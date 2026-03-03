@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": []
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/refine_prompt.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-code-plugins": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "codex-toolkit-for-claude@xiaolai": true,
+    "codex-toolkit@xiaolai": true
+  }
+}

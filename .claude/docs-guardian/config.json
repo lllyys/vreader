@@ -1,0 +1,30 @@
+{
+  "language": "typescript",
+  "framework": "vitepress",
+  "docRoot": "website/guide",
+  "strictness": "warn",
+  "stalenessThresholdDays": 30,
+  "mappings": [
+    { "source": "src/stores/shortcutsStore.ts", "doc": "website/guide/shortcuts.md" },
+    { "source": "src-tauri/src/menu.rs", "doc": "website/guide/shortcuts.md" },
+    { "source": "src-tauri/src/mcp/", "doc": "website/guide/mcp-tools.md" },
+    { "source": "src/components/Tabs/", "doc": "website/guide/tab-navigation.md" },
+    { "source": "src/export/", "doc": "website/guide/export.md" },
+    { "source": "src-tauri/src/ai_provider/", "doc": "website/guide/ai-providers.md" },
+    { "source": "src/components/Genie/", "doc": "website/guide/ai-genies.md" },
+    { "source": "src/components/Terminal/", "doc": "website/guide/terminal.md" },
+    { "source": "src/plugins/mermaid/", "doc": "website/guide/mermaid.md" },
+    { "source": "src/hooks/useExternalFileChanges.ts", "doc": "website/guide/features.md" },
+    { "source": "src/plugins/multiCursor/", "doc": "website/guide/multi-cursor.md" },
+    { "source": "src/plugins/cjk*/", "doc": "website/guide/cjk-formatting.md" }
+  ],
+  "exclude": [
+    "node_modules/",
+    "dist/",
+    "coverage/",
+    "src/test/",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/__tests__/"
+  ]
+}

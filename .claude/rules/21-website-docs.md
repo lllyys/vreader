@@ -1,0 +1,65 @@
+# 21 - Website Documentation Sync
+
+When making changes that affect user-facing behavior, update the corresponding website documentation.
+
+## Trigger Conditions
+
+Update website docs when:
+
+| Change Type | Website File to Update |
+|-------------|------------------------|
+| Add/modify keyboard shortcuts | `website/guide/shortcuts.md` |
+| Add/modify features | `website/guide/features.md` |
+| Change popup behavior | `website/guide/popups.md` |
+| Change multi-cursor behavior | `website/guide/multi-cursor.md` |
+| Add/modify MCP tools | `website/guide/mcp-tools.md` |
+| Change MCP setup process | `website/guide/mcp-setup.md` |
+| Add/modify Mermaid support | `website/guide/mermaid.md` |
+| Change CJK formatting | `website/guide/cjk-formatting.md` |
+| Change tab/window behavior | `website/guide/tab-navigation.md` |
+| Change export/print behavior | `website/guide/export.md` |
+| Change AI provider setup | `website/guide/ai-providers.md` |
+| Change AI Genies feature | `website/guide/ai-genies.md` |
+| Change terminal feature | `website/guide/terminal.md` |
+| Change SVG handling | `website/guide/svg.md` |
+| Change Markmap support | `website/guide/markmap.md` |
+| New major feature | Consider adding new guide page |
+
+## File Mapping
+
+| Source Code Area | Website Page |
+|------------------|--------------|
+| `src/stores/shortcutsStore.ts` | `website/guide/shortcuts.md` |
+| `src-tauri/src/menu.rs` | `website/guide/shortcuts.md` |
+| `src-tauri/src/mcp/` | `website/guide/mcp-tools.md` |
+| Popup components | `website/guide/popups.md` |
+| Multi-cursor hooks | `website/guide/multi-cursor.md` |
+| `src/components/Tabs/` | `website/guide/tab-navigation.md` |
+| `src/export/` | `website/guide/export.md` |
+| `src-tauri/src/ai_provider/` | `website/guide/ai-providers.md` |
+| `src/components/Genie/` | `website/guide/ai-genies.md` |
+| `src/components/Terminal/` | `website/guide/terminal.md` |
+| `src/plugins/mermaid*/` | `website/guide/mermaid.md` |
+| CJK formatting hooks | `website/guide/cjk-formatting.md` |
+
+## Timestamp Handling
+
+- Website uses **git-based lastUpdated** (configured in `.vitepress/config.ts`)
+- Timestamps update automatically when files are committed
+- No manual timestamp updates needed
+
+## Update Process
+
+1. Make the code change
+2. Identify affected website page(s) from the mapping above
+3. Update the relevant `.md` file in `website/guide/`
+4. Commit code and docs together (or in the same PR)
+
+## Verification
+
+After updating website docs:
+```bash
+cd website && pnpm build
+```
+
+Check the built page shows correct content and updated timestamp.
