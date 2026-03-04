@@ -1,0 +1,67 @@
+name: vreader
+options:
+  bundleIdPrefix: com.vreader
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+
+targets:
+  vreader:
+    type: application
+    platform: iOS
+    sources:
+      - path: vreader
+        excludes:
+          - "**/.gitkeep"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
+        INFOPLIST_VALUES: >-
+          CFBundleDisplayName=vreader
+          CFBundleShortVersionString=0.1.0
+          CFBundleVersion=1
+          UILaunchScreen_Generation=YES
+          UISupportedInterfaceOrientations=UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+          UISupportedInterfaceOrientations~ipad=UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        GENERATE_INFOPLIST_FILE: YES
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+    scheme:
+      testTargets:
+        - vreaderTests
+        - vreaderUITests
+
+  vreaderTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: vreaderTests
+        excludes:
+          - "**/.gitkeep"
+    dependencies:
+      - target: vreader
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vreader.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  vreaderUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: vreaderUITests
+        excludes:
+          - "**/.gitkeep"
+    dependencies:
+      - target: vreader
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vreader.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: vreader

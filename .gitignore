@@ -3,3 +3,14 @@ node_modules/
 dist/
 target/
 *.log
+
+# Xcode
+build/
+DerivedData/
+*.xcuserdata
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.ipa
+*.dSYM.zip
+*.dSYM
