@@ -60,6 +60,45 @@ vreaderTests/        # Unit tests (Swift Testing)
 vreaderUITests/      # UI tests (XCTest)
 ```
 
+## AI-Powered Development
+
+VReader is built using an AI-assisted coding workflow with multiple agents collaborating through structured processes.
+
+### Tools
+
+| Tool | Role |
+|------|------|
+| [Claude Code](https://claude.com/claude-code) | Primary coding agent — implementation, editing, code review, fixes |
+| [Codex CLI](https://github.com/openai/codex) | Architecture review, auditing, autonomous implementation in sandbox |
+
+### Workflow
+
+The development process follows a gated, multi-agent pipeline:
+
+1. **Plan** — Features are designed as detailed implementation plans with work items, acceptance criteria, and test requirements (`docs/codex-plans/`)
+2. **Review** — Plans go through multi-round architecture review via Codex (consistency, completeness, feasibility, ambiguity, risk)
+3. **Implement** — Work items are implemented by the implementer agent following TDD (RED-GREEN-REFACTOR)
+4. **Audit** — Code is audited across 9 dimensions (correctness, security, duplication, dead code, performance, testing, etc.)
+5. **Fix** — Audit findings are fixed and verified in iterative loops until clean
+6. **Commit** — Changes are committed only on explicit request after passing all gates
+
+### Agent Rules
+
+Shared rules for all AI agents live in [`AGENTS.md`](AGENTS.md):
+
+- **Test-first is mandatory** — Write a failing test before implementing any new behavior
+- **Research before building** — Search for established patterns and proven solutions before inventing
+- **Edge cases are not optional** — Brainstorm and test: empty input, null values, Unicode/CJK, concurrent access, network failures
+- **Keep files under ~300 lines** — Split proactively to maintain readability
+- **Keep diffs focused** — No drive-by refactors; only change what's needed
+
+### Configuration
+
+- `.claude/rules/` — Rule files for TDD, UI consistency, design tokens, keyboard shortcuts, version bumping
+- `.claude/skills/` — Custom skill definitions (plan-audit, etc.)
+- `CLAUDE.md` — Claude Code project instructions
+- `AGENTS.md` — Shared instructions for all AI coding agents
+
 ## License
 
 TBD
