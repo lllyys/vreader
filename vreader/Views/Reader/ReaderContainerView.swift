@@ -3,13 +3,14 @@
 //
 // Key decisions:
 // - Dispatches to format-specific reader based on BookFormat.
-// - EPUB/PDF readers are stubs until their respective WIs are wired.
-// - TXT reader dispatches to TXTReaderContainerView (WI-6A).
-// - MD reader dispatches to MDReaderContainerView (WI-6B).
+// - EPUB reader is a stub until its WI is fully wired.
+// - All format readers (EPUB/PDF/TXT/MD) have containers + ViewModels implemented.
+// - Full wiring requires file URL resolved from BookRecord persistence layer.
+// - Placeholders remain until navigation pipeline provides file URLs.
 // - Provides navigation bar with back button.
 //
 // @coordinates-with: EPUBReaderViewModel.swift, TXTReaderViewModel.swift,
-//   MDReaderViewModel.swift, LibraryView.swift
+//   MDReaderViewModel.swift, PDFReaderViewModel.swift, LibraryView.swift
 
 import SwiftUI
 
@@ -25,7 +26,7 @@ struct ReaderContainerView: View {
             case "epub":
                 epubReaderContent
             case "pdf":
-                unsupportedFormatView(format: "PDF")
+                pdfReaderContent
             case "txt":
                 txtReaderContent
             case "md":
@@ -55,6 +56,14 @@ struct ReaderContainerView: View {
         // EPUBReaderView is fully wired with WKWebView.
         Text("EPUB Reader: \(book.title)")
             .accessibilityIdentifier("epubReaderPlaceholder")
+    }
+
+    @ViewBuilder
+    private var pdfReaderContent: some View {
+        // PDFReaderContainerView + PDFReaderViewModel implemented (WI-7).
+        // Placeholder until navigation pipeline resolves file URLs from BookRecord.
+        Text("PDF Reader: \(book.title)")
+            .accessibilityIdentifier("pdfReaderPlaceholder")
     }
 
     @ViewBuilder

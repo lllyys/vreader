@@ -123,6 +123,12 @@
 		AA6A01B5C7E4D92F8B1D3E05 /* TXTReaderContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6A01B6C7E4D92F8B1D3E06 /* TXTReaderContainerView.swift */; };
 		AA6A01B7C7E4D92F8B1D3E07 /* MockTXTService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6A01B8C7E4D92F8B1D3E08 /* MockTXTService.swift */; };
 		AA6A01B9C7E4D92F8B1D3E09 /* TXTReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6A01BAC7E4D92F8B1D3E0A /* TXTReaderViewModelTests.swift */; };
+		PDF01BF01A0B1C2D3E4F50001 /* PDFReaderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDF01FR01A0B1C2D3E4F50001 /* PDFReaderViewModel.swift */; };
+		PDF01BF02A0B1C2D3E4F50002 /* PDFViewBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDF01FR02A0B1C2D3E4F50002 /* PDFViewBridge.swift */; };
+		PDF01BF03A0B1C2D3E4F50003 /* PDFReaderContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDF01FR03A0B1C2D3E4F50003 /* PDFReaderContainerView.swift */; };
+		PDF01BF04A0B1C2D3E4F50004 /* PDFPasswordPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDF01FR04A0B1C2D3E4F50004 /* PDFPasswordPromptView.swift */; };
+		PDF02BF01A0B1C2D3E4F50001 /* PDFReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDF02FR01A0B1C2D3E4F50001 /* PDFReaderViewModelTests.swift */; };
+		PDF02BF02A0B1C2D3E4F50002 /* PDFIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDF02FR02A0B1C2D3E4F50002 /* PDFIntegrationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -262,6 +268,12 @@
 		AA6A01B6C7E4D92F8B1D3E06 /* TXTReaderContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderContainerView.swift; sourceTree = "<group>"; };
 		AA6A01B8C7E4D92F8B1D3E08 /* MockTXTService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockTXTService.swift; sourceTree = "<group>"; };
 		AA6A01BAC7E4D92F8B1D3E0A /* TXTReaderViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderViewModelTests.swift; sourceTree = "<group>"; };
+		PDF01FR01A0B1C2D3E4F50001 /* PDFReaderViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderViewModel.swift; sourceTree = "<group>"; };
+		PDF01FR02A0B1C2D3E4F50002 /* PDFViewBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFViewBridge.swift; sourceTree = "<group>"; };
+		PDF01FR03A0B1C2D3E4F50003 /* PDFReaderContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderContainerView.swift; sourceTree = "<group>"; };
+		PDF01FR04A0B1C2D3E4F50004 /* PDFPasswordPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPasswordPromptView.swift; sourceTree = "<group>"; };
+		PDF02FR01A0B1C2D3E4F50001 /* PDFReaderViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderViewModelTests.swift; sourceTree = "<group>"; };
+		PDF02FR02A0B1C2D3E4F50002 /* PDFIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFIntegrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -346,6 +358,7 @@
 				F3B26374749D7626349FB9E0 /* LibraryTestHelpers.swift */,
 				3B1563E77E28434568F45736 /* LibraryViewModelTests.swift */,
 				MD04FR02A0B1C2D3E4F50002 /* MDReaderViewModelTests.swift */,
+				PDF02FR01A0B1C2D3E4F50001 /* PDFReaderViewModelTests.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -431,6 +444,9 @@
 				AA6A01B6C7E4D92F8B1D3E06 /* TXTReaderContainerView.swift */,
 				43347208CA56C84F65B2DCF7 /* TXTTextViewBridge.swift */,
 				MD05FR01A0B1C2D3E4F50001 /* MDReaderContainerView.swift */,
+				PDF01FR02A0B1C2D3E4F50002 /* PDFViewBridge.swift */,
+				PDF01FR03A0B1C2D3E4F50003 /* PDFReaderContainerView.swift */,
+				PDF01FR04A0B1C2D3E4F50004 /* PDFPasswordPromptView.swift */,
 			);
 			path = Reader;
 			sourceTree = "<group>";
@@ -450,6 +466,7 @@
 				CF473C04CE58CE0887DAA5A1 /* LibraryViewModel.swift */,
 				AA6A01B4C7E4D92F8B1D3E04 /* TXTReaderViewModel.swift */,
 				MD04FR01A0B1C2D3E4F50001 /* MDReaderViewModel.swift */,
+				PDF01FR01A0B1C2D3E4F50001 /* PDFReaderViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -471,6 +488,7 @@
 			children = (
 				0069CA3A00998B13DE06E424 /* LocatorIntegrationTests.swift */,
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* MDIntegrationTests.swift */,
+				PDF02FR02A0B1C2D3E4F50002 /* PDFIntegrationTests.swift */,
 				E50B0954852C3621D008EE07 /* TXTBridgeOffsetTests.swift */,
 			);
 			path = Integration;
@@ -794,6 +812,8 @@
 				3548ECB80E9BAC95250F69E5 /* TXTOffsetMapperTests.swift in Sources */,
 				AA6A01B7C7E4D92F8B1D3E07 /* MockTXTService.swift in Sources */,
 				AA6A01B9C7E4D92F8B1D3E09 /* TXTReaderViewModelTests.swift in Sources */,
+				PDF02BF01A0B1C2D3E4F50001 /* PDFReaderViewModelTests.swift in Sources */,
+				PDF02BF02A0B1C2D3E4F50002 /* PDFIntegrationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -858,6 +878,10 @@
 				AA6A01B1C7E4D92F8B1D3E01 /* TXTServiceProtocol.swift in Sources */,
 				AA6A01B3C7E4D92F8B1D3E03 /* TXTReaderViewModel.swift in Sources */,
 				AA6A01B5C7E4D92F8B1D3E05 /* TXTReaderContainerView.swift in Sources */,
+				PDF01BF01A0B1C2D3E4F50001 /* PDFReaderViewModel.swift in Sources */,
+				PDF01BF02A0B1C2D3E4F50002 /* PDFViewBridge.swift in Sources */,
+				PDF01BF03A0B1C2D3E4F50003 /* PDFReaderContainerView.swift in Sources */,
+				PDF01BF04A0B1C2D3E4F50004 /* PDFPasswordPromptView.swift in Sources */,
 				F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
