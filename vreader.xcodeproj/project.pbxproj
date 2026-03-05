@@ -105,6 +105,11 @@
 		F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 605C9BAEA41B7C63D7E343B1 /* VReaderApp.swift */; };
 		F5A31837AE39AA372B31F1B5 /* LocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E8B92C301E5470AB98C87E /* LocatorTests.swift */; };
 		FD253FA0CEB159E2B1299BD4 /* SchemaV1Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2EA03BEFDBB65F5D7533EDE /* SchemaV1Tests.swift */; };
+		AA6A01B1C7E4D92F8B1D3E01 /* TXTServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6A01B2C7E4D92F8B1D3E02 /* TXTServiceProtocol.swift */; };
+		AA6A01B3C7E4D92F8B1D3E03 /* TXTReaderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6A01B4C7E4D92F8B1D3E04 /* TXTReaderViewModel.swift */; };
+		AA6A01B5C7E4D92F8B1D3E05 /* TXTReaderContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6A01B6C7E4D92F8B1D3E06 /* TXTReaderContainerView.swift */; };
+		AA6A01B7C7E4D92F8B1D3E07 /* MockTXTService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6A01B8C7E4D92F8B1D3E08 /* MockTXTService.swift */; };
+		AA6A01B9C7E4D92F8B1D3E09 /* TXTReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6A01BAC7E4D92F8B1D3E0A /* TXTReaderViewModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -226,6 +231,11 @@
 		F8DEE3B767FC8F7457067C11 /* MutationDriftTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MutationDriftTests.swift; sourceTree = "<group>"; };
 		FB82BDFCDB76725A5586D5E0 /* Bookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bookmark.swift; sourceTree = "<group>"; };
 		FDFAF8770F91837F0B3793E1 /* ImportProvenanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProvenanceTests.swift; sourceTree = "<group>"; };
+		AA6A01B2C7E4D92F8B1D3E02 /* TXTServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTServiceProtocol.swift; sourceTree = "<group>"; };
+		AA6A01B4C7E4D92F8B1D3E04 /* TXTReaderViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderViewModel.swift; sourceTree = "<group>"; };
+		AA6A01B6C7E4D92F8B1D3E06 /* TXTReaderContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderContainerView.swift; sourceTree = "<group>"; };
+		AA6A01B8C7E4D92F8B1D3E08 /* MockTXTService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockTXTService.swift; sourceTree = "<group>"; };
+		AA6A01BAC7E4D92F8B1D3E0A /* TXTReaderViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderViewModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -351,8 +361,10 @@
 		60B87C16019C31ED0DAABBBC /* TXT */ = {
 			isa = PBXGroup;
 			children = (
+				AA6A01B8C7E4D92F8B1D3E08 /* MockTXTService.swift */,
 				A069D350D0DC6B4C000E1D43 /* TXTChunkedLoaderTests.swift */,
 				5FA7AE29709E497DBB6AF9DF /* TXTOffsetMapperTests.swift */,
+				AA6A01BAC7E4D92F8B1D3E0A /* TXTReaderViewModelTests.swift */,
 			);
 			path = TXT;
 			sourceTree = "<group>";
@@ -378,6 +390,7 @@
 			isa = PBXGroup;
 			children = (
 				EAB42EEEFFCAD8D654D57AE7 /* ReaderContainerView.swift */,
+				AA6A01B6C7E4D92F8B1D3E06 /* TXTReaderContainerView.swift */,
 				43347208CA56C84F65B2DCF7 /* TXTTextViewBridge.swift */,
 			);
 			path = Reader;
@@ -396,6 +409,7 @@
 			children = (
 				90B380013D82DFFD0411633E /* EPUBReaderViewModel.swift */,
 				CF473C04CE58CE0887DAA5A1 /* LibraryViewModel.swift */,
+				AA6A01B4C7E4D92F8B1D3E04 /* TXTReaderViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -426,6 +440,7 @@
 			children = (
 				D02AA769AEDBC25CEA896348 /* TXTChunkedLoader.swift */,
 				C2D49361893EE9956D6EC5DB /* TXTOffsetMapper.swift */,
+				AA6A01B2C7E4D92F8B1D3E02 /* TXTServiceProtocol.swift */,
 			);
 			path = TXT;
 			sourceTree = "<group>";
@@ -716,6 +731,8 @@
 				CD8C26CB53B0BE57CE214F00 /* TXTBridgeOffsetTests.swift in Sources */,
 				E9177AEFF47DA3EFEAC13C50 /* TXTChunkedLoaderTests.swift in Sources */,
 				3548ECB80E9BAC95250F69E5 /* TXTOffsetMapperTests.swift in Sources */,
+				AA6A01B7C7E4D92F8B1D3E07 /* MockTXTService.swift in Sources */,
+				AA6A01B9C7E4D92F8B1D3E09 /* TXTReaderViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -770,6 +787,9 @@
 				BF7CA157DAD1516A4667641D /* TXTChunkedLoader.swift in Sources */,
 				947AC899C38470795EF51F2E /* TXTOffsetMapper.swift in Sources */,
 				BA758603C760FDE615B4E6CD /* TXTTextViewBridge.swift in Sources */,
+				AA6A01B1C7E4D92F8B1D3E01 /* TXTServiceProtocol.swift in Sources */,
+				AA6A01B3C7E4D92F8B1D3E03 /* TXTReaderViewModel.swift in Sources */,
+				AA6A01B5C7E4D92F8B1D3E05 /* TXTReaderContainerView.swift in Sources */,
 				F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

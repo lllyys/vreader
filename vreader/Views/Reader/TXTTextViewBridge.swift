@@ -77,8 +77,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
             textView.textContainerInset = config.textInset
         }
 
-        // Handle offset restore updates
-        if let offset = restoreOffset {
+        // Handle offset restore — apply only once per value to avoid fighting user scroll
+        if let offset = restoreOffset, context.coordinator.lastRestoredOffset != offset {
+            context.coordinator.lastRestoredOffset = offset
             restoreScrollPosition(in: textView, toCharOffset: offset)
         }
     }
@@ -90,12 +91,14 @@ struct TXTTextViewBridge: UIViewRepresentable {
     // MARK: - Private
 
     private func applyText(to textView: UITextView) {
-        let font: UIFont
+        let baseFont: UIFont
         if let name = config.fontName {
-            font = UIFont(name: name, size: config.fontSize) ?? .systemFont(ofSize: config.fontSize)
+            baseFont = UIFont(name: name, size: config.fontSize) ?? .systemFont(ofSize: config.fontSize)
         } else {
-            font = .systemFont(ofSize: config.fontSize)
+            baseFont = .systemFont(ofSize: config.fontSize)
         }
+        let font = UIFontMetrics.default.scaledFont(for: baseFont)
+        textView.adjustsFontForContentSizeCategory = true
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = config.lineSpacing
@@ -110,7 +113,7 @@ struct TXTTextViewBridge: UIViewRepresentable {
     }
 
     private func restoreScrollPosition(in textView: UITextView, toCharOffset offset: Int) {
-        guard let layoutManager = textView.layoutManager as? NSLayoutManager else { return }
+        let layoutManager = textView.layoutManager
         let textLength = (textView.text as NSString?)?.length ?? 0
         let clampedOffset = min(max(offset, 0), textLength)
         let scrollY = TXTOffsetMapper.charOffsetToScrollOffset(
@@ -126,6 +129,8 @@ struct TXTTextViewBridge: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         weak var delegate: TXTTextViewBridgeDelegate?
         var lastConfig: TXTViewConfig
+        /// Tracks the last restored offset to avoid re-applying on every updateUIView.
+        var lastRestoredOffset: Int?
 
         init(delegate: TXTTextViewBridgeDelegate?, config: TXTViewConfig = TXTViewConfig()) {
             self.delegate = delegate
@@ -143,14 +148,13 @@ struct TXTTextViewBridge: UIViewRepresentable {
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            guard let textView = scrollView as? UITextView,
-                  let layoutManager = textView.layoutManager as? NSLayoutManager else {
+            guard let textView = scrollView as? UITextView else {
                 return
             }
 
             let topOffset = TXTOffsetMapper.scrollOffsetToCharOffset(
                 scrollY: scrollView.contentOffset.y,
-                layoutManager: layoutManager,
+                layoutManager: textView.layoutManager,
                 textContainer: textView.textContainer
             )
             delegate?.scrollPositionDidChange(topCharOffsetUTF16: topOffset)

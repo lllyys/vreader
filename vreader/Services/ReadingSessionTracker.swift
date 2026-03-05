@@ -242,14 +242,15 @@ final class ReadingSessionTracker {
             deviceId: deviceId
         )
 
+        // Save first — if this throws, state remains unchanged
+        try store.saveSession(session)
+
         currentSession = session
         currentBookFingerprint = bookFingerprint
         segmentStartUptime = clock.uptime()
         accumulatedDuration = 0
         currentEndLocator = nil
         state = .active(sessionId: sessionId)
-
-        try store.saveSession(session)
     }
 
     private func finalizeCurrentSession() {

@@ -10,6 +10,7 @@ You produce a modular plan that is executable by other agents.
 ## Research Phase (mandatory for new features)
 
 Before writing any plan, research:
+
 - **Industry best practices** — search official docs, well-known libraries, and popular open-source projects for established patterns.
 - **Prior art** — how do VS Code, Obsidian, Typora, or other editors solve this? What conventions exist?
 - **Edge cases** — brainstorm exhaustively: empty input, null/undefined, max values, concurrent access, Unicode/CJK text, RTL, rapid repeated actions, network failures, permission denials, cross-platform differences.

@@ -170,6 +170,7 @@ final class TXTChunkedLoader {
         let toEvict = sorted.dropFirst(clampedMax)
         for index in toEvict {
             loadedChunks.removeValue(forKey: index)
+            trailingBytes.removeValue(forKey: index)
         }
     }
 
