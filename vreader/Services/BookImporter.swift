@@ -1,0 +1,249 @@
+// Purpose: Main import orchestrator. Receives a file URL, validates format,
+// computes identity hash, checks for duplicates, copies to sandbox, extracts
+// metadata, persists the Book record, and emits an indexing trigger.
+//
+// Key decisions:
+// - Security-scoped URL access is wrapped with guaranteed cleanup (defer).
+// - Atomic copy: write to temp file first, then rename into final location.
+// - TXT files run through EncodingDetector for binary masquerade + encoding.
+// - Duplicate detection happens after hashing, before copy.
+// - Indexing trigger is a Notification; the indexer is a separate concern.
+//
+// @coordinates-with: PersistenceActor.swift, ContentHasher.swift,
+//   EncodingDetector.swift, MetadataExtractor.swift, ImportError.swift
+
+import Foundation
+
+/// Result of a successful import operation.
+struct ImportResult: Sendable, Equatable {
+    let fingerprintKey: String
+    let title: String
+    let author: String?
+    let fingerprint: DocumentFingerprint
+    let provenance: ImportProvenance
+    let detectedEncoding: String?
+    let isDuplicate: Bool
+}
+
+/// Orchestrates the book import pipeline.
+final class BookImporter: Sendable {
+
+    /// Posted after a successful import. `userInfo["fingerprintKey"]` contains the key.
+    static let indexingNeededNotification = Notification.Name("BookImporter.indexingNeeded")
+
+    private let persistence: any BookPersisting
+    private let sandboxBooksDirectory: URL
+
+    /// Metadata extractors by format.
+    private let extractors: [BookFormat: any MetadataExtractor]
+
+    init(
+        persistence: any BookPersisting,
+        sandboxBooksDirectory: URL,
+        extractors: [BookFormat: any MetadataExtractor]? = nil
+    ) {
+        self.persistence = persistence
+        self.sandboxBooksDirectory = sandboxBooksDirectory
+        self.extractors = extractors ?? [
+            .txt: TXTMetadataExtractor(),
+            .epub: EPUBMetadataExtractor(),
+            .pdf: PDFMetadataExtractor(),
+        ]
+    }
+
+    /// Imports a file into the library.
+    ///
+    /// - Parameters:
+    ///   - fileURL: URL to the file to import. May be a security-scoped resource.
+    ///   - source: How the file was provided (Files app, share sheet, etc.).
+    /// - Returns: The import result with book identity and metadata.
+    /// - Throws: `ImportError` for all failure modes.
+    func importFile(
+        at fileURL: URL,
+        source: ImportSource
+    ) async throws -> ImportResult {
+        // Step 1: Validate format
+        let format = try resolveFormat(fileURL: fileURL)
+
+        // Step 2: Access security-scoped resource
+        let accessGranted = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessGranted {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        // Step 3: Verify file is readable (security scope failure may cause this)
+        guard FileManager.default.isReadableFile(atPath: fileURL.path) else {
+            if !accessGranted {
+                throw ImportError.securityScopeAccessDenied
+            }
+            throw ImportError.fileNotReadable("File does not exist or is not readable")
+        }
+
+        // Step 4: TXT-specific validation (binary masquerade + encoding detection)
+        var detectedEncoding: String? = nil
+        if format == .txt {
+            let fileData = try readFileData(at: fileURL)
+            do {
+                let encodingResult = try EncodingDetector.detect(data: fileData)
+                detectedEncoding = EncodingDetector.encodingName(encodingResult.encoding)
+            } catch let error as ImportError {
+                throw error
+            } catch {
+                throw ImportError.encodingDetectionFailed
+            }
+        }
+
+        // Step 5: Compute content hash
+        let hashResult = try await ContentHasher.hash(fileAt: fileURL)
+
+        // Step 6: Build fingerprint
+        guard let fingerprint = DocumentFingerprint.validated(
+            contentSHA256: hashResult.sha256Hex,
+            fileByteCount: hashResult.byteCount,
+            format: format
+        ) else {
+            throw ImportError.hashComputationFailed("Invalid hash result")
+        }
+
+        // Step 7: Check for duplicate
+        let fingerprintKey = fingerprint.canonicalKey
+        if let existing = try await persistence.findBook(byFingerprintKey: fingerprintKey) {
+            // Append provenance for the new import source
+            let provenance = ImportProvenance(
+                source: source,
+                importedAt: Date(),
+                originalURLBookmarkData: nil
+            )
+            try await persistence.appendProvenance(provenance, toBookWithKey: fingerprintKey)
+
+            return ImportResult(
+                fingerprintKey: existing.fingerprintKey,
+                title: existing.title,
+                author: existing.author,
+                fingerprint: existing.fingerprint,
+                provenance: provenance,
+                detectedEncoding: existing.detectedEncoding,
+                isDuplicate: true
+            )
+        }
+
+        // Step 8: Copy to sandbox (atomic: temp + rename)
+        let sandboxURL = try atomicCopyToSandbox(
+            sourceURL: fileURL,
+            fingerprintKey: fingerprintKey,
+            format: format
+        )
+
+        // Step 9: Extract metadata
+        let extractor = extractors[format] ?? TXTMetadataExtractor()
+        let metadata = try await extractor.extractMetadata(from: sandboxURL)
+
+        // Step 10: Build provenance
+        let provenance = ImportProvenance(
+            source: source,
+            importedAt: Date(),
+            originalURLBookmarkData: nil
+        )
+
+        // Step 11: Persist book record
+        let record = BookRecord(
+            fingerprintKey: fingerprintKey,
+            title: metadata.title,
+            author: metadata.author,
+            coverImagePath: metadata.coverImagePath,
+            fingerprint: fingerprint,
+            provenance: provenance,
+            detectedEncoding: detectedEncoding,
+            addedAt: Date()
+        )
+
+        let persisted = try await persistence.insertBook(record)
+
+        // Step 12: Emit indexing trigger
+        NotificationCenter.default.post(
+            name: Self.indexingNeededNotification,
+            object: nil,
+            userInfo: ["fingerprintKey": fingerprintKey]
+        )
+
+        return ImportResult(
+            fingerprintKey: persisted.fingerprintKey,
+            title: persisted.title,
+            author: persisted.author,
+            fingerprint: persisted.fingerprint,
+            provenance: provenance,
+            detectedEncoding: detectedEncoding,
+            isDuplicate: false
+        )
+    }
+
+    // MARK: - Private
+
+    /// Resolves the BookFormat from the file extension.
+    private func resolveFormat(fileURL: URL) throws -> BookFormat {
+        let ext = fileURL.pathExtension.lowercased()
+
+        for format in BookFormat.allCases where format.isImportableV1 {
+            if format.fileExtensions.contains(ext) {
+                return format
+            }
+        }
+
+        throw ImportError.unsupportedFormat(ext)
+    }
+
+    /// Reads file data for encoding detection.
+    private func readFileData(at url: URL) throws -> Data {
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            throw ImportError.fileNotReadable(error.localizedDescription)
+        }
+    }
+
+    /// Atomically copies the source file to the sandbox directory.
+    /// Uses temp file + rename for crash safety.
+    private func atomicCopyToSandbox(
+        sourceURL: URL,
+        fingerprintKey: String,
+        format: BookFormat
+    ) throws -> URL {
+        // Ensure sandbox directory exists
+        try FileManager.default.createDirectory(
+            at: sandboxBooksDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let safeName = fingerprintKey.replacingOccurrences(of: ":", with: "_")
+        let ext = format.fileExtensions.first ?? "bin"
+        let finalURL = sandboxBooksDirectory
+            .appendingPathComponent(safeName)
+            .appendingPathExtension(ext)
+
+        // If already exists (re-import after crash), return existing
+        if FileManager.default.fileExists(atPath: finalURL.path) {
+            return finalURL
+        }
+
+        let tempURL = sandboxBooksDirectory
+            .appendingPathComponent(".\(safeName)_\(UUID().uuidString).tmp")
+
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: tempURL)
+        } catch {
+            throw ImportError.sandboxCopyFailed("Copy failed: \(error.localizedDescription)")
+        }
+
+        do {
+            try FileManager.default.moveItem(at: tempURL, to: finalURL)
+        } catch {
+            // Clean up temp file
+            try? FileManager.default.removeItem(at: tempURL)
+            throw ImportError.sandboxCopyFailed("Rename failed: \(error.localizedDescription)")
+        }
+
+        return finalURL
+    }
+}

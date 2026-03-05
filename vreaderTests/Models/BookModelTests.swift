@@ -8,8 +8,9 @@ import Foundation
 @Suite("Book Model")
 struct BookModelTests {
 
+    // Use a valid 64-character hex hash to match production invariants
     static let sampleFP = DocumentFingerprint(
-        contentSHA256: "abc123def456",
+        contentSHA256: "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
         fileByteCount: 1_048_576,
         format: .epub
     )
@@ -68,6 +69,29 @@ struct BookModelTests {
         #expect(book.totalWordCount == nil)
         #expect(book.totalPageCount == nil)
         #expect(book.totalTextLengthUTF16 == nil)
+        #expect(book.detectedEncoding == nil)
+    }
+
+    // MARK: - Detected Encoding
+
+    @Test func detectedEncodingCanBeSet() {
+        let book = Book(
+            fingerprint: Self.sampleFP,
+            title: "Test",
+            provenance: Self.sampleProvenance
+        )
+        book.detectedEncoding = "utf-8"
+        #expect(book.detectedEncoding == "utf-8")
+    }
+
+    @Test func detectedEncodingStoresIANAName() {
+        let book = Book(
+            fingerprint: Self.sampleFP,
+            title: "Test",
+            provenance: Self.sampleProvenance
+        )
+        book.detectedEncoding = "shift_jis"
+        #expect(book.detectedEncoding == "shift_jis")
     }
 
     // MARK: - Indexing Metadata
@@ -117,14 +141,22 @@ struct BookModelTests {
     // MARK: - Different Formats
 
     @Test func pdfBookHasCorrectFormat() {
-        let pdfFP = DocumentFingerprint(contentSHA256: "pdf123", fileByteCount: 2048, format: .pdf)
+        let pdfFP = DocumentFingerprint(
+            contentSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            fileByteCount: 2048,
+            format: .pdf
+        )
         let book = Book(fingerprint: pdfFP, title: "PDF Book", provenance: Self.sampleProvenance)
         #expect(book.format == "pdf")
         #expect(book.fingerprintKey.hasPrefix("pdf:"))
     }
 
     @Test func txtBookHasCorrectFormat() {
-        let txtFP = DocumentFingerprint(contentSHA256: "txt123", fileByteCount: 512, format: .txt)
+        let txtFP = DocumentFingerprint(
+            contentSHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            fileByteCount: 512,
+            format: .txt
+        )
         let book = Book(fingerprint: txtFP, title: "TXT Book", provenance: Self.sampleProvenance)
         #expect(book.format == "txt")
     }

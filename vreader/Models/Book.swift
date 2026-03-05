@@ -10,6 +10,8 @@
 //   fingerprint at init time. They must not be mutated independently.
 // - coverImagePath stores a file path reference instead of inline blob data
 //   to avoid memory/store pressure with large images.
+// - detectedEncoding stores the IANA name of the encoding detected at import
+//   for TXT files, enabling consistent reopen without re-detection.
 
 import Foundation
 import SwiftData
@@ -22,8 +24,9 @@ final class Book {
     /// Format: "{format}:{contentSHA256}:{fileByteCount}"
     @Attribute(.unique) var fingerprintKey: String
 
-    /// Full fingerprint for domain logic.
-    var fingerprint: DocumentFingerprint {
+    /// Full fingerprint for domain logic. Immutable after initialization.
+    /// To change identity, delete and re-import the book.
+    private(set) var fingerprint: DocumentFingerprint {
         didSet { syncDerivedFields() }
     }
 
@@ -40,6 +43,10 @@ final class Book {
 
     /// Derived from fingerprint — stored for query indexing.
     private(set) var fileByteCount: Int64
+
+    /// IANA encoding name detected at import (TXT only). Nil for non-text formats.
+    /// Stored for consistent reopen without re-detection.
+    var detectedEncoding: String?
 
     // MARK: - Import Provenance
 
@@ -84,7 +91,9 @@ final class Book {
     ) {
         self.fingerprintKey = fingerprint.canonicalKey
         self.fingerprint = fingerprint
-        self.title = title
+        // Defense-in-depth: normalize title even though extractors should sanitize.
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.title = trimmedTitle.isEmpty ? "Untitled" : String(trimmedTitle.prefix(255))
         self.author = author
         self.coverImagePath = coverImagePath
         self.format = fingerprint.format.rawValue
