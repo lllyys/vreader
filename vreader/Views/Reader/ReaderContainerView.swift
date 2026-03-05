@@ -5,9 +5,11 @@
 // - Dispatches to format-specific reader based on BookFormat.
 // - EPUB/PDF readers are stubs until their respective WIs are wired.
 // - TXT reader dispatches to TXTReaderContainerView (WI-6A).
+// - MD reader dispatches to MDReaderContainerView (WI-6B).
 // - Provides navigation bar with back button.
 //
-// @coordinates-with: EPUBReaderViewModel.swift, TXTReaderViewModel.swift, LibraryView.swift
+// @coordinates-with: EPUBReaderViewModel.swift, TXTReaderViewModel.swift,
+//   MDReaderViewModel.swift, LibraryView.swift
 
 import SwiftUI
 
@@ -26,6 +28,8 @@ struct ReaderContainerView: View {
                 unsupportedFormatView(format: "PDF")
             case "txt":
                 txtReaderContent
+            case "md":
+                mdReaderContent
             default:
                 unsupportedFormatView(format: book.format.uppercased())
             }
@@ -60,6 +64,15 @@ struct ReaderContainerView: View {
         // which will be connected when the navigation pipeline is complete.
         Text("TXT Reader: \(book.title)")
             .accessibilityIdentifier("txtReaderPlaceholder")
+    }
+
+    @ViewBuilder
+    private var mdReaderContent: some View {
+        // MD reader ViewModel and container are implemented (WI-6B).
+        // Full wiring requires file URL from BookRecord persistence layer,
+        // which will be connected when the navigation pipeline is complete.
+        Text("MD Reader: \(book.title)")
+            .accessibilityIdentifier("mdReaderPlaceholder")
     }
 
     private func unsupportedFormatView(format: String) -> some View {

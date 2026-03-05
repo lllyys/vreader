@@ -5,7 +5,7 @@
 // Key decisions:
 // - Security-scoped URL access is wrapped with guaranteed cleanup (defer).
 // - Atomic copy: write to temp file first, then rename into final location.
-// - TXT files run through EncodingDetector for binary masquerade + encoding.
+// - TXT and MD files run through EncodingDetector for binary masquerade + encoding.
 // - Duplicate detection happens after hashing, before copy.
 // - Indexing trigger is a Notification; the indexer is a separate concern.
 //
@@ -48,6 +48,7 @@ final class BookImporter: Sendable {
             .txt: TXTMetadataExtractor(),
             .epub: EPUBMetadataExtractor(),
             .pdf: PDFMetadataExtractor(),
+            .md: MDMetadataExtractor(),
         ]
     }
 
@@ -81,10 +82,10 @@ final class BookImporter: Sendable {
             throw ImportError.fileNotReadable("File does not exist or is not readable")
         }
 
-        // Step 4: TXT-specific validation (binary masquerade + encoding detection)
+        // Step 4: Text-specific validation (binary masquerade + encoding detection)
         // Only reads first 64KB for detection to avoid full-file memory spike.
         var detectedEncoding: String? = nil
-        if format == .txt {
+        if format == .txt || format == .md {
             let sampleData = try readFileDataSample(at: fileURL, maxBytes: 64 * 1024)
             do {
                 let encodingResult = try EncodingDetector.detect(data: sampleData)

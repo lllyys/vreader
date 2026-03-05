@@ -54,6 +54,26 @@ struct LibraryBookItemTests {
 
         let txt = LibraryBookItem.stub(format: "txt")
         #expect(txt.formatBadge == "TXT")
+
+        let md = LibraryBookItem.stub(format: "md")
+        #expect(md.formatBadge == "MD")
+    }
+
+    @Test func formatIconForAllFormats() {
+        let epub = LibraryBookItem.stub(format: "epub")
+        #expect(epub.formatIcon == "book.fill")
+
+        let pdf = LibraryBookItem.stub(format: "pdf")
+        #expect(pdf.formatIcon == "doc.fill")
+
+        let txt = LibraryBookItem.stub(format: "txt")
+        #expect(txt.formatIcon == "doc.text.fill")
+
+        let md = LibraryBookItem.stub(format: "md")
+        #expect(md.formatIcon == "doc.richtext.fill")
+
+        let unknown = LibraryBookItem.stub(format: "xyz")
+        #expect(unknown.formatIcon == "doc.fill")
     }
 
     @Test func equalityByAllFields() {

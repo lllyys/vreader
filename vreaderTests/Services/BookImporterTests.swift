@@ -187,7 +187,7 @@ struct BookImporterTests {
         }
     }
 
-    @Test func mdFormatThrows() async throws {
+    @Test func mdFormatImportsSuccessfully() async throws {
         let dir = FileManager.default.temporaryDirectory
         let url = dir.appendingPathComponent("test_\(UUID().uuidString).md")
         try "# Markdown".data(using: .utf8)!.write(to: url)
@@ -196,15 +196,10 @@ struct BookImporterTests {
         let (importer, _, sandbox) = try await makeImporter()
         defer { try? FileManager.default.removeItem(at: sandbox) }
 
-        do {
-            _ = try await importer.importFile(at: url, source: .filesApp)
-            Issue.record("Expected unsupportedFormat error")
-        } catch let error as ImportError {
-            guard case .unsupportedFormat = error else {
-                Issue.record("Expected unsupportedFormat, got \(error)")
-                return
-            }
-        }
+        let result = try await importer.importFile(at: url, source: .filesApp)
+        #expect(result.fingerprint.format == .md)
+        #expect(result.detectedEncoding == "utf-8")
+        #expect(result.title == "Markdown") // Title extracted from H1
     }
 
     // MARK: - Binary Masquerade

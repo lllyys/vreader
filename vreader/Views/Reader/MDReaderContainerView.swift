@@ -1,30 +1,30 @@
-// Purpose: SwiftUI container for the TXT reader. Composes the TXTTextViewBridge
-// with loading/error overlays and reading session chrome.
+// Purpose: SwiftUI container for the Markdown reader. Composes the TXTTextViewBridge
+// (with NSAttributedString) with loading/error overlays and reading session chrome.
 //
 // Key decisions:
-// - Owns TXTReaderViewModel lifecycle (open on appear, close on disappear).
+// - Owns MDReaderViewModel lifecycle (open on appear, close on disappear).
 // - Delegates scroll/selection events from bridge to ViewModel.
 // - Shows loading spinner during file open.
 // - Shows error message on failure.
-// - Passes theme config to bridge (font size, line spacing).
+// - Passes rendered NSAttributedString to bridge for rich display.
 //
-// @coordinates-with: TXTReaderViewModel.swift, TXTTextViewBridge.swift
+// @coordinates-with: MDReaderViewModel.swift, TXTTextViewBridge.swift
 
 import SwiftUI
 
-/// Container view for the TXT reader screen.
-struct TXTReaderContainerView: View {
+/// Container view for the Markdown reader screen.
+struct MDReaderContainerView: View {
     let fileURL: URL
-    let viewModel: TXTReaderViewModel
+    let viewModel: MDReaderViewModel
 
     var body: some View {
         ZStack {
             if viewModel.isLoading {
                 loadingView
-            } else if let errorMessage = viewModel.errorMessage, viewModel.textContent == nil {
+            } else if let errorMessage = viewModel.errorMessage, viewModel.renderedText == nil {
                 errorView(message: errorMessage)
-            } else if let text = viewModel.textContent {
-                readerContent(text: text)
+            } else if let attrStr = viewModel.renderedAttributedString {
+                readerContent(attributedString: attrStr)
             } else {
                 // Not yet opened
                 Color.clear
@@ -36,7 +36,7 @@ struct TXTReaderContainerView: View {
         .onDisappear {
             Task { await viewModel.close() }
         }
-        .accessibilityIdentifier("txtReaderContainer")
+        .accessibilityIdentifier("mdReaderContainer")
     }
 
     // MARK: - Subviews
@@ -50,7 +50,7 @@ struct TXTReaderContainerView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
-        .accessibilityIdentifier("txtReaderLoading")
+        .accessibilityIdentifier("mdReaderLoading")
     }
 
     private func errorView(message: String) -> some View {
@@ -64,19 +64,19 @@ struct TXTReaderContainerView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
-        .accessibilityIdentifier("txtReaderError")
+        .accessibilityIdentifier("mdReaderError")
     }
 
     @ViewBuilder
-    private func readerContent(text: String) -> some View {
+    private func readerContent(attributedString: NSAttributedString) -> some View {
         TXTTextViewBridge(
-            text: text,
-            attributedText: nil,
+            text: attributedString.string,
+            attributedText: attributedString,
             config: TXTViewConfig(),
             restoreOffset: viewModel.currentOffsetUTF16,
-            delegate: nil // Delegate wiring deferred to WI-6B bridge integration
+            delegate: nil // Delegate wiring will come with bridge hardening
         )
         .ignoresSafeArea(edges: .bottom)
-        .accessibilityIdentifier("txtReaderContent")
+        .accessibilityIdentifier("mdReaderContent")
     }
 }

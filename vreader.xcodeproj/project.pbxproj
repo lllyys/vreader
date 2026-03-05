@@ -7,6 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		MD07BF01A0B1C2D3E4F50001 /* MDAttributedStringRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD07FR01A0B1C2D3E4F50001 /* MDAttributedStringRendererTests.swift */; };
+		MD06BF01A0B1C2D3E4F50001 /* MDParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD06FR01A0B1C2D3E4F50001 /* MDParser.swift */; };
+		MD06BF02A0B1C2D3E4F50002 /* MDAttributedStringRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD06FR02A0B1C2D3E4F50002 /* MDAttributedStringRenderer.swift */; };
+		MD05BF01A0B1C2D3E4F50001 /* MDReaderContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD05FR01A0B1C2D3E4F50001 /* MDReaderContainerView.swift */; };
+		MD04BF01A0B1C2D3E4F50001 /* MDReaderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD04FR01A0B1C2D3E4F50001 /* MDReaderViewModel.swift */; };
+		MD04BF02A0B1C2D3E4F50002 /* MDReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD04FR02A0B1C2D3E4F50002 /* MDReaderViewModelTests.swift */; };
+		MD01BF01A0B1C2D3E4F50001 /* MDTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD01FR01A0B1C2D3E4F50001 /* MDTypes.swift */; };
+		MD01BF02A0B1C2D3E4F50002 /* MDParserProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD01FR02A0B1C2D3E4F50002 /* MDParserProtocol.swift */; };
+		MD01BF03A0B1C2D3E4F50003 /* MDMetadataExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD01FR03A0B1C2D3E4F50003 /* MDMetadataExtractor.swift */; };
+		MD02BF01A0B1C2D3E4F50001 /* MockMDParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD02FR01A0B1C2D3E4F50001 /* MockMDParser.swift */; };
+		MD02BF02A0B1C2D3E4F50002 /* MDMetadataExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD02FR02A0B1C2D3E4F50002 /* MDMetadataExtractorTests.swift */; };
+		MD02BF03A0B1C2D3E4F50003 /* MDTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD02FR03A0B1C2D3E4F50003 /* MDTypesTests.swift */; };
 		00AA9871B88FE39518AC1320 /* utf16be_bom.txt in Resources */ = {isa = PBXBuildFile; fileRef = F2EFEE7A0EC5352A0BB1A994 /* utf16be_bom.txt */; };
 		01FEDA4DD8F5A3BFA56F275D /* DocumentFingerprintValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4B4E4FB28FD82376AE20A4F /* DocumentFingerprintValidationTests.swift */; };
 		08C05E320FF9F6EFAAE34DA3 /* ImportErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744CB6180C0CE88E75E124F3 /* ImportErrorTests.swift */; };
@@ -87,6 +99,7 @@
 		C6D9CCA699EBFFBE7A5479F1 /* LibraryTestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B26374749D7626349FB9E0 /* LibraryTestHelpers.swift */; };
 		C72258E7A1E6477E89E27D6E /* ImportError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 982822FD76DDFB1EEE150FF0 /* ImportError.swift */; };
 		C731DA5F2D3885D918F1640A /* EncodingDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A43A801A0876E2437CE63808 /* EncodingDetector.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* MDIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F7A8B9C0D1E2 /* MDIntegrationTests.swift */; };
 		CD8C26CB53B0BE57CE214F00 /* TXTBridgeOffsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50B0954852C3621D008EE07 /* TXTBridgeOffsetTests.swift */; };
 		CD9751D76A3A9DBF872CA5D7 /* PersistenceActor+Library.swift in Sources */ = {isa = PBXBuildFile; fileRef = E46A786B20AA87E763D00F45 /* PersistenceActor+Library.swift */; };
 		CFF2F7127E363B96F2B6429B /* LibraryBookItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E3D2050D82A39083191EDDA /* LibraryBookItem.swift */; };
@@ -130,6 +143,18 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		MD07FR01A0B1C2D3E4F50001 /* MDAttributedStringRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDAttributedStringRendererTests.swift; sourceTree = "<group>"; };
+		MD06FR01A0B1C2D3E4F50001 /* MDParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDParser.swift; sourceTree = "<group>"; };
+		MD06FR02A0B1C2D3E4F50002 /* MDAttributedStringRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDAttributedStringRenderer.swift; sourceTree = "<group>"; };
+		MD05FR01A0B1C2D3E4F50001 /* MDReaderContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDReaderContainerView.swift; sourceTree = "<group>"; };
+		MD04FR01A0B1C2D3E4F50001 /* MDReaderViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDReaderViewModel.swift; sourceTree = "<group>"; };
+		MD04FR02A0B1C2D3E4F50002 /* MDReaderViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDReaderViewModelTests.swift; sourceTree = "<group>"; };
+		MD01FR01A0B1C2D3E4F50001 /* MDTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDTypes.swift; sourceTree = "<group>"; };
+		MD01FR02A0B1C2D3E4F50002 /* MDParserProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDParserProtocol.swift; sourceTree = "<group>"; };
+		MD01FR03A0B1C2D3E4F50003 /* MDMetadataExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDMetadataExtractor.swift; sourceTree = "<group>"; };
+		MD02FR01A0B1C2D3E4F50001 /* MockMDParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockMDParser.swift; sourceTree = "<group>"; };
+		MD02FR02A0B1C2D3E4F50002 /* MDMetadataExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDMetadataExtractorTests.swift; sourceTree = "<group>"; };
+		MD02FR03A0B1C2D3E4F50003 /* MDTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDTypesTests.swift; sourceTree = "<group>"; };
 		0069CA3A00998B13DE06E424 /* LocatorIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorIntegrationTests.swift; sourceTree = "<group>"; };
 		00FE0912FBC85E22DF8C637F /* ReadingTimeFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingTimeFormatter.swift; sourceTree = "<group>"; };
 		03FA3AC72012ED6686293475 /* ReadingStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStatsTests.swift; sourceTree = "<group>"; };
@@ -221,6 +246,7 @@
 		E11E9DBFB16DA26DD0659851 /* AnnotationModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationModelTests.swift; sourceTree = "<group>"; };
 		E46A786B20AA87E763D00F45 /* PersistenceActor+Library.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+Library.swift"; sourceTree = "<group>"; };
 		E46AADA707F0E3AF7E8AB297 /* vreaderTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = vreaderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1A2B3C4D5E6F7A8B9C0D1E2 /* MDIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDIntegrationTests.swift; sourceTree = "<group>"; };
 		E50B0954852C3621D008EE07 /* TXTBridgeOffsetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTBridgeOffsetTests.swift; sourceTree = "<group>"; };
 		EAB42EEEFFCAD8D654D57AE7 /* ReaderContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderContainerView.swift; sourceTree = "<group>"; };
 		EAE6C27BECED96A8DA016439 /* MetadataExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataExtractor.swift; sourceTree = "<group>"; };
@@ -319,6 +345,7 @@
 			children = (
 				F3B26374749D7626349FB9E0 /* LibraryTestHelpers.swift */,
 				3B1563E77E28434568F45736 /* LibraryViewModelTests.swift */,
+				MD04FR02A0B1C2D3E4F50002 /* MDReaderViewModelTests.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -358,6 +385,17 @@
 			path = Locator;
 			sourceTree = "<group>";
 		};
+		MD03GR02A0B1C2D3E4F50002 /* MD */ = {
+			isa = PBXGroup;
+			children = (
+				MD02FR01A0B1C2D3E4F50001 /* MockMDParser.swift */,
+				MD02FR02A0B1C2D3E4F50002 /* MDMetadataExtractorTests.swift */,
+				MD02FR03A0B1C2D3E4F50003 /* MDTypesTests.swift */,
+				MD07FR01A0B1C2D3E4F50001 /* MDAttributedStringRendererTests.swift */,
+			);
+			path = MD;
+			sourceTree = "<group>";
+		};
 		60B87C16019C31ED0DAABBBC /* TXT */ = {
 			isa = PBXGroup;
 			children = (
@@ -392,6 +430,7 @@
 				EAB42EEEFFCAD8D654D57AE7 /* ReaderContainerView.swift */,
 				AA6A01B6C7E4D92F8B1D3E06 /* TXTReaderContainerView.swift */,
 				43347208CA56C84F65B2DCF7 /* TXTTextViewBridge.swift */,
+				MD05FR01A0B1C2D3E4F50001 /* MDReaderContainerView.swift */,
 			);
 			path = Reader;
 			sourceTree = "<group>";
@@ -410,6 +449,7 @@
 				90B380013D82DFFD0411633E /* EPUBReaderViewModel.swift */,
 				CF473C04CE58CE0887DAA5A1 /* LibraryViewModel.swift */,
 				AA6A01B4C7E4D92F8B1D3E04 /* TXTReaderViewModel.swift */,
+				MD04FR01A0B1C2D3E4F50001 /* MDReaderViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -430,9 +470,22 @@
 			isa = PBXGroup;
 			children = (
 				0069CA3A00998B13DE06E424 /* LocatorIntegrationTests.swift */,
+				F1A2B3C4D5E6F7A8B9C0D1E2 /* MDIntegrationTests.swift */,
 				E50B0954852C3621D008EE07 /* TXTBridgeOffsetTests.swift */,
 			);
 			path = Integration;
+			sourceTree = "<group>";
+		};
+		MD03GR01A0B1C2D3E4F50001 /* MD */ = {
+			isa = PBXGroup;
+			children = (
+				MD01FR01A0B1C2D3E4F50001 /* MDTypes.swift */,
+				MD01FR02A0B1C2D3E4F50002 /* MDParserProtocol.swift */,
+				MD01FR03A0B1C2D3E4F50003 /* MDMetadataExtractor.swift */,
+				MD06FR01A0B1C2D3E4F50001 /* MDParser.swift */,
+				MD06FR02A0B1C2D3E4F50002 /* MDAttributedStringRenderer.swift */,
+			);
+			path = MD;
 			sourceTree = "<group>";
 		};
 		C0B6C8014BAA5AFC1F7476A3 /* TXT */ = {
@@ -462,6 +515,7 @@
 				5F8FFECE27C7EBAE6B16B555 /* Locator */,
 				8D9655BC6E5498F95CB02833 /* Mocks */,
 				60B87C16019C31ED0DAABBBC /* TXT */,
+				MD03GR02A0B1C2D3E4F50002 /* MD */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -533,6 +587,7 @@
 				FDAD081C3FE054319EF94E4A /* EPUB */,
 				5CF05FDFCFCF1A5110783282 /* Locator */,
 				C0B6C8014BAA5AFC1F7476A3 /* TXT */,
+				MD03GR01A0B1C2D3E4F50001 /* MD */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -708,6 +763,7 @@
 				879E269189DBE24A5AF6095B /* LibraryRefreshServiceTests.swift in Sources */,
 				C6D9CCA699EBFFBE7A5479F1 /* LibraryTestHelpers.swift in Sources */,
 				8178696A12B2FC6B462D9C3A /* LibraryViewModelTests.swift in Sources */,
+				MD04BF02A0B1C2D3E4F50002 /* MDReaderViewModelTests.swift in Sources */,
 				34B285C323BF6E55A25CC148 /* LocatorCanonicalHashTests.swift in Sources */,
 				2FA04FC59FECB40C45FAD4D8 /* LocatorFactoryTests.swift in Sources */,
 				87A61AC432B6116973B7D291 /* LocatorIntegrationTests.swift in Sources */,
@@ -715,6 +771,10 @@
 				F5A31837AE39AA372B31F1B5 /* LocatorTests.swift in Sources */,
 				545CCE5FED3565C9BF15EF78 /* LocatorValidationTests.swift in Sources */,
 				D08EB57C5EBC9C9542476015 /* MetadataExtractorTests.swift in Sources */,
+				MD02BF01A0B1C2D3E4F50001 /* MockMDParser.swift in Sources */,
+				MD02BF02A0B1C2D3E4F50002 /* MDMetadataExtractorTests.swift in Sources */,
+				MD02BF03A0B1C2D3E4F50003 /* MDTypesTests.swift in Sources */,
+				MD07BF01A0B1C2D3E4F50001 /* MDAttributedStringRendererTests.swift in Sources */,
 				1FC25DD5163814F8A1DF4EBF /* MigrationFixtureTests.swift in Sources */,
 				4930168887D85648F1EDA897 /* MigrationFixtures.swift in Sources */,
 				73CB49F24C1650EA99E2A5B5 /* MockEPUBParser.swift in Sources */,
@@ -728,6 +788,7 @@
 				800F472661AB1030CC54DB46 /* ReadingTimeFormatterTests.swift in Sources */,
 				FD253FA0CEB159E2B1299BD4 /* SchemaV1Tests.swift in Sources */,
 				30F629136C9EED9FCD557222 /* SmokeTests.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* MDIntegrationTests.swift in Sources */,
 				CD8C26CB53B0BE57CE214F00 /* TXTBridgeOffsetTests.swift in Sources */,
 				E9177AEFF47DA3EFEAC13C50 /* TXTChunkedLoaderTests.swift in Sources */,
 				3548ECB80E9BAC95250F69E5 /* TXTOffsetMapperTests.swift in Sources */,
@@ -753,6 +814,7 @@
 				55E8CDBFFC9EC1C49EAC47EE /* DocumentFingerprint.swift in Sources */,
 				2F558CF136B69212E668F2D3 /* EPUBParserProtocol.swift in Sources */,
 				08F6B888EBC4D1ADDA3CC360 /* EPUBReaderViewModel.swift in Sources */,
+				MD04BF01A0B1C2D3E4F50001 /* MDReaderViewModel.swift in Sources */,
 				E8353217B517055A09014AE7 /* EPUBTypes.swift in Sources */,
 				C731DA5F2D3885D918F1640A /* EncodingDetector.swift in Sources */,
 				98CC47D9875A2A96F5098AF3 /* FeatureFlags.swift in Sources */,
@@ -772,11 +834,17 @@
 				09122777AF5FD739850888CA /* LocatorFactory.swift in Sources */,
 				9FCA583CDA52A7FB584260FA /* LocatorRestorer.swift in Sources */,
 				AF7D99D9C0CEA266BFD976B8 /* MetadataExtractor.swift in Sources */,
+				MD01BF01A0B1C2D3E4F50001 /* MDTypes.swift in Sources */,
+				MD01BF02A0B1C2D3E4F50002 /* MDParserProtocol.swift in Sources */,
+				MD01BF03A0B1C2D3E4F50003 /* MDMetadataExtractor.swift in Sources */,
+				MD06BF01A0B1C2D3E4F50001 /* MDParser.swift in Sources */,
+				MD06BF02A0B1C2D3E4F50002 /* MDAttributedStringRenderer.swift in Sources */,
 				CD9751D76A3A9DBF872CA5D7 /* PersistenceActor+Library.swift in Sources */,
 				E1646FDF9A47255E94758A54 /* PersistenceActor+ReadingPosition.swift in Sources */,
 				A190FE66621610AD2D04739D /* PersistenceActor.swift in Sources */,
 				B64CAC947A1951E5ED22009C /* QuoteRecovery.swift in Sources */,
 				4CCBF4F6E186A7363A995303 /* ReaderContainerView.swift in Sources */,
+				MD05BF01A0B1C2D3E4F50001 /* MDReaderContainerView.swift in Sources */,
 				16E0E8B88F2913E822EA56C3 /* ReadingPosition.swift in Sources */,
 				EF1F3F42EE0664A058F2304D /* ReadingPositionPersisting.swift in Sources */,
 				A232BB96700FAD0583896DE3 /* ReadingSession.swift in Sources */,

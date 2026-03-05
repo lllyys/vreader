@@ -1,21 +1,21 @@
 // Purpose: Defines supported book formats for the reader.
-// .md is reserved and not importable in V1.
+// .md is importable as of WI-6B.
 
 /// Supported document formats for the reader.
 enum BookFormat: String, Codable, Hashable, Sendable, CaseIterable {
     case epub
     case pdf
     case txt
-    case md  // Reserved; not importable in V1
+    case md
 
-    /// Formats that can be imported in V1.
+    /// Formats that can be imported.
     static var importableFormats: [BookFormat] {
-        [.epub, .pdf, .txt]
+        [.epub, .pdf, .txt, .md]
     }
 
-    /// Whether this format is importable in V1.
+    /// Whether this format is importable.
     var isImportableV1: Bool {
-        self != .md
+        true
     }
 
     /// Common file extensions for this format.

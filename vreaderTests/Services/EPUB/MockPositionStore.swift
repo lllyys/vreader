@@ -51,6 +51,11 @@ actor MockPositionStore: ReadingPositionPersisting {
 
     // MARK: - Test Helpers
 
+    /// Sets the error to throw on load.
+    func setLoadError(_ error: (any Error & Sendable)?) {
+        loadError = error
+    }
+
     /// Seeds a position for testing restore behavior.
     func seed(bookFingerprintKey: String, locator: Locator) {
         positions[bookFingerprintKey] = locator

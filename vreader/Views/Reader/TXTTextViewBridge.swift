@@ -1,14 +1,18 @@
-// Purpose: UIViewRepresentable wrapping UITextView for TXT document rendering.
+// Purpose: UIViewRepresentable wrapping UITextView for TXT/MD document rendering.
 // Provides selection range extraction, scroll position -> offset mapping,
-// and configurable appearance. This is a feasibility spike prototype.
+// and configurable appearance. Supports both plain text and NSAttributedString.
 //
 // Key decisions:
 // - Uses TextKit 1 (NSLayoutManager) for reliable offset mapping.
 // - Non-editable UITextView for reading — selection enabled for highlights.
 // - Coordinator handles delegate callbacks (scroll, selection change).
 // - All offset conversions delegate to TXTOffsetMapper for testability.
+// - Optional `attributedText` parameter: if non-nil, uses it directly (MD reader).
+//   If nil, builds plain-text attributed string from `text` + config (TXT reader).
+// - Link interaction policy: only http/https URLs are tappable.
 //
-// @coordinates-with TXTOffsetMapper.swift, TXTChunkedLoader.swift, Locator.swift
+// @coordinates-with TXTOffsetMapper.swift, TXTChunkedLoader.swift, Locator.swift,
+//   MDReaderContainerView.swift
 
 #if canImport(UIKit)
 import SwiftUI
@@ -31,9 +35,12 @@ protocol TXTTextViewBridgeDelegate: AnyObject {
     func scrollPositionDidChange(topCharOffsetUTF16: Int)
 }
 
-/// SwiftUI wrapper for a read-only UITextView displaying plain text.
+/// SwiftUI wrapper for a read-only UITextView displaying plain or attributed text.
 struct TXTTextViewBridge: UIViewRepresentable {
     let text: String
+    /// Optional pre-built attributed string (e.g., from Markdown rendering).
+    /// When non-nil, used directly instead of building from `text` + config.
+    var attributedText: NSAttributedString?
     let config: TXTViewConfig
     var restoreOffset: Int?
     weak var delegate: TXTTextViewBridgeDelegate?
@@ -67,7 +74,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
             || context.coordinator.lastConfig.lineSpacing != config.lineSpacing
 
         // Update text or re-apply styling if config changed
-        if textView.attributedText.string != text || configChanged {
+        let textChanged = textView.attributedText.string != text
+        let attrChanged = attributedText != nil && !textView.attributedText.isEqual(to: attributedText!)
+        if textChanged || attrChanged || configChanged {
             applyText(to: textView)
             context.coordinator.lastConfig = config
         }
@@ -91,25 +100,32 @@ struct TXTTextViewBridge: UIViewRepresentable {
     // MARK: - Private
 
     private func applyText(to textView: UITextView) {
-        let baseFont: UIFont
-        if let name = config.fontName {
-            baseFont = UIFont(name: name, size: config.fontSize) ?? .systemFont(ofSize: config.fontSize)
+        if let attributedText {
+            // Use pre-built attributed string (e.g., from Markdown rendering)
+            textView.attributedText = attributedText
+            textView.adjustsFontForContentSizeCategory = true
         } else {
-            baseFont = .systemFont(ofSize: config.fontSize)
+            // Build plain-text attributed string from text + config
+            let baseFont: UIFont
+            if let name = config.fontName {
+                baseFont = UIFont(name: name, size: config.fontSize) ?? .systemFont(ofSize: config.fontSize)
+            } else {
+                baseFont = .systemFont(ofSize: config.fontSize)
+            }
+            let font = UIFontMetrics.default.scaledFont(for: baseFont)
+            textView.adjustsFontForContentSizeCategory = true
+
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.lineSpacing = config.lineSpacing
+
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .paragraphStyle: paragraphStyle,
+                .foregroundColor: UIColor.label,
+            ]
+
+            textView.attributedText = NSAttributedString(string: text, attributes: attributes)
         }
-        let font = UIFontMetrics.default.scaledFont(for: baseFont)
-        textView.adjustsFontForContentSizeCategory = true
-
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = config.lineSpacing
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .paragraphStyle: paragraphStyle,
-            .foregroundColor: UIColor.label,
-        ]
-
-        textView.attributedText = NSAttributedString(string: text, attributes: attributes)
     }
 
     private func restoreScrollPosition(in textView: UITextView, toCharOffset offset: Int) {
@@ -135,6 +151,19 @@ struct TXTTextViewBridge: UIViewRepresentable {
         init(delegate: TXTTextViewBridgeDelegate?, config: TXTViewConfig = TXTViewConfig()) {
             self.delegate = delegate
             self.lastConfig = config
+        }
+
+        // MARK: - Link Interaction Policy
+
+        func textView(
+            _ textView: UITextView,
+            shouldInteractWith URL: URL,
+            in characterRange: NSRange,
+            interaction: UITextItemInteraction
+        ) -> Bool {
+            // Only allow http and https links
+            let scheme = URL.scheme?.lowercased()
+            return scheme == "http" || scheme == "https"
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {

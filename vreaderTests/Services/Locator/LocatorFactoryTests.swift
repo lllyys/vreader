@@ -418,4 +418,132 @@ struct LocatorFactoryTests {
         // Should still produce a valid locator (quote snaps to scalar boundary)
         #expect(locator != nil)
     }
+
+    // MARK: - MD Aliases
+
+    private static let mdFingerprint = DocumentFingerprint(
+        contentSHA256: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+        fileByteCount: 256,
+        format: .md
+    )
+
+    @Test("mdPosition creates valid locator with md fingerprint")
+    func mdPositionCreatesValidLocator() {
+        let locator = LocatorFactory.mdPosition(
+            fingerprint: Self.mdFingerprint,
+            charOffsetUTF16: 42,
+            totalProgression: 0.5
+        )
+
+        #expect(locator != nil)
+        #expect(locator?.charOffsetUTF16 == 42)
+        #expect(locator?.totalProgression == 0.5)
+        #expect(locator?.bookFingerprint.format == .md)
+    }
+
+    @Test("mdPosition with source text extracts quote")
+    func mdPositionWithSourceText() {
+        let source = "Hello world rendered from markdown"
+        let locator = LocatorFactory.mdPosition(
+            fingerprint: Self.mdFingerprint,
+            charOffsetUTF16: 0,
+            totalProgression: 0.0,
+            sourceText: source
+        )
+
+        #expect(locator != nil)
+        #expect(locator?.textQuote != nil)
+    }
+
+    @Test("mdRange creates valid locator with char range")
+    func mdRangeCreatesValidLocator() {
+        let locator = LocatorFactory.mdRange(
+            fingerprint: Self.mdFingerprint,
+            charRangeStartUTF16: 10,
+            charRangeEndUTF16: 20,
+            totalProgression: 0.3
+        )
+
+        #expect(locator != nil)
+        #expect(locator?.charRangeStartUTF16 == 10)
+        #expect(locator?.charRangeEndUTF16 == 20)
+        #expect(locator?.bookFingerprint.format == .md)
+    }
+
+    @Test("mdRange with source text extracts selected text as quote")
+    func mdRangeWithSourceText() {
+        let source = "Hello world rendered from markdown"
+        let locator = LocatorFactory.mdRange(
+            fingerprint: Self.mdFingerprint,
+            charRangeStartUTF16: 6,
+            charRangeEndUTF16: 11,
+            sourceText: source
+        )
+
+        #expect(locator != nil)
+        #expect(locator?.textQuote == "world")
+    }
+
+    @Test("mdPosition with negative offset returns nil")
+    func mdPositionNegativeOffset() {
+        let locator = LocatorFactory.mdPosition(
+            fingerprint: Self.mdFingerprint,
+            charOffsetUTF16: -1
+        )
+        #expect(locator == nil)
+    }
+
+    // MARK: - UTF-16 Surrogate Boundary Splitting
+
+    @Test("extractContext splitting surrogate pair mid-emoji snaps to boundary")
+    func extractContextSurrogateBoundarySplit() {
+        // "A😀B" = A(1) + 😀(2 UTF-16, surrogate pair) + B(1) = 4 code units
+        let source = "A😀B"
+        // Offset 2 lands between the surrogate pair halves of 😀
+        let result = LocatorFactory.extractContext(
+            from: source,
+            at: 2,
+            length: 1,
+            windowSize: 5
+        )
+        // Should not crash; String.Index(utf16Offset:in:) snaps to nearest boundary
+        // Context before must contain at least "A" (and possibly the emoji, depending on snap)
+        if let before = result.contextBefore {
+            #expect(before.contains("A"))
+        }
+        // Any extracted text must be valid UTF-8 (no garbled surrogates)
+        if let quote = result.quote {
+            #expect(quote.utf8.count > 0)
+        }
+    }
+
+    @Test("extractContext with emoji at boundaries produces valid text")
+    func extractContextEmojiAtBoundaries() {
+        // "😀😀😀" = 6 UTF-16 code units
+        let source = "😀😀😀"
+        let result = LocatorFactory.extractContext(
+            from: source,
+            at: 2,
+            length: 2,
+            windowSize: 2
+        )
+        // Should extract the middle emoji as quote
+        #expect(result.quote == "😀")
+        #expect(result.contextBefore == "😀")
+        #expect(result.contextAfter == "😀")
+    }
+
+    @Test("txtPosition with offset inside surrogate pair still produces valid locator")
+    func txtPositionInsideSurrogatePair() {
+        // "Hello😀World" = 5 + 2 + 5 = 12 UTF-16 code units
+        // Offset 6 is inside the emoji surrogate pair (between high/low surrogate)
+        let source = "Hello😀World"
+        let locator = LocatorFactory.txtPosition(
+            fingerprint: Self.txtFingerprint,
+            charOffsetUTF16: 6,
+            sourceText: source
+        )
+        #expect(locator != nil)
+        #expect(locator?.charOffsetUTF16 == 6)
+    }
 }

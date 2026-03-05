@@ -147,6 +147,44 @@ enum LocatorFactory {
         )
     }
 
+    // MARK: - MD Position (alias for TXT offset logic on rendered text)
+
+    /// Creates a locator for an MD cursor position in rendered text.
+    /// Delegates to the same logic as `txtPosition` — offsets are UTF-16 over rendered text.
+    static func mdPosition(
+        fingerprint: DocumentFingerprint,
+        charOffsetUTF16: Int,
+        totalProgression: Double? = nil,
+        sourceText: String? = nil
+    ) -> Locator? {
+        txtPosition(
+            fingerprint: fingerprint,
+            charOffsetUTF16: charOffsetUTF16,
+            totalProgression: totalProgression,
+            sourceText: sourceText
+        )
+    }
+
+    // MARK: - MD Range (alias for TXT range logic on rendered text)
+
+    /// Creates a locator for an MD selection range in rendered text.
+    /// Delegates to the same logic as `txtRange`.
+    static func mdRange(
+        fingerprint: DocumentFingerprint,
+        charRangeStartUTF16: Int,
+        charRangeEndUTF16: Int,
+        totalProgression: Double? = nil,
+        sourceText: String? = nil
+    ) -> Locator? {
+        txtRange(
+            fingerprint: fingerprint,
+            charRangeStartUTF16: charRangeStartUTF16,
+            charRangeEndUTF16: charRangeEndUTF16,
+            totalProgression: totalProgression,
+            sourceText: sourceText
+        )
+    }
+
     // MARK: - Quote/Context Extraction
 
     /// Extracts quote text and surrounding context from source text at a UTF-16 offset.
@@ -224,14 +262,9 @@ enum LocatorFactory {
         let utf16 = string.utf16
         guard start < end, start >= 0, end <= utf16.count else { return nil }
 
-        let rawStart = utf16.index(utf16.startIndex, offsetBy: start)
-        let rawEnd = utf16.index(utf16.startIndex, offsetBy: end)
-
-        // Snap to valid Unicode scalar boundaries to avoid splitting surrogate pairs.
-        let startIndex = rawStart.samePosition(in: string.unicodeScalars)
-            ?? string.unicodeScalars.index(after: rawStart).samePosition(in: string.unicodeScalars)
-            ?? rawStart
-        let endIndex = rawEnd.samePosition(in: string.unicodeScalars) ?? rawEnd
+        // Use String.Index(utf16Offset:in:) for safe boundary-aware conversion.
+        let startIndex = String.Index(utf16Offset: start, in: string)
+        let endIndex = String.Index(utf16Offset: end, in: string)
 
         guard startIndex < endIndex else { return nil }
         return String(string[startIndex ..< endIndex])

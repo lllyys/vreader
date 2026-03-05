@@ -9,12 +9,12 @@ struct BookFormatTests {
 
     // MARK: - Importability
 
-    @Test func importableFormatsExcludesMarkdown() {
+    @Test func importableFormatsIncludesMarkdown() {
         let importable = BookFormat.importableFormats
         #expect(importable.contains(.epub))
         #expect(importable.contains(.pdf))
         #expect(importable.contains(.txt))
-        #expect(!importable.contains(.md))
+        #expect(importable.contains(.md))
     }
 
     @Test func epubIsImportable() {
@@ -29,8 +29,8 @@ struct BookFormatTests {
         #expect(BookFormat.txt.isImportableV1 == true)
     }
 
-    @Test func mdIsNotImportable() {
-        #expect(BookFormat.md.isImportableV1 == false)
+    @Test func mdIsImportable() {
+        #expect(BookFormat.md.isImportableV1 == true)
     }
 
     // MARK: - File Extensions

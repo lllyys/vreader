@@ -53,6 +53,7 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable {
         case "epub": return "book.fill"
         case "pdf": return "doc.fill"
         case "txt": return "doc.text.fill"
+        case "md": return "doc.richtext.fill"
         default: return "doc.fill"
         }
     }
