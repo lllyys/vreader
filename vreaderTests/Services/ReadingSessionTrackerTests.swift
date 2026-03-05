@@ -36,8 +36,10 @@ final class MockSessionStore: SessionPersisting {
     private(set) var discardedSessionIds: [UUID] = []
     private(set) var flushedDurations: [(UUID, Int)] = []
     var unclosedSessions: [ReadingSession] = []
+    var saveError: (any Error)?
 
     func saveSession(_ session: ReadingSession) throws {
+        if let error = saveError { throw error }
         savedSessions.append(session)
     }
 
