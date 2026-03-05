@@ -7,10 +7,12 @@
 // - All format readers (EPUB/PDF/TXT/MD) have containers + ViewModels implemented.
 // - Full wiring requires file URL resolved from BookRecord persistence layer.
 // - Placeholders remain until navigation pipeline provides file URLs.
-// - Provides navigation bar with back button.
+// - Provides navigation bar with back button and settings button.
+// - Settings panel presented as a sheet for theme/typography controls.
 //
 // @coordinates-with: EPUBReaderViewModel.swift, TXTReaderViewModel.swift,
-//   MDReaderViewModel.swift, PDFReaderViewModel.swift, LibraryView.swift
+//   MDReaderViewModel.swift, PDFReaderViewModel.swift, LibraryView.swift,
+//   ReaderSettingsStore.swift, ReaderSettingsPanel.swift
 
 import SwiftUI
 
@@ -19,6 +21,8 @@ struct ReaderContainerView: View {
     let book: LibraryBookItem
 
     @Environment(\.dismiss) private var dismiss
+    @State private var settingsStore = ReaderSettingsStore()
+    @State private var showSettings = false
 
     var body: some View {
         Group {
@@ -46,6 +50,20 @@ struct ReaderContainerView: View {
                 .accessibilityLabel("Back to library")
                 .accessibilityIdentifier("readerBackButton")
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "textformat.size")
+                }
+                .accessibilityLabel("Reading settings")
+                .accessibilityIdentifier("readerSettingsButton")
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            ReaderSettingsPanel(store: settingsStore)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 

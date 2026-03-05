@@ -23,6 +23,9 @@ struct TXTViewConfig: Sendable {
     var fontSize: CGFloat = 18
     var fontName: String? = nil // nil = system font
     var lineSpacing: CGFloat = 6
+    var textColor: UIColor = UIColor(red: 0.10, green: 0.10, blue: 0.10, alpha: 1.0)
+    var backgroundColor: UIColor = .white
+    var letterSpacing: CGFloat = 0
     var textInset: UIEdgeInsets = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
 }
 
