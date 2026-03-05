@@ -139,17 +139,11 @@ enum QuoteRecovery {
             caseInsensitive: caseInsensitive
         )
 
-        // If context was provided and helped disambiguate, report .contextMatch.
-        // If no context was provided (both nil), this is just a first-match fallback.
-        let hasContext = contextBefore != nil || contextAfter != nil
-        let resolvedConfidence: QuoteConfidence
-        if confidence == .fuzzy {
-            resolvedConfidence = .fuzzy
-        } else if hasContext {
-            resolvedConfidence = .contextMatch
-        } else {
-            resolvedConfidence = .exact
-        }
+
+        // Multiple matches: confidence degrades from .exact to .contextMatch.
+        // Even without context, first-match fallback is not truly "exact" (ambiguous).
+        // Fuzzy stays fuzzy.
+        let resolvedConfidence: QuoteConfidence = confidence == .fuzzy ? .fuzzy : .contextMatch
         return makeResult(range: disambiguated, confidence: resolvedConfidence, text: text)
     }
 

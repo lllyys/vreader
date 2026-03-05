@@ -139,7 +139,7 @@ final class BookImporter: Sendable {
 
         // Step 9: Extract metadata from original URL (sandbox filename is hash-based)
         let extractor = extractors[format] ?? TXTMetadataExtractor()
-        let metadata: ExtractedMetadata
+        let metadata: BookMetadata
         do {
             metadata = try await extractor.extractMetadata(from: fileURL)
         } catch {

@@ -88,6 +88,14 @@
 		F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 605C9BAEA41B7C63D7E343B1 /* VReaderApp.swift */; };
 		F5A31837AE39AA372B31F1B5 /* LocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E8B92C301E5470AB98C87E /* LocatorTests.swift */; };
 		FD253FA0CEB159E2B1299BD4 /* SchemaV1Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2EA03BEFDBB65F5D7533EDE /* SchemaV1Tests.swift */; };
+		5A01000000000001 /* TXTOffsetMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A02000000000001 /* TXTOffsetMapper.swift */; };
+		5A01000000000002 /* TXTChunkedLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A02000000000002 /* TXTChunkedLoader.swift */; };
+		5A01000000000003 /* TXTTextViewBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A02000000000003 /* TXTTextViewBridge.swift */; };
+		5A01000000000004 /* TXTOffsetMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A02000000000004 /* TXTOffsetMapperTests.swift */; };
+		5A01000000000005 /* TXTChunkedLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A02000000000005 /* TXTChunkedLoaderTests.swift */; };
+		5A01000000000006 /* TXTBridgeOffsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A02000000000006 /* TXTBridgeOffsetTests.swift */; };
+		5B01000000000001 /* ReadingSessionTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B02000000000001 /* ReadingSessionTracker.swift */; };
+		5B01000000000002 /* ReadingSessionTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B02000000000002 /* ReadingSessionTrackerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -192,6 +200,14 @@
 		F8DEE3B767FC8F7457067C11 /* MutationDriftTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MutationDriftTests.swift; sourceTree = "<group>"; };
 		FB82BDFCDB76725A5586D5E0 /* Bookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bookmark.swift; sourceTree = "<group>"; };
 		FDFAF8770F91837F0B3793E1 /* ImportProvenanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProvenanceTests.swift; sourceTree = "<group>"; };
+		5A02000000000001 /* TXTOffsetMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTOffsetMapper.swift; sourceTree = "<group>"; };
+		5A02000000000002 /* TXTChunkedLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChunkedLoader.swift; sourceTree = "<group>"; };
+		5A02000000000003 /* TXTTextViewBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTTextViewBridge.swift; sourceTree = "<group>"; };
+		5A02000000000004 /* TXTOffsetMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTOffsetMapperTests.swift; sourceTree = "<group>"; };
+		5A02000000000005 /* TXTChunkedLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChunkedLoaderTests.swift; sourceTree = "<group>"; };
+		5A02000000000006 /* TXTBridgeOffsetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTBridgeOffsetTests.swift; sourceTree = "<group>"; };
+		5B02000000000001 /* ReadingSessionTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionTracker.swift; sourceTree = "<group>"; };
+		5B02000000000002 /* ReadingSessionTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionTrackerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -264,6 +280,7 @@
 			isa = PBXGroup;
 			children = (
 				B2C3D4E5F6071829300010A2 /* LocatorIntegrationTests.swift */,
+				5A02000000000006 /* TXTBridgeOffsetTests.swift */,
 			);
 			path = Integration;
 			sourceTree = "<group>";
@@ -340,6 +357,7 @@
 		AE4E61A680128143BD32AA91 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				5A03000000000002 /* Reader */,
 				6BEB6636BEBB84D528EE5DF5 /* BookCardView.swift */,
 				23A84FE014139E7B5524445D /* BookRowView.swift */,
 				1FD65C0547DF264510657CA2 /* ContentView.swift */,
@@ -361,6 +379,7 @@
 			isa = PBXGroup;
 			children = (
 				8F60718293A4B5C6D7E8F9A0 /* Locator */,
+				5A03000000000003 /* TXT */,
 				C0FBDC41C60328ED4FB8A197 /* BookImporterTests.swift */,
 				0616892213196BCF802266F8 /* ContentHasherTests.swift */,
 				77811B16F2CF741310C23CF5 /* EncodingDetectorTests.swift */,
@@ -370,6 +389,7 @@
 				CF5C12635DFA6BEE42EBB1CE /* KeychainServiceTests.swift */,
 				B6DAD680DB86CF1A65D34F3F /* LibraryRefreshServiceTests.swift */,
 				21BC5F159064D57CFAE2A676 /* MetadataExtractorTests.swift */,
+				5B02000000000002 /* ReadingSessionTrackerTests.swift */,
 				8D9655BC6E5498F95CB02833 /* Mocks */,
 			);
 			path = Services;
@@ -433,10 +453,37 @@
 			path = Locator;
 			sourceTree = "<group>";
 		};
+		5A03000000000001 /* TXT */ = {
+			isa = PBXGroup;
+			children = (
+				5A02000000000001 /* TXTOffsetMapper.swift */,
+				5A02000000000002 /* TXTChunkedLoader.swift */,
+			);
+			path = TXT;
+			sourceTree = "<group>";
+		};
+		5A03000000000002 /* Reader */ = {
+			isa = PBXGroup;
+			children = (
+				5A02000000000003 /* TXTTextViewBridge.swift */,
+			);
+			path = Reader;
+			sourceTree = "<group>";
+		};
+		5A03000000000003 /* TXT */ = {
+			isa = PBXGroup;
+			children = (
+				5A02000000000004 /* TXTOffsetMapperTests.swift */,
+				5A02000000000005 /* TXTChunkedLoaderTests.swift */,
+			);
+			path = TXT;
+			sourceTree = "<group>";
+		};
 		E30BACA9301E4652075A07C9 /* Services */ = {
 			isa = PBXGroup;
 			children = (
 				7E5F60718293A4B5C6D7E8F9 /* Locator */,
+				5A03000000000001 /* TXT */,
 				5160D7D68BF1AF6654AD08B6 /* BookImporter.swift */,
 				400D03ADE39639337E9993C5 /* FeatureFlags.swift */,
 				982822FD76DDFB1EEE150FF0 /* ImportError.swift */,
@@ -447,6 +494,7 @@
 				EAE6C27BECED96A8DA016439 /* MetadataExtractor.swift */,
 				C1DE5531A63EA492C5D91BEE /* PersistenceActor.swift */,
 				E46A786B20AA87E763D00F45 /* PersistenceActor+Library.swift */,
+				5B02000000000001 /* ReadingSessionTracker.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -618,6 +666,10 @@
 				800F472661AB1030CC54DB46 /* ReadingTimeFormatterTests.swift in Sources */,
 				FD253FA0CEB159E2B1299BD4 /* SchemaV1Tests.swift in Sources */,
 				30F629136C9EED9FCD557222 /* SmokeTests.swift in Sources */,
+				5A01000000000004 /* TXTOffsetMapperTests.swift in Sources */,
+				5A01000000000005 /* TXTChunkedLoaderTests.swift in Sources */,
+				5A01000000000006 /* TXTBridgeOffsetTests.swift in Sources */,
+				5B01000000000002 /* ReadingSessionTrackerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -663,6 +715,10 @@
 				38F1AB473618B5EB717D05DE /* ReadingTimeFormatter.swift in Sources */,
 				689521FED3BECF363AF06049 /* SchemaV1.swift in Sources */,
 				F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */,
+				5A01000000000001 /* TXTOffsetMapper.swift in Sources */,
+				5A01000000000002 /* TXTChunkedLoader.swift in Sources */,
+				5A01000000000003 /* TXTTextViewBridge.swift in Sources */,
+				5B01000000000001 /* ReadingSessionTracker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

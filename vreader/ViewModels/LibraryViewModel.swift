@@ -120,6 +120,11 @@ final class LibraryViewModel {
         }
     }
 
+    /// Imports files from the given URLs. Stub for WI-6+ implementation.
+    func importFiles(_ urls: [URL]) async {
+        // TODO: Delegate to BookImporter pipeline
+    }
+
     /// Toggles between grid and list view modes.
     func toggleViewMode() {
         viewMode = viewMode == .grid ? .list : .grid
