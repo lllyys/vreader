@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 
 @Test func smokeTest() {
     #expect(true, "Test infrastructure is working")

@@ -53,7 +53,7 @@ import SwiftData
 /// Schema version 1: baseline schema for vreader.
 /// All models defined in this version.
 enum SchemaV1: VersionedSchema {
-    static var versionIdentifier = Schema.Version(1, 0, 0)
+    static let versionIdentifier = Schema.Version(1, 0, 0)
 
     static var models: [any PersistentModel.Type] {
         [

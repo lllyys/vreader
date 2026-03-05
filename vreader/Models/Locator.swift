@@ -155,15 +155,20 @@ struct Locator: Codable, Hashable, Sendable {
         return result
     }
 
+    /// Cached formatter for locale-independent float formatting with 6 decimal places.
+    private static let posixFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.minimumFractionDigits = 6
+        f.maximumFractionDigits = 6
+        f.numberStyle = .decimal
+        f.groupingSeparator = ""
+        return f
+    }()
+
     /// Locale-independent float formatting with 6 decimal places.
     private func roundedString(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.minimumFractionDigits = 6
-        formatter.maximumFractionDigits = 6
-        formatter.numberStyle = .decimal
-        formatter.groupingSeparator = ""
-        return formatter.string(from: NSNumber(value: value)) ?? "0.000000"
+        Self.posixFormatter.string(from: NSNumber(value: value)) ?? "0.000000"
     }
 
     private func normalizeLineEndings(_ s: String) -> String {

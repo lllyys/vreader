@@ -24,11 +24,10 @@ final class Book {
     /// Format: "{format}:{contentSHA256}:{fileByteCount}"
     @Attribute(.unique) var fingerprintKey: String
 
-    /// Full fingerprint for domain logic. Immutable after initialization.
-    /// To change identity, delete and re-import the book.
-    private(set) var fingerprint: DocumentFingerprint {
-        didSet { syncDerivedFields() }
-    }
+    /// Full fingerprint for domain logic. Must not be mutated after initialization
+    /// except via `updateFingerprint(_:)`. SwiftData @Model `didSet` observers are
+    /// unreliable, so derived field sync is done explicitly in `updateFingerprint(_:)`.
+    var fingerprint: DocumentFingerprint
 
     // MARK: - Metadata
 
@@ -105,6 +104,16 @@ final class Book {
         self.bookmarks = []
         self.highlights = []
         self.annotations = []
+    }
+
+    // MARK: - Explicit Sync
+
+    /// Updates the fingerprint and syncs all derived fields.
+    /// Use this instead of setting `fingerprint` directly, because
+    /// SwiftData @Model classes do not reliably fire `didSet` observers.
+    func updateFingerprint(_ newFingerprint: DocumentFingerprint) {
+        fingerprint = newFingerprint
+        syncDerivedFields()
     }
 
     // MARK: - Private

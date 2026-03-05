@@ -208,7 +208,8 @@ struct KeychainService: Sendable {
         }
     }
 
-    /// Rotates the device identifier by deleting the old one and generating a new UUID.
+    /// Deletes the stored device identifier. The next call to `deviceId()` will
+    /// generate a fresh UUID, effectively rotating the identity.
     ///
     /// This is the "Reset Sync Identity" action exposed in Settings.
     ///

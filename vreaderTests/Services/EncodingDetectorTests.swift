@@ -198,17 +198,17 @@ struct EncodingDetectorTests {
 
     // MARK: - Lossy Fallback
 
-    @Test func invalidBytesProduceLossyUTF8() throws {
-        // Isolated continuation byte in the middle of ASCII —
-        // not valid in any encoding. Should fall through to lossy UTF-8.
-        // Using a byte sequence that is unlikely to be valid in any encoding
+    @Test func invalidUTF8BytesHandledGracefully() throws {
+        // 0x80 bytes are invalid UTF-8 (bare continuation bytes) but valid
+        // in CP1252 (Euro sign) and ISO Latin 1. The pipeline correctly
+        // decodes them via NSString heuristic or CP1252 fallback — the lossy
+        // UTF-8 fallback is unreachable because ISO Latin 1 maps all 256 bytes.
         let data = Data([0x80, 0x80, 0x80, 0x80, 0x80])
         let result = try EncodingDetector.detect(data: data)
-        // Must succeed (no throw) — lossy conversion expected
-        #expect(!result.text.isEmpty, "Lossy fallback should produce non-empty text")
-        // The result should indicate lossy conversion was used, OR contain replacement characters
-        let isLossyOrReplaced = result.usedLossyConversion || result.text.contains("\u{FFFD}")
-        #expect(isLossyOrReplaced, "Expected lossy conversion or replacement characters for invalid bytes")
+        // Must succeed (no throw) and produce non-empty text
+        #expect(!result.text.isEmpty, "Pipeline should decode invalid-UTF-8 bytes via fallback encoding")
+        // Encoding should NOT be UTF-8 (since strict UTF-8 rejects 0x80)
+        #expect(result.encoding != .utf8, "Expected a non-UTF-8 fallback encoding for bare 0x80 bytes")
     }
 
     // MARK: - BOM Prioritized Over Binary Check

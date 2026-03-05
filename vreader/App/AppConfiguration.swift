@@ -85,8 +85,12 @@ struct AppConfiguration: Sendable {
             return
         }
         #if !DEBUG
-        // Safety: release builds must always use prod.
-        assert(resolved == .prod, "Non-prod environment \(resolved) in release build")
+        // Safety: release builds must always use prod. Force override rather than
+        // relying on assert(), which is stripped from optimized builds.
+        if resolved != .prod {
+            self.environment = .prod
+            return
+        }
         #endif
         self.environment = resolved
     }

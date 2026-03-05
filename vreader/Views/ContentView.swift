@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct ContentView: View {
+    let viewModel: LibraryViewModel
+
     var body: some View {
-        Text("vreader")
-            .accessibilityIdentifier("appTitle")
+        LibraryView(viewModel: viewModel)
+            .accessibilityIdentifier("libraryView")
     }
 }

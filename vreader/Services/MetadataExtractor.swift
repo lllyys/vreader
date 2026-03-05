@@ -28,7 +28,12 @@ struct BookMetadata: Sendable, Equatable {
     static func fromFilename(_ fileURL: URL, author: String? = nil, coverImagePath: String? = nil) -> BookMetadata {
         let filename = fileURL.deletingPathExtension().lastPathComponent
         let trimmed = filename.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = trimmed.isEmpty ? "Untitled" : String(trimmed.prefix(maxTitleLength))
+        // Guard against dot-prefixed names with no real extension (e.g., ".txt"
+        // is treated by URL as a hidden file, not "stem.ext"). If pathExtension
+        // is empty and the name starts with ".", there is no meaningful stem.
+        let hasNoStem = trimmed.isEmpty
+            || (fileURL.pathExtension.isEmpty && trimmed.hasPrefix("."))
+        let title = hasNoStem ? "Untitled" : String(trimmed.prefix(maxTitleLength))
         return BookMetadata(title: title, author: author, coverImagePath: coverImagePath)
     }
 }

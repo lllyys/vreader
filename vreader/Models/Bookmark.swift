@@ -10,12 +10,19 @@ final class Bookmark {
     /// Primitive key for sync: "{bookFingerprintKey}:{locatorHash}"
     var profileKey: String
 
-    var locator: Locator {
-        didSet { profileKey = "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)" }
-    }
+    /// Mutate via `updateLocator(_:)` — SwiftData `didSet` is unreliable.
+    var locator: Locator
     var title: String?
     var createdAt: Date
     var updatedAt: Date
+
+    /// Updates the locator and syncs the derived profileKey.
+    /// Use this instead of setting `locator` directly, because
+    /// SwiftData @Model classes do not reliably fire `didSet` observers.
+    func updateLocator(_ newLocator: Locator) {
+        locator = newLocator
+        profileKey = "\(newLocator.bookFingerprint.canonicalKey):\(newLocator.canonicalHash)"
+    }
 
     // MARK: - Relationship
 

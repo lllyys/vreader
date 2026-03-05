@@ -98,7 +98,7 @@ enum EncodingDetector {
             if let name = CFStringConvertEncodingToIANACharSetName(cfEncoding) {
                 return (name as String).lowercased()
             }
-            return "utf-8" // Fallback: canonical default for downstream consumers
+            return "x-unknown" // Unknown encoding; downstream should treat as binary-safe
         }
     }
 
@@ -135,40 +135,42 @@ enum EncodingDetector {
     private static func detectByBOM(data: Data) -> EncodingResult? {
         guard data.count >= 2 else { return nil }
 
+        let bytes = [UInt8](data.prefix(4))
+
         // UTF-32 LE BOM: FF FE 00 00 (must check before UTF-16 LE)
-        if data.count >= 4 && data[data.startIndex] == 0xFF && data[data.startIndex + 1] == 0xFE
-            && data[data.startIndex + 2] == 0x00 && data[data.startIndex + 3] == 0x00 {
-            if let text = String(data: data[data.startIndex + 4...], encoding: .utf32LittleEndian) {
+        if bytes.count >= 4 && bytes[0] == 0xFF && bytes[1] == 0xFE
+            && bytes[2] == 0x00 && bytes[3] == 0x00 {
+            if let text = String(data: data.dropFirst(4), encoding: .utf32LittleEndian) {
                 return EncodingResult(text: text, encoding: .utf32LittleEndian, usedLossyConversion: false)
             }
         }
 
         // UTF-32 BE BOM: 00 00 FE FF
-        if data.count >= 4 && data[data.startIndex] == 0x00 && data[data.startIndex + 1] == 0x00
-            && data[data.startIndex + 2] == 0xFE && data[data.startIndex + 3] == 0xFF {
-            if let text = String(data: data[data.startIndex + 4...], encoding: .utf32BigEndian) {
+        if bytes.count >= 4 && bytes[0] == 0x00 && bytes[1] == 0x00
+            && bytes[2] == 0xFE && bytes[3] == 0xFF {
+            if let text = String(data: data.dropFirst(4), encoding: .utf32BigEndian) {
                 return EncodingResult(text: text, encoding: .utf32BigEndian, usedLossyConversion: false)
             }
         }
 
         // UTF-8 BOM: EF BB BF
-        if data.count >= 3 && data[data.startIndex] == 0xEF && data[data.startIndex + 1] == 0xBB
-            && data[data.startIndex + 2] == 0xBF {
-            if let text = String(data: data[data.startIndex + 3...], encoding: .utf8) {
+        if bytes.count >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB
+            && bytes[2] == 0xBF {
+            if let text = String(data: data.dropFirst(3), encoding: .utf8) {
                 return EncodingResult(text: text, encoding: .utf8, usedLossyConversion: false)
             }
         }
 
         // UTF-16 LE BOM: FF FE
-        if data[data.startIndex] == 0xFF && data[data.startIndex + 1] == 0xFE {
-            if let text = String(data: data[data.startIndex + 2...], encoding: .utf16LittleEndian) {
+        if bytes[0] == 0xFF && bytes[1] == 0xFE {
+            if let text = String(data: data.dropFirst(2), encoding: .utf16LittleEndian) {
                 return EncodingResult(text: text, encoding: .utf16LittleEndian, usedLossyConversion: false)
             }
         }
 
         // UTF-16 BE BOM: FE FF
-        if data[data.startIndex] == 0xFE && data[data.startIndex + 1] == 0xFF {
-            if let text = String(data: data[data.startIndex + 2...], encoding: .utf16BigEndian) {
+        if bytes[0] == 0xFE && bytes[1] == 0xFF {
+            if let text = String(data: data.dropFirst(2), encoding: .utf16BigEndian) {
                 return EncodingResult(text: text, encoding: .utf16BigEndian, usedLossyConversion: false)
             }
         }

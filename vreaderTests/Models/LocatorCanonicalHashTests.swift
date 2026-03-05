@@ -90,16 +90,18 @@ struct LocatorCanonicalHashTests {
     // MARK: - Float Rounding
 
     @Test func roundsFloatsTo6Decimals() {
+        // Values that differ at the 6th decimal place after rounding.
+        // 0.123456x rounds to 0.123456, 0.123457x rounds to 0.123457.
         let loc1 = Locator(
             bookFingerprint: Self.epubFP,
-            href: nil, progression: 0.1234564, totalProgression: nil,
+            href: nil, progression: 0.1234561, totalProgression: nil,
             cfi: nil, page: nil,
             charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
             textQuote: nil, textContextBefore: nil, textContextAfter: nil
         )
         let loc2 = Locator(
             bookFingerprint: Self.epubFP,
-            href: nil, progression: 0.1234565, totalProgression: nil,
+            href: nil, progression: 0.1234571, totalProgression: nil,
             cfi: nil, page: nil,
             charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
             textQuote: nil, textContextBefore: nil, textContextAfter: nil

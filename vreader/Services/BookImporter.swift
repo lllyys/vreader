@@ -136,9 +136,9 @@ final class BookImporter: Sendable {
             format: format
         )
 
-        // Step 9: Extract metadata
+        // Step 9: Extract metadata from original URL (sandbox filename is hash-based)
         let extractor = extractors[format] ?? TXTMetadataExtractor()
-        let metadata = try await extractor.extractMetadata(from: sandboxURL)
+        let metadata = try await extractor.extractMetadata(from: fileURL)
 
         // Step 10: Build provenance
         let provenance = ImportProvenance(

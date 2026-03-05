@@ -324,7 +324,8 @@ struct BookImporterTests {
             object: nil,
             queue: .main
         ) { notification in
-            Task { await collector.record(notification) }
+            let key = notification.userInfo?["fingerprintKey"] as? String
+            Task { await collector.record(hasFingerprintKey: key != nil) }
         }
         defer { NotificationCenter.default.removeObserver(token) }
 
@@ -333,19 +334,23 @@ struct BookImporterTests {
         // Give main queue a chance to process the notification
         try await Task.sleep(for: .milliseconds(50))
 
-        let received = await collector.notifications
-        #expect(!received.isEmpty, "Expected indexing notification to be posted")
-        #expect(received.first?.userInfo?["fingerprintKey"] != nil)
+        let count = await collector.count
+        #expect(count > 0, "Expected indexing notification to be posted")
+        let hasKey = await collector.hasFingerprintKey
+        #expect(hasKey, "Expected fingerprintKey in notification userInfo")
     }
 }
 
 // MARK: - Test Helpers
 
 /// Actor-isolated notification collector for race-free notification capture in tests.
+/// Stores only Sendable primitives extracted from notifications.
 private actor NotificationCollector {
-    var notifications: [Notification] = []
+    private(set) var count = 0
+    private(set) var hasFingerprintKey = false
 
-    func record(_ notification: Notification) {
-        notifications.append(notification)
+    func record(hasFingerprintKey: Bool) {
+        count += 1
+        if hasFingerprintKey { self.hasFingerprintKey = true }
     }
 }

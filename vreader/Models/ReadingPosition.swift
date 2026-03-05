@@ -10,15 +10,24 @@ final class ReadingPosition {
     var locatorHash: String
 
     /// Full locator for the current reading position.
-    var locator: Locator {
-        didSet { locatorHash = locator.canonicalHash }
-    }
+    /// Mutate via `updateLocator(_:)` — SwiftData `didSet` is unreliable.
+    var locator: Locator
 
     /// When the position was last updated.
     var updatedAt: Date
 
     /// Device that last updated this position.
     var deviceId: String
+
+    // MARK: - Explicit Sync
+
+    /// Updates the locator and syncs the derived locatorHash.
+    /// Use this instead of setting `locator` directly, because
+    /// SwiftData @Model classes do not reliably fire `didSet` observers.
+    func updateLocator(_ newLocator: Locator) {
+        locator = newLocator
+        locatorHash = newLocator.canonicalHash
+    }
 
     // MARK: - Relationship
 

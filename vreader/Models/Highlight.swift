@@ -13,9 +13,8 @@ final class Highlight {
     var profileKey: String
 
     /// Locator marking the highlight range start (and range via charRange fields).
-    var locator: Locator {
-        didSet { profileKey = "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)" }
-    }
+    /// Mutate via `updateLocator(_:)` — SwiftData `didSet` is unreliable.
+    var locator: Locator
 
     /// The highlighted text content.
     var selectedText: String
@@ -26,6 +25,16 @@ final class Highlight {
     var note: String?
     var createdAt: Date
     var updatedAt: Date
+
+    // MARK: - Explicit Sync
+
+    /// Updates the locator and syncs the derived profileKey.
+    /// Use this instead of setting `locator` directly, because
+    /// SwiftData @Model classes do not reliably fire `didSet` observers.
+    func updateLocator(_ newLocator: Locator) {
+        locator = newLocator
+        profileKey = "\(newLocator.bookFingerprint.canonicalKey):\(newLocator.canonicalHash)"
+    }
 
     // MARK: - Relationship
 

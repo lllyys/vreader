@@ -42,7 +42,9 @@ struct BookRecord: Sendable, Equatable {
 /// Actor-isolated persistence layer for SwiftData writes.
 /// In production, wraps a ModelContainer. In tests, replaced by MockPersistenceActor.
 actor PersistenceActor: BookPersisting {
-    private let modelContainer: ModelContainer
+    /// Internal visibility required: extensions in separate files
+    /// (e.g. PersistenceActor+Library.swift) cannot access private members.
+    let modelContainer: ModelContainer
 
     /// Core Data error codes indicating unique constraint violations.
     /// - 133021: NSManagedObjectConstraintMergeError (constraint merge conflict)
@@ -112,8 +114,7 @@ actor PersistenceActor: BookPersisting {
         descriptor.fetchLimit = 1
 
         guard let book = try context.fetch(descriptor).first else {
-            assertionFailure("appendProvenance: book not found for key \(key)")
-            return // No-op in release — caller manages consistency
+            throw ImportError.fileNotReadable("appendProvenance: book not found for key \(key)")
         }
         book.provenance = provenance
         try context.save()

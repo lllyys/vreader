@@ -178,11 +178,13 @@ actor ImportJobQueue {
 
     /// Associates a task handle with a job for cancellation support.
     /// If the job does not exist, the handle is cancelled immediately.
+    /// If a previous handle exists for this job, it is cancelled before replacement.
     func setTaskHandle(_ handle: Task<Void, Never>, forJobId id: UUID) {
         guard jobs[id] != nil else {
             handle.cancel()
             return
         }
+        taskHandles[id]?.cancel()
         taskHandles[id] = handle
     }
 }

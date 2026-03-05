@@ -17,26 +17,44 @@ final class ReadingSession {
     /// Primitive key for book association (matches Book.fingerprintKey).
     private(set) var bookFingerprintKey: String
 
-    var bookFingerprint: DocumentFingerprint {
-        didSet { bookFingerprintKey = bookFingerprint.canonicalKey }
-    }
+    /// Mutate via `updateBookFingerprint(_:)` — SwiftData `didSet` is unreliable.
+    var bookFingerprint: DocumentFingerprint
 
     var startedAt: Date
     var endedAt: Date?
 
-    /// Duration in seconds. Always >= 0.
-    var durationSeconds: Int {
-        didSet { if durationSeconds < 0 { durationSeconds = 0 } }
-    }
+    /// Duration in seconds. Always >= 0. Mutate via `updateDuration(_:)`.
+    var durationSeconds: Int
 
     /// Pages read during this session. Always >= 0 when set.
-    var pagesRead: Int? {
-        didSet { if let v = pagesRead, v < 0 { pagesRead = 0 } }
-    }
+    var pagesRead: Int?
 
     /// Words read during this session. Always >= 0 when set.
-    var wordsRead: Int? {
-        didSet { if let v = wordsRead, v < 0 { wordsRead = 0 } }
+    var wordsRead: Int?
+
+    /// Updates the book fingerprint and syncs the derived bookFingerprintKey.
+    /// Use this instead of setting `bookFingerprint` directly, because
+    /// SwiftData @Model classes do not reliably fire `didSet` observers.
+    func updateBookFingerprint(_ newFingerprint: DocumentFingerprint) {
+        bookFingerprint = newFingerprint
+        bookFingerprintKey = newFingerprint.canonicalKey
+    }
+
+    /// Updates duration with non-negative clamping.
+    /// Use this instead of setting `durationSeconds` directly, because
+    /// SwiftData @Model classes do not reliably fire `didSet` observers.
+    func updateDuration(_ newDuration: Int) {
+        durationSeconds = max(0, newDuration)
+    }
+
+    /// Updates pages read with non-negative clamping.
+    func updatePagesRead(_ newPages: Int?) {
+        pagesRead = newPages.map { max(0, $0) }
+    }
+
+    /// Updates words read with non-negative clamping.
+    func updateWordsRead(_ newWords: Int?) {
+        wordsRead = newWords.map { max(0, $0) }
     }
 
     var startLocator: Locator?
@@ -69,7 +87,12 @@ final class ReadingSession {
         self.bookFingerprintKey = bookFingerprint.canonicalKey
         self.bookFingerprint = bookFingerprint
         self.startedAt = startedAt
-        self.endedAt = endedAt
+        // Clamp invalid timeline: endedAt must not precede startedAt.
+        if let end = endedAt, end < startedAt {
+            self.endedAt = startedAt
+        } else {
+            self.endedAt = endedAt
+        }
         self.durationSeconds = max(0, durationSeconds)
         self.pagesRead = pagesRead.map { max(0, $0) }
         self.wordsRead = wordsRead.map { max(0, $0) }

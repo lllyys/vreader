@@ -43,6 +43,8 @@ enum ContentHasher {
     }
 
     /// Synchronous hash computation on the calling thread.
+    /// Note: The pre-check `isReadableFile` is informational (TOCTOU caveat).
+    /// The actual read via FileHandle will throw if the file vanishes between check and open.
     private static func computeHash(fileAt fileURL: URL) throws -> HashResult {
         guard FileManager.default.isReadableFile(atPath: fileURL.path) else {
             throw ImportError.hashComputationFailed("File not readable")

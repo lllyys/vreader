@@ -36,8 +36,8 @@ struct MutationDriftTests {
         #expect(book.format == "epub")
         #expect(book.fingerprintKey == Self.epubFP.canonicalKey)
 
-        // Mutate fingerprint
-        book.fingerprint = Self.pdfFP
+        // Mutate fingerprint via explicit method (SwiftData bypasses didSet)
+        book.updateFingerprint(Self.pdfFP)
 
         #expect(book.format == "pdf")
         #expect(book.fileByteCount == 2048)
@@ -64,7 +64,7 @@ struct MutationDriftTests {
             charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
             textQuote: nil, textContextBefore: nil, textContextAfter: nil
         )
-        pos.locator = loc2
+        pos.updateLocator(loc2)
 
         #expect(pos.locatorHash != hash1)
         #expect(pos.locatorHash == loc2.canonicalHash)
@@ -90,7 +90,7 @@ struct MutationDriftTests {
             charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
             textQuote: nil, textContextBefore: nil, textContextAfter: nil
         )
-        bookmark.locator = loc2
+        bookmark.updateLocator(loc2)
 
         #expect(bookmark.profileKey != key1)
         #expect(bookmark.profileKey.contains(loc2.canonicalHash))
@@ -102,7 +102,7 @@ struct MutationDriftTests {
         let session = ReadingSession(bookFingerprint: Self.epubFP)
         #expect(session.bookFingerprintKey == Self.epubFP.canonicalKey)
 
-        session.bookFingerprint = Self.pdfFP
+        session.updateBookFingerprint(Self.pdfFP)
 
         #expect(session.bookFingerprintKey == Self.pdfFP.canonicalKey)
     }
@@ -135,7 +135,7 @@ struct MutationDriftTests {
 
     @Test func sessionDidSetClamsNegativeDuration() {
         let session = ReadingSession(bookFingerprint: Self.epubFP, durationSeconds: 100)
-        session.durationSeconds = -50
+        session.updateDuration(-50)
         #expect(session.durationSeconds == 0)
     }
 
@@ -150,13 +150,17 @@ struct MutationDriftTests {
         #expect(session.hasValidTimeline)
     }
 
-    @Test func invertedTimelineReturnsFalse() {
+    @Test func invertedTimelineClampedAtInit() {
+        // Init now clamps endedAt to startedAt when inverted,
+        // so timeline is always valid after construction.
         let session = ReadingSession(
             bookFingerprint: Self.epubFP,
             startedAt: Date(timeIntervalSince1970: 2000),
             endedAt: Date(timeIntervalSince1970: 1000)
         )
-        #expect(!session.hasValidTimeline)
+        #expect(session.hasValidTimeline)
+        // endedAt should be clamped to startedAt
+        #expect(session.endedAt == session.startedAt)
     }
 
     @Test func nilEndedAtIsValidTimeline() {
