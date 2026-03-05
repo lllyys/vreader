@@ -82,11 +82,12 @@ final class BookImporter: Sendable {
         }
 
         // Step 4: TXT-specific validation (binary masquerade + encoding detection)
+        // Only reads first 64KB for detection to avoid full-file memory spike.
         var detectedEncoding: String? = nil
         if format == .txt {
-            let fileData = try readFileData(at: fileURL)
+            let sampleData = try readFileDataSample(at: fileURL, maxBytes: 64 * 1024)
             do {
-                let encodingResult = try EncodingDetector.detect(data: fileData)
+                let encodingResult = try EncodingDetector.detect(data: sampleData)
                 detectedEncoding = EncodingDetector.encodingName(encodingResult.encoding)
             } catch let error as ImportError {
                 throw error
@@ -138,7 +139,14 @@ final class BookImporter: Sendable {
 
         // Step 9: Extract metadata from original URL (sandbox filename is hash-based)
         let extractor = extractors[format] ?? TXTMetadataExtractor()
-        let metadata = try await extractor.extractMetadata(from: fileURL)
+        let metadata: ExtractedMetadata
+        do {
+            metadata = try await extractor.extractMetadata(from: fileURL)
+        } catch {
+            // Rollback: remove the sandbox copy on downstream failure
+            try? FileManager.default.removeItem(at: sandboxURL)
+            throw error
+        }
 
         // Step 10: Build provenance
         let provenance = ImportProvenance(
@@ -159,7 +167,14 @@ final class BookImporter: Sendable {
             addedAt: Date()
         )
 
-        let persisted = try await persistence.insertBook(record)
+        let persisted: BookRecord
+        do {
+            persisted = try await persistence.insertBook(record)
+        } catch {
+            // Rollback: remove the sandbox copy on persistence failure
+            try? FileManager.default.removeItem(at: sandboxURL)
+            throw error
+        }
 
         // Step 12: Emit indexing trigger
         NotificationCenter.default.post(
@@ -194,10 +209,14 @@ final class BookImporter: Sendable {
         throw ImportError.unsupportedFormat(ext)
     }
 
-    /// Reads file data for encoding detection.
-    private func readFileData(at url: URL) throws -> Data {
+    /// Reads a sample of file data for encoding detection.
+    /// Only reads up to `maxBytes` to avoid full-file memory spike on large files.
+    private func readFileDataSample(at url: URL, maxBytes: Int) throws -> Data {
         do {
-            return try Data(contentsOf: url)
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = handle.readData(ofLength: maxBytes)
+            return data
         } catch {
             throw ImportError.fileNotReadable(error.localizedDescription)
         }

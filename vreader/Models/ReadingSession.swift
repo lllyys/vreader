@@ -18,19 +18,19 @@ final class ReadingSession {
     private(set) var bookFingerprintKey: String
 
     /// Mutate via `updateBookFingerprint(_:)` — SwiftData `didSet` is unreliable.
-    var bookFingerprint: DocumentFingerprint
+    private(set) var bookFingerprint: DocumentFingerprint
 
     var startedAt: Date
     var endedAt: Date?
 
     /// Duration in seconds. Always >= 0. Mutate via `updateDuration(_:)`.
-    var durationSeconds: Int
+    private(set) var durationSeconds: Int
 
-    /// Pages read during this session. Always >= 0 when set.
-    var pagesRead: Int?
+    /// Pages read during this session. Always >= 0 when set. Mutate via `updatePagesRead(_:)`.
+    private(set) var pagesRead: Int?
 
-    /// Words read during this session. Always >= 0 when set.
-    var wordsRead: Int?
+    /// Words read during this session. Always >= 0 when set. Mutate via `updateWordsRead(_:)`.
+    private(set) var wordsRead: Int?
 
     /// Updates the book fingerprint and syncs the derived bookFingerprintKey.
     /// Use this instead of setting `bookFingerprint` directly, because

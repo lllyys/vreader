@@ -139,8 +139,17 @@ enum QuoteRecovery {
             caseInsensitive: caseInsensitive
         )
 
-        // .contextMatch indicates multiple matches existed; first-match fallback if no context provided.
-        let resolvedConfidence: QuoteConfidence = confidence == .fuzzy ? .fuzzy : .contextMatch
+        // If context was provided and helped disambiguate, report .contextMatch.
+        // If no context was provided (both nil), this is just a first-match fallback.
+        let hasContext = contextBefore != nil || contextAfter != nil
+        let resolvedConfidence: QuoteConfidence
+        if confidence == .fuzzy {
+            resolvedConfidence = .fuzzy
+        } else if hasContext {
+            resolvedConfidence = .contextMatch
+        } else {
+            resolvedConfidence = .exact
+        }
         return makeResult(range: disambiguated, confidence: resolvedConfidence, text: text)
     }
 
@@ -258,11 +267,25 @@ enum QuoteRecovery {
         return makeResult(range: best, confidence: .fuzzy, text: text)
     }
 
-    /// Collapse runs of whitespace to a single space.
+    /// Collapse runs of whitespace to a single space using single-pass builder.
     private static func normalizeWhitespace(_ string: String) -> String {
-        string.components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        var result = ""
+        result.reserveCapacity(string.count)
+        var inWhitespace = false
+        for char in string {
+            if char.isWhitespace || char.isNewline {
+                if !inWhitespace && !result.isEmpty {
+                    result.append(" ")
+                    inWhitespace = true
+                }
+            } else {
+                result.append(char)
+                inWhitespace = false
+            }
+        }
+        // Trim trailing space if present
+        if result.hasSuffix(" ") { result.removeLast() }
+        return result
     }
 
     /// Map a character offset in normalized text back to a range in the original text.

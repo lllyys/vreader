@@ -95,7 +95,8 @@ final class LibraryRefreshService: @unchecked Sendable {
     }
 
     /// Whether a refresh should be allowed based on throttle interval.
-    /// Prefer `tryAcquireRefreshPermit()` for atomic check-and-record.
+    /// - Important: Use `tryAcquireRefreshPermit()` instead for atomic check-and-record.
+    @available(*, deprecated, message: "Use tryAcquireRefreshPermit() for atomic check-and-record")
     func shouldAllowRefresh() -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -105,7 +106,8 @@ final class LibraryRefreshService: @unchecked Sendable {
     }
 
     /// Records that a refresh just occurred.
-    /// Prefer `tryAcquireRefreshPermit()` for atomic check-and-record.
+    /// - Important: Use `tryAcquireRefreshPermit()` instead for atomic check-and-record.
+    @available(*, deprecated, message: "Use tryAcquireRefreshPermit() for atomic check-and-record")
     func recordRefresh() {
         lock.lock()
         defer { lock.unlock() }

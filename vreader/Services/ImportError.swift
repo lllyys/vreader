@@ -34,6 +34,9 @@ enum ImportError: Error, Equatable, Sendable {
     /// Security-scoped resource access was denied.
     case securityScopeAccessDenied
 
+    /// Book not found in persistence for the given key.
+    case bookNotFound(String)
+
     /// User-facing error message suitable for display in UI.
     /// Keeps messages generic to avoid leaking system/path details.
     var userMessage: String {
@@ -56,6 +59,8 @@ enum ImportError: Error, Equatable, Sendable {
             return "Import was cancelled."
         case .securityScopeAccessDenied:
             return "Permission to access this file was denied."
+        case .bookNotFound:
+            return "The book could not be found in the library."
         }
     }
 
@@ -68,6 +73,8 @@ enum ImportError: Error, Equatable, Sendable {
             return "hashComputationFailed: \(reason)"
         case .sandboxCopyFailed(let reason):
             return "sandboxCopyFailed: \(reason)"
+        case .bookNotFound(let key):
+            return "bookNotFound: \(key)"
         default:
             return userMessage
         }

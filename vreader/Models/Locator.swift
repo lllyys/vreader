@@ -51,6 +51,10 @@ struct Locator: Codable, Hashable, Sendable {
         if let charOffsetUTF16, charOffsetUTF16 < 0 { return .negativeUTF16Offset }
         if let charRangeStartUTF16, charRangeStartUTF16 < 0 { return .negativeUTF16Offset }
         if let charRangeEndUTF16, charRangeEndUTF16 < 0 { return .negativeUTF16Offset }
+        // Require both range endpoints together or neither
+        if (charRangeStartUTF16 != nil) != (charRangeEndUTF16 != nil) {
+            return .invertedUTF16Range
+        }
         if let start = charRangeStartUTF16, let end = charRangeEndUTF16, start > end {
             return .invertedUTF16Range
         }
@@ -155,20 +159,11 @@ struct Locator: Codable, Hashable, Sendable {
         return result
     }
 
-    /// Cached formatter for locale-independent float formatting with 6 decimal places.
-    private static let posixFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.minimumFractionDigits = 6
-        f.maximumFractionDigits = 6
-        f.numberStyle = .decimal
-        f.groupingSeparator = ""
-        return f
-    }()
-
-    /// Locale-independent float formatting with 6 decimal places.
+    /// Thread-safe locale-independent float formatting with 6 decimal places.
+    /// Uses String(format:) instead of a shared NumberFormatter to avoid
+    /// thread-safety issues with NSFormatter's mutable state.
     private func roundedString(_ value: Double) -> String {
-        Self.posixFormatter.string(from: NSNumber(value: value)) ?? "0.000000"
+        String(format: "%.6f", value)
     }
 
     private func normalizeLineEndings(_ s: String) -> String {

@@ -1,5 +1,5 @@
-// Purpose: Durable import job queue with retry, cancel, and resume support.
-// Jobs are tracked in memory; durability across app launches is out of scope
+// Purpose: In-memory import job queue with retry, cancel, and resume support.
+// Jobs are tracked in memory only; durability across app launches is out of scope
 // for V1 (will be backed by a persistent store in V2).
 //
 // Key decisions:
@@ -162,6 +162,17 @@ actor ImportJobQueue {
         jobs = jobs.filter { _, job in
             if case .completed = job.state { return false }
             return true
+        }
+    }
+
+    /// Removes all terminal-state jobs (completed, failed, cancelled) from the queue.
+    /// Call periodically to prevent unbounded growth over long sessions.
+    func removeTerminal() {
+        jobs = jobs.filter { _, job in
+            switch job.state {
+            case .completed, .failed, .cancelled: return false
+            case .pending, .running: return true
+            }
         }
     }
 

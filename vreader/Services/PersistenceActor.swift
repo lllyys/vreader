@@ -114,7 +114,7 @@ actor PersistenceActor: BookPersisting {
         descriptor.fetchLimit = 1
 
         guard let book = try context.fetch(descriptor).first else {
-            throw ImportError.fileNotReadable("appendProvenance: book not found for key \(key)")
+            throw ImportError.bookNotFound(key)
         }
         book.provenance = provenance
         try context.save()

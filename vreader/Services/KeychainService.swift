@@ -26,6 +26,9 @@ enum KeychainError: Error, LocalizedError, Sendable {
     /// An unexpected Security framework status code.
     case unexpectedStatus(OSStatus)
 
+    /// Keychain returned a result that is not Data (unexpected type from SecItemCopyMatching).
+    case unexpectedResultType
+
     var errorDescription: String? {
         switch self {
         case .dataEncodingFailed:
@@ -33,6 +36,8 @@ enum KeychainError: Error, LocalizedError, Sendable {
         case .unexpectedStatus(let status):
             let message = SecCopyErrorMessageString(status, nil) as String? ?? "Unknown"
             return "Keychain error (\(status)): \(message)"
+        case .unexpectedResultType:
+            return "Keychain returned an unexpected result type."
         }
     }
 }
@@ -140,7 +145,7 @@ struct KeychainService: Sendable {
         switch status {
         case errSecSuccess:
             guard let data = result as? Data else {
-                throw KeychainError.dataEncodingFailed
+                throw KeychainError.unexpectedResultType
             }
             return data
         case errSecItemNotFound:

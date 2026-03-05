@@ -27,7 +27,7 @@ final class Book {
     /// Full fingerprint for domain logic. Must not be mutated after initialization
     /// except via `updateFingerprint(_:)`. SwiftData @Model `didSet` observers are
     /// unreliable, so derived field sync is done explicitly in `updateFingerprint(_:)`.
-    var fingerprint: DocumentFingerprint
+    private(set) var fingerprint: DocumentFingerprint
 
     // MARK: - Metadata
 

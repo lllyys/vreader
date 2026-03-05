@@ -10,11 +10,11 @@ final class Highlight {
     @Attribute(.unique) var highlightId: UUID
 
     /// Primitive sync key.
-    var profileKey: String
+    private(set) var profileKey: String
 
     /// Locator marking the highlight range start (and range via charRange fields).
     /// Mutate via `updateLocator(_:)` — SwiftData `didSet` is unreliable.
-    var locator: Locator
+    private(set) var locator: Locator
 
     /// The highlighted text content.
     var selectedText: String

@@ -8,10 +8,10 @@ final class AnnotationNote {
     @Attribute(.unique) var annotationId: UUID
 
     /// Primitive sync key.
-    var profileKey: String
+    private(set) var profileKey: String
 
     /// Mutate via `updateLocator(_:)` — SwiftData `didSet` is unreliable.
-    var locator: Locator
+    private(set) var locator: Locator
     var content: String
     var createdAt: Date
     var updatedAt: Date

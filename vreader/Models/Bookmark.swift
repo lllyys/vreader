@@ -8,10 +8,10 @@ final class Bookmark {
     @Attribute(.unique) var bookmarkId: UUID
 
     /// Primitive key for sync: "{bookFingerprintKey}:{locatorHash}"
-    var profileKey: String
+    private(set) var profileKey: String
 
     /// Mutate via `updateLocator(_:)` — SwiftData `didSet` is unreliable.
-    var locator: Locator
+    private(set) var locator: Locator
     var title: String?
     var createdAt: Date
     var updatedAt: Date

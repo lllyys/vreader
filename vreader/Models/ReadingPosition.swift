@@ -7,11 +7,11 @@ import SwiftData
 @Model
 final class ReadingPosition {
     /// Locator-based canonical hash for sync key.
-    var locatorHash: String
+    private(set) var locatorHash: String
 
     /// Full locator for the current reading position.
     /// Mutate via `updateLocator(_:)` — SwiftData `didSet` is unreliable.
-    var locator: Locator
+    private(set) var locator: Locator
 
     /// When the position was last updated.
     var updatedAt: Date

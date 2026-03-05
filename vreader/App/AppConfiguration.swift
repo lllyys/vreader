@@ -26,8 +26,11 @@ struct AppConfiguration: Sendable {
     let environment: AppEnvironment
 
     // Pre-validated URL constants — guaranteed valid at compile time.
+    // swiftlint:disable:next force_unwrapping
     private static let devURL = URL(string: "http://localhost:8080/api")!
+    // swiftlint:disable:next force_unwrapping
     private static let stagingURL = URL(string: "https://staging-api.vreader.app/api")!
+    // swiftlint:disable:next force_unwrapping
     private static let prodURL = URL(string: "https://api.vreader.app/api")!
 
     /// API base URL for the current environment.

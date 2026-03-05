@@ -12,11 +12,13 @@
 // @coordinates-with: LibraryViewModel.swift, BookCardView.swift, BookRowView.swift
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Main library view for the book collection.
 struct LibraryView: View {
     @State private var viewModel: LibraryViewModel
     @State private var bookToDelete: LibraryBookItem?
+    @State private var isShowingImporter = false
 
     init(viewModel: LibraryViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -64,6 +66,18 @@ struct LibraryView: View {
             } message: {
                 if let book = bookToDelete {
                     Text("Are you sure you want to delete \"\(book.title)\"? This cannot be undone.")
+                }
+            }
+            .fileImporter(
+                isPresented: $isShowingImporter,
+                allowedContentTypes: [.epub, .pdf, .plainText],
+                allowsMultipleSelection: true
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    Task { await viewModel.importFiles(urls) }
+                case .failure:
+                    break
                 }
             }
         }
@@ -127,7 +141,7 @@ struct LibraryView: View {
                 .padding(.horizontal, 40)
 
             Button {
-                // TODO: Trigger file import
+                isShowingImporter = true
             } label: {
                 Label("Import Books", systemImage: "plus.circle.fill")
                     .font(.headline)
