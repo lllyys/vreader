@@ -155,7 +155,7 @@ final class SearchService: SearchProviding, @unchecked Sendable {
 
         return SearchResultPage(
             results: results,
-            page: page,
+            page: safePage,
             hasMore: hasMore,
             totalEstimate: nil
         )

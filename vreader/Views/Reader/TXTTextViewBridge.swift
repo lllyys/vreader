@@ -121,12 +121,16 @@ struct TXTTextViewBridge: UIViewRepresentable {
             let paragraphStyle = NSMutableParagraphStyle()
             paragraphStyle.lineSpacing = config.lineSpacing
 
-            let attributes: [NSAttributedString.Key: Any] = [
+            var attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .paragraphStyle: paragraphStyle,
-                .foregroundColor: UIColor.label,
+                .foregroundColor: config.textColor,
             ]
+            if config.letterSpacing != 0 {
+                attributes[.kern] = config.letterSpacing
+            }
 
+            textView.backgroundColor = config.backgroundColor
             textView.attributedText = NSAttributedString(string: text, attributes: attributes)
         }
     }

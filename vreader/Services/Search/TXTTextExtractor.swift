@@ -27,8 +27,13 @@ struct TXTTextExtractor: SearchTextExtractor {
         fingerprint: DocumentFingerprint
     ) async throws -> [TextUnit] {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw TXTTextExtractorError.decodingFailed(url.lastPathComponent)
+        // Try UTF-8 first, then fall back to encoding detection pipeline
+        let text: String
+        if let utf8 = String(data: data, encoding: .utf8) {
+            text = utf8
+        } else {
+            let result = try EncodingDetector.detect(data: data)
+            text = result.text
         }
         return segmentText(text).textUnits
     }

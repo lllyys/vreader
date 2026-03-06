@@ -14,6 +14,9 @@
 // @coordinates-with: ReadingSession.swift, ReadingStats.swift
 
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.vreader", category: "ReadingSessionTracker")
 
 // MARK: - Protocols
 
@@ -268,7 +271,11 @@ final class ReadingSessionTracker {
 
         // Check minimum duration
         if totalDuration < Self.minimumDurationSeconds {
-            try? store.discardSession(id: session.sessionId)
+            do {
+                try store.discardSession(id: session.sessionId)
+            } catch {
+                logger.error("Failed to discard short session \(session.sessionId): \(error.localizedDescription)")
+            }
             resetState()
             return
         }
@@ -277,7 +284,11 @@ final class ReadingSessionTracker {
         session.endedAt = clock.now()
         session.updateDuration(durationInt)
         session.endLocator = currentEndLocator
-        try? store.saveSession(session)
+        do {
+            try store.saveSession(session)
+        } catch {
+            logger.error("Failed to save session \(session.sessionId): \(error.localizedDescription)")
+        }
 
         resetState()
     }

@@ -70,7 +70,7 @@ struct LibraryView: View {
             }
             .fileImporter(
                 isPresented: $isShowingImporter,
-                allowedContentTypes: [.epub, .pdf, .plainText],
+                allowedContentTypes: Self.importableTypes,
                 allowsMultipleSelection: true
             ) { result in
                 switch result {
@@ -82,6 +82,16 @@ struct LibraryView: View {
             }
         }
     }
+
+    // MARK: - Constants
+
+    private static let importableTypes: [UTType] = {
+        var types: [UTType] = [.epub, .pdf, .plainText]
+        if let md = UTType("net.daringfireball.markdown") {
+            types.append(md)
+        }
+        return types
+    }()
 
     // MARK: - Subviews
 

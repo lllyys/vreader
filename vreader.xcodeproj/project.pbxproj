@@ -7,6 +7,22 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		WI11BF01 /* AITypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR01 /* AITypes.swift */; };
+		WI11BF02 /* AIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR02 /* AIError.swift */; };
+		WI11BF03 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR03 /* AIProvider.swift */; };
+		WI11BF04 /* AIContextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR04 /* AIContextExtractor.swift */; };
+		WI11BF05 /* AIResponseCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR05 /* AIResponseCache.swift */; };
+		WI11BF06 /* AIConsentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR06 /* AIConsentManager.swift */; };
+		WI11BF07 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR07 /* AIService.swift */; };
+		WI11BF08 /* AIAssistantViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR08 /* AIAssistantViewModel.swift */; };
+		WI11BF09 /* AIAssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR09 /* AIAssistantView.swift */; };
+		WI11BF10 /* AIConsentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR10 /* AIConsentView.swift */; };
+		WI11TBF01 /* AIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11TFR01 /* AIServiceTests.swift */; };
+		WI11TBF02 /* AIResponseCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11TFR02 /* AIResponseCacheTests.swift */; };
+		WI11TBF03 /* AIConsentManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11TFR03 /* AIConsentManagerTests.swift */; };
+		WI11TBF04 /* AIContextExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11TFR04 /* AIContextExtractorTests.swift */; };
+		WI11TBF05 /* AIAssistantViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11TFR05 /* AIAssistantViewModelTests.swift */; };
+		WI11TBF06 /* WI11TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11TFR06 /* WI11TestHelpers.swift */; };
 		00AA9871B88FE39518AC1320 /* utf16be_bom.txt in Resources */ = {isa = PBXBuildFile; fileRef = F2EFEE7A0EC5352A0BB1A994 /* utf16be_bom.txt */; };
 		01FEDA4DD8F5A3BFA56F275D /* DocumentFingerprintValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4B4E4FB28FD82376AE20A4F /* DocumentFingerprintValidationTests.swift */; };
 		08C05E320FF9F6EFAAE34DA3 /* ImportErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744CB6180C0CE88E75E124F3 /* ImportErrorTests.swift */; };
@@ -386,6 +402,22 @@
 		WI10TFR01 /* SearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceTests.swift; sourceTree = "<group>"; };
 		WI10TFR02 /* BackgroundIndexingCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundIndexingCoordinatorTests.swift; sourceTree = "<group>"; };
 		WI10TFR03 /* SearchViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModelTests.swift; sourceTree = "<group>"; };
+		WI11FR01 /* AITypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITypes.swift; sourceTree = "<group>"; };
+		WI11FR02 /* AIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIError.swift; sourceTree = "<group>"; };
+		WI11FR03 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
+		WI11FR04 /* AIContextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIContextExtractor.swift; sourceTree = "<group>"; };
+		WI11FR05 /* AIResponseCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIResponseCache.swift; sourceTree = "<group>"; };
+		WI11FR06 /* AIConsentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConsentManager.swift; sourceTree = "<group>"; };
+		WI11FR07 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
+		WI11FR08 /* AIAssistantViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistantViewModel.swift; sourceTree = "<group>"; };
+		WI11FR09 /* AIAssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistantView.swift; sourceTree = "<group>"; };
+		WI11FR10 /* AIConsentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConsentView.swift; sourceTree = "<group>"; };
+		WI11TFR01 /* AIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServiceTests.swift; sourceTree = "<group>"; };
+		WI11TFR02 /* AIResponseCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIResponseCacheTests.swift; sourceTree = "<group>"; };
+		WI11TFR03 /* AIConsentManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConsentManagerTests.swift; sourceTree = "<group>"; };
+		WI11TFR04 /* AIContextExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIContextExtractorTests.swift; sourceTree = "<group>"; };
+		WI11TFR05 /* AIAssistantViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistantViewModelTests.swift; sourceTree = "<group>"; };
+		WI11TFR06 /* WI11TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WI11TestHelpers.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -470,6 +502,7 @@
 		31E042EB986C2221B3740C56 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				WI11TFR05 /* AIAssistantViewModelTests.swift */,
 				WI09TFR07 /* AnnotationListViewModelTests.swift */,
 				WI09TFR05 /* BookmarkListViewModelTests.swift */,
 				WI09TFR06 /* HighlightListViewModelTests.swift */,
@@ -575,6 +608,7 @@
 		94D06942F90AF64D53FF08E9 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				WI11FR08 /* AIAssistantViewModel.swift */,
 				WI09FR14 /* AnnotationListViewModel.swift */,
 				WI09FR12 /* BookmarkListViewModel.swift */,
 				90B380013D82DFFD0411633E /* EPUBReaderViewModel.swift */,
@@ -591,6 +625,7 @@
 		AE4E61A680128143BD32AA91 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				WI11GR03 /* AI */,
 				6BEB6636BEBB84D528EE5DF5 /* BookCardView.swift */,
 				23A84FE014139E7B5524445D /* BookRowView.swift */,
 				1FD65C0547DF264510657CA2 /* ContentView.swift */,
@@ -637,6 +672,7 @@
 		C89089F8D64EB38CF661EAB4 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				WI11GR02 /* AI */,
 				C0FBDC41C60328ED4FB8A197 /* BookImporterTests.swift */,
 				0616892213196BCF802266F8 /* ContentHasherTests.swift */,
 				WI09TFR08 /* TOCProviderTests.swift */,
@@ -715,6 +751,7 @@
 		E30BACA9301E4652075A07C9 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				WI11GR01 /* AI */,
 				5160D7D68BF1AF6654AD08B6 /* BookImporter.swift */,
 				400D03ADE39639337E9993C5 /* FeatureFlags.swift */,
 				982822FD76DDFB1EEE150FF0 /* ImportError.swift */,
@@ -854,6 +891,41 @@
 				WI09FR19 /* AnnotationEditSheet.swift */,
 			);
 			path = Annotations;
+			sourceTree = "<group>";
+		};
+		WI11GR01 /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				WI11FR06 /* AIConsentManager.swift */,
+				WI11FR04 /* AIContextExtractor.swift */,
+				WI11FR02 /* AIError.swift */,
+				WI11FR03 /* AIProvider.swift */,
+				WI11FR05 /* AIResponseCache.swift */,
+				WI11FR07 /* AIService.swift */,
+				WI11FR01 /* AITypes.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
+		WI11GR02 /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				WI11TFR03 /* AIConsentManagerTests.swift */,
+				WI11TFR04 /* AIContextExtractorTests.swift */,
+				WI11TFR02 /* AIResponseCacheTests.swift */,
+				WI11TFR01 /* AIServiceTests.swift */,
+				WI11TFR06 /* WI11TestHelpers.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
+		WI11GR03 /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				WI11FR09 /* AIAssistantView.swift */,
+				WI11FR10 /* AIConsentView.swift */,
+			);
+			path = AI;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1041,6 +1113,12 @@
 				WI10TBF01 /* SearchServiceTests.swift in Sources */,
 				WI10TBF02 /* BackgroundIndexingCoordinatorTests.swift in Sources */,
 				WI10TBF03 /* SearchViewModelTests.swift in Sources */,
+				WI11TBF01 /* AIServiceTests.swift in Sources */,
+				WI11TBF02 /* AIResponseCacheTests.swift in Sources */,
+				WI11TBF03 /* AIConsentManagerTests.swift in Sources */,
+				WI11TBF04 /* AIContextExtractorTests.swift in Sources */,
+				WI11TBF05 /* AIAssistantViewModelTests.swift in Sources */,
+				WI11TBF06 /* WI11TestHelpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1146,6 +1224,16 @@
 				WI10BF04 /* SearchView.swift in Sources */,
 				WI10BF05 /* SearchResultRow.swift in Sources */,
 				F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */,
+				WI11BF01 /* AITypes.swift in Sources */,
+				WI11BF02 /* AIError.swift in Sources */,
+				WI11BF03 /* AIProvider.swift in Sources */,
+				WI11BF04 /* AIContextExtractor.swift in Sources */,
+				WI11BF05 /* AIResponseCache.swift in Sources */,
+				WI11BF06 /* AIConsentManager.swift in Sources */,
+				WI11BF07 /* AIService.swift in Sources */,
+				WI11BF08 /* AIAssistantViewModel.swift in Sources */,
+				WI11BF09 /* AIAssistantView.swift in Sources */,
+				WI11BF10 /* AIConsentView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
