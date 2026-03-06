@@ -7,15 +7,16 @@
 // - All format readers (EPUB/PDF/TXT/MD) have containers + ViewModels implemented.
 // - Full wiring requires file URL resolved from BookRecord persistence layer.
 // - Placeholders remain until navigation pipeline provides file URLs.
-// - Provides navigation bar with back button, settings button, and annotations menu.
+// - Provides navigation bar with back button, search button, settings button, and annotations menu.
 // - Settings panel presented as a sheet for theme/typography controls.
 // - Annotations sheet provides access to bookmarks, TOC, highlights, annotations.
+// - Search sheet placeholder until SearchService is instantiated in reader pipeline.
 //
 // @coordinates-with: EPUBReaderViewModel.swift, TXTReaderViewModel.swift,
 //   MDReaderViewModel.swift, PDFReaderViewModel.swift, LibraryView.swift,
 //   ReaderSettingsStore.swift, ReaderSettingsPanel.swift,
 //   BookmarkListView.swift, TOCListView.swift, HighlightListView.swift,
-//   AnnotationListView.swift
+//   AnnotationListView.swift, SearchView.swift, SearchViewModel.swift
 
 import SwiftUI
 
@@ -27,6 +28,7 @@ struct ReaderContainerView: View {
     @State private var settingsStore = ReaderSettingsStore()
     @State private var showSettings = false
     @State private var showAnnotationsPanel = false
+    @State private var showSearch = false
     @State private var selectedAnnotationsTab: AnnotationsPanelTab = .bookmarks
 
     var body: some View {
@@ -57,6 +59,14 @@ struct ReaderContainerView: View {
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
+                    showSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("Search in book")
+                .accessibilityIdentifier("readerSearchButton")
+
+                Button {
                     showAnnotationsPanel = true
                 } label: {
                     Image(systemName: "list.bullet.rectangle")
@@ -83,6 +93,33 @@ struct ReaderContainerView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showSearch) {
+            searchSheet
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    /// Search sheet placeholder — wired when SearchService is available.
+    @ViewBuilder
+    private var searchSheet: some View {
+        NavigationStack {
+            ContentUnavailableView {
+                Label("Search", systemImage: "magnifyingglass")
+            } description: {
+                Text("Search will be available once the book is indexed.")
+            }
+            .navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Done") {
+                        showSearch = false
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("searchSheet")
     }
 
     @ViewBuilder

@@ -177,6 +177,14 @@
 		WI09TBF06 /* HighlightListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR06 /* HighlightListViewModelTests.swift */; };
 		WI09TBF07 /* AnnotationListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR07 /* AnnotationListViewModelTests.swift */; };
 		WI09TBF08 /* TOCProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR08 /* TOCProviderTests.swift */; };
+		WI10BF01 /* SearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10FR01 /* SearchService.swift */; };
+		WI10BF02 /* BackgroundIndexingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10FR02 /* BackgroundIndexingCoordinator.swift */; };
+		WI10BF03 /* SearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10FR03 /* SearchViewModel.swift */; };
+		WI10BF04 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10FR04 /* SearchView.swift */; };
+		WI10BF05 /* SearchResultRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10FR05 /* SearchResultRow.swift */; };
+		WI10TBF01 /* SearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10TFR01 /* SearchServiceTests.swift */; };
+		WI10TBF02 /* BackgroundIndexingCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10TFR02 /* BackgroundIndexingCoordinatorTests.swift */; };
+		WI10TBF03 /* SearchViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10TFR03 /* SearchViewModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -370,6 +378,14 @@
 		WI09TFR06 /* HighlightListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightListViewModelTests.swift; sourceTree = "<group>"; };
 		WI09TFR07 /* AnnotationListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationListViewModelTests.swift; sourceTree = "<group>"; };
 		WI09TFR08 /* TOCProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOCProviderTests.swift; sourceTree = "<group>"; };
+		WI10FR01 /* SearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchService.swift; sourceTree = "<group>"; };
+		WI10FR02 /* BackgroundIndexingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundIndexingCoordinator.swift; sourceTree = "<group>"; };
+		WI10FR03 /* SearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModel.swift; sourceTree = "<group>"; };
+		WI10FR04 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+		WI10FR05 /* SearchResultRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultRow.swift; sourceTree = "<group>"; };
+		WI10TFR01 /* SearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceTests.swift; sourceTree = "<group>"; };
+		WI10TFR02 /* BackgroundIndexingCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundIndexingCoordinatorTests.swift; sourceTree = "<group>"; };
+		WI10TFR03 /* SearchViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -454,14 +470,15 @@
 		31E042EB986C2221B3740C56 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				WI09TFR07 /* AnnotationListViewModelTests.swift */,
+				WI09TFR05 /* BookmarkListViewModelTests.swift */,
+				WI09TFR06 /* HighlightListViewModelTests.swift */,
 				F3B26374749D7626349FB9E0 /* LibraryTestHelpers.swift */,
 				3B1563E77E28434568F45736 /* LibraryViewModelTests.swift */,
 				MD04FR02A0B1C2D3E4F50002 /* MDReaderViewModelTests.swift */,
 				PDF02FR01A0B1C2D3E4F50001 /* PDFReaderViewModelTests.swift */,
+				WI10TFR03 /* SearchViewModelTests.swift */,
 				WI09TFR04 /* WI9TestHelpers.swift */,
-				WI09TFR05 /* BookmarkListViewModelTests.swift */,
-				WI09TFR06 /* HighlightListViewModelTests.swift */,
-				WI09TFR07 /* AnnotationListViewModelTests.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -558,14 +575,15 @@
 		94D06942F90AF64D53FF08E9 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				WI09FR14 /* AnnotationListViewModel.swift */,
+				WI09FR12 /* BookmarkListViewModel.swift */,
 				90B380013D82DFFD0411633E /* EPUBReaderViewModel.swift */,
+				WI09FR13 /* HighlightListViewModel.swift */,
 				CF473C04CE58CE0887DAA5A1 /* LibraryViewModel.swift */,
-				AA6A01B4C7E4D92F8B1D3E04 /* TXTReaderViewModel.swift */,
 				MD04FR01A0B1C2D3E4F50001 /* MDReaderViewModel.swift */,
 				PDF01FR01A0B1C2D3E4F50001 /* PDFReaderViewModel.swift */,
-				WI09FR12 /* BookmarkListViewModel.swift */,
-				WI09FR13 /* HighlightListViewModel.swift */,
-				WI09FR14 /* AnnotationListViewModel.swift */,
+				WI10FR03 /* SearchViewModel.swift */,
+				AA6A01B4C7E4D92F8B1D3E04 /* TXTReaderViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -577,11 +595,21 @@
 				23A84FE014139E7B5524445D /* BookRowView.swift */,
 				1FD65C0547DF264510657CA2 /* ContentView.swift */,
 				28354051023D618CC3CAE2E2 /* LibraryView.swift */,
-				8D2F333DAEB9758BF44807FC /* Reader */,
-				WI09GR01 /* Bookmarks */,
 				WI09GR02 /* Annotations */,
+				WI09GR01 /* Bookmarks */,
+				8D2F333DAEB9758BF44807FC /* Reader */,
+				WI10GR01 /* Search */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		WI10GR01 /* Search */ = {
+			isa = PBXGroup;
+			children = (
+				WI10FR05 /* SearchResultRow.swift */,
+				WI10FR04 /* SearchView.swift */,
+			);
+			path = Search;
 			sourceTree = "<group>";
 		};
 		B507E0BD7D08A4E11203ACB1 /* Integration */ = {
@@ -784,11 +812,13 @@
 		SI01GR01A0B1C2D3E4F50001 /* Search */ = {
 			isa = PBXGroup;
 			children = (
+				WI10FR02 /* BackgroundIndexingCoordinator.swift */,
+				SI01FR05A0B1C2D3E4F50005 /* PDFTextExtractor.swift */,
+				SI01FR04A0B1C2D3E4F50004 /* SearchHitToLocatorResolver.swift */,
+				SI01FR03A0B1C2D3E4F50003 /* SearchIndexStore.swift */,
+				WI10FR01 /* SearchService.swift */,
 				SI01FR01A0B1C2D3E4F50001 /* SearchTextExtractor.swift */,
 				SI01FR02A0B1C2D3E4F50002 /* SearchTextNormalizer.swift */,
-				SI01FR03A0B1C2D3E4F50003 /* SearchIndexStore.swift */,
-				SI01FR04A0B1C2D3E4F50004 /* SearchHitToLocatorResolver.swift */,
-				SI01FR05A0B1C2D3E4F50005 /* PDFTextExtractor.swift */,
 				SI01FR08A0B1C2D3E4F50008 /* SearchTokenizer.swift */,
 				SI01FR06A0B1C2D3E4F50006 /* TXTTextExtractor.swift */,
 			);
@@ -798,9 +828,11 @@
 		SI02GR01A0B1C2D3E4F50001 /* Search */ = {
 			isa = PBXGroup;
 			children = (
-				SI02FR01A0B1C2D3E4F50001 /* SearchTextNormalizerTests.swift */,
-				SI02FR02A0B1C2D3E4F50002 /* SearchIndexStoreTests.swift */,
+				WI10TFR02 /* BackgroundIndexingCoordinatorTests.swift */,
 				SI02FR03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift */,
+				SI02FR02A0B1C2D3E4F50002 /* SearchIndexStoreTests.swift */,
+				WI10TFR01 /* SearchServiceTests.swift */,
+				SI02FR01A0B1C2D3E4F50001 /* SearchTextNormalizerTests.swift */,
 			);
 			path = Search;
 			sourceTree = "<group>";
@@ -1006,6 +1038,9 @@
 				WI09TBF06 /* HighlightListViewModelTests.swift in Sources */,
 				WI09TBF07 /* AnnotationListViewModelTests.swift in Sources */,
 				WI09TBF08 /* TOCProviderTests.swift in Sources */,
+				WI10TBF01 /* SearchServiceTests.swift in Sources */,
+				WI10TBF02 /* BackgroundIndexingCoordinatorTests.swift in Sources */,
+				WI10TBF03 /* SearchViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1105,6 +1140,11 @@
 				SI01BF06A0B1C2D3E4F50006 /* TXTTextExtractor.swift in Sources */,
 				SI01BF07A0B1C2D3E4F50007 /* TokenSpan.swift in Sources */,
 				SI01BF08A0B1C2D3E4F50008 /* SearchTokenizer.swift in Sources */,
+				WI10BF01 /* SearchService.swift in Sources */,
+				WI10BF02 /* BackgroundIndexingCoordinator.swift in Sources */,
+				WI10BF03 /* SearchViewModel.swift in Sources */,
+				WI10BF04 /* SearchView.swift in Sources */,
+				WI10BF05 /* SearchResultRow.swift in Sources */,
 				F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

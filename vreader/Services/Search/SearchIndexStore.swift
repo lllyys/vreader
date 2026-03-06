@@ -88,6 +88,22 @@ final class SearchIndexStore: @unchecked Sendable {
 
     // MARK: - Indexing
 
+    /// Removes all indexed data for a book.
+    func removeBook(fingerprintKey: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        try exec("BEGIN TRANSACTION")
+        do {
+            try execBind("DELETE FROM search_index WHERE fingerprint_key = ?", params: [fingerprintKey])
+            try execBind("DELETE FROM token_spans WHERE fingerprint_key = ?", params: [fingerprintKey])
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
+
     /// Indexes a book's text units into FTS5 and the span map.
     /// Re-indexing the same book replaces existing rows (no duplicates).
     func indexBook(fingerprintKey: String, textUnits: [TextUnit]) throws {
