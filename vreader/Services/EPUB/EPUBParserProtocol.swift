@@ -1,5 +1,5 @@
 // Purpose: Protocol abstracting EPUB parsing operations.
-// Decouples the reader from Readium for testability.
+// Decouples the reader from the production parser for testability.
 //
 // Key decisions:
 // - Async throws for all I/O operations.
@@ -22,7 +22,8 @@ enum EPUBParserError: Error, Sendable, Equatable {
 }
 
 /// Protocol for EPUB parsing operations.
-/// In production, backed by Readium. In tests, backed by a mock.
+/// In production, backed by EPUBParser (ZIP extraction + XML parsing).
+/// In tests, backed by MockEPUBParser.
 /// Conformers must ensure serialized access (e.g., via actor isolation).
 protocol EPUBParserProtocol: Sendable {
     /// Opens an EPUB file at the given URL. Must be called before other operations.
@@ -35,7 +36,12 @@ protocol EPUBParserProtocol: Sendable {
     func contentForSpineItem(href: String) async throws -> String
 
     /// Returns the base URL for resolving relative resources within the EPUB.
+    /// This is the OPF directory — spine hrefs are relative to it.
     func resourceBaseURL() async throws -> URL
+
+    /// Returns the root directory of the extracted EPUB archive.
+    /// Used for WKWebView `allowingReadAccessTo` to ensure all resources are accessible.
+    func extractedRootURL() async throws -> URL
 
     /// Whether a publication is currently open.
     var isOpen: Bool { get async }

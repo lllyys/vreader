@@ -3,10 +3,11 @@
 //
 // Key decisions:
 // - Dispatches to format-specific reader based on BookFormat.
-// - EPUB reader is a stub until its WI is fully wired.
-// - All format readers (EPUB/PDF/TXT/MD) have containers + ViewModels implemented.
-// - Full wiring requires file URL resolved from BookRecord persistence layer.
-// - Placeholders remain until navigation pipeline provides file URLs.
+// - EPUB reader wired with production EPUBParser (ZIP extraction + OPF parsing).
+// - TXT, PDF, MD readers are fully wired with real ViewModels and containers.
+// - File URL resolved from fingerprintKey using the sandbox import convention.
+// - DocumentFingerprint parsed from the canonical key string.
+// - Each format host view owns its ViewModel via @State for stable lifecycle.
 // - Provides navigation bar with back button, search button, settings button, and annotations menu.
 // - Settings panel presented as a sheet for theme/typography controls.
 // - Annotations sheet provides access to bookmarks, TOC, highlights, annotations.
@@ -15,16 +16,18 @@
 // @coordinates-with: EPUBReaderViewModel.swift, TXTReaderViewModel.swift,
 //   MDReaderViewModel.swift, PDFReaderViewModel.swift, LibraryView.swift,
 //   ReaderSettingsStore.swift, ReaderSettingsPanel.swift,
-//   BookmarkListView.swift, TOCListView.swift, HighlightListView.swift,
-//   AnnotationListView.swift, SearchView.swift, SearchViewModel.swift
+//   TXTReaderContainerView.swift, PDFReaderContainerView.swift,
+//   MDReaderContainerView.swift, DocumentFingerprint.swift
 
 import SwiftUI
+import SwiftData
 
 /// Container view that dispatches to the correct format-specific reader.
 struct ReaderContainerView: View {
     let book: LibraryBookItem
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @State private var settingsStore = ReaderSettingsStore()
     @State private var showSettings = false
     @State private var showAnnotationsPanel = false
@@ -33,17 +36,37 @@ struct ReaderContainerView: View {
 
     var body: some View {
         Group {
-            switch book.format.lowercased() {
-            case "epub":
-                epubReaderContent
-            case "pdf":
-                pdfReaderContent
-            case "txt":
-                txtReaderContent
-            case "md":
-                mdReaderContent
-            default:
-                unsupportedFormatView(format: book.format.uppercased())
+            if let fingerprint = DocumentFingerprint(canonicalKey: book.fingerprintKey) {
+                switch book.format.lowercased() {
+                case "epub":
+                    EPUBReaderHost(
+                        fileURL: resolvedFileURL,
+                        fingerprint: fingerprint,
+                        modelContainer: modelContext.container
+                    )
+                case "pdf":
+                    PDFReaderHost(
+                        fileURL: resolvedFileURL,
+                        fingerprint: fingerprint,
+                        modelContainer: modelContext.container
+                    )
+                case "txt":
+                    TXTReaderHost(
+                        fileURL: resolvedFileURL,
+                        fingerprint: fingerprint,
+                        modelContainer: modelContext.container
+                    )
+                case "md":
+                    MDReaderHost(
+                        fileURL: resolvedFileURL,
+                        fingerprint: fingerprint,
+                        modelContainer: modelContext.container
+                    )
+                default:
+                    unsupportedFormatView(format: book.format.uppercased())
+                }
+            } else {
+                fingerprintErrorView
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -100,6 +123,34 @@ struct ReaderContainerView: View {
         }
     }
 
+    // MARK: - File URL Resolution
+
+    /// Resolves the sandbox file URL using the same convention as BookImporter.
+    private var resolvedFileURL: URL {
+        let booksDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedBooks", isDirectory: true)
+        let safeName = book.fingerprintKey.replacingOccurrences(of: ":", with: "_")
+        let bookFormat = BookFormat(rawValue: book.format.lowercased())
+        let ext = bookFormat?.fileExtensions.first ?? book.format.lowercased()
+        return booksDir
+            .appendingPathComponent(safeName)
+            .appendingPathExtension(ext)
+    }
+
+    // MARK: - Device ID
+
+    /// Stable device identifier for reading position and session tracking.
+    static let deviceId: String = {
+        #if canImport(UIKit)
+        return UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        #else
+        return UUID().uuidString
+        #endif
+    }()
+
+    // MARK: - Sheets & Placeholders
+
     /// Search sheet placeholder — wired when SearchService is available.
     @ViewBuilder
     private var searchSheet: some View {
@@ -122,39 +173,16 @@ struct ReaderContainerView: View {
         .accessibilityIdentifier("searchSheet")
     }
 
-    @ViewBuilder
-    private var epubReaderContent: some View {
-        // EPUB reader will be wired here in the full implementation.
-        // For now, show a placeholder that will be replaced when
-        // EPUBReaderView is fully wired with WKWebView.
-        Text("EPUB Reader: \(book.title)")
-            .accessibilityIdentifier("epubReaderPlaceholder")
-    }
-
-    @ViewBuilder
-    private var pdfReaderContent: some View {
-        // PDFReaderContainerView + PDFReaderViewModel implemented (WI-7).
-        // Placeholder until navigation pipeline resolves file URLs from BookRecord.
-        Text("PDF Reader: \(book.title)")
-            .accessibilityIdentifier("pdfReaderPlaceholder")
-    }
-
-    @ViewBuilder
-    private var txtReaderContent: some View {
-        // TXT reader ViewModel and container are implemented (WI-6A).
-        // Full wiring requires file URL from BookRecord persistence layer,
-        // which will be connected when the navigation pipeline is complete.
-        Text("TXT Reader: \(book.title)")
-            .accessibilityIdentifier("txtReaderPlaceholder")
-    }
-
-    @ViewBuilder
-    private var mdReaderContent: some View {
-        // MD reader ViewModel and container are implemented (WI-6B).
-        // Full wiring requires file URL from BookRecord persistence layer,
-        // which will be connected when the navigation pipeline is complete.
-        Text("MD Reader: \(book.title)")
-            .accessibilityIdentifier("mdReaderPlaceholder")
+    private var fingerprintErrorView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("Unable to open this book.")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityIdentifier("fingerprintErrorView")
     }
 
     private func unsupportedFormatView(format: String) -> some View {
@@ -167,6 +195,154 @@ struct ReaderContainerView: View {
                 .foregroundStyle(.secondary)
         }
         .accessibilityIdentifier("unsupportedFormatView")
+    }
+}
+
+// MARK: - Format-Specific Host Views
+
+/// Owns TXTReaderViewModel lifecycle via @State.
+private struct TXTReaderHost: View {
+    let fileURL: URL
+    let fingerprint: DocumentFingerprint
+    let modelContainer: ModelContainer
+
+    @State private var viewModel: TXTReaderViewModel?
+
+    var body: some View {
+        Group {
+            if let viewModel {
+                TXTReaderContainerView(fileURL: fileURL, viewModel: viewModel)
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            guard viewModel == nil else { return }
+            let persistence = PersistenceActor(modelContainer: modelContainer)
+            let tracker = ReadingSessionTracker(
+                clock: SystemClock(),
+                store: NoOpSessionStore(),
+                deviceId: ReaderContainerView.deviceId
+            )
+            viewModel = TXTReaderViewModel(
+                bookFingerprint: fingerprint,
+                txtService: TXTService(),
+                positionStore: persistence,
+                sessionTracker: tracker,
+                deviceId: ReaderContainerView.deviceId
+            )
+        }
+    }
+}
+
+/// Owns PDFReaderViewModel lifecycle via @State.
+private struct PDFReaderHost: View {
+    let fileURL: URL
+    let fingerprint: DocumentFingerprint
+    let modelContainer: ModelContainer
+
+    @State private var viewModel: PDFReaderViewModel?
+
+    var body: some View {
+        Group {
+            if let viewModel {
+                PDFReaderContainerView(fileURL: fileURL, viewModel: viewModel)
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            guard viewModel == nil else { return }
+            let persistence = PersistenceActor(modelContainer: modelContainer)
+            let tracker = ReadingSessionTracker(
+                clock: SystemClock(),
+                store: NoOpSessionStore(),
+                deviceId: ReaderContainerView.deviceId
+            )
+            viewModel = PDFReaderViewModel(
+                bookFingerprint: fingerprint,
+                positionStore: persistence,
+                sessionTracker: tracker,
+                deviceId: ReaderContainerView.deviceId
+            )
+        }
+    }
+}
+
+/// Owns MDReaderViewModel lifecycle via @State.
+private struct MDReaderHost: View {
+    let fileURL: URL
+    let fingerprint: DocumentFingerprint
+    let modelContainer: ModelContainer
+
+    @State private var viewModel: MDReaderViewModel?
+
+    var body: some View {
+        Group {
+            if let viewModel {
+                MDReaderContainerView(fileURL: fileURL, viewModel: viewModel)
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            guard viewModel == nil else { return }
+            let persistence = PersistenceActor(modelContainer: modelContainer)
+            let tracker = ReadingSessionTracker(
+                clock: SystemClock(),
+                store: NoOpSessionStore(),
+                deviceId: ReaderContainerView.deviceId
+            )
+            viewModel = MDReaderViewModel(
+                bookFingerprint: fingerprint,
+                parser: MDParser(),
+                positionStore: persistence,
+                sessionTracker: tracker,
+                deviceId: ReaderContainerView.deviceId
+            )
+        }
+    }
+}
+
+/// Owns EPUBReaderViewModel lifecycle via @State.
+private struct EPUBReaderHost: View {
+    let fileURL: URL
+    let fingerprint: DocumentFingerprint
+    let modelContainer: ModelContainer
+
+    @State private var viewModel: EPUBReaderViewModel?
+    @State private var parser: EPUBParser?
+
+    var body: some View {
+        Group {
+            if let viewModel, let parser {
+                EPUBReaderContainerView(
+                    fileURL: fileURL,
+                    viewModel: viewModel,
+                    parser: parser
+                )
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            guard viewModel == nil else { return }
+            let persistence = PersistenceActor(modelContainer: modelContainer)
+            let tracker = ReadingSessionTracker(
+                clock: SystemClock(),
+                store: NoOpSessionStore(),
+                deviceId: ReaderContainerView.deviceId
+            )
+            let epubParser = EPUBParser()
+            parser = epubParser
+            viewModel = EPUBReaderViewModel(
+                bookFingerprint: fingerprint,
+                parser: epubParser,
+                positionStore: persistence,
+                sessionTracker: tracker,
+                deviceId: ReaderContainerView.deviceId
+            )
+        }
     }
 }
 

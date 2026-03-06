@@ -54,4 +54,9 @@ actor MockEPUBParser: EPUBParserProtocol {
         guard _isOpen else { throw EPUBParserError.notOpen }
         return URL(fileURLWithPath: "/tmp/mock-epub/")
     }
+
+    func extractedRootURL() async throws -> URL {
+        guard _isOpen else { throw EPUBParserError.notOpen }
+        return URL(fileURLWithPath: "/tmp/mock-epub/")
+    }
 }

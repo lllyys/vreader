@@ -1,8 +1,3 @@
----
-description: Fix issues properly - no patches, no shortcuts, no regressions
-argument-hint: "[issue description or error message]"
----
-
 # Fix
 
 ## Context
@@ -63,7 +58,7 @@ $ARGUMENTS
   - Use `@/` imports for cross-module, relative for same-module
   - Use design tokens, never hardcoded colors (`.claude/rules/31-design-tokens.md`)
   - No Zustand store destructuring in components
-  - Keep files under ~300 lines
+  - Keep files under \~300 lines
 
 ### 5. Refactor
 
@@ -80,12 +75,15 @@ $ARGUMENTS
 ### When to Rewrite vs Patch
 
 **Rewrite when:**
+
 - The existing code is fundamentally flawed
 - Patching would add complexity
 - The fix requires understanding fragile logic
 - Similar bugs have occurred in this code before
 
 **Patch only when:**
+
 - The code is sound but has a small oversight
 - The fix is isolated and obvious
 - Rewriting would introduce unnecessary risk
+

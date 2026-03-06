@@ -141,9 +141,13 @@ struct ImportJobQueueTests {
         let canRetry1 = await queue.canRetry(jobId: jobId)
         #expect(canRetry1 == true)
 
-        // Exhaust retries
+        // Exhaust retries by simulating full retry cycles
+        // (incrementAttempt only works on pending/running state, not failed)
         for _ in 0..<3 {
+            await queue.resetForRetry(jobId: jobId)
             await queue.incrementAttempt(jobId: jobId)
+            await queue.markRunning(jobId: jobId)
+            await queue.markFailed(jobId: jobId, error: .fileNotReadable("test"))
         }
 
         let canRetry2 = await queue.canRetry(jobId: jobId)

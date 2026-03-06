@@ -84,7 +84,8 @@ struct ImportErrorTests {
 
     @Test func emptyExtensionFormat() {
         let error = ImportError.unsupportedFormat("")
-        #expect(error.userMessage.contains("\"\""))
+        // Empty extension is displayed as "unknown" in the user message
+        #expect(error.userMessage.contains("\"unknown\""))
     }
 
     @Test func longReasonInDiagnosticMessage() {

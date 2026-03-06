@@ -44,4 +44,28 @@ struct DocumentFingerprint: Codable, Hashable, Sendable {
             format: format
         )
     }
+
+}
+
+// MARK: - Canonical Key Parsing
+
+extension DocumentFingerprint {
+    /// Creates a fingerprint by parsing a canonical key string.
+    /// Expected format: "{format}:{contentSHA256}:{fileByteCount}"
+    init?(canonicalKey: String) {
+        let parts = canonicalKey.split(separator: ":", maxSplits: 2)
+        guard parts.count == 3,
+              let format = BookFormat(rawValue: String(parts[0])),
+              let byteCount = Int64(parts[2]),
+              byteCount >= 0 else {
+            return nil
+        }
+        let sha256 = String(parts[1])
+        guard Self.isValidSHA256(sha256) else {
+            return nil
+        }
+        self.contentSHA256 = sha256
+        self.fileByteCount = byteCount
+        self.format = format
+    }
 }

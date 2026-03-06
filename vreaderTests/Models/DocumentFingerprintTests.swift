@@ -98,4 +98,60 @@ struct DocumentFingerprintTests {
         let fp = DocumentFingerprint(contentSHA256: "", fileByteCount: 100, format: .epub)
         #expect(fp.canonicalKey == "epub::100")
     }
+
+    // MARK: - Canonical Key Parsing
+
+    @Test func initFromCanonicalKeyRoundTrips() {
+        let original = DocumentFingerprint(
+            contentSHA256: Self.sampleSHA,
+            fileByteCount: 1024,
+            format: .epub
+        )
+        let parsed = DocumentFingerprint(canonicalKey: original.canonicalKey)
+        #expect(parsed == original)
+    }
+
+    @Test func initFromCanonicalKeyAllFormats() {
+        for format in BookFormat.allCases {
+            let key = "\(format.rawValue):\(Self.sampleSHA):2048"
+            let fp = DocumentFingerprint(canonicalKey: key)
+            #expect(fp != nil)
+            #expect(fp?.format == format)
+            #expect(fp?.contentSHA256 == Self.sampleSHA)
+            #expect(fp?.fileByteCount == 2048)
+        }
+    }
+
+    @Test func initFromCanonicalKeyZeroBytes() {
+        let fp = DocumentFingerprint(canonicalKey: "txt:\(Self.sampleSHA):0")
+        #expect(fp != nil)
+        #expect(fp?.fileByteCount == 0)
+    }
+
+    @Test func initFromCanonicalKeyRejectsInvalidFormat() {
+        let fp = DocumentFingerprint(canonicalKey: "docx:\(Self.sampleSHA):1024")
+        #expect(fp == nil)
+    }
+
+    @Test func initFromCanonicalKeyRejectsInvalidSHA() {
+        // Too short
+        let fp = DocumentFingerprint(canonicalKey: "epub:abc123:1024")
+        #expect(fp == nil)
+    }
+
+    @Test func initFromCanonicalKeyRejectsNegativeBytes() {
+        let fp = DocumentFingerprint(canonicalKey: "epub:\(Self.sampleSHA):-1")
+        #expect(fp == nil)
+    }
+
+    @Test func initFromCanonicalKeyRejectsMissingParts() {
+        #expect(DocumentFingerprint(canonicalKey: "epub") == nil)
+        #expect(DocumentFingerprint(canonicalKey: "epub:\(Self.sampleSHA)") == nil)
+        #expect(DocumentFingerprint(canonicalKey: "") == nil)
+    }
+
+    @Test func initFromCanonicalKeyRejectsNonNumericBytes() {
+        let fp = DocumentFingerprint(canonicalKey: "epub:\(Self.sampleSHA):notanumber")
+        #expect(fp == nil)
+    }
 }
