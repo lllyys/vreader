@@ -7,12 +7,15 @@
 // - All format readers (EPUB/PDF/TXT/MD) have containers + ViewModels implemented.
 // - Full wiring requires file URL resolved from BookRecord persistence layer.
 // - Placeholders remain until navigation pipeline provides file URLs.
-// - Provides navigation bar with back button and settings button.
+// - Provides navigation bar with back button, settings button, and annotations menu.
 // - Settings panel presented as a sheet for theme/typography controls.
+// - Annotations sheet provides access to bookmarks, TOC, highlights, annotations.
 //
 // @coordinates-with: EPUBReaderViewModel.swift, TXTReaderViewModel.swift,
 //   MDReaderViewModel.swift, PDFReaderViewModel.swift, LibraryView.swift,
-//   ReaderSettingsStore.swift, ReaderSettingsPanel.swift
+//   ReaderSettingsStore.swift, ReaderSettingsPanel.swift,
+//   BookmarkListView.swift, TOCListView.swift, HighlightListView.swift,
+//   AnnotationListView.swift
 
 import SwiftUI
 
@@ -23,6 +26,8 @@ struct ReaderContainerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var settingsStore = ReaderSettingsStore()
     @State private var showSettings = false
+    @State private var showAnnotationsPanel = false
+    @State private var selectedAnnotationsTab: AnnotationsPanelTab = .bookmarks
 
     var body: some View {
         Group {
@@ -50,7 +55,15 @@ struct ReaderContainerView: View {
                 .accessibilityLabel("Back to library")
                 .accessibilityIdentifier("readerBackButton")
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    showAnnotationsPanel = true
+                } label: {
+                    Image(systemName: "list.bullet.rectangle")
+                }
+                .accessibilityLabel("Bookmarks and annotations")
+                .accessibilityIdentifier("readerAnnotationsButton")
+
                 Button {
                     showSettings = true
                 } label: {
@@ -62,6 +75,11 @@ struct ReaderContainerView: View {
         }
         .sheet(isPresented: $showSettings) {
             ReaderSettingsPanel(store: settingsStore)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showAnnotationsPanel) {
+            AnnotationsPanelSheet(selectedTab: $selectedAnnotationsTab)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -112,5 +130,92 @@ struct ReaderContainerView: View {
                 .foregroundStyle(.secondary)
         }
         .accessibilityIdentifier("unsupportedFormatView")
+    }
+}
+
+// MARK: - Annotations Panel
+
+/// Tabs for the annotations panel sheet.
+enum AnnotationsPanelTab: String, CaseIterable, Identifiable {
+    case bookmarks = "Bookmarks"
+    case toc = "Contents"
+    case highlights = "Highlights"
+    case annotations = "Notes"
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .bookmarks: return "bookmark"
+        case .toc: return "list.bullet"
+        case .highlights: return "highlighter"
+        case .annotations: return "note.text"
+        }
+    }
+}
+
+/// Sheet that hosts the tabbed annotations panel.
+/// Placeholder panels are shown until ViewModels are wired with live persistence.
+private struct AnnotationsPanelSheet: View {
+    @Binding var selectedTab: AnnotationsPanelTab
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("Section", selection: $selectedTab) {
+                    ForEach(AnnotationsPanelTab.allCases) { tab in
+                        Label(tab.rawValue, systemImage: tab.systemImage)
+                            .tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+                Divider()
+                    .padding(.top, 8)
+
+                Group {
+                    switch selectedTab {
+                    case .bookmarks:
+                        placeholderView(
+                            title: "Bookmarks",
+                            systemImage: "bookmark",
+                            description: "Bookmarks will appear here once the reader is fully wired."
+                        )
+                    case .toc:
+                        placeholderView(
+                            title: "Table of Contents",
+                            systemImage: "list.bullet",
+                            description: "Table of contents will appear here once the reader is fully wired."
+                        )
+                    case .highlights:
+                        placeholderView(
+                            title: "Highlights",
+                            systemImage: "highlighter",
+                            description: "Highlights will appear here once the reader is fully wired."
+                        )
+                    case .annotations:
+                        placeholderView(
+                            title: "Notes",
+                            systemImage: "note.text",
+                            description: "Notes will appear here once the reader is fully wired."
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .navigationTitle("Reader Panels")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .accessibilityIdentifier("annotationsPanelSheet")
+    }
+
+    private func placeholderView(title: String, systemImage: String, description: String) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+        } description: {
+            Text(description)
+        }
     }
 }

@@ -150,6 +150,33 @@
 		SI02BF03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI02FR03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift */; };
 		SI02BF04A0B1C2D3E4F50004 /* TokenSpanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI02FR04A0B1C2D3E4F50004 /* TokenSpanTests.swift */; };
 		SI02BF05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI02FR05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift */; };
+		WI09BF01 /* BookmarkRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR01 /* BookmarkRecord.swift */; };
+		WI09BF02 /* HighlightRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR02 /* HighlightRecord.swift */; };
+		WI09BF03 /* AnnotationRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR03 /* AnnotationRecord.swift */; };
+		WI09BF04 /* BookmarkPersisting.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR04 /* BookmarkPersisting.swift */; };
+		WI09BF05 /* HighlightPersisting.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR05 /* HighlightPersisting.swift */; };
+		WI09BF06 /* AnnotationPersisting.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR06 /* AnnotationPersisting.swift */; };
+		WI09BF07 /* PersistenceActor+Bookmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR07 /* PersistenceActor+Bookmarks.swift */; };
+		WI09BF08 /* PersistenceActor+Highlights.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR08 /* PersistenceActor+Highlights.swift */; };
+		WI09BF09 /* PersistenceActor+Annotations.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR09 /* PersistenceActor+Annotations.swift */; };
+		WI09BF10 /* TOCProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR10 /* TOCProvider.swift */; };
+		WI09BF11 /* TOCBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR11 /* TOCBuilder.swift */; };
+		WI09BF12 /* BookmarkListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR12 /* BookmarkListViewModel.swift */; };
+		WI09BF13 /* HighlightListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR13 /* HighlightListViewModel.swift */; };
+		WI09BF14 /* AnnotationListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR14 /* AnnotationListViewModel.swift */; };
+		WI09BF15 /* BookmarkListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR15 /* BookmarkListView.swift */; };
+		WI09BF16 /* TOCListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR16 /* TOCListView.swift */; };
+		WI09BF17 /* HighlightListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR17 /* HighlightListView.swift */; };
+		WI09BF18 /* AnnotationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR18 /* AnnotationListView.swift */; };
+		WI09BF19 /* AnnotationEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09FR19 /* AnnotationEditSheet.swift */; };
+		WI09TBF01 /* MockBookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR01 /* MockBookmarkStore.swift */; };
+		WI09TBF02 /* MockHighlightStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR02 /* MockHighlightStore.swift */; };
+		WI09TBF03 /* MockAnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR03 /* MockAnnotationStore.swift */; };
+		WI09TBF04 /* WI9TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR04 /* WI9TestHelpers.swift */; };
+		WI09TBF05 /* BookmarkListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR05 /* BookmarkListViewModelTests.swift */; };
+		WI09TBF06 /* HighlightListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR06 /* HighlightListViewModelTests.swift */; };
+		WI09TBF07 /* AnnotationListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR07 /* AnnotationListViewModelTests.swift */; };
+		WI09TBF08 /* TOCProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI09TFR08 /* TOCProviderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -316,6 +343,33 @@
 		SI02FR03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchHitToLocatorResolverTests.swift; sourceTree = "<group>"; };
 		SI02FR04A0B1C2D3E4F50004 /* TokenSpanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenSpanTests.swift; sourceTree = "<group>"; };
 		SI02FR05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchLocatorSliceTests.swift; sourceTree = "<group>"; };
+		WI09FR01 /* BookmarkRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkRecord.swift; sourceTree = "<group>"; };
+		WI09FR02 /* HighlightRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightRecord.swift; sourceTree = "<group>"; };
+		WI09FR03 /* AnnotationRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationRecord.swift; sourceTree = "<group>"; };
+		WI09FR04 /* BookmarkPersisting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkPersisting.swift; sourceTree = "<group>"; };
+		WI09FR05 /* HighlightPersisting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightPersisting.swift; sourceTree = "<group>"; };
+		WI09FR06 /* AnnotationPersisting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationPersisting.swift; sourceTree = "<group>"; };
+		WI09FR07 /* PersistenceActor+Bookmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+Bookmarks.swift"; sourceTree = "<group>"; };
+		WI09FR08 /* PersistenceActor+Highlights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+Highlights.swift"; sourceTree = "<group>"; };
+		WI09FR09 /* PersistenceActor+Annotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+Annotations.swift"; sourceTree = "<group>"; };
+		WI09FR10 /* TOCProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOCProvider.swift; sourceTree = "<group>"; };
+		WI09FR11 /* TOCBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOCBuilder.swift; sourceTree = "<group>"; };
+		WI09FR12 /* BookmarkListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkListViewModel.swift; sourceTree = "<group>"; };
+		WI09FR13 /* HighlightListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightListViewModel.swift; sourceTree = "<group>"; };
+		WI09FR14 /* AnnotationListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationListViewModel.swift; sourceTree = "<group>"; };
+		WI09FR15 /* BookmarkListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkListView.swift; sourceTree = "<group>"; };
+		WI09FR16 /* TOCListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOCListView.swift; sourceTree = "<group>"; };
+		WI09FR17 /* HighlightListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightListView.swift; sourceTree = "<group>"; };
+		WI09FR18 /* AnnotationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationListView.swift; sourceTree = "<group>"; };
+		WI09FR19 /* AnnotationEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationEditSheet.swift; sourceTree = "<group>"; };
+		WI09TFR01 /* MockBookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockBookmarkStore.swift; sourceTree = "<group>"; };
+		WI09TFR02 /* MockHighlightStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockHighlightStore.swift; sourceTree = "<group>"; };
+		WI09TFR03 /* MockAnnotationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAnnotationStore.swift; sourceTree = "<group>"; };
+		WI09TFR04 /* WI9TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WI9TestHelpers.swift; sourceTree = "<group>"; };
+		WI09TFR05 /* BookmarkListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkListViewModelTests.swift; sourceTree = "<group>"; };
+		WI09TFR06 /* HighlightListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightListViewModelTests.swift; sourceTree = "<group>"; };
+		WI09TFR07 /* AnnotationListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationListViewModelTests.swift; sourceTree = "<group>"; };
+		WI09TFR08 /* TOCProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOCProviderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -404,6 +458,10 @@
 				3B1563E77E28434568F45736 /* LibraryViewModelTests.swift */,
 				MD04FR02A0B1C2D3E4F50002 /* MDReaderViewModelTests.swift */,
 				PDF02FR01A0B1C2D3E4F50001 /* PDFReaderViewModelTests.swift */,
+				WI09TFR04 /* WI9TestHelpers.swift */,
+				WI09TFR05 /* BookmarkListViewModelTests.swift */,
+				WI09TFR06 /* HighlightListViewModelTests.swift */,
+				WI09TFR07 /* AnnotationListViewModelTests.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -490,6 +548,9 @@
 			isa = PBXGroup;
 			children = (
 				B925BE5683D3296D77D3503B /* MockPersistenceActor.swift */,
+				WI09TFR01 /* MockBookmarkStore.swift */,
+				WI09TFR02 /* MockHighlightStore.swift */,
+				WI09TFR03 /* MockAnnotationStore.swift */,
 			);
 			path = Mocks;
 			sourceTree = "<group>";
@@ -502,6 +563,9 @@
 				AA6A01B4C7E4D92F8B1D3E04 /* TXTReaderViewModel.swift */,
 				MD04FR01A0B1C2D3E4F50001 /* MDReaderViewModel.swift */,
 				PDF01FR01A0B1C2D3E4F50001 /* PDFReaderViewModel.swift */,
+				WI09FR12 /* BookmarkListViewModel.swift */,
+				WI09FR13 /* HighlightListViewModel.swift */,
+				WI09FR14 /* AnnotationListViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -514,6 +578,8 @@
 				1FD65C0547DF264510657CA2 /* ContentView.swift */,
 				28354051023D618CC3CAE2E2 /* LibraryView.swift */,
 				8D2F333DAEB9758BF44807FC /* Reader */,
+				WI09GR01 /* Bookmarks */,
+				WI09GR02 /* Annotations */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -545,6 +611,7 @@
 			children = (
 				C0FBDC41C60328ED4FB8A197 /* BookImporterTests.swift */,
 				0616892213196BCF802266F8 /* ContentHasherTests.swift */,
+				WI09TFR08 /* TOCProviderTests.swift */,
 				77811B16F2CF741310C23CF5 /* EncodingDetectorTests.swift */,
 				43EE33FE1EDFE9B393885110 /* FeatureFlagsTests.swift */,
 				744CB6180C0CE88E75E124F3 /* ImportErrorTests.swift */,
@@ -633,6 +700,17 @@
 				59ECD5BE8EE959A2EF3E208E /* PersistenceActor+ReadingPosition.swift */,
 				TH01FR03A0B1C2D3E4F50003 /* ReaderSettingsStore.swift */,
 				41D94EE13466B0286DEA2EA7 /* ReadingSessionTracker.swift */,
+				WI09FR01 /* BookmarkRecord.swift */,
+				WI09FR02 /* HighlightRecord.swift */,
+				WI09FR03 /* AnnotationRecord.swift */,
+				WI09FR04 /* BookmarkPersisting.swift */,
+				WI09FR05 /* HighlightPersisting.swift */,
+				WI09FR06 /* AnnotationPersisting.swift */,
+				WI09FR07 /* PersistenceActor+Bookmarks.swift */,
+				WI09FR08 /* PersistenceActor+Highlights.swift */,
+				WI09FR09 /* PersistenceActor+Annotations.swift */,
+				WI09FR10 /* TOCProvider.swift */,
+				WI09FR11 /* TOCBuilder.swift */,
 				FDAD081C3FE054319EF94E4A /* EPUB */,
 				5CF05FDFCFCF1A5110783282 /* Locator */,
 				SI01GR01A0B1C2D3E4F50001 /* Search */,
@@ -725,6 +803,25 @@
 				SI02FR03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift */,
 			);
 			path = Search;
+			sourceTree = "<group>";
+		};
+		WI09GR01 /* Bookmarks */ = {
+			isa = PBXGroup;
+			children = (
+				WI09FR15 /* BookmarkListView.swift */,
+				WI09FR16 /* TOCListView.swift */,
+			);
+			path = Bookmarks;
+			sourceTree = "<group>";
+		};
+		WI09GR02 /* Annotations */ = {
+			isa = PBXGroup;
+			children = (
+				WI09FR17 /* HighlightListView.swift */,
+				WI09FR18 /* AnnotationListView.swift */,
+				WI09FR19 /* AnnotationEditSheet.swift */,
+			);
+			path = Annotations;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -901,6 +998,14 @@
 				SI02BF03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift in Sources */,
 				SI02BF04A0B1C2D3E4F50004 /* TokenSpanTests.swift in Sources */,
 				SI02BF05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift in Sources */,
+				WI09TBF01 /* MockBookmarkStore.swift in Sources */,
+				WI09TBF02 /* MockHighlightStore.swift in Sources */,
+				WI09TBF03 /* MockAnnotationStore.swift in Sources */,
+				WI09TBF04 /* WI9TestHelpers.swift in Sources */,
+				WI09TBF05 /* BookmarkListViewModelTests.swift in Sources */,
+				WI09TBF06 /* HighlightListViewModelTests.swift in Sources */,
+				WI09TBF07 /* AnnotationListViewModelTests.swift in Sources */,
+				WI09TBF08 /* TOCProviderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -948,6 +1053,25 @@
 				MD06BF02A0B1C2D3E4F50002 /* MDAttributedStringRenderer.swift in Sources */,
 				CD9751D76A3A9DBF872CA5D7 /* PersistenceActor+Library.swift in Sources */,
 				E1646FDF9A47255E94758A54 /* PersistenceActor+ReadingPosition.swift in Sources */,
+				WI09BF01 /* BookmarkRecord.swift in Sources */,
+				WI09BF02 /* HighlightRecord.swift in Sources */,
+				WI09BF03 /* AnnotationRecord.swift in Sources */,
+				WI09BF04 /* BookmarkPersisting.swift in Sources */,
+				WI09BF05 /* HighlightPersisting.swift in Sources */,
+				WI09BF06 /* AnnotationPersisting.swift in Sources */,
+				WI09BF07 /* PersistenceActor+Bookmarks.swift in Sources */,
+				WI09BF08 /* PersistenceActor+Highlights.swift in Sources */,
+				WI09BF09 /* PersistenceActor+Annotations.swift in Sources */,
+				WI09BF10 /* TOCProvider.swift in Sources */,
+				WI09BF11 /* TOCBuilder.swift in Sources */,
+				WI09BF12 /* BookmarkListViewModel.swift in Sources */,
+				WI09BF13 /* HighlightListViewModel.swift in Sources */,
+				WI09BF14 /* AnnotationListViewModel.swift in Sources */,
+				WI09BF15 /* BookmarkListView.swift in Sources */,
+				WI09BF16 /* TOCListView.swift in Sources */,
+				WI09BF17 /* HighlightListView.swift in Sources */,
+				WI09BF18 /* AnnotationListView.swift in Sources */,
+				WI09BF19 /* AnnotationEditSheet.swift in Sources */,
 				A190FE66621610AD2D04739D /* PersistenceActor.swift in Sources */,
 				B64CAC947A1951E5ED22009C /* QuoteRecovery.swift in Sources */,
 				4CCBF4F6E186A7363A995303 /* ReaderContainerView.swift in Sources */,

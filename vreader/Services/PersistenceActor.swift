@@ -12,6 +12,11 @@
 import Foundation
 import SwiftData
 
+/// Errors from persistence operations beyond import.
+enum PersistenceError: Error, Sendable {
+    case recordNotFound(String)
+}
+
 /// Protocol for persistence operations, enabling mock injection in tests.
 protocol BookPersisting: Sendable {
     /// Finds an existing book by fingerprint key, or returns nil.
