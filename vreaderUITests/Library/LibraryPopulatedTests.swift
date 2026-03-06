@@ -7,6 +7,7 @@
 
 import XCTest
 
+@MainActor
 final class LibraryPopulatedTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -75,6 +76,12 @@ final class LibraryPopulatedTests: XCTestCase {
         let scrollViews = app.scrollViews
         XCTAssertTrue(scrollViews.firstMatch.waitForExistence(timeout: 5),
                        "Grid mode should show a scroll view with book cards")
+
+        // Verify at least one book card element exists
+        let cardPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+        let card = app.buttons.matching(cardPredicate).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5),
+                       "At least one book card should exist in grid mode")
     }
 
     /// Verifies list mode shows BookRowView items.

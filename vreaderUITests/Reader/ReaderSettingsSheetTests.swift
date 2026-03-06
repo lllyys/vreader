@@ -5,6 +5,7 @@
 
 import XCTest
 
+@MainActor
 final class ReaderSettingsSheetTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -19,12 +20,6 @@ final class ReaderSettingsSheetTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func navigateToFirstBook() {
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 5), "Expected at least one book in the library")
-        firstBook.tap()
-    }
-
     private func openSettingsSheet() {
         let settingsButton = app.buttons[AccessibilityID.readerSettingsButton]
         XCTAssertTrue(settingsButton.waitForHittable(timeout: 5), "Settings button should be hittable")
@@ -34,7 +29,7 @@ final class ReaderSettingsSheetTests: XCTestCase {
     // MARK: - Tests
 
     func testSettingsSheetPresents() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openSettingsSheet()
 
         let settingsPanel = app.otherElements[AccessibilityID.readerSettingsPanel]
@@ -45,7 +40,7 @@ final class ReaderSettingsSheetTests: XCTestCase {
     }
 
     func testSettingsSheetTitle() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openSettingsSheet()
 
         let title = app.navigationBars["Reading Settings"]
@@ -56,7 +51,7 @@ final class ReaderSettingsSheetTests: XCTestCase {
     }
 
     func testSettingsSheetDismiss() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openSettingsSheet()
 
         let settingsPanel = app.otherElements[AccessibilityID.readerSettingsPanel]

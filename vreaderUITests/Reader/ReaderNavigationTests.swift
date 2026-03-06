@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class ReaderNavigationTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -18,32 +19,10 @@ final class ReaderNavigationTests: XCTestCase {
         app = nil
     }
 
-    // MARK: - Helpers
-
-    /// Navigates to the first book in the library.
-    /// Assumes seeded books are present.
-    private func navigateToFirstBook() {
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 5), "Expected at least one book in the library")
-        firstBook.tap()
-    }
-
-    /// Navigates to a book whose cell contains the given text.
-    /// Falls back to first book if no match found.
-    private func navigateToBook(containing text: String) {
-        let cell = app.cells.containing(.staticText, identifier: text).firstMatch
-        if cell.waitForExistence(timeout: 5) {
-            cell.tap()
-        } else {
-            // Fallback: tap first book
-            navigateToFirstBook()
-        }
-    }
-
     // MARK: - Navigation to Format Readers
 
     func testNavigateToEPUBReader() {
-        navigateToBook(containing: "Test EPUB Book")
+        tapBook(titled: "Test EPUB Book", in: app)
         let placeholder = app.staticTexts[AccessibilityID.epubReaderPlaceholder]
         XCTAssertTrue(
             placeholder.waitForExistence(timeout: 5),
@@ -52,7 +31,7 @@ final class ReaderNavigationTests: XCTestCase {
     }
 
     func testNavigateToPDFReader() {
-        navigateToBook(containing: "Test PDF Document")
+        tapBook(titled: "Test PDF Document", in: app)
         let placeholder = app.staticTexts[AccessibilityID.pdfReaderPlaceholder]
         XCTAssertTrue(
             placeholder.waitForExistence(timeout: 5),
@@ -61,7 +40,7 @@ final class ReaderNavigationTests: XCTestCase {
     }
 
     func testNavigateToTXTReader() {
-        navigateToBook(containing: "Test Plain Text")
+        tapBook(titled: "Test Plain Text", in: app)
         let placeholder = app.staticTexts[AccessibilityID.txtReaderPlaceholder]
         XCTAssertTrue(
             placeholder.waitForExistence(timeout: 5),
@@ -70,7 +49,7 @@ final class ReaderNavigationTests: XCTestCase {
     }
 
     func testNavigateToMDReader() {
-        navigateToBook(containing: "Test Markdown")
+        tapBook(titled: "Test Markdown", in: app)
         let placeholder = app.staticTexts[AccessibilityID.mdReaderPlaceholder]
         XCTAssertTrue(
             placeholder.waitForExistence(timeout: 5),
@@ -81,7 +60,7 @@ final class ReaderNavigationTests: XCTestCase {
     // MARK: - Back Navigation
 
     func testBackButtonReturnsToLibrary() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
 
         let backButton = app.buttons[AccessibilityID.readerBackButton]
         XCTAssertTrue(
@@ -100,7 +79,7 @@ final class ReaderNavigationTests: XCTestCase {
     // MARK: - Toolbar Buttons
 
     func testToolbarButtonsExist() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
 
         let searchButton = app.buttons[AccessibilityID.readerSearchButton]
         let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
@@ -112,7 +91,7 @@ final class ReaderNavigationTests: XCTestCase {
     }
 
     func testToolbarButtonAccessibilityLabels() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
 
         let searchButton = app.buttons["Search in book"]
         let annotationsButton = app.buttons["Bookmarks and annotations"]
@@ -133,7 +112,7 @@ final class ReaderNavigationTests: XCTestCase {
     }
 
     func testAllToolbarButtonsHittable() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
 
         let searchButton = app.buttons[AccessibilityID.readerSearchButton]
         let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
@@ -147,7 +126,7 @@ final class ReaderNavigationTests: XCTestCase {
     // MARK: - Accessibility
 
     func testReaderChromeAccessibilityAudit() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
 
         // Wait for reader to fully load
         let backButton = app.buttons[AccessibilityID.readerBackButton]

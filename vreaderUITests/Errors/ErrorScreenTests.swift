@@ -3,14 +3,15 @@ import XCTest
 /// WI-UI-14: Error screen tests.
 ///
 /// Tests the app initialization error screen that appears when the
-/// database fails to initialize. Requires --seed-corrupt-db launch argument.
+/// database fails to initialize. Uses seed: .corruptDB launch argument.
+@MainActor
 final class ErrorScreenTests: XCTestCase {
 
     var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
+        app = launchApp(seed: .corruptDB)
     }
 
     override func tearDownWithError() throws {
@@ -22,31 +23,15 @@ final class ErrorScreenTests: XCTestCase {
     /// When the database fails to initialize, an error screen should appear
     /// with a warning icon and "Unable to Open Library" title.
     func testInitErrorScreen() throws {
-        // TODO: --seed-corrupt-db launch argument may not be implemented yet.
-        // This flag should cause the ModelContainer initialization to fail,
-        // triggering the error screen in VReaderApp.
-        app.launchArguments = ["--uitesting", "--seed-corrupt-db"]
-        app.launch()
-
         // The error screen shows:
         //   - Image(systemName: "exclamationmark.triangle") — warning icon
         //   - Text("Unable to Open Library") — title
         //   - Sanitized error message — body
         let errorTitle = app.staticTexts["Unable to Open Library"]
-        if errorTitle.waitForExistence(timeout: 5) {
-            XCTAssertTrue(errorTitle.exists,
-                          "Error screen should show 'Unable to Open Library' title")
-        } else {
-            // If --seed-corrupt-db isn't implemented, the app may launch normally.
-            // Check if library loaded instead.
-            let libraryView = app.otherElements[AccessibilityID.libraryView]
-            if libraryView.waitForExistence(timeout: 3) {
-                XCTExpectFailure("--seed-corrupt-db launch argument not implemented yet")
-                XCTFail("App launched normally — --seed-corrupt-db not wired")
-            } else {
-                XCTFail("Neither error screen nor library appeared")
-            }
-        }
+        XCTAssertTrue(
+            errorTitle.waitForExistence(timeout: 5),
+            "Error screen should show 'Unable to Open Library' title when launched with corruptDB seed"
+        )
     }
 
     // MARK: - No File Paths in Error
@@ -54,15 +39,11 @@ final class ErrorScreenTests: XCTestCase {
     /// Error messages must be sanitized — no raw file paths or technical details
     /// should be exposed to the user.
     func testInitErrorNoFilePaths() throws {
-        app.launchArguments = ["--uitesting", "--seed-corrupt-db"]
-        app.launch()
-
         let errorTitle = app.staticTexts["Unable to Open Library"]
-        guard errorTitle.waitForExistence(timeout: 5) else {
-            XCTExpectFailure("--seed-corrupt-db launch argument not implemented yet")
-            XCTFail("Error screen not shown — cannot verify message sanitization")
-            return
-        }
+        XCTAssertTrue(
+            errorTitle.waitForExistence(timeout: 5),
+            "Error screen should appear for corrupt DB"
+        )
 
         // Collect all visible text on the error screen
         let allTexts = app.staticTexts.allElementsBoundByIndex
@@ -86,15 +67,11 @@ final class ErrorScreenTests: XCTestCase {
 
     /// The error screen should pass the iOS 17+ accessibility audit.
     func testInitErrorAccessibilityAudit() throws {
-        app.launchArguments = ["--uitesting", "--seed-corrupt-db"]
-        app.launch()
-
         let errorTitle = app.staticTexts["Unable to Open Library"]
-        guard errorTitle.waitForExistence(timeout: 5) else {
-            XCTExpectFailure("--seed-corrupt-db launch argument not implemented yet")
-            XCTFail("Error screen not shown — cannot run audit")
-            return
-        }
+        XCTAssertTrue(
+            errorTitle.waitForExistence(timeout: 5),
+            "Error screen should appear for corrupt DB"
+        )
 
         try app.performAccessibilityAudit()
     }

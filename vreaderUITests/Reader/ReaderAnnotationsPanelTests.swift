@@ -5,6 +5,7 @@
 
 import XCTest
 
+@MainActor
 final class ReaderAnnotationsPanelTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -19,12 +20,6 @@ final class ReaderAnnotationsPanelTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func navigateToFirstBook() {
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 5), "Expected at least one book in the library")
-        firstBook.tap()
-    }
-
     private func openAnnotationsPanel() {
         let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
         XCTAssertTrue(annotationsButton.waitForHittable(timeout: 5), "Annotations button should be hittable")
@@ -34,7 +29,7 @@ final class ReaderAnnotationsPanelTests: XCTestCase {
     // MARK: - Tests
 
     func testAnnotationsPanelPresents() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openAnnotationsPanel()
 
         let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
@@ -45,7 +40,7 @@ final class ReaderAnnotationsPanelTests: XCTestCase {
     }
 
     func testAnnotationsPanelHasTabs() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openAnnotationsPanel()
 
         let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
@@ -64,7 +59,7 @@ final class ReaderAnnotationsPanelTests: XCTestCase {
     }
 
     func testAnnotationsPanelTabSwitching() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openAnnotationsPanel()
 
         let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
@@ -86,7 +81,7 @@ final class ReaderAnnotationsPanelTests: XCTestCase {
     }
 
     func testAnnotationsPanelDismiss() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openAnnotationsPanel()
 
         let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]

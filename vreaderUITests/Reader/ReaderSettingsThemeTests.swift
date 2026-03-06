@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class ReaderSettingsThemeTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -21,9 +22,7 @@ final class ReaderSettingsThemeTests: XCTestCase {
     // MARK: - Helpers
 
     private func navigateToFirstBookAndOpenSettings() {
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 5), "Expected at least one book in the library")
-        firstBook.tap()
+        tapFirstBook(in: app)
 
         let settingsButton = app.buttons[AccessibilityID.readerSettingsButton]
         XCTAssertTrue(settingsButton.waitForHittable(timeout: 5), "Settings button should be hittable")
@@ -85,6 +84,12 @@ final class ReaderSettingsThemeTests: XCTestCase {
             XCTAssertTrue(
                 button.waitForExistence(timeout: 3),
                 "Theme button should remain after tapping \(theme)"
+            )
+
+            // Verify the tapped theme is now selected
+            XCTAssertTrue(
+                button.isSelected,
+                "\(theme) button should be selected after tapping"
             )
         }
     }

@@ -19,12 +19,15 @@ enum TestSeedState {
     case empty
     /// Pre-populated with fixture books.
     case books
+    /// Corrupted database (triggers init error screen).
+    case corruptDB
 
     /// Launch argument flag.
     var launchArgument: String {
         switch self {
         case .empty: return "--seed-empty"
         case .books: return "--seed-books"
+        case .corruptDB: return "--seed-corrupt-db"
         }
     }
 }
@@ -168,6 +171,54 @@ func launchApp(
         enableSync: enableSync,
         reduceMotion: reduceMotion
     )
+}
+
+// MARK: - Book Navigation Helpers
+
+/// Taps a book in the library by title, independent of grid/list mode.
+/// NavigationLink renders as button in grid, cell in list.
+@MainActor
+func tapBook(titled title: String, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    let predicate = NSPredicate(format: "label CONTAINS[cd] %@", title)
+    // Grid mode: NavigationLink is a button
+    let button = app.buttons.matching(predicate).firstMatch
+    if button.waitForExistence(timeout: 5) {
+        button.tap()
+        return
+    }
+    // List mode: NavigationLink is a cell
+    let cell = app.cells.matching(predicate).firstMatch
+    if cell.waitForExistence(timeout: 3) {
+        cell.tap()
+        return
+    }
+    XCTFail("Could not find book '\(title)' in library", file: file, line: line)
+}
+
+/// Taps the first available book in the library, independent of grid/list mode.
+@MainActor
+func tapFirstBook(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    // Grid mode: buttons with bookCard_ prefix
+    let cardPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+    let card = app.buttons.matching(cardPredicate).firstMatch
+    if card.waitForExistence(timeout: 5) {
+        card.tap()
+        return
+    }
+    // List mode: buttons with bookRow_ prefix
+    let rowPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookRow_'")
+    let row = app.buttons.matching(rowPredicate).firstMatch
+    if row.waitForExistence(timeout: 3) {
+        row.tap()
+        return
+    }
+    // Last resort: cells
+    let cell = app.cells.firstMatch
+    if cell.waitForExistence(timeout: 3) {
+        cell.tap()
+        return
+    }
+    XCTFail("Could not find any book in library", file: file, line: line)
 }
 
 // MARK: - XCUIElement Wait Extensions

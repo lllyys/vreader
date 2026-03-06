@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class LibraryEmptyStateTests: XCTestCase {
     var app: XCUIApplication!
 

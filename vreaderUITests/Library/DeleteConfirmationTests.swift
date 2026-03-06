@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class DeleteConfirmationTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -36,8 +37,9 @@ final class DeleteConfirmationTests: XCTestCase {
         // In grid mode, books are in scroll view with accessibility identifiers "bookCard_*"
         let scrollView = app.scrollViews.firstMatch
         if scrollView.waitForExistence(timeout: 5) {
-            // Long press the first accessible element in the grid
-            let firstCard = scrollView.buttons.firstMatch
+            // Long press the first book card in the grid
+            let cardPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+            let firstCard = app.buttons.matching(cardPredicate).firstMatch
             if firstCard.waitForHittable(timeout: 3) {
                 firstCard.press(forDuration: 1.0)
 
@@ -114,23 +116,27 @@ final class DeleteConfirmationTests: XCTestCase {
         }
 
         let table = app.tables.firstMatch
-        guard table.waitForExistence(timeout: 5) else { return }
+        XCTAssertTrue(table.waitForExistence(timeout: 5), "Table should exist in list mode")
+        guard table.waitForExistence(timeout: 5) else { XCTFail("Table not found"); return }
 
         let initialCellCount = table.cells.count
 
         // Trigger delete alert
         let firstCell = table.cells.firstMatch
-        guard firstCell.waitForHittable(timeout: 3) else { return }
+        XCTAssertTrue(firstCell.waitForHittable(timeout: 3), "First cell should be hittable")
+        guard firstCell.waitForHittable(timeout: 3) else { XCTFail("First cell not hittable"); return }
 
         firstCell.swipeLeft()
 
         let deleteAction = app.buttons["Delete"]
-        guard deleteAction.waitForHittable(timeout: 3) else { return }
+        XCTAssertTrue(deleteAction.waitForHittable(timeout: 3), "Delete action should appear after swipe")
+        guard deleteAction.waitForHittable(timeout: 3) else { XCTFail("Delete action not hittable"); return }
         deleteAction.tap()
 
         // Wait for alert
         let alert = app.alerts["Delete Book"]
-        guard alert.waitForExistence(timeout: 3) else { return }
+        XCTAssertTrue(alert.waitForExistence(timeout: 3), "Delete confirmation alert should appear")
+        guard alert.waitForExistence(timeout: 3) else { XCTFail("Alert not found"); return }
 
         // Tap Cancel
         let cancelButton = alert.buttons["Cancel"]
@@ -163,24 +169,29 @@ final class DeleteConfirmationTests: XCTestCase {
         }
 
         let table = app.tables.firstMatch
-        guard table.waitForExistence(timeout: 5) else { return }
+        XCTAssertTrue(table.waitForExistence(timeout: 5), "Table should exist in list mode")
+        guard table.waitForExistence(timeout: 5) else { XCTFail("Table not found"); return }
 
         let initialCellCount = table.cells.count
-        guard initialCellCount > 0 else { return }
+        XCTAssertGreaterThan(initialCellCount, 0, "At least one book should exist")
+        guard initialCellCount > 0 else { XCTFail("No books in table"); return }
 
         // Trigger delete alert
         let firstCell = table.cells.firstMatch
-        guard firstCell.waitForHittable(timeout: 3) else { return }
+        XCTAssertTrue(firstCell.waitForHittable(timeout: 3), "First cell should be hittable")
+        guard firstCell.waitForHittable(timeout: 3) else { XCTFail("First cell not hittable"); return }
 
         firstCell.swipeLeft()
 
         let deleteAction = app.buttons["Delete"]
-        guard deleteAction.waitForHittable(timeout: 3) else { return }
+        XCTAssertTrue(deleteAction.waitForHittable(timeout: 3), "Delete action should appear after swipe")
+        guard deleteAction.waitForHittable(timeout: 3) else { XCTFail("Delete action not hittable"); return }
         deleteAction.tap()
 
         // Wait for alert and confirm delete
         let alert = app.alerts["Delete Book"]
-        guard alert.waitForExistence(timeout: 3) else { return }
+        XCTAssertTrue(alert.waitForExistence(timeout: 3), "Delete confirmation alert should appear")
+        guard alert.waitForExistence(timeout: 3) else { XCTFail("Alert not found"); return }
 
         let confirmDelete = alert.buttons["Delete"]
         XCTAssertTrue(confirmDelete.exists, "Alert should have Delete button")
@@ -214,10 +225,12 @@ final class DeleteConfirmationTests: XCTestCase {
         }
 
         let table = app.tables.firstMatch
-        guard table.waitForExistence(timeout: 5) else { return }
+        XCTAssertTrue(table.waitForExistence(timeout: 5), "Table should exist in list mode")
+        guard table.waitForExistence(timeout: 5) else { XCTFail("Table not found"); return }
 
         let firstCell = table.cells.firstMatch
-        guard firstCell.waitForHittable(timeout: 3) else { return }
+        XCTAssertTrue(firstCell.waitForHittable(timeout: 3), "First cell should be hittable")
+        guard firstCell.waitForHittable(timeout: 3) else { XCTFail("First cell not hittable"); return }
 
         // Swipe left to reveal delete action
         firstCell.swipeLeft()
@@ -262,10 +275,13 @@ final class DeleteConfirmationTests: XCTestCase {
         }
 
         let table = app.tables.firstMatch
-        guard table.waitForExistence(timeout: 5) else { return }
+        XCTAssertTrue(table.waitForExistence(timeout: 5), "Table should exist in list mode")
+        guard table.waitForExistence(timeout: 5) else { XCTFail("Table not found"); return }
 
-        // Delete all books one by one
-        while table.cells.count > 0 {
+        // Delete all books one by one (max 20 iterations to prevent infinite loop)
+        var maxIterations = 20
+        while table.cells.count > 0, maxIterations > 0 {
+            maxIterations -= 1
             let cell = table.cells.firstMatch
             guard cell.waitForHittable(timeout: 3) else { break }
 

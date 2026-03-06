@@ -5,6 +5,7 @@
 
 import XCTest
 
+@MainActor
 final class MDReaderPlaceholderTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -17,24 +18,10 @@ final class MDReaderPlaceholderTests: XCTestCase {
         app = nil
     }
 
-    // MARK: - Helpers
-
-    private func navigateToMDBook() {
-        let mdCell = app.cells.containing(.staticText, identifier: "Test Markdown").firstMatch
-        if mdCell.waitForExistence(timeout: 5) {
-            mdCell.tap()
-        } else {
-            // Fallback: tap first available book
-            let firstBook = app.cells.firstMatch
-            XCTAssertTrue(firstBook.waitForExistence(timeout: 5))
-            firstBook.tap()
-        }
-    }
-
     // MARK: - Tests
 
     func testMDPlaceholderExists() {
-        navigateToMDBook()
+        tapBook(titled: "Test Markdown", in: app)
 
         let placeholder = app.staticTexts[AccessibilityID.mdReaderPlaceholder]
         XCTAssertTrue(
@@ -44,7 +31,7 @@ final class MDReaderPlaceholderTests: XCTestCase {
     }
 
     func testMDPlaceholderAccessibilityAudit() {
-        navigateToMDBook()
+        tapBook(titled: "Test Markdown", in: app)
 
         // Wait for reader to load
         let backButton = app.buttons[AccessibilityID.readerBackButton]

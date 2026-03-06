@@ -5,6 +5,7 @@
 
 import XCTest
 
+@MainActor
 final class PDFReaderPlaceholderTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -18,16 +19,7 @@ final class PDFReaderPlaceholderTests: XCTestCase {
     }
 
     func testPDFPlaceholderExists() {
-        // Navigate to a PDF book
-        let pdfCell = app.cells.containing(.staticText, identifier: "Test PDF Document").firstMatch
-        if pdfCell.waitForExistence(timeout: 5) {
-            pdfCell.tap()
-        } else {
-            // Fallback: tap first book and hope it's PDF
-            let firstBook = app.cells.firstMatch
-            XCTAssertTrue(firstBook.waitForExistence(timeout: 5))
-            firstBook.tap()
-        }
+        tapBook(titled: "Test PDF Document", in: app)
 
         let placeholder = app.staticTexts[AccessibilityID.pdfReaderPlaceholder]
         XCTAssertTrue(

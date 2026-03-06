@@ -17,6 +17,14 @@ struct VReaderApp: App {
         #if DEBUG
         let config = TestLaunchConfig.parse(ProcessInfo.processInfo.arguments)
         self.testConfig = config
+
+        // --seed-corrupt-db: simulate database init failure for error screen tests
+        if config.seedCorruptDB {
+            self.modelContainer = nil
+            self.initError = "The library database could not be opened. It may need to be reset."
+            self.contentView = nil
+            return
+        }
         #endif
 
         do {
@@ -41,6 +49,27 @@ struct VReaderApp: App {
             )
             self.modelContainer = container
             self.initError = nil
+
+            #if DEBUG
+            // Seed test data synchronously before creating the ViewModel to avoid race
+            // with LibraryView.loadBooks(). In-memory store is fast enough for sync seeding.
+            // Uses Task.detached to avoid deadlocking the main thread with semaphore.wait().
+            if config.isUITesting {
+                let persistence = PersistenceActor(modelContainer: container)
+                let seedConfig = config
+                let semaphore = DispatchSemaphore(value: 0)
+                Task.detached {
+                    if seedConfig.seedEmpty {
+                        await TestSeeder.clearAllBooks(persistence: persistence)
+                    } else if seedConfig.seedBooks {
+                        await TestSeeder.seedBooks(persistence: persistence)
+                    }
+                    semaphore.signal()
+                }
+                semaphore.wait()
+            }
+            #endif
+
             self.contentView = ContentView(
                 viewModel: LibraryViewModel(
                     persistence: PersistenceActor(modelContainer: container)
@@ -61,9 +90,6 @@ struct VReaderApp: App {
                 contentView
                     .modelContainer(modelContainer)
                     .modifier(TestLaunchModifier(config: testConfig))
-                    .task {
-                        await applyTestSeeding(container: modelContainer)
-                    }
                 #else
                 contentView
                     .modelContainer(modelContainer)
@@ -99,22 +125,6 @@ struct VReaderApp: App {
         }
     }
 
-    #if DEBUG
-    /// Applies test data seeding based on launch arguments.
-    @MainActor
-    private func applyTestSeeding(container: ModelContainer) async {
-        guard testConfig.isUITesting else { return }
-
-        let persistence = PersistenceActor(modelContainer: container)
-
-        // --seed-empty wins over --seed-books (clean state takes priority)
-        if testConfig.seedEmpty {
-            await TestSeeder.clearAllBooks(persistence: persistence)
-        } else if testConfig.seedBooks {
-            await TestSeeder.seedBooks(persistence: persistence)
-        }
-    }
-    #endif
 }
 
 // MARK: - Test Launch Configuration (DEBUG only)
@@ -127,6 +137,7 @@ struct TestLaunchConfig: Sendable {
     let isUITesting: Bool
     let seedEmpty: Bool
     let seedBooks: Bool
+    let seedCorruptDB: Bool
     let colorSchemeOverride: ColorScheme?
     let dynamicTypeOverride: DynamicTypeSize?
     let enableAI: Bool
@@ -162,6 +173,7 @@ struct TestLaunchConfig: Sendable {
             isUITesting: args.contains("--uitesting"),
             seedEmpty: args.contains("--seed-empty"),
             seedBooks: args.contains("--seed-books"),
+            seedCorruptDB: args.contains("--seed-corrupt-db"),
             colorSchemeOverride: colorScheme,
             dynamicTypeOverride: dynamicType,
             enableAI: args.contains("--enable-ai"),
@@ -175,6 +187,7 @@ struct TestLaunchConfig: Sendable {
         isUITesting: false,
         seedEmpty: false,
         seedBooks: false,
+        seedCorruptDB: false,
         colorSchemeOverride: nil,
         dynamicTypeOverride: nil,
         enableAI: false,

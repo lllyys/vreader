@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class LibraryTouchTargetTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -87,15 +88,17 @@ final class LibraryTouchTargetTests: XCTestCase {
 
         // Check the first cell height
         let firstCell = table.cells.firstMatch
-        if firstCell.waitForExistence(timeout: 3) {
-            XCTAssertGreaterThanOrEqual(
-                firstCell.frame.height, minimumTouchTarget,
-                "Book row height (\(firstCell.frame.height)) should be >= \(minimumTouchTarget)pt"
-            )
-        }
+        XCTAssertTrue(firstCell.waitForExistence(timeout: 3),
+                       "At least one book row should exist in list mode")
+        XCTAssertGreaterThanOrEqual(
+            firstCell.frame.height, minimumTouchTarget,
+            "Book row height (\(firstCell.frame.height)) should be >= \(minimumTouchTarget)pt"
+        )
     }
 
     /// Verifies the format icon in list mode occupies a 44x44pt frame.
+    /// Note: XCUITest cannot target the format icon directly without a dedicated
+    /// accessibility identifier. This test measures the containing row height as a proxy.
     func testFormatIconSize() {
         // Switch to list mode
         let toggle = app.buttons[AccessibilityID.viewModeToggle]
@@ -111,13 +114,14 @@ final class LibraryTouchTargetTests: XCTestCase {
 
         // The format icon is a 44x44 ZStack within BookRowView.
         // In XCUITest, we check the overall row height which contains the icon.
+        // Icon-specific measurement would require a dedicated accessibility identifier.
         let firstCell = table.cells.firstMatch
-        if firstCell.waitForExistence(timeout: 3) {
-            // The row's height should accommodate the 44pt icon
-            XCTAssertGreaterThanOrEqual(
-                firstCell.frame.height, minimumTouchTarget,
-                "Book row should accommodate the 44pt format icon"
-            )
-        }
+        XCTAssertTrue(firstCell.waitForExistence(timeout: 3),
+                       "At least one book row should exist in list mode")
+        // The row's height should accommodate the 44pt icon
+        XCTAssertGreaterThanOrEqual(
+            firstCell.frame.height, minimumTouchTarget,
+            "Book row should accommodate the 44pt format icon"
+        )
     }
 }

@@ -5,6 +5,7 @@
 
 import XCTest
 
+@MainActor
 final class ReaderSearchSheetTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -19,12 +20,6 @@ final class ReaderSearchSheetTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func navigateToFirstBook() {
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 5), "Expected at least one book in the library")
-        firstBook.tap()
-    }
-
     private func openSearchSheet() {
         let searchButton = app.buttons[AccessibilityID.readerSearchButton]
         XCTAssertTrue(searchButton.waitForHittable(timeout: 5), "Search button should be hittable")
@@ -34,7 +29,7 @@ final class ReaderSearchSheetTests: XCTestCase {
     // MARK: - Tests
 
     func testSearchSheetPresents() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openSearchSheet()
 
         let searchSheet = app.otherElements[AccessibilityID.searchSheet]
@@ -45,7 +40,7 @@ final class ReaderSearchSheetTests: XCTestCase {
     }
 
     func testSearchSheetDismiss() {
-        navigateToFirstBook()
+        tapFirstBook(in: app)
         openSearchSheet()
 
         let searchSheet = app.otherElements[AccessibilityID.searchSheet]

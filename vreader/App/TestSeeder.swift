@@ -15,7 +15,6 @@
 import Foundation
 
 /// Creates fixture book entries for UI testing.
-@MainActor
 enum TestSeeder {
 
     /// Seeds the database with fixture books for UI test scenarios.
@@ -51,73 +50,88 @@ enum TestSeeder {
     ///
     /// SHA-256 suffixes use only valid hex chars (0-9, a-f) to pass
     /// DocumentFingerprint validation.
-    static let fixtures: [BookRecord] = [
-        // Standard format fixtures
-        makeRecord(
-            format: .epub,
-            sha256Suffix: "e00b0001",
-            title: "Test EPUB Book",
-            author: "Test Author",
-            byteCount: 102_400
-        ),
-        makeRecord(
-            format: .pdf,
-            sha256Suffix: "0df00001",
-            title: "Test PDF Document",
-            author: "PDF Author",
-            byteCount: 204_800
-        ),
-        makeRecord(
-            format: .txt,
-            sha256Suffix: "00a00001",
-            title: "Test Plain Text",
-            author: nil,
-            byteCount: 1_024
-        ),
-        makeRecord(
-            format: .md,
-            sha256Suffix: "0d000001",
-            title: "Test Markdown",
-            author: "MD Author",
-            byteCount: 2_048
-        ),
+    /// Fixed dates ensure deterministic ordering across test runs.
+    static let fixtures: [BookRecord] = {
+        // Base date: 2024-03-01 00:00:00 UTC (700_000_000 seconds since reference date)
+        let baseDate = Date(timeIntervalSinceReferenceDate: 700_000_000)
+        let increment: TimeInterval = 3600 // 1 hour between fixtures
 
-        // Edge case: long title
-        makeRecord(
-            format: .txt,
-            sha256Suffix: "10face01",
-            title: "A Very Long Book Title That Should Definitely Trigger Truncation in Both Grid and List Modes",
-            author: "Author Name",
-            byteCount: 512
-        ),
+        return [
+            // Standard format fixtures
+            makeRecord(
+                format: .epub,
+                sha256Suffix: "e00b0001",
+                title: "Test EPUB Book",
+                author: "Test Author",
+                byteCount: 102_400,
+                date: baseDate
+            ),
+            makeRecord(
+                format: .pdf,
+                sha256Suffix: "0df00001",
+                title: "Test PDF Document",
+                author: "PDF Author",
+                byteCount: 204_800,
+                date: baseDate.addingTimeInterval(increment)
+            ),
+            makeRecord(
+                format: .txt,
+                sha256Suffix: "00a00001",
+                title: "Test Plain Text",
+                author: nil,
+                byteCount: 1_024,
+                date: baseDate.addingTimeInterval(increment * 2)
+            ),
+            makeRecord(
+                format: .md,
+                sha256Suffix: "0d000001",
+                title: "Test Markdown",
+                author: "MD Author",
+                byteCount: 2_048,
+                date: baseDate.addingTimeInterval(increment * 3)
+            ),
 
-        // Edge case: CJK title
-        makeRecord(
-            format: .txt,
-            sha256Suffix: "c0a00001",
-            title: "中文日本語한국어",
-            author: nil,
-            byteCount: 768
-        ),
+            // Edge case: long title
+            makeRecord(
+                format: .txt,
+                sha256Suffix: "10face01",
+                title: "A Very Long Book Title That Should Definitely Trigger Truncation in Both Grid and List Modes",
+                author: "Author Name",
+                byteCount: 512,
+                date: baseDate.addingTimeInterval(increment * 4)
+            ),
 
-        // Edge case: zero reading time (unread book)
-        makeRecord(
-            format: .epub,
-            sha256Suffix: "00dead01",
-            title: "Unread Book",
-            author: "Author",
-            byteCount: 51_200
-        ),
+            // Edge case: CJK title
+            makeRecord(
+                format: .txt,
+                sha256Suffix: "c0a00001",
+                title: "中文日本語한국어",
+                author: nil,
+                byteCount: 768,
+                date: baseDate.addingTimeInterval(increment * 5)
+            ),
 
-        // Edge case: password-protected PDF placeholder
-        makeRecord(
-            format: .pdf,
-            sha256Suffix: "0bead001",
-            title: "Protected PDF",
-            author: nil,
-            byteCount: 307_200
-        ),
-    ]
+            // Edge case: zero reading time (unread book)
+            makeRecord(
+                format: .epub,
+                sha256Suffix: "00dead01",
+                title: "Unread Book",
+                author: "Author",
+                byteCount: 51_200,
+                date: baseDate.addingTimeInterval(increment * 6)
+            ),
+
+            // Edge case: password-protected PDF placeholder
+            makeRecord(
+                format: .pdf,
+                sha256Suffix: "0bead001",
+                title: "Protected PDF",
+                author: nil,
+                byteCount: 307_200,
+                date: baseDate.addingTimeInterval(increment * 7)
+            ),
+        ]
+    }()
 
     // MARK: - Private Helpers
 
@@ -130,7 +144,8 @@ enum TestSeeder {
         sha256Suffix: String,
         title: String,
         author: String?,
-        byteCount: Int64
+        byteCount: Int64,
+        date: Date
     ) -> BookRecord {
         // Pad suffix to create a valid 64-char lowercase hex string
         let paddedHash = String(repeating: "0", count: max(0, 64 - sha256Suffix.count))
@@ -147,7 +162,7 @@ enum TestSeeder {
 
         let provenance = ImportProvenance(
             source: .localCopy,
-            importedAt: Date(),
+            importedAt: date,
             originalURLBookmarkData: nil
         )
 
@@ -159,7 +174,7 @@ enum TestSeeder {
             fingerprint: fingerprint,
             provenance: provenance,
             detectedEncoding: format == .txt ? "utf-8" : nil,
-            addedAt: Date()
+            addedAt: date
         )
     }
 }

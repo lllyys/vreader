@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class AnnotationsPanelPlaceholderTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -21,9 +22,7 @@ final class AnnotationsPanelPlaceholderTests: XCTestCase {
     // MARK: - Helpers
 
     private func navigateToFirstBookAndOpenAnnotations() {
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 5), "Expected at least one book in the library")
-        firstBook.tap()
+        tapFirstBook(in: app)
 
         let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
         XCTAssertTrue(annotationsButton.waitForHittable(timeout: 5), "Annotations button should be hittable")

@@ -5,6 +5,7 @@
 
 import XCTest
 
+@MainActor
 final class TXTReaderPlaceholderTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -17,24 +18,10 @@ final class TXTReaderPlaceholderTests: XCTestCase {
         app = nil
     }
 
-    // MARK: - Helpers
-
-    private func navigateToTXTBook() {
-        let txtCell = app.cells.containing(.staticText, identifier: "Test Plain Text").firstMatch
-        if txtCell.waitForExistence(timeout: 5) {
-            txtCell.tap()
-        } else {
-            // Fallback: tap first available book
-            let firstBook = app.cells.firstMatch
-            XCTAssertTrue(firstBook.waitForExistence(timeout: 5))
-            firstBook.tap()
-        }
-    }
-
     // MARK: - Tests
 
     func testTXTPlaceholderExists() {
-        navigateToTXTBook()
+        tapBook(titled: "Test Plain Text", in: app)
 
         let placeholder = app.staticTexts[AccessibilityID.txtReaderPlaceholder]
         XCTAssertTrue(
@@ -44,7 +31,7 @@ final class TXTReaderPlaceholderTests: XCTestCase {
     }
 
     func testTXTPlaceholderAccessibilityAudit() {
-        navigateToTXTBook()
+        tapBook(titled: "Test Plain Text", in: app)
 
         // Wait for reader to load
         let backButton = app.buttons[AccessibilityID.readerBackButton]

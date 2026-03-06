@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class SearchSheetPlaceholderTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -21,9 +22,7 @@ final class SearchSheetPlaceholderTests: XCTestCase {
     // MARK: - Helpers
 
     private func navigateToFirstBookAndOpenSearch() {
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 5), "Expected at least one book in the library")
-        firstBook.tap()
+        tapFirstBook(in: app)
 
         let searchButton = app.buttons[AccessibilityID.readerSearchButton]
         XCTAssertTrue(searchButton.waitForHittable(timeout: 5), "Search button should be hittable")

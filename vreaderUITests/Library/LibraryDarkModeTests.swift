@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class LibraryDarkModeTests: XCTestCase {
     var app: XCUIApplication!
 

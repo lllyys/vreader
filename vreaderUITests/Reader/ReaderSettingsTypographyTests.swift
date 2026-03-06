@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class ReaderSettingsTypographyTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -21,9 +22,7 @@ final class ReaderSettingsTypographyTests: XCTestCase {
     // MARK: - Helpers
 
     private func navigateToFirstBookAndOpenSettings() {
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 5), "Expected at least one book in the library")
-        firstBook.tap()
+        tapFirstBook(in: app)
 
         let settingsButton = app.buttons[AccessibilityID.readerSettingsButton]
         XCTAssertTrue(settingsButton.waitForHittable(timeout: 5), "Settings button should be hittable")
@@ -73,8 +72,8 @@ final class ReaderSettingsTypographyTests: XCTestCase {
     func testFontFamilyPickerExists() {
         navigateToFirstBookAndOpenSettings()
 
-        // The segmented picker should be accessible with its label
-        let picker = app.segmentedControls.firstMatch
+        // Use accessibility label to disambiguate from other segmented controls
+        let picker = app.segmentedControls["Font family"]
         XCTAssertTrue(
             picker.waitForExistence(timeout: 3),
             "Font family segmented picker should exist in settings panel"

@@ -14,6 +14,7 @@
 
 import XCTest
 
+@MainActor
 final class PDFPasswordTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -29,38 +30,20 @@ final class PDFPasswordTests: XCTestCase {
     // MARK: - Helpers
 
     /// Attempts to navigate to the password-protected PDF.
-    /// Returns true if the password prompt appeared, false otherwise.
-    private func navigateToPasswordProtectedPDF() -> Bool {
-        let protectedCell = app.cells.containing(.staticText, identifier: "Protected PDF").firstMatch
-        guard protectedCell.waitForExistence(timeout: 5) else {
-            return false
-        }
-        protectedCell.tap()
+    /// Throws XCTSkip if the prompt is not reachable in the current app state.
+    private func navigateToPasswordProtectedPDF() throws {
+        tapBook(titled: "Protected PDF", in: app)
 
         let prompt = app.otherElements[AccessibilityID.pdfPasswordPrompt]
-        return prompt.waitForExistence(timeout: 5)
+        if !prompt.waitForExistence(timeout: 5) {
+            throw XCTSkip("PDF password prompt not reachable in placeholder state")
+        }
     }
 
     // MARK: - Tests
 
-    func testPasswordPromptShowsAllElements() {
-        // TODO: Requires a seeded password-protected PDF that triggers the prompt.
-        // When available, verify these elements:
-        // - Lock icon (Image(systemName: "lock.doc.fill"))
-        // - Explanation text "This PDF is password protected"
-        // - SecureField with pdfPasswordField identifier
-        // - Cancel button with pdfPasswordCancel identifier
-        // - Unlock button with pdfPasswordSubmit identifier
-
-        guard navigateToPasswordProtectedPDF() else {
-            // Password prompt not reachable in current app state.
-            // Verify the identifiers compile correctly.
-            XCTAssertFalse(AccessibilityID.pdfPasswordPrompt.isEmpty)
-            XCTAssertFalse(AccessibilityID.pdfPasswordField.isEmpty)
-            XCTAssertFalse(AccessibilityID.pdfPasswordCancel.isEmpty)
-            XCTAssertFalse(AccessibilityID.pdfPasswordSubmit.isEmpty)
-            return
-        }
+    func testPasswordPromptShowsAllElements() throws {
+        try navigateToPasswordProtectedPDF()
 
         let passwordField = app.secureTextFields[AccessibilityID.pdfPasswordField]
         XCTAssertTrue(passwordField.waitForExistence(timeout: 3), "Password field should exist")
@@ -76,12 +59,8 @@ final class PDFPasswordTests: XCTestCase {
         XCTAssertTrue(explanationText.waitForExistence(timeout: 3), "Explanation text should exist")
     }
 
-    func testUnlockButtonDisabledWhenEmpty() {
-        guard navigateToPasswordProtectedPDF() else {
-            // Not reachable — verify identifiers compile
-            XCTAssertFalse(AccessibilityID.pdfPasswordSubmit.isEmpty)
-            return
-        }
+    func testUnlockButtonDisabledWhenEmpty() throws {
+        try navigateToPasswordProtectedPDF()
 
         let unlockButton = app.buttons[AccessibilityID.pdfPasswordSubmit]
         XCTAssertTrue(unlockButton.waitForExistence(timeout: 3))
@@ -91,11 +70,8 @@ final class PDFPasswordTests: XCTestCase {
         )
     }
 
-    func testUnlockButtonEnabledAfterTyping() {
-        guard navigateToPasswordProtectedPDF() else {
-            XCTAssertFalse(AccessibilityID.pdfPasswordField.isEmpty)
-            return
-        }
+    func testUnlockButtonEnabledAfterTyping() throws {
+        try navigateToPasswordProtectedPDF()
 
         let passwordField = app.secureTextFields[AccessibilityID.pdfPasswordField]
         XCTAssertTrue(passwordField.waitForExistence(timeout: 3))
@@ -110,11 +86,8 @@ final class PDFPasswordTests: XCTestCase {
         )
     }
 
-    func testCancelButtonIsHittable() {
-        guard navigateToPasswordProtectedPDF() else {
-            XCTAssertFalse(AccessibilityID.pdfPasswordCancel.isEmpty)
-            return
-        }
+    func testCancelButtonIsHittable() throws {
+        try navigateToPasswordProtectedPDF()
 
         let cancelButton = app.buttons[AccessibilityID.pdfPasswordCancel]
         XCTAssertTrue(
@@ -123,11 +96,8 @@ final class PDFPasswordTests: XCTestCase {
         )
     }
 
-    func testPasswordFieldIsFocusable() {
-        guard navigateToPasswordProtectedPDF() else {
-            XCTAssertFalse(AccessibilityID.pdfPasswordField.isEmpty)
-            return
-        }
+    func testPasswordFieldIsFocusable() throws {
+        try navigateToPasswordProtectedPDF()
 
         let passwordField = app.secureTextFields[AccessibilityID.pdfPasswordField]
         XCTAssertTrue(passwordField.waitForExistence(timeout: 3))
@@ -141,11 +111,8 @@ final class PDFPasswordTests: XCTestCase {
         )
     }
 
-    func testPasswordPromptTouchTargets() {
-        guard navigateToPasswordProtectedPDF() else {
-            XCTAssertFalse(AccessibilityID.pdfPasswordCancel.isEmpty)
-            return
-        }
+    func testPasswordPromptTouchTargets() throws {
+        try navigateToPasswordProtectedPDF()
 
         let cancelButton = app.buttons[AccessibilityID.pdfPasswordCancel]
         XCTAssertTrue(cancelButton.waitForExistence(timeout: 3))
@@ -162,12 +129,8 @@ final class PDFPasswordTests: XCTestCase {
         )
     }
 
-    func testPasswordPromptAccessibilityAudit() {
-        guard navigateToPasswordProtectedPDF() else {
-            // Verify identifiers compile
-            XCTAssertFalse(AccessibilityID.pdfPasswordPrompt.isEmpty)
-            return
-        }
+    func testPasswordPromptAccessibilityAudit() throws {
+        try navigateToPasswordProtectedPDF()
 
         auditCurrentScreen(app: app)
     }

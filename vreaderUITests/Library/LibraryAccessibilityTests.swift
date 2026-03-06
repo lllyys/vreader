@@ -7,6 +7,7 @@
 
 import XCTest
 
+@MainActor
 final class LibraryAccessibilityTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -39,21 +40,24 @@ final class LibraryAccessibilityTests: XCTestCase {
             NSPredicate(format: "label CONTAINS 'Test EPUB Book'")
         ).firstMatch
 
-        if epubBook.waitForExistence(timeout: 5) {
-            let label = epubBook.label
-            XCTAssertTrue(
-                label.contains("Test EPUB Book"),
-                "Book label should contain title"
-            )
-            XCTAssertTrue(
-                label.contains("by Test Author"),
-                "Book label should contain author"
-            )
-            XCTAssertTrue(
-                label.contains("EPUB format"),
-                "Book label should contain format badge"
-            )
-        }
+        XCTAssertTrue(
+            epubBook.waitForExistence(timeout: 5),
+            "Fixture 'Test EPUB Book' should exist in seeded library"
+        )
+
+        let label = epubBook.label
+        XCTAssertTrue(
+            label.contains("Test EPUB Book"),
+            "Book label should contain title"
+        )
+        XCTAssertTrue(
+            label.contains("by Test Author"),
+            "Book label should contain author"
+        )
+        XCTAssertTrue(
+            label.contains("EPUB format"),
+            "Book label should contain format badge"
+        )
     }
 
     /// Verifies a book with no author omits the "by" prefix in its accessibility label.
@@ -131,6 +135,11 @@ final class LibraryAccessibilityTests: XCTestCase {
 
     /// Verifies accessibility elements appear in logical order.
     /// Expected: navigation title -> toolbar buttons -> book items (or empty state).
+    ///
+    /// Note: XCUITest has limited APIs for verifying strict VoiceOver traversal order.
+    /// This test verifies existence and hittability of key elements, which confirms
+    /// they are reachable by assistive technologies. Strict ordering verification
+    /// requires manual VoiceOver testing.
     func testVoiceOverTraversalOrder() {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))

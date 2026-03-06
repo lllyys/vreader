@@ -4,15 +4,14 @@ import XCTest
 ///
 /// Tests that file availability badges are hidden for locally available books
 /// and that accessibility labels are properly set.
+@MainActor
 final class FileAvailabilityBadgeTests: XCTestCase {
 
     var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.launchArguments = ["--uitesting", "--seed-books"]
-        app.launch()
+        app = launchApp(seed: .books)
     }
 
     override func tearDownWithError() throws {
@@ -30,7 +29,8 @@ final class FileAvailabilityBadgeTests: XCTestCase {
                       "Library view should appear")
 
         // Wait for books to load
-        let firstBook = app.cells.firstMatch
+        let cardPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+        let firstBook = app.buttons.matching(cardPredicate).firstMatch
         XCTAssertTrue(firstBook.waitForExistence(timeout: 5),
                       "Seeded books should appear")
 
@@ -50,7 +50,8 @@ final class FileAvailabilityBadgeTests: XCTestCase {
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5),
                       "Library view should appear")
 
-        let firstBook = app.cells.firstMatch
+        let cardPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+        let firstBook = app.buttons.matching(cardPredicate).firstMatch
         XCTAssertTrue(firstBook.waitForExistence(timeout: 5),
                       "Seeded books should appear")
 

@@ -5,6 +5,7 @@
 
 import XCTest
 
+@MainActor
 final class VReaderUITests: XCTestCase {
     var app: XCUIApplication!
 

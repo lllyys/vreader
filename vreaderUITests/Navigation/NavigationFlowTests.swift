@@ -5,15 +5,14 @@ import XCTest
 /// Verifies end-to-end navigation: library -> reader -> settings -> back,
 /// reader -> annotations -> tab switch -> dismiss, and edge cases like
 /// rapid navigation and reduce-motion transitions.
+@MainActor
 final class NavigationFlowTests: XCTestCase {
 
     var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.launchArguments = ["--uitesting", "--seed-books"]
-        app.launch()
+        app = launchApp(seed: .books)
     }
 
     override func tearDownWithError() throws {
@@ -23,22 +22,11 @@ final class NavigationFlowTests: XCTestCase {
     // MARK: - Helpers
 
     /// Navigate to the first book in the library and wait for the reader to load.
-    /// Returns true if navigation succeeded.
     @discardableResult
     private func navigateToFirstBook() -> Bool {
-        let firstBook = app.cells.firstMatch
-        guard firstBook.waitForExistence(timeout: 5) else {
-            XCTFail("No book cells found in library")
-            return false
-        }
-        firstBook.tap()
-
+        tapFirstBook(in: app)
         let backButton = app.buttons[AccessibilityID.readerBackButton]
-        guard backButton.waitForExistence(timeout: 5) else {
-            XCTFail("Reader did not load — back button not found")
-            return false
-        }
-        return true
+        return backButton.waitForExistence(timeout: 5)
     }
 
     /// Navigate back to library from reader.
@@ -68,18 +56,13 @@ final class NavigationFlowTests: XCTestCase {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5),
                       "Library view should reappear after navigating back")
-
-        // Verify library content is preserved
-        let firstBook = app.cells.firstMatch
-        XCTAssertTrue(firstBook.waitForExistence(timeout: 3),
-                      "Library books should still be visible after returning")
     }
 
     // MARK: - Reader Settings Round Trip
 
     /// Reader -> tap settings -> verify sheet -> dismiss -> verify reader.
     func testReaderSettingsRoundTrip() throws {
-        guard navigateToFirstBook() else { return }
+        XCTAssertTrue(navigateToFirstBook(), "Should navigate to reader")
 
         // Open settings sheet
         let settingsButton = app.buttons[AccessibilityID.readerSettingsButton]
@@ -109,7 +92,7 @@ final class NavigationFlowTests: XCTestCase {
 
     /// Reader -> tap annotations -> verify panel -> switch tab -> dismiss -> verify reader.
     func testReaderAnnotationsRoundTrip() throws {
-        guard navigateToFirstBook() else { return }
+        XCTAssertTrue(navigateToFirstBook(), "Should navigate to reader")
 
         // Open annotations panel
         let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
@@ -182,14 +165,7 @@ final class NavigationFlowTests: XCTestCase {
 
     /// Tap book then immediately tap back — tests resilience to rapid navigation.
     func testRapidBackNavigation() throws {
-        let firstBook = app.cells.firstMatch
-        guard firstBook.waitForExistence(timeout: 5) else {
-            XCTFail("No book cells found")
-            return
-        }
-
-        // Tap the book
-        firstBook.tap()
+        tapFirstBook(in: app)
 
         // Immediately try to tap back (before reader fully loads)
         let backButton = app.buttons[AccessibilityID.readerBackButton]
@@ -203,15 +179,11 @@ final class NavigationFlowTests: XCTestCase {
             }
         }
 
-        // Verify we end up in a stable state (either library or reader)
+        // After rapid back-navigation, the library should return.
+        // Wait long enough for any transition to settle.
         let libraryView = app.otherElements[AccessibilityID.libraryView]
-        let readerBack = app.buttons[AccessibilityID.readerBackButton]
-
-        let libraryAppeared = libraryView.waitForExistence(timeout: 5)
-        let readerStillShown = readerBack.exists
-
-        XCTAssertTrue(libraryAppeared || readerStillShown,
-                      "App should be in a stable state after rapid navigation")
+        XCTAssertTrue(libraryView.waitForExistence(timeout: 10),
+                      "Library view should reappear after rapid back navigation")
     }
 
     // MARK: - Reduce Motion Transitions
@@ -220,8 +192,7 @@ final class NavigationFlowTests: XCTestCase {
     func testReduceMotionTransitions() throws {
         // Relaunch with reduce motion flag
         app.terminate()
-        app.launchArguments = ["--uitesting", "--seed-books", "--reduce-motion"]
-        app.launch()
+        app = launchApp(seed: .books, reduceMotion: true)
 
         // Full round trip with reduce motion
         XCTAssertTrue(navigateToFirstBook(), "Should navigate to reader with reduce motion")

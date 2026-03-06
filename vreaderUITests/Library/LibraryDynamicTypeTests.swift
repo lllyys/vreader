@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class LibraryDynamicTypeTests: XCTestCase {
     var app: XCUIApplication!
 

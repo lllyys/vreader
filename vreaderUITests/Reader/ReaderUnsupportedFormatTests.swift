@@ -6,6 +6,7 @@
 
 import XCTest
 
+@MainActor
 final class ReaderUnsupportedFormatTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -18,7 +19,7 @@ final class ReaderUnsupportedFormatTests: XCTestCase {
         app = nil
     }
 
-    func testUnsupportedFormatShowsMessage() {
+    func testUnsupportedFormatShowsMessage() throws {
         // TODO: This test requires a seeded book with an unsupported format.
         // The current test seeder (WI-UI-0) does not include such a fixture.
         // When available, navigate to the unsupported-format book and verify:
@@ -29,8 +30,6 @@ final class ReaderUnsupportedFormatTests: XCTestCase {
         //     "Unsupported format view should appear for unknown format books"
         // )
 
-        // For now, verify the identifier constant compiles correctly.
-        XCTAssertFalse(AccessibilityID.unsupportedFormatView.isEmpty,
-                        "Accessibility ID for unsupported format view should be defined")
+        throw XCTSkip("No unsupported-format fixture in test seeder yet")
     }
 }

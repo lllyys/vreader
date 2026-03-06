@@ -7,6 +7,7 @@
 
 import XCTest
 
+@MainActor
 final class LibraryEdgeCaseTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -52,16 +53,17 @@ final class LibraryEdgeCaseTests: XCTestCase {
             NSPredicate(format: "label CONTAINS 'Test Plain Text'")
         ).firstMatch
 
-        if plainTextBook.waitForExistence(timeout: 5) {
-            let label = plainTextBook.label
-            // Accessibility label for nil-author books omits "by Author" segment
-            XCTAssertFalse(
-                label.contains("by "),
-                "Book with nil author should not have 'by' in accessibility label, got: \(label)"
-            )
-        }
-        // If the specific fixture book doesn't exist, the test is inconclusive
-        // (fixture seeding not yet implemented). This is expected per WI-UI-0.
+        XCTAssertTrue(
+            plainTextBook.waitForExistence(timeout: 5),
+            "Fixture 'Test Plain Text' should exist in seeded library"
+        )
+
+        let label = plainTextBook.label
+        // Accessibility label for nil-author books omits "by Author" segment
+        XCTAssertFalse(
+            label.contains("by "),
+            "Book with nil author should not have 'by' in accessibility label, got: \(label)"
+        )
     }
 
     /// Verifies books with zero reading time do not show a reading time label.
@@ -82,14 +84,17 @@ final class LibraryEdgeCaseTests: XCTestCase {
             NSPredicate(format: "label CONTAINS 'Unread Book'")
         ).firstMatch
 
-        if unreadBook.waitForExistence(timeout: 5) {
-            let label = unreadBook.label
-            // AccessibilityFormatters.accessibleReadingTime returns nil for 0 seconds
-            XCTAssertFalse(
-                label.contains("minute") || label.contains("hour"),
-                "Book with zero reading time should not show time in label, got: \(label)"
-            )
-        }
+        XCTAssertTrue(
+            unreadBook.waitForExistence(timeout: 5),
+            "Fixture 'Unread Book' should exist in seeded library"
+        )
+
+        let label = unreadBook.label
+        // AccessibilityFormatters.accessibleReadingTime returns nil for 0 seconds
+        XCTAssertFalse(
+            label.contains("minute") || label.contains("hour"),
+            "Book with zero reading time should not show time in label, got: \(label)"
+        )
     }
 
     /// Verifies books with very long titles truncate without layout breaks.
@@ -107,12 +112,15 @@ final class LibraryEdgeCaseTests: XCTestCase {
             NSPredicate(format: "label CONTAINS 'A Very Long Book Title'")
         ).firstMatch
 
-        if longTitleBook.waitForExistence(timeout: 5) {
-            XCTAssertLessThanOrEqual(
-                longTitleBook.frame.maxX,
-                screenWidth,
-                "Long title should not extend beyond screen width"
-            )
-        }
+        XCTAssertTrue(
+            longTitleBook.waitForExistence(timeout: 5),
+            "Fixture 'A Very Long Book Title' should exist in seeded library"
+        )
+
+        XCTAssertLessThanOrEqual(
+            longTitleBook.frame.maxX,
+            screenWidth,
+            "Long title should not extend beyond screen width"
+        )
     }
 }
