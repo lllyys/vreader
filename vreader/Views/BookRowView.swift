@@ -3,9 +3,11 @@
 //
 // Key decisions:
 // - Horizontal layout with format icon, text stack, and trailing metadata.
-// - Accessibility label combines all visible information.
+// - Accessibility label uses AccessibilityFormatters for VoiceOver-friendly expanded text.
 // - Dynamic Type supported via system fonts.
 // - Reading time label omitted for zero reading time.
+//
+// @coordinates-with: AccessibilityFormatters.swift, LibraryBookItem.swift
 
 import SwiftUI
 
@@ -74,6 +76,7 @@ struct BookRowView: View {
         .padding(.vertical, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint("Double tap to open")
     }
 
     // MARK: - Private
@@ -83,6 +86,7 @@ struct BookRowView: View {
         case "epub": return .blue
         case "pdf": return .red
         case "txt": return .gray
+        case "md": return .purple
         default: return .secondary
         }
     }
@@ -90,17 +94,11 @@ struct BookRowView: View {
     private var formatIcon: String { book.formatIcon }
 
     private var accessibilityLabel: String {
-        var parts: [String] = [book.title]
-        if let author = book.author {
-            parts.append("by \(author)")
-        }
-        parts.append(book.formatBadge)
-        if let time = book.formattedReadingTime {
-            parts.append(time)
-        }
-        if let speed = book.formattedSpeed {
-            parts.append(speed)
-        }
-        return parts.joined(separator: ", ")
+        AccessibilityFormatters.accessibleBookDescription(
+            title: book.title,
+            author: book.author,
+            format: book.format,
+            readingTimeSeconds: book.totalReadingSeconds
+        )
     }
 }

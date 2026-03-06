@@ -209,6 +209,7 @@ final class TXTReaderViewModel {
 
         sessionTracker.endSessionIfNeeded()
         await txtService.close()
+        resetState()
     }
 
     /// Called when the app moves to background while reader is open.

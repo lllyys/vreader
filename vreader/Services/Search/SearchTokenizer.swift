@@ -76,10 +76,11 @@ enum SearchTokenizer {
     /// Wraps each token in double quotes for literal matching.
     /// Embedded double quotes are escaped as "" per FTS5 spec.
     static func escapeFTS5Query(_ query: String) -> String {
-        let tokens = query.split(separator: " ").map { token -> String in
-            let escaped = token.replacingOccurrences(of: "\"", with: "\"\"")
-            return "\"\(escaped)\""
-        }
+        let tokens = query.split(omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
+            .map { token -> String in
+                let escaped = token.replacingOccurrences(of: "\"", with: "\"\"")
+                return "\"\(escaped)\""
+            }
         return tokens.joined(separator: " ")
     }
 }

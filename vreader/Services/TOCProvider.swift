@@ -23,9 +23,10 @@ struct TOCEntry: Sendable, Equatable, Identifiable {
     init(
         title: String,
         level: Int,
-        locator: Locator
+        locator: Locator,
+        sequenceIndex: Int = 0
     ) {
-        self.id = "\(locator.canonicalHash):\(title)"
+        self.id = "\(locator.canonicalHash):\(title):\(sequenceIndex)"
         self.title = title
         self.level = max(0, level)
         self.locator = locator

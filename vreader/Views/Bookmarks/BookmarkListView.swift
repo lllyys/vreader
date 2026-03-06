@@ -89,6 +89,14 @@ private struct BookmarkRowView: View {
             }
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        let title = bookmark.title ?? "Untitled Bookmark"
+        let date = formattedDate(bookmark.createdAt)
+        return "\(title), created \(date)"
     }
 
     private func formattedDate(_ date: Date) -> String {

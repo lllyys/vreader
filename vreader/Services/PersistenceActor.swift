@@ -29,7 +29,7 @@ protocol BookPersisting: Sendable {
 
     /// Updates the provenance for an existing book.
     /// Note: V1 replaces provenance. V2 will maintain a provenance history array.
-    func appendProvenance(_ provenance: ImportProvenance, toBookWithKey key: String) async throws
+    func replaceProvenance(_ provenance: ImportProvenance, toBookWithKey key: String) async throws
 }
 
 /// Lightweight value type representing a book for cross-boundary transfer.
@@ -72,6 +72,11 @@ actor PersistenceActor: BookPersisting {
     }
 
     func insertBook(_ record: BookRecord) async throws -> BookRecord {
+        // Guard: fingerprintKey must match fingerprint's canonical key
+        guard record.fingerprintKey == record.fingerprint.canonicalKey else {
+            throw PersistenceError.invalidContent("Fingerprint key mismatch")
+        }
+
         let context = ModelContext(modelContainer)
 
         // Check for existing first (idempotent)
@@ -113,7 +118,7 @@ actor PersistenceActor: BookPersisting {
         return record
     }
 
-    func appendProvenance(_ provenance: ImportProvenance, toBookWithKey key: String) async throws {
+    func replaceProvenance(_ provenance: ImportProvenance, toBookWithKey key: String) async throws {
         let context = ModelContext(modelContainer)
         let predicate = #Predicate<Book> { $0.fingerprintKey == key }
         var descriptor = FetchDescriptor<Book>(predicate: predicate)

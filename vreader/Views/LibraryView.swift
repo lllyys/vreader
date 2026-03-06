@@ -76,8 +76,8 @@ struct LibraryView: View {
                 switch result {
                 case .success(let urls):
                     Task { await viewModel.importFiles(urls) }
-                case .failure:
-                    break
+                case .failure(let error):
+                    viewModel.setError(ErrorMessageAuditor.sanitize(error))
                 }
             }
         }

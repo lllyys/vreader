@@ -31,6 +31,8 @@ struct FileAvailabilityBadge: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(.ultraThinMaterial, in: Capsule())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(AccessibilityFormatters.accessibleFileAvailability(state: state))
         }
     }
 

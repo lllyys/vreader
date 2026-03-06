@@ -109,6 +109,14 @@ private struct AnnotationRowView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        let preview = String(annotation.content.prefix(100))
+        let date = formattedDate(annotation.createdAt)
+        return "Annotation: \(preview), created \(date)"
     }
 
     private func formattedDate(_ date: Date) -> String {

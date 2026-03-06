@@ -115,6 +115,21 @@ private struct HighlightRowView: View {
             }
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        var parts: [String] = ["\(highlight.color) highlight"]
+        let preview = String(highlight.selectedText.prefix(100))
+        parts.append(preview)
+        if let note = highlight.note, !note.isEmpty {
+            parts.append("note: \(note)")
+        }
+        if isOutOfBounds {
+            parts.append("may be inaccurate")
+        }
+        return parts.joined(separator: ", ")
     }
 
     private var highlightColor: Color {

@@ -22,14 +22,17 @@ struct AIAssistantView: View {
             case .idle:
                 Text("Select an action to get AI assistance.")
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("AI assistant ready. Select an action to get AI assistance.")
 
             case .loading:
                 ProgressView("Processing...")
+                    .accessibilityLabel("AI is processing your request.")
 
             case .streaming:
                 ScrollView {
                     Text(viewModel.responseText)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel("AI response: \(viewModel.responseText)")
                 }
 
             case .complete:
@@ -37,6 +40,7 @@ struct AIAssistantView: View {
                     Text(viewModel.responseText)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
+                        .accessibilityLabel("AI response complete: \(viewModel.responseText)")
                 }
 
             case .error(let message):
@@ -47,6 +51,8 @@ struct AIAssistantView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("AI error: \(message)")
 
             case .consentRequired:
                 AIConsentView {
@@ -60,6 +66,8 @@ struct AIAssistantView: View {
                     Text("AI features are currently disabled.")
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("AI features are currently disabled.")
             }
         }
         .padding()

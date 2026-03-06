@@ -198,6 +198,7 @@ final class MDReaderViewModel {
         }
 
         sessionTracker.endSessionIfNeeded()
+        resetState()
     }
 
     /// Called when the app moves to background while reader is open.

@@ -37,6 +37,9 @@ enum ImportError: Error, Equatable, Sendable {
     /// Book not found in persistence for the given key.
     case bookNotFound(String)
 
+    /// Persistence operation failed during import.
+    case persistenceFailed
+
     /// User-facing error message suitable for display in UI.
     /// Keeps messages generic to avoid leaking system/path details.
     var userMessage: String {
@@ -61,6 +64,8 @@ enum ImportError: Error, Equatable, Sendable {
             return "Permission to access this file was denied."
         case .bookNotFound:
             return "The book could not be found in the library."
+        case .persistenceFailed:
+            return "Could not save the book to the library."
         }
     }
 
@@ -75,6 +80,8 @@ enum ImportError: Error, Equatable, Sendable {
             return "sandboxCopyFailed: \(reason)"
         case .bookNotFound(let key):
             return "bookNotFound: \(key)"
+        case .persistenceFailed:
+            return "persistenceFailed"
         default:
             return userMessage
         }

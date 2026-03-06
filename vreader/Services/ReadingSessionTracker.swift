@@ -185,9 +185,12 @@ final class ReadingSessionTracker {
     }
 
     /// Records progress (locator update) for the current session.
-    /// No-op if idle.
+    /// No-op if idle or if locator belongs to a different book.
     func recordProgress(locator: Locator) {
         guard state.sessionId != nil else { return }
+        // Guard against cross-book locator updates
+        guard let bookFP = currentBookFingerprint,
+              locator.bookFingerprint == bookFP else { return }
         currentEndLocator = locator
     }
 

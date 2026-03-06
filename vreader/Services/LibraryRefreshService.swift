@@ -49,7 +49,7 @@ final class LibraryRefreshService: @unchecked Sendable {
         throttleInterval: TimeInterval = 5.0
     ) {
         self.fileChecker = fileChecker
-        self.throttleInterval = throttleInterval
+        self.throttleInterval = max(0, throttleInterval)
     }
 
     // MARK: - File Existence

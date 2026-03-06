@@ -51,6 +51,8 @@ struct VReaderApp: App {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Unable to open library. \(initError ?? "An unexpected error occurred.")")
             }
         }
     }

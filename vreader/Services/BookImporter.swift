@@ -118,7 +118,7 @@ final class BookImporter: Sendable {
                 importedAt: Date(),
                 originalURLBookmarkData: nil
             )
-            try await persistence.appendProvenance(provenance, toBookWithKey: fingerprintKey)
+            try await persistence.replaceProvenance(provenance, toBookWithKey: fingerprintKey)
 
             return ImportResult(
                 fingerprintKey: existing.fingerprintKey,
@@ -143,10 +143,13 @@ final class BookImporter: Sendable {
         let metadata: BookMetadata
         do {
             metadata = try await extractor.extractMetadata(from: fileURL)
-        } catch {
+        } catch let importErr as ImportError {
             // Rollback: remove the sandbox copy on downstream failure
             try? FileManager.default.removeItem(at: sandboxURL)
-            throw error
+            throw importErr
+        } catch {
+            try? FileManager.default.removeItem(at: sandboxURL)
+            throw ImportError.fileNotReadable("Metadata extraction failed")
         }
 
         // Step 10: Build provenance
@@ -171,10 +174,13 @@ final class BookImporter: Sendable {
         let persisted: BookRecord
         do {
             persisted = try await persistence.insertBook(record)
+        } catch let importErr as ImportError {
+            try? FileManager.default.removeItem(at: sandboxURL)
+            throw importErr
         } catch {
             // Rollback: remove the sandbox copy on persistence failure
             try? FileManager.default.removeItem(at: sandboxURL)
-            throw error
+            throw ImportError.persistenceFailed
         }
 
         // Step 12: Emit indexing trigger

@@ -11,8 +11,8 @@ actor MockPersistenceActor: BookPersisting {
     /// Count of insertBook calls (for verifying behavior).
     private(set) var insertCallCount = 0
 
-    /// Count of appendProvenance calls.
-    private(set) var appendProvenanceCallCount = 0
+    /// Count of replaceProvenance calls.
+    private(set) var replaceProvenanceCallCount = 0
 
     /// If set, insertBook will throw this error.
     var insertError: (any Error)?
@@ -20,8 +20,8 @@ actor MockPersistenceActor: BookPersisting {
     /// If set, findBook will throw this error.
     var findError: (any Error)?
 
-    /// If set, appendProvenance will throw this error.
-    var appendProvenanceError: (any Error)?
+    /// If set, replaceProvenance will throw this error.
+    var replaceProvenanceError: (any Error)?
 
     func findBook(byFingerprintKey key: String) async throws -> BookRecord? {
         if let error = findError { throw error }
@@ -41,11 +41,11 @@ actor MockPersistenceActor: BookPersisting {
         return record
     }
 
-    func appendProvenance(_ provenance: ImportProvenance, toBookWithKey key: String) async throws {
-        appendProvenanceCallCount += 1
-        if let error = appendProvenanceError { throw error }
+    func replaceProvenance(_ provenance: ImportProvenance, toBookWithKey key: String) async throws {
+        replaceProvenanceCallCount += 1
+        if let error = replaceProvenanceError { throw error }
         guard var book = books[key] else {
-            assertionFailure("MockPersistenceActor.appendProvenance: book not found for key \(key)")
+            assertionFailure("MockPersistenceActor.replaceProvenance: book not found for key \(key)")
             return
         }
         book = BookRecord(
@@ -72,10 +72,10 @@ actor MockPersistenceActor: BookPersisting {
     func reset() {
         books = [:]
         insertCallCount = 0
-        appendProvenanceCallCount = 0
+        replaceProvenanceCallCount = 0
         insertError = nil
         findError = nil
-        appendProvenanceError = nil
+        replaceProvenanceError = nil
     }
 
     /// Directly seeds a book for testing duplicate detection.

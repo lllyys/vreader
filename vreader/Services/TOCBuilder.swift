@@ -21,7 +21,7 @@ enum TOCBuilder {
         _ items: [EPUBSpineItem],
         fingerprint: DocumentFingerprint
     ) -> [TOCEntry] {
-        items.compactMap { item in
+        items.enumerated().compactMap { index, item in
             guard let rawTitle = item.title,
                   !rawTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
             let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -37,7 +37,8 @@ enum TOCBuilder {
             return TOCEntry(
                 title: title,
                 level: 0,
-                locator: locator
+                locator: locator,
+                sequenceIndex: index
             )
         }
     }
@@ -50,8 +51,9 @@ enum TOCBuilder {
         entries: [(title: String, level: Int, page: Int)],
         fingerprint: DocumentFingerprint
     ) -> [TOCEntry] {
-        entries.compactMap { entry in
-            guard !entry.title.isEmpty else { return nil }
+        entries.enumerated().compactMap { index, entry in
+            let trimmedTitle = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedTitle.isEmpty else { return nil }
 
             let locator = LocatorFactory.pdf(
                 fingerprint: fingerprint,
@@ -61,9 +63,10 @@ enum TOCBuilder {
             guard let locator else { return nil }
 
             return TOCEntry(
-                title: entry.title,
+                title: trimmedTitle,
                 level: entry.level,
-                locator: locator
+                locator: locator,
+                sequenceIndex: index
             )
         }
     }

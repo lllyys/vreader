@@ -3,9 +3,11 @@
 //
 // Key decisions:
 // - Uses system fonts for Dynamic Type support.
-// - Accessibility label combines title, author, format, and reading time.
+// - Accessibility label uses AccessibilityFormatters for VoiceOver-friendly expanded text.
 // - Cover placeholder uses format-specific colors.
 // - Reading time label omitted for zero reading time.
+//
+// @coordinates-with: AccessibilityFormatters.swift, LibraryBookItem.swift
 
 import SwiftUI
 
@@ -64,6 +66,7 @@ struct BookCardView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint("Double tap to open")
     }
 
     // MARK: - Private
@@ -73,6 +76,7 @@ struct BookCardView: View {
         case "epub": return .blue
         case "pdf": return .red
         case "txt": return .gray
+        case "md": return .purple
         default: return .secondary
         }
     }
@@ -80,17 +84,11 @@ struct BookCardView: View {
     private var formatIcon: String { book.formatIcon }
 
     private var accessibilityLabel: String {
-        var parts: [String] = [book.title]
-        if let author = book.author {
-            parts.append("by \(author)")
-        }
-        parts.append(book.formatBadge)
-        if let time = book.formattedReadingTime {
-            parts.append(time)
-        }
-        if let speed = book.formattedSpeed {
-            parts.append(speed)
-        }
-        return parts.joined(separator: ", ")
+        AccessibilityFormatters.accessibleBookDescription(
+            title: book.title,
+            author: book.author,
+            format: book.format,
+            readingTimeSeconds: book.totalReadingSeconds
+        )
     }
 }

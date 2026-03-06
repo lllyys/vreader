@@ -153,10 +153,13 @@ final class SearchService: SearchProviding, @unchecked Sendable {
             )
         }
 
+        // Recompute hasMore after locator resolution filtering
+        let resolvedHasMore = hasMore && !results.isEmpty
+
         return SearchResultPage(
             results: results,
             page: safePage,
-            hasMore: hasMore,
+            hasMore: resolvedHasMore,
             totalEstimate: nil
         )
     }

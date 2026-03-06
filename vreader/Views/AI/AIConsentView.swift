@@ -41,5 +41,7 @@ struct AIConsentView: View {
         }
         .padding()
         .accessibilityIdentifier("aiConsentView")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("AI consent required. Text from your reading position will be sent to an external AI provider. Double tap the agree button to enable AI features.")
     }
 }

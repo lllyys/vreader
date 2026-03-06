@@ -214,6 +214,12 @@
 		WI10TBF01 /* SearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10TFR01 /* SearchServiceTests.swift */; };
 		WI10TBF02 /* BackgroundIndexingCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10TFR02 /* BackgroundIndexingCoordinatorTests.swift */; };
 		WI10TBF03 /* SearchViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI10TFR03 /* SearchViewModelTests.swift */; };
+		WI13BF01 /* AccessibilityFormatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI13FR01 /* AccessibilityFormatters.swift */; };
+		WI13BF02 /* ErrorMessageAuditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI13FR02 /* ErrorMessageAuditor.swift */; };
+		WI13BF03 /* ReduceMotionHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI13FR03 /* ReduceMotionHelper.swift */; };
+		WI13TBF01 /* AccessibilityFormattersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI13TFR01 /* AccessibilityFormattersTests.swift */; };
+		WI13TBF02 /* ErrorMessageAuditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI13TFR02 /* ErrorMessageAuditorTests.swift */; };
+		WI13TBF03 /* VoiceOverAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI13TFR03 /* VoiceOverAuditTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -428,6 +434,12 @@
 		WI12TFR03 /* TombstoneStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TombstoneStoreTests.swift; sourceTree = "<group>"; };
 		WI12TFR04 /* SyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncServiceTests.swift; sourceTree = "<group>"; };
 		WI12TFR05 /* SyncTestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTestHelpers.swift; sourceTree = "<group>"; };
+		WI13FR01 /* AccessibilityFormatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityFormatters.swift; sourceTree = "<group>"; };
+		WI13FR02 /* ErrorMessageAuditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorMessageAuditor.swift; sourceTree = "<group>"; };
+		WI13FR03 /* ReduceMotionHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReduceMotionHelper.swift; sourceTree = "<group>"; };
+		WI13TFR01 /* AccessibilityFormattersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityFormattersTests.swift; sourceTree = "<group>"; };
+		WI13TFR02 /* ErrorMessageAuditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorMessageAuditorTests.swift; sourceTree = "<group>"; };
+		WI13TFR03 /* VoiceOverAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverAuditTests.swift; sourceTree = "<group>"; };
 		WI11FR01 /* AITypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITypes.swift; sourceTree = "<group>"; };
 		WI11FR02 /* AIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIError.swift; sourceTree = "<group>"; };
 		WI11FR03 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
@@ -492,10 +504,13 @@
 		1C50B198239F3C3BDCBF46EE /* Utils */ = {
 			isa = PBXGroup;
 			children = (
+				WI13FR01 /* AccessibilityFormatters.swift */,
 				B84D0E1452F211B986E8328A /* ContentHasher.swift */,
 				A43A801A0876E2437CE63808 /* EncodingDetector.swift */,
+				WI13FR02 /* ErrorMessageAuditor.swift */,
 				D2AEB48E4BF208D97EEF397C /* QuoteRecovery.swift */,
 				00FE0912FBC85E22DF8C637F /* ReadingTimeFormatter.swift */,
+				WI13FR03 /* ReduceMotionHelper.swift */,
 			);
 			path = Utils;
 			sourceTree = "<group>";
@@ -504,6 +519,7 @@
 			isa = PBXGroup;
 			children = (
 				D14E222357346107CB34B750 /* SmokeTests.swift */,
+				WI13GRP01 /* Accessibility */,
 				FDF7354ED65C36908A8EDE2E /* App */,
 				05198A5DC2B193BFACC2EFF5 /* Fixtures */,
 				B507E0BD7D08A4E11203ACB1 /* Integration */,
@@ -553,10 +569,20 @@
 		3EC42569191D945E8426907A /* Utils */ = {
 			isa = PBXGroup;
 			children = (
+				WI13TFR01 /* AccessibilityFormattersTests.swift */,
+				WI13TFR02 /* ErrorMessageAuditorTests.swift */,
 				92AB43BED5AC7096E7278A16 /* QuoteRecoveryTests.swift */,
 				9CED0BF7A8104C22C6E293BF /* ReadingTimeFormatterTests.swift */,
 			);
 			path = Utils;
+			sourceTree = "<group>";
+		};
+		WI13GRP01 /* Accessibility */ = {
+			isa = PBXGroup;
+			children = (
+				WI13TFR03 /* VoiceOverAuditTests.swift */,
+			);
+			path = Accessibility;
 			sourceTree = "<group>";
 		};
 		5CF05FDFCFCF1A5110783282 /* Locator */ = {
@@ -1187,6 +1213,9 @@
 				WI12TBF03 /* TombstoneStoreTests.swift in Sources */,
 				WI12TBF04 /* SyncServiceTests.swift in Sources */,
 				WI12TBF05 /* SyncTestHelpers.swift in Sources */,
+				WI13TBF01 /* AccessibilityFormattersTests.swift in Sources */,
+				WI13TBF02 /* ErrorMessageAuditorTests.swift in Sources */,
+				WI13TBF03 /* VoiceOverAuditTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1310,6 +1339,9 @@
 				WI12BF06 /* SyncStatusMonitor.swift in Sources */,
 				WI12BF07 /* SyncStatusView.swift in Sources */,
 				WI12BF08 /* FileAvailabilityBadge.swift in Sources */,
+				WI13BF01 /* AccessibilityFormatters.swift in Sources */,
+				WI13BF02 /* ErrorMessageAuditor.swift in Sources */,
+				WI13BF03 /* ReduceMotionHelper.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -15,15 +15,18 @@ struct SyncStatusView: View {
     let monitor: SyncStatusMonitor
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: iconName)
-                .font(.caption)
-                .foregroundStyle(iconColor)
-            Text(statusText)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        if monitor.status != .disabled {
+            HStack(spacing: 4) {
+                Image(systemName: iconName)
+                    .font(.caption)
+                    .foregroundStyle(iconColor)
+                Text(statusText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AccessibilityFormatters.accessibleSyncStatus(monitor.status))
         }
-        .opacity(monitor.status == .disabled ? 0 : 1)
     }
 
     // MARK: - Private

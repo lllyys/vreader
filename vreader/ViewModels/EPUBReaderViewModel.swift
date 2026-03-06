@@ -199,6 +199,10 @@ final class EPUBReaderViewModel {
 
         // Close parser
         await parser.close()
+
+        // Release state to free memory
+        metadata = nil
+        currentPosition = nil
     }
 
     /// Called when the app moves to background while reader is open.

@@ -128,7 +128,7 @@ actor AIService {
         }
 
         guard let factory = providerFactory else {
-            throw AIError.apiKeyMissing
+            throw AIError.providerError("No AI provider configured.")
         }
 
         return factory(apiKey)

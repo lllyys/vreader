@@ -135,6 +135,11 @@ final class LibraryViewModel {
         errorMessage = nil
     }
 
+    /// Sets an error message from external callers (e.g., file importer failures).
+    func setError(_ message: String) {
+        errorMessage = message
+    }
+
     // MARK: - Sorting
 
     /// Sorts books by the given sort order.
