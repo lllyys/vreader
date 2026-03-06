@@ -2,7 +2,7 @@ import XCTest
 
 /// WI-UI-17: Cross-screen accessibility audit sweep.
 ///
-/// Runs performAccessibilityAudit() on every reachable screen as a
+/// Runs accessibility audits on every reachable screen as a
 /// regression safety net. Individual WIs include per-screen audits;
 /// this is the consolidated sweep across all screens.
 @MainActor
@@ -39,18 +39,18 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
     // MARK: - Library Audits
 
     /// Accessibility audit on empty library state.
-    func testLibraryEmptyAudit() throws {
+    func testLibraryEmptyAudit() {
         app = launchApp(seed: .empty)
 
         let emptyState = app.otherElements[AccessibilityID.emptyLibraryState]
         XCTAssertTrue(emptyState.waitForExistence(timeout: 5),
                       "Empty library state should appear")
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     /// Accessibility audit on populated library state.
-    func testLibraryPopulatedAudit() throws {
+    func testLibraryPopulatedAudit() {
         app = launchApp(seed: .books)
 
         let cardPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
@@ -58,13 +58,13 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         XCTAssertTrue(firstBook.waitForExistence(timeout: 5),
                       "Seeded books should appear")
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     // MARK: - Reader Audits
 
     /// Accessibility audit on reader container (format placeholder).
-    func testReaderContainerAudit() throws {
+    func testReaderContainerAudit() {
         app = launchApp(seed: .books)
 
         guard navigateToFirstBook() else {
@@ -72,11 +72,11 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
             return
         }
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     /// Accessibility audit on reader settings sheet.
-    func testReaderSettingsAudit() throws {
+    func testReaderSettingsAudit() {
         app = launchApp(seed: .books)
 
         guard navigateToFirstBook() else {
@@ -93,11 +93,11 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         XCTAssertTrue(settingsPanel.waitForExistence(timeout: 5),
                       "Settings panel should appear")
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     /// Accessibility audit on annotations panel.
-    func testAnnotationsPanelAudit() throws {
+    func testAnnotationsPanelAudit() {
         app = launchApp(seed: .books)
 
         guard navigateToFirstBook() else {
@@ -114,11 +114,11 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         XCTAssertTrue(annotationsPanel.waitForExistence(timeout: 5),
                       "Annotations panel should appear")
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     /// Accessibility audit on search sheet.
-    func testSearchSheetAudit() throws {
+    func testSearchSheetAudit() {
         app = launchApp(seed: .books)
 
         guard navigateToFirstBook() else {
@@ -135,7 +135,7 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         XCTAssertTrue(searchSheet.waitForExistence(timeout: 5),
                       "Search sheet should appear")
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     // MARK: - AI Consent Audit
@@ -149,7 +149,7 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
             throw XCTSkip("AI consent view not reachable — navigation path not wired")
         }
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     // MARK: - PDF Password Prompt Audit
@@ -166,26 +166,26 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
             throw XCTSkip("PDF password prompt not shown — reader wiring incomplete")
         }
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     // MARK: - Error Screen Audit
 
     /// Accessibility audit on error initialization screen.
-    func testErrorScreenAudit() throws {
+    func testErrorScreenAudit() {
         app = launchApp(seed: .corruptDB)
 
         let errorTitle = app.staticTexts["Unable to Open Library"]
         XCTAssertTrue(errorTitle.waitForExistence(timeout: 5),
                       "Error screen should appear with --seed-corrupt-db")
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 
     // MARK: - Dark Mode Sweep
 
     /// Accessibility audit across library and reader in dark mode.
-    func testDarkModeAuditAllScreens() throws {
+    func testDarkModeAuditAllScreens() {
         app = launchApp(seed: .books, colorScheme: .dark)
 
         // Audit library in dark mode
@@ -193,14 +193,14 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         let firstBook = app.buttons.matching(cardPredicate).firstMatch
         XCTAssertTrue(firstBook.waitForExistence(timeout: 5),
                       "Books should appear in dark mode")
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
 
         // Navigate to reader and audit
         guard navigateToFirstBook() else {
             XCTFail("Could not navigate to reader in dark mode")
             return
         }
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
 
         // Navigate back and verify library
         navigateBackToLibrary()
@@ -211,7 +211,7 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
     // MARK: - AX5 (Largest Dynamic Type) Sweep
 
     /// Accessibility audit at the largest accessibility Dynamic Type size (AX5).
-    func testAX5AuditLibraryAndReaderChrome() throws {
+    func testAX5AuditLibraryAndReaderChrome() {
         app = launchApp(seed: .books, dynamicType: .ax5)
 
         // Audit library at AX5
@@ -219,7 +219,7 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         let firstBook = app.buttons.matching(cardPredicate).firstMatch
         XCTAssertTrue(firstBook.waitForExistence(timeout: 5),
                       "Books should appear at AX5 Dynamic Type")
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
 
         // Navigate to reader and audit chrome at AX5
         guard navigateToFirstBook() else {
@@ -240,6 +240,6 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         XCTAssertTrue(annotationsButton.waitForExistence(timeout: 3),
                       "Annotations button should exist at AX5")
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 }

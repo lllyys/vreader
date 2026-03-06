@@ -19,6 +19,35 @@ final class DeleteConfirmationTests: XCTestCase {
         app = nil
     }
 
+    // MARK: - Helpers
+
+    /// Switches to list mode and waits for list rows to appear.
+    private func switchToListMode() {
+        let toggle = app.buttons[AccessibilityID.viewModeToggle]
+        guard toggle.waitForHittable(timeout: 5) else { return }
+
+        if toggle.label == "Switch to list view" {
+            toggle.tap()
+            let switched = NSPredicate(format: "label == 'Switch to grid view'")
+            let expectation = XCTNSPredicateExpectation(predicate: switched, object: toggle)
+            _ = XCTWaiter.wait(for: [expectation], timeout: 3)
+        }
+    }
+
+    /// Finds the first book row element in list mode.
+    private func findFirstRow() -> XCUIElement? {
+        // In SwiftUI List, NavigationLink items appear as buttons with bookRow_ identifiers
+        let rowPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookRow_'")
+        let row = app.buttons.matching(rowPredicate).firstMatch
+        return row.waitForExistence(timeout: 5) ? row : nil
+    }
+
+    /// Returns the count of book rows in the library.
+    private func bookRowCount() -> Int {
+        let rowPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookRow_'")
+        return app.buttons.matching(rowPredicate).count
+    }
+
     // MARK: - Context Menu Delete (Grid Mode)
 
     /// Verifies long press on a book card reveals context menu with Delete option,
@@ -33,75 +62,70 @@ final class DeleteConfirmationTests: XCTestCase {
             toggle.tap()
         }
 
-        // Find the first book element and long press for context menu
-        // In grid mode, books are in scroll view with accessibility identifiers "bookCard_*"
-        let scrollView = app.scrollViews.firstMatch
-        if scrollView.waitForExistence(timeout: 5) {
-            // Long press the first book card in the grid
-            let cardPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
-            let firstCard = app.buttons.matching(cardPredicate).firstMatch
-            if firstCard.waitForHittable(timeout: 3) {
-                firstCard.press(forDuration: 1.0)
-
-                // Context menu should show Delete option
-                let deleteButton = app.buttons["Delete"]
-                XCTAssertTrue(
-                    deleteButton.waitForExistence(timeout: 3),
-                    "Context menu should show 'Delete' option"
-                )
-
-                // Tap Delete to trigger alert
-                deleteButton.tap()
-
-                // Verify confirmation alert appears
-                let alert = app.alerts["Delete Book"]
-                XCTAssertTrue(
-                    alert.waitForExistence(timeout: 3),
-                    "Delete confirmation alert should appear"
-                )
-            }
+        // Find the first book card in the grid
+        let cardPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+        let firstCard = app.buttons.matching(cardPredicate).firstMatch
+        guard firstCard.waitForHittable(timeout: 5) else {
+            XCTFail("No book card found in grid mode")
+            return
         }
+
+        // Long press for context menu
+        firstCard.press(forDuration: 1.0)
+
+        // Context menu should show Delete option
+        let deleteButton = app.buttons["Delete"]
+        XCTAssertTrue(
+            deleteButton.waitForExistence(timeout: 3),
+            "Context menu should show 'Delete' option"
+        )
+
+        // Tap Delete to trigger alert
+        deleteButton.tap()
+
+        // Verify confirmation alert appears
+        let alert = app.alerts["Delete Book"]
+        XCTAssertTrue(
+            alert.waitForExistence(timeout: 3),
+            "Delete confirmation alert should appear"
+        )
     }
 
-    /// Verifies the delete confirmation alert contains the book title.
+    /// Verifies the delete confirmation alert contains the expected message.
     func testAlertContainsBookTitle() {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // Switch to list mode for easier book identification
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
+        switchToListMode()
+
+        guard let firstRow = findFirstRow() else {
+            XCTFail("No book row found in list mode")
+            return
         }
 
-        // Swipe to delete the first cell to trigger the alert
-        let table = app.tables.firstMatch
-        if table.waitForExistence(timeout: 5) {
-            let firstCell = table.cells.firstMatch
-            if firstCell.waitForHittable(timeout: 3) {
-                firstCell.swipeLeft()
+        // Swipe to reveal delete action
+        firstRow.swipeLeft()
 
-                let deleteAction = app.buttons["Delete"]
-                if deleteAction.waitForHittable(timeout: 3) {
-                    deleteAction.tap()
-
-                    // Verify alert exists and contains "This cannot be undone."
-                    let alert = app.alerts["Delete Book"]
-                    if alert.waitForExistence(timeout: 3) {
-                        let message = alert.staticTexts.element(boundBy: 1)
-                        XCTAssertTrue(
-                            message.exists,
-                            "Alert should have a message"
-                        )
-                        let messageLabel = message.label
-                        XCTAssertTrue(
-                            messageLabel.contains("This cannot be undone"),
-                            "Alert message should contain 'This cannot be undone', got: \(messageLabel)"
-                        )
-                    }
-                }
-            }
+        let deleteAction = app.buttons["Delete"]
+        guard deleteAction.waitForHittable(timeout: 3) else {
+            XCTFail("Delete action not found after swipe")
+            return
         }
+        deleteAction.tap()
+
+        // Verify alert exists and contains "This cannot be undone."
+        let alert = app.alerts["Delete Book"]
+        guard alert.waitForExistence(timeout: 3) else {
+            XCTFail("Delete confirmation alert did not appear")
+            return
+        }
+
+        let messagePredicate = NSPredicate(format: "label CONTAINS 'This cannot be undone'")
+        let message = alert.staticTexts.matching(messagePredicate).firstMatch
+        XCTAssertTrue(
+            message.waitForExistence(timeout: 3),
+            "Alert message should contain 'This cannot be undone'"
+        )
     }
 
     /// Verifies Cancel dismisses the alert without removing the book.
@@ -109,34 +133,31 @@ final class DeleteConfirmationTests: XCTestCase {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // Switch to list mode
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
+        switchToListMode()
+
+        let initialCount = bookRowCount()
+        XCTAssertGreaterThan(initialCount, 0, "At least one book should exist")
+
+        guard let firstRow = findFirstRow() else {
+            XCTFail("No book row found in list mode")
+            return
         }
 
-        let table = app.tables.firstMatch
-        XCTAssertTrue(table.waitForExistence(timeout: 5), "Table should exist in list mode")
-        guard table.waitForExistence(timeout: 5) else { XCTFail("Table not found"); return }
-
-        let initialCellCount = table.cells.count
-
         // Trigger delete alert
-        let firstCell = table.cells.firstMatch
-        XCTAssertTrue(firstCell.waitForHittable(timeout: 3), "First cell should be hittable")
-        guard firstCell.waitForHittable(timeout: 3) else { XCTFail("First cell not hittable"); return }
-
-        firstCell.swipeLeft()
+        firstRow.swipeLeft()
 
         let deleteAction = app.buttons["Delete"]
-        XCTAssertTrue(deleteAction.waitForHittable(timeout: 3), "Delete action should appear after swipe")
-        guard deleteAction.waitForHittable(timeout: 3) else { XCTFail("Delete action not hittable"); return }
+        guard deleteAction.waitForHittable(timeout: 3) else {
+            XCTFail("Delete action not found after swipe")
+            return
+        }
         deleteAction.tap()
 
-        // Wait for alert
         let alert = app.alerts["Delete Book"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 3), "Delete confirmation alert should appear")
-        guard alert.waitForExistence(timeout: 3) else { XCTFail("Alert not found"); return }
+        guard alert.waitForExistence(timeout: 3) else {
+            XCTFail("Delete confirmation alert did not appear")
+            return
+        }
 
         // Tap Cancel
         let cancelButton = alert.buttons["Cancel"]
@@ -150,9 +171,9 @@ final class DeleteConfirmationTests: XCTestCase {
         )
 
         // Book count should not change
-        let finalCellCount = table.cells.count
+        let finalCount = bookRowCount()
         XCTAssertEqual(
-            initialCellCount, finalCellCount,
+            initialCount, finalCount,
             "Book count should not change after Cancel"
         )
     }
@@ -162,36 +183,32 @@ final class DeleteConfirmationTests: XCTestCase {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // Switch to list mode
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
+        switchToListMode()
+
+        guard let firstRow = findFirstRow() else {
+            XCTFail("No book row found in list mode")
+            return
         }
 
-        let table = app.tables.firstMatch
-        XCTAssertTrue(table.waitForExistence(timeout: 5), "Table should exist in list mode")
-        guard table.waitForExistence(timeout: 5) else { XCTFail("Table not found"); return }
+        // Capture the identifier of the row to be deleted
+        let deletedIdentifier = firstRow.identifier
+        XCTAssertFalse(deletedIdentifier.isEmpty, "Row should have an identifier")
 
-        let initialCellCount = table.cells.count
-        XCTAssertGreaterThan(initialCellCount, 0, "At least one book should exist")
-        guard initialCellCount > 0 else { XCTFail("No books in table"); return }
-
-        // Trigger delete alert
-        let firstCell = table.cells.firstMatch
-        XCTAssertTrue(firstCell.waitForHittable(timeout: 3), "First cell should be hittable")
-        guard firstCell.waitForHittable(timeout: 3) else { XCTFail("First cell not hittable"); return }
-
-        firstCell.swipeLeft()
+        // Trigger delete
+        firstRow.swipeLeft()
 
         let deleteAction = app.buttons["Delete"]
-        XCTAssertTrue(deleteAction.waitForHittable(timeout: 3), "Delete action should appear after swipe")
-        guard deleteAction.waitForHittable(timeout: 3) else { XCTFail("Delete action not hittable"); return }
+        guard deleteAction.waitForHittable(timeout: 3) else {
+            XCTFail("Delete action not found after swipe")
+            return
+        }
         deleteAction.tap()
 
-        // Wait for alert and confirm delete
         let alert = app.alerts["Delete Book"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 3), "Delete confirmation alert should appear")
-        guard alert.waitForExistence(timeout: 3) else { XCTFail("Alert not found"); return }
+        guard alert.waitForExistence(timeout: 3) else {
+            XCTFail("Delete confirmation alert did not appear")
+            return
+        }
 
         let confirmDelete = alert.buttons["Delete"]
         XCTAssertTrue(confirmDelete.exists, "Alert should have Delete button")
@@ -200,15 +217,12 @@ final class DeleteConfirmationTests: XCTestCase {
         // Wait for alert to dismiss
         _ = alert.waitForDisappearance(timeout: 3)
 
-        // Verify book count decreased
-        // Wait briefly for the deletion animation
-        let countPredicate = NSPredicate(format: "count < %d", initialCellCount)
-        let countExpectation = XCTNSPredicateExpectation(
-            predicate: countPredicate,
-            object: table.cells
+        // Verify the specific deleted row no longer exists
+        let deletedRow = app.buttons[deletedIdentifier]
+        XCTAssertTrue(
+            deletedRow.waitForDisappearance(timeout: 5),
+            "Deleted book row should no longer exist"
         )
-        let result = XCTWaiter.wait(for: [countExpectation], timeout: 5)
-        XCTAssertEqual(result, .completed, "Book count should decrease after delete")
     }
 
     // MARK: - Swipe-to-Delete (List Mode)
@@ -218,22 +232,15 @@ final class DeleteConfirmationTests: XCTestCase {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // Switch to list mode
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
+        switchToListMode()
+
+        guard let firstRow = findFirstRow() else {
+            XCTFail("No book row found in list mode")
+            return
         }
 
-        let table = app.tables.firstMatch
-        XCTAssertTrue(table.waitForExistence(timeout: 5), "Table should exist in list mode")
-        guard table.waitForExistence(timeout: 5) else { XCTFail("Table not found"); return }
-
-        let firstCell = table.cells.firstMatch
-        XCTAssertTrue(firstCell.waitForHittable(timeout: 3), "First cell should be hittable")
-        guard firstCell.waitForHittable(timeout: 3) else { XCTFail("First cell not hittable"); return }
-
         // Swipe left to reveal delete action
-        firstCell.swipeLeft()
+        firstRow.swipeLeft()
 
         // Delete button should appear
         let deleteButton = app.buttons["Delete"]
@@ -262,30 +269,19 @@ final class DeleteConfirmationTests: XCTestCase {
 
     /// Verifies deleting the last book transitions to empty state.
     func testDeleteLastBookShowsEmptyState() {
-        // This test requires a single-book seed state.
-        // With the standard fixture set, we would need to delete all books.
-        // For now, we verify the flow conceptually with the available seed data.
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // Switch to list mode
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
-        }
-
-        let table = app.tables.firstMatch
-        XCTAssertTrue(table.waitForExistence(timeout: 5), "Table should exist in list mode")
-        guard table.waitForExistence(timeout: 5) else { XCTFail("Table not found"); return }
+        switchToListMode()
 
         // Delete all books one by one (max 20 iterations to prevent infinite loop)
         var maxIterations = 20
-        while table.cells.count > 0, maxIterations > 0 {
+        while bookRowCount() > 0, maxIterations > 0 {
             maxIterations -= 1
-            let cell = table.cells.firstMatch
-            guard cell.waitForHittable(timeout: 3) else { break }
 
-            cell.swipeLeft()
+            guard let row = findFirstRow(), row.waitForHittable(timeout: 3) else { break }
+
+            row.swipeLeft()
 
             let deleteAction = app.buttons["Delete"]
             guard deleteAction.waitForHittable(timeout: 3) else { break }
@@ -300,12 +296,7 @@ final class DeleteConfirmationTests: XCTestCase {
 
             // Wait for deletion to complete
             _ = alert.waitForDisappearance(timeout: 3)
-
-            // Brief wait for animation
-            let disappeared = cell.waitForDisappearance(timeout: 3)
-            if !disappeared {
-                break
-            }
+            _ = row.waitForDisappearance(timeout: 3)
         }
 
         // After deleting all books, empty state should appear

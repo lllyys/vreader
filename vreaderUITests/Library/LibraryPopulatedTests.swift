@@ -99,10 +99,18 @@ final class LibraryPopulatedTests: XCTestCase {
             _ = XCTWaiter.wait(for: [expectation], timeout: 3)
         }
 
-        // Verify list elements appear
-        let tables = app.tables
-        XCTAssertTrue(tables.firstMatch.waitForExistence(timeout: 5),
+        // Verify list elements appear (SwiftUI List may be table or collectionView)
+        let table = app.tables.firstMatch
+        let collection = app.collectionViews.firstMatch
+        let listFound = table.waitForExistence(timeout: 3) || collection.waitForExistence(timeout: 3)
+        XCTAssertTrue(listFound,
                        "List mode should show a table/list with book rows")
+
+        // Verify book rows exist via identifier pattern
+        let rowPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookRow_'")
+        let row = app.buttons.matching(rowPredicate).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5),
+                       "At least one book row should exist in list mode")
     }
 
     // MARK: - Interactions

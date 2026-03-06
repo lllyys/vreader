@@ -70,10 +70,21 @@ struct VReaderApp: App {
             }
             #endif
 
+            #if DEBUG
+            let syncMonitor: SyncStatusMonitor? = config.enableSync ? {
+                let monitor = SyncStatusMonitor()
+                monitor.update(status: .idle)
+                return monitor
+            }() : nil
+            #else
+            let syncMonitor: SyncStatusMonitor? = nil
+            #endif
+
             self.contentView = ContentView(
                 viewModel: LibraryViewModel(
                     persistence: PersistenceActor(modelContainer: container)
-                )
+                ),
+                syncMonitor: syncMonitor
             )
         } catch {
             self.modelContainer = nil

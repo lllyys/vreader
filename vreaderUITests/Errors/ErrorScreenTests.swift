@@ -47,6 +47,8 @@ final class ErrorScreenTests: XCTestCase {
 
         // Collect all visible text on the error screen
         let allTexts = app.staticTexts.allElementsBoundByIndex
+        XCTAssertGreaterThan(allTexts.count, 0, "Error screen should have visible text elements")
+
         for text in allTexts {
             let label = text.label
 
@@ -73,6 +75,6 @@ final class ErrorScreenTests: XCTestCase {
             "Error screen should appear for corrupt DB"
         )
 
-        try app.performAccessibilityAudit()
+        auditCurrentScreen(app: app)
     }
 }

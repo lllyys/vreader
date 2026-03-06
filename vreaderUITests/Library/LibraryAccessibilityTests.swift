@@ -28,17 +28,10 @@ final class LibraryAccessibilityTests: XCTestCase {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // Switch to list mode for consistent cell queries
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
-        }
-
-        // Look for a book element that contains title and format
-        // AccessibilityFormatters produces: "Title, by Author, FORMAT format, X minutes read"
-        let epubBook = app.cells.containing(
-            NSPredicate(format: "label CONTAINS 'Test EPUB Book'")
-        ).firstMatch
+        // BookCardView/BookRowView uses accessibilityElement(children: .ignore)
+        // with a combined label. In grid mode, NavigationLink renders as a button.
+        let predicate = NSPredicate(format: "label CONTAINS[cd] 'Test EPUB Book'")
+        let epubBook = app.buttons.matching(predicate).firstMatch
 
         XCTAssertTrue(
             epubBook.waitForExistence(timeout: 5),
@@ -62,46 +55,53 @@ final class LibraryAccessibilityTests: XCTestCase {
 
     /// Verifies a book with no author omits the "by" prefix in its accessibility label.
     func testBookItemWithNoAuthorLabel() {
-        // Switch to list mode
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
+        // "Test Plain Text" has nil author — may need scrolling in LazyVGrid
+        let predicate = NSPredicate(format: "label CONTAINS[cd] 'Test Plain Text'")
+        let scrollTarget = app.scrollViews.firstMatch
+
+        var txtBook: XCUIElement?
+        for _ in 0..<6 {
+            let match = app.buttons.matching(predicate).firstMatch
+            if match.exists { txtBook = match; break }
+            if scrollTarget.exists { scrollTarget.swipeUp() } else { app.swipeUp() }
         }
 
-        // "Test Plain Text" has nil author
-        let txtBook = app.cells.containing(
-            NSPredicate(format: "label CONTAINS 'Test Plain Text'")
-        ).firstMatch
-
-        if txtBook.waitForExistence(timeout: 5) {
-            let label = txtBook.label
-            XCTAssertFalse(
-                label.contains("by "),
-                "Book with nil author should not include 'by' in label, got: \(label)"
-            )
+        guard let txtBook else {
+            XCTFail("Fixture 'Test Plain Text' should exist in seeded library")
+            return
         }
+
+        let label = txtBook.label
+        XCTAssertFalse(
+            label.contains("by "),
+            "Book with nil author should not include 'by' in label, got: \(label)"
+        )
     }
 
     /// Verifies a book with zero reading time omits the time from its accessibility label.
     func testBookItemWithZeroReadingTimeLabel() {
-        // Switch to list mode
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
+        // "Unread Book" has zero reading time — may need scrolling in LazyVGrid
+        let predicate = NSPredicate(format: "label CONTAINS[cd] 'Unread Book'")
+        let scrollTarget = app.scrollViews.firstMatch
+
+        var unreadBook: XCUIElement?
+        for _ in 0..<6 {
+            let match = app.buttons.matching(predicate).firstMatch
+            if match.exists { unreadBook = match; break }
+            if scrollTarget.exists { scrollTarget.swipeUp() } else { app.swipeUp() }
         }
 
-        // "Unread Book" has zero reading time
-        let unreadBook = app.cells.containing(
-            NSPredicate(format: "label CONTAINS 'Unread Book'")
-        ).firstMatch
-
-        if unreadBook.waitForExistence(timeout: 5) {
-            let label = unreadBook.label
-            XCTAssertFalse(
-                label.contains("read"),
-                "Book with zero reading time should not include reading time in label, got: \(label)"
-            )
+        guard let unreadBook else {
+            XCTFail("Fixture 'Unread Book' should exist in seeded library")
+            return
         }
+
+        let label = unreadBook.label
+        // Check for reading time phrases, not "read" which matches the title "Unread Book"
+        XCTAssertFalse(
+            label.contains("minute") || label.contains("hour"),
+            "Book with zero reading time should not include reading time in label, got: \(label)"
+        )
     }
 
     // MARK: - Interactive Element Labels

@@ -19,9 +19,11 @@ struct LibraryView: View {
     @State private var viewModel: LibraryViewModel
     @State private var bookToDelete: LibraryBookItem?
     @State private var isShowingImporter = false
+    let syncMonitor: SyncStatusMonitor?
 
-    init(viewModel: LibraryViewModel) {
+    init(viewModel: LibraryViewModel, syncMonitor: SyncStatusMonitor? = nil) {
         _viewModel = State(initialValue: viewModel)
+        self.syncMonitor = syncMonitor
     }
 
     var body: some View {
@@ -123,6 +125,13 @@ struct LibraryView: View {
                         deleteButton(for: book)
                     }
                     .accessibilityIdentifier("bookCard_\(book.fingerprintKey)")
+                    .accessibilityLabel(AccessibilityFormatters.accessibleBookDescription(
+                        title: book.title,
+                        author: book.author,
+                        format: book.format,
+                        readingTimeSeconds: book.totalReadingSeconds
+                    ))
+                    .accessibilityHint("Double tap to open")
                 }
             }
             .padding()
@@ -139,6 +148,13 @@ struct LibraryView: View {
                     deleteButton(for: book)
                 }
                 .accessibilityIdentifier("bookRow_\(book.fingerprintKey)")
+                .accessibilityLabel(AccessibilityFormatters.accessibleBookDescription(
+                    title: book.title,
+                    author: book.author,
+                    format: book.format,
+                    readingTimeSeconds: book.totalReadingSeconds
+                ))
+                .accessibilityHint("Double tap to open")
             }
         }
         .listStyle(.plain)
@@ -149,6 +165,7 @@ struct LibraryView: View {
             Image(systemName: "books.vertical")
                 .font(.system(size: 64))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
 
             Text("Your Library is Empty")
                 .font(.title2)
@@ -165,6 +182,7 @@ struct LibraryView: View {
             } label: {
                 Label("Import Books", systemImage: "plus.circle.fill")
                     .font(.headline)
+                    .frame(minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("importBooksButton")
@@ -175,6 +193,12 @@ struct LibraryView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        if let syncMonitor {
+            ToolbarItem(placement: .topBarLeading) {
+                SyncStatusView(monitor: syncMonitor)
+            }
+        }
+
         ToolbarItem(placement: .topBarTrailing) {
             Button {
                 viewModel.toggleViewMode()

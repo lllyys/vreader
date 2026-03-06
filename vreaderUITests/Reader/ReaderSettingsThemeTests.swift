@@ -24,6 +24,10 @@ final class ReaderSettingsThemeTests: XCTestCase {
     private func navigateToFirstBookAndOpenSettings() {
         tapFirstBook(in: app)
 
+        // Wait for reader chrome to fully load before interacting
+        let backButton = app.buttons[AccessibilityID.readerBackButton]
+        XCTAssertTrue(backButton.waitForExistence(timeout: 5), "Reader should load before opening settings")
+
         let settingsButton = app.buttons[AccessibilityID.readerSettingsButton]
         XCTAssertTrue(settingsButton.waitForHittable(timeout: 5), "Settings button should be hittable")
         settingsButton.tap()

@@ -176,22 +176,27 @@ func launchApp(
 // MARK: - Book Navigation Helpers
 
 /// Taps a book in the library by title, independent of grid/list mode.
-/// NavigationLink renders as button in grid, cell in list.
+/// Scrolls down if the book is not initially visible (LazyVGrid only loads visible elements).
 @MainActor
 func tapBook(titled title: String, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
     let predicate = NSPredicate(format: "label CONTAINS[cd] %@", title)
-    // Grid mode: NavigationLink is a button
-    let button = app.buttons.matching(predicate).firstMatch
-    if button.waitForExistence(timeout: 5) {
-        button.tap()
-        return
+    let scrollTarget = app.scrollViews.firstMatch
+
+    // Try up to 6 scroll attempts for lazy-loaded elements
+    for _ in 0..<6 {
+        let button = app.buttons.matching(predicate).firstMatch
+        if button.exists {
+            button.tap()
+            return
+        }
+        // Scroll down to load more elements
+        if scrollTarget.exists {
+            scrollTarget.swipeUp()
+        } else {
+            app.swipeUp()
+        }
     }
-    // List mode: NavigationLink is a cell
-    let cell = app.cells.matching(predicate).firstMatch
-    if cell.waitForExistence(timeout: 3) {
-        cell.tap()
-        return
-    }
+
     XCTFail("Could not find book '\(title)' in library", file: file, line: line)
 }
 

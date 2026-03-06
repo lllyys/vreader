@@ -20,6 +20,25 @@ final class LibraryEdgeCaseTests: XCTestCase {
         app = nil
     }
 
+    // MARK: - Helpers
+
+    /// Finds a book card by label substring, scrolling down to load lazy elements.
+    private func findCard(labelContaining text: String) -> XCUIElement? {
+        let predicate = NSPredicate(format: "label CONTAINS[cd] %@", text)
+        let scrollTarget = app.scrollViews.firstMatch
+
+        for _ in 0..<6 {
+            let match = app.buttons.matching(predicate).firstMatch
+            if match.exists { return match }
+            if scrollTarget.exists {
+                scrollTarget.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+        }
+        return nil
+    }
+
     /// Verifies a single book displays correctly (no scrolling needed).
     func testSingleBookDisplay() {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
@@ -40,23 +59,10 @@ final class LibraryEdgeCaseTests: XCTestCase {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // Switch to list mode for easier text inspection
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
+        guard let plainTextBook = findCard(labelContaining: "Test Plain Text") else {
+            XCTFail("Fixture 'Test Plain Text' should exist in seeded library")
+            return
         }
-
-        // The book "Test Plain Text" has nil author.
-        // Its accessibility label should NOT contain "by" prefix.
-        // We check that a book element exists whose label does NOT include "by".
-        let plainTextBook = app.cells.containing(
-            NSPredicate(format: "label CONTAINS 'Test Plain Text'")
-        ).firstMatch
-
-        XCTAssertTrue(
-            plainTextBook.waitForExistence(timeout: 5),
-            "Fixture 'Test Plain Text' should exist in seeded library"
-        )
 
         let label = plainTextBook.label
         // Accessibility label for nil-author books omits "by Author" segment
@@ -72,22 +78,10 @@ final class LibraryEdgeCaseTests: XCTestCase {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // Switch to list mode
-        let toggle = app.buttons[AccessibilityID.viewModeToggle]
-        if toggle.waitForHittable(timeout: 3), toggle.label == "Switch to list view" {
-            toggle.tap()
+        guard let unreadBook = findCard(labelContaining: "Unread Book") else {
+            XCTFail("Fixture 'Unread Book' should exist in seeded library")
+            return
         }
-
-        // "Unread Book" has zero reading time.
-        // Its accessibility label should not contain "read" time description.
-        let unreadBook = app.cells.containing(
-            NSPredicate(format: "label CONTAINS 'Unread Book'")
-        ).firstMatch
-
-        XCTAssertTrue(
-            unreadBook.waitForExistence(timeout: 5),
-            "Fixture 'Unread Book' should exist in seeded library"
-        )
 
         let label = unreadBook.label
         // AccessibilityFormatters.accessibleReadingTime returns nil for 0 seconds
@@ -103,19 +97,13 @@ final class LibraryEdgeCaseTests: XCTestCase {
         let libraryView = app.otherElements[AccessibilityID.libraryView]
         XCTAssertTrue(libraryView.waitForExistence(timeout: 5))
 
-        // The long-title fixture should exist in the library.
-        // Key check: the app doesn't crash, and the element's frame fits within screen width.
         let screenWidth = app.windows.firstMatch.frame.width
 
-        // Find any element containing the truncated title
-        let longTitleBook = app.staticTexts.containing(
-            NSPredicate(format: "label CONTAINS 'A Very Long Book Title'")
-        ).firstMatch
-
-        XCTAssertTrue(
-            longTitleBook.waitForExistence(timeout: 5),
-            "Fixture 'A Very Long Book Title' should exist in seeded library"
-        )
+        // May need scrolling in LazyVGrid to find the long-title fixture
+        guard let longTitleBook = findCard(labelContaining: "A Very Long Book Title") else {
+            XCTFail("Fixture 'A Very Long Book Title' should exist in seeded library")
+            return
+        }
 
         XCTAssertLessThanOrEqual(
             longTitleBook.frame.maxX,
