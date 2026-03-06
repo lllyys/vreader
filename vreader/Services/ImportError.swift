@@ -20,6 +20,8 @@ enum ImportError: Error, Equatable, Sendable {
     case hashComputationFailed(String)
 
     /// A book with the same fingerprint already exists in the library.
+    /// Note: V1 importer returns `ImportResult(isDuplicate: true)` instead of throwing this.
+    /// Reserved for future use by external callers or strict-mode import.
     case duplicateBook(fingerprintKey: String)
 
     /// Atomic copy to sandbox failed.
@@ -45,7 +47,8 @@ enum ImportError: Error, Equatable, Sendable {
     var userMessage: String {
         switch self {
         case .unsupportedFormat(let ext):
-            return "The file format \"\(ext)\" is not supported."
+            let displayExt = ext.isEmpty ? "unknown" : ext
+            return "The file format \"\(displayExt)\" is not supported."
         case .binaryMasquerade:
             return "This file appears to be a binary file, not a text document."
         case .fileNotReadable:

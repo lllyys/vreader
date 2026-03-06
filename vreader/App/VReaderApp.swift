@@ -51,9 +51,9 @@ struct VReaderApp: App {
             self.initError = nil
 
             #if DEBUG
-            // Seed test data synchronously before creating the ViewModel to avoid race
-            // with LibraryView.loadBooks(). In-memory store is fast enough for sync seeding.
-            // Uses Task.detached to avoid deadlocking the main thread with semaphore.wait().
+            // Seed test data before creating the ViewModel to avoid race with LibraryView.loadBooks().
+            // Uses Task.detached + semaphore to block init until seeding completes.
+            // Bounded timeout prevents indefinite hang if seeding fails.
             if config.isUITesting {
                 let persistence = PersistenceActor(modelContainer: container)
                 let seedConfig = config
@@ -66,7 +66,10 @@ struct VReaderApp: App {
                     }
                     semaphore.signal()
                 }
-                semaphore.wait()
+                let waitResult = semaphore.wait(timeout: .now() + 5.0)
+                if waitResult == .timedOut {
+                    assertionFailure("Test seeding timed out after 5 seconds")
+                }
             }
             #endif
 
@@ -80,9 +83,18 @@ struct VReaderApp: App {
             let syncMonitor: SyncStatusMonitor? = nil
             #endif
 
+            let persistence = PersistenceActor(modelContainer: container)
+            let booksDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ImportedBooks", isDirectory: true)
+            let importer = BookImporter(
+                persistence: persistence,
+                sandboxBooksDirectory: booksDir
+            )
+
             self.contentView = ContentView(
                 viewModel: LibraryViewModel(
-                    persistence: PersistenceActor(modelContainer: container)
+                    persistence: persistence,
+                    importer: importer
                 ),
                 syncMonitor: syncMonitor
             )

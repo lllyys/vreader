@@ -8,14 +8,16 @@ import Foundation
 /// Mock persistence for library operations.
 actor MockLibraryPersistence: LibraryPersisting {
     private var books: [String: LibraryBookItem] = [:]
+    private(set) var fetchCallCount = 0
     private(set) var deleteCallCount = 0
     private(set) var deletedKeys: [String] = []
     var fetchError: (any Error)?
     var deleteError: (any Error)?
 
     func fetchAllLibraryBooks() async throws -> [LibraryBookItem] {
+        fetchCallCount += 1
         if let error = fetchError { throw error }
-        return Array(books.values)
+        return Array(books.values).sorted { $0.fingerprintKey < $1.fingerprintKey }
     }
 
     func deleteBook(fingerprintKey: String) async throws {
@@ -39,6 +41,7 @@ actor MockLibraryPersistence: LibraryPersisting {
 
     func reset() {
         books = [:]
+        fetchCallCount = 0
         deleteCallCount = 0
         deletedKeys = []
         fetchError = nil

@@ -26,7 +26,7 @@ struct ImportResult: Sendable, Equatable {
 }
 
 /// Orchestrates the book import pipeline.
-final class BookImporter: Sendable {
+final class BookImporter: BookImporting, Sendable {
 
     /// Posted after a successful import. `userInfo["fingerprintKey"]` contains the key.
     static let indexingNeededNotification = Notification.Name("BookImporter.indexingNeeded")
@@ -63,6 +63,15 @@ final class BookImporter: Sendable {
         at fileURL: URL,
         source: ImportSource
     ) async throws -> ImportResult {
+        // Step 0: Reject non-file and directory URLs
+        guard fileURL.isFileURL else {
+            throw ImportError.fileNotReadable("Not a file URL")
+        }
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir), isDir.boolValue {
+            throw ImportError.fileNotReadable("Cannot import a directory")
+        }
+
         // Step 1: Validate format
         let format = try resolveFormat(fileURL: fileURL)
 
@@ -112,7 +121,7 @@ final class BookImporter: Sendable {
         // Step 7: Check for duplicate
         let fingerprintKey = fingerprint.canonicalKey
         if let existing = try await persistence.findBook(byFingerprintKey: fingerprintKey) {
-            // Append provenance for the new import source
+            // Replace provenance with the new import source
             let provenance = ImportProvenance(
                 source: source,
                 importedAt: Date(),
@@ -120,6 +129,8 @@ final class BookImporter: Sendable {
             )
             try await persistence.replaceProvenance(provenance, toBookWithKey: fingerprintKey)
 
+            // Return persisted metadata. For an identical file (same SHA-256 + size),
+            // detectedEncoding and other metadata are unchanged.
             return ImportResult(
                 fingerprintKey: existing.fingerprintKey,
                 title: existing.title,
@@ -132,11 +143,19 @@ final class BookImporter: Sendable {
         }
 
         // Step 8: Copy to sandbox (atomic: temp + rename)
-        let sandboxURL = try atomicCopyToSandbox(
+        let sandboxCopy = try atomicCopyToSandbox(
             sourceURL: fileURL,
             fingerprintKey: fingerprintKey,
             format: format
         )
+        let sandboxURL = sandboxCopy.url
+
+        /// Rollback helper: only delete sandbox file if this import created it.
+        /// Prevents deleting a valid file owned by a concurrent import.
+        func rollbackSandboxIfOwned() {
+            guard sandboxCopy.createdByThisImport else { return }
+            try? FileManager.default.removeItem(at: sandboxURL)
+        }
 
         // Step 9: Extract metadata from original URL (sandbox filename is hash-based)
         let extractor = extractors[format] ?? TXTMetadataExtractor()
@@ -144,12 +163,11 @@ final class BookImporter: Sendable {
         do {
             metadata = try await extractor.extractMetadata(from: fileURL)
         } catch let importErr as ImportError {
-            // Rollback: remove the sandbox copy on downstream failure
-            try? FileManager.default.removeItem(at: sandboxURL)
+            rollbackSandboxIfOwned()
             throw importErr
         } catch {
-            try? FileManager.default.removeItem(at: sandboxURL)
-            throw ImportError.fileNotReadable("Metadata extraction failed")
+            rollbackSandboxIfOwned()
+            throw ImportError.fileNotReadable("Metadata extraction failed: \(type(of: error))")
         }
 
         // Step 10: Build provenance
@@ -175,11 +193,10 @@ final class BookImporter: Sendable {
         do {
             persisted = try await persistence.insertBook(record)
         } catch let importErr as ImportError {
-            try? FileManager.default.removeItem(at: sandboxURL)
+            rollbackSandboxIfOwned()
             throw importErr
         } catch {
-            // Rollback: remove the sandbox copy on persistence failure
-            try? FileManager.default.removeItem(at: sandboxURL)
+            rollbackSandboxIfOwned()
             throw ImportError.persistenceFailed
         }
 
@@ -225,8 +242,15 @@ final class BookImporter: Sendable {
             let data = handle.readData(ofLength: maxBytes)
             return data
         } catch {
-            throw ImportError.fileNotReadable(error.localizedDescription)
+            throw ImportError.fileNotReadable("File read failed: \(type(of: error))")
         }
+    }
+
+    /// Result of a sandbox copy operation.
+    private struct SandboxCopyResult {
+        let url: URL
+        /// True if this call created the file; false if it already existed.
+        let createdByThisImport: Bool
     }
 
     /// Atomically copies the source file to the sandbox directory.
@@ -235,7 +259,7 @@ final class BookImporter: Sendable {
         sourceURL: URL,
         fingerprintKey: String,
         format: BookFormat
-    ) throws -> URL {
+    ) throws -> SandboxCopyResult {
         // Ensure sandbox directory exists
         try FileManager.default.createDirectory(
             at: sandboxBooksDirectory,
@@ -248,9 +272,9 @@ final class BookImporter: Sendable {
             .appendingPathComponent(safeName)
             .appendingPathExtension(ext)
 
-        // If already exists (re-import after crash), return existing
+        // If already exists (re-import after crash or concurrent import), return existing
         if FileManager.default.fileExists(atPath: finalURL.path) {
-            return finalURL
+            return SandboxCopyResult(url: finalURL, createdByThisImport: false)
         }
 
         let tempURL = sandboxBooksDirectory
@@ -259,7 +283,7 @@ final class BookImporter: Sendable {
         do {
             try FileManager.default.copyItem(at: sourceURL, to: tempURL)
         } catch {
-            throw ImportError.sandboxCopyFailed("Copy failed: \(error.localizedDescription)")
+            throw ImportError.sandboxCopyFailed("Copy failed: \(type(of: error))")
         }
 
         do {
@@ -267,9 +291,13 @@ final class BookImporter: Sendable {
         } catch {
             // Clean up temp file
             try? FileManager.default.removeItem(at: tempURL)
-            throw ImportError.sandboxCopyFailed("Rename failed: \(error.localizedDescription)")
+            // If finalURL now exists, a concurrent import won the race — not an error
+            if FileManager.default.fileExists(atPath: finalURL.path) {
+                return SandboxCopyResult(url: finalURL, createdByThisImport: false)
+            }
+            throw ImportError.sandboxCopyFailed("Rename failed")
         }
 
-        return finalURL
+        return SandboxCopyResult(url: finalURL, createdByThisImport: true)
     }
 }

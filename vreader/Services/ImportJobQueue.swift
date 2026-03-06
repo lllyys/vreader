@@ -7,7 +7,7 @@
 // - Each job has a unique UUID for tracking.
 // - State machine: pending -> running -> completed/failed/cancelled.
 // - Retry count is tracked; max retries is configurable.
-// - Cancelled jobs release any temp artifacts via cleanup callback.
+// - Cancelled jobs are marked terminal; callers handle cleanup externally.
 //
 // @coordinates-with: BookImporter.swift, ImportError.swift
 
@@ -105,39 +105,56 @@ actor ImportJobQueue {
         Array(jobs.values).sorted { $0.enqueuedAt < $1.enqueuedAt }
     }
 
-    /// Returns only pending jobs.
+    /// Returns only pending jobs, sorted by enqueue time.
     func pendingJobs() -> [ImportJob] {
-        allJobs().filter { $0.state == .pending }
+        jobs.values
+            .filter { $0.state == .pending }
+            .sorted { $0.enqueuedAt < $1.enqueuedAt }
     }
 
     // MARK: - State Transitions
 
     /// Marks a job as running. Only valid from `.pending` state.
-    func markRunning(jobId: UUID) {
-        guard var job = jobs[jobId], job.state == .pending else { return }
+    /// - Returns: `true` if the transition succeeded.
+    @discardableResult
+    func markRunning(jobId: UUID) -> Bool {
+        guard var job = jobs[jobId], job.state == .pending else { return false }
         job.state = .running
         jobs[jobId] = job
+        return true
     }
 
     /// Marks a job as completed with the given fingerprint key. Only valid from `.running` state.
-    func markCompleted(jobId: UUID, fingerprintKey: String) {
-        guard var job = jobs[jobId], job.state == .running else { return }
+    /// - Returns: `true` if the transition succeeded.
+    @discardableResult
+    func markCompleted(jobId: UUID, fingerprintKey: String) -> Bool {
+        guard var job = jobs[jobId], job.state == .running else { return false }
         job.state = .completed(fingerprintKey: fingerprintKey)
         jobs[jobId] = job
         taskHandles[jobId] = nil
+        return true
     }
 
     /// Marks a job as failed with the given error. Only valid from `.running` state.
-    func markFailed(jobId: UUID, error: ImportError) {
-        guard var job = jobs[jobId], job.state == .running else { return }
+    /// - Returns: `true` if the transition succeeded.
+    @discardableResult
+    func markFailed(jobId: UUID, error: ImportError) -> Bool {
+        guard var job = jobs[jobId], job.state == .running else { return false }
         job.state = .failed(error)
         jobs[jobId] = job
         taskHandles[jobId] = nil
+        return true
     }
 
-    /// Increments the attempt count for a job.
+    /// Increments the attempt count for a job. Only valid for non-terminal states.
     func incrementAttempt(jobId: UUID) {
         guard var job = jobs[jobId] else { return }
+        switch job.state {
+        case .completed, .failed, .cancelled:
+            return
+        case .pending, .running:
+            break
+        }
         job.attemptCount += 1
         jobs[jobId] = job
     }
@@ -191,9 +208,17 @@ actor ImportJobQueue {
     /// If the job does not exist, the handle is cancelled immediately.
     /// If a previous handle exists for this job, it is cancelled before replacement.
     func setTaskHandle(_ handle: Task<Void, Never>, forJobId id: UUID) {
-        guard jobs[id] != nil else {
+        guard let job = jobs[id] else {
             handle.cancel()
             return
+        }
+        // Only accept handles for non-terminal states
+        switch job.state {
+        case .completed, .failed, .cancelled:
+            handle.cancel()
+            return
+        case .pending, .running:
+            break
         }
         taskHandles[id]?.cancel()
         taskHandles[id] = handle

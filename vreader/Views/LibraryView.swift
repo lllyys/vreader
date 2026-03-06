@@ -7,7 +7,7 @@
 // - Grid uses adaptive columns for responsive layout.
 // - Sort picker and view mode toggle in toolbar.
 // - Empty state shown when library is empty.
-// - Swipe-to-delete in both grid and list modes.
+// - Delete via context menu (grid) and swipe actions (list).
 //
 // @coordinates-with: LibraryViewModel.swift, BookCardView.swift, BookRowView.swift, ReaderContainerView.swift
 
@@ -171,7 +171,7 @@ struct LibraryView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Import books to start reading. Supports EPUB, PDF, and TXT formats.")
+            Text("Import books to start reading. Supports EPUB, PDF, TXT, and Markdown formats.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -197,6 +197,16 @@ struct LibraryView: View {
             ToolbarItem(placement: .topBarLeading) {
                 SyncStatusView(monitor: syncMonitor)
             }
+        }
+
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                isShowingImporter = true
+            } label: {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel("Import books")
+            .accessibilityIdentifier("importBooksToolbarButton")
         }
 
         ToolbarItem(placement: .topBarTrailing) {

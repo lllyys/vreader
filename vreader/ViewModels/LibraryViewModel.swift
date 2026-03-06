@@ -1,14 +1,16 @@
 // Purpose: ViewModel for the library view. Manages book list, sorting,
-// view mode, deletion, and pull-to-refresh with throttling.
+// view mode, deletion, import wiring, and pull-to-refresh with throttling.
 //
 // Key decisions:
 // - @Observable + @MainActor for SwiftUI integration.
 // - Uses LibraryPersisting protocol for testability.
+// - Uses BookImporting protocol for import testability.
 // - Pull-to-refresh throttled to minimum 5s interval (configurable for tests).
 // - Sort applied locally after fetch for responsiveness.
 // - Books stored as [LibraryBookItem] (value types, not @Model).
+// - Import processes all URLs, collects first error, reloads books after all imports.
 //
-// @coordinates-with: LibraryPersisting.swift, LibraryBookItem.swift
+// @coordinates-with: LibraryPersisting.swift, LibraryBookItem.swift, BookImporting.swift
 
 import Foundation
 
@@ -56,6 +58,9 @@ final class LibraryViewModel {
     /// Persistence layer (injected for testability).
     private let persistence: any LibraryPersisting
 
+    /// Book importer (injected for testability). Nil means import is a no-op.
+    private let importer: (any BookImporting)?
+
     /// Minimum interval between refreshes.
     private let throttleInterval: TimeInterval
 
@@ -65,8 +70,13 @@ final class LibraryViewModel {
 
     // MARK: - Init
 
-    init(persistence: any LibraryPersisting, throttleInterval: TimeInterval = 5.0) {
+    init(
+        persistence: any LibraryPersisting,
+        importer: (any BookImporting)? = nil,
+        throttleInterval: TimeInterval = 5.0
+    ) {
         self.persistence = persistence
+        self.importer = importer
         self.throttleInterval = throttleInterval
     }
 
@@ -82,7 +92,7 @@ final class LibraryViewModel {
         } catch {
             errorMessage = error is CancellationError
                 ? nil
-                : (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                : ErrorMessageAuditor.sanitize(error)
         }
     }
 
@@ -116,13 +126,41 @@ final class LibraryViewModel {
             books.removeAll { $0.fingerprintKey == fingerprintKey }
             errorMessage = nil
         } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            errorMessage = ErrorMessageAuditor.sanitize(error)
         }
     }
 
-    /// Imports files from the given URLs. Stub for WI-6+ implementation.
+    /// Imports files from the given URLs via the BookImporter pipeline.
+    /// Processes all URLs sequentially, collecting the first error encountered.
+    /// Reloads the book list after all imports complete.
     func importFiles(_ urls: [URL]) async {
-        // TODO: Delegate to BookImporter pipeline
+        guard !urls.isEmpty else { return }
+        guard let importer else {
+            // No importer configured — nothing to do.
+            // This is expected only in tests using ViewModel without import wiring.
+            return
+        }
+
+        var firstError: (any Error)?
+
+        for url in urls {
+            do {
+                _ = try await importer.importFile(at: url, source: .filesApp)
+            } catch is CancellationError {
+                // Don't surface cancellation as user-facing error
+                continue
+            } catch {
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+
+        await loadBooks()
+
+        if let error = firstError {
+            errorMessage = ErrorMessageAuditor.sanitize(error)
+        }
     }
 
     /// Toggles between grid and list view modes.
