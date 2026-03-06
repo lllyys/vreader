@@ -137,6 +137,19 @@
 		TH02BF02A0B1C2D3E4F50002 /* TypographySettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH02FR02A0B1C2D3E4F50002 /* TypographySettingsTests.swift */; };
 		TH02BF03A0B1C2D3E4F50003 /* ReaderSettingsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH02FR03A0B1C2D3E4F50003 /* ReaderSettingsStoreTests.swift */; };
 		TH02BF04A0B1C2D3E4F50004 /* WCAGContrastTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH02FR04A0B1C2D3E4F50004 /* WCAGContrastTests.swift */; };
+		SI01BF01A0B1C2D3E4F50001 /* SearchTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI01FR01A0B1C2D3E4F50001 /* SearchTextExtractor.swift */; };
+		SI01BF02A0B1C2D3E4F50002 /* SearchTextNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI01FR02A0B1C2D3E4F50002 /* SearchTextNormalizer.swift */; };
+		SI01BF03A0B1C2D3E4F50003 /* SearchIndexStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI01FR03A0B1C2D3E4F50003 /* SearchIndexStore.swift */; };
+		SI01BF04A0B1C2D3E4F50004 /* SearchHitToLocatorResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI01FR04A0B1C2D3E4F50004 /* SearchHitToLocatorResolver.swift */; };
+		SI01BF05A0B1C2D3E4F50005 /* PDFTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI01FR05A0B1C2D3E4F50005 /* PDFTextExtractor.swift */; };
+		SI01BF06A0B1C2D3E4F50006 /* TXTTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI01FR06A0B1C2D3E4F50006 /* TXTTextExtractor.swift */; };
+		SI01BF07A0B1C2D3E4F50007 /* TokenSpan.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI01FR07A0B1C2D3E4F50007 /* TokenSpan.swift */; };
+		SI01BF08A0B1C2D3E4F50008 /* SearchTokenizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI01FR08A0B1C2D3E4F50008 /* SearchTokenizer.swift */; };
+		SI02BF01A0B1C2D3E4F50001 /* SearchTextNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI02FR01A0B1C2D3E4F50001 /* SearchTextNormalizerTests.swift */; };
+		SI02BF02A0B1C2D3E4F50002 /* SearchIndexStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI02FR02A0B1C2D3E4F50002 /* SearchIndexStoreTests.swift */; };
+		SI02BF03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI02FR03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift */; };
+		SI02BF04A0B1C2D3E4F50004 /* TokenSpanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI02FR04A0B1C2D3E4F50004 /* TokenSpanTests.swift */; };
+		SI02BF05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI02FR05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -290,6 +303,19 @@
 		TH02FR02A0B1C2D3E4F50002 /* TypographySettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypographySettingsTests.swift; sourceTree = "<group>"; };
 		TH02FR03A0B1C2D3E4F50003 /* ReaderSettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsStoreTests.swift; sourceTree = "<group>"; };
 		TH02FR04A0B1C2D3E4F50004 /* WCAGContrastTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WCAGContrastTests.swift; sourceTree = "<group>"; };
+		SI01FR01A0B1C2D3E4F50001 /* SearchTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTextExtractor.swift; sourceTree = "<group>"; };
+		SI01FR02A0B1C2D3E4F50002 /* SearchTextNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTextNormalizer.swift; sourceTree = "<group>"; };
+		SI01FR03A0B1C2D3E4F50003 /* SearchIndexStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchIndexStore.swift; sourceTree = "<group>"; };
+		SI01FR04A0B1C2D3E4F50004 /* SearchHitToLocatorResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchHitToLocatorResolver.swift; sourceTree = "<group>"; };
+		SI01FR05A0B1C2D3E4F50005 /* PDFTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFTextExtractor.swift; sourceTree = "<group>"; };
+		SI01FR06A0B1C2D3E4F50006 /* TXTTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTTextExtractor.swift; sourceTree = "<group>"; };
+		SI01FR07A0B1C2D3E4F50007 /* TokenSpan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenSpan.swift; sourceTree = "<group>"; };
+		SI01FR08A0B1C2D3E4F50008 /* SearchTokenizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTokenizer.swift; sourceTree = "<group>"; };
+		SI02FR01A0B1C2D3E4F50001 /* SearchTextNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTextNormalizerTests.swift; sourceTree = "<group>"; };
+		SI02FR02A0B1C2D3E4F50002 /* SearchIndexStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchIndexStoreTests.swift; sourceTree = "<group>"; };
+		SI02FR03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchHitToLocatorResolverTests.swift; sourceTree = "<group>"; };
+		SI02FR04A0B1C2D3E4F50004 /* TokenSpanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenSpanTests.swift; sourceTree = "<group>"; };
+		SI02FR05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchLocatorSliceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -316,6 +342,7 @@
 				61E8B92C301E5470AB98C87E /* LocatorTests.swift */,
 				4C87C165AFE78571456C14D1 /* LocatorValidationTests.swift */,
 				F8DEE3B767FC8F7457067C11 /* MutationDriftTests.swift */,
+				SI02FR04A0B1C2D3E4F50004 /* TokenSpanTests.swift */,
 				TH02FR01A0B1C2D3E4F50001 /* ReaderThemeTests.swift */,
 				EE41196788F697BB4ACD4B06 /* ReadingSessionTests.swift */,
 				03FA3AC72012ED6686293475 /* ReadingStatsTests.swift */,
@@ -497,6 +524,7 @@
 				0069CA3A00998B13DE06E424 /* LocatorIntegrationTests.swift */,
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* MDIntegrationTests.swift */,
 				PDF02FR02A0B1C2D3E4F50002 /* PDFIntegrationTests.swift */,
+				SI02FR05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift */,
 				E50B0954852C3621D008EE07 /* TXTBridgeOffsetTests.swift */,
 			);
 			path = Integration;
@@ -530,6 +558,7 @@
 				EF527EE1B64863AD6FA373B4 /* EPUB */,
 				5F8FFECE27C7EBAE6B16B555 /* Locator */,
 				8D9655BC6E5498F95CB02833 /* Mocks */,
+				SI02GR01A0B1C2D3E4F50001 /* Search */,
 				60B87C16019C31ED0DAABBBC /* TXT */,
 				MD03GR02A0B1C2D3E4F50002 /* MD */,
 			);
@@ -551,6 +580,7 @@
 				DC606D4AF30DF956E04C13DF /* LibrarySortOrder.swift */,
 				3C567EE93DC61BBB63CEAC20 /* Locator.swift */,
 				831F853E3D42A27170BB0F92 /* ReadingPosition.swift */,
+				SI01FR07A0B1C2D3E4F50007 /* TokenSpan.swift */,
 				38A104E5CBC93D0266E6C21E /* ReadingSession.swift */,
 				TH01FR01A0B1C2D3E4F50001 /* ReaderTheme.swift */,
 				8A12A0D94CF17D48152929F0 /* ReadingStats.swift */,
@@ -605,6 +635,7 @@
 				41D94EE13466B0286DEA2EA7 /* ReadingSessionTracker.swift */,
 				FDAD081C3FE054319EF94E4A /* EPUB */,
 				5CF05FDFCFCF1A5110783282 /* Locator */,
+				SI01GR01A0B1C2D3E4F50001 /* Search */,
 				C0B6C8014BAA5AFC1F7476A3 /* TXT */,
 				MD03GR01A0B1C2D3E4F50001 /* MD */,
 			);
@@ -670,6 +701,30 @@
 				MD07FR01A0B1C2D3E4F50001 /* MDAttributedStringRendererTests.swift */,
 			);
 			path = MD;
+			sourceTree = "<group>";
+		};
+		SI01GR01A0B1C2D3E4F50001 /* Search */ = {
+			isa = PBXGroup;
+			children = (
+				SI01FR01A0B1C2D3E4F50001 /* SearchTextExtractor.swift */,
+				SI01FR02A0B1C2D3E4F50002 /* SearchTextNormalizer.swift */,
+				SI01FR03A0B1C2D3E4F50003 /* SearchIndexStore.swift */,
+				SI01FR04A0B1C2D3E4F50004 /* SearchHitToLocatorResolver.swift */,
+				SI01FR05A0B1C2D3E4F50005 /* PDFTextExtractor.swift */,
+				SI01FR08A0B1C2D3E4F50008 /* SearchTokenizer.swift */,
+				SI01FR06A0B1C2D3E4F50006 /* TXTTextExtractor.swift */,
+			);
+			path = Search;
+			sourceTree = "<group>";
+		};
+		SI02GR01A0B1C2D3E4F50001 /* Search */ = {
+			isa = PBXGroup;
+			children = (
+				SI02FR01A0B1C2D3E4F50001 /* SearchTextNormalizerTests.swift */,
+				SI02FR02A0B1C2D3E4F50002 /* SearchIndexStoreTests.swift */,
+				SI02FR03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift */,
+			);
+			path = Search;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -841,6 +896,11 @@
 				TH02BF02A0B1C2D3E4F50002 /* TypographySettingsTests.swift in Sources */,
 				TH02BF03A0B1C2D3E4F50003 /* ReaderSettingsStoreTests.swift in Sources */,
 				TH02BF04A0B1C2D3E4F50004 /* WCAGContrastTests.swift in Sources */,
+				SI02BF01A0B1C2D3E4F50001 /* SearchTextNormalizerTests.swift in Sources */,
+				SI02BF02A0B1C2D3E4F50002 /* SearchIndexStoreTests.swift in Sources */,
+				SI02BF03A0B1C2D3E4F50003 /* SearchHitToLocatorResolverTests.swift in Sources */,
+				SI02BF04A0B1C2D3E4F50004 /* TokenSpanTests.swift in Sources */,
+				SI02BF05A0B1C2D3E4F50005 /* SearchLocatorSliceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -913,6 +973,14 @@
 				TH01BF02A0B1C2D3E4F50002 /* TypographySettings.swift in Sources */,
 				TH01BF03A0B1C2D3E4F50003 /* ReaderSettingsStore.swift in Sources */,
 				TH01BF04A0B1C2D3E4F50004 /* ReaderSettingsPanel.swift in Sources */,
+				SI01BF01A0B1C2D3E4F50001 /* SearchTextExtractor.swift in Sources */,
+				SI01BF02A0B1C2D3E4F50002 /* SearchTextNormalizer.swift in Sources */,
+				SI01BF03A0B1C2D3E4F50003 /* SearchIndexStore.swift in Sources */,
+				SI01BF04A0B1C2D3E4F50004 /* SearchHitToLocatorResolver.swift in Sources */,
+				SI01BF05A0B1C2D3E4F50005 /* PDFTextExtractor.swift in Sources */,
+				SI01BF06A0B1C2D3E4F50006 /* TXTTextExtractor.swift in Sources */,
+				SI01BF07A0B1C2D3E4F50007 /* TokenSpan.swift in Sources */,
+				SI01BF08A0B1C2D3E4F50008 /* SearchTokenizer.swift in Sources */,
 				F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
