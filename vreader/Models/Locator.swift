@@ -160,10 +160,11 @@ struct Locator: Codable, Hashable, Sendable {
     }
 
     /// Thread-safe locale-independent float formatting with 6 decimal places.
-    /// Uses String(format:) instead of a shared NumberFormatter to avoid
-    /// thread-safety issues with NSFormatter's mutable state.
+    /// Explicit POSIX locale ensures consistent output across devices/regions.
+    private static let posixLocale = Locale(identifier: "en_US_POSIX")
+
     private func roundedString(_ value: Double) -> String {
-        String(format: "%.6f", value)
+        String(format: "%.6f", locale: Self.posixLocale, value)
     }
 
     private func normalizeLineEndings(_ s: String) -> String {

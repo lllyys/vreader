@@ -357,8 +357,8 @@ final class EPUBReaderViewModel {
     // MARK: - Private: Navigation Helpers
 
     private func estimateTotalProgression(spineIndex: Int) -> Double {
-        guard let metadata, metadata.spineCount > 0 else { return 0 }
-        return Double(spineIndex) / Double(metadata.spineCount)
+        guard let metadata, metadata.spineCount > 1 else { return 0 }
+        return Double(spineIndex) / Double(metadata.spineCount - 1)
     }
 
     // MARK: - Private: Error Description

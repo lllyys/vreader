@@ -10,6 +10,10 @@ import SwiftData
 extension PersistenceActor: BookmarkPersisting {
 
     func addBookmark(locator: Locator, title: String?, toBookWithKey key: String) async throws -> BookmarkRecord {
+        guard locator.bookFingerprint.canonicalKey == key else {
+            throw PersistenceError.recordNotFound("Locator fingerprint does not match book key")
+        }
+
         let context = ModelContext(modelContainer)
         let predicate = #Predicate<Book> { $0.fingerprintKey == key }
         var descriptor = FetchDescriptor<Book>(predicate: predicate)

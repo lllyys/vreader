@@ -62,7 +62,10 @@ final class BookmarkListViewModel {
                 title: title,
                 toBookWithKey: bookFingerprintKey
             )
-            bookmarks.insert(record, at: 0)
+            // Upsert: avoid duplicates if store returned existing record
+            if !bookmarks.contains(where: { $0.bookmarkId == record.bookmarkId }) {
+                bookmarks.insert(record, at: 0)
+            }
         } catch {
             errorMessage = "Failed to add bookmark."
         }

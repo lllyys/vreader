@@ -38,14 +38,14 @@ final class ReadingStats {
     ) {
         self.bookFingerprintKey = bookFingerprint.canonicalKey
         self.bookFingerprint = bookFingerprint
-        self.totalReadingSeconds = totalReadingSeconds
-        self.sessionCount = sessionCount
+        self.totalReadingSeconds = max(0, totalReadingSeconds)
+        self.sessionCount = max(0, sessionCount)
         self.lastReadAt = lastReadAt
         self.averagePagesPerHour = averagePagesPerHour
         self.averageWordsPerMinute = averageWordsPerMinute
-        self.totalPagesRead = totalPagesRead
-        self.totalWordsRead = totalWordsRead
-        self.longestSessionSeconds = longestSessionSeconds
+        self.totalPagesRead = totalPagesRead.map { max(0, $0) }
+        self.totalWordsRead = totalWordsRead.map { max(0, $0) }
+        self.longestSessionSeconds = max(0, longestSessionSeconds)
     }
 
     // MARK: - Recomputation

@@ -14,6 +14,10 @@ extension PersistenceActor: AnnotationPersisting {
         content: String,
         toBookWithKey key: String
     ) async throws -> AnnotationRecord {
+        guard locator.bookFingerprint.canonicalKey == key else {
+            throw PersistenceError.recordNotFound("Locator fingerprint does not match book key")
+        }
+
         let context = ModelContext(modelContainer)
         let predicate = #Predicate<Book> { $0.fingerprintKey == key }
         var descriptor = FetchDescriptor<Book>(predicate: predicate)
@@ -25,7 +29,7 @@ extension PersistenceActor: AnnotationPersisting {
 
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw PersistenceError.recordNotFound("Annotation content cannot be empty")
+            throw PersistenceError.invalidContent("Annotation content cannot be empty")
         }
 
         let annotation = AnnotationNote(locator: locator, content: trimmed)
@@ -65,7 +69,7 @@ extension PersistenceActor: AnnotationPersisting {
 
         let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else {
-            throw PersistenceError.recordNotFound("Annotation content cannot be empty")
+            throw PersistenceError.invalidContent("Annotation content cannot be empty")
         }
 
         annotation.content = trimmedContent

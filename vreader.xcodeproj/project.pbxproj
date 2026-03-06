@@ -7,6 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		WI12BF01 /* SyncTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12FR01 /* SyncTypes.swift */; };
+		WI12BF02 /* SyncConflictResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12FR02 /* SyncConflictResolver.swift */; };
+		WI12BF03 /* FileAvailabilityStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12FR03 /* FileAvailabilityStateMachine.swift */; };
+		WI12BF04 /* TombstoneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12FR04 /* TombstoneStore.swift */; };
+		WI12BF05 /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12FR05 /* SyncService.swift */; };
+		WI12BF06 /* SyncStatusMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12FR06 /* SyncStatusMonitor.swift */; };
+		WI12BF07 /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12FR07 /* SyncStatusView.swift */; };
+		WI12BF08 /* FileAvailabilityBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12FR08 /* FileAvailabilityBadge.swift */; };
+		WI12TBF01 /* SyncConflictResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12TFR01 /* SyncConflictResolverTests.swift */; };
+		WI12TBF02 /* FileAvailabilityStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12TFR02 /* FileAvailabilityStateMachineTests.swift */; };
+		WI12TBF03 /* TombstoneStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12TFR03 /* TombstoneStoreTests.swift */; };
+		WI12TBF04 /* SyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12TFR04 /* SyncServiceTests.swift */; };
+		WI12TBF05 /* SyncTestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI12TFR05 /* SyncTestHelpers.swift */; };
 		WI11BF01 /* AITypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR01 /* AITypes.swift */; };
 		WI11BF02 /* AIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR02 /* AIError.swift */; };
 		WI11BF03 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = WI11FR03 /* AIProvider.swift */; };
@@ -402,6 +415,19 @@
 		WI10TFR01 /* SearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceTests.swift; sourceTree = "<group>"; };
 		WI10TFR02 /* BackgroundIndexingCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundIndexingCoordinatorTests.swift; sourceTree = "<group>"; };
 		WI10TFR03 /* SearchViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModelTests.swift; sourceTree = "<group>"; };
+		WI12FR01 /* SyncTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTypes.swift; sourceTree = "<group>"; };
+		WI12FR02 /* SyncConflictResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncConflictResolver.swift; sourceTree = "<group>"; };
+		WI12FR03 /* FileAvailabilityStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAvailabilityStateMachine.swift; sourceTree = "<group>"; };
+		WI12FR04 /* TombstoneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TombstoneStore.swift; sourceTree = "<group>"; };
+		WI12FR05 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
+		WI12FR06 /* SyncStatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusMonitor.swift; sourceTree = "<group>"; };
+		WI12FR07 /* SyncStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusView.swift; sourceTree = "<group>"; };
+		WI12FR08 /* FileAvailabilityBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAvailabilityBadge.swift; sourceTree = "<group>"; };
+		WI12TFR01 /* SyncConflictResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncConflictResolverTests.swift; sourceTree = "<group>"; };
+		WI12TFR02 /* FileAvailabilityStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAvailabilityStateMachineTests.swift; sourceTree = "<group>"; };
+		WI12TFR03 /* TombstoneStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TombstoneStoreTests.swift; sourceTree = "<group>"; };
+		WI12TFR04 /* SyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncServiceTests.swift; sourceTree = "<group>"; };
+		WI12TFR05 /* SyncTestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTestHelpers.swift; sourceTree = "<group>"; };
 		WI11FR01 /* AITypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITypes.swift; sourceTree = "<group>"; };
 		WI11FR02 /* AIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIError.swift; sourceTree = "<group>"; };
 		WI11FR03 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
@@ -626,6 +652,7 @@
 			isa = PBXGroup;
 			children = (
 				WI11GR03 /* AI */,
+				WI12GR03 /* Sync */,
 				6BEB6636BEBB84D528EE5DF5 /* BookCardView.swift */,
 				23A84FE014139E7B5524445D /* BookRowView.swift */,
 				1FD65C0547DF264510657CA2 /* ContentView.swift */,
@@ -673,6 +700,7 @@
 			isa = PBXGroup;
 			children = (
 				WI11GR02 /* AI */,
+				WI12GR02 /* Sync */,
 				C0FBDC41C60328ED4FB8A197 /* BookImporterTests.swift */,
 				0616892213196BCF802266F8 /* ContentHasherTests.swift */,
 				WI09TFR08 /* TOCProviderTests.swift */,
@@ -752,6 +780,7 @@
 			isa = PBXGroup;
 			children = (
 				WI11GR01 /* AI */,
+				WI12GR01 /* Sync */,
 				5160D7D68BF1AF6654AD08B6 /* BookImporter.swift */,
 				400D03ADE39639337E9993C5 /* FeatureFlags.swift */,
 				982822FD76DDFB1EEE150FF0 /* ImportError.swift */,
@@ -926,6 +955,40 @@
 				WI11FR10 /* AIConsentView.swift */,
 			);
 			path = AI;
+			sourceTree = "<group>";
+		};
+		WI12GR01 /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+				WI12FR03 /* FileAvailabilityStateMachine.swift */,
+				WI12FR02 /* SyncConflictResolver.swift */,
+				WI12FR05 /* SyncService.swift */,
+				WI12FR06 /* SyncStatusMonitor.swift */,
+				WI12FR01 /* SyncTypes.swift */,
+				WI12FR04 /* TombstoneStore.swift */,
+			);
+			path = Sync;
+			sourceTree = "<group>";
+		};
+		WI12GR02 /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+				WI12TFR02 /* FileAvailabilityStateMachineTests.swift */,
+				WI12TFR01 /* SyncConflictResolverTests.swift */,
+				WI12TFR04 /* SyncServiceTests.swift */,
+				WI12TFR05 /* SyncTestHelpers.swift */,
+				WI12TFR03 /* TombstoneStoreTests.swift */,
+			);
+			path = Sync;
+			sourceTree = "<group>";
+		};
+		WI12GR03 /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+				WI12FR08 /* FileAvailabilityBadge.swift */,
+				WI12FR07 /* SyncStatusView.swift */,
+			);
+			path = Sync;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1119,6 +1182,11 @@
 				WI11TBF04 /* AIContextExtractorTests.swift in Sources */,
 				WI11TBF05 /* AIAssistantViewModelTests.swift in Sources */,
 				WI11TBF06 /* WI11TestHelpers.swift in Sources */,
+				WI12TBF01 /* SyncConflictResolverTests.swift in Sources */,
+				WI12TBF02 /* FileAvailabilityStateMachineTests.swift in Sources */,
+				WI12TBF03 /* TombstoneStoreTests.swift in Sources */,
+				WI12TBF04 /* SyncServiceTests.swift in Sources */,
+				WI12TBF05 /* SyncTestHelpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1234,6 +1302,14 @@
 				WI11BF08 /* AIAssistantViewModel.swift in Sources */,
 				WI11BF09 /* AIAssistantView.swift in Sources */,
 				WI11BF10 /* AIConsentView.swift in Sources */,
+				WI12BF01 /* SyncTypes.swift in Sources */,
+				WI12BF02 /* SyncConflictResolver.swift in Sources */,
+				WI12BF03 /* FileAvailabilityStateMachine.swift in Sources */,
+				WI12BF04 /* TombstoneStore.swift in Sources */,
+				WI12BF05 /* SyncService.swift in Sources */,
+				WI12BF06 /* SyncStatusMonitor.swift in Sources */,
+				WI12BF07 /* SyncStatusView.swift in Sources */,
+				WI12BF08 /* FileAvailabilityBadge.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

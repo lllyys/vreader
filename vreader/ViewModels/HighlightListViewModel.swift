@@ -84,7 +84,10 @@ final class HighlightListViewModel {
                 note: note,
                 toBookWithKey: bookFingerprintKey
             )
-            highlights.insert(record, at: 0)
+            // Upsert: avoid duplicates if store returned existing record
+            if !highlights.contains(where: { $0.highlightId == record.highlightId }) {
+                highlights.insert(record, at: 0)
+            }
             detectOutOfBounds()
         } catch {
             errorMessage = "Failed to add highlight."

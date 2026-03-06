@@ -58,7 +58,7 @@ final class PDFReaderViewModel {
     /// Total progression through the document (0.0 to 1.0). Nil for empty PDFs.
     var totalProgression: Double? {
         guard totalPages > 0 else { return nil }
-        return Double(currentPageIndex) / Double(totalPages)
+        return Double(currentPageIndex) / Double(max(totalPages - 1, 1))
     }
 
     /// Display string for current page (1-based) / total.

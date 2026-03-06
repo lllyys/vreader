@@ -33,6 +33,10 @@ extension PersistenceActor: ReadingPositionPersisting {
         locator: Locator,
         deviceId: String
     ) async throws {
+        guard locator.bookFingerprint.canonicalKey == bookFingerprintKey else {
+            throw PersistenceError.recordNotFound("Locator fingerprint does not match book key")
+        }
+
         let context = ModelContext(modelContainer)
         let key = bookFingerprintKey
         let predicate = #Predicate<Book> { $0.fingerprintKey == key }

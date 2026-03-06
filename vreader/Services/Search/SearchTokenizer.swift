@@ -22,45 +22,51 @@ struct IndexedToken: Sendable {
 enum SearchTokenizer {
 
     /// Splits text into tokens with normalized forms and UTF-16 offsets.
+    /// Uses Character-level iteration to correctly handle surrogate pairs (non-BMP).
     static func tokenize(_ text: String) -> [IndexedToken] {
         var tokens: [IndexedToken] = []
-        let utf16 = text.utf16
-        var i = utf16.startIndex
-        let end = utf16.endIndex
+        var utf16Offset = 0
+        var currentTokenStart: Int?
+        var currentTokenChars: [Character] = []
 
-        while i < end {
-            // Skip non-alphanumeric
-            guard CharacterSet.alphanumerics.contains(
-                Unicode.Scalar(utf16[i]) ?? Unicode.Scalar(0)
-            ) else {
-                i = utf16.index(after: i)
-                continue
+        for char in text {
+            let charUTF16Length = char.utf16.count
+            let isAlphanumeric = char.isLetter || char.isNumber
+
+            if isAlphanumeric {
+                if currentTokenStart == nil {
+                    currentTokenStart = utf16Offset
+                }
+                currentTokenChars.append(char)
+            } else {
+                if let start = currentTokenStart {
+                    let tokenText = String(currentTokenChars)
+                    let normalized = SearchTextNormalizer.normalize(tokenText)
+                    if !normalized.isEmpty {
+                        tokens.append(IndexedToken(
+                            normalized: normalized,
+                            startUTF16: start,
+                            endUTF16: utf16Offset
+                        ))
+                    }
+                    currentTokenStart = nil
+                    currentTokenChars.removeAll()
+                }
             }
+            utf16Offset += charUTF16Length
+        }
 
-            let tokenStart = utf16.distance(from: utf16.startIndex, to: i)
-            var j = i
-
-            // Consume alphanumeric characters
-            while j < end,
-                  let scalar = Unicode.Scalar(utf16[j]),
-                  CharacterSet.alphanumerics.contains(scalar) {
-                j = utf16.index(after: j)
-            }
-
-            let tokenEnd = utf16.distance(from: utf16.startIndex, to: j)
-            let startIdx = String.Index(utf16Offset: tokenStart, in: text)
-            let endIdx = String.Index(utf16Offset: tokenEnd, in: text)
-            let tokenText = String(text[startIdx..<endIdx])
+        // Flush trailing token
+        if let start = currentTokenStart {
+            let tokenText = String(currentTokenChars)
             let normalized = SearchTextNormalizer.normalize(tokenText)
-
             if !normalized.isEmpty {
                 tokens.append(IndexedToken(
                     normalized: normalized,
-                    startUTF16: tokenStart,
-                    endUTF16: tokenEnd
+                    startUTF16: start,
+                    endUTF16: utf16Offset
                 ))
             }
-            i = j
         }
 
         return tokens

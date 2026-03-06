@@ -15,6 +15,7 @@ import SwiftData
 /// Errors from persistence operations beyond import.
 enum PersistenceError: Error, Sendable {
     case recordNotFound(String)
+    case invalidContent(String)
 }
 
 /// Protocol for persistence operations, enabling mock injection in tests.

@@ -254,8 +254,9 @@ struct PDFReaderViewModelPageTests {
             Issue.record("Expected non-nil totalProgression")
             return
         }
-        #expect(progression > 0.45)
-        #expect(progression < 0.55)
+        // 5 / max(10 - 1, 1) ≈ 0.556
+        #expect(progression > 0.50)
+        #expect(progression < 0.60)
     }
 
     @Test("totalProgression is 0 at first page")
@@ -559,7 +560,9 @@ struct PDFReaderViewModelLocatorTests {
             Issue.record("Expected non-nil totalProgression")
             return
         }
-        #expect(tp == 0.5) // 10 / 20
+        // 10 / max(20 - 1, 1) ≈ 0.526
+        let expected = 10.0 / 19.0
+        #expect(abs(tp - expected) < 0.001)
     }
 
     @Test("locator at page 0 has totalProgression 0")

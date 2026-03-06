@@ -73,7 +73,7 @@ struct OpenAICompatibleProvider: AIProvider, Sendable {
 
     func streamRequest(_ request: AIRequest) -> AsyncThrowingStream<AIStreamChunk, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     let urlRequest = try buildURLRequest(for: request, stream: true)
                     let (bytes, response) = try await session.bytes(for: urlRequest)
@@ -100,6 +100,9 @@ struct OpenAICompatibleProvider: AIProvider, Sendable {
                 } catch {
                     continuation.finish(throwing: error)
                 }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
             }
         }
     }
@@ -179,7 +182,8 @@ struct OpenAICompatibleProvider: AIProvider, Sendable {
             throw AIError.providerError("Authentication failed (HTTP \(httpResponse.statusCode))")
         default:
             let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? "No body"
-            throw AIError.providerError("HTTP \(httpResponse.statusCode): \(body)")
+            let truncated = body.count > 200 ? String(body.prefix(200)) + "…" : body
+            throw AIError.providerError("HTTP \(httpResponse.statusCode): \(truncated)")
         }
     }
 }
