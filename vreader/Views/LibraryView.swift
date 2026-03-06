@@ -9,7 +9,7 @@
 // - Empty state shown when library is empty.
 // - Swipe-to-delete in both grid and list modes.
 //
-// @coordinates-with: LibraryViewModel.swift, BookCardView.swift, BookRowView.swift
+// @coordinates-with: LibraryViewModel.swift, BookCardView.swift, BookRowView.swift, ReaderContainerView.swift
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -34,6 +34,9 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("Library")
+            .navigationDestination(for: LibraryBookItem.self) { book in
+                ReaderContainerView(book: book)
+            }
             .toolbar {
                 toolbarContent
             }
@@ -112,10 +115,14 @@ struct LibraryView: View {
                 spacing: 16
             ) {
                 ForEach(viewModel.books) { book in
-                    BookCardView(book: book)
-                        .contextMenu {
-                            deleteButton(for: book)
-                        }
+                    NavigationLink(value: book) {
+                        BookCardView(book: book)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        deleteButton(for: book)
+                    }
+                    .accessibilityIdentifier("bookCard_\(book.fingerprintKey)")
                 }
             }
             .padding()
@@ -125,10 +132,13 @@ struct LibraryView: View {
     private var listView: some View {
         List {
             ForEach(viewModel.books) { book in
-                BookRowView(book: book)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        deleteButton(for: book)
-                    }
+                NavigationLink(value: book) {
+                    BookRowView(book: book)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    deleteButton(for: book)
+                }
+                .accessibilityIdentifier("bookRow_\(book.fingerprintKey)")
             }
         }
         .listStyle(.plain)

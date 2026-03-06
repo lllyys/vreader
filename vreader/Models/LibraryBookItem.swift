@@ -10,7 +10,7 @@
 import Foundation
 
 /// Lightweight value type combining Book metadata and ReadingStats for library display.
-struct LibraryBookItem: Sendable, Identifiable, Equatable {
+struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
     var id: String { fingerprintKey }
 
     let fingerprintKey: String

@@ -17,29 +17,30 @@ Design comprehensive XCUITest integration tests that verify every UI surface in 
 
 > **Critical context**: The app is under active development. Several integration layers are not yet wired. Tests must be written against what *exists today*, not what is planned. This section tracks the placeholder/integration boundary so implementers know which tests are immediately feasible vs. which require production code changes first.
 
-| Area | Current State | Impact on Tests |
-|------|---------------|-----------------|
-| Library -> Reader navigation | **No NavigationLink exists** — LibraryView has no tap-to-open navigation | WI-UI-0 must wire this before WI-UI-6+ |
-| EPUB/PDF/TXT/MD readers | **All placeholders** — `Text("EPUB reader placeholder")` etc. | Reader state tests (WI-UI-8, WI-UI-9) test placeholder presence only |
-| Annotations panel tabs | **ContentUnavailableView placeholders** | WI-UI-11 tests empty placeholders, not real data |
-| Search sheet | **Placeholder view** | WI-UI-10 tests placeholder presence only |
-| Launch argument handling | **Not implemented** in VReaderApp | WI-UI-0 must add this |
-| Test data seeding | **No mechanism** | WI-UI-0 must define the contract |
-| Feature flags via launch args | `FeatureFlags.setOverride()` exists but no launch arg parsing | WI-UI-0 must bridge this |
+| Area                          | Current State                                                            | Impact on Tests                                                      |
+| ----------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| Library -> Reader navigation  | **No NavigationLink exists** — LibraryView has no tap-to-open navigation | WI-UI-0 must wire this before WI-UI-6+                               |
+| EPUB/PDF/TXT/MD readers       | **All placeholders** — `Text("EPUB reader placeholder")` etc.            | Reader state tests (WI-UI-8, WI-UI-9) test placeholder presence only |
+| Annotations panel tabs        | **ContentUnavailableView placeholders**                                  | WI-UI-11 tests empty placeholders, not real data                     |
+| Search sheet                  | **Placeholder view**                                                     | WI-UI-10 tests placeholder presence only                             |
+| Launch argument handling      | **Not implemented** in VReaderApp                                        | WI-UI-0 must add this                                                |
+| Test data seeding             | **No mechanism**                                                         | WI-UI-0 must define the contract                                     |
+| Feature flags via launch args | `FeatureFlags.setOverride()` exists but no launch arg parsing            | WI-UI-0 must bridge this                                             |
 
 ### 0.3 Testing Strategy
 
-| Layer | Framework | Scope |
-|-------|-----------|-------|
+| Layer                     | Framework                | Scope                                                                     |
+| ------------------------- | ------------------------ | ------------------------------------------------------------------------- |
 | UI integration (XCUITest) | XCTest + XCUIApplication | Full app launch, element existence, navigation flows, accessibility audit |
-| ViewModel unit | Swift Testing (existing) | Already covered by 1097 unit tests in 122 suites |
+| ViewModel unit            | Swift Testing (existing) | Already covered by 1097 unit tests in 122 suites                          |
 
 **Snapshot/ViewInspector testing is explicitly out of scope.** XCUITest is the single mandatory automated approach for UI verification.
 
 All UI tests go in the `vreaderUITests` target. Test command:
+
 ```
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
-  -project vreader.xcodeproj -scheme vreader \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test   
+  -project vreader.xcodeproj -scheme vreader   
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.3.1'
 ```
 
@@ -47,14 +48,14 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
 
 ### 0.4 iPhone 17 Pro Considerations
 
-| Attribute | Value | Impact |
-|-----------|-------|--------|
-| Screen size | 393 x 852 pt (2556 x 1179 px) | Content width constraints, grid layout |
-| Dynamic Island | 126 x 37.33 pt cutout | Navigation bar must not clip under cutout |
-| Home indicator | 5pt bar at bottom | Bottom-anchored overlays need safe area inset |
-| Safe area top | ~59pt (with nav bar) | Toolbar elements must be below safe area |
-| Safe area bottom | ~34pt | PDF bottom overlay, reader content padding |
-| Pixel density | 3x | Thin borders/lines remain visible |
+| Attribute        | Value                         | Impact                                        |
+| ---------------- | ----------------------------- | --------------------------------------------- |
+| Screen size      | 393 x 852 pt (2556 x 1179 px) | Content width constraints, grid layout        |
+| Dynamic Island   | 126 x 37.33 pt cutout         | Navigation bar must not clip under cutout     |
+| Home indicator   | 5pt bar at bottom             | Bottom-anchored overlays need safe area inset |
+| Safe area top    | \~59pt (with nav bar)         | Toolbar elements must be below safe area      |
+| Safe area bottom | \~34pt                        | PDF bottom overlay, reader content padding    |
+| Pixel density    | 3x                            | Thin borders/lines remain visible             |
 
 ### 0.5 Anti-Flake Strategy
 
@@ -80,6 +81,7 @@ extension XCUIElement {
 ```
 
 **Rules:**
+
 - Never use `Thread.sleep()` or `usleep()` in UI tests.
 - Always `waitForExistence(timeout:)` before asserting on an element.
 - Use `waitForHittable(timeout:)` before tap actions.
@@ -89,6 +91,7 @@ extension XCUIElement {
 ### 0.6 Swift UI Test Target Gate
 
 The `vreaderUITests` target must:
+
 1. Compile without warnings (`xcodebuild build-for-testing` succeeds).
 2. All tests pass on iPhone 17 Pro simulator.
 3. No `Thread.sleep()` calls in test code.
@@ -118,22 +121,23 @@ This plan targets a **native SwiftUI iOS app** built with Swift 6 and iOS 17+. C
    - Back navigation returns to library.
 
 2. **Launch argument handling in VReaderApp:**
+
    - `VReaderApp.init()` reads `ProcessInfo.processInfo.arguments` for test flags.
    - Supported flags:
 
-   | Flag | Effect |
-   |------|--------|
-   | `--uitesting` | Enables test mode (disables animations, skips onboarding) |
-   | `--seed-empty` | Seeds empty database (clean state) |
-   | `--seed-books` | Seeds database with fixture books (see fixture manifest) |
-   | `--force-dark` | Forces `.dark` color scheme |
-   | `--force-light` | Forces `.light` color scheme |
-   | `--dynamic-type-XS` | Sets Dynamic Type to `.xSmall` |
-   | `--dynamic-type-XXXL` | Sets Dynamic Type to `.xxxLarge` |
-   | `--dynamic-type-AX5` | Sets Dynamic Type to `.accessibilityExtraExtraExtraLarge` |
-   | `--enable-ai` | Sets `FeatureFlags.setOverride(.aiAssistant, true)` |
-   | `--enable-sync` | Sets `FeatureFlags.setOverride(.sync, true)` |
-   | `--reduce-motion` | Simulates reduce motion preference |
+   | Flag                  | Effect                                                    |
+   | --------------------- | --------------------------------------------------------- |
+   | `--uitesting`         | Enables test mode (disables animations, skips onboarding) |
+   | `--seed-empty`        | Seeds empty database (clean state)                        |
+   | `--seed-books`        | Seeds database with fixture books (see fixture manifest)  |
+   | `--force-dark`        | Forces `.dark` color scheme                               |
+   | `--force-light`       | Forces `.light` color scheme                              |
+   | `--dynamic-type-XS`   | Sets Dynamic Type to `.xSmall`                            |
+   | `--dynamic-type-XXXL` | Sets Dynamic Type to `.xxxLarge`                          |
+   | `--dynamic-type-AX5`  | Sets Dynamic Type to `.accessibilityExtraExtraExtraLarge` |
+   | `--enable-ai`         | Sets `FeatureFlags.setOverride(.aiAssistant, true)`       |
+   | `--enable-sync`       | Sets `FeatureFlags.setOverride(.sync, true)`              |
+   | `--reduce-motion`     | Simulates reduce motion preference                        |
 
    - Flags are `#if DEBUG` guarded — no effect in release builds.
 
@@ -145,16 +149,16 @@ This plan targets a **native SwiftUI iOS app** built with Swift 6 and iOS 17+. C
 
 4. **Fixture manifest:**
 
-   | Fixture | Format | Title | Author | Notes |
-   |---------|--------|-------|--------|-------|
-   | `fixture-epub.epub` | EPUB | "Test EPUB Book" | "Test Author" | Minimal valid EPUB |
-   | `fixture-pdf.pdf` | PDF | "Test PDF Document" | "PDF Author" | 3-page PDF |
-   | `fixture-txt.txt` | TXT | "Test Plain Text" | nil | ASCII content |
-   | `fixture-md.md` | MD | "Test Markdown" | "MD Author" | Headings + paragraphs |
-   | `fixture-long-title.txt` | TXT | "A Very Long Book Title That Should Definitely Trigger Truncation in Both Grid and List Modes" | "Author Name" | Truncation test |
-   | `fixture-cjk.txt` | TXT | "Chinese Japanese Korean" | nil | CJK title |
-   | `fixture-zero-time.epub` | EPUB | "Unread Book" | "Author" | readingTime = 0 |
-   | `fixture-password.pdf` | PDF | "Protected PDF" | nil | Password: "test123" |
+   | Fixture                  | Format | Title                                                                                          | Author        | Notes                 |
+   | ------------------------ | ------ | ---------------------------------------------------------------------------------------------- | ------------- | --------------------- |
+   | `fixture-epub.epub`      | EPUB   | "Test EPUB Book"                                                                               | "Test Author" | Minimal valid EPUB    |
+   | `fixture-pdf.pdf`        | PDF    | "Test PDF Document"                                                                            | "PDF Author"  | 3-page PDF            |
+   | `fixture-txt.txt`        | TXT    | "Test Plain Text"                                                                              | nil           | ASCII content         |
+   | `fixture-md.md`          | MD     | "Test Markdown"                                                                                | "MD Author"   | Headings + paragraphs |
+   | `fixture-long-title.txt` | TXT    | "A Very Long Book Title That Should Definitely Trigger Truncation in Both Grid and List Modes" | "Author Name" | Truncation test       |
+   | `fixture-cjk.txt`        | TXT    | "Chinese Japanese Korean"                                                                      | nil           | CJK title             |
+   | `fixture-zero-time.epub` | EPUB   | "Unread Book"                                                                                  | "Author"      | readingTime = 0       |
+   | `fixture-password.pdf`   | PDF    | "Protected PDF"                                                                                | nil           | Password: "test123"   |
 
    - Fixture files go in `vreaderUITests/Fixtures/` (test bundle, not app bundle).
    - `TestSeeder` creates `BookRecord` entries pointing to bundled fixture file paths.
@@ -168,13 +172,13 @@ This plan targets a **native SwiftUI iOS app** built with Swift 6 and iOS 17+. C
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `vreader/Views/LibraryView.swift` | Add NavigationLink/destination to ReaderContainerView |
-| `vreader/App/VReaderApp.swift` | Add launch argument parsing (DEBUG-only) |
-| `vreader/App/TestSeeder.swift` | Create (DEBUG-only test data seeder) |
-| `vreader/Services/FeatureFlags.swift` | Ensure `setOverride` works from launch arg path |
-| `vreaderUITests/Fixtures/` | Add fixture files |
+| File                                  | Action                                                |
+| ------------------------------------- | ----------------------------------------------------- |
+| `vreader/Views/LibraryView.swift`     | Add NavigationLink/destination to ReaderContainerView |
+| `vreader/App/VReaderApp.swift`        | Add launch argument parsing (DEBUG-only)              |
+| `vreader/App/TestSeeder.swift`        | Create (DEBUG-only test data seeder)                  |
+| `vreader/Services/FeatureFlags.swift` | Ensure `setOverride` works from launch arg path       |
+| `vreaderUITests/Fixtures/`            | Add fixture files                                     |
 
 ### Dependencies
 
@@ -215,12 +219,12 @@ Every WI from this point forward must include at least one `performAccessibility
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `vreaderUITests/Helpers/TestConstants.swift` | Create |
-| `vreaderUITests/Helpers/LaunchHelper.swift` | Create |
-| `vreaderUITests/Helpers/AccessibilityAuditHelper.swift` | Create |
-| `vreaderUITests/VReaderUITests.swift` | Replace placeholder |
+| File                                                    | Action              |
+| ------------------------------------------------------- | ------------------- |
+| `vreaderUITests/Helpers/TestConstants.swift`            | Create              |
+| `vreaderUITests/Helpers/LaunchHelper.swift`             | Create              |
+| `vreaderUITests/Helpers/AccessibilityAuditHelper.swift` | Create              |
+| `vreaderUITests/VReaderUITests.swift`                   | Replace placeholder |
 
 ### Dependencies
 
@@ -245,24 +249,19 @@ Delete new files, restore `VReaderUITests.swift` to original.
    - "Import Books" button has `importBooksButton` identifier and is hittable.
    - Empty state container has `emptyLibraryState` identifier.
    - Navigation title shows "Library".
-
 2. **Populated state tests:**
    - With seeded books, library shows book items (not empty state).
    - View mode toggle (`viewModeToggle`) exists and is hittable.
    - Sort picker (`sortPicker`) exists and is hittable.
    - Grid mode shows `BookCardView` items with title, format badge, and cover placeholder.
    - List mode shows `BookRowView` items with format icon (44x44pt), title, author, and metadata.
-
 3. **View mode toggle:**
    - Tapping `viewModeToggle` switches between grid and list.
    - Button label updates ("Switch to list view" / "Switch to grid view").
-
 4. **Sort picker interaction:**
    - Tapping sort picker reveals menu with "Title", "Date Added", "Last Read", "Reading Time" options.
-
 5. **Pull-to-refresh:**
    - Scroll gesture triggers refresh (swipe down in populated list).
-
 6. **Accessibility audit:** `performAccessibilityAudit()` passes on both empty and populated states.
 
 ### Edge Cases
@@ -302,6 +301,7 @@ LibraryEdgeCaseTests:
 ### Pilot Verification
 
 After completing WI-UI-2, verify:
+
 - [ ] `xcodebuild test` command succeeds end-to-end
 - [ ] Test seeding produces visible books
 - [ ] Wait utilities prevent flakes (run 3x consecutively)
@@ -312,11 +312,11 @@ If any of these fail, fix the infrastructure before proceeding to WI-UI-3+.
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                  | Action |
+| ----------------------------------------------------- | ------ |
 | `vreaderUITests/Library/LibraryEmptyStateTests.swift` | Create |
-| `vreaderUITests/Library/LibraryPopulatedTests.swift` | Create |
-| `vreaderUITests/Library/LibraryEdgeCaseTests.swift` | Create |
+| `vreaderUITests/Library/LibraryPopulatedTests.swift`  | Create |
+| `vreaderUITests/Library/LibraryEdgeCaseTests.swift`   | Create |
 
 ### Dependencies
 
@@ -342,12 +342,10 @@ Delete test files.
    - Import Books button frame >= 44x44pt.
    - Each book row/card is tappable with frame height >= 44pt.
    - Format icon in list mode occupies 44x44pt frame.
-
 2. **Dynamic Type scaling (xSmall through AX5):**
    - At `xSmall`: All text is present (use `waitForExistence`), no critical labels disappear.
    - At `xxxLarge`: Layout has no overlapping elements (verified by checking element frames don't intersect).
    - At `AX5` (largest accessibility size): No elements extend beyond screen width (element `frame.maxX <= 393`). Import button remains hittable.
-
 3. **Accessibility audit at each Dynamic Type size.**
 
 ### Measurable Criteria
@@ -381,8 +379,8 @@ LibraryDynamicTypeTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                   | Action |
+| ------------------------------------------------------ | ------ |
 | `vreaderUITests/Library/LibraryTouchTargetTests.swift` | Create |
 | `vreaderUITests/Library/LibraryDynamicTypeTests.swift` | Create |
 
@@ -409,17 +407,14 @@ Delete test files.
    - Library view appears without crashes.
    - Navigation bar, toolbar buttons, and book items are all present (exist and hittable).
    - Empty state is visible with all elements present.
-
 2. **Light mode rendering:**
    - Same checks as dark mode to establish baseline (via `--force-light`).
-
 3. **Accessibility audit:**
    - `performAccessibilityAudit()` on library view reports zero issues in both color schemes.
    - Each book item has a combined accessibility label including title, author, format, and reading time.
    - View mode toggle has dynamic accessibility label.
    - Sort picker has "Sort books" accessibility label.
    - Empty state import button has "Import Books" label.
-
 4. **VoiceOver traversal order:**
    - Accessibility elements appear in logical order: navigation title -> toolbar buttons -> book items (or empty state).
    - All interactive elements are reachable.
@@ -452,9 +447,9 @@ LibraryAccessibilityTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `vreaderUITests/Library/LibraryDarkModeTests.swift` | Create |
+| File                                                     | Action |
+| -------------------------------------------------------- | ------ |
+| `vreaderUITests/Library/LibraryDarkModeTests.swift`      | Create |
 | `vreaderUITests/Library/LibraryAccessibilityTests.swift` | Create |
 
 ### Dependencies
@@ -481,16 +476,13 @@ Delete test files.
    - Alert has "Cancel" and "Delete" buttons.
    - "Cancel" dismisses the alert without removing the book.
    - "Delete" dismisses the alert (book removal verified by element count change).
-
 2. **Swipe-to-delete (list mode):**
    - Swiping left on a book row reveals "Delete" button.
    - Tapping the swipe action shows the same confirmation dialog.
-
 3. **Alert text:**
    - Alert title is "Delete Book".
    - Alert message contains the book title in quotes.
    - Alert message includes "This cannot be undone."
-
 4. **Accessibility audit on alert.**
 
 ### Edge Cases
@@ -513,8 +505,8 @@ DeleteConfirmationTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                   | Action |
+| ------------------------------------------------------ | ------ |
 | `vreaderUITests/Library/DeleteConfirmationTests.swift` | Create |
 
 ### Dependencies
@@ -542,38 +534,31 @@ NavigationLink from LibraryView to ReaderContainerView must be wired. Without th
 1. **Navigation to reader:**
    - Tapping a book in the library navigates to the reader container.
    - Reader shows format-specific placeholder (e.g., `epubReaderPlaceholder`, `pdfReaderPlaceholder`).
-
 2. **Back button:**
    - Back button is present and hittable (SwiftUI auto-generates this from NavigationStack).
    - Tapping back returns to the library.
-
 3. **Toolbar buttons:**
    - Search button (`readerSearchButton`) exists with label "Search in book".
    - Annotations button (`readerAnnotationsButton`) exists with label "Bookmarks and annotations".
    - Settings button (`readerSettingsButton`) exists with label "Reading settings".
    - All three buttons are hittable.
-
 4. **Settings sheet:**
    - Tapping settings button presents the ReaderSettingsPanel sheet.
    - Sheet has `readerSettingsPanel` identifier.
    - Sheet shows "Reading Settings" title.
    - Sheet can be dismissed by swipe down or drag indicator.
-
 5. **Annotations panel sheet:**
    - Tapping annotations button presents the AnnotationsPanelSheet.
    - Sheet has `annotationsPanelSheet` identifier.
    - Sheet shows segmented picker with "Bookmarks", "Contents", "Highlights", "Notes".
    - Each tab shows a placeholder ContentUnavailableView.
    - Sheet can be dismissed.
-
 6. **Search sheet:**
    - Tapping search button presents the search sheet.
    - Sheet has `searchSheet` identifier.
    - Sheet can be dismissed.
-
 7. **Unsupported format:**
    - A book with unknown format shows `unsupportedFormatView`.
-
 8. **Accessibility audit on reader chrome.**
 
 ### Edge Cases
@@ -617,12 +602,12 @@ ReaderUnsupportedFormatTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `vreaderUITests/Reader/ReaderNavigationTests.swift` | Create |
-| `vreaderUITests/Reader/ReaderSettingsSheetTests.swift` | Create |
-| `vreaderUITests/Reader/ReaderAnnotationsPanelTests.swift` | Create |
-| `vreaderUITests/Reader/ReaderSearchSheetTests.swift` | Create |
+| File                                                       | Action |
+| ---------------------------------------------------------- | ------ |
+| `vreaderUITests/Reader/ReaderNavigationTests.swift`        | Create |
+| `vreaderUITests/Reader/ReaderSettingsSheetTests.swift`     | Create |
+| `vreaderUITests/Reader/ReaderAnnotationsPanelTests.swift`  | Create |
+| `vreaderUITests/Reader/ReaderSearchSheetTests.swift`       | Create |
 | `vreaderUITests/Reader/ReaderUnsupportedFormatTests.swift` | Create |
 
 ### Dependencies
@@ -648,26 +633,21 @@ Delete test files.
    - Each circle is tappable (44x44pt touch target verified by frame check).
    - Selected theme has `.isSelected` accessibility trait.
    - Theme circles have labels: "light theme", "sepia theme", "dark theme".
-
 2. **Font size slider:**
    - Slider exists with "Font size" accessibility label.
    - Slider value changes when adjusted.
    - Current value display shows point size (e.g., "18pt").
-
 3. **Line spacing slider:**
    - Slider exists with "Line spacing" accessibility label.
    - Current value display shows multiplier (e.g., "1.4x").
-
 4. **Font family picker:**
    - Segmented picker with "System", "Serif", "Monospace" options.
    - "Font family" accessibility label.
    - Each segment is selectable.
-
 5. **CJK spacing toggle:**
    - Toggle exists with "CJK character spacing" accessibility label.
    - Toggle is tappable.
    - Footer text explains the setting.
-
 6. **Accessibility audit on settings panel.**
 
 ### Edge Cases
@@ -697,9 +677,9 @@ ReaderSettingsTypographyTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `vreaderUITests/Reader/ReaderSettingsThemeTests.swift` | Create |
+| File                                                        | Action |
+| ----------------------------------------------------------- | ------ |
+| `vreaderUITests/Reader/ReaderSettingsThemeTests.swift`      | Create |
 | `vreaderUITests/Reader/ReaderSettingsTypographyTests.swift` | Create |
 
 ### Dependencies
@@ -724,7 +704,6 @@ Delete test files.
 
 1. **Placeholder state (current):**
    - Navigating to a PDF book shows `pdfReaderPlaceholder` identifier.
-
 2. **Password prompt (standalone view, testable now):**
    - `PDFPasswordPromptView` shows lock icon and explanation text.
    - SecureField (`pdfPasswordField`) is present and focusable.
@@ -732,16 +711,15 @@ Delete test files.
    - Unlock button (`pdfPasswordSubmit`) is present.
    - Unlock button is disabled when password field is empty.
    - Unlock button becomes enabled after typing.
-
 3. **Touch targets:**
    - Cancel and Unlock buttons >= 44x44pt.
    - Password field is tappable.
-
 4. **Accessibility audit on password prompt.**
 
 ### Future Tests (blocked until reader wiring)
 
 These tests should be added when real PDF loading is wired:
+
 - `testLoadingStateShowsProgress`
 - `testErrorStateShowsMessage`
 - `testContentStateShowsPDFView`
@@ -772,10 +750,10 @@ PDFPasswordTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                    | Action |
+| ------------------------------------------------------- | ------ |
 | `vreaderUITests/Reader/PDFReaderPlaceholderTests.swift` | Create |
-| `vreaderUITests/Reader/PDFPasswordTests.swift` | Create |
+| `vreaderUITests/Reader/PDFPasswordTests.swift`          | Create |
 
 ### Dependencies
 
@@ -799,15 +777,14 @@ Delete test files.
 
 1. **TXT Reader placeholder:**
    - Navigating to a TXT book shows `txtReaderPlaceholder` identifier.
-
 2. **MD Reader placeholder:**
    - Navigating to an MD book shows `mdReaderPlaceholder` identifier.
-
 3. **Accessibility audit on both placeholders.**
 
 ### Future Tests (blocked until reader wiring)
 
 These tests should be added when real text loading is wired:
+
 - `testTXTLoadingState` / `testTXTErrorState` / `testTXTContentState`
 - `testMDLoadingState` / `testMDErrorState` / `testMDContentState`
 - `testTextViewIsReadOnly` / `testTextViewIsSelectable` / `testTextViewScrolls`
@@ -826,10 +803,10 @@ MDReaderPlaceholderTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                    | Action |
+| ------------------------------------------------------- | ------ |
 | `vreaderUITests/Reader/TXTReaderPlaceholderTests.swift` | Create |
-| `vreaderUITests/Reader/MDReaderPlaceholderTests.swift` | Create |
+| `vreaderUITests/Reader/MDReaderPlaceholderTests.swift`  | Create |
 
 ### Dependencies
 
@@ -858,6 +835,7 @@ Delete test files.
 ### Future Tests (blocked until search is mounted)
 
 These tests should be added when SearchView is wired into the reader:
+
 - `testEmptyPromptState`
 - `testSearchFieldAcceptsInput`
 - `testLoadingState`
@@ -880,8 +858,8 @@ SearchSheetPlaceholderTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                      | Action |
+| --------------------------------------------------------- | ------ |
 | `vreaderUITests/Search/SearchSheetPlaceholderTests.swift` | Create |
 
 ### Dependencies
@@ -911,6 +889,7 @@ Delete test file.
 ### Future Tests (blocked until annotation views are wired)
 
 These tests should be added when real annotation data flows:
+
 - `testBookmarkEmptyState` / `testBookmarkPopulatedList` / `testBookmarkSwipeToDelete`
 - `testTOCPopulatedList` / `testTOCNestedIndentation`
 - `testHighlightPopulatedList` / `testHighlightColorIndicator` / `testHighlightSwipeToDelete`
@@ -932,8 +911,8 @@ AnnotationsPanelPlaceholderTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                                | Action |
+| ------------------------------------------------------------------- | ------ |
 | `vreaderUITests/Annotations/AnnotationsPanelPlaceholderTests.swift` | Create |
 
 ### Dependencies
@@ -956,35 +935,29 @@ Delete test file.
 
 1. **Feature disabled state:**
    - When AI feature flag is OFF, shows wand icon and "AI features are currently disabled" text.
-
 2. **Consent required state:**
    - When AI is enabled but consent not given, shows `aiConsentView` with lock shield icon, "AI Assistant" title, and privacy explanation.
    - "I Agree -- Enable AI" button (`aiConsentButton`) is present and hittable.
    - Button has `.borderedProminent` style.
    - Revocation notice text is visible.
-
 3. **Idle state:**
    - After consent, shows "Select an action to get AI assistance" text.
-
 4. **Loading state:**
    - Shows ProgressView with "Processing..." text.
-
 5. **Streaming state:**
    - Shows ScrollView with response text accumulating.
-
 6. **Complete state:**
    - Shows ScrollView with full response text.
    - Text is selectable (`.textSelection(.enabled)`).
-
 7. **Error state:**
    - Shows warning icon and error message.
    - Error message is user-friendly (sanitized).
-
 8. **Accessibility audit on consent view and assistant view.**
 
 ### Testing Approach
 
 States 3-7 (idle, loading, streaming, complete, error) require ViewModel state manipulation. Since XCUITest cannot directly set ViewModel state, these tests require one of:
+
 - A `--ai-mock-state=idle|loading|streaming|complete|error` launch argument that sets a mock ViewModel state.
 - Or defer to unit tests (already covered).
 
@@ -1011,10 +984,10 @@ AIConsentViewTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                            | Action |
+| ----------------------------------------------- | ------ |
 | `vreaderUITests/AI/AIAssistantStateTests.swift` | Create |
-| `vreaderUITests/AI/AIConsentViewTests.swift` | Create |
+| `vreaderUITests/AI/AIConsentViewTests.swift`    | Create |
 
 ### Dependencies
 
@@ -1035,6 +1008,7 @@ Delete test files.
 ### Testing Approach
 
 `SyncStatusView` conditionally renders based on `monitor.status`. Since XCUITest cannot inject sync states, these tests require either:
+
 - A `--sync-mock-state=idle|syncing|error|offline` launch argument.
 - Or verify only the `.disabled` state (sync feature off) and `.idle` state (sync enabled, default).
 
@@ -1063,9 +1037,9 @@ FileAvailabilityBadgeTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `vreaderUITests/Sync/SyncStatusViewTests.swift` | Create |
+| File                                                   | Action |
+| ------------------------------------------------------ | ------ |
+| `vreaderUITests/Sync/SyncStatusViewTests.swift`        | Create |
 | `vreaderUITests/Sync/FileAvailabilityBadgeTests.swift` | Create |
 
 ### Dependencies
@@ -1090,11 +1064,9 @@ Delete test files.
    - When database fails to init (via `--seed-corrupt-db` launch argument), error screen shows warning icon, "Unable to Open Library" title, and sanitized error message.
    - No file paths or technical details in error message.
    - Screen has combined accessibility label.
-
 2. **Library error alert:**
    - Error alert shows "Error" title, error message, and "OK" button.
    - "OK" button dismisses the alert.
-
 3. **Accessibility audit on error screen.**
 
 ### Edge Cases
@@ -1117,8 +1089,8 @@ AlertDialogTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                           | Action |
+| ---------------------------------------------- | ------ |
 | `vreaderUITests/Errors/ErrorScreenTests.swift` | Create |
 | `vreaderUITests/Errors/AlertDialogTests.swift` | Create |
 
@@ -1143,16 +1115,12 @@ Delete test files.
 1. **Library to reader and back:**
    - Tap book -> reader appears (placeholder visible) -> tap back -> library appears.
    - Library state is preserved after returning from reader.
-
 2. **Reader to settings and back:**
    - Tap settings -> sheet appears -> dismiss sheet -> reader visible.
-
 3. **Reader to annotations panel:**
    - Tap annotations -> panel appears -> switch tabs -> dismiss -> reader visible.
-
 4. **Full round trip:**
    - Library -> tap book -> reader -> settings sheet -> dismiss -> annotations panel -> dismiss -> back button -> library.
-
 5. **Reduce Motion:**
    - With `--reduce-motion` flag, all transitions complete without animation.
    - No crashes from suppressed animations.
@@ -1177,8 +1145,8 @@ NavigationFlowTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                  | Action |
+| ----------------------------------------------------- | ------ |
 | `vreaderUITests/Navigation/NavigationFlowTests.swift` | Create |
 
 ### Dependencies
@@ -1204,7 +1172,6 @@ Delete test file.
    - Typing obscured characters appear.
    - Return key triggers password submission.
    - Keyboard dismisses after submission.
-
 2. **Safe area with keyboard:**
    - Keyboard does not obscure the active input field.
 
@@ -1230,8 +1197,8 @@ KeyboardInteractionTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                     | Action |
+| -------------------------------------------------------- | ------ |
 | `vreaderUITests/Keyboard/KeyboardInteractionTests.swift` | Create |
 
 ### Dependencies
@@ -1262,17 +1229,13 @@ Delete test file.
    - AI consent view (with `--enable-ai`)
    - PDF password prompt
    - Error init screen
-
 2. **Audit categories checked:**
    - Dynamic Type
    - Sufficient contrast
    - Touch target sizes
    - Element descriptions (labels)
-
 3. **All audits pass with zero violations.**
-
 4. **Dark mode sweep:** All screens audited again with `--force-dark`.
-
 5. **AX5 sweep:** Library and reader chrome audited with `--dynamic-type-AX5`.
 
 ### Tests
@@ -1294,8 +1257,8 @@ GlobalAccessibilityAuditTests:
 
 ### Files to Create/Modify
 
-| File | Action |
-|------|--------|
+| File                                                               | Action |
+| ------------------------------------------------------------------ | ------ |
 | `vreaderUITests/Accessibility/GlobalAccessibilityAuditTests.swift` | Create |
 
 ### Dependencies
@@ -1310,68 +1273,68 @@ Delete test file.
 
 ## Appendix A: Complete Accessibility Identifier Registry
 
-| Identifier | View | Purpose |
-|-----------|------|---------|
-| `libraryView` | ContentView | Root library container |
-| `importBooksButton` | LibraryView | Import CTA button |
-| `emptyLibraryState` | LibraryView | Empty state container |
-| `viewModeToggle` | LibraryView | Grid/list toggle |
-| `sortPicker` | LibraryView | Sort menu |
-| `readerBackButton` | ReaderContainerView | Back to library |
-| `readerSearchButton` | ReaderContainerView | Open search |
-| `readerAnnotationsButton` | ReaderContainerView | Open annotations panel |
-| `readerSettingsButton` | ReaderContainerView | Open settings |
-| `searchSheet` | ReaderContainerView | Search sheet |
-| `annotationsPanelSheet` | ReaderContainerView | Annotations panel |
-| `epubReaderPlaceholder` | ReaderContainerView | EPUB placeholder |
-| `pdfReaderPlaceholder` | ReaderContainerView | PDF placeholder |
-| `txtReaderPlaceholder` | ReaderContainerView | TXT placeholder |
-| `mdReaderPlaceholder` | ReaderContainerView | MD placeholder |
-| `unsupportedFormatView` | ReaderContainerView | Unknown format |
-| `readerSettingsPanel` | ReaderSettingsPanel | Settings panel |
-| `pdfReaderContainer` | PDFReaderContainerView | PDF container |
-| `pdfReaderContent` | PDFReaderContainerView | PDF view |
-| `pdfReaderLoading` | PDFReaderContainerView | Loading overlay |
-| `pdfReaderError` | PDFReaderContainerView | Error overlay |
-| `pdfBottomOverlay` | PDFReaderContainerView | Bottom bar |
-| `pdfPageIndicator` | PDFReaderContainerView | Page X/Y |
-| `pdfSessionTime` | PDFReaderContainerView | Session timer |
-| `pdfPagesPerHour` | PDFReaderContainerView | Speed display |
-| `pdfView` | PDFViewBridge | PDFKit view |
-| `pdfPasswordPrompt` | PDFPasswordPromptView | Password dialog |
-| `pdfPasswordField` | PDFPasswordPromptView | Password input |
-| `pdfPasswordError` | PDFPasswordPromptView | Wrong password msg |
-| `pdfPasswordCancel` | PDFPasswordPromptView | Cancel button |
-| `pdfPasswordSubmit` | PDFPasswordPromptView | Unlock button |
-| `txtReaderContainer` | TXTReaderContainerView | TXT container |
-| `txtReaderLoading` | TXTReaderContainerView | Loading state |
-| `txtReaderError` | TXTReaderContainerView | Error state |
-| `txtReaderContent` | TXTReaderContainerView | Text view |
-| `mdReaderContainer` | MDReaderContainerView | MD container |
-| `mdReaderLoading` | MDReaderContainerView | Loading state |
-| `mdReaderError` | MDReaderContainerView | Error state |
-| `mdReaderContent` | MDReaderContainerView | Attributed text |
-| `searchView` | SearchView | Search container |
-| `searchDismissButton` | SearchView | Done button |
-| `searchResultsList` | SearchView | Results list |
-| `searchResult_{id}` | SearchView | Individual result |
-| `searchResultRow` | SearchResultRow | Row view |
-| `loadMoreButton` | SearchView | Pagination button |
-| `searchLoadingView` | SearchView | Loading spinner |
-| `searchNoResultsView` | SearchView | No results |
-| `searchEmptyPromptView` | SearchView | Initial prompt |
-| `bookmarkEmptyState` | BookmarkListView | Empty state |
-| `bookmarkRow-{id}` | BookmarkListView | Bookmark row |
-| `tocEmptyState` | TOCListView | Empty state |
-| `tocRow-{id}` | TOCListView | TOC row |
-| `highlightEmptyState` | HighlightListView | Empty state |
-| `highlightRow-{id}` | HighlightListView | Highlight row |
-| `annotationEmptyState` | AnnotationListView | Empty state |
-| `annotationRow-{id}` | AnnotationListView | Annotation row |
-| `annotationEditCancel` | AnnotationEditSheet | Cancel button |
-| `annotationEditSave` | AnnotationEditSheet | Save button |
-| `aiConsentView` | AIConsentView | Consent container |
-| `aiConsentButton` | AIConsentView | Agree button |
+| Identifier                | View                   | Purpose                |
+| ------------------------- | ---------------------- | ---------------------- |
+| `libraryView`             | ContentView            | Root library container |
+| `importBooksButton`       | LibraryView            | Import CTA button      |
+| `emptyLibraryState`       | LibraryView            | Empty state container  |
+| `viewModeToggle`          | LibraryView            | Grid/list toggle       |
+| `sortPicker`              | LibraryView            | Sort menu              |
+| `readerBackButton`        | ReaderContainerView    | Back to library        |
+| `readerSearchButton`      | ReaderContainerView    | Open search            |
+| `readerAnnotationsButton` | ReaderContainerView    | Open annotations panel |
+| `readerSettingsButton`    | ReaderContainerView    | Open settings          |
+| `searchSheet`             | ReaderContainerView    | Search sheet           |
+| `annotationsPanelSheet`   | ReaderContainerView    | Annotations panel      |
+| `epubReaderPlaceholder`   | ReaderContainerView    | EPUB placeholder       |
+| `pdfReaderPlaceholder`    | ReaderContainerView    | PDF placeholder        |
+| `txtReaderPlaceholder`    | ReaderContainerView    | TXT placeholder        |
+| `mdReaderPlaceholder`     | ReaderContainerView    | MD placeholder         |
+| `unsupportedFormatView`   | ReaderContainerView    | Unknown format         |
+| `readerSettingsPanel`     | ReaderSettingsPanel    | Settings panel         |
+| `pdfReaderContainer`      | PDFReaderContainerView | PDF container          |
+| `pdfReaderContent`        | PDFReaderContainerView | PDF view               |
+| `pdfReaderLoading`        | PDFReaderContainerView | Loading overlay        |
+| `pdfReaderError`          | PDFReaderContainerView | Error overlay          |
+| `pdfBottomOverlay`        | PDFReaderContainerView | Bottom bar             |
+| `pdfPageIndicator`        | PDFReaderContainerView | Page X/Y               |
+| `pdfSessionTime`          | PDFReaderContainerView | Session timer          |
+| `pdfPagesPerHour`         | PDFReaderContainerView | Speed display          |
+| `pdfView`                 | PDFViewBridge          | PDFKit view            |
+| `pdfPasswordPrompt`       | PDFPasswordPromptView  | Password dialog        |
+| `pdfPasswordField`        | PDFPasswordPromptView  | Password input         |
+| `pdfPasswordError`        | PDFPasswordPromptView  | Wrong password msg     |
+| `pdfPasswordCancel`       | PDFPasswordPromptView  | Cancel button          |
+| `pdfPasswordSubmit`       | PDFPasswordPromptView  | Unlock button          |
+| `txtReaderContainer`      | TXTReaderContainerView | TXT container          |
+| `txtReaderLoading`        | TXTReaderContainerView | Loading state          |
+| `txtReaderError`          | TXTReaderContainerView | Error state            |
+| `txtReaderContent`        | TXTReaderContainerView | Text view              |
+| `mdReaderContainer`       | MDReaderContainerView  | MD container           |
+| `mdReaderLoading`         | MDReaderContainerView  | Loading state          |
+| `mdReaderError`           | MDReaderContainerView  | Error state            |
+| `mdReaderContent`         | MDReaderContainerView  | Attributed text        |
+| `searchView`              | SearchView             | Search container       |
+| `searchDismissButton`     | SearchView             | Done button            |
+| `searchResultsList`       | SearchView             | Results list           |
+| `searchResult_{id}`       | SearchView             | Individual result      |
+| `searchResultRow`         | SearchResultRow        | Row view               |
+| `loadMoreButton`          | SearchView             | Pagination button      |
+| `searchLoadingView`       | SearchView             | Loading spinner        |
+| `searchNoResultsView`     | SearchView             | No results             |
+| `searchEmptyPromptView`   | SearchView             | Initial prompt         |
+| `bookmarkEmptyState`      | BookmarkListView       | Empty state            |
+| `bookmarkRow-{id}`        | BookmarkListView       | Bookmark row           |
+| `tocEmptyState`           | TOCListView            | Empty state            |
+| `tocRow-{id}`             | TOCListView            | TOC row                |
+| `highlightEmptyState`     | HighlightListView      | Empty state            |
+| `highlightRow-{id}`       | HighlightListView      | Highlight row          |
+| `annotationEmptyState`    | AnnotationListView     | Empty state            |
+| `annotationRow-{id}`      | AnnotationListView     | Annotation row         |
+| `annotationEditCancel`    | AnnotationEditSheet    | Cancel button          |
+| `annotationEditSave`      | AnnotationEditSheet    | Save button            |
+| `aiConsentView`           | AIConsentView          | Consent container      |
+| `aiConsentButton`         | AIConsentView          | Agree button           |
 
 ---
 
@@ -1470,7 +1433,7 @@ vreaderUITests/
     GlobalAccessibilityAuditTests.swift
 ```
 
-Total: 30 test files, ~95 test methods across 18 work items (WI-UI-0 through WI-UI-17).
+Total: 30 test files, \~95 test methods across 18 work items (WI-UI-0 through WI-UI-17).
 
 ---
 
@@ -1478,12 +1441,13 @@ Total: 30 test files, ~95 test methods across 18 work items (WI-UI-0 through WI-
 
 Tests deferred until integration layers are wired. Track these and add them as features ship.
 
-| Blocked Feature | Tests Needed | Unblocked When |
-|----------------|--------------|----------------|
-| Real PDF loading | Loading/error/content states, page indicator, session time | PDF file URL pipeline wired |
-| Real TXT/MD loading | Loading/error/content states, read-only/selectable/scrollable | Text file URL pipeline wired |
-| Search mounting | Full search flow (empty prompt, results, no results, load more, error) | SearchView mounted in reader |
-| Annotation data flow | Bookmark/TOC/highlight/annotation CRUD, edit sheet, swipe-to-delete | Annotation ViewModels wired to persistence |
-| AI response states | Idle, loading, streaming, complete, error states | AI ViewModel state injection via launch args |
-| Sync state rendering | All 5 sync states, file availability badge states | Sync mock state injection |
-| Large library scroll | 100+ books, lazy loading performance | Test seeder supports bulk insertion |
+| Blocked Feature      | Tests Needed                                                           | Unblocked When                               |
+| -------------------- | ---------------------------------------------------------------------- | -------------------------------------------- |
+| Real PDF loading     | Loading/error/content states, page indicator, session time             | PDF file URL pipeline wired                  |
+| Real TXT/MD loading  | Loading/error/content states, read-only/selectable/scrollable          | Text file URL pipeline wired                 |
+| Search mounting      | Full search flow (empty prompt, results, no results, load more, error) | SearchView mounted in reader                 |
+| Annotation data flow | Bookmark/TOC/highlight/annotation CRUD, edit sheet, swipe-to-delete    | Annotation ViewModels wired to persistence   |
+| AI response states   | Idle, loading, streaming, complete, error states                       | AI ViewModel state injection via launch args |
+| Sync state rendering | All 5 sync states, file availability badge states                      | Sync mock state injection                    |
+| Large library scroll | 100+ books, lazy loading performance                                   | Test seeder supports bulk insertion          |
+
