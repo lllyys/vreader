@@ -89,6 +89,16 @@ final class SearchViewModel {
         errorMessage = nil
     }
 
+    /// Re-triggers the current search if the user already has a query.
+    /// Called after the search index finishes building so results appear
+    /// without the user needing to retype.
+    func retriggerIfNeeded() {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        searchTask?.cancel()
+        searchTask = Task { await resetAndSearch() }
+    }
+
     // MARK: - Private
 
     private func onQueryChanged() {

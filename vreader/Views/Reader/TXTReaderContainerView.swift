@@ -16,6 +16,7 @@ import SwiftUI
 struct TXTReaderContainerView: View {
     let fileURL: URL
     let viewModel: TXTReaderViewModel
+    var settingsStore: ReaderSettingsStore?
 
     var body: some View {
         ZStack {
@@ -72,9 +73,9 @@ struct TXTReaderContainerView: View {
         TXTTextViewBridge(
             text: text,
             attributedText: nil,
-            config: TXTViewConfig(),
+            config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
             restoreOffset: viewModel.currentOffsetUTF16,
-            delegate: nil // Delegate wiring deferred to WI-6B bridge integration
+            delegate: viewModel
         )
         .ignoresSafeArea(edges: .bottom)
         .accessibilityIdentifier("txtReaderContent")

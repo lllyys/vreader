@@ -22,6 +22,14 @@ Shared instructions for all AI agents (Claude, Codex, etc.).
     - Coverage thresholds are enforced — `ut` fails if coverage drops.
     - Exceptions: CSS-only, docs, config. See `.claude/rules/10-tdd.md` for full scope.
   - Run ut for gates.
+  - **Bug fix workflow** (follow this order for every bug):
+    1. **Understand**: Read the file/area, reproduce the symptom, identify root cause (not just location).
+    2. **RED**: Write a failing test that proves the bug exists.
+    3. **GREEN**: Minimal fix to make the test pass.
+    4. **REFACTOR**: Clean up without changing behavior.
+    5. **Verify**: Run tests, confirm the fix, check for regressions. Run `/codex-toolkit:audit-fix` on changed files
+    6. **Track**: Update `docs/bugs.md` status to FIXED.
+    7. Do NOT commit unless explicitly requested.
 - AI coding tool auth:
   - **Prefer subscription auth over API keys** for all AI coding tools (Claude Code, Codex CLI, Gemini CLI). Subscription plans are dramatically cheaper for sustained coding sessions — API billing can cost 10–30x more.
   - Claude Code: log in with Claude Max subscription. Codex CLI: `codex login` with ChatGPT Plus/Pro. Gemini CLI: Google account login.

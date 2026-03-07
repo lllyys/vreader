@@ -61,7 +61,7 @@ struct SearchWiringTests {
         try await Task.sleep(for: .milliseconds(50))
 
         #expect(!viewModel.results.isEmpty)
-        #expect(viewModel.results.first?.snippet.contains("Swift") == true)
+        #expect(viewModel.results.first?.snippet.localizedCaseInsensitiveContains("Swift") == true)
     }
 
     @Test @MainActor func searchBeforeIndexingReturnsEmpty() async throws {

@@ -65,13 +65,15 @@ struct ReaderContainerView: View {
                     TXTReaderHost(
                         fileURL: resolvedFileURL,
                         fingerprint: fingerprint,
-                        modelContainer: modelContext.container
+                        modelContainer: modelContext.container,
+                        settingsStore: settingsStore
                     )
                 case "md":
                     MDReaderHost(
                         fileURL: resolvedFileURL,
                         fingerprint: fingerprint,
-                        modelContainer: modelContext.container
+                        modelContainer: modelContext.container,
+                        settingsStore: settingsStore
                     )
                 default:
                     unsupportedFormatView(format: book.format.uppercased())
@@ -123,7 +125,11 @@ struct ReaderContainerView: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showAnnotationsPanel) {
-            AnnotationsPanelSheet(selectedTab: $selectedAnnotationsTab)
+            AnnotationsPanelSheet(
+                selectedTab: $selectedAnnotationsTab,
+                bookFingerprintKey: book.fingerprintKey,
+                modelContainer: modelContext.container
+            )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -142,9 +148,14 @@ struct ReaderContainerView: View {
                 let service = SearchService(store: store)
                 searchService = service
 
-                // Index book content BEFORE exposing search UI.
-                // searchViewModel is set after indexing so early searches won't
-                // hit an empty index.
+                // Create ViewModel immediately so the search panel opens instantly.
+                // Searching before indexing returns empty results (acceptable UX).
+                let vm = SearchViewModel(
+                    searchService: service,
+                    bookFingerprint: fingerprint
+                )
+                searchViewModel = vm
+
                 let alreadyIndexed = await service.isIndexed(fingerprint: fingerprint)
                 if !alreadyIndexed {
                     await Self.indexBookContent(
@@ -153,12 +164,9 @@ struct ReaderContainerView: View {
                         fingerprint: fingerprint,
                         format: book.format.lowercased()
                     )
+                    // Re-trigger search if user typed a query while indexing
+                    vm.retriggerIfNeeded()
                 }
-
-                searchViewModel = SearchViewModel(
-                    searchService: service,
-                    bookFingerprint: fingerprint
-                )
             } catch {
                 Self.logger.error("Search setup failed: \(error.localizedDescription)")
             }
@@ -326,13 +334,14 @@ private struct TXTReaderHost: View {
     let fileURL: URL
     let fingerprint: DocumentFingerprint
     let modelContainer: ModelContainer
+    let settingsStore: ReaderSettingsStore
 
     @State private var viewModel: TXTReaderViewModel?
 
     var body: some View {
         Group {
             if let viewModel {
-                TXTReaderContainerView(fileURL: fileURL, viewModel: viewModel)
+                TXTReaderContainerView(fileURL: fileURL, viewModel: viewModel, settingsStore: settingsStore)
             } else {
                 ProgressView()
             }
@@ -395,13 +404,14 @@ private struct MDReaderHost: View {
     let fileURL: URL
     let fingerprint: DocumentFingerprint
     let modelContainer: ModelContainer
+    let settingsStore: ReaderSettingsStore
 
     @State private var viewModel: MDReaderViewModel?
 
     var body: some View {
         Group {
             if let viewModel {
-                MDReaderContainerView(fileURL: fileURL, viewModel: viewModel)
+                MDReaderContainerView(fileURL: fileURL, viewModel: viewModel, settingsStore: settingsStore)
             } else {
                 ProgressView()
             }
@@ -489,9 +499,15 @@ enum AnnotationsPanelTab: String, CaseIterable, Identifiable {
 }
 
 /// Sheet that hosts the tabbed annotations panel.
-/// Placeholder panels are shown until ViewModels are wired with live persistence.
+/// Wires real list views for bookmarks, TOC, highlights, and annotations.
 private struct AnnotationsPanelSheet: View {
     @Binding var selectedTab: AnnotationsPanelTab
+    let bookFingerprintKey: String
+    let modelContainer: ModelContainer
+
+    @State private var bookmarkVM: BookmarkListViewModel?
+    @State private var highlightVM: HighlightListViewModel?
+    @State private var annotationVM: AnnotationListViewModel?
 
     var body: some View {
         NavigationStack {
@@ -512,29 +528,25 @@ private struct AnnotationsPanelSheet: View {
                 Group {
                     switch selectedTab {
                     case .bookmarks:
-                        placeholderView(
-                            title: "Bookmarks",
-                            systemImage: "bookmark",
-                            description: "Bookmarks will appear here once the reader is fully wired."
-                        )
+                        if let vm = bookmarkVM {
+                            BookmarkListView(viewModel: vm, onNavigate: { _ in })
+                        } else {
+                            ProgressView()
+                        }
                     case .toc:
-                        placeholderView(
-                            title: "Table of Contents",
-                            systemImage: "list.bullet",
-                            description: "Table of contents will appear here once the reader is fully wired."
-                        )
+                        TOCListView(entries: [], onNavigate: { _ in })
                     case .highlights:
-                        placeholderView(
-                            title: "Highlights",
-                            systemImage: "highlighter",
-                            description: "Highlights will appear here once the reader is fully wired."
-                        )
+                        if let vm = highlightVM {
+                            HighlightListView(viewModel: vm, onNavigate: { _ in })
+                        } else {
+                            ProgressView()
+                        }
                     case .annotations:
-                        placeholderView(
-                            title: "Notes",
-                            systemImage: "note.text",
-                            description: "Notes will appear here once the reader is fully wired."
-                        )
+                        if let vm = annotationVM {
+                            AnnotationListView(viewModel: vm, onNavigate: { _ in })
+                        } else {
+                            ProgressView()
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -542,14 +554,23 @@ private struct AnnotationsPanelSheet: View {
             .navigationTitle("Reader Panels")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .accessibilityIdentifier("annotationsPanelSheet")
-    }
-
-    private func placeholderView(title: String, systemImage: String, description: String) -> some View {
-        ContentUnavailableView {
-            Label(title, systemImage: systemImage)
-        } description: {
-            Text(description)
+        .task {
+            guard bookmarkVM == nil else { return }
+            let persistence = PersistenceActor(modelContainer: modelContainer)
+            bookmarkVM = BookmarkListViewModel(
+                bookFingerprintKey: bookFingerprintKey,
+                store: persistence
+            )
+            highlightVM = HighlightListViewModel(
+                bookFingerprintKey: bookFingerprintKey,
+                store: persistence,
+                totalTextLengthUTF16: nil
+            )
+            annotationVM = AnnotationListViewModel(
+                bookFingerprintKey: bookFingerprintKey,
+                store: persistence
+            )
         }
+        .accessibilityIdentifier("annotationsPanelSheet")
     }
 }

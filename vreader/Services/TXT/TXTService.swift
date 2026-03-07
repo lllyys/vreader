@@ -24,7 +24,8 @@ actor TXTService: TXTServiceProtocol {
             throw TXTServiceError.fileNotFound(url.lastPathComponent)
         }
 
-        let data = try Data(contentsOf: url)
+        // Use mappedIfSafe to avoid copying entire file into heap memory
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
 
         guard let (text, encoding) = Self.decodeText(data) else {
             throw TXTServiceError.decodingFailed(
@@ -39,7 +40,7 @@ actor TXTService: TXTServiceProtocol {
             fileByteCount: Int64(data.count),
             detectedEncoding: encoding,
             totalTextLengthUTF16: text.utf16.count,
-            totalWordCount: text.split(whereSeparator: \.isWhitespace).count
+            totalWordCount: Self.countWords(text)
         )
     }
 
@@ -159,6 +160,21 @@ actor TXTService: TXTServiceProtocol {
             CFStringEncoding(CFStringEncodings.EUC_KR.rawValue)
         )
     )
+
+    /// Counts words without allocating split substrings. O(n) single pass.
+    private static func countWords(_ text: String) -> Int {
+        var count = 0
+        var inWord = false
+        for char in text {
+            if char.isWhitespace || char.isNewline {
+                inWord = false
+            } else if !inWord {
+                count += 1
+                inWord = true
+            }
+        }
+        return count
+    }
 
     /// Maps a String.Encoding to a human-readable name.
     private static func encodingName(_ encoding: String.Encoding) -> String {

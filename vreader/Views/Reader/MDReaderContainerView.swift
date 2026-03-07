@@ -3,7 +3,7 @@
 //
 // Key decisions:
 // - Owns MDReaderViewModel lifecycle (open on appear, close on disappear).
-// - Delegates scroll/selection events from bridge to ViewModel.
+// - Delegates scroll/selection events from bridge to ViewModel for position persistence.
 // - Shows loading spinner during file open.
 // - Shows error message on failure.
 // - Passes rendered NSAttributedString to bridge for rich display.
@@ -16,6 +16,7 @@ import SwiftUI
 struct MDReaderContainerView: View {
     let fileURL: URL
     let viewModel: MDReaderViewModel
+    var settingsStore: ReaderSettingsStore?
 
     var body: some View {
         ZStack {
@@ -72,9 +73,9 @@ struct MDReaderContainerView: View {
         TXTTextViewBridge(
             text: attributedString.string,
             attributedText: attributedString,
-            config: TXTViewConfig(),
+            config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
             restoreOffset: viewModel.currentOffsetUTF16,
-            delegate: nil // Delegate wiring will come with bridge hardening
+            delegate: viewModel
         )
         .ignoresSafeArea(edges: .bottom)
         .accessibilityIdentifier("mdReaderContent")

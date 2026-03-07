@@ -96,6 +96,8 @@ final class TXTReaderViewModel {
     private var segmentStartDate: Date?
     /// Accumulated active reading seconds (excluding paused time).
     private var accumulatedActiveSeconds: TimeInterval = 0
+    /// Generation counter to guard against open/close races.
+    private var openGeneration: Int = 0
 
     // MARK: - Init
 
@@ -123,6 +125,9 @@ final class TXTReaderViewModel {
             await close()
         }
 
+        openGeneration += 1
+        let myGeneration = openGeneration
+
         isLoading = true
         errorMessage = nil
 
@@ -137,6 +142,9 @@ final class TXTReaderViewModel {
                 ?? "Failed to open file."
             return
         }
+
+        // Guard: another open() may have started while we were awaiting
+        guard myGeneration == openGeneration else { return }
 
         textContent = meta.text
         totalTextLengthUTF16 = meta.totalTextLengthUTF16
@@ -186,6 +194,9 @@ final class TXTReaderViewModel {
 
     /// Closes the reader, ending the session and flushing state.
     func close() async {
+        // Invalidate generation so any in-flight open() becomes stale
+        openGeneration += 1
+
         flushTask?.cancel()
         flushTask = nil
         debounceTask?.cancel()
@@ -267,9 +278,15 @@ final class TXTReaderViewModel {
     // MARK: - Selection
 
     /// Called when the user's text selection changes.
+    /// A zero-width range (start == end) is a cursor, not a selection — clear it.
     func updateSelection(startUTF16: Int, endUTF16: Int) {
-        currentSelectionStart = startUTF16
-        currentSelectionEnd = endUTF16
+        if startUTF16 == endUTF16 {
+            currentSelectionStart = nil
+            currentSelectionEnd = nil
+        } else {
+            currentSelectionStart = startUTF16
+            currentSelectionEnd = endUTF16
+        }
     }
 
     /// Clears the current selection.
@@ -382,6 +399,9 @@ final class TXTReaderViewModel {
         currentOffsetUTF16 = 0
         currentSelectionStart = nil
         currentSelectionEnd = nil
+        segmentStartDate = nil
+        accumulatedActiveSeconds = 0
+        sessionTimeDisplay = nil
     }
 
     // MARK: - Private: Offset Clamping
@@ -402,3 +422,17 @@ final class TXTReaderViewModel {
         }
     }
 }
+
+// MARK: - TXTTextViewBridgeDelegate Conformance
+
+#if canImport(UIKit)
+extension TXTReaderViewModel: TXTTextViewBridgeDelegate {
+    func scrollPositionDidChange(topCharOffsetUTF16: Int) {
+        updateScrollPosition(charOffsetUTF16: topCharOffsetUTF16)
+    }
+
+    func selectionDidChange(utf16Range: UTF16Range) {
+        updateSelection(startUTF16: utf16Range.startUTF16, endUTF16: utf16Range.endUTF16)
+    }
+}
+#endif

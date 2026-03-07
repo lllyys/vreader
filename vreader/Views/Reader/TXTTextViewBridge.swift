@@ -58,6 +58,10 @@ struct TXTTextViewBridge: UIViewRepresentable {
         textView.textContainerInset = config.textInset
         textView.textContainer.lineFragmentPadding = 0
 
+        // Performance: defer off-screen glyph layout for large documents.
+        // TextKit 1 will only compute layout for the visible region + buffer.
+        textView.layoutManager.allowsNonContiguousLayout = true
+
         applyText(to: textView)
 
         // Restore scroll position if requested
@@ -71,10 +75,17 @@ struct TXTTextViewBridge: UIViewRepresentable {
     }
 
     func updateUIView(_ textView: UITextView, context: Context) {
+        // Keep delegate reference in sync (SwiftUI may recreate the struct)
+        context.coordinator.delegate = delegate
+
         // Detect if config changed by comparing against stored config
-        let configChanged = context.coordinator.lastConfig.fontSize != config.fontSize
-            || context.coordinator.lastConfig.fontName != config.fontName
-            || context.coordinator.lastConfig.lineSpacing != config.lineSpacing
+        let lastCfg = context.coordinator.lastConfig
+        let configChanged = lastCfg.fontSize != config.fontSize
+            || lastCfg.fontName != config.fontName
+            || lastCfg.lineSpacing != config.lineSpacing
+            || lastCfg.textColor != config.textColor
+            || lastCfg.backgroundColor != config.backgroundColor
+            || lastCfg.letterSpacing != config.letterSpacing
 
         // Update text or re-apply styling if config changed
         let textChanged = textView.attributedText.string != text
@@ -154,6 +165,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
         var lastConfig: TXTViewConfig
         /// Tracks the last restored offset to avoid re-applying on every updateUIView.
         var lastRestoredOffset: Int?
+        /// Throttle scroll callbacks to ~10fps to avoid expensive TextKit queries per frame.
+        private var lastScrollCallbackTime: CFTimeInterval = 0
+        private static let scrollThrottleInterval: CFTimeInterval = 0.1
 
         init(delegate: TXTTextViewBridgeDelegate?, config: TXTViewConfig = TXTViewConfig()) {
             self.delegate = delegate
@@ -184,10 +198,33 @@ struct TXTTextViewBridge: UIViewRepresentable {
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            guard let textView = scrollView as? UITextView else {
-                return
-            }
+            guard let textView = scrollView as? UITextView else { return }
 
+            // Throttle: skip if called within the throttle interval
+            let now = CACurrentMediaTime()
+            guard now - lastScrollCallbackTime >= Self.scrollThrottleInterval else { return }
+            lastScrollCallbackTime = now
+
+            let topOffset = TXTOffsetMapper.scrollOffsetToCharOffset(
+                scrollY: scrollView.contentOffset.y,
+                layoutManager: textView.layoutManager,
+                textContainer: textView.textContainer
+            )
+            delegate?.scrollPositionDidChange(topCharOffsetUTF16: topOffset)
+        }
+
+        /// Flush final scroll position when scrolling ends (deceleration complete).
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            sendScrollPosition(scrollView)
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if !decelerate { sendScrollPosition(scrollView) }
+        }
+
+        private func sendScrollPosition(_ scrollView: UIScrollView) {
+            guard let textView = scrollView as? UITextView else { return }
+            lastScrollCallbackTime = CACurrentMediaTime()
             let topOffset = TXTOffsetMapper.scrollOffsetToCharOffset(
                 scrollY: scrollView.contentOffset.y,
                 layoutManager: textView.layoutManager,

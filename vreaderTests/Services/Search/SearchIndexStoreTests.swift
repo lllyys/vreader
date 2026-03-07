@@ -70,7 +70,7 @@ struct SearchIndexStoreTests {
         try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
 
         let hits = try store.search(query: "common", bookFingerprintKey: "txt:abc:1024", limit: 5)
-        #expect(hits.count <= 5)
+        #expect(hits.count == 5, "Should return exactly 5 hits (limit applied to 20 available), got \(hits.count)")
     }
 
     // MARK: - Multi-book isolation
@@ -258,6 +258,95 @@ struct SearchIndexStoreTests {
 
         let hits = try store.search(query: "编", bookFingerprintKey: "txt:cjk:3")
         #expect(!hits.isEmpty, "Single CJK character '编' should match within '编程'")
+    }
+
+    // MARK: - Multiple occurrences per segment (bug #2 fix)
+
+    @Test func searchReturnsAllOccurrencesWithinSegment() throws {
+        let store = try makeStore()
+        let units = [TextUnit(sourceUnitId: "txt:segment:0", text: "hello world hello again hello")]
+        try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
+
+        let hits = try store.search(query: "hello", bookFingerprintKey: "txt:abc:1024")
+        #expect(hits.count == 3, "Should return all 3 occurrences of 'hello', got \(hits.count)")
+    }
+
+    @Test func searchReturnsAllOccurrencesAcrossSegments() throws {
+        let store = try makeStore()
+        let units = [
+            TextUnit(sourceUnitId: "txt:segment:0", text: "hello world hello"),
+            TextUnit(sourceUnitId: "txt:segment:1", text: "another hello here"),
+        ]
+        try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
+
+        let hits = try store.search(query: "hello", bookFingerprintKey: "txt:abc:1024")
+        #expect(hits.count == 3, "Should return all 3 occurrences across segments, got \(hits.count)")
+    }
+
+    @Test func searchReturnsDistinctOffsetsPerOccurrence() throws {
+        let store = try makeStore()
+        let units = [TextUnit(sourceUnitId: "txt:segment:0", text: "cat sat on cat")]
+        try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
+
+        let hits = try store.search(query: "cat", bookFingerprintKey: "txt:abc:1024")
+        #expect(hits.count == 2, "Should return 2 occurrences of 'cat', got \(hits.count)")
+
+        if hits.count == 2 {
+            #expect(hits[0].matchStartOffsetUTF16 != hits[1].matchStartOffsetUTF16,
+                    "Each occurrence should have a distinct start offset")
+        }
+    }
+
+    @Test func searchCJKReturnsAllOccurrences() throws {
+        let store = try makeStore()
+        let units = [TextUnit(sourceUnitId: "txt:segment:0", text: "编程是编程的基础")]
+        try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
+
+        let hits = try store.search(query: "编程", bookFingerprintKey: "txt:abc:1024")
+        #expect(hits.count == 2, "Should return 2 occurrences of '编程', got \(hits.count)")
+    }
+
+    @Test func searchLimitAppliesAfterExpansion() throws {
+        let store = try makeStore()
+        let text = (0..<20).map { "word\($0) common" }.joined(separator: " ")
+        let units = [TextUnit(sourceUnitId: "txt:segment:0", text: text)]
+        try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
+
+        let hits = try store.search(query: "common", bookFingerprintKey: "txt:abc:1024", limit: 5)
+        #expect(hits.count == 5, "Limit should cap expanded results at 5, got \(hits.count)")
+    }
+
+    @Test func searchMultiTokenPhraseMatchesConsecutiveTokens() throws {
+        let store = try makeStore()
+        let units = [TextUnit(sourceUnitId: "txt:segment:0", text: "the quick brown fox jumps over the lazy dog")]
+        try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
+
+        let hits = try store.search(query: "quick brown fox", bookFingerprintKey: "txt:abc:1024")
+        #expect(!hits.isEmpty, "Multi-token phrase 'quick brown fox' should match")
+        if let hit = hits.first {
+            // Verify the range covers all three tokens
+            #expect(hit.matchStartOffsetUTF16 < hit.matchEndOffsetUTF16)
+        }
+    }
+
+    @Test func searchLimitZeroReturnsAtLeastOne() throws {
+        let store = try makeStore()
+        let units = [TextUnit(sourceUnitId: "txt:segment:0", text: "hello world")]
+        try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
+
+        // limit is clamped to max(1, limit) so 0 should still return 1
+        let hits = try store.search(query: "hello", bookFingerprintKey: "txt:abc:1024", limit: 0)
+        #expect(hits.count == 1, "limit=0 should be clamped to 1, got \(hits.count)")
+    }
+
+    @Test func searchMultiTokenNonAdjacentDoesNotMatch() throws {
+        let store = try makeStore()
+        // "quick" and "dog" both exist but are far apart — should not match as a phrase
+        let units = [TextUnit(sourceUnitId: "txt:segment:0", text: "the quick brown fox jumps over the lazy dog")]
+        try store.indexBook(fingerprintKey: "txt:abc:1024", textUnits: units)
+
+        let hits = try store.search(query: "quick dog", bookFingerprintKey: "txt:abc:1024")
+        #expect(hits.isEmpty, "Non-adjacent tokens 'quick' and 'dog' should not match as phrase, got \(hits.count)")
     }
 
     @Test func searchFullWidthDigitsMixedWithCJK() throws {

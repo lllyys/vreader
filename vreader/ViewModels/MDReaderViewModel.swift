@@ -349,6 +349,9 @@ final class MDReaderViewModel {
         renderedAttributedString = nil
         renderedTextLengthUTF16 = 0
         currentOffsetUTF16 = 0
+        segmentStartDate = nil
+        accumulatedActiveSeconds = 0
+        sessionTimeDisplay = nil
     }
 
     // MARK: - Private: Offset Clamping
@@ -357,3 +360,17 @@ final class MDReaderViewModel {
         min(max(offset, 0), renderedTextLengthUTF16)
     }
 }
+
+// MARK: - TXTTextViewBridgeDelegate Conformance
+
+#if canImport(UIKit)
+extension MDReaderViewModel: TXTTextViewBridgeDelegate {
+    func scrollPositionDidChange(topCharOffsetUTF16: Int) {
+        updateScrollPosition(charOffsetUTF16: topCharOffsetUTF16)
+    }
+
+    func selectionDidChange(utf16Range: UTF16Range) {
+        // MD reader does not support selection tracking yet
+    }
+}
+#endif

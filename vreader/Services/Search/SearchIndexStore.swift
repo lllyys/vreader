@@ -160,6 +160,7 @@ final class SearchIndexStore: @unchecked Sendable {
     /// Searches the FTS5 index for the given query within a specific book.
     func search(query: String, bookFingerprintKey: String, limit: Int = 50) throws -> [SearchHit] {
         guard !query.isEmpty else { return [] }
+        let safeLimit = max(1, limit)
         let normalized = SearchTextNormalizer.normalize(query)
         let normalizedQuery = SearchTextNormalizer.segmentCJK(normalized)
         guard !normalizedQuery.isEmpty else { return [] }
@@ -171,10 +172,12 @@ final class SearchIndexStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        // No SQL LIMIT — expand all segment matches to per-occurrence hits,
+        // then cap at the caller's limit. In-memory single-book scan is fast.
         let sql = """
             SELECT fingerprint_key, source_unit_id,
                    snippet(search_index, 2, '<b>', '</b>', '...', 32) as snip
-            FROM search_index WHERE search_index MATCH ? AND fingerprint_key = ? LIMIT ?
+            FROM search_index WHERE search_index MATCH ? AND fingerprint_key = ?
         """
         let ftsQuery = "content : \(escapedQuery)"
 
@@ -187,19 +190,22 @@ final class SearchIndexStore: @unchecked Sendable {
 
         bindText(stmt, 1, ftsQuery)
         bindText(stmt, 2, bookFingerprintKey)
-        sqlite3_bind_int(stmt, 3, Int32(limit))
 
         var results: [SearchHit] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let fpKey = colText(stmt, 0)
             let unitId = colText(stmt, 1)
             let snippet = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
-            let offsets = try findMatchOffsets(fingerprintKey: fpKey, sourceUnitId: unitId, normalizedQuery: normalizedQuery)
+            let allOffsets = try findAllMatchOffsets(fingerprintKey: fpKey, sourceUnitId: unitId, normalizedQuery: normalizedQuery)
 
-            results.append(SearchHit(
-                fingerprintKey: fpKey, sourceUnitId: unitId, snippet: snippet,
-                matchStartOffsetUTF16: offsets.start, matchEndOffsetUTF16: offsets.end
-            ))
+            for offsets in allOffsets {
+                results.append(SearchHit(
+                    fingerprintKey: fpKey, sourceUnitId: unitId, snippet: snippet,
+                    matchStartOffsetUTF16: offsets.start, matchEndOffsetUTF16: offsets.end
+                ))
+                if results.count >= safeLimit { break }
+            }
+            if results.count >= safeLimit { break }
         }
         return results
     }
@@ -243,36 +249,59 @@ final class SearchIndexStore: @unchecked Sendable {
 
     // MARK: - Private
 
-    /// Finds the UTF-16 offset range of the first occurrence of the query tokens in the source unit.
-    /// For multi-word queries, finds the first token's start and the last token's end.
-    private func findMatchOffsets(fingerprintKey: String, sourceUnitId: String, normalizedQuery: String) throws -> (start: Int, end: Int) {
+    /// Finds all UTF-16 offset ranges where the query tokens match in the source unit.
+    /// Returns one (start, end) per occurrence so each match becomes a separate SearchHit.
+    ///
+    /// For multi-token queries, verifies all tokens appear in offset order with each
+    /// subsequent token starting no more than `maxTokenGap` UTF-16 units after the
+    /// previous token ends. This approximates phrase matching without requiring true
+    /// adjacency. FTS5 already confirmed all tokens exist in the segment.
+    private func findAllMatchOffsets(fingerprintKey: String, sourceUnitId: String, normalizedQuery: String) throws -> [(start: Int, end: Int)] {
         let queryTokens = normalizedQuery.split(separator: " ").map(String.init)
-        guard let firstTokenStr = queryTokens.first else { return (0, 0) }
+        guard let firstTokenStr = queryTokens.first else { return [] }
 
         let firstSpans = try tokenSpansUnlocked(
             fingerprintKey: fingerprintKey, sourceUnitId: sourceUnitId,
             normalizedToken: firstTokenStr
         )
-        guard let firstSpan = firstSpans.first else { return (0, 0) }
+        guard !firstSpans.isEmpty else { return [] }
 
-        // Single-word query: return the first span's range
+        // Single-token query: each span is a separate occurrence
         if queryTokens.count == 1 {
-            return (firstSpan.startOffsetUTF16, firstSpan.endOffsetUTF16)
+            return firstSpans.map { ($0.startOffsetUTF16, $0.endOffsetUTF16) }
         }
 
-        // Multi-word: find the last token's span to compute full match range
-        if let lastTokenStr = queryTokens.last, lastTokenStr != firstTokenStr {
-            let lastSpans = try tokenSpansUnlocked(
+        // Multi-token: load spans for all distinct query tokens
+        var spansByToken: [String: [TokenSpan]] = [firstTokenStr: firstSpans]
+        for token in queryTokens.dropFirst() where spansByToken[token] == nil {
+            spansByToken[token] = try tokenSpansUnlocked(
                 fingerprintKey: fingerprintKey, sourceUnitId: sourceUnitId,
-                normalizedToken: lastTokenStr
+                normalizedToken: token
             )
-            // Find the first last-token span that comes after the first-token span
-            if let lastSpan = lastSpans.first(where: { $0.startOffsetUTF16 > firstSpan.startOffsetUTF16 }) {
-                return (firstSpan.startOffsetUTF16, lastSpan.endOffsetUTF16)
+        }
+
+        // For each first-token span, verify all subsequent tokens follow in offset order
+        // with a maximum gap to approximate phrase-level proximity.
+        let maxTokenGap = 50 // UTF-16 units — allows whitespace/punctuation between tokens
+        var results: [(start: Int, end: Int)] = []
+        for firstSpan in firstSpans {
+            var currentEnd = firstSpan.endOffsetUTF16
+            var valid = true
+            for token in queryTokens.dropFirst() {
+                guard let spans = spansByToken[token],
+                      let nextSpan = spans.first(where: { $0.startOffsetUTF16 >= currentEnd }),
+                      nextSpan.startOffsetUTF16 - currentEnd <= maxTokenGap else {
+                    valid = false
+                    break
+                }
+                currentEnd = nextSpan.endOffsetUTF16
+            }
+            if valid {
+                results.append((firstSpan.startOffsetUTF16, currentEnd))
             }
         }
 
-        return (firstSpan.startOffsetUTF16, firstSpan.endOffsetUTF16)
+        return results
     }
 
     private func errMsg() -> String {
