@@ -126,7 +126,10 @@ final class SearchIndexStore: @unchecked Sendable {
 
             let ftsSQL = "INSERT INTO search_index(fingerprint_key, source_unit_id, content) VALUES (?, ?, ?)"
             for unit in textUnits {
-                try execBind(ftsSQL, params: [fingerprintKey, unit.sourceUnitId, unit.text])
+                // Normalize + segment CJK so both index and query use the same pipeline
+                let normalized = SearchTextNormalizer.normalize(unit.text)
+                let segmented = SearchTextNormalizer.segmentCJK(normalized)
+                try execBind(ftsSQL, params: [fingerprintKey, unit.sourceUnitId, segmented])
             }
             for unit in textUnits {
                 try indexSpans(fingerprintKey: fingerprintKey, sourceUnitId: unit.sourceUnitId, text: unit.text)
@@ -157,8 +160,13 @@ final class SearchIndexStore: @unchecked Sendable {
     /// Searches the FTS5 index for the given query within a specific book.
     func search(query: String, bookFingerprintKey: String, limit: Int = 50) throws -> [SearchHit] {
         guard !query.isEmpty else { return [] }
-        let normalizedQuery = SearchTextNormalizer.normalize(query)
+        let normalized = SearchTextNormalizer.normalize(query)
+        let normalizedQuery = SearchTextNormalizer.segmentCJK(normalized)
         guard !normalizedQuery.isEmpty else { return [] }
+
+        // Reject queries that produce no valid tokens (whitespace-only, punctuation-only)
+        let escapedQuery = SearchTokenizer.escapeFTS5Query(normalizedQuery)
+        guard !escapedQuery.isEmpty else { return [] }
 
         lock.lock()
         defer { lock.unlock() }
@@ -168,7 +176,7 @@ final class SearchIndexStore: @unchecked Sendable {
                    snippet(search_index, 2, '<b>', '</b>', '...', 32) as snip
             FROM search_index WHERE search_index MATCH ? AND fingerprint_key = ? LIMIT ?
         """
-        let ftsQuery = "content : \(SearchTokenizer.escapeFTS5Query(normalizedQuery))"
+        let ftsQuery = "content : \(escapedQuery)"
 
         var stmt: OpaquePointer?
         let rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)

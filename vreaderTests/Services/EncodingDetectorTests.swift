@@ -269,4 +269,45 @@ struct EncodingDetectorTests {
         let name = EncodingDetector.encodingName(result.encoding)
         #expect(name == "utf-16le")
     }
+
+    // MARK: - GBK / CJK Encoding Detection
+
+    @Test func detectsGBKEncodedChinese() throws {
+        let gbkEncoding = String.Encoding(
+            rawValue: CFStringConvertEncodingToNSStringEncoding(
+                CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+            )
+        )
+        // "你好世界" (Hello World) encoded in GBK/GB18030
+        let chineseText = "你好世界"
+        guard let data = chineseText.data(using: gbkEncoding) else {
+            Issue.record("Could not encode test string as GBK")
+            return
+        }
+
+        let result = try EncodingDetector.detect(data: data)
+        #expect(
+            result.text.contains("你好世界"),
+            "Expected decoded text to contain '你好世界', got: \(result.text.prefix(50))"
+        )
+    }
+
+    @Test func detectsGBKWithMixedContent() throws {
+        let gbkEncoding = String.Encoding(
+            rawValue: CFStringConvertEncodingToNSStringEncoding(
+                CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+            )
+        )
+        // Mixed ASCII + Chinese in GBK
+        let text = "Chapter 1: 第一章 引言\n\n这是一本关于编程的书。\n\nHello World 你好世界"
+        guard let data = text.data(using: gbkEncoding) else {
+            Issue.record("Could not encode test string as GBK")
+            return
+        }
+
+        let result = try EncodingDetector.detect(data: data)
+        #expect(result.text.contains("第一章"), "Expected decoded text to contain '第一章'")
+        #expect(result.text.contains("编程"), "Expected decoded text to contain '编程'")
+        #expect(result.text.contains("Chapter 1"), "Expected decoded text to contain ASCII content")
+    }
 }

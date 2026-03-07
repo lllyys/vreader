@@ -6,9 +6,11 @@
 // - EPUB: "epub:<href>" → LocatorFactory.epub with progression=0 (search doesn't know position).
 // - PDF: "pdf:page:<N>" → LocatorFactory.pdf with page number.
 // - TXT: "txt:segment:<N>" → compute global UTF-16 offset from segment base + hit offset.
+// - MD: "md:segment:<N>" → same offset logic as TXT, using LocatorFactory.mdPosition.
 // - Returns nil for unrecognized formats or invalid sourceUnitId formats.
 //
-// @coordinates-with SearchHit (SearchIndexStore.swift), LocatorFactory.swift, TokenSpan.swift
+// @coordinates-with SearchHit (SearchIndexStore.swift), LocatorFactory.swift, TokenSpan.swift,
+//   MDTextExtractor.swift
 
 import Foundation
 
@@ -37,6 +39,13 @@ enum SearchHitToLocatorResolver {
             return resolvePDF(hit: hit, fingerprint: fingerprint, unitId: unitId)
         } else if unitId.hasPrefix("txt:segment:") {
             return resolveTXT(
+                hit: hit,
+                fingerprint: fingerprint,
+                unitId: unitId,
+                segmentBaseOffsets: segmentBaseOffsets
+            )
+        } else if unitId.hasPrefix("md:segment:") {
+            return resolveMD(
                 hit: hit,
                 fingerprint: fingerprint,
                 unitId: unitId,
@@ -100,6 +109,28 @@ enum SearchHitToLocatorResolver {
         let globalOffset = segBase + hit.matchStartOffsetUTF16
 
         return LocatorFactory.txtPosition(
+            fingerprint: fingerprint,
+            charOffsetUTF16: globalOffset
+        )
+    }
+
+    private static func resolveMD(
+        hit: SearchHit,
+        fingerprint: DocumentFingerprint,
+        unitId: String,
+        segmentBaseOffsets: [Int: Int]?
+    ) -> Locator? {
+        // "md:segment:1" → segmentIndex = 1
+        let segStr = String(unitId.dropFirst("md:segment:".count))
+        guard let segIndex = Int(segStr), segIndex >= 0 else { return nil }
+
+        guard let bases = segmentBaseOffsets, let segBase = bases[segIndex] else {
+            return nil
+        }
+
+        let globalOffset = segBase + hit.matchStartOffsetUTF16
+
+        return LocatorFactory.mdPosition(
             fingerprint: fingerprint,
             charOffsetUTF16: globalOffset
         )

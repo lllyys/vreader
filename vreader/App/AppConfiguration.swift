@@ -82,7 +82,8 @@ struct AppConfiguration: Sendable {
               !value.isEmpty,
               let resolved = AppEnvironment(rawValue: value) else {
             if let raw = bundleEnvironmentValue, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                assertionFailure("Unrecognized VReaderEnvironment value: \"\(raw)\". Defaulting to prod.")
+                // Log instead of crashing — test runners may inject unexpected values.
+                print("⚠️ Unrecognized VReaderEnvironment value: \"\(raw)\". Defaulting to prod.")
             }
             self.environment = .prod
             return

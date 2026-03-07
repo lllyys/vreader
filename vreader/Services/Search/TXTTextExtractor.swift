@@ -8,7 +8,7 @@
 // - Segment text is NOT trimmed to preserve UTF-16 offset alignment with original text.
 // - Also computes cumulative UTF-16 base offsets for locator resolution.
 //
-// @coordinates-with SearchTextExtractor.swift, TXTServiceProtocol.swift
+// @coordinates-with SearchTextExtractor.swift, TXTService.swift
 
 import Foundation
 
@@ -26,16 +26,27 @@ struct TXTTextExtractor: SearchTextExtractor {
         from url: URL,
         fingerprint: DocumentFingerprint
     ) async throws -> [TextUnit] {
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        // Try UTF-8 first, then fall back to encoding detection pipeline
-        let text: String
-        if let utf8 = String(data: data, encoding: .utf8) {
-            text = utf8
-        } else {
-            let result = try EncodingDetector.detect(data: data)
-            text = result.text
-        }
+        let text = try Self.decodeFile(at: url)
         return segmentText(text).textUnits
+    }
+
+    /// Loads a file with encoding detection and extracts text units with offsets.
+    /// Uses TXTService.decodeText() for encoding consistency with the reader display.
+    func extractWithOffsets(from url: URL) async throws -> TXTExtractionResult {
+        let text = try Self.decodeFile(at: url)
+        return extractWithOffsets(from: text)
+    }
+
+    /// Decodes a TXT file using the same pipeline as the reader (TXTService.decodeText),
+    /// ensuring search indexes the same text the user sees.
+    private static func decodeFile(at url: URL) throws -> String {
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        if let (text, _) = TXTService.decodeText(data) {
+            return text
+        }
+        throw TXTTextExtractorError.decodingFailed(
+            "Could not decode file with any supported encoding"
+        )
     }
 
     /// Creates text units from already-decoded text with segment base offsets.

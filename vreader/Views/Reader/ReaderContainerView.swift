@@ -11,19 +11,28 @@
 // - Provides navigation bar with back button, search button, settings button, and annotations menu.
 // - Settings panel presented as a sheet for theme/typography controls.
 // - Annotations sheet provides access to bookmarks, TOC, highlights, annotations.
-// - Search sheet placeholder until SearchService is instantiated in reader pipeline.
+// - Search sheet wired with SearchService, SearchViewModel, and SearchView.
+// - Book content is indexed for search on first open using format-specific extractors.
 //
 // @coordinates-with: EPUBReaderViewModel.swift, TXTReaderViewModel.swift,
 //   MDReaderViewModel.swift, PDFReaderViewModel.swift, LibraryView.swift,
 //   ReaderSettingsStore.swift, ReaderSettingsPanel.swift,
 //   TXTReaderContainerView.swift, PDFReaderContainerView.swift,
-//   MDReaderContainerView.swift, DocumentFingerprint.swift
+//   MDReaderContainerView.swift, DocumentFingerprint.swift,
+//   SearchView.swift, SearchViewModel.swift, SearchService.swift, SearchIndexStore.swift,
+//   TXTTextExtractor.swift, PDFTextExtractor.swift, EPUBTextExtractor.swift, MDTextExtractor.swift
 
 import SwiftUI
 import SwiftData
+import os
 
 /// Container view that dispatches to the correct format-specific reader.
 struct ReaderContainerView: View {
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "vreader",
+        category: "Search"
+    )
+
     let book: LibraryBookItem
 
     @Environment(\.dismiss) private var dismiss
@@ -33,6 +42,8 @@ struct ReaderContainerView: View {
     @State private var showAnnotationsPanel = false
     @State private var showSearch = false
     @State private var selectedAnnotationsTab: AnnotationsPanelTab = .bookmarks
+    @State private var searchViewModel: SearchViewModel?
+    @State private var searchService: SearchService?
 
     var body: some View {
         Group {
@@ -121,6 +132,37 @@ struct ReaderContainerView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .task {
+            guard searchService == nil,
+                  let fingerprint = DocumentFingerprint(canonicalKey: book.fingerprintKey) else {
+                return
+            }
+            do {
+                let store = try SearchIndexStore()
+                let service = SearchService(store: store)
+                searchService = service
+
+                // Index book content BEFORE exposing search UI.
+                // searchViewModel is set after indexing so early searches won't
+                // hit an empty index.
+                let alreadyIndexed = await service.isIndexed(fingerprint: fingerprint)
+                if !alreadyIndexed {
+                    await Self.indexBookContent(
+                        service: service,
+                        fileURL: resolvedFileURL,
+                        fingerprint: fingerprint,
+                        format: book.format.lowercased()
+                    )
+                }
+
+                searchViewModel = SearchViewModel(
+                    searchService: service,
+                    bookFingerprint: fingerprint
+                )
+            } catch {
+                Self.logger.error("Search setup failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - File URL Resolution
@@ -149,28 +191,107 @@ struct ReaderContainerView: View {
         #endif
     }()
 
+    // MARK: - Search Indexing
+
+    /// Extracts text from the book and indexes it for search.
+    /// Runs on the calling task — use from a `.task` modifier for background execution.
+    private static func indexBookContent(
+        service: SearchService,
+        fileURL: URL,
+        fingerprint: DocumentFingerprint,
+        format: String
+    ) async {
+        do {
+            switch format {
+            case "txt":
+                let extractor = TXTTextExtractor()
+                let result = try await extractor.extractWithOffsets(from: fileURL)
+                try await service.indexBook(
+                    fingerprint: fingerprint,
+                    textUnits: result.textUnits,
+                    segmentBaseOffsets: result.segmentBaseOffsets
+                )
+
+            case "md":
+                let extractor = MDTextExtractor()
+                let result = try await extractor.extractWithOffsets(from: fileURL)
+                try await service.indexBook(
+                    fingerprint: fingerprint,
+                    textUnits: result.textUnits,
+                    segmentBaseOffsets: result.segmentBaseOffsets
+                )
+
+            case "pdf":
+                let extractor = PDFTextExtractor()
+                let units = try await extractor.extractTextUnits(
+                    from: fileURL, fingerprint: fingerprint
+                )
+                try await service.indexBook(
+                    fingerprint: fingerprint,
+                    textUnits: units,
+                    segmentBaseOffsets: nil
+                )
+
+            case "epub":
+                let parser = EPUBParser()
+                do {
+                    let metadata = try await parser.open(url: fileURL)
+                    let extractor = EPUBTextExtractor()
+                    let units = try await extractor.extractFromParser(
+                        parser, metadata: metadata
+                    )
+                    await parser.close()
+                    try await service.indexBook(
+                        fingerprint: fingerprint,
+                        textUnits: units,
+                        segmentBaseOffsets: nil
+                    )
+                } catch {
+                    await parser.close()
+                    throw error
+                }
+
+            default:
+                break
+            }
+        } catch {
+            Self.logger.error("Search indexing failed for \(format): \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Sheets & Placeholders
 
-    /// Search sheet placeholder — wired when SearchService is available.
+    /// Search sheet — uses SearchView when search pipeline is ready.
     @ViewBuilder
     private var searchSheet: some View {
-        NavigationStack {
-            ContentUnavailableView {
-                Label("Search", systemImage: "magnifyingglass")
-            } description: {
-                Text("Search will be available once the book is indexed.")
-            }
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") {
-                        showSearch = false
-                    }
+        if let searchViewModel {
+            SearchView(
+                viewModel: searchViewModel,
+                onNavigate: { _ in
+                    // Navigation to search result location — format-specific
+                    // readers will wire this when they support search navigation.
+                    showSearch = false
+                },
+                onDismiss: {
+                    showSearch = false
                 }
+            )
+            .accessibilityIdentifier("searchSheet")
+        } else {
+            NavigationStack {
+                ProgressView("Preparing search…")
+                    .navigationTitle("Search")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") {
+                                showSearch = false
+                            }
+                        }
+                    }
             }
+            .accessibilityIdentifier("searchSheet")
         }
-        .accessibilityIdentifier("searchSheet")
     }
 
     private var fingerprintErrorView: some View {

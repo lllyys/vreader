@@ -17,9 +17,11 @@ struct SearchTextNormalizerTests {
     }
 
     @Test func nfkcNormalizesCircledLetters() {
-        // ① (U+2460) normalizes to "1"
+        // ① (U+2460) NFKC decomposes; exact output is platform-dependent
         let result = SearchTextNormalizer.normalize("①②③")
-        #expect(result == "1.2.3." || result == "123" || result.contains("1"))
+        // Must contain "1", "2", "3" in order (platform may or may not include periods)
+        #expect(result == "123" || result == "1.2.3.",
+                "Expected NFKC decomposition of circled numbers, got: \(result)")
     }
 
     // MARK: - Case folding
@@ -118,5 +120,80 @@ struct SearchTextNormalizerTests {
         // Full-width + diacritics + case
         let result = SearchTextNormalizer.normalize("ＣＡＦÉ")
         #expect(result == "cafe")
+    }
+
+    // MARK: - CJK Segmentation
+
+    @Test func segmentCJKSeparatesCharacters() {
+        let result = SearchTextNormalizer.segmentCJK("你好世界")
+        #expect(result == "你 好 世 界")
+    }
+
+    @Test func segmentCJKMixedWithLatin() {
+        let result = SearchTextNormalizer.segmentCJK("Hello你好World")
+        #expect(result == "Hello 你 好 World")
+    }
+
+    @Test func segmentCJKPreservesExistingSpaces() {
+        let result = SearchTextNormalizer.segmentCJK("你好 世界")
+        #expect(result == "你 好 世 界")
+    }
+
+    @Test func segmentCJKEmpty() {
+        let result = SearchTextNormalizer.segmentCJK("")
+        #expect(result == "")
+    }
+
+    @Test func segmentCJKPureLatin() {
+        let result = SearchTextNormalizer.segmentCJK("Hello World")
+        #expect(result == "Hello World")
+    }
+
+    @Test func segmentCJKJapaneseHiragana() {
+        let result = SearchTextNormalizer.segmentCJK("こんにちは")
+        #expect(result == "こ ん に ち は")
+    }
+
+    @Test func segmentCJKWithPunctuation() {
+        let result = SearchTextNormalizer.segmentCJK("你好，世界！")
+        // Punctuation stays between CJK chars
+        #expect(result.contains("你"))
+        #expect(result.contains("世"))
+    }
+
+    @Test func isCJKCharacterDetectsIdeographs() {
+        #expect(SearchTextNormalizer.isCJKCharacter("你"))
+        #expect(SearchTextNormalizer.isCJKCharacter("好"))
+        #expect(SearchTextNormalizer.isCJKCharacter("こ"))  // Hiragana
+        #expect(SearchTextNormalizer.isCJKCharacter("ア"))  // Katakana
+        #expect(!SearchTextNormalizer.isCJKCharacter("A"))
+        #expect(!SearchTextNormalizer.isCJKCharacter("1"))
+        #expect(!SearchTextNormalizer.isCJKCharacter(" "))
+    }
+
+    // MARK: - CJK segmentation edge cases (bug fix coverage)
+
+    @Test func segmentCJKKoreanHangul() {
+        let result = SearchTextNormalizer.segmentCJK("안녕하세요")
+        #expect(result == "안 녕 하 세 요", "Korean Hangul syllables should be space-separated")
+    }
+
+    @Test func segmentCJKIdempotent() {
+        let original = "你好世界"
+        let firstPass = SearchTextNormalizer.segmentCJK(original)
+        #expect(firstPass == "你 好 世 界")
+        let secondPass = SearchTextNormalizer.segmentCJK(firstPass)
+        // Already-segmented text should not gain extra spaces
+        #expect(secondPass == "你 好 世 界", "Running segmentCJK twice should not add extra spaces")
+    }
+
+    @Test func segmentCJKNumbersBetweenCJK() {
+        let result = SearchTextNormalizer.segmentCJK("第1章")
+        // "第" is CJK, "1" is not, "章" is CJK — transitions should insert spaces
+        #expect(result.contains("第"), "Should contain '第'")
+        #expect(result.contains("1"), "Should contain '1'")
+        #expect(result.contains("章"), "Should contain '章'")
+        // The three items should be space-separated
+        #expect(result == "第 1 章", "CJK-number-CJK should be fully separated: got '\(result)'")
     }
 }

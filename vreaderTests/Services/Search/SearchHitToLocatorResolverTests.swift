@@ -167,6 +167,54 @@ struct SearchHitToLocatorResolverTests {
         #expect(locator == nil)
     }
 
+    // MARK: - MD resolution
+
+    private static let mdFP = DocumentFingerprint(
+        contentSHA256: "aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112236",
+        fileByteCount: 256,
+        format: .md
+    )
+
+    @Test func resolveMDHit() {
+        let hit = SearchHit(
+            fingerprintKey: Self.mdFP.canonicalKey,
+            sourceUnitId: "md:segment:1",
+            snippet: "...md content...",
+            matchStartOffsetUTF16: 10,
+            matchEndOffsetUTF16: 20
+        )
+
+        let segmentBaseOffsets: [Int: Int] = [0: 0, 1: 50]
+
+        let locator = SearchHitToLocatorResolver.resolve(
+            hit: hit,
+            fingerprint: Self.mdFP,
+            segmentBaseOffsets: segmentBaseOffsets
+        )
+        #expect(locator != nil)
+        // Global offset = segment base (50) + hit offset (10) = 60
+        #expect(locator?.charOffsetUTF16 == 60)
+    }
+
+    @Test func resolveMDHitMissingOffsets() {
+        let hit = SearchHit(
+            fingerprintKey: Self.mdFP.canonicalKey,
+            sourceUnitId: "md:segment:0",
+            snippet: "text",
+            matchStartOffsetUTF16: 0,
+            matchEndOffsetUTF16: 4
+        )
+
+        let locator = SearchHitToLocatorResolver.resolve(
+            hit: hit,
+            fingerprint: Self.mdFP,
+            segmentBaseOffsets: nil
+        )
+        #expect(locator == nil)
+    }
+
+    // MARK: - Edge cases
+
     @Test func emptySourceUnitId() {
         let hit = SearchHit(
             fingerprintKey: Self.txtFP.canonicalKey,

@@ -308,6 +308,11 @@ struct SearchServiceTests {
         #expect(ctx == "Section 3") // 1-indexed display
     }
 
+    @Test func formatSourceContextMD() {
+        let ctx = SearchService.formatSourceContext(sourceUnitId: "md:segment:1")
+        #expect(ctx == "Section 2") // 1-indexed display
+    }
+
     @Test func formatSourceContextUnknown() {
         let ctx = SearchService.formatSourceContext(sourceUnitId: "unknown:format")
         #expect(ctx == "")
@@ -413,17 +418,14 @@ struct SearchServiceTests {
             segmentBaseOffsets: [0: 0]
         )
 
-        // FTS5 unicode61 tokenizer may handle CJK differently;
-        // at minimum, indexing should not fail
         let page = try await service.search(
             query: "中文",
             bookFingerprint: Self.txtFP,
             page: 0,
             pageSize: 10
         )
-        // Note: unicode61 tokenizer may not match CJK substrings —
-        // this test verifies no crash/error at minimum
-        #expect(page.page == 0)
+        #expect(!page.results.isEmpty, "CJK search should return results after segmentation fix")
+        #expect(page.results.first?.sourceContext == "Section 1")
     }
 
     // MARK: - Diacritic Search

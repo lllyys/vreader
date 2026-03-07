@@ -92,10 +92,12 @@ final class SearchService: SearchProviding, @unchecked Sendable {
         try store.indexBook(fingerprintKey: key, textUnits: textUnits)
 
         state.withLock { s in
-            if let offsets = segmentBaseOffsets {
-                s.segmentOffsets[key] = offsets
+            // Always set offsets (nil clears stale data from previous index)
+            s.segmentOffsets[key] = segmentBaseOffsets
+            // Only mark indexed when content was actually stored
+            if !textUnits.isEmpty {
+                s.indexedKeys.insert(key)
             }
-            s.indexedKeys.insert(key)
         }
     }
 
@@ -195,6 +197,12 @@ final class SearchService: SearchProviding, @unchecked Sendable {
             return "Page"
         } else if sourceUnitId.hasPrefix("txt:segment:") {
             let segStr = String(sourceUnitId.dropFirst("txt:segment:".count))
+            if let seg = Int(segStr) {
+                return "Section \(seg + 1)" // Display as 1-indexed
+            }
+            return "Section"
+        } else if sourceUnitId.hasPrefix("md:segment:") {
+            let segStr = String(sourceUnitId.dropFirst("md:segment:".count))
             if let seg = Int(segStr) {
                 return "Section \(seg + 1)" // Display as 1-indexed
             }

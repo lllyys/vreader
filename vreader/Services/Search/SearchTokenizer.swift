@@ -23,6 +23,8 @@ enum SearchTokenizer {
 
     /// Splits text into tokens with normalized forms and UTF-16 offsets.
     /// Uses Character-level iteration to correctly handle surrogate pairs (non-BMP).
+    /// CJK characters are emitted as individual tokens (one per character)
+    /// to match the FTS5 indexing behavior after CJK segmentation.
     static func tokenize(_ text: String) -> [IndexedToken] {
         var tokens: [IndexedToken] = []
         var utf16Offset = 0
@@ -32,8 +34,33 @@ enum SearchTokenizer {
         for char in text {
             let charUTF16Length = char.utf16.count
             let isAlphanumeric = char.isLetter || char.isNumber
+            let isCJK = SearchTextNormalizer.isCJKCharacter(char)
 
-            if isAlphanumeric {
+            if isCJK {
+                // Flush any accumulated non-CJK token first
+                if let start = currentTokenStart {
+                    let tokenText = String(currentTokenChars)
+                    let normalized = SearchTextNormalizer.normalize(tokenText)
+                    if !normalized.isEmpty {
+                        tokens.append(IndexedToken(
+                            normalized: normalized,
+                            startUTF16: start,
+                            endUTF16: utf16Offset
+                        ))
+                    }
+                    currentTokenStart = nil
+                    currentTokenChars.removeAll()
+                }
+                // Emit CJK character as its own token
+                let normalized = SearchTextNormalizer.normalize(String(char))
+                if !normalized.isEmpty {
+                    tokens.append(IndexedToken(
+                        normalized: normalized,
+                        startUTF16: utf16Offset,
+                        endUTF16: utf16Offset + charUTF16Length
+                    ))
+                }
+            } else if isAlphanumeric {
                 if currentTokenStart == nil {
                     currentTokenStart = utf16Offset
                 }
