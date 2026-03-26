@@ -109,7 +109,7 @@ Then select a simulator or device and run.
 
 ## Architecture
 
-See `` for the full architecture document.
+See [`docs/architecture.md`](docs/architecture.md) for the full architecture document.
 
 ```
 vreader/
