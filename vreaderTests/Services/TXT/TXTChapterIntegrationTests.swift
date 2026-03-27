@@ -566,3 +566,143 @@ struct TXTFileLoaderChapterTests {
         #expect(result.hadSavedPosition == false)
     }
 }
+
+// MARK: - GH #30: Unified Chapter System
+
+@Suite("GH #30 — Unified Chapter System")
+@MainActor
+struct GH30UnifiedChapterTests {
+
+    @Test("navigateToChapterByTitle finds correct chapter")
+    func titleMatchNavigation() async {
+        let result = makeChapterOpenResult()
+        let (vm, _, _) = await makeChapterVM(chapterResult: result)
+        await vm.openChapterBased(url: chapterTestURL)
+
+        let matched = await vm.navigateToChapterByTitle("Chapter 2")
+
+        #expect(matched == true)
+        #expect(vm.currentChapterIdx == 1)
+        #expect(vm.currentChapterText == ch2Text)
+    }
+
+    @Test("navigateToChapterByTitle trims whitespace")
+    func titleMatchWhitespace() async {
+        let result = makeChapterOpenResult()
+        let (vm, _, _) = await makeChapterVM(chapterResult: result)
+        await vm.openChapterBased(url: chapterTestURL)
+
+        let matched = await vm.navigateToChapterByTitle("  Chapter 3  \n")
+
+        #expect(matched == true)
+        #expect(vm.currentChapterIdx == 2)
+    }
+
+    @Test("navigateToChapterByTitle returns false for no match")
+    func titleMatchNoMatch() async {
+        let result = makeChapterOpenResult()
+        let (vm, _, _) = await makeChapterVM(chapterResult: result)
+        await vm.openChapterBased(url: chapterTestURL)
+
+        let matched = await vm.navigateToChapterByTitle("Nonexistent")
+
+        #expect(matched == false)
+        #expect(vm.currentChapterIdx == 0)
+    }
+
+    @Test("makeLocator includes txtchapter href in chapter mode")
+    func makeLocatorHref() async {
+        let result = makeChapterOpenResult()
+        let (vm, _, _) = await makeChapterVM(chapterResult: result)
+        await vm.openChapterBased(url: chapterTestURL)
+
+        await vm.navigateToChapter(1)
+        let locator = vm.makeLocator()
+
+        #expect(locator.href?.hasPrefix("txtchapter:1:") == true)
+    }
+
+    @Test("makeLocator has nil href in non-chapter mode")
+    func makeLocatorNoHref() async {
+        let meta = TXTFileMetadata(
+            text: "plain text", fileByteCount: 10,
+            detectedEncoding: "UTF-8", totalTextLengthUTF16: 10, totalWordCount: 2
+        )
+        let (vm, _, _) = await makeChapterVM(fullTextMetadata: meta)
+        await vm.open(url: chapterTestURL)
+
+        let locator = vm.makeLocator()
+
+        #expect(locator.href == nil)
+    }
+
+    @Test("content loader slices full text by UTF-16 offsets")
+    func contentLoaderSlicing() async throws {
+        let allText = ch1Text + ch2Text + ch3Text
+        let allData = Data(allText.utf8)
+        let ch1UTF16 = (ch1Text as NSString).length
+        let ch2UTF16 = (ch2Text as NSString).length
+
+        let loader = TXTChapterContentLoader(fileData: allData, encoding: .utf8)
+        let ch = TXTChapter(
+            index: 1, title: "Chapter 2",
+            startByte: 0, endByte: Int64(allData.count),
+            globalStartUTF16: ch1UTF16, textLengthUTF16: ch2UTF16
+        )
+
+        let text = try await loader.loadChapter(ch)
+
+        #expect(text == ch2Text)
+    }
+
+    @Test("position restore via href parses chapter index directly")
+    func hrefPositionRestore() async {
+        let result = makeChapterOpenResult()
+        let (vm, _, positionStore) = await makeChapterVM(chapterResult: result)
+
+        // Save a position with href encoding
+        let locator = Locator(
+            bookFingerprint: chapterFingerprint,
+            href: "txtchapter:2:5", progression: nil, totalProgression: nil,
+            cfi: nil, page: nil,
+            charOffsetUTF16: 99999, // Wrong global offset — should be ignored
+            charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil
+        )
+        await positionStore.seed(
+            bookFingerprintKey: chapterFingerprint.canonicalKey,
+            locator: locator
+        )
+
+        await vm.openChapterBased(url: chapterTestURL)
+
+        // Should use href (chapter 2, offset 5), not the wrong charOffsetUTF16
+        #expect(vm.currentChapterIdx == 2)
+        #expect(vm.currentChapterText == ch3Text)
+    }
+
+    @Test("position restore falls back to global offset for legacy locators")
+    func legacyPositionRestore() async {
+        let result = makeChapterOpenResult()
+        let ch1UTF16 = (ch1Text as NSString).length
+        let (vm, _, positionStore) = await makeChapterVM(chapterResult: result)
+
+        // Save a legacy position without href
+        guard let locator = LocatorFactory.txtPosition(
+            fingerprint: chapterFingerprint,
+            charOffsetUTF16: ch1UTF16 + 5
+        ) else {
+            Issue.record("Failed to create locator")
+            return
+        }
+        await positionStore.seed(
+            bookFingerprintKey: chapterFingerprint.canonicalKey,
+            locator: locator
+        )
+
+        await vm.openChapterBased(url: chapterTestURL)
+
+        // Should fall back to global offset → chapter 1
+        #expect(vm.currentChapterIdx == 1)
+    }
+}

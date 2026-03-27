@@ -129,32 +129,50 @@ extension TXTFileLoader {
         )
     }
 
-    /// Resolves saved global UTF-16 offset to a chapter index + local offset.
+    /// Resolves saved position to chapter index + local offset.
+    /// GH #30: Prefers `txtchapter:N:M` href (direct, no drift) over global
+    /// UTF-16 binary search (fragile for multi-byte encodings).
     private static func resolveChapterPosition(
         chapters: [TXTChapter],
         positionStore: any ReadingPositionPersisting,
         bookFingerprintKey: String
     ) async -> (chapterIndex: Int, localOffset: Int, hadSaved: Bool) {
         do {
-            let savedLocator = try await positionStore.loadPosition(
+            guard let savedLocator = try await positionStore.loadPosition(
                 bookFingerprintKey: bookFingerprintKey
-            )
-            if let savedLocator, let savedOffset = savedLocator.charOffsetUTF16 {
-                // Use binary search to find containing chapter
+            ) else { return (0, 0, false) }
+
+            // GH #30: Prefer chapter-encoded href (no offset drift)
+            if let href = savedLocator.href,
+               let parsed = parseChapterHref(href),
+               parsed.chapterIndex >= 0, parsed.chapterIndex < chapters.count {
+                let maxLocal = chapters[parsed.chapterIndex].textLengthUTF16
+                let clamped = min(max(parsed.localOffset, 0), max(maxLocal, 0))
+                return (parsed.chapterIndex, clamped, true)
+            }
+
+            // Fallback: global UTF-16 offset binary search (legacy locators)
+            if let savedOffset = savedLocator.charOffsetUTF16 {
                 if let localPos = TXTOffsetTranslator.toLocal(
-                    globalUTF16: savedOffset,
-                    chapters: chapters
+                    globalUTF16: savedOffset, chapters: chapters
                 ) {
                     return (localPos.chapterIndex, localPos.localOffsetUTF16, true)
                 }
-                // Offset beyond range — default to last chapter at 0
                 if !chapters.isEmpty {
                     return (chapters.count - 1, 0, true)
                 }
             }
         } catch {
-            // Position restore failure is non-fatal — fall back to chapter 0
+            // Non-fatal — fall back to chapter 0
         }
         return (0, 0, false)
+    }
+
+    /// Parses "txtchapter:{index}:{localOffset}" from a Locator href.
+    private static func parseChapterHref(_ href: String) -> (chapterIndex: Int, localOffset: Int)? {
+        let parts = href.split(separator: ":")
+        guard parts.count == 3, parts[0] == "txtchapter",
+              let idx = Int(parts[1]), let offset = Int(parts[2]) else { return nil }
+        return (idx, offset)
     }
 }

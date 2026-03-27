@@ -41,7 +41,8 @@ enum ReaderTOCFactory {
             }.value
 
         case "txt":
-            // Use TXTService encoding detection — not UTF-8 only (bug #83 / #92 pattern)
+            // GH #30: Use same full-text decode + regex as chapter builder.
+            // This ensures TOC entries and chapters are perfectly aligned.
             guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else { return [] }
             let hintName = TXTService.detectEncodingFromSample(data)
             if let enc = TXTService.encodingFromName(hintName),

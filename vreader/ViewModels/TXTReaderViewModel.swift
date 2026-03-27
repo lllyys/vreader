@@ -360,16 +360,18 @@ final class TXTReaderViewModel {
     }
 
     /// Navigates to the chapter matching a TOC entry title.
-    /// Used by TOC navigation — matches by title because UTF-16 offsets from
-    /// TOC (full-text regex) and chapters (byte-range decode) can drift. (GH #30)
-    func navigateToChapterByTitle(_ title: String) async {
-        guard let chIdx = chapterIndex else { return }
+    /// Returns true if a match was found. (GH #30)
+    @discardableResult
+    func navigateToChapterByTitle(_ title: String) async -> Bool {
+        guard let chIdx = chapterIndex else { return false }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if let idx = chIdx.chapters.firstIndex(where: {
             $0.title.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
         }) {
             await navigateToChapter(idx)
+            return true
         }
+        return false
     }
 
     /// Navigates to the chapter containing the given global UTF-16 offset.
@@ -496,21 +498,26 @@ final class TXTReaderViewModel {
 
     // MARK: - Private: Locator Construction
 
-    /// Full locator with quote/context extraction (for persistence).
-    /// Internal access for bookmark creation from container views.
+    /// Full locator for position persistence.
+    /// GH #30: In chapter mode, encodes chapter index + local offset in `href`
+    /// so restore uses the index directly — no global offset reverse-mapping.
     func makeLocator() -> Locator {
         let progression = totalTextLengthUTF16 > 0
             ? Double(currentOffsetUTF16) / Double(totalTextLengthUTF16)
             : 0.0
 
-        return LocatorFactory.txtPosition(
-            fingerprint: bookFingerprint,
-            charOffsetUTF16: currentOffsetUTF16,
+        let chapterHref: String? = isChapterMode
+            ? "txtchapter:\(currentChapterIdx):\(currentChapterLocalUTF16)"
+            : nil
+
+        return Locator.validated(
+            bookFingerprint: bookFingerprint,
+            href: chapterHref,
             totalProgression: progression,
-            sourceText: textContent
+            charOffsetUTF16: currentOffsetUTF16
         ) ?? Locator(
             bookFingerprint: bookFingerprint,
-            href: nil, progression: nil, totalProgression: progression,
+            href: chapterHref, progression: nil, totalProgression: progression,
             cfi: nil, page: nil,
             charOffsetUTF16: currentOffsetUTF16,
             charRangeStartUTF16: nil, charRangeEndUTF16: nil,

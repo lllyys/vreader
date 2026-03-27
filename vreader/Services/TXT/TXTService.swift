@@ -109,57 +109,32 @@ actor TXTService: TXTServiceProtocol {
                 let cacheDir = Self.cacheDirectory(for: url)
                 let fileModDate = Self.fileModificationDate(url: url) ?? Date()
 
-                if var cachedIndex = TXTChapterIndexStore.load(
+                // GH #30: Load from cache if valid (built with full-text strategy)
+                if let cachedIndex = TXTChapterIndexStore.load(
                     cacheDir: cacheDir, fileByteCount: fileByteCount, fileModDate: fileModDate
-                ) {
+                ), cachedIndex.totalTextLengthUTF16 > 0 {
                     let loader = TXTChapterContentLoader(fileData: data, encoding: encoding)
-                    // Populate UTF-16 offsets if not already done (GH #30)
-                    if cachedIndex.totalTextLengthUTF16 == 0, !cachedIndex.chapters.isEmpty {
-                        var chs = cachedIndex.chapters
-                        try TXTOffsetTranslator.populateUTF16Offsets(chapters: &chs) { ch in
-                            let s = Int(ch.startByte), e = min(Int(ch.endByte), data.count)
-                            guard s < e else { return "" }
-                            guard let decoded = String(data: data[s..<e], encoding: encoding) else {
-                                return ""
-                            }
-                            return decoded
-                        }
-                        cachedIndex = TXTChapterIndex(
-                            chapters: chs,
-                            totalBytes: cachedIndex.totalBytes,
-                            detectedEncoding: cachedIndex.detectedEncoding,
-                            totalTextLengthUTF16: chs.last.map { $0.globalStartUTF16 + $0.textLengthUTF16 } ?? 0
-                        )
-                    }
                     return TXTChapterOpenResult(
                         chapterIndex: cachedIndex, contentLoader: loader,
                         fileByteCount: fileByteCount, detectedEncoding: encodingName
                     )
                 }
 
-                // Build index from streaming blocks
-                let sampleSize = min(data.count, 512_000)
-                let sampleText = String(data: Data(data.prefix(sampleSize)), encoding: encoding) ?? ""
+                // GH #30 (Legado strategy): Decode full file → regex → chapters
+                // with exact UTF-16 offsets. One system for TOC + content + position.
+                guard let fullString = String(data: data, encoding: encoding) else {
+                    throw TXTServiceError.decodingFailed("Failed to decode with \(encodingName)")
+                }
+                let fullText = fullString as NSString
+                let sampleEnd = min(fullText.length, 512 * 1024)
+                let sampleText = fullText.substring(with: NSRange(location: 0, length: sampleEnd))
                 let rule = TXTTocRuleEngine.detectBestRule(
                     text: sampleText, rules: TXTTocRuleEngine.defaultRules
                 )
-                var index = TXTChapterIndexBuilder.build(
-                    data: data, encoding: encoding, encodingName: encodingName, rule: rule
-                )
 
-                // Populate UTF-16 offsets eagerly — needed for TOC navigation,
-                // position restore, and progress display. (GH #30)
-                var chapters = index.chapters
-                try TXTOffsetTranslator.populateUTF16Offsets(chapters: &chapters) { ch in
-                    let s = Int(ch.startByte), e = min(Int(ch.endByte), data.count)
-                    guard s < e else { return "" }
-                    return String(data: data[s..<e], encoding: encoding) ?? ""
-                }
-                index = TXTChapterIndex(
-                    chapters: chapters,
-                    totalBytes: index.totalBytes,
-                    detectedEncoding: index.detectedEncoding,
-                    totalTextLengthUTF16: chapters.last.map { $0.globalStartUTF16 + $0.textLengthUTF16 } ?? 0
+                let index = Self.buildChapterIndexFromFullText(
+                    fullText: fullText, totalBytes: Int64(data.count),
+                    encodingName: encodingName, rule: rule
                 )
 
                 try? FileManager.default.createDirectory(
@@ -184,6 +159,146 @@ actor TXTService: TXTServiceProtocol {
         _isOpen = true
         _isOpening = false
         return result
+    }
+
+    // MARK: - Full-Text Chapter Builder (GH #30, Legado strategy)
+
+    /// Builds chapter index by running regex on the full decoded text.
+    /// UTF-16 offsets are exact (from NSRegularExpression match positions).
+    /// This is the same text the TOC uses, guaranteeing perfect alignment.
+    private static func buildChapterIndexFromFullText(
+        fullText: NSString,
+        totalBytes: Int64,
+        encodingName: String,
+        rule: TXTTocRule?
+    ) -> TXTChapterIndex {
+        let totalUTF16 = fullText.length
+        guard totalUTF16 > 0 else {
+            return TXTChapterIndex(
+                chapters: [], totalBytes: totalBytes,
+                detectedEncoding: encodingName, totalTextLengthUTF16: 0
+            )
+        }
+
+        var chapters: [TXTChapter] = []
+
+        if let rule, let regex = try? NSRegularExpression(
+            pattern: rule.rule, options: [.anchorsMatchLines]
+        ) {
+            let matches = regex.matches(
+                in: fullText as String,
+                range: NSRange(location: 0, length: totalUTF16)
+            )
+            for match in matches {
+                guard match.range.location != NSNotFound else { continue }
+                let title = fullText.substring(with: match.range)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { continue }
+
+                let utf16Start = match.range.location
+
+                // Close previous chapter
+                if !chapters.isEmpty {
+                    let last = chapters.count - 1
+                    chapters[last] = TXTChapter(
+                        index: chapters[last].index,
+                        title: chapters[last].title,
+                        startByte: 0, endByte: totalBytes,
+                        globalStartUTF16: chapters[last].globalStartUTF16,
+                        textLengthUTF16: utf16Start - chapters[last].globalStartUTF16
+                    )
+                }
+
+                chapters.append(TXTChapter(
+                    index: chapters.count,
+                    title: title,
+                    startByte: 0, endByte: totalBytes,
+                    globalStartUTF16: utf16Start,
+                    textLengthUTF16: totalUTF16 - utf16Start
+                ))
+            }
+        }
+
+        // Add preamble if first chapter doesn't start at 0
+        if let first = chapters.first, first.globalStartUTF16 > 0 {
+            var updated = [TXTChapter(
+                index: 0, title: "前言",
+                startByte: 0, endByte: totalBytes,
+                globalStartUTF16: 0,
+                textLengthUTF16: first.globalStartUTF16
+            )]
+            for (i, ch) in chapters.enumerated() {
+                updated.append(TXTChapter(
+                    index: i + 1, title: ch.title,
+                    startByte: 0, endByte: totalBytes,
+                    globalStartUTF16: ch.globalStartUTF16,
+                    textLengthUTF16: ch.textLengthUTF16
+                ))
+            }
+            chapters = updated
+        }
+
+        // Close last chapter
+        if !chapters.isEmpty {
+            let last = chapters.count - 1
+            chapters[last] = TXTChapter(
+                index: chapters[last].index,
+                title: chapters[last].title,
+                startByte: 0, endByte: totalBytes,
+                globalStartUTF16: chapters[last].globalStartUTF16,
+                textLengthUTF16: totalUTF16 - chapters[last].globalStartUTF16
+            )
+        }
+
+        // Need at least 2 chapters
+        if chapters.count < 2 {
+            chapters = buildSyntheticChaptersUTF16(
+                fullText: fullText, totalBytes: totalBytes
+            )
+        }
+
+        return TXTChapterIndex(
+            chapters: chapters, totalBytes: totalBytes,
+            detectedEncoding: encodingName, totalTextLengthUTF16: totalUTF16
+        )
+    }
+
+    /// Synthetic chapters at ~50K UTF-16 boundaries (paragraph breaks).
+    private static func buildSyntheticChaptersUTF16(
+        fullText: NSString, totalBytes: Int64
+    ) -> [TXTChapter] {
+        let total = fullText.length
+        let size = 50_000
+        guard total > size else {
+            return [TXTChapter(
+                index: 0, title: "Chapter 1",
+                startByte: 0, endByte: totalBytes,
+                globalStartUTF16: 0, textLengthUTF16: total
+            )]
+        }
+        var chapters: [TXTChapter] = []
+        var pos = 0
+        while pos < total {
+            let target = min(pos + size, total)
+            if target >= total {
+                chapters.append(TXTChapter(
+                    index: chapters.count, title: "Chapter \(chapters.count + 1)",
+                    startByte: 0, endByte: totalBytes,
+                    globalStartUTF16: pos, textLengthUTF16: total - pos
+                ))
+                break
+            }
+            let searchRange = NSRange(location: target, length: min(2000, total - target))
+            let br = fullText.range(of: "\n\n", options: [], range: searchRange)
+            let split = br.location != NSNotFound ? br.location + 2 : target
+            chapters.append(TXTChapter(
+                index: chapters.count, title: "Chapter \(chapters.count + 1)",
+                startByte: 0, endByte: totalBytes,
+                globalStartUTF16: pos, textLengthUTF16: split - pos
+            ))
+            pos = split
+        }
+        return chapters
     }
 
     // MARK: - File Helpers

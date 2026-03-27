@@ -208,7 +208,12 @@ struct TXTReaderContainerView: View {
             if viewModel.textContent == nil && viewModel.currentChapterText == nil {
                 await viewModel.openChapterBased(url: fileURL)
             }
-            initialRestoreOffset = viewModel.currentOffsetUTF16
+            // GH #30: In chapter mode, capture LOCAL offset for within-chapter restore.
+            if viewModel.isChapterMode {
+                initialRestoreOffset = viewModel.currentChapterLocalUTF16
+            } else {
+                initialRestoreOffset = viewModel.currentOffsetUTF16
+            }
             // Load persisted highlights from DB for visual rendering (bug #55)
             if let container = modelContainer {
                 let persistence = PersistenceActor(modelContainer: container)
@@ -346,9 +351,20 @@ struct TXTReaderContainerView: View {
             },
             sourceText: { [viewModel] in viewModel.textContent },
             makeCurrentLocator: { [viewModel] in viewModel.makeLocator() },
-            onNavigate: { [viewModel] offset in
+            onNavigate: { [viewModel, tocEntries] offset in
                 if viewModel.chapterIndex != nil {
-                    Task { await viewModel.navigateToGlobalOffset(offset) }
+                    // GH #30: TOC and chapters now use the same full-text decode,
+                    // so title matching is reliable. Fall back to offset for bookmarks/search.
+                    if let title = tocEntries.first(where: { $0.locator.charOffsetUTF16 == offset })?.title {
+                        Task {
+                            let matched = await viewModel.navigateToChapterByTitle(title)
+                            if !matched {
+                                await viewModel.navigateToGlobalOffset(offset)
+                            }
+                        }
+                    } else {
+                        Task { await viewModel.navigateToGlobalOffset(offset) }
+                    }
                 } else {
                     viewModel.updateScrollPosition(charOffsetUTF16: offset)
                 }
@@ -414,7 +430,7 @@ struct TXTReaderContainerView: View {
             text: text,
             attributedText: attributedText,
             config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
-            restoreOffset: nil, // Chapter starts at top; position within chapter not persisted yet
+            restoreOffset: initialRestoreOffset, // GH #30: chapter-local offset for scroll restore
             scrollToOffset: uiState.scrollToOffset, // Scrubber seek within chapter
             highlightRange: nil, // Highlight offset translation is WI-7
             highlightIsTemporary: true,
