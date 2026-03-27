@@ -16,7 +16,7 @@ $ARGUMENTS
 2. **Fix the cause, not the symptom** — No band-aids, no workarounds, no "good enough"
 3. **Rewrite if necessary** — Bad code deserves replacement, not patching
 4. **Test-first** — Write a failing test that captures the bug, then fix, then verify green (see `.claude/rules/10-tdd.md`)
-5. **Zero regressions** — Run `pnpm check:all` before declaring done
+5. **Zero regressions** — Run `xcodebuild test` before declaring done
 6. **Clean as you go** — If you touch it, leave it better than you found it
 
 ### Anti-patterns to Avoid
@@ -33,7 +33,7 @@ $ARGUMENTS
 ### 1. Reproduce
 
 - Read the relevant source files. Trace the call chain from symptom to root cause.
-- If the issue involves UI behavior, ask the user to reproduce it (no dev server — use Tauri MCP for E2E when available).
+- If the issue involves UI behavior, ask the user to reproduce on device or simulator.
 
 ### 2. Diagnose
 
@@ -43,22 +43,24 @@ $ARGUMENTS
 ### 3. Test First (RED)
 
 - Write a failing test that captures the bug.
-- Follow the pattern catalog in `.claude/rules/10-tdd.md`:
-  - Store bug → store test with `getState()`
-  - Plugin bug → minimal schema + `createState()` helper
-  - Hook bug → `renderHook` with mocked dependencies
-  - Util bug → table-driven `it.each` covering the broken case
-- Exception: CSS-only or visual bugs don't need unit tests — use visual QA instead.
+- Follow the pattern catalog in `.claude/rules/10-tdd.md`. VReader-specific patterns:
+  - **SwiftData bug** → persistence/service test with in-memory container
+  - **WKWebView bridge bug** → parser/coordinator unit test (FoliateMessageParser, FoliateViewCoordinator)
+  - **ViewModel bug** → Swift Testing async test with `@MainActor` and mocks
+  - **Utility bug** → parameterized Swift Testing `@Test(arguments:)` covering the broken case
+  - **PDFKit bug** → annotation/page mapping test
+  - **TextKit/TXT bug** → offset translation, Unicode/CJK boundary test
+- Exception: visual-only bugs don't need unit tests — use manual QA on device instead.
 
 ### 4. Fix Properly (GREEN)
 
 - Address the root cause. Rewrite if the existing code is fundamentally flawed.
 - Keep the diff minimal and focused — don't refactor unrelated code.
 - Follow project conventions:
-  - Use `@/` imports for cross-module, relative for same-module
-  - Use design tokens, never hardcoded colors (`.claude/rules/31-design-tokens.md`)
-  - No Zustand store destructuring in components
-  - Keep files under \~300 lines
+  - Keep files under ~300 lines
+  - Escape all strings before `evaluateJavaScript()` via `FoliateJSEscaper`
+  - Use `@Observable` + `@MainActor` for ViewModels
+  - Use `Locator.validated()` for position construction
 
 ### 5. Refactor
 
@@ -67,10 +69,16 @@ $ARGUMENTS
 
 ### 6. Verify
 
-- Run `pnpm check:all` — lint, coverage thresholds, and build must all pass.
-- If Rust code was changed, also run `cargo check --manifest-path src-tauri/Cargo.toml`.
-- If keyboard shortcuts changed, verify all three files are in sync (`.claude/rules/41-keyboard-shortcuts.md`).
-- If user-facing behavior changed, update website docs (`.claude/rules/21-website-docs.md`).
+- Run tests:
+  ```bash
+  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
+    -project vreader.xcodeproj -scheme vreader \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+    -only-testing:vreaderTests
+  ```
+- Update trackers:
+  - Update bug status in `docs/bugs.md` (TODO → FIXED)
+  - Update `docs/architecture.md` if component communication changed
 
 ### When to Rewrite vs Patch
 
@@ -86,4 +94,3 @@ $ARGUMENTS
 - The code is sound but has a small oversight
 - The fix is isolated and obvious
 - Rewriting would introduce unnecessary risk
-

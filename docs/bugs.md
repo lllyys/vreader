@@ -66,6 +66,13 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 - **Actual**: Only 1 bold run
 - **RED test**: `HighlightedSnippetTests.multiWordQuery_overlappingMatches_handled`
 
+### Bug #106 — AZW3 reader stuck on "Opening book"
+- **Repro**: Import any .azw3 or .mobi file, tap to open
+- **Expected**: Book renders with text visible
+- **Actual**: Loading screen stays forever ("Opening book...")
+- **Root cause**: `WKURLSchemeHandler` + JS `fetch()` doesn't work on device. The `bridge-ready` event fires, `openBookJS()` runs `fetch('vreader-resource://localhost/book/file')`, but fetch fails silently. `book-ready` never arrives so `isLoading` stays true.
+- **Fix**: Switch to `loadHTMLString` + base64 book handoff (proven working in FoliateSpikeView)
+
 ### Bug #88 — Imported annotations not visually highlighted
 - **Repro**: Import annotations JSON, check if highlights are rendered in reader
 - **Expected**: Imported highlights visible in the reader
@@ -184,3 +191,4 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 | 103| Cannot add highlight in native EPUB (JS dropped when onInjectJS is nil)                               | EPUB/*    | High     | TODO     | Race between .task callback setup and highlight creation; restoreHighlightsOnLoad swap loses concurrent JS. Bug #77 RED tests document this. |
 | 104| EPUB 3 nav titles not extracted (shows "Section N" instead of real titles)                             | EPUB/*    | Medium   | REOPENED | Bug #74 marked FIXED but EPUBParserTests.epub3NavTitlesExtracted still fails. withResolvedTitles() may not parse nav.xhtml correctly. |
 | 105| Highlighted snippet multi-word overlap not handled                                                     | Search/*  | Low      | TODO     | HighlightedSnippetTests.multiWordQuery_overlappingMatches_handled fails. Bold run count is 1, expected >=2 for overlapping matches. |
+| 106| AZW3 reader stuck on "Opening book" — loading never completes                                         | Foliate/* | High     | TODO     | WKURLSchemeHandler fetch() fails on device. book-ready never fires. Need loadHTMLString+base64 fallback. GH: #115 |

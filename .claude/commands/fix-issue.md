@@ -17,8 +17,8 @@ $ARGUMENTS
 
 1. **Parse arguments** — extract issue numbers (e.g. `#123`, `123`, `#123 #456`).
    - No arguments: print usage and STOP.
-2. **Working tree must be clean** — run `git status --porcelain`. If dirty, error and STOP.
-3. **Confirm on main/up-to-date** — run `git branch --show-current` and `git fetch origin`.
+2. **Check working tree** — run `git status --porcelain`. If dirty, do not revert unrelated changes; isolate your work with a branch.
+3. **Confirm branch** — run `git branch --show-current` and `git fetch origin`.
 
 ## Single-Issue Pipeline
 
@@ -55,7 +55,11 @@ Follow the philosophy from `/fix` — no half measures.
 
 1. **Reproduce** — Read relevant code, trace call chain from symptom to root cause.
 2. **Diagnose** — Find root cause, check for similar patterns elsewhere.
-3. **RED** — Write a failing test capturing the bug (see `.claude/rules/10-tdd.md`).
+3. **RED** — Write a failing test capturing the bug (see `.claude/rules/10-tdd.md`):
+   - SwiftData bug → persistence test with in-memory container
+   - WKWebView bridge bug → parser/coordinator unit test
+   - ViewModel bug → Swift Testing async test with `@MainActor`
+   - Utility bug → parameterized `@Test(arguments:)` covering the broken case
 4. **GREEN** — Fix the root cause with minimal, focused changes.
 5. **REFACTOR** — Clean up without changing behavior.
 
@@ -69,8 +73,8 @@ Follow the philosophy from `/fix` — no half measures.
 #### 3c. Question Path
 
 1. **Research** — Read code and docs to compose a thorough answer.
-2. **Detect language** — Check the issue author's language from the issue title and body. Reply in the **same language** the author used (e.g. Chinese issue gets a Chinese reply, Japanese gets Japanese).
-3. **Respond** — Post the answer as a comment in the author's language:
+2. **Detect language** — Check the issue author's language from the issue title and body. Reply in the **same language** the author used.
+3. **Respond** — Post the answer as a comment:
    ```bash
    gh issue comment {N} --body "{answer in author's language}"
    ```
@@ -91,69 +95,64 @@ git diff main
 
 Use `ToolSearch` with query `+codex` to discover Codex tools.
 
-**Model & reasoning**: Do NOT specify a `model` parameter — inherit from global `config.toml` so upgrades propagate automatically. Always set reasoning effort explicitly.
-
 **Availability test** — before the real audit, send a short ping:
 ```
 mcp__codex__codex with:
   prompt: "Respond with 'ok' if you can read this."
-  config: { "model_reasoning_effort": "high" }
 ```
-If Codex does not respond or errors out, skip to **4f. Fallback** immediately. Do not retry.
+If Codex does not respond or errors out, skip to **4f. Fallback** immediately.
 
 If Codex responds:
 
 **Audit prompt:**
 ```
 mcp__codex__codex with:
-  config: { "model_reasoning_effort": "high" }
   sandbox: read-only
   prompt: |
     Audit these files changed for GitHub issue #{N}: {title}
-Files: {changed file list}
-Diff summary: {git diff main --stat}
-Focus:
-1. Correctness & logic — does the fix actually solve the root cause? No patching around symptoms.
-2. Edge cases — boundary conditions, null/empty, Unicode/CJK, concurrent access
-3. Security — no vulnerabilities introduced (injection, XSS, path traversal)
-4. Duplicate code — copy-paste patterns, repeated logic that should be unified
-5. Dead code — unused imports, unreachable branches, orphaned functions left behind
-6. Shortcuts & patches — workarounds, TODO markers, band-aids, flags to bypass broken logic
-7. VMark compliance — Zustand selectors (no destructuring), CSS tokens (no hardcoded colors), file size <300 lines
-8. Cross-platform paths — if changes touch path parsing, file operations, or Command::new(), flag any hardcoded `/` separators, missing Windows `\` handling, or platform-specific assumptions. Paths must work on macOS, Windows, and Linux. See AGENTS.md cross-platform policy.
+    Files: {changed file list}
+    Diff summary: {git diff main --stat}
+    Focus:
+    1. Correctness & logic — does the fix actually solve the root cause?
+    2. Edge cases — boundary conditions, nil, Unicode/CJK, concurrent access
+    3. Security — JS/CSS injection safety in evaluateJavaScript() and WKWebView bridges
+    4. Duplicate code — repeated logic that should be unified
+    5. Dead code — unused imports, unreachable branches, orphaned functions
+    6. Shortcuts & patches — workarounds, TODO markers, band-aids
+    7. VReader compliance — Swift 6 concurrency, @MainActor correctness, SwiftData actor isolation, file size <300 lines
+    8. Bridge safety — FoliateJSEscaper used for all JS string interpolation, message parser handles all edge cases
     Report as: file:line | severity (Critical/High/Medium/Low) | issue | fix
 ```
 
 #### 4c. Parse & fix
 
-Fix **every** finding — Critical, High, Medium, and Low. No exceptions, no "note in PR" deferrals. The audit is not clean until the finding count is zero.
+Fix **every** finding — Critical, High, Medium, and Low.
 
 #### 4d. Verify via Codex reply
 
-Use `mcp__codex__codex-reply` on the same thread (reasoning effort carries from initial call):
+Use `mcp__codex__codex-reply` on the same thread:
 
 ```
 I fixed these issues: {list of fixes with file:line}
 Verify ALL fixes are correct. Check for new issues introduced by the fixes.
-The audit passes ONLY when zero findings remain — any severity.
 Updated diff: {git diff main --stat}
 ```
 
 #### 4e. Loop or exit
 
-- **Zero findings** (all severities): audit passes, exit loop.
-- **Any findings remain** and iteration < 3: fix everything and verify again (goto 4c).
-- 3 iterations reached with findings still open: STOP. Report all remaining issues to the user. Do NOT create a PR — the code is not ready.
+- **Zero findings**: audit passes, exit loop.
+- **Any findings remain** and iteration < 3: fix everything and verify again.
+- 3 iterations reached with findings still open: STOP. Report all remaining issues.
 
 #### 4f. Fallback — manual mini-audit
 
-If Codex MCP is unavailable, perform a manual 6-dimension audit per `/codex-audit-mini`:
+If Codex MCP is unavailable, perform a manual audit:
 1. Logic & Correctness
 2. Duplication
 3. Dead Code
 4. Refactoring Debt
 5. Shortcuts & Patches
-6. Code Comments
+6. Bridge Safety (JS injection, message parsing)
 
 Read each changed file, analyze, fix Critical/High issues.
 
@@ -162,31 +161,29 @@ Read each changed file, analyze, fix Critical/High issues.
 Run up to 3 attempts:
 
 ```bash
-pnpm check:all
-```
-
-If Rust files were changed:
-```bash
-cargo check --manifest-path src-tauri/Cargo.toml
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
+  -project vreader.xcodeproj -scheme vreader \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:vreaderTests
 ```
 
 - Pass: proceed to Phase 6.
 - Fail: read errors, fix, retry.
 - 3 failures: report errors, keep branch, STOP.
 
-Also verify sync rules:
-- Keyboard shortcuts changed? Check 3-file sync (`.claude/rules/41-keyboard-shortcuts.md`).
-- User-facing behavior changed? Update website docs (`.claude/rules/21-website-docs.md`).
+Also verify:
+- Update `docs/bugs.md` status if fixing a tracked bug.
+- Update `docs/architecture.md` if component communication changed.
 
 ### Phase 6: Create PR
 
 ```bash
-gh pr create --title "{type}: {concise description} (fixes #{N})" --body "$(cat <<'EOF'
+gh pr create --title "{type}: {concise description}" --body "$(cat <<'EOF'
 ## Summary
 
 {1-3 bullet points describing what changed and why}
 
-Fixes #{N}
+Refs #{N}
 
 ## What Changed
 
@@ -194,15 +191,13 @@ Fixes #{N}
 
 ## Codex Audit
 
-{audit summary — iterations run, findings fixed, remaining notes}
+{audit summary — iterations run, findings fixed}
 
 ## Validation
 
-- [x] `pnpm check:all` passes
+- [x] `xcodebuild test` passes
 - [x] Tests cover changed behavior (TDD)
 - [x] Codex audit loop completed ({M} iterations)
-{- [x] `cargo check` passes (if Rust changed)}
-{- [x] Keyboard shortcut sync verified (if shortcuts changed)}
 
 ## Type of Change
 
@@ -235,14 +230,12 @@ gh issue view {N} --json number,title,body,labels,state
 
 For each issue, create an isolated git worktree:
 ```bash
-git worktree add ../vmark-worktree-{N} -b fix/issue-{N}-{slug} main
+git worktree add .claude/worktrees/issue-{N} -b fix/issue-{N}-{slug} main
 ```
 
 ### M3: Parallel Execution
 
-Spawn one Task agent per issue, each running the **full single-issue pipeline** (Phases 1-6) inside its worktree directory.
-
-Use the Task tool with `subagent_type: "general-purpose"` and `run_in_background: true` for each.
+Spawn one Agent per issue, each running the **full single-issue pipeline** (Phases 1-6) inside its worktree directory.
 
 ### M4: Collect Results
 
@@ -250,7 +243,7 @@ After all agents complete, display a summary table:
 
 ```
 | Issue | Status | Branch | PR |
-|-------|--------|--------|----|
+|-------|--------|--------|------|
 | #123  | Done   | fix/issue-123-slug | #45 |
 | #456  | Failed (gate) | fix/issue-456-slug | — |
 ```
@@ -259,7 +252,7 @@ After all agents complete, display a summary table:
 
 ```bash
 # Remove successful worktrees
-git worktree remove ../vmark-worktree-{N}
+git worktree remove .claude/worktrees/issue-{N}
 
 # Keep failed ones for investigation
 ```
@@ -272,10 +265,9 @@ git worktree remove ../vmark-worktree-{N}
 |----------|--------|
 | No arguments | Print usage, STOP |
 | Issue not found / closed | Warn, ask user |
-| Dirty working tree | Error, STOP |
+| Dirty working tree | Isolate with branch, don't revert unrelated changes |
 | No labels (ambiguous type) | Ask user to classify |
 | Codex MCP unavailable | Fall back to manual mini-audit |
 | Gate fails 3x | Report errors, keep branch, STOP |
 | Feature too large (10+ files) | Redirect to `/feature-workflow` |
 | Branch already exists | Ask user: reuse or rename |
-| CJK / non-ASCII in title | Strip to ASCII for branch slug |

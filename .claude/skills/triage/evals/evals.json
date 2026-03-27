@@ -1,0 +1,23 @@
+{
+  "skill_name": "triage",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "the reader crashes when I open big files, like that 80mb azw3 I just imported",
+      "expected_output": "Classified as bug. Investigates the AZW3 reader code. Records in docs/bugs.md with next available ID. Reports the classification to the user.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "triage the inbox",
+      "expected_output": "Reads docs/tasks.md 'New' section. For each item: investigates code, checks for duplicates in bugs.md and features.md, classifies, records, moves to Triaged section.",
+      "files": ["docs/tasks.md"]
+    },
+    {
+      "id": 3,
+      "prompt": "can we add night mode with a warm sepia tone? the current themes are too harsh on my eyes at night",
+      "expected_output": "Classified as feature (never implemented, or partial). Investigates existing theme system. Records in docs/features.md. Does NOT start implementing.",
+      "files": []
+    }
+  ]
+}
