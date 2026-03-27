@@ -89,10 +89,11 @@ struct FoliateViewBridge: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.lastLocationCFI = lastLocationCFI
 
-        // Read book file as base64 for passing to JS (bypasses WKURLSchemeHandler fetch limitation).
-        // If file can't be read, bookBase64 stays nil → coordinator shows error on bridge-ready.
+        // Read book file as base64 — embedded directly in HTML (not via evaluateJavaScript,
+        // which has size limits for large payloads).
+        var bookBase64: String?
         if let bookData = try? Data(contentsOf: bookURL, options: .mappedIfSafe), !bookData.isEmpty {
-            coordinator.bookBase64 = bookData.base64EncodedString()
+            bookBase64 = bookData.base64EncodedString()
         }
 
         // Register message handlers using weak proxy to avoid retain cycle
@@ -118,8 +119,8 @@ struct FoliateViewBridge: UIViewRepresentable {
             }
         }
 
-        // Load reader HTML with JS bundle inlined (proven approach from spike)
-        if let html = Self.buildReaderHTML() {
+        // Load reader HTML with JS bundle + book data inlined (proven approach from spike)
+        if let html = Self.buildReaderHTML(bookBase64: bookBase64, bookFormat: bookFormat) {
             webView.loadHTMLString(html, baseURL: nil)
         } else {
             coordinator.handleMessage(name: "error", body: [
@@ -131,13 +132,45 @@ struct FoliateViewBridge: UIViewRepresentable {
         return webView
     }
 
-    /// Builds the reader HTML with the IIFE JS bundle inlined.
-    /// This bypasses WKWebView's file:// and custom scheme restrictions for ES modules.
-    private static func buildReaderHTML() -> String? {
+    /// Builds the reader HTML with the IIFE JS bundle inlined AND book data embedded.
+    /// The book is embedded as base64 in a script that auto-opens it on load.
+    /// This is the exact approach proven in the spike (FoliateSpikeView).
+    private static func buildReaderHTML(bookBase64: String?, bookFormat: String) -> String? {
         guard let bundleURL = Bundle.main.url(forResource: "foliate-bundle", withExtension: "js"),
               let jsCode = try? String(contentsOf: bundleURL, encoding: .utf8) else {
             return nil
         }
+
+        let safeFormat = FoliateJSEscaper.escapeForJSString(bookFormat)
+
+        // Book opening script — embedded in HTML so WKWebView parses it with the page
+        // (not via evaluateJavaScript which has size limits for large payloads)
+        let bookScript: String
+        if let base64 = bookBase64 {
+            bookScript = """
+            <script>
+            (async () => {
+                try {
+                    const b64 = "\(base64)";
+                    const binary = atob(b64);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                    const file = new File([bytes], "book.\(safeFormat)");
+                    await readerAPI.open(file);
+                } catch(e) {
+                    post('error', {message: 'openBook: ' + (e.message || e), type: 'open'});
+                }
+            })();
+            </script>
+            """
+        } else {
+            bookScript = """
+            <script>
+            post('error', {message: 'Book file could not be read.', type: 'open'});
+            </script>
+            """
+        }
+
         return """
         <!DOCTYPE html>
         <html><head>
@@ -155,11 +188,7 @@ struct FoliateViewBridge: UIViewRepresentable {
         </script>
         <foliate-view id="view"></foliate-view>
         <script>\(jsCode)</script>
-        <script>
-        // The IIFE bundle already posts bridge-ready at the end.
-        // Only post error if readerAPI failed to initialize.
-        if(!window.readerAPI){post('error',{message:'readerAPI not defined after bundle load',type:'init'})}
-        </script>
+        \(bookScript)
         </body></html>
         """
     }

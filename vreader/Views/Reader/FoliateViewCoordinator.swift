@@ -111,14 +111,9 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
     func handleMessage(name: String, body: Any) {
         switch name {
         case "bridge-ready":
-            if let base64 = bookBase64 {
-                let js = Self.openBookBase64JS(base64: base64, format: bookFormat)
-                jsEvaluator?(js)
-            } else {
-                // bookBase64 is nil — book file couldn't be read.
-                // Don't fall back to fetch() (it doesn't work on device).
-                onError("Could not read book file. It may have been moved or deleted.")
-            }
+            // Book is opened directly in the HTML (embedded as base64 in the page).
+            // bridge-ready just confirms the JS bridge loaded. No action needed here.
+            break
 
         case "book-ready":
             guard let info = FoliateMessageParser.parseBookReady(body) else { return }
