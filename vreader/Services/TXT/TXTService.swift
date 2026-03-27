@@ -109,10 +109,14 @@ actor TXTService: TXTServiceProtocol {
                 let cacheDir = Self.cacheDirectory(for: url)
                 let fileModDate = Self.fileModificationDate(url: url) ?? Date()
 
-                // GH #30: Load from cache if valid (built with full-text strategy)
+                // GH #30: Load from cache if built with full-text strategy (v2).
+                // Old streaming-block caches used byte offsets — incompatible.
+                // Detect by checking if startByte == 0 for all chapters (full-text
+                // builder sets startByte=0 since byte offsets are unused).
                 if let cachedIndex = TXTChapterIndexStore.load(
                     cacheDir: cacheDir, fileByteCount: fileByteCount, fileModDate: fileModDate
-                ), cachedIndex.totalTextLengthUTF16 > 0 {
+                ), cachedIndex.totalTextLengthUTF16 > 0,
+                   cachedIndex.chapters.first.map({ $0.startByte == 0 }) ?? false {
                     let loader = TXTChapterContentLoader(fileData: data, encoding: encoding)
                     return TXTChapterOpenResult(
                         chapterIndex: cachedIndex, contentLoader: loader,
@@ -126,10 +130,11 @@ actor TXTService: TXTServiceProtocol {
                     throw TXTServiceError.decodingFailed("Failed to decode with \(encodingName)")
                 }
                 let fullText = fullString as NSString
-                let sampleEnd = min(fullText.length, 512 * 1024)
-                let sampleText = fullText.substring(with: NSRange(location: 0, length: sampleEnd))
+                // GH #30: Detect rule from full text (not a sample) to match the
+                // TOC path. A 512K sample can pick a different rule than full-text,
+                // producing different chapter counts.
                 let rule = TXTTocRuleEngine.detectBestRule(
-                    text: sampleText, rules: TXTTocRuleEngine.defaultRules
+                    text: fullString, rules: TXTTocRuleEngine.defaultRules
                 )
 
                 let index = Self.buildChapterIndexFromFullText(
