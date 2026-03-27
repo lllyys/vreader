@@ -143,7 +143,7 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
                     if let dict = body as? [String: Any] {
                         let title = dict["title"] as? String ?? "Unknown"
                         onBookReady(title)
-                        _ = try? await webView?.evaluateJavaScript("readerAPI.init({})")
+                        webView?.evaluateJavaScript("readerAPI.init({})") { _, _ in }
                     }
 
                 case "error":
@@ -186,15 +186,9 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
                         message: 'openBook: ' + (e.message || e), type: 'open'
                     });
                 }
-            })()
+            })(); void 0;
             """
-            webView?.evaluateJavaScript(js) { _, error in
-                if let error {
-                    Task { @MainActor [weak self] in
-                        self?.onError("JS eval: \(error.localizedDescription)")
-                    }
-                }
-            }
+            webView?.evaluateJavaScript(js) { _, _ in }
         }
     }
 }
