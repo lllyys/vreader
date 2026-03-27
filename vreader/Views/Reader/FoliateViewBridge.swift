@@ -1,16 +1,17 @@
 // Purpose: UIViewRepresentable wrapping WKWebView for the Foliate-js reader.
-// Loads the reader HTML via WKURLSchemeHandler and routes JS messages through
-// FoliateViewCoordinator.
+// Loads the reader HTML via loadHTMLString with the JS bundle inlined, and passes
+// book data as base64 to bypass WKWebView's custom scheme fetch() limitations.
 //
 // Key decisions:
 // - Single WKWebView created once in makeUIView (no recreation on SwiftUI updates).
 // - WeakScriptMessageHandler pattern breaks WKUserContentController retain cycle.
-// - Scheme handler serves reader HTML, JS bundle, and book file from custom URL scheme.
+// - loadHTMLString with inlined IIFE bundle (not loadFileURL or scheme handler loading).
+// - Book file read as base64 in Swift, passed to JS via evaluateJavaScript.
 // - updateUIView detects themeCSS and layoutFlow changes, pushes via evaluateJavaScript.
 // - All interpolated values are sanitized via FoliateJSEscaper.
 //
-// @coordinates-with: FoliateViewCoordinator.swift, FoliateURLSchemeHandler.swift,
-//   FoliateTypes.swift, FoliateMessageParser.swift, FoliateJSEscaper.swift
+// @coordinates-with: FoliateViewCoordinator.swift, FoliateTypes.swift,
+//   FoliateMessageParser.swift, FoliateJSEscaper.swift
 
 #if canImport(UIKit)
 import SwiftUI
@@ -79,10 +80,7 @@ struct FoliateViewBridge: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let schemeHandler = FoliateURLSchemeHandler(bookFileURL: bookURL)
-
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(schemeHandler, forURLScheme: FoliateURLSchemeHandler.scheme)
 
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
@@ -90,6 +88,12 @@ struct FoliateViewBridge: UIViewRepresentable {
 
         let coordinator = context.coordinator
         coordinator.lastLocationCFI = lastLocationCFI
+
+        // Read book file as base64 for passing to JS (bypasses WKURLSchemeHandler fetch limitation).
+        // If file can't be read, bookBase64 stays nil → coordinator shows error on bridge-ready.
+        if let bookData = try? Data(contentsOf: bookURL, options: .mappedIfSafe), !bookData.isEmpty {
+            coordinator.bookBase64 = bookData.base64EncodedString()
+        }
 
         // Register message handlers using weak proxy to avoid retain cycle
         let weakHandler = WeakScriptMessageHandler(coordinator)
@@ -114,11 +118,49 @@ struct FoliateViewBridge: UIViewRepresentable {
             }
         }
 
-        // Load the reader HTML from the custom scheme
-        let readerURL = URL(string: "\(FoliateURLSchemeHandler.scheme)://localhost/index.html")!
-        webView.load(URLRequest(url: readerURL))
+        // Load reader HTML with JS bundle inlined (proven approach from spike)
+        if let html = Self.buildReaderHTML() {
+            webView.loadHTMLString(html, baseURL: nil)
+        } else {
+            coordinator.handleMessage(name: "error", body: [
+                "message": "Failed to build reader HTML — foliate-bundle.js not found in app bundle",
+                "type": "init"
+            ] as [String: Any])
+        }
 
         return webView
+    }
+
+    /// Builds the reader HTML with the IIFE JS bundle inlined.
+    /// This bypasses WKWebView's file:// and custom scheme restrictions for ES modules.
+    private static func buildReaderHTML() -> String? {
+        guard let bundleURL = Bundle.main.url(forResource: "foliate-bundle", withExtension: "js"),
+              let jsCode = try? String(contentsOf: bundleURL, encoding: .utf8) else {
+            return nil
+        }
+        return """
+        <!DOCTYPE html>
+        <html><head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+        <style>
+        html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
+        foliate-view { display:block; width:100%; height:100%; }
+        </style>
+        </head><body>
+        <script>
+        function post(n,d){try{window.webkit?.messageHandlers?.[n]?.postMessage(d||{})}catch(e){}}
+        window.onerror=function(m,s,l){post('error',{message:'JS: '+m+' line:'+l,type:'onerror'})};
+        window.addEventListener('unhandledrejection',function(e){post('error',{message:'Promise: '+(e.reason?.message||e.reason||'?'),type:'rejection'})});
+        </script>
+        <foliate-view id="view"></foliate-view>
+        <script>\(jsCode)</script>
+        <script>
+        if(window.readerAPI){post('bridge-ready',{})}
+        else{post('error',{message:'readerAPI not defined after bundle load',type:'init'})}
+        </script>
+        </body></html>
+        """
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {

@@ -24,6 +24,9 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
     /// Book file extension (e.g., "azw3", "epub", "mobi").
     let bookFormat: String
 
+    /// Base64-encoded book file data. Set by FoliateViewBridge before loading.
+    var bookBase64: String?
+
     /// Optional saved CFI to restore position on book-ready.
     var lastLocationCFI: String?
 
@@ -108,8 +111,14 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
     func handleMessage(name: String, body: Any) {
         switch name {
         case "bridge-ready":
-            let js = Self.openBookJS(format: bookFormat)
-            jsEvaluator?(js)
+            if let base64 = bookBase64 {
+                let js = Self.openBookBase64JS(base64: base64, format: bookFormat)
+                jsEvaluator?(js)
+            } else {
+                // bookBase64 is nil — book file couldn't be read.
+                // Don't fall back to fetch() (it doesn't work on device).
+                onError("Could not read book file. It may have been moved or deleted.")
+            }
 
         case "book-ready":
             guard let info = FoliateMessageParser.parseBookReady(body) else { return }
@@ -207,6 +216,7 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
     // MARK: - JS Generation (static, testable)
 
     /// Generates JavaScript to fetch the book file from the scheme handler and open it.
+    /// Note: fetch() from custom URL schemes may fail on device. Prefer openBookBase64JS.
     static func openBookJS(format: String) -> String {
         let bookURL = "\(FoliateURLSchemeHandler.scheme)://localhost/book/file"
         let safeFormat = FoliateJSEscaper.escapeForJSString(format)
@@ -217,6 +227,28 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
                 if (!res.ok) throw new Error('fetch failed: ' + res.status);
                 const blob = await res.blob();
                 const file = new File([blob], "book.\(safeFormat)");
+                await readerAPI.open(file);
+            } catch(e) {
+                window.webkit?.messageHandlers?.error?.postMessage({
+                    message: 'openBook: ' + (e.message || e), type: 'open'
+                });
+            }
+        })()
+        """
+    }
+
+    /// Generates JavaScript to open a book from base64-encoded data.
+    /// This approach bypasses the WKURLSchemeHandler fetch() limitation on device.
+    static func openBookBase64JS(base64: String, format: String) -> String {
+        let safeFormat = FoliateJSEscaper.escapeForJSString(format)
+        return """
+        (async () => {
+            try {
+                const b64 = "\(base64)";
+                const binary = atob(b64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                const file = new File([bytes], "book.\(safeFormat)");
                 await readerAPI.open(file);
             } catch(e) {
                 window.webkit?.messageHandlers?.error?.postMessage({

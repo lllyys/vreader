@@ -26,11 +26,11 @@ struct SearchJSTests {
         #expect(js.contains("hello world"))
     }
 
-    @Test("escapes double quotes in query")
-    func escapesDoubleQuotes() {
+    @Test("double quotes in query are preserved (single-quoted JS string)")
+    func doubleQuotesPreserved() {
         let js = FoliateSearchAdapter.searchJS(query: "say \"hello\"")
-        // The escaped string in JS must use backslash-quote
-        #expect(js.contains("say \\\"hello\\\""))
+        // Double quotes inside a single-quoted JS string are safe
+        #expect(js.contains("say \"hello\""))
     }
 
     @Test("escapes backslashes in query")
@@ -71,11 +71,11 @@ struct SearchJSTests {
         #expect(js.contains("readerAPI.search"))
     }
 
-    @Test("single quotes in query are preserved")
-    func singleQuotes() {
+    @Test("single quotes in query are escaped")
+    func singleQuotesEscaped() {
         let js = FoliateSearchAdapter.searchJS(query: "it's fine")
-        // Single quotes inside a double-quoted JS string are safe
-        #expect(js.contains("it's fine"))
+        // Single quotes must be escaped in single-quoted JS strings
+        #expect(js.contains("it\\'s fine"))
         #expect(js.contains("readerAPI.search"))
     }
 
@@ -123,11 +123,12 @@ struct GoToResultJSTests {
         #expect(js.contains(cfi))
     }
 
-    @Test("escapes CFI with double quotes")
-    func escapesCFIWithQuotes() {
+    @Test("preserves double quotes in CFI (single-quoted JS string)")
+    func preservesCFIWithQuotes() {
         let cfi = "epubcfi(/6/14!/4/2/1:0\")"
         let js = FoliateSearchAdapter.goToResultJS(cfi: cfi)
-        #expect(js.contains("\\\""))
+        // Double quotes are safe inside single-quoted JS strings
+        #expect(js.contains("epubcfi(/6/14!/4/2/1:0\")"))
     }
 
     @Test("escapes CFI with backslashes")

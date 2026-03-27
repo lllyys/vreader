@@ -86,16 +86,27 @@ private nonisolated(unsafe) let sampleErrorBody: [String: Any] = [
 @Suite("FoliateViewCoordinator — message routing")
 struct FoliateViewCoordinatorMessageRoutingTests {
 
-    @Test("handleMessage bridge-ready triggers openBook JS evaluation")
+    @Test("handleMessage bridge-ready with base64 triggers openBook JS evaluation")
     @MainActor
     func bridgeReadyTriggersOpenBook() {
         var jsEvaluated = false
         let coordinator = makeCoordinator()
+        coordinator.bookBase64 = "dGVzdA==" // base64 for "test"
         coordinator.jsEvaluator = { js in
             if js.contains("readerAPI.open") { jsEvaluated = true }
         }
         coordinator.handleMessage(name: "bridge-ready", body: "")
         #expect(jsEvaluated, "bridge-ready should trigger JS with readerAPI.open")
+    }
+
+    @Test("handleMessage bridge-ready without base64 reports error")
+    @MainActor
+    func bridgeReadyWithoutBase64ReportsError() {
+        var receivedError: String?
+        let coordinator = makeCoordinator(onError: { receivedError = $0 })
+        coordinator.jsEvaluator = { _ in }
+        coordinator.handleMessage(name: "bridge-ready", body: "")
+        #expect(receivedError != nil, "Missing book data should report error")
     }
 
     @Test("handleMessage book-ready calls onBookReady with parsed info")
@@ -387,6 +398,56 @@ struct FoliateViewCoordinatorInitJSTests {
         let js = FoliateViewCoordinator.initJS(cfi: "epubcfi(/6/4[it's]!/4/2)")
         #expect(js.contains("readerAPI.init"))
         #expect(js.contains("\\'"))
+    }
+}
+
+// MARK: - openBookBase64JS generation
+
+@Suite("FoliateViewCoordinator — openBookBase64JS")
+struct FoliateViewCoordinatorOpenBookBase64JSTests {
+
+    @Test("includes atob and Uint8Array for base64 decoding")
+    @MainActor
+    func includesBase64Decoding() {
+        let js = FoliateViewCoordinator.openBookBase64JS(base64: "AAAA", format: "azw3")
+        #expect(js.contains("atob"))
+        #expect(js.contains("Uint8Array"))
+    }
+
+    @Test("includes the base64 data")
+    @MainActor
+    func includesBase64Data() {
+        let js = FoliateViewCoordinator.openBookBase64JS(base64: "dGVzdA==", format: "azw3")
+        #expect(js.contains("dGVzdA=="))
+    }
+
+    @Test("includes book format extension")
+    @MainActor
+    func includesFormat() {
+        let js = FoliateViewCoordinator.openBookBase64JS(base64: "AA==", format: "mobi")
+        #expect(js.contains("book.mobi"))
+    }
+
+    @Test("includes readerAPI.open call")
+    @MainActor
+    func includesAPIOpen() {
+        let js = FoliateViewCoordinator.openBookBase64JS(base64: "AA==", format: "azw3")
+        #expect(js.contains("readerAPI.open"))
+    }
+
+    @Test("includes error handler")
+    @MainActor
+    func includesErrorHandler() {
+        let js = FoliateViewCoordinator.openBookBase64JS(base64: "AA==", format: "azw3")
+        #expect(js.contains("messageHandlers"))
+        #expect(js.contains("error"))
+    }
+
+    @Test("creates a File object from decoded bytes")
+    @MainActor
+    func createsFileObject() {
+        let js = FoliateViewCoordinator.openBookBase64JS(base64: "AA==", format: "epub")
+        #expect(js.contains("new File"))
     }
 }
 #endif
