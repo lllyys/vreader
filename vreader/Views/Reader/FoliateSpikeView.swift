@@ -1,100 +1,58 @@
-// Purpose: Throwaway spike to validate Foliate-js runs in WKWebView on iOS.
-// Tests: ES module loading, book parsing (EPUB + MOBI), relocate events, selection events.
-// DELETE THIS FILE after the spike validates the approach.
-//
-// Approach: Load foliate-reader.html from app bundle via loadFileURL,
-// copy book file INTO the bundle directory so it's accessible.
-// allowingReadAccessTo: bundleResourceDir gives WKWebView access to all JS files.
+// Purpose: Spike view for AZW3/MOBI rendering via Foliate-js.
+// Uses loadHTMLString + inline IIFE bundle + base64 book handoff.
+// This is the PROVEN approach that worked on device.
 
 import SwiftUI
 import WebKit
 
-/// Spike view that opens a book via Foliate-js in WKWebView and logs events.
 struct FoliateSpikeView: View {
     let bookURL: URL
 
-    @State private var logs: [String] = []
     @State private var isBookReady = false
     @State private var bookTitle = ""
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Circle()
-                    .fill(isBookReady ? .green : .orange)
-                    .frame(width: 8, height: 8)
-                Text(isBookReady ? bookTitle : "Loading...")
-                    .font(.caption)
-                    .lineLimit(1)
-                Spacer()
-                Text("\(logs.count) events")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.bar)
-
+        ZStack {
             FoliateSpikeWebView(
                 bookURL: bookURL,
-                onLog: { msg in
-                    logs.append(msg)
-                    if logs.count > 200 { logs.removeFirst() }
-                },
                 onBookReady: { title in
                     isBookReady = true
                     bookTitle = title
                 },
-                onError: { msg in
-                    errorMessage = msg
-                }
+                onError: { msg in errorMessage = msg }
             )
 
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.white)
-                    .padding(8)
-                    .frame(maxWidth: .infinity)
-                    .background(.red)
+            if !isBookReady && errorMessage == nil {
+                ProgressView("Opening book\u{2026}")
             }
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(logs.enumerated()), id: \.offset) { _, log in
-                        Text(log)
-                            .font(.system(size: 10, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
+            if let errorMessage {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                        .foregroundStyle(.red)
+                    Text(errorMessage)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
                 }
-                .padding(8)
             }
-            .frame(height: 150)
-            .background(Color(.systemGroupedBackground))
         }
     }
 }
 
-// MARK: - WKWebView Wrapper
-
 private struct FoliateSpikeWebView: UIViewRepresentable {
     let bookURL: URL
-    let onLog: @MainActor (String) -> Void
     let onBookReady: @MainActor (String) -> Void
     let onError: @MainActor (String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onLog: onLog, onBookReady: onBookReady, onError: onError)
+        Coordinator(onBookReady: onBookReady, onError: onError)
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        // Register scheme handler for serving JS bundle + book file
-        let schemeHandler = FoliateURLSchemeHandler(bookFileURL: bookURL)
-
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(schemeHandler, forURLScheme: FoliateURLSchemeHandler.scheme)
-
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
@@ -114,34 +72,59 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         webView.navigationDelegate = coordinator
         webView.scrollView.isScrollEnabled = false
         coordinator.webView = webView
-        coordinator.bookExt = bookURL.pathExtension.lowercased()
 
-        // Load via scheme handler — the production path
-        let readerURL = URL(string: "\(FoliateURLSchemeHandler.scheme)://localhost/index.html")!
-        webView.load(URLRequest(url: readerURL))
-
-        Task { @MainActor in
-            onLog("[setup] scheme handler, book: \(bookURL.lastPathComponent)")
+        // Read book as base64
+        if let bookData = try? Data(contentsOf: bookURL) {
+            coordinator.bookBase64 = bookData.base64EncodedString()
+            coordinator.bookExt = bookURL.pathExtension.lowercased()
+            if coordinator.bookExt?.isEmpty == true { coordinator.bookExt = "azw3" }
         }
 
+        // Build HTML with inline IIFE bundle
+        guard let bundleURL = Bundle.main.url(forResource: "foliate-bundle", withExtension: "js"),
+              let jsCode = try? String(contentsOf: bundleURL, encoding: .utf8) else {
+            Task { @MainActor in onError("foliate-bundle.js not found") }
+            return webView
+        }
+
+        let html = """
+        <!DOCTYPE html>
+        <html><head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+        <style>
+        html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
+        foliate-view { display:block; width:100%; height:100%; }
+        </style>
+        </head><body>
+        <script>
+        function post(n,d){try{window.webkit?.messageHandlers?.[n]?.postMessage(d||{})}catch(e){}}
+        window.onerror=function(m,s,l){post('error',{message:'JS: '+m+' line:'+l,type:'onerror'})};
+        window.addEventListener('unhandledrejection',function(e){post('error',{message:'Promise: '+(e.reason?.message||e.reason||'?'),type:'rejection'})});
+        </script>
+        <foliate-view id="view"></foliate-view>
+        <script>\(jsCode)</script>
+        <script>
+        if(!window.readerAPI){post('error',{message:'readerAPI not defined',type:'init'})}
+        </script>
+        </body></html>
+        """
+
+        webView.loadHTMLString(html, baseURL: nil)
         return webView
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
-    // MARK: - Coordinator
-
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         weak var webView: WKWebView?
+        var bookBase64: String?
         var bookExt: String?
-        let onLog: @MainActor (String) -> Void
         let onBookReady: @MainActor (String) -> Void
         let onError: @MainActor (String) -> Void
 
-        init(onLog: @escaping @MainActor (String) -> Void,
-             onBookReady: @escaping @MainActor (String) -> Void,
+        init(onBookReady: @escaping @MainActor (String) -> Void,
              onError: @escaping @MainActor (String) -> Void) {
-            self.onLog = onLog
             self.onBookReady = onBookReady
             self.onError = onError
         }
@@ -154,109 +137,49 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
             Task { @MainActor in
                 switch name {
                 case "bridge-ready":
-                    onLog("[bridge] JS bridge loaded, opening book...")
                     openBook()
 
                 case "book-ready":
                     if let dict = body as? [String: Any] {
                         let title = dict["title"] as? String ?? "Unknown"
-                        let sections = dict["sections"] as? Int ?? 0
-                        let layout = dict["layout"] as? String ?? "?"
-                        onLog("[book-ready] \"\(title)\" — \(sections) sections, \(layout)")
                         onBookReady(title)
                         _ = try? await webView?.evaluateJavaScript("readerAPI.init({})")
                     }
 
-                case "relocate":
-                    if let dict = body as? [String: Any] {
-                        let frac = dict["fraction"] as? Double ?? 0
-                        let section = dict["sectionIndex"] as? Int ?? 0
-                        let total = dict["sectionTotal"] as? Int ?? 0
-                        let cfi = dict["cfi"] as? String ?? ""
-                        let toc = dict["tocLabel"] as? String ?? ""
-                        let pct = String(format: "%.1f%%", frac * 100)
-                        onLog("[relocate] \(pct) sec:\(section)/\(total) toc:\(toc) cfi:\(cfi.prefix(40))...")
-                    }
-
-                case "selection":
-                    if let dict = body as? [String: Any] {
-                        let collapsed = dict["collapsed"] as? Bool ?? true
-                        if !collapsed {
-                            let text = dict["text"] as? String ?? ""
-                            let cfi = dict["cfi"] as? String ?? ""
-                            onLog("[selection] \"\(text.prefix(50))\" cfi:\(cfi.prefix(40))...")
-                        }
-                    }
-
-                case "tap":
-                    onLog("[tap] content tapped")
-
-                case "create-overlay":
-                    if let dict = body as? [String: Any] {
-                        onLog("[overlay] section \(dict["index"] as? Int ?? -1)")
-                    }
-
-                case "section-load":
-                    if let dict = body as? [String: Any] {
-                        onLog("[load] section \(dict["index"] as? Int ?? -1)")
-                    }
-
-                case "external-link":
-                    if let dict = body as? [String: Any] {
-                        onLog("[link] \(dict["href"] as? String ?? "")")
-                    }
-
                 case "error":
                     if let dict = body as? [String: Any] {
-                        let msg = dict["message"] as? String ?? "Unknown"
-                        let type = dict["type"] as? String ?? ""
-                        onLog("[ERROR] \(type): \(msg)")
-                        onError("\(type): \(msg)")
+                        let msg = dict["message"] as? String ?? "Unknown error"
+                        onError(msg)
                     }
 
                 default:
-                    onLog("[\(name)] \(body)")
+                    break
                 }
             }
-        }
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            Task { @MainActor in onLog("[nav-error] \(error.localizedDescription)") }
-        }
-
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
-                     withError error: Error) {
-            Task { @MainActor in
-                onLog("[load-error] \(error.localizedDescription)")
-                onError(error.localizedDescription)
-            }
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Task { @MainActor in onLog("[nav] page loaded") }
         }
 
         func webView(_ webView: WKWebView,
                      decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
             guard let url = navigationAction.request.url else { return .cancel }
-            if url.scheme == FoliateURLSchemeHandler.scheme || url.scheme == "blob" || url.absoluteString == "about:blank" {
-                return .allow
-            }
-            Task { @MainActor in onLog("[blocked] \(url.absoluteString)") }
+            if url.scheme == "blob" || url.absoluteString == "about:blank" { return .allow }
+            // Allow the initial loadHTMLString (about:blank origin)
+            if url.absoluteString.hasPrefix("about:") { return .allow }
             return .cancel
         }
 
         private func openBook() {
-            guard let bookExt else { return }
-            // Open book via scheme handler URL — Foliate-js fetches it
-            let bookURL = "\(FoliateURLSchemeHandler.scheme)://localhost/book/file"
+            guard let bookBase64, let bookExt else {
+                Task { @MainActor in onError("Book file could not be read") }
+                return
+            }
             let js = """
             (async () => {
                 try {
-                    const res = await fetch('\(bookURL)');
-                    if (!res.ok) throw new Error('fetch failed: ' + res.status);
-                    const blob = await res.blob();
-                    const file = new File([blob], "book.\(bookExt)");
+                    const b64 = "\(bookBase64)";
+                    const binary = atob(b64);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                    const file = new File([bytes], "book.\(bookExt)");
                     await readerAPI.open(file);
                 } catch(e) {
                     window.webkit?.messageHandlers?.error?.postMessage({
@@ -265,10 +188,10 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
                 }
             })()
             """
-            webView?.evaluateJavaScript(js) { [weak self] _, error in
+            webView?.evaluateJavaScript(js) { _, error in
                 if let error {
                     Task { @MainActor [weak self] in
-                        self?.onLog("[eval-error] \(error.localizedDescription)")
+                        self?.onError("JS eval: \(error.localizedDescription)")
                     }
                 }
             }
