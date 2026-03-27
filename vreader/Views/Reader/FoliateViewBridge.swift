@@ -156,8 +156,9 @@ struct FoliateViewBridge: UIViewRepresentable {
         <foliate-view id="view"></foliate-view>
         <script>\(jsCode)</script>
         <script>
-        if(window.readerAPI){post('bridge-ready',{})}
-        else{post('error',{message:'readerAPI not defined after bundle load',type:'init'})}
+        // The IIFE bundle already posts bridge-ready at the end.
+        // Only post error if readerAPI failed to initialize.
+        if(!window.readerAPI){post('error',{message:'readerAPI not defined after bundle load',type:'init'})}
         </script>
         </body></html>
         """
