@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "testCommand": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project vreader.xcodeproj -scheme vreader -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:vreaderTests -quiet",
+  "testCommand": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild build-for-testing -project vreader.xcodeproj -scheme vreader -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -quiet && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test-without-building -project vreader.xcodeproj -scheme vreader -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:vreaderTests -quiet",
   "coverageCommand": "",
   "coverageSummaryPath": "",
   "mutationCommand": "",

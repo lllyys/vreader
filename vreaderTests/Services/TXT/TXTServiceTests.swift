@@ -225,7 +225,11 @@ struct SearchServiceOffsetTests {
     @Test func restoreSegmentOffsetsAreUsed() async throws {
         let store = try SearchIndexStore()
         let service = SearchService(store: store)
-        let fp = DocumentFingerprint(canonicalKey: "test:sha256:abc123")!
+        let fp = DocumentFingerprint(
+            contentSHA256: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+            fileByteCount: 1000,
+            format: .txt
+        )
         let offsets: [Int: Int] = [0: 0, 1: 500, 2: 1200]
 
         await service.restoreSegmentOffsets(fingerprint: fp, offsets: offsets)
