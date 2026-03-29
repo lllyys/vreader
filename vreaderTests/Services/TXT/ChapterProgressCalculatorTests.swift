@@ -8,22 +8,22 @@ import Foundation
 // MARK: - Fixtures
 
 private let threeChapterIndex = TXTChapterIndex(chapters: [
-    TXTChapterEntry(title: "Chapter 1", startByte: 0, endByte: 1000),
-    TXTChapterEntry(title: "Chapter 2", startByte: 1000, endByte: 2000),
-    TXTChapterEntry(title: "Chapter 3", startByte: 2000, endByte: 3000),
-])
+    TXTChapter(index: 0, title: "Chapter 1", startByte: 0, endByte: 1000),
+    TXTChapter(index: 1, title: "Chapter 2", startByte: 1000, endByte: 2000),
+    TXTChapter(index: 2, title: "Chapter 3", startByte: 2000, endByte: 3000),
+], totalBytes: 3000, detectedEncoding: "UTF-8")
 
 private let singleChapterIndex = TXTChapterIndex(chapters: [
-    TXTChapterEntry(title: "Only Chapter", startByte: 0, endByte: 5000),
-])
+    TXTChapter(index: 0, title: "Only Chapter", startByte: 0, endByte: 5000),
+], totalBytes: 5000, detectedEncoding: "UTF-8")
 
 private let emptyTitleIndex = TXTChapterIndex(chapters: [
-    TXTChapterEntry(title: "Chapter 1", startByte: 0, endByte: 1000),
-    TXTChapterEntry(title: "", startByte: 1000, endByte: 2000),
-    TXTChapterEntry(title: "Chapter 3", startByte: 2000, endByte: 3000),
-])
+    TXTChapter(index: 0, title: "Chapter 1", startByte: 0, endByte: 1000),
+    TXTChapter(index: 1, title: "", startByte: 1000, endByte: 2000),
+    TXTChapter(index: 2, title: "Chapter 3", startByte: 2000, endByte: 3000),
+], totalBytes: 3000, detectedEncoding: "UTF-8")
 
-private let emptyIndex = TXTChapterIndex(chapters: [])
+private let emptyIndex = TXTChapterIndex(chapters: [], totalBytes: 0, detectedEncoding: "UTF-8")
 
 // MARK: - bookProgress
 
@@ -304,14 +304,14 @@ struct TXTChapterIndexTests {
     @Test("equatable conformance")
     func equatable() {
         let a = TXTChapterIndex(chapters: [
-            TXTChapterEntry(title: "Ch1", startByte: 0, endByte: 100)
-        ])
+            TXTChapter(index: 0, title: "Ch1", startByte: 0, endByte: 100)
+        ], totalBytes: 100, detectedEncoding: "UTF-8")
         let b = TXTChapterIndex(chapters: [
-            TXTChapterEntry(title: "Ch1", startByte: 0, endByte: 100)
-        ])
+            TXTChapter(index: 0, title: "Ch1", startByte: 0, endByte: 100)
+        ], totalBytes: 100, detectedEncoding: "UTF-8")
         let c = TXTChapterIndex(chapters: [
-            TXTChapterEntry(title: "Ch2", startByte: 0, endByte: 100)
-        ])
+            TXTChapter(index: 0, title: "Ch2", startByte: 0, endByte: 100)
+        ], totalBytes: 100, detectedEncoding: "UTF-8")
         #expect(a == b)
         #expect(a != c)
     }

@@ -28,7 +28,7 @@ struct TXTChapter: Codable, Sendable, Equatable {
 }
 
 /// Immutable chapter index for a TXT file.
-struct TXTChapterIndex: Codable, Sendable {
+struct TXTChapterIndex: Codable, Sendable, Equatable {
     /// Ordered list of chapters covering the entire file.
     let chapters: [TXTChapter]
     /// Total file size in bytes.
