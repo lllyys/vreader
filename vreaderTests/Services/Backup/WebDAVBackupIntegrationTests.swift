@@ -103,32 +103,6 @@ struct WebDAVBackupIntegrationSuite {
 
     // MARK: - Round-trip test
 
-    @Test func directPutSucceeds() async throws {
-        // Sanity check: pure URLSession PUT against the server, mirroring the
-        // production client. Helps isolate "is the server reachable" from
-        // "does our client construct PUT requests correctly".
-        guard let url = URL(string: "\(WebDAVIntegrationConfig.serverURL)/VReader/sanity-\(UUID().uuidString).txt") else {
-            return
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        let creds = "\(WebDAVIntegrationConfig.username):\(WebDAVIntegrationConfig.password)"
-        let auth = "Basic \(Data(creds.utf8).base64EncodedString())"
-        request.setValue(auth, forHTTPHeaderField: "Authorization")
-        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data("hello".utf8)
-
-        var mkcolReq = URLRequest(url: URL(string: "\(WebDAVIntegrationConfig.serverURL)/VReader/")!)
-        mkcolReq.httpMethod = "MKCOL"
-        mkcolReq.setValue(auth, forHTTPHeaderField: "Authorization")
-        _ = try? await URLSession.shared.data(for: mkcolReq)
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-        let http = response as? HTTPURLResponse
-        #expect(http != nil)
-        #expect((200...299).contains(http?.statusCode ?? 0), "Direct PUT got HTTP \(http?.statusCode ?? -1)")
-    }
-
     @Test func webDAVClientUploadSucceeds() async throws {
         guard let url = URL(string: WebDAVIntegrationConfig.serverURL) else { return }
         let client = WebDAVClient(

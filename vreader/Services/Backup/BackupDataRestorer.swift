@@ -108,7 +108,11 @@ final class BackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(type, from: data)
-        guard envelope.schemaVersion <= kBackupCurrentSchemaVersion else {
+        // Only schema v1 exists today, so require an exact match. When v2
+        // ships, this becomes a switch + per-version migration; accepting
+        // anything `<= current` would silently pass v0 archives without the
+        // migrations they need.
+        guard envelope.schemaVersion == kBackupCurrentSchemaVersion else {
             throw BackupRestoreError.unsupportedSchemaVersion(
                 section: section,
                 actual: envelope.schemaVersion,

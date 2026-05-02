@@ -205,18 +205,39 @@ extension PersistenceActor {
     /// exist are skipped. Preserves the original UUIDs and timestamps so a
     /// restored archive doesn't fork the sync identity of each annotation.
     /// Re-running a restore against the same target is idempotent.
+    ///
+    /// Dedupe order:
+    /// 1. Match by backed-up UUID (sync-identity preservation).
+    /// 2. Otherwise match by `(profileKey, anchorHash)` — same reader location.
+    ///    This prevents a restored archive from re-introducing a duplicate at
+    ///    the same anchor that was previously created locally with a different
+    ///    UUID (e.g. via the live `addHighlight` path that mints fresh ids).
+    /// 3. Otherwise insert a new row with the backed-up UUID/createdAt/updatedAt.
+    ///
+    /// In all matched cases every restorable field (locator, anchor, payload,
+    /// timestamps, book attachment) is rewritten from the backup so a repaired
+    /// archive can fix wrong local state.
     func restoreBackupAnnotations(_ envelope: BackupAnnotationsEnvelope) async throws {
         let context = ModelContext(modelContainer)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        // Pre-fetch existing rows so we can upsert keyed by backed-up UUID.
         let existingHighlights = try context.fetch(FetchDescriptor<Highlight>())
         var highlightById: [UUID: Highlight] = [:]
-        for h in existingHighlights { highlightById[h.highlightId] = h }
+        var highlightByProfile: [String: Highlight] = [:]
+        for h in existingHighlights {
+            highlightById[h.highlightId] = h
+            highlightByProfile[h.profileKey] = h
+        }
+
         let existingBookmarks = try context.fetch(FetchDescriptor<Bookmark>())
         var bookmarkById: [UUID: Bookmark] = [:]
-        for b in existingBookmarks { bookmarkById[b.bookmarkId] = b }
+        var bookmarkByProfile: [String: Bookmark] = [:]
+        for b in existingBookmarks {
+            bookmarkById[b.bookmarkId] = b
+            bookmarkByProfile[b.profileKey] = b
+        }
+
         let existingNotes = try context.fetch(FetchDescriptor<AnnotationNote>())
         var noteById: [UUID: AnnotationNote] = [:]
         for n in existingNotes { noteById[n.annotationId] = n }
@@ -225,10 +246,13 @@ extension PersistenceActor {
             guard let book = try fetchBook(context: context, key: h.bookFingerprintKey) else { continue }
             guard let locator = decodeLocator(from: h.locatorJSON, expectedKey: h.bookFingerprintKey, decoder: decoder)
             else { continue }
-            if let existing = highlightById[h.highlightId] {
-                existing.color = h.color
-                existing.note = h.note
-                existing.updatedAt = h.updatedAt
+            let profileKey = "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)"
+            if let existing = highlightById[h.highlightId] ?? highlightByProfile[profileKey] {
+                applyHighlightUpdate(existing, from: h, locator: locator, book: book)
+                // Track the row under the backed-up id too so a later entry
+                // with the same id won't get re-inserted as a duplicate.
+                highlightById[h.highlightId] = existing
+                highlightByProfile[profileKey] = existing
                 continue
             }
             let highlight = Highlight(
@@ -244,15 +268,19 @@ extension PersistenceActor {
             highlight.book = book
             book.highlights.append(highlight)
             context.insert(highlight)
+            highlightById[h.highlightId] = highlight
+            highlightByProfile[profileKey] = highlight
         }
 
         for b in envelope.bookmarks {
             guard let book = try fetchBook(context: context, key: b.bookFingerprintKey) else { continue }
             guard let locator = decodeLocator(from: b.locatorJSON, expectedKey: b.bookFingerprintKey, decoder: decoder)
             else { continue }
-            if let existing = bookmarkById[b.bookmarkId] {
-                existing.title = b.title
-                existing.updatedAt = b.updatedAt
+            let profileKey = "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)"
+            if let existing = bookmarkById[b.bookmarkId] ?? bookmarkByProfile[profileKey] {
+                applyBookmarkUpdate(existing, from: b, locator: locator, book: book)
+                bookmarkById[b.bookmarkId] = existing
+                bookmarkByProfile[profileKey] = existing
                 continue
             }
             let bookmark = Bookmark(
@@ -265,15 +293,19 @@ extension PersistenceActor {
             bookmark.book = book
             book.bookmarks.append(bookmark)
             context.insert(bookmark)
+            bookmarkById[b.bookmarkId] = bookmark
+            bookmarkByProfile[profileKey] = bookmark
         }
 
+        // Notes have no profileKey-based dedupe in the live path, so UUID is
+        // the only identity. Same-content notes added later via the live API
+        // get unique UUIDs and stay distinct.
         for n in envelope.notes {
             guard let book = try fetchBook(context: context, key: n.bookFingerprintKey) else { continue }
             guard let locator = decodeLocator(from: n.locatorJSON, expectedKey: n.bookFingerprintKey, decoder: decoder)
             else { continue }
             if let existing = noteById[n.annotationId] {
-                existing.content = n.content
-                existing.updatedAt = n.updatedAt
+                applyNoteUpdate(existing, from: n, locator: locator, book: book)
                 continue
             }
             let note = AnnotationNote(
@@ -286,9 +318,42 @@ extension PersistenceActor {
             note.book = book
             book.annotations.append(note)
             context.insert(note)
+            noteById[n.annotationId] = note
         }
 
         try context.save()
+    }
+
+    private func applyHighlightUpdate(_ row: Highlight, from h: BackupHighlight, locator: Locator, book: Book) {
+        row.updateLocator(locator)
+        row.selectedText = h.selectedText
+        row.color = h.color
+        row.note = h.note
+        row.createdAt = h.createdAt
+        row.updatedAt = h.updatedAt
+        if row.book?.fingerprintKey != book.fingerprintKey {
+            row.book = book
+        }
+    }
+
+    private func applyBookmarkUpdate(_ row: Bookmark, from b: BackupBookmark, locator: Locator, book: Book) {
+        row.updateLocator(locator)
+        row.title = b.title
+        row.createdAt = b.createdAt
+        row.updatedAt = b.updatedAt
+        if row.book?.fingerprintKey != book.fingerprintKey {
+            row.book = book
+        }
+    }
+
+    private func applyNoteUpdate(_ row: AnnotationNote, from n: BackupNote, locator: Locator, book: Book) {
+        row.updateLocator(locator)
+        row.content = n.content
+        row.createdAt = n.createdAt
+        row.updatedAt = n.updatedAt
+        if row.book?.fingerprintKey != book.fingerprintKey {
+            row.book = book
+        }
     }
 
     // MARK: - Private helpers

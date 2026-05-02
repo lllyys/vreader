@@ -154,7 +154,7 @@ struct WebDAVSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             if let candidate = restoreCandidate {
-                Text("This will merge \(candidate.bookCount) books' annotations, positions, and settings into your library. Local data is preserved (merge, not replace).")
+                Text("This merges backup data for \(candidate.bookCount) books into your library. Annotations and bookmarks dedupe by ID and reader location; existing matches will be overwritten with the backup's values. Reading positions and settings are replaced. Book files themselves are not restored.")
             }
         }
         .confirmationDialog(

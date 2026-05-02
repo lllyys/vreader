@@ -204,14 +204,28 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
         ]
 
         let totalFiles = Double(restoreFiles.count)
+        var sectionFailures: [String] = []
         for (index, (filename, restoreFunc)) in restoreFiles.enumerated() {
             if let entryData = try? ZIPWriter.extractEntry(named: filename, from: zipData) {
-                try await restoreFunc(entryData)
+                do {
+                    try await restoreFunc(entryData)
+                } catch {
+                    // Per-section restore errors don't abort the loop —
+                    // restoring the remaining sections is more useful than
+                    // bailing out and leaving the user with a half-applied
+                    // archive that's hard to reason about.
+                    sectionFailures.append("\(filename): \(error.localizedDescription)")
+                }
             }
             progress(0.55 + 0.40 * Double(index + 1) / totalFiles)
         }
 
         progress(1.0)
+        if !sectionFailures.isEmpty {
+            throw BackupError.archiveCorrupted(
+                "Some sections failed to restore: \(sectionFailures.joined(separator: "; "))"
+            )
+        }
     }
 
     func listBackups() async throws -> [BackupMetadata] {

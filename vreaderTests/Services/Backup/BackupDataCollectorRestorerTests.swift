@@ -218,7 +218,7 @@ struct BackupCollectorRestorerSuite {
         let locator = makeLocator(fingerprint: fp, href: "ch1.xhtml", progression: 0.3)
 
         let originalHighlight = try await sourcePersistence.addHighlight(
-            locator: locator, selectedText: "x", color: "yellow", note: nil, toBookWithKey: key
+            locator: locator, selectedText: "selected", color: "yellow", note: "note v1", toBookWithKey: key
         )
         let originalNote = try await sourcePersistence.addAnnotation(
             locator: locator, content: "preserved note", toBookWithKey: key
@@ -240,21 +240,75 @@ struct BackupCollectorRestorerSuite {
             perBookSettingsBaseURL: perBookDir
         )
 
-        // First restore.
+        // First restore — exercises the insert branch.
         try await restorer.restoreAnnotations(from: data)
         let firstHighlights = try await destPersistence.fetchHighlights(forBookWithKey: key)
         let firstNotes = try await destPersistence.fetchAnnotations(forBookWithKey: key)
         #expect(firstHighlights.count == 1)
         #expect(firstNotes.count == 1)
         #expect(firstHighlights.first?.highlightId == originalHighlight.highlightId)
+        #expect(firstHighlights.first?.color == "yellow")
+        #expect(firstHighlights.first?.note == "note v1")
+        #expect(firstHighlights.first?.selectedText == "selected")
         #expect(firstNotes.first?.annotationId == originalNote.annotationId)
+        #expect(firstNotes.first?.content == "preserved note")
 
-        // Second restore should be idempotent — no duplicates.
+        // Second restore — exercises the UUID-match update branch.
+        // Should remain idempotent and the row's fields should still match the archive.
         try await restorer.restoreAnnotations(from: data)
         let secondHighlights = try await destPersistence.fetchHighlights(forBookWithKey: key)
         let secondNotes = try await destPersistence.fetchAnnotations(forBookWithKey: key)
         #expect(secondHighlights.count == 1, "Restore should be idempotent for highlights")
         #expect(secondNotes.count == 1, "Restore should be idempotent for notes")
+        #expect(secondHighlights.first?.highlightId == originalHighlight.highlightId)
+        #expect(secondHighlights.first?.note == "note v1")
+        #expect(secondNotes.first?.content == "preserved note")
+    }
+
+    @Test func annotationsRestoreDedupesByLocationAcrossDifferentUUID() async throws {
+        // Arrange: source produces a highlight at a given location; dest already
+        // has a *different-UUID* highlight at the same location (e.g. user
+        // re-highlighted on the new device before restoring). The restore
+        // should overwrite the local row with the backup's UUID/payload, not
+        // create a second highlight at the same anchor.
+        let sourcePersistence = try makePersistence()
+        let fp = try await insertBook(sourcePersistence, title: "Same Location")
+        let key = fp.canonicalKey
+        let locator = makeLocator(fingerprint: fp, href: "ch1.xhtml", progression: 0.5)
+
+        let backedUpHighlight = try await sourcePersistence.addHighlight(
+            locator: locator, selectedText: "x", color: "yellow", note: "from backup", toBookWithKey: key
+        )
+
+        let perBookDir = try makeTempDir(label: "ann-prof")
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "profA"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectAnnotations()
+
+        let destPersistence = try makePersistence()
+        _ = try await insertBook(destPersistence, title: "Same Location")
+        // Dest has its own pre-existing highlight at the same location with a
+        // different UUID and different payload.
+        let localHighlight = try await destPersistence.addHighlight(
+            locator: locator, selectedText: "x", color: "blue", note: "local note", toBookWithKey: key
+        )
+        #expect(localHighlight.highlightId != backedUpHighlight.highlightId)
+
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "profB"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restoreAnnotations(from: data)
+
+        let restored = try await destPersistence.fetchHighlights(forBookWithKey: key)
+        #expect(restored.count == 1, "Should not duplicate a highlight at the same location")
+        // The surviving row should now carry the backup's payload.
+        #expect(restored.first?.color == "yellow")
+        #expect(restored.first?.note == "from backup")
     }
 
     @Test func annotationsSkipsMissingBook() async throws {
