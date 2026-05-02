@@ -2,7 +2,7 @@
 
 **Built entirely by AI — coded, tested, and debugged by AI agents. Human-directed.**
 
-An iOS reader for EPUB, AZW3/MOBI (Kindle), PDF, TXT, and Markdown — built entirely by AI coding agents, with Swift 6, SwiftUI, and SwiftData. Now with cover art extraction for EPUB and AZW3.
+An iOS reader for EPUB, AZW3/MOBI (Kindle), PDF, TXT, and Markdown — built entirely by AI coding agents, with Swift 6, SwiftUI, and SwiftData.
 
 ## About
 
@@ -25,9 +25,9 @@ VReader is a modern reading app designed for iPhone and iPad, built entirely by 
 
 ### Annotations
 
-- **Bookmarks, highlights, notes** — Full CRUD for TXT/MD/PDF/EPUB; AZW3 highlights in progress
+- **Bookmarks, highlights, notes** — Full CRUD for TXT/MD/PDF/EPUB; AZW3 in progress
 - **EPUB highlights** — CSS Highlight API with JS bridge + buffered delivery
-- **AZW3 highlights** — SVG overlay via Foliate-js overlayer + CFI anchoring
+- **AZW3 highlights** — Selection capture + CFI anchoring shipped; overlay restoration deferred to WI-7
 - **PDF highlights** — PDFAnnotation-based with selection detection
 - **TXT/MD highlights** — NSAttributedString with persistent rendering
 - **Export/import** — Markdown + JSON export, VReader JSON round-trip import
@@ -70,6 +70,10 @@ VReader is a modern reading app designed for iPhone and iPad, built entirely by 
 - **WebDAV backup** — Archive to any WebDAV server (Nutstore compatible)
 - **Per-book settings** — Font, theme, spacing overrides per book (JSON-persisted)
 - **Theme backgrounds** — Custom background images via PhotosPicker with per-theme opacity
+
+### Developer Tools (DEBUG-only)
+
+- **DebugBridge** — `vreader-debug://` URL scheme for autonomous testing. Drives the app from outside via `xcrun simctl openurl`: reset library, seed fixtures, set theme, open books, snapshot state to JSON. Compiled out of Release builds. Reference: [`dev-docs/debug-bridge.md`](dev-docs/debug-bridge.md)
 
 ## Tech Stack
 
@@ -127,10 +131,11 @@ vreader/
 │   ├── Search/          # FTS5 indexing, text extraction
 │   ├── AI/, TTS/        # AI service, TTS providers
 │   ├── Backup/          # WebDAV client, BackupProvider
-│   ├── Sync/            # iCloud sync engine, CloudKit mapper, tombstones
+│   ├── Sync/            # CloudKit infrastructure (built but not wired — feature #10 WONT DO)
+│   ├── DebugBridge/     # DEBUG-only: vreader-debug:// URL scheme + active-reader registry
 │   ├── TextMapping/     # Simp/Trad, replacement rules
 │   └── Locator/         # Reading position (Readium-inspired)
-vreaderTests/            # Unit tests (3200+ test cases)
+vreaderTests/            # XCTest unit tests (~90 unit-test methods plus integration suites)
 vreaderUITests/          # UI tests (XCUITest)
 ```
 
@@ -186,7 +191,7 @@ Shared rules for all AI agents live in ``:
 
 ## Status
 
-Active development. See [features](docs/features.md) (39 done) and [bugs](docs/bugs.md) (104 fixed) for current state.
+Active development. See [features](docs/features.md) (36 done) and [bugs](docs/bugs.md) (98 fixed) for current state.
 
 ## License
 
