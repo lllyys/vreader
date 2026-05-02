@@ -165,8 +165,8 @@ extension BackupError {
         case .backupNotFound: return "Backup not found on the server."
         case .storageUnavailable(let msg): return "Server unavailable. \(msg)"
         case .cancelled: return "Cancelled."
-        case .restorePartiallyFailed(let detail):
-            return "Some sections of the backup didn't restore. \(detail)"
+        case .restorePartiallyFailed(let sections):
+            return "These sections didn't restore: \(sections). Other sections were applied; try the restore again."
         }
     }
 }

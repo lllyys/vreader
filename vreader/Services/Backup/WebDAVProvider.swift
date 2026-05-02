@@ -193,38 +193,39 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
 
         // Apply restored data to local database via BackupDataRestoring delegate.
         // Each file is optional — missing entries are silently skipped (forward compatibility).
-        let restoreFiles: [(String, (Data) async throws -> Void)] = [
-            ("annotations.json", dataRestorer.restoreAnnotations),
-            ("positions.json", dataRestorer.restorePositions),
-            ("settings.json", dataRestorer.restoreSettings),
-            ("collections.json", dataRestorer.restoreCollections),
-            ("book-sources.json", dataRestorer.restoreBookSources),
-            ("per-book-settings.json", dataRestorer.restorePerBookSettings),
-            ("replacement-rules.json", dataRestorer.restoreReplacementRules),
+        // Each tuple: (zip filename, user-facing section label, restore fn).
+        // The label is what shows up in BackupError.restorePartiallyFailed —
+        // it must not leak internal filenames.
+        let restoreFiles: [(filename: String, label: String, fn: (Data) async throws -> Void)] = [
+            ("annotations.json", "annotations", dataRestorer.restoreAnnotations),
+            ("positions.json", "reading positions", dataRestorer.restorePositions),
+            ("settings.json", "settings", dataRestorer.restoreSettings),
+            ("collections.json", "collections", dataRestorer.restoreCollections),
+            ("book-sources.json", "book sources", dataRestorer.restoreBookSources),
+            ("per-book-settings.json", "per-book settings", dataRestorer.restorePerBookSettings),
+            ("replacement-rules.json", "replacement rules", dataRestorer.restoreReplacementRules),
         ]
 
         let totalFiles = Double(restoreFiles.count)
-        var sectionFailures: [String] = []
-        for (index, (filename, restoreFunc)) in restoreFiles.enumerated() {
-            if let entryData = try? ZIPWriter.extractEntry(named: filename, from: zipData) {
+        var failedLabels: [String] = []
+        for (index, item) in restoreFiles.enumerated() {
+            if let entryData = try? ZIPWriter.extractEntry(named: item.filename, from: zipData) {
                 do {
-                    try await restoreFunc(entryData)
+                    try await item.fn(entryData)
                 } catch {
                     // Per-section restore errors don't abort the loop —
                     // restoring the remaining sections is more useful than
                     // bailing out and leaving the user with a half-applied
                     // archive that's hard to reason about.
-                    sectionFailures.append("\(filename): \(error.localizedDescription)")
+                    failedLabels.append(item.label)
                 }
             }
             progress(0.55 + 0.40 * Double(index + 1) / totalFiles)
         }
 
         progress(1.0)
-        if !sectionFailures.isEmpty {
-            throw BackupError.restorePartiallyFailed(
-                sectionFailures.joined(separator: "; ")
-            )
+        if !failedLabels.isEmpty {
+            throw BackupError.restorePartiallyFailed(failedLabels.joined(separator: ", "))
         }
     }
 
