@@ -351,6 +351,115 @@ final class RealDebugBridgeContextTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
+    // MARK: - open
+
+    @MainActor
+    func test_open_unknownBookId_throwsBookNotFound() async throws {
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        do {
+            try await context.open(bookId: "definitely-not-a-real-key", position: nil)
+            XCTFail("expected bookNotFound")
+        } catch DebugBridgeContextError.bookNotFound(let id) {
+            XCTAssertEqual(id, "definitely-not-a-real-key")
+        } catch {
+            XCTFail("expected bookNotFound, got \(error)")
+        }
+    }
+
+    @MainActor
+    func test_open_existingBook_postsNotificationWithFingerprintKey() async throws {
+        let key = try await CollectionTestHelper.insertBook(
+            persistence: persistence,
+            title: "Openable",
+            sha: String(repeating: "f", count: 64)
+        )
+
+        let exp = expectation(description: "notification posted")
+        nonisolated(unsafe) var receivedKey: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedKey = notification.userInfo?["fingerprintKey"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.open(bookId: key, position: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedKey, key)
+    }
+
+    @MainActor
+    func test_open_withNonNilPosition_throwsNotImplemented() async throws {
+        // v0 rejects position rather than silently ignoring it. Repros that
+        // depend on opening at a specific location fail loudly instead of
+        // opening at the wrong place.
+        let key = try await CollectionTestHelper.insertBook(
+            persistence: persistence,
+            title: "Openable",
+            sha: String(repeating: "9", count: 64)
+        )
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        do {
+            try await context.open(bookId: key, position: "epubcfi(/6/4)")
+            XCTFail("expected notImplemented for non-nil position")
+        } catch DebugBridgeContextError.notImplemented(let cmd) {
+            XCTAssertEqual(cmd, "open.position")
+        } catch {
+            XCTFail("expected notImplemented, got \(error)")
+        }
+    }
+
+    @MainActor
+    func test_open_nonNilPosition_doesNotPostNotification() async throws {
+        // Verify the position-rejected case doesn't leak a partial side effect.
+        let key = try await CollectionTestHelper.insertBook(
+            persistence: persistence,
+            title: "Openable",
+            sha: String(repeating: "8", count: 64)
+        )
+
+        let exp = expectation(description: "no notification expected")
+        exp.isInverted = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook,
+            object: nil,
+            queue: .main
+        ) { _ in
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        do {
+            try await context.open(bookId: key, position: "p:42")
+            XCTFail("expected throw")
+        } catch DebugBridgeContextError.notImplemented {
+            // expected
+        }
+        await fulfillment(of: [exp], timeout: 0.5)
+    }
+
     @MainActor
     func test_snapshot_highlightCountReflectsLibrary() async throws {
         // Insert a book, then add highlights via the persistence API.

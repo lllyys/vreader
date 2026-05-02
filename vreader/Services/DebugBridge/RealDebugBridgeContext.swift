@@ -21,6 +21,7 @@ enum DebugBridgeContextError: Error, Equatable {
     case unknownFixture(String)
     case fixtureResourceMissing(String)
     case notImplemented(command: String)
+    case bookNotFound(String)
 }
 
 /// Production DebugBridgeContext. Each handler is a thin wrapper over
@@ -58,6 +59,7 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         for book in books {
             try await persistence.deleteBook(fingerprintKey: book.fingerprintKey)
         }
+        NotificationCenter.default.post(name: .debugBridgeLibraryChanged, object: nil)
         log.info("reset: removed \(books.count) book(s)")
     }
 
@@ -80,6 +82,7 @@ final class RealDebugBridgeContext: DebugBridgeContext {
             throw DebugBridgeContextError.fixtureResourceMissing("\(entry.resourceName).\(entry.resourceExtension)")
         }
         let result = try await importer.importFile(at: url, source: .localCopy)
+        NotificationCenter.default.post(name: .debugBridgeLibraryChanged, object: nil)
         log.info("seed: imported \(entry.name, privacy: .public) → key=\(result.fingerprintKey, privacy: .public) duplicate=\(result.isDuplicate)")
     }
 
@@ -90,8 +93,29 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         return DebugBridgeContextError.notImplemented(command: command)
     }
 
+    /// Verify the book exists and post a notification for LibraryView to
+    /// push it onto the navigation stack. Throws `bookNotFound` if no book
+    /// in the library has the given fingerprint key.
+    ///
+    /// Position handling: v0 only supports nil position. A non-nil position
+    /// throws `notImplemented` rather than silently ignoring the parameter,
+    /// so repros that depend on opening at a specific location fail loudly
+    /// instead of opening at the wrong place. v1 will resolve position to
+    /// a Locator and pass it to the reader.
     func open(bookId: String, position: String?) async throws {
-        throw notImplemented("open")
+        if position != nil {
+            throw DebugBridgeContextError.notImplemented(command: "open.position")
+        }
+        let books = try await persistence.fetchAllLibraryBooks()
+        guard books.contains(where: { $0.fingerprintKey == bookId }) else {
+            throw DebugBridgeContextError.bookNotFound(bookId)
+        }
+        NotificationCenter.default.post(
+            name: .debugBridgeOpenBook,
+            object: nil,
+            userInfo: ["fingerprintKey": bookId]
+        )
+        log.info("open: posted notification for \(bookId, privacy: .public)")
     }
 
     /// Set reader theme + optional font size. Mutates a transient

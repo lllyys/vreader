@@ -98,6 +98,32 @@ struct LibraryView: View {
                     Task { await viewModel.refresh(force: true) }
                 }
             }
+            #if DEBUG
+            // Feature #44 DebugBridge — vreader-debug://open posts this so
+            // automated tests can navigate to a specific book without
+            // tapping. The bridge has already verified the book exists in
+            // persistence. We refresh viewModel.books FIRST so a rapid
+            // seed → open sequence finds the freshly-imported book — the
+            // bridge serializes its own commands but does not wait for
+            // SwiftUI to propagate libraryChanged refreshes.
+            .onReceive(NotificationCenter.default.publisher(for: .debugBridgeOpenBook)) { notification in
+                guard let key = notification.userInfo?["fingerprintKey"] as? String else { return }
+                Task {
+                    await viewModel.loadBooks()
+                    guard let book = viewModel.books.first(where: { $0.fingerprintKey == key })
+                    else { return }
+                    isPushingReader = true
+                    navigationPath.append(book)
+                }
+            }
+            // The bridge's reset/seed mutate SwiftData directly, bypassing
+            // LibraryViewModel's import path. Refresh the in-memory books
+            // array so the UI reflects the new state for snapshot/observe
+            // consumers that don't go through .onReceive(openBook).
+            .onReceive(NotificationCenter.default.publisher(for: .debugBridgeLibraryChanged)) { _ in
+                Task { await viewModel.refresh(force: true) }
+            }
+            #endif
             // Reset toolbar visibility when returning from reader (bug #72)
             .onChange(of: navigationPath) { _, newPath in
                 if newPath.isEmpty { isPushingReader = false }

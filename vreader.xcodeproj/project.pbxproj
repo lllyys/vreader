@@ -535,6 +535,7 @@
 		D4BE2B581F2B7372BA6390AF /* chapter_list.html in Resources */ = {isa = PBXBuildFile; fileRef = 2026D64F5931E86FF0E34945 /* chapter_list.html */; };
 		D4DBF7581572109E9CA3D5AB /* SimpTradTransformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C34F8D2600AE19D9C4F2E44 /* SimpTradTransformTests.swift */; };
 		D5062FEAC5E9C9FB902C5BCC /* SimpTradTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82775D9CFBD2C2E05C770BB9 /* SimpTradTransform.swift */; };
+		D5B2894B2955D7F7C7242C56 /* DebugBridgeNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B061A054BCA74CAABF5CE /* DebugBridgeNotifications.swift */; };
 		D697FB1FEDD8809977C2CDCC /* DebugFixtureCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD6CBECDB1B545AEC90C9A9B /* DebugFixtureCatalogTests.swift */; };
 		D71DF2EA214C3E5B86EB04BD /* GlobalAccessibilityAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDF40785A923791B0241CF75 /* GlobalAccessibilityAuditTests.swift */; };
 		D80F7202019D31765C8708B2 /* binary_masquerade.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6782FA6981AE8309748D8E5D /* binary_masquerade.txt */; };
@@ -1316,6 +1317,7 @@
 		FA0100000000002D /* BookImporterAZW3Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookImporterAZW3Tests.swift; sourceTree = "<group>"; };
 		FA0100000000002E /* MOBICoverExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBICoverExtractor.swift; sourceTree = "<group>"; };
 		FA0100000000002F /* MOBICoverExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBICoverExtractorTests.swift; sourceTree = "<group>"; };
+		FA4B061A054BCA74CAABF5CE /* DebugBridgeNotifications.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DebugBridgeNotifications.swift; sourceTree = "<group>"; };
 		FA8BD6824D9945998A61EFB4 /* TTSHighlightCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSHighlightCoordinator.swift; sourceTree = "<group>"; };
 		FB17C932D5188B36F01F024A /* AnnotationExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationExporter.swift; sourceTree = "<group>"; };
 		FB82BDFCDB76725A5586D5E0 /* Bookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bookmark.swift; sourceTree = "<group>"; };
@@ -2180,6 +2182,7 @@
 				D7F1AE1C279E77B5BFFE4A33 /* DebugFixtureCatalog.swift */,
 				1F65CD78E52AF656CD80A01D /* DebugBridge.swift */,
 				66956A94EEDA33F184F0E038 /* RealDebugBridgeContext.swift */,
+				FA4B061A054BCA74CAABF5CE /* DebugBridgeNotifications.swift */,
 			);
 			name = DebugBridge;
 			path = DebugBridge;
@@ -3472,6 +3475,7 @@
 				0ED89008EFE68CA6FC453519 /* DebugFixtureCatalog.swift in Sources */,
 				481EF3BB135D63C2D39B9A16 /* DebugBridge.swift in Sources */,
 				388B4B3BFBD66168240AADD0 /* RealDebugBridgeContext.swift in Sources */,
+				D5B2894B2955D7F7C7242C56 /* DebugBridgeNotifications.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

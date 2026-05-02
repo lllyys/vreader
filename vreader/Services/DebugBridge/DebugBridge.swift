@@ -98,6 +98,8 @@ final class DebugBridge {
                 return "bridge.fixtureResourceMissing: \(name)"
             case .notImplemented(let cmd):
                 return "bridge.notImplemented: \(cmd)"
+            case .bookNotFound(let id):
+                return "bridge.bookNotFound: \(id)"
             }
         default:
             return "unknown: \(String(describing: type(of: error)))"
