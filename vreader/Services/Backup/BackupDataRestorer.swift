@@ -37,17 +37,17 @@ final class BackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
     }
 
     func restoreAnnotations(from data: Data) async throws {
-        let envelope = try decode(BackupAnnotationsEnvelope.self, from: data)
+        let envelope = try decodeAndValidate(BackupAnnotationsEnvelope.self, from: data, section: "annotations")
         try await persistence.restoreBackupAnnotations(envelope)
     }
 
     func restorePositions(from data: Data) async throws {
-        let envelope = try decode(BackupPositionsEnvelope.self, from: data)
+        let envelope = try decodeAndValidate(BackupPositionsEnvelope.self, from: data, section: "positions")
         try await persistence.restoreBackupPositions(envelope.positions)
     }
 
     func restoreSettings(from data: Data) async throws {
-        let envelope = try decode(BackupSettingsEnvelope.self, from: data)
+        let envelope = try decodeAndValidate(BackupSettingsEnvelope.self, from: data, section: "settings")
         for (key, value) in envelope.defaults {
             switch value {
             case .bool(let v): defaults.set(v, forKey: key)
@@ -60,17 +60,18 @@ final class BackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
     }
 
     func restoreCollections(from data: Data) async throws {
-        let envelope = try decode(BackupCollectionsEnvelope.self, from: data)
+        let envelope = try decodeAndValidate(BackupCollectionsEnvelope.self, from: data, section: "collections")
         try await persistence.restoreBackupCollections(envelope.collections)
     }
 
     func restoreBookSources(from data: Data) async throws {
-        let envelope = try decode(BackupBookSourcesEnvelope.self, from: data)
+        let envelope = try decodeAndValidate(BackupBookSourcesEnvelope.self, from: data, section: "book-sources")
         try await persistence.upsertBackupBookSources(envelope.sources)
     }
 
     func restorePerBookSettings(from data: Data) async throws {
-        let envelope = try decode(BackupPerBookSettingsEnvelope.self, from: data)
+        let envelope = try decodeAndValidate(BackupPerBookSettingsEnvelope.self, from: data, section: "per-book-settings")
+        var failures = 0
         for entry in envelope.entries {
             do {
                 try PerBookSettingsStore.save(
@@ -79,23 +80,41 @@ final class BackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
                     baseURL: perBookSettingsBaseURL
                 )
             } catch {
+                failures += 1
                 log.error(
                     "Failed to save per-book settings for \(entry.bookFingerprintKey, privacy: .public): \(String(describing: error), privacy: .public)"
                 )
             }
         }
+        if failures > 0 {
+            throw BackupRestoreError.partialFailure(
+                section: "per-book-settings",
+                failed: failures,
+                total: envelope.entries.count
+            )
+        }
     }
 
     func restoreReplacementRules(from data: Data) async throws {
-        let envelope = try decode(BackupReplacementRulesEnvelope.self, from: data)
+        let envelope = try decodeAndValidate(BackupReplacementRulesEnvelope.self, from: data, section: "replacement-rules")
         try await persistence.upsertBackupReplacementRules(envelope.rules)
     }
 
     // MARK: - Helpers
 
-    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    private func decodeAndValidate<T: Decodable & BackupVersionedEnvelope>(
+        _ type: T.Type, from data: Data, section: String
+    ) throws -> T {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(type, from: data)
+        let envelope = try decoder.decode(type, from: data)
+        guard envelope.schemaVersion <= kBackupCurrentSchemaVersion else {
+            throw BackupRestoreError.unsupportedSchemaVersion(
+                section: section,
+                actual: envelope.schemaVersion,
+                supported: kBackupCurrentSchemaVersion
+            )
+        }
+        return envelope
     }
 }

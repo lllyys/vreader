@@ -201,50 +201,112 @@ extension PersistenceActor {
         try context.save()
     }
 
-    /// Restores annotations (highlights/bookmarks/notes). Books that no longer exist are skipped.
+    /// Restores annotations (highlights/bookmarks/notes). Books that no longer
+    /// exist are skipped. Preserves the original UUIDs and timestamps so a
+    /// restored archive doesn't fork the sync identity of each annotation.
+    /// Re-running a restore against the same target is idempotent.
     func restoreBackupAnnotations(_ envelope: BackupAnnotationsEnvelope) async throws {
+        let context = ModelContext(modelContainer)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
+        // Pre-fetch existing rows so we can upsert keyed by backed-up UUID.
+        let existingHighlights = try context.fetch(FetchDescriptor<Highlight>())
+        var highlightById: [UUID: Highlight] = [:]
+        for h in existingHighlights { highlightById[h.highlightId] = h }
+        let existingBookmarks = try context.fetch(FetchDescriptor<Bookmark>())
+        var bookmarkById: [UUID: Bookmark] = [:]
+        for b in existingBookmarks { bookmarkById[b.bookmarkId] = b }
+        let existingNotes = try context.fetch(FetchDescriptor<AnnotationNote>())
+        var noteById: [UUID: AnnotationNote] = [:]
+        for n in existingNotes { noteById[n.annotationId] = n }
+
         for h in envelope.highlights {
-            guard try await findBook(byFingerprintKey: h.bookFingerprintKey) != nil else { continue }
-            guard let data = h.locatorJSON.data(using: .utf8),
-                  let locator = try? decoder.decode(Locator.self, from: data),
-                  locator.bookFingerprint.canonicalKey == h.bookFingerprintKey
+            guard let book = try fetchBook(context: context, key: h.bookFingerprintKey) else { continue }
+            guard let locator = decodeLocator(from: h.locatorJSON, expectedKey: h.bookFingerprintKey, decoder: decoder)
             else { continue }
-            _ = try? await addHighlight(
+            if let existing = highlightById[h.highlightId] {
+                existing.color = h.color
+                existing.note = h.note
+                existing.updatedAt = h.updatedAt
+                continue
+            }
+            let highlight = Highlight(
+                highlightId: h.highlightId,
                 locator: locator,
                 selectedText: h.selectedText,
                 color: h.color,
                 note: h.note,
-                toBookWithKey: h.bookFingerprintKey
+                anchor: nil,
+                createdAt: h.createdAt
             )
+            highlight.updatedAt = h.updatedAt
+            highlight.book = book
+            book.highlights.append(highlight)
+            context.insert(highlight)
         }
 
         for b in envelope.bookmarks {
-            guard try await findBook(byFingerprintKey: b.bookFingerprintKey) != nil else { continue }
-            guard let data = b.locatorJSON.data(using: .utf8),
-                  let locator = try? decoder.decode(Locator.self, from: data),
-                  locator.bookFingerprint.canonicalKey == b.bookFingerprintKey
+            guard let book = try fetchBook(context: context, key: b.bookFingerprintKey) else { continue }
+            guard let locator = decodeLocator(from: b.locatorJSON, expectedKey: b.bookFingerprintKey, decoder: decoder)
             else { continue }
-            _ = try? await addBookmark(
+            if let existing = bookmarkById[b.bookmarkId] {
+                existing.title = b.title
+                existing.updatedAt = b.updatedAt
+                continue
+            }
+            let bookmark = Bookmark(
+                bookmarkId: b.bookmarkId,
                 locator: locator,
                 title: b.title,
-                toBookWithKey: b.bookFingerprintKey
+                createdAt: b.createdAt
             )
+            bookmark.updatedAt = b.updatedAt
+            bookmark.book = book
+            book.bookmarks.append(bookmark)
+            context.insert(bookmark)
         }
 
         for n in envelope.notes {
-            guard try await findBook(byFingerprintKey: n.bookFingerprintKey) != nil else { continue }
-            guard let data = n.locatorJSON.data(using: .utf8),
-                  let locator = try? decoder.decode(Locator.self, from: data),
-                  locator.bookFingerprint.canonicalKey == n.bookFingerprintKey
+            guard let book = try fetchBook(context: context, key: n.bookFingerprintKey) else { continue }
+            guard let locator = decodeLocator(from: n.locatorJSON, expectedKey: n.bookFingerprintKey, decoder: decoder)
             else { continue }
-            _ = try? await addAnnotation(
+            if let existing = noteById[n.annotationId] {
+                existing.content = n.content
+                existing.updatedAt = n.updatedAt
+                continue
+            }
+            let note = AnnotationNote(
+                annotationId: n.annotationId,
                 locator: locator,
                 content: n.content,
-                toBookWithKey: n.bookFingerprintKey
+                createdAt: n.createdAt
             )
+            note.updatedAt = n.updatedAt
+            note.book = book
+            book.annotations.append(note)
+            context.insert(note)
         }
+
+        try context.save()
+    }
+
+    // MARK: - Private helpers
+
+    private func fetchBook(context: ModelContext, key: String) throws -> Book? {
+        let predicate = #Predicate<Book> { $0.fingerprintKey == key }
+        var descriptor = FetchDescriptor<Book>(predicate: predicate)
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+
+    private func decodeLocator(
+        from json: String, expectedKey: String, decoder: JSONDecoder
+    ) -> Locator? {
+        guard let data = json.data(using: .utf8),
+              let locator = try? decoder.decode(Locator.self, from: data),
+              locator.bookFingerprint.canonicalKey == expectedKey
+        else { return nil }
+        return locator
     }
 }

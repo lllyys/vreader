@@ -136,7 +136,21 @@ final class BackupViewModel {
         if let backupError = error as? BackupError {
             return "\(action): \(backupError.userMessage)"
         }
+        if let restoreError = error as? BackupRestoreError {
+            return "\(action): \(restoreError.userMessage)"
+        }
         return "\(action): \(error.localizedDescription)"
+    }
+}
+
+extension BackupRestoreError {
+    var userMessage: String {
+        switch self {
+        case .unsupportedSchemaVersion(let section, let actual, let supported):
+            return "Backup section '\(section)' uses schema v\(actual); this version supports v\(supported). Update the app to restore."
+        case .partialFailure(let section, let failed, let total):
+            return "\(failed) of \(total) entries in section '\(section)' failed to restore."
+        }
     }
 }
 

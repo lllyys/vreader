@@ -211,6 +211,52 @@ struct BackupCollectorRestorerSuite {
         #expect(note.annotationId != UUID(uuid: (0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)))
     }
 
+    @Test func annotationsRestorePreservesIdsAndIsIdempotent() async throws {
+        let sourcePersistence = try makePersistence()
+        let fp = try await insertBook(sourcePersistence, title: "ID Preservation")
+        let key = fp.canonicalKey
+        let locator = makeLocator(fingerprint: fp, href: "ch1.xhtml", progression: 0.3)
+
+        let originalHighlight = try await sourcePersistence.addHighlight(
+            locator: locator, selectedText: "x", color: "yellow", note: nil, toBookWithKey: key
+        )
+        let originalNote = try await sourcePersistence.addAnnotation(
+            locator: locator, content: "preserved note", toBookWithKey: key
+        )
+
+        let perBookDir = try makeTempDir(label: "ann-ids")
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "annIdsA"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectAnnotations()
+
+        let destPersistence = try makePersistence()
+        _ = try await insertBook(destPersistence, title: "ID Preservation")
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "annIdsB"),
+            perBookSettingsBaseURL: perBookDir
+        )
+
+        // First restore.
+        try await restorer.restoreAnnotations(from: data)
+        let firstHighlights = try await destPersistence.fetchHighlights(forBookWithKey: key)
+        let firstNotes = try await destPersistence.fetchAnnotations(forBookWithKey: key)
+        #expect(firstHighlights.count == 1)
+        #expect(firstNotes.count == 1)
+        #expect(firstHighlights.first?.highlightId == originalHighlight.highlightId)
+        #expect(firstNotes.first?.annotationId == originalNote.annotationId)
+
+        // Second restore should be idempotent — no duplicates.
+        try await restorer.restoreAnnotations(from: data)
+        let secondHighlights = try await destPersistence.fetchHighlights(forBookWithKey: key)
+        let secondNotes = try await destPersistence.fetchAnnotations(forBookWithKey: key)
+        #expect(secondHighlights.count == 1, "Restore should be idempotent for highlights")
+        #expect(secondNotes.count == 1, "Restore should be idempotent for notes")
+    }
+
     @Test func annotationsSkipsMissingBook() async throws {
         let sourcePersistence = try makePersistence()
         let fp = try await insertBook(sourcePersistence, title: "Will Be Missing")
@@ -468,6 +514,25 @@ struct BackupCollectorRestorerSuite {
         let data = try await collector.collectCollections()
         let envelope = try JSONDecoder().decode(BackupCollectionsEnvelope.self, from: data)
         #expect(envelope.schemaVersion == 1)
+    }
+
+    @Test func restorerRejectsFutureSchemaVersion() async throws {
+        // Hand-craft an envelope claiming schema v999 — restorer must reject it.
+        let envelope = BackupCollectionsEnvelope(schemaVersion: 999, collections: [])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(envelope)
+
+        let persistence = try makePersistence()
+        let restorer = BackupDataRestorer(
+            persistence: persistence,
+            defaults: makeIsolatedDefaults(label: "future"),
+            perBookSettingsBaseURL: try makeTempDir(label: "future")
+        )
+
+        await #expect(throws: BackupRestoreError.self) {
+            try await restorer.restoreCollections(from: data)
+        }
     }
 }
 

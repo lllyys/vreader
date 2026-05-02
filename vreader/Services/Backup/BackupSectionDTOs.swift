@@ -11,10 +11,24 @@ import Foundation
 /// Currently only v1 is emitted.
 let kBackupCurrentSchemaVersion = 1
 
+/// Common shape every section envelope honors so the restorer can validate
+/// `schemaVersion` without 7 special cases.
+protocol BackupVersionedEnvelope {
+    var schemaVersion: Int { get }
+}
+
+/// Errors thrown by the backup restore path.
+enum BackupRestoreError: Error, Sendable, Equatable {
+    /// Archive section was produced by a newer schema this client doesn't know about.
+    case unsupportedSchemaVersion(section: String, actual: Int, supported: Int)
+    /// One or more per-entry restores failed but others succeeded.
+    case partialFailure(section: String, failed: Int, total: Int)
+}
+
 // MARK: - Annotations
 
 /// Annotations section: highlights / bookmarks / notes flattened across all books.
-struct BackupAnnotationsEnvelope: Codable, Sendable, Equatable {
+struct BackupAnnotationsEnvelope: Codable, Sendable, Equatable, BackupVersionedEnvelope {
     let schemaVersion: Int
     let highlights: [BackupHighlight]
     let bookmarks: [BackupBookmark]
@@ -53,7 +67,7 @@ struct BackupNote: Codable, Sendable, Equatable {
 // MARK: - Positions
 
 /// Reading positions per book.
-struct BackupPositionsEnvelope: Codable, Sendable, Equatable {
+struct BackupPositionsEnvelope: Codable, Sendable, Equatable, BackupVersionedEnvelope {
     let schemaVersion: Int
     let positions: [BackupPosition]
 }
@@ -68,7 +82,7 @@ struct BackupPosition: Codable, Sendable, Equatable {
 // MARK: - Settings
 
 /// Global app settings (UserDefaults snapshot for reader-related keys).
-struct BackupSettingsEnvelope: Codable, Sendable, Equatable {
+struct BackupSettingsEnvelope: Codable, Sendable, Equatable, BackupVersionedEnvelope {
     let schemaVersion: Int
     let defaults: [String: BackupDefaultsValue]
 }
@@ -128,7 +142,7 @@ enum BackupSettingsKeys {
 
 // MARK: - Collections
 
-struct BackupCollectionsEnvelope: Codable, Sendable, Equatable {
+struct BackupCollectionsEnvelope: Codable, Sendable, Equatable, BackupVersionedEnvelope {
     let schemaVersion: Int
     let collections: [BackupCollection]
 }
@@ -141,7 +155,7 @@ struct BackupCollection: Codable, Sendable, Equatable {
 
 // MARK: - Book Sources
 
-struct BackupBookSourcesEnvelope: Codable, Sendable, Equatable {
+struct BackupBookSourcesEnvelope: Codable, Sendable, Equatable, BackupVersionedEnvelope {
     let schemaVersion: Int
     let sources: [BackupBookSource]
 }
@@ -165,7 +179,7 @@ struct BackupBookSource: Codable, Sendable, Equatable {
 
 // MARK: - Per-Book Settings
 
-struct BackupPerBookSettingsEnvelope: Codable, Sendable, Equatable {
+struct BackupPerBookSettingsEnvelope: Codable, Sendable, Equatable, BackupVersionedEnvelope {
     let schemaVersion: Int
     let entries: [BackupPerBookSettingsEntry]
 }
@@ -177,7 +191,7 @@ struct BackupPerBookSettingsEntry: Codable, Sendable, Equatable {
 
 // MARK: - Replacement Rules
 
-struct BackupReplacementRulesEnvelope: Codable, Sendable, Equatable {
+struct BackupReplacementRulesEnvelope: Codable, Sendable, Equatable, BackupVersionedEnvelope {
     let schemaVersion: Int
     let rules: [BackupReplacementRule]
 }
