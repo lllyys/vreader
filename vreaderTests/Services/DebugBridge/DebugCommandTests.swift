@@ -177,6 +177,30 @@ final class DebugCommandTests: XCTestCase {
         }
     }
 
+    func test_parse_evalWithSlashInBridge_throwsInvalidParam() {
+        let js = Data("foo".utf8).base64EncodedString()
+        let url = URL(string: "vreader-debug://eval?bridge=foo/bar&js=\(js)")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "bridge")
+        }
+    }
+
+    func test_parse_evalWithDotDotBridge_throwsInvalidParam() {
+        let js = Data("foo".utf8).base64EncodedString()
+        let url = URL(string: "vreader-debug://eval?bridge=..&js=\(js)")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "bridge")
+        }
+    }
+
     func test_parse_evalMissingBridge_throwsMissingParam() {
         let js = Data("foo".utf8).base64EncodedString()
         let url = URL(string: "vreader-debug://eval?js=\(js)")!

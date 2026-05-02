@@ -22,6 +22,10 @@ enum DebugBridgeContextError: Error, Equatable {
     case fixtureResourceMissing(String)
     case notImplemented(command: String)
     case bookNotFound(String)
+    case noActiveReader
+    case settleTimeout
+    case evalUnsupported(format: String)
+    case evalFailed(String)
 }
 
 /// Production DebugBridgeContext. Each handler is a thin wrapper over
@@ -137,9 +141,94 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         log.info("theme: mode=\(target.rawValue, privacy: .public) fontSize=\(fontSize.map(String.init) ?? "unchanged", privacy: .public)")
     }
 
+    /// Wait for the active reader to settle, then write
+    /// `Caches/DebugBridge/ready-<token>.json` with the current state.
+    /// Throws `noActiveReader` if no reader is presented. On settle
+    /// timeout, writes a sentinel file with `error: "settle timeout"`
+    /// rather than throwing — so the host-side waiter has a file to
+    /// inspect after its own timeout expires.
+    ///
+    /// The timeout is enforced by the bridge, not just the probe — a
+    /// probe that hangs instead of throwing settleTimeout still produces
+    /// the sentinel. Throws only on infrastructure failures (file write).
     func settle(token: String) async throws {
-        throw notImplemented("settle")
+        try await settleWithTimeout(token: token, timeoutSeconds: Self.settleTimeoutSeconds)
     }
+
+    /// Internal test seam — same logic as `settle` but accepts a custom
+    /// timeout so tests can exercise the race without waiting 30s.
+    func settleWithTimeout(token: String, timeoutSeconds: TimeInterval) async throws {
+        guard let probe = DebugReaderRegistry.shared.current else {
+            throw DebugBridgeContextError.noActiveReader
+        }
+        var settleError: String?
+        do {
+            try await withTimeout(seconds: timeoutSeconds) {
+                try await probe.awaitSettle(timeout: timeoutSeconds)
+            }
+        } catch DebugReaderProbeError.settleTimeout {
+            settleError = "settle timeout"
+        } catch SettleTimeoutSentinel.timedOut {
+            settleError = "settle timeout"
+        } catch {
+            settleError = String(describing: error)
+        }
+
+        var payload: [String: Any] = [
+            "token": token,
+            "ts": ISO8601DateFormatter().string(from: Date()),
+            "fingerprintKey": probe.fingerprintKey,
+            "format": probe.format,
+            "position": probe.currentPositionString as Any
+        ]
+        if let err = settleError {
+            payload["error"] = err
+            payload["phase"] = "unknown"  // probe doesn't yet report a render phase
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        let outputURL = try Self.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        try data.write(to: outputURL, options: .atomic)
+        if let err = settleError {
+            log.error("settle: ready-\(token, privacy: .public).json with error=\(err, privacy: .public)")
+        } else {
+            log.info("settle: wrote ready-\(token, privacy: .public).json")
+        }
+    }
+
+    /// Race a MainActor-isolated operation against a timer; whichever
+    /// finishes first wins, the loser is cancelled. Used to bound
+    /// settle's awaitSettle even if a probe hangs without honoring its
+    /// own timeout parameter. MainActor-isolated by construction so the
+    /// operation can capture `@MainActor` references (the probe).
+    private func withTimeout(
+        seconds: TimeInterval,
+        operation: @escaping @MainActor () async throws -> Void
+    ) async throws {
+        let work = Task { @MainActor in try await operation() }
+        let timer = Task {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            work.cancel()
+        }
+        defer { timer.cancel() }
+        do {
+            try await work.value
+        } catch is CancellationError {
+            throw SettleTimeoutSentinel.timedOut
+        }
+    }
+
+    /// Internal sentinel — leaks to caller only as `settleError = "settle timeout"`.
+    private enum SettleTimeoutSentinel: Error {
+        case timedOut
+    }
+
+    /// Default settle timeout. Not URL-configurable in v0; harness can
+    /// shorten by triggering its own timeout if needed.
+    static let settleTimeoutSeconds: TimeInterval = 30.0
 
     /// Build a state snapshot and write the JSON to
     /// `Library/Caches/DebugBridge/{dest}` in the app container.
@@ -199,8 +288,90 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         try await persistence.countAllHighlights()
     }
 
+    /// Evaluate JS in the active reader's webview and ALWAYS write
+    /// `Caches/DebugBridge/eval-<bridge>.json` — happy path with `result`
+    /// (raw JSON value), error path with `error` string. Throws only on
+    /// infrastructure failures (filesystem write); failure modes the
+    /// caller cares about (no reader, unsupported format, JS exception)
+    /// land in the JSON file so the host-side waiter has output to read.
     func eval(bridge: String, js: String) async throws {
-        throw notImplemented("eval")
+        let probe = DebugReaderRegistry.shared.current
+        let outputURL = try Self.snapshotsDirectory()
+            .appendingPathComponent("eval-\(bridge).json")
+
+        guard let probe else {
+            try Self.writeEvalError(
+                outputURL: outputURL,
+                bridge: bridge,
+                fingerprintKey: nil,
+                format: nil,
+                error: "no active reader"
+            )
+            log.error("eval: noActiveReader → eval-\(bridge, privacy: .public).json")
+            return
+        }
+
+        do {
+            let resultData = try await probe.evaluateJavaScript(js)
+            // Splice raw JSON value into the result field — JSONSerialization
+            // accepts pre-encoded JSON via re-decoding to its native type.
+            let resultValue = try JSONSerialization.jsonObject(
+                with: resultData,
+                options: [.fragmentsAllowed]
+            )
+            let payload: [String: Any] = [
+                "bridge": bridge,
+                "ts": ISO8601DateFormatter().string(from: Date()),
+                "fingerprintKey": probe.fingerprintKey,
+                "format": probe.format,
+                "result": resultValue
+            ]
+            let out = try JSONSerialization.data(
+                withJSONObject: payload,
+                options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed]
+            )
+            try out.write(to: outputURL, options: .atomic)
+            log.info("eval: wrote eval-\(bridge, privacy: .public).json")
+        } catch DebugReaderProbeError.evalUnsupported(let fmt) {
+            try Self.writeEvalError(
+                outputURL: outputURL,
+                bridge: bridge,
+                fingerprintKey: probe.fingerprintKey,
+                format: probe.format,
+                error: "eval unsupported for format: \(fmt)"
+            )
+            log.error("eval: unsupported format \(fmt, privacy: .public)")
+        } catch {
+            try Self.writeEvalError(
+                outputURL: outputURL,
+                bridge: bridge,
+                fingerprintKey: probe.fingerprintKey,
+                format: probe.format,
+                error: String(describing: error)
+            )
+            log.error("eval: failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    private static func writeEvalError(
+        outputURL: URL,
+        bridge: String,
+        fingerprintKey: String?,
+        format: String?,
+        error: String
+    ) throws {
+        var payload: [String: Any] = [
+            "bridge": bridge,
+            "ts": ISO8601DateFormatter().string(from: Date()),
+            "error": error
+        ]
+        if let k = fingerprintKey { payload["fingerprintKey"] = k }
+        if let f = format { payload["format"] = f }
+        let data = try JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try data.write(to: outputURL, options: .atomic)
     }
 }
 

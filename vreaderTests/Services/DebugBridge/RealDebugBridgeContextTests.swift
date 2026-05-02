@@ -460,6 +460,209 @@ final class RealDebugBridgeContextTests: XCTestCase {
         await fulfillment(of: [exp], timeout: 0.5)
     }
 
+    // MARK: - settle / eval (active-reader registry)
+
+    @MainActor
+    func test_settle_withoutActiveReader_throwsNoActiveReader() async {
+        DebugReaderRegistry.shared.reset()
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        do {
+            try await context.settle(token: "abc")
+            XCTFail("expected noActiveReader")
+        } catch DebugBridgeContextError.noActiveReader {
+            // expected
+        } catch {
+            XCTFail("expected noActiveReader, got \(error)")
+        }
+    }
+
+    @MainActor
+    func test_settle_withActiveReader_writesReadySentinelFile() async throws {
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "test-key", format: "txt"
+        )
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "settle-\(UUID().uuidString)"
+        try await context.settle(token: token)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "test-key")
+        XCTAssertEqual(json?["format"] as? String, "txt")
+        XCTAssertEqual(json?["token"] as? String, token)
+        XCTAssertNil(json?["error"], "happy path must not include error key")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_settle_onHangingProbe_writesTimeoutSentinelViaBridgeRace() async throws {
+        // A probe whose awaitSettle never returns AND never throws — exercises
+        // the bridge-side timeout race (not the probe-side timeout). Without
+        // the race, settle would hang forever and never write the sentinel.
+        // We use a very short bridge timeout via an override hook in the test
+        // by registering a HangingProbe and patching settleTimeoutSeconds.
+        let probe = HangingProbe(fingerprintKey: "h-key", format: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "hang-\(UUID().uuidString)"
+        // settle should return within ~30s with a timeout sentinel — we don't
+        // wait that long; we only verify the sentinel format when it returns.
+        // The ACTUAL timeout race is exercised in the unit-test harness by
+        // overriding settleTimeoutSeconds via a private bridge call below.
+        // For this test we just confirm: under a hanging probe the bridge
+        // STILL produces a valid output file with `error` set, after the
+        // configured race elapses.
+        try await context.settleWithTimeout(token: token, timeoutSeconds: 0.2)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "settle timeout")
+        XCTAssertEqual(json?["phase"] as? String, "unknown")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_settle_onTimeout_writesReadyWithErrorButDoesNotThrow() async throws {
+        // A probe whose awaitSettle always throws settleTimeout — exercises the
+        // timeout path without waiting 30s.
+        let probe = TimingOutProbe(fingerprintKey: "to-key", format: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "to-\(UUID().uuidString)"
+        try await context.settle(token: token)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "settle timeout",
+                       "timeout must surface in JSON file, not as a thrown error")
+        XCTAssertEqual(json?["token"] as? String, token)
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "to-key")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_eval_withoutActiveReader_writesErrorFileButDoesNotThrow() async throws {
+        DebugReaderRegistry.shared.reset()
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        try await context.eval(bridge: "foliate", js: "1+1")
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("eval-foliate.json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "no active reader")
+        XCTAssertNil(json?["result"], "no result on error path")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_eval_onTextReader_writesUnsupportedErrorFileButDoesNotThrow() async throws {
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "test-key", format: "txt"
+        )
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        try await context.eval(bridge: "foliate", js: "1+1")
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("eval-foliate.json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "eval unsupported for format: txt")
+        XCTAssertEqual(json?["format"] as? String, "txt")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_eval_withWebviewProbe_writesRawJSONResultValue() async throws {
+        // Verify result encodes as actual JSON value, not a string-wrapped JSON.
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "test-key", format: "epub"
+        )
+        probe.jsEvaluator = { js in
+            XCTAssertEqual(js, "document.querySelectorAll('.highlight').length")
+            return Data("3".utf8)  // raw JSON `3`, not the string "3"
+        }
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        try await context.eval(
+            bridge: "foliate",
+            js: "document.querySelectorAll('.highlight').length"
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("eval-foliate.json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["bridge"] as? String, "foliate")
+        // result must be the JSON number 3, not the string "3"
+        XCTAssertEqual(json?["result"] as? Int, 3)
+        XCTAssertEqual(json?["format"] as? String, "epub")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_eval_jsThrown_writesErrorFile() async throws {
+        struct JSError: Error {}
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "test-key", format: "epub"
+        )
+        probe.jsEvaluator = { _ in throw JSError() }
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        try await context.eval(bridge: "foliate", js: "throw 1")
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("eval-foliate.json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertNotNil(json?["error"] as? String)
+        XCTAssertNil(json?["result"])
+        try? FileManager.default.removeItem(at: url)
+    }
+
     @MainActor
     func test_snapshot_highlightCountReflectsLibrary() async throws {
         // Insert a book, then add highlights via the persistence API.
@@ -504,6 +707,54 @@ final class RealDebugBridgeContextTests: XCTestCase {
         let snap = try JSONDecoder().decode(DebugSnapshot.self, from: Data(contentsOf: url))
         XCTAssertEqual(snap.highlightCount, 3)
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+/// Probe whose awaitSettle always throws settleTimeout. Lets the timeout
+/// path be tested without waiting for a real 30s timer.
+@MainActor
+private final class TimingOutProbe: DebugReaderProbe {
+    let fingerprintKey: String
+    let format: String
+    var currentPositionString: String? = nil
+
+    init(fingerprintKey: String, format: String) {
+        self.fingerprintKey = fingerprintKey
+        self.format = format
+    }
+
+    func awaitSettle(timeout: TimeInterval) async throws {
+        throw DebugReaderProbeError.settleTimeout
+    }
+
+    func evaluateJavaScript(_ script: String) async throws -> Data {
+        throw DebugReaderProbeError.evalUnsupported(format: format)
+    }
+}
+
+/// Probe whose awaitSettle never returns and never throws. Exercises
+/// the bridge-side timeout race — without it, settle would hang forever.
+@MainActor
+private final class HangingProbe: DebugReaderProbe {
+    let fingerprintKey: String
+    let format: String
+    var currentPositionString: String? = nil
+
+    init(fingerprintKey: String, format: String) {
+        self.fingerprintKey = fingerprintKey
+        self.format = format
+    }
+
+    func awaitSettle(timeout: TimeInterval) async throws {
+        // Sleep for a long time — Task.sleep IS cancellation-aware, so the
+        // bridge's timeout race wins and we throw CancellationError. The
+        // bridge translates that into "settle timeout" via the sentinel
+        // race in withTimeout.
+        try await Task.sleep(nanoseconds: 60_000_000_000)
+    }
+
+    func evaluateJavaScript(_ script: String) async throws -> Data {
+        throw DebugReaderProbeError.evalUnsupported(format: format)
     }
 }
 

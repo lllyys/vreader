@@ -71,6 +71,13 @@ struct ReaderContainerView: View {
     /// Shared pagination cache for the unified renderer (B13).
     @State var paginationCache = PaginationCache()
 
+    #if DEBUG
+    /// DebugBridge probe (feature #44). Registers on appear, unregisters on
+    /// disappear. Holds a closure that the registry queries for the current
+    /// position; v1 will wire per-format settle/eval hooks here.
+    @State private var debugProbe: DebugReaderProbeAdapter?
+    #endif
+
     var body: some View {
         ZStack {
             if settingsStore.useCustomBackground {
@@ -232,6 +239,27 @@ struct ReaderContainerView: View {
         .onChange(of: showAnnotationsPanel) { _, isShowing in
             if isShowing { ensureTOCReady() }
         }
+        #if DEBUG
+        .onAppear {
+            let probe = DebugReaderProbeAdapter(
+                fingerprintKey: book.fingerprintKey,
+                format: book.format
+                // positionProvider intentionally defaults to nil-returning
+                // — wiring currentLocator → string lands when DebugSnapshot
+                // reads from the registry (next WI). Returning a stand-in
+                // value here would mislead consumers into treating it as
+                // a real position.
+            )
+            debugProbe = probe
+            DebugReaderRegistry.shared.register(probe)
+        }
+        .onDisappear {
+            if let probe = debugProbe {
+                DebugReaderRegistry.shared.unregister(probe)
+                debugProbe = nil
+            }
+        }
+        #endif
     }
 
     // MARK: - Resolved Helpers

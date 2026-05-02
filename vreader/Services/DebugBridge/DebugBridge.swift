@@ -100,6 +100,14 @@ final class DebugBridge {
                 return "bridge.notImplemented: \(cmd)"
             case .bookNotFound(let id):
                 return "bridge.bookNotFound: \(id)"
+            case .noActiveReader:
+                return "bridge.noActiveReader"
+            case .settleTimeout:
+                return "bridge.settleTimeout"
+            case .evalUnsupported(let fmt):
+                return "bridge.evalUnsupported: \(fmt)"
+            case .evalFailed(let msg):
+                return "bridge.evalFailed: \(msg)"
             }
         default:
             return "unknown: \(String(describing: type(of: error)))"

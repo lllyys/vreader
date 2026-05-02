@@ -104,6 +104,9 @@ extension DebugCommand {
 
         case "eval":
             let bridge = try requireParam("bridge", in: params)
+            // bridge becomes a filename ("eval-<bridge>.json"); validate as
+            // a basename to prevent path traversal in the eval output path.
+            try validateBasename(bridge, paramName: "bridge")
             let encoded = try requireParam("js", in: params)
             guard let data = Data(base64Encoded: encoded),
                   let js = String(data: data, encoding: .utf8) else {
