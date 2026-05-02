@@ -41,6 +41,9 @@ enum BackupError: Error, Sendable, Equatable {
     case backupNotFound(UUID)
     /// The operation was cancelled by the user or system.
     case cancelled
+    /// One or more sections of an otherwise-valid archive failed to restore.
+    /// Other sections were applied; the user can retry the missing pieces.
+    case restorePartiallyFailed(String)
 }
 
 // MARK: - BackupProvider Protocol

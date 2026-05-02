@@ -306,9 +306,11 @@ struct BackupCollectorRestorerSuite {
 
         let restored = try await destPersistence.fetchHighlights(forBookWithKey: key)
         #expect(restored.count == 1, "Should not duplicate a highlight at the same location")
-        // The surviving row should now carry the backup's payload.
+        // The surviving row should now carry the backup's payload AND UUID
+        // so sync identity tracks the source device.
         #expect(restored.first?.color == "yellow")
         #expect(restored.first?.note == "from backup")
+        #expect(restored.first?.highlightId == backedUpHighlight.highlightId)
     }
 
     @Test func annotationsSkipsMissingBook() async throws {

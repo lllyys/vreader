@@ -248,11 +248,21 @@ extension PersistenceActor {
             else { continue }
             let profileKey = "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)"
             if let existing = highlightById[h.highlightId] ?? highlightByProfile[profileKey] {
+                let oldId = existing.highlightId
+                let oldProfileKey = existing.profileKey
                 applyHighlightUpdate(existing, from: h, locator: locator, book: book)
-                // Track the row under the backed-up id too so a later entry
-                // with the same id won't get re-inserted as a duplicate.
+                // Adopt the backup's UUID on profile-key match so the row keeps
+                // a single sync identity going forward. The old UUID isn't
+                // unique-locked elsewhere — `existing` was the only carrier.
+                if existing.highlightId != h.highlightId {
+                    existing.highlightId = h.highlightId
+                    highlightById.removeValue(forKey: oldId)
+                }
+                if oldProfileKey != existing.profileKey {
+                    highlightByProfile.removeValue(forKey: oldProfileKey)
+                }
                 highlightById[h.highlightId] = existing
-                highlightByProfile[profileKey] = existing
+                highlightByProfile[existing.profileKey] = existing
                 continue
             }
             let highlight = Highlight(
@@ -278,9 +288,18 @@ extension PersistenceActor {
             else { continue }
             let profileKey = "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)"
             if let existing = bookmarkById[b.bookmarkId] ?? bookmarkByProfile[profileKey] {
+                let oldId = existing.bookmarkId
+                let oldProfileKey = existing.profileKey
                 applyBookmarkUpdate(existing, from: b, locator: locator, book: book)
+                if existing.bookmarkId != b.bookmarkId {
+                    existing.bookmarkId = b.bookmarkId
+                    bookmarkById.removeValue(forKey: oldId)
+                }
+                if oldProfileKey != existing.profileKey {
+                    bookmarkByProfile.removeValue(forKey: oldProfileKey)
+                }
                 bookmarkById[b.bookmarkId] = existing
-                bookmarkByProfile[profileKey] = existing
+                bookmarkByProfile[existing.profileKey] = existing
                 continue
             }
             let bookmark = Bookmark(

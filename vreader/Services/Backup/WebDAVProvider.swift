@@ -222,8 +222,8 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
 
         progress(1.0)
         if !sectionFailures.isEmpty {
-            throw BackupError.archiveCorrupted(
-                "Some sections failed to restore: \(sectionFailures.joined(separator: "; "))"
+            throw BackupError.restorePartiallyFailed(
+                sectionFailures.joined(separator: "; ")
             )
         }
     }
