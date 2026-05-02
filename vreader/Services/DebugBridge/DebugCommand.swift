@@ -73,7 +73,11 @@ extension DebugCommand {
 
         case "open":
             let bookId = try requireParam("bookId", in: params)
-            let position = nonEmpty(params["cfi"])
+            // Parameter is named `position` to match the documented grammar
+            // and the public `DebugCommand.open(bookId:position:)` shape.
+            // (Earlier draft used `cfi`; renamed for consistency with the
+            // doc and the universal-position concept used elsewhere.)
+            let position = nonEmpty(params["position"])
             return .open(bookId: bookId, position: position)
 
         case "theme":

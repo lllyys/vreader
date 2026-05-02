@@ -265,8 +265,8 @@ final class RealDebugBridgeContextTests: XCTestCase {
     // MARK: - snapshot
 
     @MainActor
-    func test_snapshot_writesValidJSONWithDocumentedShape() async throws {
-        // Pre-set theme so snapshot has something to encode
+    func test_snapshot_withoutActiveReader_listsReaderFieldsAsPartial() async throws {
+        DebugReaderRegistry.shared.reset()
         try await RealDebugBridgeContext(
             persistence: persistence,
             importer: importer,
@@ -296,13 +296,71 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(snap.format)
         XCTAssertNil(snap.position)
         XCTAssertNil(snap.selection)
-        // partial lists fields whose nil means "not yet implemented"
+        // No active reader → reader fields are partial
         XCTAssertEqual(
             Set(snap.partial ?? []),
             Set(["currentBookId", "format", "position", "selection"])
         )
+        try? FileManager.default.removeItem(at: url)
+    }
 
-        // Cleanup
+    @MainActor
+    func test_snapshot_withActiveReader_populatesReaderFieldsAndShrinksPartial() async throws {
+        // No positionProvider → currentBookId/format are authoritative,
+        // but `position` stays in `partial` because the probe can't supply it.
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "txt:abc123:1024",
+            format: "txt"
+        )
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        let dest = "snapshot-\(UUID().uuidString).json"
+        try await context.snapshot(dest: dest, lastErrorMessage: nil)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory().appendingPathComponent(dest)
+        let snap = try JSONDecoder().decode(DebugSnapshot.self, from: Data(contentsOf: url))
+
+        XCTAssertEqual(snap.currentBookId, "txt:abc123:1024")
+        XCTAssertEqual(snap.format, "txt")
+        XCTAssertNil(snap.position)
+        XCTAssertEqual(
+            Set(snap.partial ?? []),
+            Set(["selection", "position"]),
+            "without a positionProvider the position field stays partial"
+        )
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_snapshot_withActiveReaderAndPosition_propagatesPosition() async throws {
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "epub:def:2048",
+            format: "epub",
+            positionProvider: { "epubcfi(/6/4!/4/1:0)" }
+        )
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        let dest = "snapshot-\(UUID().uuidString).json"
+        try await context.snapshot(dest: dest, lastErrorMessage: nil)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory().appendingPathComponent(dest)
+        let snap = try JSONDecoder().decode(DebugSnapshot.self, from: Data(contentsOf: url))
+
+        XCTAssertEqual(snap.format, "epub")
+        XCTAssertEqual(snap.position, "epubcfi(/6/4!/4/1:0)")
+        XCTAssertEqual(snap.partial, ["selection"], "position drops from partial when probe supplies it")
         try? FileManager.default.removeItem(at: url)
     }
 

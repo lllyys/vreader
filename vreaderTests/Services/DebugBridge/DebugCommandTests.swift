@@ -58,7 +58,7 @@ final class DebugCommandTests: XCTestCase {
         let bookId = "550e8400-e29b-41d4-a716-446655440000"
         let cfi = "epubcfi(/6/4!/4/1:0)"
         let encodedCFI = cfi.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
-        let url = URL(string: "vreader-debug://open?bookId=\(bookId)&cfi=\(encodedCFI)")!
+        let url = URL(string: "vreader-debug://open?bookId=\(bookId)&position=\(encodedCFI)")!
         let cmd = try DebugCommand.parse(url)
         XCTAssertEqual(cmd, .open(bookId: bookId, position: cfi))
     }

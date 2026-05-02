@@ -236,28 +236,42 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// no slashes, no dot-only sequences). Path traversal is structurally
     /// impossible.
     ///
-    /// V0 fields filled in: ts, theme, fontSize, highlightCount, renderPhase
-    /// ("idle"), lastError, schemaVersion, partial.
-    /// Reader-derived fields (currentBookId, format, position, selection)
-    /// are listed in `partial` so consumers know nil ≠ "no value" — they
-    /// land when the active-reader registry ships in a later WI-5 commit.
+    /// Reader-derived fields (currentBookId, format, position) are
+    /// populated from `DebugReaderRegistry.shared.current` when a reader
+    /// is presented. Without an active reader they remain nil and stay
+    /// in the `partial` array. `selection` always stays in `partial` —
+    /// selection probe lands when readers expose their selection state.
     func snapshot(dest: String, lastErrorMessage: String?) async throws {
         let store = ReaderSettingsStore(defaults: userDefaults)
         let highlightCount = try await totalHighlightCount()
+        let probe = DebugReaderRegistry.shared.current
+
+        // Build `partial` dynamically. A reader-derived field stays
+        // partial when the probe can't supply a value:
+        // - currentBookId/format require a probe at all
+        // - position additionally requires the probe to have wired a
+        //   positionProvider (default adapter has none)
+        // - selection is always partial in v0
+        var partial: [String] = ["selection"]
+        if probe == nil {
+            partial.append(contentsOf: ["currentBookId", "format", "position"])
+        } else if probe?.currentPositionString == nil {
+            partial.append("position")
+        }
 
         let snap = DebugSnapshot(
             schemaVersion: DebugSnapshot.currentSchemaVersion,
             ts: ISO8601DateFormatter().string(from: Date()),
-            currentBookId: nil,
-            format: nil,
-            position: nil,
+            currentBookId: probe?.fingerprintKey,
+            format: probe?.format,
+            position: probe?.currentPositionString,
             theme: themeName(from: store.theme),
             fontSize: Int(store.typography.fontSize),
             selection: nil,
             highlightCount: highlightCount,
             renderPhase: "idle",
             lastError: lastErrorMessage,
-            partial: ["currentBookId", "format", "position", "selection"]
+            partial: partial
         )
 
         let data = try DebugSnapshot.encoder.encode(snap)
