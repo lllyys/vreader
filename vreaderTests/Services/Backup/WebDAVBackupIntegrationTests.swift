@@ -1,0 +1,248 @@
+// Purpose: End-to-end backup → restore round trip against a real WebDAV
+// server. Disabled by default — set `VREADER_WEBDAV_INTEGRATION=1` and
+// configure VREADER_WEBDAV_URL / VREADER_WEBDAV_USER / VREADER_WEBDAV_PASS
+// to enable.
+//
+// Run a local Bytemark WebDAV container before exercising:
+//
+//   docker run --rm -p 8080:80 -v /tmp/webdav-test-data:/var/lib/dav \
+//       -e USERNAME=vreader -e PASSWORD=test123 \
+//       --platform linux/amd64 bytemark/webdav
+//
+//   VREADER_WEBDAV_INTEGRATION=1 \
+//   VREADER_WEBDAV_URL=http://localhost:8080 \
+//   VREADER_WEBDAV_USER=vreader \
+//   VREADER_WEBDAV_PASS=test123 \
+//   xcodebuild test \
+//     -only-testing:vreaderTests/WebDAVBackupIntegrationSuite ...
+//
+// @coordinates-with: WebDAVProvider.swift, BackupDataCollector.swift,
+//   BackupDataRestorer.swift, WebDAVClient.swift
+
+import Testing
+import Foundation
+import SwiftData
+@testable import vreader
+
+@Suite("WebDAV Backup Integration", .enabled(if: WebDAVIntegrationConfig.isEnabled))
+struct WebDAVBackupIntegrationSuite {
+
+    // MARK: - Fixture builders
+
+    private func makePersistence() throws -> (ModelContainer, PersistenceActor) {
+        let schema = Schema(SchemaV4.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        return (container, PersistenceActor(modelContainer: container))
+    }
+
+    private func makeFingerprint() -> DocumentFingerprint {
+        DocumentFingerprint(
+            contentSHA256: String(repeating: "f", count: 64),
+            fileByteCount: 1024, format: .epub
+        )
+    }
+
+    private func insertBook(_ persistence: PersistenceActor) async throws -> DocumentFingerprint {
+        let fp = makeFingerprint()
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "Integration Book",
+            author: "Tester",
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: ImportProvenance(
+                source: .filesApp,
+                importedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                originalURLBookmarkData: nil
+            ),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+        return fp
+    }
+
+    private func makeProvider(persistence: PersistenceActor) throws -> WebDAVProvider {
+        guard let url = URL(string: WebDAVIntegrationConfig.serverURL) else {
+            throw IntegrationFailure.invalidURL
+        }
+        // Use an ephemeral session so cached auth / connections from prior
+        // probes don't interfere with the integration round trip.
+        let config = URLSessionConfiguration.ephemeral
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let session = URLSession(configuration: config)
+        let transport = WebDAVClient(
+            serverURL: url,
+            username: WebDAVIntegrationConfig.username,
+            password: WebDAVIntegrationConfig.password,
+            session: session
+        )
+        let suiteName = "vreader.integration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vreader-integ-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let collector = BackupDataCollector(
+            persistence: persistence, defaults: defaults, perBookSettingsBaseURL: dir
+        )
+        let restorer = BackupDataRestorer(
+            persistence: persistence, defaults: defaults, perBookSettingsBaseURL: dir
+        )
+        return WebDAVProvider(
+            transport: transport,
+            dataCollector: collector,
+            dataRestorer: restorer,
+            deviceName: "IntegrationTest",
+            appVersion: "0.0.0-test"
+        )
+    }
+
+    enum IntegrationFailure: Error { case invalidURL }
+
+    // MARK: - Round-trip test
+
+    @Test func directPutSucceeds() async throws {
+        // Sanity check: pure URLSession PUT against the server, mirroring the
+        // production client. Helps isolate "is the server reachable" from
+        // "does our client construct PUT requests correctly".
+        guard let url = URL(string: "\(WebDAVIntegrationConfig.serverURL)/VReader/sanity-\(UUID().uuidString).txt") else {
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        let creds = "\(WebDAVIntegrationConfig.username):\(WebDAVIntegrationConfig.password)"
+        let auth = "Basic \(Data(creds.utf8).base64EncodedString())"
+        request.setValue(auth, forHTTPHeaderField: "Authorization")
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("hello".utf8)
+
+        var mkcolReq = URLRequest(url: URL(string: "\(WebDAVIntegrationConfig.serverURL)/VReader/")!)
+        mkcolReq.httpMethod = "MKCOL"
+        mkcolReq.setValue(auth, forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: mkcolReq)
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        let http = response as? HTTPURLResponse
+        #expect(http != nil)
+        #expect((200...299).contains(http?.statusCode ?? 0), "Direct PUT got HTTP \(http?.statusCode ?? -1)")
+    }
+
+    @Test func webDAVClientUploadSucceeds() async throws {
+        guard let url = URL(string: WebDAVIntegrationConfig.serverURL) else { return }
+        let client = WebDAVClient(
+            serverURL: url,
+            username: WebDAVIntegrationConfig.username,
+            password: WebDAVIntegrationConfig.password
+        )
+        try? await client.createDirectory(path: "VReader")
+        let path = "VReader/client-sanity-\(UUID().uuidString).txt"
+        try await client.upload(data: Data("hello-from-client".utf8), toPath: path)
+    }
+
+    @Test func backupListRestoreDeleteRoundTrip() async throws {
+        let (_, sourcePersistence) = try makePersistence()
+        let fp = try await insertBook(sourcePersistence)
+        let key = fp.canonicalKey
+        let locator = Locator.validated(
+            bookFingerprint: fp, href: "ch1.xhtml", progression: 0.5
+        )!
+        _ = try await sourcePersistence.addHighlight(
+            locator: locator,
+            selectedText: "integration text",
+            color: "yellow",
+            note: "round-trip note",
+            toBookWithKey: key
+        )
+
+        let provider = try makeProvider(persistence: sourcePersistence)
+        let progressBox = ProgressBox()
+        let metadata = try await provider.backup { p in progressBox.append(p) }
+        let observedProgress = progressBox.snapshot()
+
+        #expect(metadata.bookCount == 1)
+        #expect(observedProgress.first ?? -1 == 0.0)
+        #expect(observedProgress.last ?? -1 == 1.0)
+
+        let listed = try await provider.listBackups()
+        #expect(listed.contains { $0.id == metadata.id })
+
+        // Restore into a clean persistence with the same book.
+        let (_, destPersistence) = try makePersistence()
+        _ = try await insertBook(destPersistence)
+        let destProvider = try makeProvider(persistence: destPersistence)
+        try await destProvider.restore(backupId: metadata.id) { _ in }
+
+        let restoredHighlights = try await destPersistence.fetchHighlights(forBookWithKey: key)
+        #expect(restoredHighlights.count == 1)
+        #expect(restoredHighlights.first?.selectedText == "integration text")
+
+        // Cleanup: delete the backup so the server doesn't accumulate cruft.
+        try await provider.deleteBackup(id: metadata.id)
+        let postDelete = try await provider.listBackups()
+        #expect(postDelete.contains { $0.id == metadata.id } == false)
+    }
+}
+
+// MARK: - Config
+
+/// Lock-protected progress accumulator for safe capture inside @Sendable closures.
+final class ProgressBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Double] = []
+    func append(_ v: Double) { lock.lock(); values.append(v); lock.unlock() }
+    func snapshot() -> [Double] { lock.lock(); defer { lock.unlock() }; return values }
+}
+
+enum WebDAVIntegrationConfig {
+    /// True when env opt-in is set OR when the default Bytemark fixture at
+    /// localhost:8080 responds to a quick reachability probe with the test creds.
+    /// The probe lets the suite run automatically on developer machines that
+    /// have the Docker fixture up, without needing to re-export env vars
+    /// through xcodebuild's test runner.
+    static let isEnabled: Bool = {
+        if ProcessInfo.processInfo.environment["VREADER_WEBDAV_INTEGRATION"] == "1" {
+            return true
+        }
+        return probeServer(url: serverURL, user: username, pass: password)
+    }()
+
+    static var serverURL: String {
+        // Default to 127.0.0.1 (not "localhost") so the simulator forces IPv4
+        // and skips the IPv6 (::1) connection refused that Docker for Mac
+        // produces when only the IPv4 socket is bound.
+        ProcessInfo.processInfo.environment["VREADER_WEBDAV_URL"] ?? "http://127.0.0.1:8080"
+    }
+
+    static var username: String {
+        ProcessInfo.processInfo.environment["VREADER_WEBDAV_USER"] ?? "vreader"
+    }
+
+    static var password: String {
+        ProcessInfo.processInfo.environment["VREADER_WEBDAV_PASS"] ?? "test123"
+    }
+
+    /// Performs a 1-second authenticated PROPFIND against the WebDAV root.
+    /// Returns true on a 2xx response. Skips silently otherwise.
+    private static func probeServer(url: String, user: String, pass: String) -> Bool {
+        guard let endpoint = URL(string: url) else { return false }
+        var request = URLRequest(url: endpoint, timeoutInterval: 1.5)
+        request.httpMethod = "PROPFIND"
+        request.setValue("0", forHTTPHeaderField: "Depth")
+        let credentials = "\(user):\(pass)".data(using: .utf8)?.base64EncodedString() ?? ""
+        request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var success = false
+        let task = URLSession.shared.dataTask(with: request) { _, response, _ in
+            if let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) {
+                success = true
+            }
+            semaphore.signal()
+        }
+        task.resume()
+        _ = semaphore.wait(timeout: .now() + 2.0)
+        return success
+    }
+}

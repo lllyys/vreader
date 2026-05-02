@@ -37,13 +37,13 @@ struct BackupProviderContractTests {
         let collector = ProgressCollector()
 
         _ = try await mock.backup { value in
-            Task { await collector.record(value) }
+            collector.record(value)
         }
 
         // Give progress callbacks time to be recorded
         try await Task.sleep(for: .milliseconds(50))
 
-        let values = await collector.values
+        let values = collector.values
         #expect(!values.isEmpty, "Expected at least one progress report")
         // Values should be in [0, 1]
         for v in values {
@@ -97,12 +97,12 @@ struct BackupProviderContractTests {
         let collector = ProgressCollector()
 
         try await mock.restore(backupId: metadata.id) { value in
-            Task { await collector.record(value) }
+            collector.record(value)
         }
 
         try await Task.sleep(for: .milliseconds(50))
 
-        let values = await collector.values
+        let values = collector.values
         #expect(!values.isEmpty, "Expected at least one progress report during restore")
         #expect(values.last == 1.0, "Final restore progress should be 1.0")
     }
@@ -267,11 +267,20 @@ struct BackupProviderContractTests {
 
 // MARK: - Test Helpers
 
-/// Actor-isolated progress value collector for race-free capture.
-private actor ProgressCollector {
-    private(set) var values: [Double] = []
+/// Lock-protected progress value collector for race-free *synchronous* capture
+/// from `@Sendable` callbacks. Was an actor previously, but actor-await
+/// scheduling under parallel test execution made the ordering check flaky.
+private final class ProgressCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [Double] = []
+
+    var values: [Double] {
+        lock.lock(); defer { lock.unlock() }
+        return storage
+    }
 
     func record(_ value: Double) {
-        values.append(value)
+        lock.lock(); defer { lock.unlock() }
+        storage.append(value)
     }
 }

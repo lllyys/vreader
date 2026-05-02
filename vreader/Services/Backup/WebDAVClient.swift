@@ -160,8 +160,13 @@ struct WebDAVClient: Sendable {
     }
 
     /// Builds a MKCOL request for directory creation.
+    /// Forces a trailing slash on the path so Apache-class servers return
+    /// 405 (already exists) or 201 (created) directly instead of issuing a
+    /// 301 redirect that URLSession's default handler can rewrite into a
+    /// method-converted follow-up that fails auth.
     func buildMKCOLRequest(path: String) -> URLRequest {
-        var request = URLRequest(url: buildURL(path: path))
+        let normalized = path.hasSuffix("/") ? path : path + "/"
+        var request = URLRequest(url: buildURL(path: normalized))
         request.httpMethod = "MKCOL"
         request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
         return request

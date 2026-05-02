@@ -123,7 +123,13 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
         // Phase 3: Upload to WebDAV (0.5 → 1.0)
         let remotePath = makeRemotePath(id: backupId, date: now)
         do {
-            try await transport.createDirectory(path: basePath); progress(0.55)
+            // Create each parent collection in turn — WebDAV MKCOL won't
+            // create intermediate directories on most servers, so a nested
+            // basePath like "VReader/backups" needs two MKCOLs.
+            for ancestor in nestedAncestors(of: basePath) {
+                try await transport.createDirectory(path: ancestor)
+            }
+            progress(0.55)
             try await transport.upload(data: zipData, toPath: remotePath); progress(0.95)
         } catch let error as WebDAVError {
             throw BackupError.storageUnavailable("WebDAV upload failed: \(error)")
@@ -287,6 +293,18 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
     }
 
     // MARK: - Private Helpers
+
+    /// Returns each ancestor directory that should be MKCOL'd, deepest last.
+    /// e.g. `"VReader/backups"` → `["VReader", "VReader/backups"]`.
+    private func nestedAncestors(of path: String) -> [String] {
+        var components: [String] = []
+        var accumulator: [String] = []
+        for piece in path.split(separator: "/") where !piece.isEmpty {
+            accumulator.append(String(piece))
+            components.append(accumulator.joined(separator: "/"))
+        }
+        return components
+    }
 
     /// Creates a remote path for a backup file.
     private func makeRemotePath(id: UUID, date: Date) -> String {
