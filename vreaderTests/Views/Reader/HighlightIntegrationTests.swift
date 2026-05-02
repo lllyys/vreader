@@ -41,7 +41,7 @@ struct HighlightCoordinatorIntegrationTests {
             charOffsetUTF16: offset,
             charRangeStartUTF16: offset,
             charRangeEndUTF16: offset + 10
-        )
+        )!
     }
 
     // MARK: - Create Flow
@@ -188,49 +188,6 @@ struct HighlightCoordinatorIntegrationTests {
     }
 }
 
-// MARK: - TextHighlightRenderer Unit Tests
-
-@Suite("TextHighlightRenderer")
-struct TextHighlightRendererTests {
-
-    private func makeRecord(offset: Int = 0) -> HighlightRecord {
-        let fp = DocumentFingerprint(
-            contentSHA256: String(repeating: "a", count: 64),
-            fileByteCount: 1024, format: .txt
-        )
-        let locator = Locator.validated(
-            bookFingerprint: fp,
-            charOffsetUTF16: offset,
-            charRangeStartUTF16: offset,
-            charRangeEndUTF16: offset + 20
-        )
-        return HighlightRecord(
-            highlightId: UUID(), locator: locator, anchor: nil,
-            profileKey: "test", selectedText: "test",
-            color: "yellow", note: nil,
-            createdAt: Date(), updatedAt: Date()
-        )
-    }
-
-    @Test @MainActor func applySetsHighlightRange() {
-        let uiState = TextReaderUIState()
-        let renderer = TextHighlightRenderer(uiState: uiState)
-        let record = makeRecord(offset: 50)
-
-        renderer.apply(record: record)
-
-        #expect(uiState.highlightRange == NSRange(location: 50, length: 20))
-        #expect(uiState.highlightIsTemporary == false)
-        #expect(uiState.persistedHighlightRanges.count == 1)
-    }
-
-    @Test @MainActor func removeClearsHighlightRange() {
-        let uiState = TextReaderUIState()
-        uiState.highlightRange = NSRange(location: 10, length: 5)
-        let renderer = TextHighlightRenderer(uiState: uiState)
-
-        renderer.remove(id: UUID())
-
-        #expect(uiState.highlightRange == nil)
-    }
-}
+// Note: TextHighlightRenderer unit tests live in HighlightRendererTests.swift.
+// The duplicate suite that previously lived here was removed because it caused
+// a `TextHighlightRendererTests` struct-name collision with HighlightRendererTests.swift.

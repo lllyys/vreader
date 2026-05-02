@@ -15,7 +15,7 @@ struct PersistenceHighlightTests {
             charOffsetUTF16: offset,
             charRangeStartUTF16: offset,
             charRangeEndUTF16: offset + 10
-        )
+        )!
     }
 
     // MARK: - Add

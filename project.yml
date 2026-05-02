@@ -19,6 +19,13 @@ targets:
       - path: vreader
         excludes:
           - "**/.gitkeep"
+          # Older spike copies — Foliate/JS/ is canonical. Keep foliate-bridge.js
+          # (only present in EPUB/FoliateJS/) but drop the duplicates.
+          - "Services/EPUB/FoliateJS/epubcfi.js"
+          - "Services/EPUB/FoliateJS/footnotes.js"
+          - "Services/EPUB/FoliateJS/overlayer.js"
+          - "Services/EPUB/FoliateJS/text-walker.js"
+          - "Services/EPUB/FoliateJS/tts.js"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app

@@ -10,21 +10,30 @@ struct TOCChapterProgressTests {
 
     // MARK: - Helpers
 
+    private static let testFingerprint = DocumentFingerprint(
+        contentSHA256: String(repeating: "0", count: 64),
+        fileByteCount: 0,
+        format: .txt
+    )
+
     private func makeTOCEntries(offsets: [Int]) -> [TOCEntry] {
         offsets.enumerated().map { i, offset in
             TOCEntry(
                 title: "Chapter \(i + 1)",
                 level: 0,
                 locator: Locator(
+                    bookFingerprint: Self.testFingerprint,
                     href: nil,
                     progression: nil,
                     totalProgression: nil,
+                    cfi: nil,
+                    page: nil,
                     charOffsetUTF16: offset,
                     charRangeStartUTF16: nil,
                     charRangeEndUTF16: nil,
                     textQuote: nil,
-                    textBefore: nil,
-                    textAfter: nil
+                    textContextBefore: nil,
+                    textContextAfter: nil
                 ),
                 sequenceIndex: i
             )

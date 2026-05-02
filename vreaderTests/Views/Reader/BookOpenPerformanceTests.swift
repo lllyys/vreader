@@ -56,13 +56,14 @@ struct BookOpenPerformanceTests {
 
 private struct NoOpPositionStore: ReadingPositionPersisting {
     func loadPosition(bookFingerprintKey: String) async throws -> Locator? { nil }
-    func savePosition(locator: Locator, bookFingerprintKey: String) async throws {}
-    func updateLastOpened(bookFingerprintKey: String) async throws {}
+    func savePosition(bookFingerprintKey: String, locator: Locator, deviceId: String) async throws {}
+    func updateLastOpened(bookFingerprintKey: String, date: Date) async throws {}
 }
 
 private struct NoOpSessionStore: SessionPersisting {
     func saveSession(_ session: ReadingSession) throws {}
-    func fetchStats(bookFingerprintKey: String) throws -> ReadingStats? { nil }
-    func recomputeStats(bookFingerprintKey: String) throws {}
+    func discardSession(id: UUID) throws {}
+    func flushDuration(sessionId: UUID, durationSeconds: Int) throws {}
+    func fetchUnclosedSessions() throws -> [ReadingSession] { [] }
 }
 #endif
