@@ -1,211 +1,182 @@
 # 50 - Codebase Conventions
 
-Undocumented patterns found across the codebase. Follow these for consistency.
+Undocumented patterns found across vreader's Swift codebase. Follow these for consistency.
 
-## 1. Store Conventions
+## 1. Concurrency: actors and @MainActor
 
-Zustand stores follow a strict naming and structure pattern.
+vreader uses Swift 6 strict concurrency.
 
-**Naming:** `use[Name]Store` for the hook, file named `[name]Store.ts`.
+**Persistence is actor-isolated:**
 
-**Creation:**
-```ts
-// Without middleware:
-export const useFooStore = create<FooState>((set, get) => ({...}));
-
-// With middleware (persist, etc.) — note the extra ():
-export const useFooStore = create<FooState>()(persist(...));
-```
-
-**Safe partial updates:** Use a local `updateDoc`-style helper to guard against missing keys:
-
-```ts
-function updateDoc(state, id, updater) {
-  const doc = state.documents[id];
-  if (!doc) return state;  // No-op if missing
-  return { documents: { ...state.documents, [id]: { ...doc, ...updater(doc) } } };
+```swift
+actor PersistenceActor {
+    func insertBook(_ record: BookRecord) async throws -> BookRecord { ... }
 }
 ```
 
-**Rule:** Always guard keyed state updates — never assume the key exists.
+- All SwiftData mutations go through `PersistenceActor`. No direct `ModelContext` use from views.
+- Tests use an in-memory `ModelContainer` per test, no shared state.
 
-## 2. Hook Cleanup
+**UI types are `@MainActor`:**
 
-Hooks that attach DOM event listeners use a refs-based cleanup pattern.
+```swift
+@MainActor
+@Observable
+final class LibraryViewModel { ... }
+```
+
+- ViewModels, observable stores, and reader hosts all `@MainActor`.
+- For test files containing only `@MainActor` types, mark the test class `@MainActor` to avoid hop ceremony.
+
+**Crossing actors:**
+
+- `await` actor methods. No `assumeIsolated` except in narrow constructor contexts (e.g., `VReaderApp.init()` → `MainActor.assumeIsolated` is OK because App.init runs on main, but prefer `@MainActor` on the App struct itself).
+- Pass values, not actor-isolated references, across actor boundaries.
+
+## 2. Persistence: SwiftData via PersistenceActor
 
 **Pattern:**
-- Store handler references in `handlersRef` so cleanup can access the exact functions.
-- Clean up on `mouseup`, `blur`, AND component unmount.
-- Use `isClosingRef` or similar boolean ref as a re-entry guard.
 
-```ts
-const handlersRef = useRef<{ move: ((e: MouseEvent) => void) | null }>({ move: null });
+- Entities live in `vreader/Models/` (e.g., `Book`, `Highlight`, `Bookmark`).
+- A schema-versioned migration plan in `VReaderMigrationPlan.swift`.
+- `PersistenceActor+Foo.swift` extension files split CRUD by feature (Library, Highlights, Bookmarks, Collections).
 
-const cleanup = useCallback(() => {
-  if (handlersRef.current.move) document.removeEventListener("mousemove", handlersRef.current.move);
-  handlersRef.current = { move: null };
-}, []);
+**Key types:**
 
-useEffect(() => cleanup, [cleanup]); // unmount cleanup
-```
+- `DocumentFingerprint` — `{format}:{SHA256}:{byteCount}` deterministic identity for a book file. Used as `fingerprintKey` everywhere.
+- `Locator` — universal position: `href + progression` (EPUB), `page` (PDF), `charOffsetUTF16` (TXT/MD).
+- `BookRecord`, `HighlightRecord`, `BookmarkRecord` — value-type DTOs returned across the actor boundary, decoupled from `@Model` classes.
 
-**Rule:** Never attach anonymous listeners without storing a reference for removal.
+**Rule:** never return `@Model` instances from `PersistenceActor` — they're context-bound. Return record value types instead.
 
-## 3. Plugin Structure
+## 3. Reader Architecture
 
-Plugins live in `src/plugins/<name>/` with a consistent layout:
+`vreader/Views/Reader/ReaderContainerView.swift` is the dispatcher. Format hosts it routes to:
 
-| File | Purpose |
-|------|---------|
-| `index.ts` | ProseMirror plugin factory (main export) |
-| `tiptap.ts` | Tiptap `Extension.create()` / `Mark.create()` wrapper |
-| `<name>.css` | Co-located styles (imported in `index.ts` or `tiptap.ts`) |
+| Host              | Format            | Renderer                                                         |
+| ----------------- | ----------------- | ---------------------------------------------------------------- |
+| `TXTReaderHost`   | `.txt`            | `UITextView` (TextKit 1) or chunked `UITableView` (>500K UTF-16) |
+| `MDReaderHost`    | `.md`             | `UITextView` with Markdown attributed string                     |
+| `EPUBReaderHost`  | `.epub`           | `EPUBWebViewBridge` (custom WKWebView + JS)                      |
+| `FoliateSpikeView`| `.azw3`, `.mobi`  | `FoliateViewBridge` (WKWebView + Foliate-js bundle)              |
+| `PDFReaderHost`   | `.pdf`            | `PDFView` (PDFKit)                                               |
 
-**CSS import location:** Import the CSS file in whichever `.ts` file creates the plugin:
+Note: AZW3/MOBI uses `FoliateSpikeView` (the spike landed first; the host structure may converge with the others later).
 
-```ts
-// index.ts or tiptap.ts
-import "./focus-mode.css";
-```
+**Bridge convention:** UIKit views (`UITextView`, `WKWebView`, `PDFView`) wrap in `UIViewRepresentable`. A `Coordinator` class handles delegate callbacks, gestures, and JS messages.
 
-**Tiptap-only variant:** Plugins that are purely Tiptap extensions (no separate ProseMirror plugin) may omit `index.ts` and use only `tiptap.ts` as their entry point. This applies to: `aiSuggestion`, `alertBlock`, `autoPair`, `codePaste`, `codePreview`, `detailsBlock`, `focusMode`, `highlight`, `htmlPaste`, `listBackspace`, `listContinuation`.
+**Rule:** Reader bridges receive their data via `@State` ownership in the host, not via global stores. Configuration flows through `ReaderSettingsStore` (an `@Observable` `@MainActor` class).
 
-**Note:** `codemirror/` is a module cluster (40+ files) rather than a single plugin. New Source mode features should consider whether they belong there or in their own top-level plugin directory.
+## 4. Notification Bus
 
-**Rule:** Plugin styles live ONLY in the plugin directory. Never define plugin CSS in global `editor.css`.
+Cross-component reader communication uses `NotificationCenter` because SwiftUI's `Environment` doesn't bridge UIKit.
 
-## 4. MCP Bridge Handlers
+**Conventions:**
 
-The MCP bridge uses a central dispatcher pattern in `src/hooks/mcpBridge/`.
+- All names live in `ReaderNotifications.swift` (release) or `DebugBridgeNotifications.swift` (DEBUG only).
+- Names are namespaced: `vreader.<scope>.<event>`.
+- Payloads use `userInfo` typed via documented keys (e.g., `["fingerprintKey": String]`).
+- For DEBUG-only flows, both the `Notification.Name` extension AND the observer block are wrapped in `#if DEBUG`.
 
-**Dispatcher** (`index.ts`): A single `switch` on `event.type` routes to handler functions.
+**Rule:** every observer must `removeObserver` in `defer` (in tests) or in `onDisappear` / deinit (in views).
 
-**Handler signature:**
-```ts
-export async function handleFoo(id: string, args: Record<string, unknown>): Promise<void> {
-  try {
-    // ... operation
-    await respond({ id, success: true, data: result });
-  } catch (error) {
-    await respond({ id, success: false, error: error instanceof Error ? error.message : String(error) });
-  }
+## 5. Bridge Cleanup
+
+Reader bridges that attach UIKit observers / gesture recognizers / WKScriptMessageHandlers must release them on teardown:
+
+```swift
+final class Coordinator: NSObject, WKScriptMessageHandler {
+    private var notificationToken: NSObjectProtocol?
+    private weak var webView: WKWebView?
+
+    func attach(to webView: WKWebView) {
+        self.webView = webView
+        webView.configuration.userContentController.add(self, name: "vreader")
+        notificationToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { [weak self] _ in self?.handleNavigate() }
+    }
+
+    deinit {
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "vreader")
+        if let token = notificationToken {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
 }
 ```
 
-**Shared utils** (`utils.ts`): `respond()` sends results back to Rust, `getEditor()` fetches the active editor instance, `getDocumentContent()` serializes current content.
+**Rule:** any handler attached via `addObserver`, `add(_:name:)`, `addTarget(_:action:)` must have a matching removal in `deinit` or an explicit `cleanup()` called from the SwiftUI host's `.onDisappear`.
 
-**Rule:** Every handler must wrap its body in try/catch and call `respond()` in both paths.
+## 6. Error Handling
 
-## 5. Test Conventions
+**Swift errors propagate via `throws`:**
 
-Tests use Vitest. Follow these patterns:
-
-**Setup:** `vi.mock()` calls MUST appear before the import of the module being tested (hoisting).
-
-**Store reset:** Clear store state in `beforeEach` to isolate tests:
-
-```ts
-beforeEach(() => {
-  const store = useFooStore.getState();
-  Object.keys(store.items).forEach((k) => store.removeItem(k));
-});
+```swift
+enum ImportError: Error {
+    case fileNotReadable(String)
+    case unsupportedFormat(String)
+    var userMessage: String { ... }
+}
 ```
 
-**ProseMirror helpers:** Create a minimal schema and helper functions for doc/state creation:
+- Custom `enum` for each subsystem's errors.
+- `userMessage: String` computed property for UI display — sanitizes paths and internal details.
 
-```ts
-const schema = new Schema({
-  nodes: { doc: { content: "paragraph+" }, paragraph: { content: "text*" }, text: { inline: true } },
-});
-function createState(text: string) { return EditorState.create({ doc: createDoc(text), schema }); }
+**Rule:** never use `try?` to silently swallow errors. Either handle them or propagate. The only acceptable swallow is a logged warning at a leaf where re-raising would corrupt invariants.
+
+## 7. Logging
+
+Use `OSLog` (via `Logger`):
+
+```swift
+private let log = Logger(subsystem: "com.vreader.app", category: "Foo")
+log.info("loaded \(count) books")
+log.error("failed: \(String(describing: error), privacy: .public)")
 ```
 
-**Rule:** Tests go next to the source (`foo.test.ts`) or in a `__tests__/` subdirectory for larger suites.
+- Subsystem is always `"com.vreader.app"`.
+- Category names a module/feature: `"Library"`, `"Persistence"`, `"DebugBridge"`.
+- Use `privacy: .public` only when the value is genuinely safe to log.
 
-## 6. CSS Organization
+**Rule:** no bare `print()` in production code — only via `Logger`. The historical migration to OSLog was tracked in commits `746f7a5` / `917d8c2`.
 
-**Co-location:** Component/plugin CSS lives next to the `.ts` file that uses it.
+## 8. Test Conventions
 
-| Location | Contains |
-|----------|----------|
-| `src/plugins/<name>/<name>.css` | Plugin-specific styles |
-| `src/components/<path>/*.css` | Component-specific styles |
-| `src/styles/` | Global styles, shared popup base, tokens |
-| `src/styles/index.css` | Design token definitions (source of truth) |
-| `src/styles/popup-shared.css` | Shared popup surface styles |
+- Tests in `vreaderTests/<MirroringSourcePath>/<Name>Tests.swift`.
+- Helpers in `vreaderTests/Helpers/` (e.g., `CollectionTestHelper`).
+- One test class per source file under test.
+- `setUp()` / `tearDown()` are `async throws` if any dependency is async.
+- See `10-tdd.md` for full TDD discipline + pattern catalog.
 
-**Rule:** Never scatter one component's styles across multiple CSS files. One component = one CSS file.
+## 9. File Organization
 
-## 7. Error Handling
+- Plugin-style features (`Foliate/`, `BookSource/`, `DebugBridge/`) live under `vreader/Services/<Name>/`.
+- View files live under `vreader/Views/<Area>/`.
+- A feature ≥3 source files gets its own directory.
+- Aim for files under ~300 lines; split when growing past that.
 
-**TypeScript:** Always narrow `unknown` errors before accessing `.message`:
+## 10. Imports
 
-```ts
-error instanceof Error ? error.message : String(error)
-```
+- `import Foundation`, `import SwiftUI`, `import SwiftData`, `import OSLog`, `import UIKit` (where needed).
+- Avoid Foundation umbrella imports (`@_exported`).
+- No third-party Swift packages currently — the only external code is Foliate-js (vendored as a JS bundle, not SPM).
 
-**Rust:** Tauri commands return `Result<T, String>`. Convert library errors with `.map_err()`:
+## 11. DEBUG Gating
 
-```rust
-fs::read(path).map_err(|e| format!("Failed to read: {}", e))?;
-```
-
-**Rule:** Never use `error as Error` (unsafe cast). Always use `instanceof` or `String()`.
-
-## 8. Import Conventions
-
-**`@/` alias:** Use for cross-module imports (anything outside the current feature directory):
-
-```ts
-import { useSettingsStore } from "@/stores/settingsStore";
-```
-
-**Relative paths:** Use for same-module imports (files in the same plugin/feature directory):
-
-```ts
-import { respond, getEditor } from "./utils";
-```
-
-**Barrel exports:** Keep minimal. Prefer direct file imports over re-exporting everything through `index.ts`.
-
-**Rule:** Never use `../../../` chains. If you need to go up more than one level, use `@/`.
-
-## 9. Debug Logging
-
-Conditional loggers live in `src/utils/debug.ts`. They compile to no-ops in production.
+DEBUG-only code MUST be wrapped in `#if DEBUG` blocks at file scope OR in dedicated `#if DEBUG`-gated extension files. The `verify-release-no-debugbridge.sh` gate enforces zero DEBUG-only symbols in Release.
 
 **Pattern:**
-```ts
-export const fooLog = import.meta.env.DEV
-  ? (...args: unknown[]) => console.log("[Foo]", ...args)
-  : () => {};
+
+```swift
+#if DEBUG
+
+import Foundation
+
+@MainActor
+final class DebugFoo { ... }
+
+#endif
 ```
 
-**Naming:** `[category]Log` — e.g., `historyLog`, `autoSaveLog`.
-
-**Usage:** Import and call like a regular function. Zero cost in production builds because Vite tree-shakes the dead branch.
-
-**Rule:** Never use bare `console.log` for debug output. Add a named logger to `debug.ts` instead.
-
-## 10. Rust Command Pattern
-
-Tauri commands follow a module-based organization.
-
-**Module layout:**
-```
-src-tauri/src/<feature>/
-  mod.rs          # pub mod commands; (+ other submodules)
-  commands.rs     # #[tauri::command] functions
-```
-
-**Command signature:**
-```rust
-#[tauri::command]
-pub async fn my_command(app: AppHandle, arg: String) -> Result<MyData, String> {
-    do_thing(&app).map_err(|e| format!("Failed: {}", e))
-}
-```
-
-**Registration:** Commands are registered in `lib.rs` via `.invoke_handler(tauri::generate_handler![...])`.
-
-**Rule:** All Tauri commands must return `Result<T, String>` — never panic on user input.
+Don't `#if DEBUG` individual lines inside otherwise-production code unless a single line genuinely needs it.

@@ -15,8 +15,5 @@
       }
     ]
   },
-  "enabledPlugins": {
-    "frontend-design@claude-code-plugins": true,
-    "rust-analyzer-lsp@claude-plugins-official": true
-  }
+  "enabledPlugins": {}
 }

@@ -1,6 +1,8 @@
 # 10 - TDD Workflow
 
-Test-Driven Development is structurally enforced in VMark. Coverage thresholds in `vitest.config.ts` make `pnpm check:all` fail if coverage drops — writing code without tests breaks the gate.
+Test-Driven Development for vreader. Tests live in `vreaderTests/`. Run via `xcodebuild test`. Coverage thresholds are not currently gated structurally; discipline is the gate.
+
+**vreader uses Swift Testing as the primary framework** (`import Testing`, `@Test`, `#expect`). XCTest is used only for tests that need `XCTestExpectation` (notification / async-callback timing) or `XCUnwrap`-style helpers — minority of tests, ~5% of the suite. New tests should default to Swift Testing unless they specifically need XCTest's expectation/notification machinery.
 
 ## Core Discipline: RED → GREEN → REFACTOR
 
@@ -12,199 +14,211 @@ Never skip RED. If you write code first, you don't know your test actually catch
 
 ## When Tests Are Required
 
-| Category | Required? | Examples |
-|----------|-----------|---------|
-| Stores | **ALWAYS** | State transitions, selectors, persistence |
-| Hooks | **ALWAYS** | Side effects, event handling, lifecycle |
-| Utils / helpers | **ALWAYS** | Pure functions, parsers, formatters |
-| Rust commands | **ALWAYS** | Input validation, error paths |
-| Business logic | **ALWAYS** | Close decisions, save logic, merge rules |
-| Bug fixes | **ALWAYS** | Regression test proving the fix |
-| Edge cases | **ALWAYS** | Empty input, null, boundary values |
-| CSS-only changes | No | Visual QA with reference doc instead |
-| Docs / config | No | Markdown, JSON, TOML changes |
-| Type-only changes | No | Interface/type additions with no runtime effect |
-| Components | Case-by-case | Test behavior (clicks, ARIA), not rendering |
-| Plugins (ProseMirror) | Case-by-case | Test logic (transforms, state), not PM integration |
+| Category          | Required?      | Examples                                                                  |
+| ----------------- | -------------- | ------------------------------------------------------------------------- |
+| Services / actors | **ALWAYS**     | `PersistenceActor`, `BookImporter`, `TXTService`, encoding detectors      |
+| Pure utilities    | **ALWAYS**     | `DocumentFingerprint`, `Locator`, parsers, formatters                     |
+| ViewModels        | **ALWAYS**     | State transitions, async flows, error paths                               |
+| Bug fixes         | **ALWAYS**     | Regression test that fails on the pre-fix commit                          |
+| Edge cases        | **ALWAYS**     | Empty input, nil, boundary values, Unicode/CJK, RTL, race conditions      |
+| SwiftUI views     | Case-by-case   | Test behavior (callbacks, observable state), not pixel rendering          |
+| Reader bridges    | Case-by-case   | Test message parsing, JS escaping, locator math — not WebView interaction |
+| Pure data models  | If non-trivial | `BookRecord`, `HighlightRecord` — test invariants, not getters            |
 
 ## Pattern Catalog
 
-Five patterns covering the most common test types in VMark. Use these as templates.
+The patterns below show XCTest first because vreader's actor/ViewModel/notification tests rely on `XCTestCase`-specific helpers (`XCTestExpectation`, `XCUnwrap`, async `setUp`, isolation pinning). For straightforward tests, prefer Swift Testing.
 
-### 1. Store Tests — `src/stores/__tests__/revisionStore.test.ts`
+### 0. Swift Testing (default for new tests)
 
-```ts
-import { useRevisionStore } from "../revisionStore";
+```swift
+import Testing
+@testable import vreader
 
-beforeEach(() => {
-  // Reset store between tests — isolation is critical
-  useRevisionStore.setState({ revisions: {} });
-});
+@Suite("DocumentFingerprint")
+struct DocumentFingerprintSuite {
+    @Test func canonicalKeyRoundTrips() {
+        let fp = DocumentFingerprint(contentSHA256: "abc...", fileByteCount: 1024, format: .epub)
+        let parsed = DocumentFingerprint(canonicalKey: fp.canonicalKey)
+        #expect(parsed == fp)
+    }
 
-it("tracks revision for document", () => {
-  const { addRevision } = useRevisionStore.getState();
-  addRevision("doc-1", "content-v1");
-  const rev = useRevisionStore.getState().revisions["doc-1"];
-  expect(rev).toBeDefined();
-});
-```
-
-**Key patterns:**
-- Use `getState()` to call actions — no React rendering needed.
-- Reset state in `beforeEach` to isolate tests.
-- Test state transitions, not implementation details.
-
-### 2. Plugin Tests — `src/plugins/multiCursor/__tests__/multiCursorPlugin.test.ts`
-
-```ts
-import { Schema } from "@tiptap/pm/model";
-import { EditorState } from "@tiptap/pm/state";
-
-const schema = new Schema({
-  nodes: {
-    doc: { content: "paragraph+" },
-    paragraph: { content: "text*" },
-    text: { inline: true },
-  },
-});
-
-function createState(text: string) {
-  return EditorState.create({
-    doc: schema.node("doc", null, [
-      schema.node("paragraph", null, text ? [schema.text(text)] : []),
-    ]),
-  });
+    @Test(arguments: [
+        ("hello world", 11),
+        ("",            0),
+        ("héllo",       6),  // 5 chars but 6 UTF-8 bytes
+    ])
+    func byteCountMatchesUTF8(_ input: String, _ expected: Int) {
+        #expect(input.utf8.count == expected)
+    }
 }
+```
 
-it("creates additional cursor at offset", () => {
-  const state = createState("hello world");
-  // ... test plugin logic using state
-});
+**Use Swift Testing for:** pure functions, value types, parameterized tests, anything that doesn't need XCTest's async-callback machinery.
+
+**Use XCTest (patterns 1-5 below) for:** actor tests with async setUp, MainActor-isolated ViewModels, notification observers needing `XCTestExpectation`, anywhere you need `XCUnwrap` over `#require`.
+
+### 1. Actor / Service Tests
+
+```swift
+import XCTest
+@testable import vreader
+
+final class PersistenceActorTests: XCTestCase {
+    private var container: ModelContainer!
+    private var actor: PersistenceActor!
+
+    override func setUp() async throws {
+        let schema = Schema(SchemaV4.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        container = try ModelContainer(for: schema, configurations: [config])
+        actor = PersistenceActor(modelContainer: container)
+    }
+
+    func test_insertBook_dedupesByFingerprintKey() async throws {
+        let record = makeBookRecord(sha: String(repeating: "a", count: 64))
+        let first = try await actor.insertBook(record)
+        let second = try await actor.insertBook(record)
+        XCTAssertEqual(first.fingerprintKey, second.fingerprintKey)
+    }
+}
 ```
 
 **Key patterns:**
-- Minimal schema — only the nodes your test needs.
-- Helper `createState()` function for readable tests.
-- Test transaction effects, not DOM output.
 
-### 3. Hook Tests — `src/hooks/useUnifiedMenuCommands.test.tsx`
+- In-memory `ModelContainer` for SwiftData isolation.
+- `setUp() async throws` to construct dependencies.
+- Test public actor methods directly — actors serialize, no manual locking.
 
-```tsx
-import { renderHook } from "@testing-library/react";
-import { useUnifiedMenuCommands } from "./useUnifiedMenuCommands";
+### 2. ViewModel Tests
 
-const mockListen = vi.fn();
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (...args: unknown[]) => mockListen(...args),
-}));
-
-it("registers menu event listeners", () => {
-  renderHook(() => useUnifiedMenuCommands());
-  expect(mockListen).toHaveBeenCalledWith(
-    expect.stringMatching(/^menu:/),
-    expect.any(Function)
-  );
-});
+```swift
+@MainActor
+final class LibraryViewModelTests: XCTestCase {
+    func test_deleteBook_removesFromBooksArray() async {
+        let persistence = MockPersistence()
+        let viewModel = LibraryViewModel(persistence: persistence, importer: ..., preferenceStore: ...)
+        await viewModel.loadBooks()
+        await viewModel.deleteBook(fingerprintKey: "key-1")
+        XCTAssertFalse(viewModel.books.contains { $0.fingerprintKey == "key-1" })
+    }
+}
 ```
 
 **Key patterns:**
-- Mock external dependencies (Tauri, DOM APIs).
-- Use `renderHook` — no need for a full component.
-- Test that effects register/cleanup correctly.
 
-### 4. Component Tests — `src/components/Editor/UniversalToolbar/UniversalToolbar.test.tsx`
+- `@MainActor` on the test class for ViewModels marked `@MainActor`.
+- Inject mocks via protocol parameters (`LibraryPersisting`, `BookImporting`).
+- Assert on observable state, not internal helpers.
 
-```tsx
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+### 3. Pure-Function Tests
 
-it("toggles bold on button click", async () => {
-  const user = userEvent.setup();
-  render(<UniversalToolbar />);
-  const boldBtn = screen.getByRole("button", { name: /bold/i });
-  await user.click(boldBtn);
-  expect(boldBtn).toHaveAttribute("aria-pressed", "true");
-});
+```swift
+final class DocumentFingerprintTests: XCTestCase {
+    func test_canonicalKey_roundTrips() {
+        let fp = DocumentFingerprint(contentSHA256: "abc...", fileByteCount: 1024, format: .epub)
+        let parsed = DocumentFingerprint(canonicalKey: fp.canonicalKey)
+        XCTAssertEqual(parsed, fp)
+    }
+}
 ```
 
 **Key patterns:**
-- Query by ARIA role/name — not CSS class or test-id.
-- Use `userEvent` (not `fireEvent`) for realistic interaction.
-- Test behavior (click → state change), not rendering details.
-- Use `vi.hoisted()` when mock setup needs to run before imports.
 
-### 5. Utils Tests — `src/utils/closeDecision.test.ts`
+- Pure functions = no setUp, no mocks.
+- Use `XCTAssertEqual(_:_:_)` for `Equatable` types.
+- Cover all branches in one test class via `func test_` methods.
 
-```ts
-import { decideOnClose } from "./closeDecision";
+### 4. Async / Concurrency Tests
 
-describe("decideOnClose", () => {
-  it.each([
-    { dirty: false, hotExit: true,  expected: "close" },
-    { dirty: true,  hotExit: true,  expected: "close" },
-    { dirty: true,  hotExit: false, expected: "prompt" },
-    { dirty: false, hotExit: false, expected: "close" },
-  ])("dirty=$dirty, hotExit=$hotExit → $expected", ({ dirty, hotExit, expected }) => {
-    expect(decideOnClose(dirty, hotExit)).toBe(expected);
-  });
-});
+```swift
+@MainActor
+func test_bridge_concurrentCalls_doNotInterleave() async {
+    let bridge = MyBridge(...)
+    async let a = bridge.handle(...)
+    async let b = bridge.handle(...)
+    _ = await (a, b)
+    // assert ordering invariants on the recorded calls
+}
 ```
 
 **Key patterns:**
-- Table-driven tests with `it.each` — exhaustive, readable.
-- Pure functions = no mocking needed.
-- Cover all branches in one `describe` block.
+
+- `async let` for concurrent calls; `await (a, b, ...)` to join.
+- For deterministic timing, use a clock probe pattern (see `DebugBridgeTests.SlowDebugBridgeContext`).
+- Avoid `Task.sleep` for synchronization; use `XCTestExpectation` + `fulfillment(of:timeout:)`.
+
+### 5. Notification / Bridge Tests
+
+```swift
+func test_handler_postsExpectedNotification() async {
+    let exp = expectation(description: "notification posted")
+    nonisolated(unsafe) var receivedKey: String?
+    let token = NotificationCenter.default.addObserver(
+        forName: .myNotification, object: nil, queue: .main
+    ) { notification in
+        receivedKey = notification.userInfo?["key"] as? String
+        exp.fulfill()
+    }
+    defer { NotificationCenter.default.removeObserver(token) }
+
+    handler.fire(key: "test-key")
+    await fulfillment(of: [exp], timeout: 2.0)
+    XCTAssertEqual(receivedKey, "test-key")
+}
+```
+
+**Key patterns:**
+
+- `XCTestExpectation` + `fulfillment(of:timeout:)` — never bare `sleep`.
+- Always `removeObserver` in `defer`.
+- `nonisolated(unsafe)` to capture into a notification closure that runs on a different queue.
 
 ## Anti-Patterns — What NOT to Do
 
-| Anti-pattern | Why it's wrong | Do this instead |
-|-------------|----------------|-----------------|
-| Write code first, tests after | You can't verify your test catches regressions | RED first — always |
-| `it("renders without crashing")` | Tests nothing meaningful | Test specific behavior or output |
-| Testing implementation details | Breaks on refactor | Test observable behavior (state, output, DOM) |
-| Mocking everything | Tests prove nothing | Mock boundaries (APIs, filesystem), not logic |
-| Skipping edge cases | Bugs live at boundaries | Empty input, null, max values, concurrent access |
-| Snapshot tests for logic | Brittle, auto-updated without review | Use explicit assertions |
-| `any` in test types | Hides type errors | Use proper types even in tests |
+| Anti-pattern                       | Why it's wrong                                 | Do this instead                                              |
+| ---------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| Write code first, tests after      | You can't verify your test catches regressions | RED first — always                                           |
+| `func test_loadsWithoutCrashing()` | Tests nothing meaningful                       | Test specific observable behavior                            |
+| Testing `private` implementation   | Breaks on refactor                             | Test public API only                                         |
+| Mocking everything                 | Tests prove nothing                            | Mock boundaries (network, filesystem), not internal logic    |
+| Skipping edge cases                | Bugs live at boundaries                        | Empty input, nil, max values, concurrent access, Unicode/CJK |
+| Bare `Task.sleep(...)` for sync    | Flaky in CI                                    | `XCTestExpectation` with timeout                             |
+| `XCTAssertNotNil(x); x!.foo()`     | Crashes on failure                             | `let x = try XCTUnwrap(opt); x.foo()`                        |
+| Tests that depend on order         | Flaky                                          | Reset state in `setUp`; never share state across tests       |
 
-## Coverage Ratchet
-
-Coverage thresholds are defined in `vitest.config.ts`:
-
-```ts
-thresholds: {
-  statements: 43,
-  branches: 37,
-  functions: 50,
-  lines: 44,
-}
-```
-
-These are **ratchet values** — they only go up, never down:
-- Set at current actual coverage when introduced.
-- New code without tests pushes coverage below threshold → gate fails.
-- After raising coverage, update thresholds to lock in the new floor.
-
-**To check:** `pnpm test:coverage` — must pass with thresholds.
-
-## Test Utilities
-
-| File | Purpose |
-|------|---------|
-| `src/test/setup.ts` | Global test setup (jsdom, mocks for Tauri APIs) |
-| `src/test/popupTestUtils.ts` | Helpers for testing popup positioning and behavior |
-
-## Running Tests
+## Test Commands
 
 ```bash
-pnpm test              # Run all tests once
-pnpm test:watch        # Watch mode during development
-pnpm test:coverage     # Run with coverage + threshold check
-pnpm check:all         # Full gate (lint + coverage + build)
+# Build then run unit tests only (skip UI tests during dev)
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
+    -project vreader.xcodeproj -scheme vreader \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+    -only-testing:vreaderTests
+
+# Single test class (faster iteration)
+... -only-testing:vreaderTests/MyClassTests
+
+# Single test method
+... -only-testing:vreaderTests/MyClassTests/test_specificThing
 ```
+
+The TDD Guardian config at `.claude/tdd-guardian/config.json` invokes the same `xcodebuild test` flow.
 
 ## File Placement
 
-- Tests go next to the source: `foo.test.ts` beside `foo.ts`
-- Larger test suites use `__tests__/` subdirectory
-- Shared test helpers go in `src/test/`
+- Tests go next to the production code, mirroring the source tree:
+  `vreader/Services/Foo/Bar.swift` → `vreaderTests/Services/Foo/BarTests.swift`
+- Larger test suites use a `__tests__` or feature subdirectory.
+- Shared test helpers go in `vreaderTests/Helpers/` (e.g., `CollectionTestHelper`).
+
+## Exceptions to Mandatory TDD
+
+These categories don't require tests:
+
+- CSS/asset-only changes (don't apply to vreader, but listed for completeness)
+- Documentation, config, comments
+- Type-only changes with no runtime effect
+- Pure file moves / renames
+
+If unsure, write the test.

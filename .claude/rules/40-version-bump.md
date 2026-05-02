@@ -1,81 +1,70 @@
 # 40 - Version Bump Procedure
 
-When bumping the version number, **all five files must be updated together**.
+vreader's version lives in `project.yml` (xcodegen) under `targets: vreader: settings: base:`. xcodegen regenerates `vreader.xcodeproj/project.pbxproj` from it; pbxproj is checked in but should not be hand-edited for a bump.
 
 ## Files to Update
 
-| File                            | Field       | Source                              |
-| ------------------------------- | ----------- | ----------------------------------- |
-| `package.json`                  | `"version"` | Frontend/npm                        |
-| `src-tauri/tauri.conf.json`     | `"version"` | Bundle (CFBundleShortVersionString) |
-| `src-tauri/Cargo.toml`          | `version`   | Rust (`env!("CARGO_PKG_VERSION")`)  |
-| `vmark-mcp-server/package.json` | `"version"` | MCP sidecar npm                     |
-| `vmark-mcp-server/src/cli.ts`   | `VERSION`   | MCP sidecar health check            |
+| File          | Field                                                       |
+| ------------- | ----------------------------------------------------------- |
+| `project.yml` | `MARKETING_VERSION` (visible version, e.g. `0.1.0`)         |
+| `project.yml` | `CURRENT_PROJECT_VERSION` (build number, monotonic integer) |
 
-## Why All Five Matter
+After editing `project.yml`, regenerate the Xcode project and commit BOTH:
 
-**App version (first 3 files):**
+```bash
+# 1. Edit project.yml — change MARKETING_VERSION (and bump CURRENT_PROJECT_VERSION)
+# 2. Regenerate
+xcodegen generate
 
-- macOS About dialog displays version from Cargo.toml and tauri.conf.json
-- If they differ, macOS shows: `Version 0.2.5 (0.3.0)` (confusing)
-
-**MCP server version (last 2 files):**
-
-- `--version` and `--health-check` CLI flags report version from cli.ts
-- Settings panel and status dialog show version from useMcpHealthCheck.ts (reads from MCP_VERSION constant)
-- Must match main app to avoid user confusion
+# 3. Confirm the regen actually changed pbxproj
+git diff vreader.xcodeproj/project.pbxproj | grep -E "MARKETING_VERSION|CURRENT_PROJECT_VERSION"
+```
 
 ## Bump Procedure
 
-1. **Update all five files** with the new version:
+1. **Edit ****`project.yml`** — change `MARKETING_VERSION` to the new version. Bump `CURRENT_PROJECT_VERSION` too (always increasing — App Store requires a higher build number than any previously-uploaded build).
+
+2. **Regenerate the Xcode project**:
 
    ```bash
-   # Example: bumping to 0.4.0
-   VERSION="0.4.0"
-
-   # Main app files
-   sed -i '' 's/"version": "[^"]*"/"version": "'$VERSION'"/' package.json
-   sed -i '' 's/"version": "[^"]*"/"version": "'$VERSION'"/' src-tauri/tauri.conf.json
-   sed -i '' 's/^version = "[^"]*"/version = "'$VERSION'"/' src-tauri/Cargo.toml
-
-   # MCP server files
-   sed -i '' 's/"version": "[^"]*"/"version": "'$VERSION'"/' vmark-mcp-server/package.json
-   sed -i '' 's/const VERSION = "[^"]*"/const VERSION = "'$VERSION'"/' vmark-mcp-server/src/cli.ts
+   xcodegen generate
    ```
 
-2. **Verify all match**:
+3. **Verify both files updated**:
 
    ```bash
-   grep '"version"' package.json src-tauri/tauri.conf.json vmark-mcp-server/package.json
-   grep '^version' src-tauri/Cargo.toml
-   grep 'const VERSION' vmark-mcp-server/src/cli.ts
+   grep -E "MARKETING_VERSION|CURRENT_PROJECT_VERSION" project.yml
+   grep -E "MARKETING_VERSION =|CURRENT_PROJECT_VERSION =" vreader.xcodeproj/project.pbxproj
    ```
 
-3. **Commit together**:
+4. **Build to confirm**:
 
    ```bash
-   git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
-           vmark-mcp-server/package.json vmark-mcp-server/src/cli.ts
-   git commit -m "chore: bump version to 0.4.0"
+   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild build \
+       -project vreader.xcodeproj -scheme vreader \
+       -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
    ```
 
-4. **Tag and push**:
+5. **Commit** (single commit, both files together):
 
    ```bash
-   git tag v0.4.0
+   git add project.yml vreader.xcodeproj/project.pbxproj
+   git commit -m "chore: bump version to {version}"
+   ```
+
+6. **Tag and push** (only after commit lands on main):
+
+   ```bash
+   git tag v{version}
    git push origin main --tags
    ```
 
 ## Common Mistakes
 
-- Forgetting Cargo.toml (causes dual version display in About dialog)
-- Forgetting MCP server files (causes version mismatch in health check)
-- Tagging before all files are updated
-- Using different versions across files
+- Editing `pbxproj` directly without updating `project.yml` — next `xcodegen` overwrites your change.
+- Forgetting `CURRENT_PROJECT_VERSION` — App Store Connect rejects uploads with the same build number as a previous build.
+- Tagging before the commit lands on `main` — orphan tag.
 
 ## Verification
 
-1. Check About VMark dialog shows single version number
-2. Run `vmark-mcp-server --version` shows same version
-3. MCP Status dialog in Settings shows same version
-
+After a bump, the App's About / TestFlight build number both should reflect the new `MARKETING_VERSION`. The build number from `CURRENT_PROJECT_VERSION` is shown in TestFlight's release lists.

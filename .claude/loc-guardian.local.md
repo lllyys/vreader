@@ -2,21 +2,33 @@
 max_pure_loc: 300
 ---
 
-# loc-guardian Extraction Rules
+# loc-guardian Extraction Rules — vreader (Swift / iOS)
 
-## TypeScript / React
+When a Swift file exceeds the LOC limit, prefer these extraction targets in order.
 
-- **Types/interfaces** → `types.ts` in same directory
-- **Constants & config objects** → `constants.ts`
-- **Pure utility functions** → `utils.ts` or `<name>Utils.ts`
-- **Sub-components** → new `<ComponentName>.tsx` file
-- **Custom hooks** → `use<Name>.ts` in same directory
-- **Store actions/selectors** → keep in store file; split by feature if >300 LOC
+## Swift / SwiftUI
 
-## Rust
+- **`@Model`**** types and SwiftData entities** → keep in `vreader/Models/<Name>.swift`. Split related entities into separate files even if small.
+- **PersistenceActor CRUD per feature** → `PersistenceActor+<Feature>.swift` extension files (e.g., `+Library.swift`, `+Highlights.swift`, `+Bookmarks.swift`).
+- **Reader container view extensions** → `<Container>+<Concern>.swift` (e.g., `EPUBReaderContainerView+Highlights.swift`, `+Navigation.swift`, `+Sheets.swift`).
+- **Coordinator subviews / action methods** → split off SwiftUI computed property `var fooSection: some View` into a dedicated `FooSection.swift` view struct.
+- **Pure helper types** → adjacent `<Module>Types.swift` (e.g., `FoliateTypes.swift`).
+- **Constants / configuration** → `<Module>Config.swift` or top of the file in a private extension.
+- **Test helpers** → `vreaderTests/Helpers/<Name>.swift`.
 
-- **Tauri commands** → `commands.rs` within the feature module
-- **Data types/structs** → `types.rs` within the feature module
-- **Helper/utility functions** → `utils.rs` within the feature module
-- **Tests** → keep in `#[cfg(test)]` block at bottom of each file
+## When NOT to extract
+
+- Tightly-coupled state machines that depend on each other's private types — extracting causes more friction than it removes.
+- Single-use utilities that won't be called from elsewhere.
+- Test files where each test method is small but there are many of them — totals > 300 lines is fine for test files.
+
+## Tests don't count toward LOC
+
+The LOC limit applies to production code in `vreader/`. `vreaderTests/` files can grow as needed; comprehensive coverage matters more than file size there.
+
+## Naming
+
+- New view file: `PascalCase` matching the type name.
+- New extension file: `<Type>+<Concern>.swift` (the `+` is the convention).
+- New service: `vreader/Services/<Feature>/<Name>.swift`.
 
