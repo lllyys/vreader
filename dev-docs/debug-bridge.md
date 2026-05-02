@@ -43,15 +43,15 @@ cat "$DATA/Library/Caches/DebugBridge/state.json"
 
 All commands are scheme `vreader-debug://`. Host names the command. Trailing `/` is allowed; any deeper path segment is rejected.
 
-| Command | Required params | Optional params | Effect |
-|---------|-----------------|-----------------|--------|
-| `reset` | — | — | Wipe every book from the library. Idempotent. |
-| `seed` | `fixture=<name>` | — | Import a bundled fixture book by catalog name. |
-| `open` | `bookId=<key>` | `position=<str>` (currently rejected) | Verify the book exists in persistence; LibraryView pushes it onto its `NavigationStack`. |
-| `theme` | `mode=dark\|light` | `fontSize=<int>` | Persist theme + optional font size to `UserDefaults`. Effect on next reader open. |
-| `settle` | `token=<basename>` | — | Wait for the active reader to settle, then write `Caches/DebugBridge/ready-<token>.json`. Bridge enforces a 30s timeout — a hung probe still produces the sentinel. |
-| `snapshot` | `dest=<basename>` | — | Build a `DebugSnapshot` and write it to `Caches/DebugBridge/<dest>`. |
-| `eval` | `bridge=<basename>`, `js=<base64>` | — | Run JS in the active reader's webview; write result/error to `Caches/DebugBridge/eval-<bridge>.json`. |
+| Command    | Required params                    | Optional params                       | Effect                                                                                                                                                              |
+| ---------- | ---------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reset`    | —                                  | —                                     | Wipe every book from the library. Idempotent.                                                                                                                       |
+| `seed`     | `fixture=<name>`                   | —                                     | Import a bundled fixture book by catalog name.                                                                                                                      |
+| `open`     | `bookId=<key>`                     | `position=<str>` (currently rejected) | Verify the book exists in persistence; LibraryView pushes it onto its `NavigationStack`.                                                                            |
+| `theme`    | `mode=dark\|light`                 | `fontSize=<int>`                      | Persist theme + optional font size to `UserDefaults`. Effect on next reader open.                                                                                   |
+| `settle`   | `token=<basename>`                 | —                                     | Wait for the active reader to settle, then write `Caches/DebugBridge/ready-<token>.json`. Bridge enforces a 30s timeout — a hung probe still produces the sentinel. |
+| `snapshot` | `dest=<basename>`                  | —                                     | Build a `DebugSnapshot` and write it to `Caches/DebugBridge/<dest>`.                                                                                                |
+| `eval`     | `bridge=<basename>`, `js=<base64>` | —                                     | Run JS in the active reader's webview; write result/error to `Caches/DebugBridge/eval-<bridge>.json`.                                                               |
 
 ### Parameter validation
 
@@ -98,6 +98,7 @@ cat "$DATA/Library/Caches/DebugBridge/<file>"
 ### `settle` → `ready-<token>.json`
 
 Happy path:
+
 ```json
 {
   "fingerprintKey": "txt:ab02...:1708",
@@ -109,6 +110,7 @@ Happy path:
 ```
 
 Timeout path:
+
 ```json
 {
   "fingerprintKey": "...",
@@ -126,6 +128,7 @@ Timeout path:
 Always written, even on error. `result` is the raw JSON value returned by the JS expression, not a string-encoded JSON.
 
 Happy path:
+
 ```json
 {
   "bridge": "foliate",
@@ -137,6 +140,7 @@ Happy path:
 ```
 
 Error path:
+
 ```json
 {
   "bridge": "foliate",
@@ -153,26 +157,26 @@ Error reporting comes in two flavors:
 
 **`snapshot.lastError`** uses stable `category.kind: detail` strings produced by `DebugBridge.stableErrorMessage`. Pin on the prefix, not the detail:
 
-| Prefix | Meaning |
-|--------|---------|
-| `parse.invalidScheme` | URL scheme isn't `vreader-debug` |
-| `parse.unknownCommand: <host>` | Host isn't a known command name |
-| `parse.missingParam: <name>` | Required parameter absent or empty |
-| `parse.invalidParam: <name> (<reason>)` | Parameter failed validation |
-| `bridge.unknownFixture: <name>` | `seed` got a name not in the catalog |
+| Prefix                                      | Meaning                                        |
+| ------------------------------------------- | ---------------------------------------------- |
+| `parse.invalidScheme`                       | URL scheme isn't `vreader-debug`               |
+| `parse.unknownCommand: <host>`              | Host isn't a known command name                |
+| `parse.missingParam: <name>`                | Required parameter absent or empty             |
+| `parse.invalidParam: <name> (<reason>)`     | Parameter failed validation                    |
+| `bridge.unknownFixture: <name>`             | `seed` got a name not in the catalog           |
 | `bridge.fixtureResourceMissing: <basename>` | Catalog entry exists but bundle file is absent |
-| `bridge.notImplemented: <command>` | Path not yet wired (e.g. `open.position`) |
-| `bridge.bookNotFound: <bookId>` | `open` received an unknown fingerprint key |
-| `bridge.noActiveReader` | `settle` / `eval` ran with no reader presented |
-| `bridge.settleTimeout` | `settle` gave up after 30s |
-| `bridge.evalUnsupported: <format>` | Active reader doesn't support JS eval |
-| `bridge.evalFailed: <msg>` | JS execution threw |
+| `bridge.notImplemented: <command>`          | Path not yet wired (e.g. `open.position`)      |
+| `bridge.bookNotFound: <bookId>`             | `open` received an unknown fingerprint key     |
+| `bridge.noActiveReader`                     | `settle` / `eval` ran with no reader presented |
+| `bridge.settleTimeout`                      | `settle` gave up after 30s                     |
+| `bridge.evalUnsupported: <format>`          | Active reader doesn't support JS eval          |
+| `bridge.evalFailed: <msg>`                  | JS execution threw                             |
 
-**`error` field in `ready-<token>.json` and `eval-<bridge>.json`** is currently a plain English string written directly by the handler. **Do not pin assertions on these strings** — they may change. Possible values today:
+**`error`**\*\* field in ****`ready-<token>.json`**** and \*\***`eval-<bridge>.json`** is currently a plain English string written directly by the handler. **Do not pin assertions on these strings** — they may change. Possible values today:
 
-| File | Possible `error` values |
-|------|-------------------------|
-| `ready-<token>.json` | `"settle timeout"` (with `phase: "unknown"`) |
+| File                 | Possible `error` values                                                                |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `ready-<token>.json` | `"settle timeout"` (with `phase: "unknown"`)                                           |
 | `eval-<bridge>.json` | `"no active reader"`, `"eval unsupported for format: <fmt>"`, raw JS error description |
 
 If you need stable codes for these files (e.g., for a verification harness), assert on the snapshot's `lastError` after running the failing command — it uses the stable prefixes and is the recommended assertion surface.
@@ -208,6 +212,7 @@ RealDebugBridgeContext           ← real handlers
 `DebugReaderRegistry.shared` holds a weak reference to the currently-presented reader. `ReaderContainerView` creates a `DebugReaderProbeAdapter` in `@State`, registers on `.onAppear`, unregisters on `.onDisappear`.
 
 The probe protocol exposes:
+
 - `fingerprintKey: String`
 - `format: String`
 - `currentPositionString: String?`
@@ -215,6 +220,7 @@ The probe protocol exposes:
 - `func evaluateJavaScript(_:) async throws -> Data` (raw JSON bytes)
 
 Default adapter:
+
 - `awaitSettle`: sleeps 100ms (placeholder until per-format hooks land — Foliate `relocate` event, TextKit layout completion).
 - `evaluateJavaScript`: throws `evalUnsupported(format:)`. EPUB/AZW3 readers will plug a real evaluator into `jsEvaluator` once the active webview is exposed.
 
@@ -249,7 +255,7 @@ xcrun simctl openurl "$SIM_ID" "vreader-debug://settle?token=open"
 # and check theme.fontSize / a chrome-visible flag.
 ```
 
-Status: **needs `sample.azw3` fixture and a chrome-visible probe field**. Center-tap itself is computer-use territory.
+Status: **needs ********`sample.azw3`******** fixture and a chrome-visible probe field**. Center-tap itself is computer-use territory.
 
 ### Generic verification recipe (template for feature #45)
 
@@ -292,6 +298,7 @@ jq '.theme == "light" and .currentBookId != null' \
 6. No DebugBridge-related strings in the main binary.
 
 Run after a Release build:
+
 ```bash
 xcodebuild build -configuration Release -derivedDataPath /tmp/vreader-release-build
 ./scripts/verify-release-no-debugbridge.sh
@@ -318,16 +325,17 @@ Exits 0 only if all six checks pass.
 
 ## File reference
 
-| File | Purpose |
-|------|---------|
-| `vreader/Services/DebugBridge/DebugBridge.swift` | Orchestrator — parse + dispatch + lastError |
-| `vreader/Services/DebugBridge/DebugCommand.swift` | URL grammar + parameter validation |
-| `vreader/Services/DebugBridge/DebugSnapshot.swift` | JSON shape for snapshot output |
-| `vreader/Services/DebugBridge/RealDebugBridgeContext.swift` | Production handlers |
-| `vreader/Services/DebugBridge/DebugReaderRegistry.swift` | Active-reader registry + probe protocol |
-| `vreader/Services/DebugBridge/DebugReaderProbeAdapter.swift` | Default probe used by ReaderContainerView |
-| `vreader/Services/DebugBridge/DebugBridgeNotifications.swift` | DEBUG-only notification names |
-| `vreader/Services/DebugBridge/DebugFixtureCatalog.swift` | Fixture name → bundle resource map |
-| `vreader/SupportingFiles/DebugBridge.plist` | Partial Info.plist (Debug build only) |
-| `vreader/Resources/DebugFixtures/` | Bundled fixture books (Debug build only) |
-| `scripts/verify-release-no-debugbridge.sh` | Release-build acceptance gate |
+| File                                                          | Purpose                                     |
+| ------------------------------------------------------------- | ------------------------------------------- |
+| `vreader/Services/DebugBridge/DebugBridge.swift`              | Orchestrator — parse + dispatch + lastError |
+| `vreader/Services/DebugBridge/DebugCommand.swift`             | URL grammar + parameter validation          |
+| `vreader/Services/DebugBridge/DebugSnapshot.swift`            | JSON shape for snapshot output              |
+| `vreader/Services/DebugBridge/RealDebugBridgeContext.swift`   | Production handlers                         |
+| `vreader/Services/DebugBridge/DebugReaderRegistry.swift`      | Active-reader registry + probe protocol     |
+| `vreader/Services/DebugBridge/DebugReaderProbeAdapter.swift`  | Default probe used by ReaderContainerView   |
+| `vreader/Services/DebugBridge/DebugBridgeNotifications.swift` | DEBUG-only notification names               |
+| `vreader/Services/DebugBridge/DebugFixtureCatalog.swift`      | Fixture name → bundle resource map          |
+| `vreader/SupportingFiles/DebugBridge.plist`                   | Partial Info.plist (Debug build only)       |
+| `vreader/Resources/DebugFixtures/`                            | Bundled fixture books (Debug build only)    |
+| `scripts/verify-release-no-debugbridge.sh`                    | Release-build acceptance gate               |
+
