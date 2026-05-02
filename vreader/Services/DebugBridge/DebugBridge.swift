@@ -72,6 +72,38 @@ final class DebugBridge {
         }
     }
 
+    /// Render an error as a stable string for the snapshot's `lastError`
+    /// field. Format is `"category: detail"`; consumers may pin on the
+    /// category prefix without depending on Swift's enum-case spelling.
+    /// Categories: `parse.<kind>`, `bridge.<kind>`, `unknown`.
+    /// `nonisolated` so tests can call without hopping to MainActor.
+    nonisolated static func stableErrorMessage(for error: Error) -> String {
+        switch error {
+        case let e as DebugCommandError:
+            switch e {
+            case .invalidScheme:
+                return "parse.invalidScheme"
+            case .unknownCommand(let host):
+                return "parse.unknownCommand: \(host)"
+            case .missingParam(let name):
+                return "parse.missingParam: \(name)"
+            case .invalidParam(let name, let reason):
+                return "parse.invalidParam: \(name) (\(reason))"
+            }
+        case let e as DebugBridgeContextError:
+            switch e {
+            case .unknownFixture(let name):
+                return "bridge.unknownFixture: \(name)"
+            case .fixtureResourceMissing(let name):
+                return "bridge.fixtureResourceMissing: \(name)"
+            case .notImplemented(let cmd):
+                return "bridge.notImplemented: \(cmd)"
+            }
+        default:
+            return "unknown: \(String(describing: type(of: error)))"
+        }
+    }
+
     private func dispatch(_ cmd: DebugCommand) async throws {
         switch cmd {
         case .reset:
@@ -88,7 +120,7 @@ final class DebugBridge {
             // Pass the bridge's current lastError so snapshot can encode it.
             // After this call returns successfully, process() clears lastError
             // — the snapshot captures the state at dispatch time.
-            let msg = lastError.map { String(describing: $0) }
+            let msg = lastError.map { Self.stableErrorMessage(for: $0) }
             try await context.snapshot(dest: dest, lastErrorMessage: msg)
         case .eval(let bridge, let js):
             try await context.eval(bridge: bridge, js: js)

@@ -143,6 +143,14 @@ extension PersistenceActor: HighlightPersisting {
             .map { highlightToRecord($0) }
     }
 
+    /// Total count of all highlights in the library, across all books.
+    /// Single aggregate query — does not materialize any record.
+    func countAllHighlights() async throws -> Int {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<Highlight>()
+        return try context.fetchCount(descriptor)
+    }
+
     // MARK: - Private
 
     private func highlightToRecord(_ highlight: Highlight) -> HighlightRecord {

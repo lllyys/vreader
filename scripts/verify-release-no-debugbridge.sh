@@ -52,6 +52,9 @@ fi
 
 # 2a. No DebugFixtures directory or fixture file should be present anywhere
 # in the .app bundle. Catches accidental copying via build phase changes.
+# We check both: (a) the directory itself, and (b) every fixture filename
+# at the bundle root (Xcode flat-copies resources, so the dir wouldn't exist
+# if the EXCLUDED glob took effect — but the file might still leak by name).
 LEAKED_FIXTURES=$(find "$APP_PATH" -type d -name "DebugFixtures" -o -path "*/DebugFixtures/*" 2>/dev/null | head -10)
 if [[ -n "$LEAKED_FIXTURES" ]]; then
     echo "FAIL: bundle contains DebugFixtures content:" >&2
@@ -59,6 +62,28 @@ if [[ -n "$LEAKED_FIXTURES" ]]; then
     FAIL=1
 else
     echo "OK: no DebugFixtures directory in bundle"
+fi
+
+# 2b. Reject every fixture file by name. Driven by the actual contents of
+# vreader/Resources/DebugFixtures/, so adding a new fixture is automatically
+# checked without editing this script.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FIXTURES_DIR="$SCRIPT_DIR/../vreader/Resources/DebugFixtures"
+if [[ -d "$FIXTURES_DIR" ]]; then
+    LEAKED_FIXTURE_FILES=()
+    while IFS= read -r fixture; do
+        name=$(basename "$fixture")
+        if find "$APP_PATH" -name "$name" -type f 2>/dev/null | grep -q .; then
+            LEAKED_FIXTURE_FILES+=("$name")
+        fi
+    done < <(find "$FIXTURES_DIR" -type f)
+    if [[ "${#LEAKED_FIXTURE_FILES[@]}" -gt 0 ]]; then
+        echo "FAIL: catalog fixture files found in bundle:" >&2
+        printf '  %s\n' "${LEAKED_FIXTURE_FILES[@]}" >&2
+        FAIL=1
+    else
+        echo "OK: no catalog fixture filenames in bundle"
+    fi
 fi
 
 # 2b. No file in the .app bundle should be named with DebugBridge identifiers

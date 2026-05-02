@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 @main
+@MainActor
 struct VReaderApp: App {
     private let modelContainer: ModelContainer?
     private let initError: String?
@@ -115,18 +116,16 @@ struct VReaderApp: App {
             )
 
             #if DEBUG
-            // Build the DebugBridge synchronously so .onOpenURL can never
-            // race with bridge construction. App init runs on the main
-            // thread; assumeIsolated is the right tool for entering the
-            // MainActor-isolated context from a nonisolated struct init.
-            self.debugBridge = MainActor.assumeIsolated {
-                DebugBridge(
-                    context: RealDebugBridgeContext(
-                        persistence: persistence,
-                        importer: importer
-                    )
+            // Build the DebugBridge synchronously. The struct is
+            // @MainActor-isolated, so init() runs on the main actor and
+            // we can construct the @MainActor DebugBridge directly with
+            // no isolation gymnastics.
+            self.debugBridge = DebugBridge(
+                context: RealDebugBridgeContext(
+                    persistence: persistence,
+                    importer: importer
                 )
-            }
+            )
             #endif
         } catch {
             self.modelContainer = nil

@@ -4,9 +4,10 @@
 // WI-5 commits) so each command performs real work rather than logging.
 // DEBUG-only.
 //
-// Composition: VReaderApp.init() builds one of these with the same
-// dependencies it injects into LibraryViewModel, then installs it on
-// DebugBridgeProvider.shared so .onOpenURL dispatches to the real handlers.
+// Composition: VReaderApp builds one of these with the same dependencies
+// it injects into LibraryViewModel and stores it as a `let debugBridge`
+// property. .onOpenURL captures the bridge by value and dispatches to
+// it. There is no global indirection — the bridge is owned by the App.
 
 #if DEBUG
 
@@ -123,14 +124,16 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// impossible.
     ///
     /// V0 fields filled in: ts, theme, fontSize, highlightCount, renderPhase
-    /// ("idle"), lastError. Reader-derived fields (currentBookId, format,
-    /// position, selection) are nil until the active-reader registry lands
-    /// in a later WI-5 commit.
+    /// ("idle"), lastError, schemaVersion, partial.
+    /// Reader-derived fields (currentBookId, format, position, selection)
+    /// are listed in `partial` so consumers know nil ≠ "no value" — they
+    /// land when the active-reader registry ships in a later WI-5 commit.
     func snapshot(dest: String, lastErrorMessage: String?) async throws {
         let store = ReaderSettingsStore(defaults: userDefaults)
         let highlightCount = try await totalHighlightCount()
 
         let snap = DebugSnapshot(
+            schemaVersion: DebugSnapshot.currentSchemaVersion,
             ts: ISO8601DateFormatter().string(from: Date()),
             currentBookId: nil,
             format: nil,
@@ -140,7 +143,8 @@ final class RealDebugBridgeContext: DebugBridgeContext {
             selection: nil,
             highlightCount: highlightCount,
             renderPhase: "idle",
-            lastError: lastErrorMessage
+            lastError: lastErrorMessage,
+            partial: ["currentBookId", "format", "position", "selection"]
         )
 
         let data = try DebugSnapshot.encoder.encode(snap)
@@ -168,13 +172,7 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     }
 
     private func totalHighlightCount() async throws -> Int {
-        let books = try await persistence.fetchAllLibraryBooks()
-        var total = 0
-        for book in books {
-            let highlights = try await persistence.fetchHighlights(forBookWithKey: book.fingerprintKey)
-            total += highlights.count
-        }
-        return total
+        try await persistence.countAllHighlights()
     }
 
     func eval(bridge: String, js: String) async throws {

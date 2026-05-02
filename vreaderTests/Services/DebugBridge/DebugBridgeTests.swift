@@ -80,6 +80,46 @@ final class DebugBridgeTests: XCTestCase {
         XCTAssertEqual(context.calls, [.reset, .seed(fixture: "alice"), .reset])
     }
 
+    // MARK: - stableErrorMessage
+
+    func test_stableErrorMessage_parseErrors_useParsePrefix() {
+        XCTAssertEqual(
+            DebugBridge.stableErrorMessage(for: DebugCommandError.invalidScheme),
+            "parse.invalidScheme"
+        )
+        XCTAssertEqual(
+            DebugBridge.stableErrorMessage(for: DebugCommandError.unknownCommand("teleport")),
+            "parse.unknownCommand: teleport"
+        )
+        XCTAssertEqual(
+            DebugBridge.stableErrorMessage(for: DebugCommandError.missingParam("fixture")),
+            "parse.missingParam: fixture"
+        )
+    }
+
+    func test_stableErrorMessage_bridgeContextErrors_useBridgePrefix() {
+        XCTAssertEqual(
+            DebugBridge.stableErrorMessage(for: DebugBridgeContextError.unknownFixture("foo")),
+            "bridge.unknownFixture: foo"
+        )
+        XCTAssertEqual(
+            DebugBridge.stableErrorMessage(for: DebugBridgeContextError.fixtureResourceMissing("foo.txt")),
+            "bridge.fixtureResourceMissing: foo.txt"
+        )
+        XCTAssertEqual(
+            DebugBridge.stableErrorMessage(for: DebugBridgeContextError.notImplemented(command: "open")),
+            "bridge.notImplemented: open"
+        )
+    }
+
+    func test_stableErrorMessage_unknownError_usesUnknownPrefix() {
+        struct DummyError: Error {}
+        let msg = DebugBridge.stableErrorMessage(for: DummyError())
+        XCTAssertTrue(msg.hasPrefix("unknown:"), "got \(msg)")
+    }
+
+    // MARK: - Routing
+
     @MainActor
     func test_handle_concurrentCalls_doNotInterleave() async {
         // A slow context exposes interleaving. Without serialization, two

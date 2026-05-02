@@ -11,7 +11,15 @@ import Foundation
 /// `DebugSnapshot.encoder` (sorted keys for deterministic output, explicit
 /// `null` for missing values so consumers can distinguish "absent" from
 /// "unknown").
+///
+/// Schema versioning: bump `schemaVersion` whenever fields are added,
+/// removed, or change semantics. The `partial` array names fields whose
+/// nil value means "not yet implemented in this build" rather than "no
+/// value" — consumers should not treat partial-listed nil fields as
+/// authoritative.
 struct DebugSnapshot: Codable, Equatable {
+    /// Schema version. Increment on field add/remove/semantics-change.
+    let schemaVersion: Int
     let ts: String
     let currentBookId: String?
     let format: String?
@@ -22,6 +30,14 @@ struct DebugSnapshot: Codable, Equatable {
     let highlightCount: Int
     let renderPhase: String
     let lastError: String?
+    /// Field names whose nil value in this snapshot means "not yet
+    /// implemented" rather than "no value". Empty/nil array means every
+    /// nil field is authoritative.
+    let partial: [String]?
+
+    /// Current schema version. Update with care — consumers may pin a
+    /// version they recognize.
+    static let currentSchemaVersion = 1
 
     /// Selected text in the active reader, if any.
     struct SelectionInfo: Codable, Equatable {
@@ -42,14 +58,15 @@ struct DebugSnapshot: Codable, Equatable {
     }()
 
     enum CodingKeys: String, CodingKey {
-        case ts, currentBookId, format, position, theme, fontSize
-        case selection, highlightCount, renderPhase, lastError
+        case schemaVersion, ts, currentBookId, format, position, theme, fontSize
+        case selection, highlightCount, renderPhase, lastError, partial
     }
 
     /// Custom encoder: emits every field, writing `null` for nil optionals
     /// so consumers can distinguish "absent" from "unknown".
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
         try c.encode(ts, forKey: .ts)
         try Self.encodeOptional(currentBookId, forKey: .currentBookId, in: &c)
         try Self.encodeOptional(format, forKey: .format, in: &c)
@@ -60,6 +77,7 @@ struct DebugSnapshot: Codable, Equatable {
         try c.encode(highlightCount, forKey: .highlightCount)
         try c.encode(renderPhase, forKey: .renderPhase)
         try Self.encodeOptional(lastError, forKey: .lastError, in: &c)
+        try Self.encodeOptional(partial, forKey: .partial, in: &c)
     }
 
     private static func encodeOptional<T: Encodable>(

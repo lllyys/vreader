@@ -14,6 +14,7 @@ final class DebugSnapshotTests: XCTestCase {
 
     func test_encode_includesAllRequiredKeys() throws {
         let snap = DebugSnapshot(
+            schemaVersion: 1,
             ts: "2026-05-02T10:00:00Z",
             currentBookId: "book-123",
             format: "epub",
@@ -23,19 +24,21 @@ final class DebugSnapshotTests: XCTestCase {
             selection: nil,
             highlightCount: 3,
             renderPhase: "settled",
-            lastError: nil
+            lastError: nil,
+            partial: nil
         )
         let dict = try encodeAsDictionary(snap)
         let expectedKeys: Set<String> = [
-            "ts", "currentBookId", "format", "position",
+            "schemaVersion", "ts", "currentBookId", "format", "position",
             "theme", "fontSize", "selection", "highlightCount",
-            "renderPhase", "lastError",
+            "renderPhase", "lastError", "partial",
         ]
         XCTAssertEqual(Set(dict.keys), expectedKeys)
     }
 
     func test_encode_outputIsStableJSON_sortedKeys() throws {
         let snap = DebugSnapshot(
+            schemaVersion: 1,
             ts: "2026-05-02T10:00:00Z",
             currentBookId: nil,
             format: nil,
@@ -45,7 +48,8 @@ final class DebugSnapshotTests: XCTestCase {
             selection: nil,
             highlightCount: 0,
             renderPhase: "idle",
-            lastError: nil
+            lastError: nil,
+            partial: nil
         )
         let data = try DebugSnapshot.encoder.encode(snap)
         let json = String(decoding: data, as: UTF8.self)
@@ -66,6 +70,7 @@ final class DebugSnapshotTests: XCTestCase {
 
     func test_encode_nilOptionalsRenderAsNullExplicitly() throws {
         let snap = DebugSnapshot(
+            schemaVersion: 1,
             ts: "2026-05-02T10:00:00Z",
             currentBookId: nil,
             format: nil,
@@ -75,7 +80,8 @@ final class DebugSnapshotTests: XCTestCase {
             selection: nil,
             highlightCount: 0,
             renderPhase: "idle",
-            lastError: nil
+            lastError: nil,
+            partial: nil
         )
         let dict = try encodeAsDictionary(snap)
         // Explicit nulls so the consumer can distinguish "absent" from "unknown".
@@ -90,6 +96,7 @@ final class DebugSnapshotTests: XCTestCase {
 
     func test_encode_nonNilOptionalsRenderWithValues() throws {
         let snap = DebugSnapshot(
+            schemaVersion: 1,
             ts: "2026-05-02T10:00:00Z",
             currentBookId: "uuid-1",
             format: "txt",
@@ -99,7 +106,8 @@ final class DebugSnapshotTests: XCTestCase {
             selection: nil,
             highlightCount: 7,
             renderPhase: "settled",
-            lastError: "nothing"
+            lastError: "nothing",
+            partial: ["currentBookId"]
         )
         let dict = try encodeAsDictionary(snap)
         XCTAssertEqual(dict["currentBookId"] as? String, "uuid-1")
@@ -117,6 +125,7 @@ final class DebugSnapshotTests: XCTestCase {
     func test_encode_selectionRendersAsNestedObject() throws {
         let selection = DebugSnapshot.SelectionInfo(text: "hello", startOffset: 100, endOffset: 105)
         let snap = DebugSnapshot(
+            schemaVersion: 1,
             ts: "2026-05-02T10:00:00Z",
             currentBookId: "book",
             format: "epub",
@@ -126,7 +135,8 @@ final class DebugSnapshotTests: XCTestCase {
             selection: selection,
             highlightCount: 0,
             renderPhase: "settled",
-            lastError: nil
+            lastError: nil,
+            partial: nil
         )
         let dict = try encodeAsDictionary(snap)
         let nested = dict["selection"] as? [String: Any]
@@ -140,6 +150,7 @@ final class DebugSnapshotTests: XCTestCase {
 
     func test_roundTrip_preservesAllFields() throws {
         let original = DebugSnapshot(
+            schemaVersion: 1,
             ts: "2026-05-02T10:00:00Z",
             currentBookId: "uuid",
             format: "azw3",
@@ -149,7 +160,8 @@ final class DebugSnapshotTests: XCTestCase {
             selection: .init(text: "world", startOffset: 0, endOffset: 5),
             highlightCount: 12,
             renderPhase: "settled",
-            lastError: nil
+            lastError: nil,
+            partial: ["selection"]
         )
         let data = try DebugSnapshot.encoder.encode(original)
         let decoded = try JSONDecoder().decode(DebugSnapshot.self, from: data)

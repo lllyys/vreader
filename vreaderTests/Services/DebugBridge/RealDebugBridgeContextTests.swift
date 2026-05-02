@@ -285,6 +285,7 @@ final class RealDebugBridgeContextTests: XCTestCase {
         let data = try Data(contentsOf: url)
         let snap = try JSONDecoder().decode(DebugSnapshot.self, from: data)
 
+        XCTAssertEqual(snap.schemaVersion, 1)
         XCTAssertFalse(snap.ts.isEmpty)
         XCTAssertEqual(snap.theme, "dark")
         XCTAssertEqual(snap.fontSize, 22)
@@ -295,6 +296,11 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(snap.format)
         XCTAssertNil(snap.position)
         XCTAssertNil(snap.selection)
+        // partial lists fields whose nil means "not yet implemented"
+        XCTAssertEqual(
+            Set(snap.partial ?? []),
+            Set(["currentBookId", "format", "position", "selection"])
+        )
 
         // Cleanup
         try? FileManager.default.removeItem(at: url)
@@ -317,9 +323,11 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
-    func test_snapshot_afterFailedCommand_includesErrorInJSON() async throws {
+    func test_snapshot_afterFailedCommand_includesStableErrorCodeInJSON() async throws {
         // Drive through the bridge so lastError flows from a failed dispatch
-        // into the snapshot via the parameter.
+        // into the snapshot via the parameter. Asserts on the stable error
+        // code prefix (`bridge.unknownFixture`) — independent of Swift's
+        // enum-case spelling.
         let context = RealDebugBridgeContext(
             persistence: persistence,
             importer: importer,
@@ -337,8 +345,8 @@ final class RealDebugBridgeContextTests: XCTestCase {
         let snap = try JSONDecoder().decode(DebugSnapshot.self, from: Data(contentsOf: url))
         XCTAssertNotNil(snap.lastError, "snapshot must encode bridge.lastError from previous failure")
         XCTAssertTrue(
-            snap.lastError?.contains("unknownFixture") == true,
-            "lastError content should mention the previous failure: \(snap.lastError ?? "nil")"
+            snap.lastError?.hasPrefix("bridge.unknownFixture") == true,
+            "lastError must start with the stable category prefix `bridge.unknownFixture`, got: \(snap.lastError ?? "nil")"
         )
         try? FileManager.default.removeItem(at: url)
     }
