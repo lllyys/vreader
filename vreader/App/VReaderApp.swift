@@ -10,6 +10,9 @@ struct VReaderApp: App {
     private let contentView: ContentView?
     /// App configuration resolved from build settings.
     private let appConfig: AppConfiguration
+    /// Live PersistenceActor — exposed via SwiftUI Environment for sub-screens
+    /// (e.g. WebDAVSettingsView) that need direct access without protocol wrapping.
+    private let persistenceActor: PersistenceActor?
 
     #if DEBUG
     /// Parsed launch argument overrides for UI testing.
@@ -35,6 +38,7 @@ struct VReaderApp: App {
             self.modelContainer = nil
             self.initError = "The library database could not be opened. It may need to be reset."
             self.contentView = nil
+            self.persistenceActor = nil
             self.debugBridge = nil
             return
         }
@@ -114,6 +118,7 @@ struct VReaderApp: App {
                 ),
                 syncMonitor: syncMonitor
             )
+            self.persistenceActor = persistence
 
             #if DEBUG
             // Build the DebugBridge synchronously. The struct is
@@ -132,6 +137,7 @@ struct VReaderApp: App {
             // Sanitize: don't expose raw file paths or internal details to the user.
             self.initError = Self.sanitizedErrorMessage(error)
             self.contentView = nil
+            self.persistenceActor = nil
             #if DEBUG
             self.debugBridge = nil
             #endif
@@ -144,6 +150,7 @@ struct VReaderApp: App {
                 #if DEBUG
                 contentView
                     .modelContainer(modelContainer)
+                    .environment(\.persistenceActor, persistenceActor)
                     .modifier(TestLaunchModifier(config: testConfig))
                     .onOpenURL { [debugBridge] url in
                         guard url.scheme == DebugCommand.scheme else { return }
@@ -155,6 +162,7 @@ struct VReaderApp: App {
                 #else
                 contentView
                     .modelContainer(modelContainer)
+                    .environment(\.persistenceActor, persistenceActor)
                 #endif
             } else {
                 VStack(spacing: 16) {

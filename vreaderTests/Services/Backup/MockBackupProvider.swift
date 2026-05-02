@@ -30,9 +30,18 @@ final class MockBackupProvider: BackupProvider, @unchecked Sendable {
     /// Total size in bytes to report per backup.
     var totalSizeBytes: Int64 = 2048
 
+    /// Per-operation failure injection.
+    enum InjectedFailure { case none, listBackups, backup, restore, delete }
+    var shouldFailNextOperation: InjectedFailure = .none
+
     // MARK: - Internal State
 
-    /// In-memory backup store keyed by UUID.
+    /// In-memory backup store keyed by UUID. Public so tests can pre-seed.
+    var metadataList: [BackupMetadata] {
+        get { Array(backups.values) }
+        set { backups = Dictionary(uniqueKeysWithValues: newValue.map { ($0.id, $0) }) }
+    }
+
     private var backups: [UUID: BackupMetadata] = [:]
 
     // MARK: - BackupProvider
@@ -40,6 +49,10 @@ final class MockBackupProvider: BackupProvider, @unchecked Sendable {
     func backup(progress: @Sendable (Double) -> Void) async throws -> BackupMetadata {
         if simulateCancellation {
             throw BackupError.cancelled
+        }
+        if shouldFailNextOperation == .backup {
+            shouldFailNextOperation = .none
+            throw BackupError.archiveCreationFailed("injected failure")
         }
 
         // Simulate progress: 0 → 0.5 → 1.0
@@ -61,6 +74,10 @@ final class MockBackupProvider: BackupProvider, @unchecked Sendable {
     }
 
     func restore(backupId: UUID, progress: @Sendable (Double) -> Void) async throws {
+        if shouldFailNextOperation == .restore {
+            shouldFailNextOperation = .none
+            throw BackupError.archiveCorrupted("injected failure")
+        }
         guard backups[backupId] != nil else {
             throw BackupError.backupNotFound(backupId)
         }
@@ -72,11 +89,19 @@ final class MockBackupProvider: BackupProvider, @unchecked Sendable {
     }
 
     func listBackups() async throws -> [BackupMetadata] {
-        backups.values
+        if shouldFailNextOperation == .listBackups {
+            shouldFailNextOperation = .none
+            throw BackupError.storageUnavailable("injected failure")
+        }
+        return backups.values
             .sorted { $0.createdAt > $1.createdAt }
     }
 
     func deleteBackup(id: UUID) async throws {
+        if shouldFailNextOperation == .delete {
+            shouldFailNextOperation = .none
+            throw BackupError.storageUnavailable("injected failure")
+        }
         guard backups.removeValue(forKey: id) != nil else {
             throw BackupError.backupNotFound(id)
         }

@@ -15,6 +15,7 @@ import SwiftUI
 /// WebDAV server configuration view for backup settings.
 struct WebDAVSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.persistenceActor) private var persistenceFromEnv
 
     @State private var serverURL = ""
     @State private var username = ""
@@ -23,8 +24,22 @@ struct WebDAVSettingsView: View {
     @State private var testResult: TestResult?
     @State private var isSaving = false
 
+    @State private var backupVM: BackupViewModel?
+    @State private var showRestoreConfirm = false
+    @State private var restoreCandidate: BackupMetadata?
+    @State private var showDeleteConfirm = false
+    @State private var deleteCandidate: BackupMetadata?
+
     /// Keychain service for credential persistence.
     private let keychain: KeychainService
+
+    /// Optional explicit persistence override (preferred for tests / previews).
+    /// When nil, we fall back to the SwiftUI environment value.
+    private let injectedPersistence: PersistenceActor?
+
+    private var persistence: PersistenceActor? {
+        injectedPersistence ?? persistenceFromEnv
+    }
 
     // MARK: - Keychain Accounts
 
@@ -34,8 +49,9 @@ struct WebDAVSettingsView: View {
 
     // MARK: - Init
 
-    init(keychain: KeychainService = KeychainService()) {
+    init(keychain: KeychainService = KeychainService(), persistence: PersistenceActor? = nil) {
         self.keychain = keychain
+        self.injectedPersistence = persistence
     }
 
     // MARK: - Body
@@ -118,10 +134,188 @@ struct WebDAVSettingsView: View {
                 }
                 .accessibilityIdentifier("webdavClearButton")
             }
+
+            backupSection
         }
         .navigationTitle("WebDAV Backup")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { loadCredentials() }
+        .task { await refreshBackupVMIfNeeded() }
+        .confirmationDialog(
+            "Restore from this backup?",
+            isPresented: $showRestoreConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Restore", role: .destructive) {
+                if let candidate = restoreCandidate {
+                    Task { await backupVM?.performRestore(backupId: candidate.id) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let candidate = restoreCandidate {
+                Text("This will merge \(candidate.bookCount) books' annotations, positions, and settings into your library. Local data is preserved (merge, not replace).")
+            }
+        }
+        .confirmationDialog(
+            "Delete this backup?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let candidate = deleteCandidate {
+                    Task { await backupVM?.deleteBackup(id: candidate.id) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes the backup from the server.")
+        }
+    }
+
+    // MARK: - Backup Section
+
+    @ViewBuilder
+    private var backupSection: some View {
+        if hasSavedCredentials, persistence != nil {
+            Section {
+                Button {
+                    Task { await backupVM?.performBackup() }
+                } label: {
+                    HStack {
+                        Image(systemName: "icloud.and.arrow.up")
+                        Text("Back Up Now")
+                        Spacer()
+                        if backupVM?.isBackingUp == true {
+                            ProgressView(value: backupVM?.backupProgress ?? 0)
+                                .frame(width: 80)
+                        } else if backupVM?.lastBackupSucceeded == true {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        }
+                    }
+                }
+                .disabled(backupVM == nil || backupVM?.isBackingUp == true || backupVM?.isRestoring == true)
+                .accessibilityIdentifier("webdavBackupNowButton")
+            } header: {
+                Text("Backup")
+            } footer: {
+                Text("Backs up annotations, reading positions, settings, collections, web sources, per-book overrides, and replacement rules. Book files themselves are not uploaded — you'll need to re-import them on a new device, then restore.")
+            }
+
+            Section {
+                if backupVM?.isLoading == true {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                } else if backupVM?.backups.isEmpty == true {
+                    Text("No backups yet")
+                        .foregroundStyle(.secondary)
+                } else if let backups = backupVM?.backups {
+                    ForEach(backups, id: \.id) { backup in
+                        backupRow(backup)
+                    }
+                }
+                Button {
+                    Task { await backupVM?.loadBackups() }
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Refresh List")
+                    }
+                }
+                .disabled(backupVM == nil || backupVM?.isLoading == true)
+                .accessibilityIdentifier("webdavRefreshBackupsButton")
+            } header: {
+                Text("Available Backups")
+            }
+
+            if let message = backupVM?.errorMessage {
+                Section {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("webdavBackupErrorText")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func backupRow(_ backup: BackupMetadata) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "archivebox")
+                Text(backup.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.body)
+                Spacer()
+                Text(byteCountFormatter.string(fromByteCount: backup.totalSizeBytes))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("\(backup.deviceName) · v\(backup.appVersion) · \(backup.bookCount) books")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Button {
+                    restoreCandidate = backup
+                    showRestoreConfirm = true
+                } label: {
+                    Label("Restore", systemImage: "icloud.and.arrow.down")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(backupVM?.isRestoring == true || backupVM?.isBackingUp == true)
+                .accessibilityIdentifier("webdavRestoreButton-\(backup.id.uuidString)")
+
+                Button(role: .destructive) {
+                    deleteCandidate = backup
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("webdavDeleteBackupButton-\(backup.id.uuidString)")
+
+                if backupVM?.isRestoring == true,
+                   restoreCandidate?.id == backup.id {
+                    ProgressView(value: backupVM?.restoreProgress ?? 0)
+                        .frame(width: 60)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var hasSavedCredentials: Bool {
+        !serverURL.isEmpty && !username.isEmpty && !password.isEmpty
+    }
+
+    private var byteCountFormatter: ByteCountFormatter {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useKB, .useMB]
+        f.countStyle = .file
+        return f
+    }
+
+    /// Constructs (or refreshes) the BackupViewModel when credentials become available.
+    private func refreshBackupVMIfNeeded() async {
+        guard let persistence else { return }
+        guard hasSavedCredentials else {
+            backupVM = nil
+            return
+        }
+        do {
+            let provider = try WebDAVProviderFactory.make(
+                persistence: persistence,
+                keychain: keychain
+            )
+            let vm = BackupViewModel(provider: provider)
+            backupVM = vm
+            await vm.loadBackups()
+        } catch {
+            backupVM = nil
+        }
     }
 
     // MARK: - Actions
@@ -167,7 +361,8 @@ struct WebDAVSettingsView: View {
             try keychain.saveString(serverURL, forAccount: Self.serverURLAccount)
             try keychain.saveString(username, forAccount: Self.usernameAccount)
             try keychain.saveString(password, forAccount: Self.passwordAccount)
-            dismiss()
+            testResult = TestResult(isSuccess: true, message: "Credentials saved")
+            await refreshBackupVMIfNeeded()
         } catch {
             testResult = TestResult(
                 isSuccess: false,
