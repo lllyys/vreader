@@ -1,0 +1,486 @@
+// Purpose: Round-trip tests for BackupDataCollector + BackupDataRestorer.
+// Exercises every section produced by the collector against a real in-memory
+// PersistenceActor + isolated UserDefaults + temp PerBookSettings dir.
+//
+// @coordinates-with: BackupDataCollector.swift, BackupDataRestorer.swift,
+//   PersistenceActor+Backup.swift, WebDAVProvider.swift
+
+import Testing
+import Foundation
+import SwiftData
+@testable import vreader
+
+@Suite("BackupDataCollector + BackupDataRestorer")
+struct BackupCollectorRestorerSuite {
+
+    // MARK: - Fixture builders
+
+    private static let suiteCounter = Atomic<Int>(0)
+    private static let testCounter = Atomic<Int>(0)
+
+    /// Creates an isolated SchemaV4 in-memory ModelContainer.
+    private func makeContainer() throws -> ModelContainer {
+        let schema = Schema(SchemaV4.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        return try ModelContainer(for: schema, configurations: [config])
+    }
+
+    private func makePersistence() throws -> PersistenceActor {
+        PersistenceActor(modelContainer: try makeContainer())
+    }
+
+    /// Returns both the container and a persistence actor wrapping it, so tests
+    /// can do raw ModelContext queries without crossing the actor boundary.
+    private func makePersistenceAndContainer() throws -> (ModelContainer, PersistenceActor) {
+        let container = try makeContainer()
+        return (container, PersistenceActor(modelContainer: container))
+    }
+
+    /// Builds a Locator for the given fingerprint with optional EPUB href/progression.
+    private func makeLocator(
+        fingerprint: DocumentFingerprint,
+        href: String? = nil,
+        progression: Double? = nil
+    ) -> Locator {
+        Locator.validated(
+            bookFingerprint: fingerprint,
+            href: href,
+            progression: progression
+        )!
+    }
+
+    /// Per-test isolated UserDefaults using a unique suite name.
+    private func makeIsolatedDefaults(label: String) -> UserDefaults {
+        let id = Self.suiteCounter.incrementAndGet()
+        let suite = "vreader.backup.test.\(label).\(id).\(UUID().uuidString)"
+        return UserDefaults(suiteName: suite) ?? .standard
+    }
+
+    /// Per-test temp dir for PerBookSettingsStore.
+    private func makeTempDir(label: String) throws -> URL {
+        let id = Self.testCounter.incrementAndGet()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vreader-backup-tests-\(label)-\(id)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func makeFingerprint(
+        sha: String = String(repeating: "a", count: 64),
+        byteCount: Int64 = 1024,
+        format: BookFormat = .epub
+    ) -> DocumentFingerprint {
+        DocumentFingerprint(contentSHA256: sha, fileByteCount: byteCount, format: format)
+    }
+
+    private func insertBook(
+        _ persistence: PersistenceActor,
+        title: String = "Test Book",
+        sha: String = String(repeating: "a", count: 64)
+    ) async throws -> DocumentFingerprint {
+        let fp = makeFingerprint(sha: sha)
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: title,
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: ImportProvenance(
+                source: .filesApp,
+                importedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                originalURLBookmarkData: nil
+            ),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+        return fp
+    }
+
+    // MARK: - Settings
+
+    @Test func settingsRoundTrips() async throws {
+        let defaultsA = makeIsolatedDefaults(label: "settingsA")
+        let defaultsB = makeIsolatedDefaults(label: "settingsB")
+
+        defaultsA.set("dark", forKey: "readerTheme")
+        defaultsA.set(true, forKey: "readerAutoPageTurn")
+        defaultsA.set(7.5, forKey: "readerAutoPageTurnInterval")
+        let typographyData = "{\"fontSize\":18}".data(using: .utf8)!
+        defaultsA.set(typographyData, forKey: "readerTypography")
+
+        let persistence = try makePersistence()
+        let perBookDir = try makeTempDir(label: "settings")
+        let collector = BackupDataCollector(
+            persistence: persistence, defaults: defaultsA, perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectSettings()
+
+        let restorer = BackupDataRestorer(
+            persistence: persistence, defaults: defaultsB, perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restoreSettings(from: data)
+
+        #expect(defaultsB.string(forKey: "readerTheme") == "dark")
+        #expect(defaultsB.bool(forKey: "readerAutoPageTurn") == true)
+        #expect(defaultsB.double(forKey: "readerAutoPageTurnInterval") == 7.5)
+        #expect(defaultsB.data(forKey: "readerTypography") == typographyData)
+    }
+
+    @Test func settingsSkipsUnknownKeys() async throws {
+        let defaultsA = makeIsolatedDefaults(label: "settingsUnknownA")
+        let defaultsB = makeIsolatedDefaults(label: "settingsUnknownB")
+
+        defaultsA.set("dark", forKey: "readerTheme")
+        defaultsA.set("malicious", forKey: "someUnrelatedAppKey")
+
+        let persistence = try makePersistence()
+        let perBookDir = try makeTempDir(label: "settings-unknown")
+        let collector = BackupDataCollector(
+            persistence: persistence, defaults: defaultsA, perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectSettings()
+
+        let restorer = BackupDataRestorer(
+            persistence: persistence, defaults: defaultsB, perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restoreSettings(from: data)
+
+        #expect(defaultsB.string(forKey: "readerTheme") == "dark")
+        #expect(defaultsB.string(forKey: "someUnrelatedAppKey") == nil)
+    }
+
+    // MARK: - Annotations (highlights / bookmarks / notes)
+
+    @Test func annotationsRoundTrip() async throws {
+        let sourcePersistence = try makePersistence()
+        let fp = try await insertBook(sourcePersistence, title: "Source Book")
+        let key = fp.canonicalKey
+        let locator = makeLocator(fingerprint: fp, href: "chapter-1.xhtml", progression: 0.42)
+
+        let highlight = try await sourcePersistence.addHighlight(
+            locator: locator,
+            selectedText: "selected passage",
+            color: "yellow",
+            note: "interesting bit",
+            toBookWithKey: key
+        )
+        let bookmark = try await sourcePersistence.addBookmark(
+            locator: locator,
+            title: "Important page",
+            toBookWithKey: key
+        )
+        let note = try await sourcePersistence.addAnnotation(
+            locator: locator,
+            content: "note body",
+            toBookWithKey: key
+        )
+
+        let perBookDir = try makeTempDir(label: "ann")
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "annA"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectAnnotations()
+
+        // Restore into a fresh persistence with the same book
+        let destPersistence = try makePersistence()
+        _ = try await insertBook(destPersistence, title: "Source Book")
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "annB"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restoreAnnotations(from: data)
+
+        let restoredHighlights = try await destPersistence.fetchHighlights(forBookWithKey: key)
+        let restoredBookmarks = try await destPersistence.fetchBookmarks(forBookWithKey: key)
+        let restoredNotes = try await destPersistence.fetchAnnotations(forBookWithKey: key)
+
+        #expect(restoredHighlights.count == 1)
+        #expect(restoredHighlights.first?.selectedText == "selected passage")
+        #expect(restoredHighlights.first?.note == "interesting bit")
+        #expect(restoredBookmarks.count == 1)
+        #expect(restoredBookmarks.first?.title == "Important page")
+        #expect(restoredNotes.count == 1)
+        #expect(restoredNotes.first?.content == "note body")
+        // Sanity-check ids exist (not necessarily equal — production addHighlight mints new UUIDs)
+        #expect(highlight.highlightId != UUID(uuid: (0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)))
+        #expect(bookmark.bookmarkId != UUID(uuid: (0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)))
+        #expect(note.annotationId != UUID(uuid: (0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)))
+    }
+
+    @Test func annotationsSkipsMissingBook() async throws {
+        let sourcePersistence = try makePersistence()
+        let fp = try await insertBook(sourcePersistence, title: "Will Be Missing")
+        let key = fp.canonicalKey
+        let locator = makeLocator(fingerprint: fp, href: "ch1", progression: 0.1)
+        _ = try await sourcePersistence.addHighlight(
+            locator: locator,
+            selectedText: "x",
+            color: "yellow",
+            note: nil,
+            toBookWithKey: key
+        )
+
+        let perBookDir = try makeTempDir(label: "ann-missing")
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "missA"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectAnnotations()
+
+        // Dest has NO book — restore should silently skip
+        let destPersistence = try makePersistence()
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "missB"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restoreAnnotations(from: data)
+        // No assertion beyond "doesn't throw" — skipping missing books is the contract.
+    }
+
+    // MARK: - Positions
+
+    @Test func positionsRoundTrip() async throws {
+        let sourcePersistence = try makePersistence()
+        let fp = try await insertBook(sourcePersistence, title: "Pos Book")
+        let key = fp.canonicalKey
+        let locator = makeLocator(fingerprint: fp, href: "chapter-3.xhtml", progression: 0.66)
+        try await sourcePersistence.savePosition(
+            bookFingerprintKey: key, locator: locator, deviceId: ""
+        )
+
+        let perBookDir = try makeTempDir(label: "pos")
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "posA"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectPositions()
+
+        let destPersistence = try makePersistence()
+        _ = try await insertBook(destPersistence, title: "Pos Book")
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "posB"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restorePositions(from: data)
+
+        let restored = try await destPersistence.loadPosition(bookFingerprintKey: key)
+        #expect(restored?.href == "chapter-3.xhtml")
+        #expect(abs((restored?.progression ?? 0) - 0.66) < 0.001)
+    }
+
+    // MARK: - Collections
+
+    @Test func collectionsRoundTrip() async throws {
+        let sourcePersistence = try makePersistence()
+        let fp = try await insertBook(sourcePersistence, title: "Coll Book")
+        let key = fp.canonicalKey
+        _ = try await sourcePersistence.createCollection(name: "Sci-Fi")
+        try await sourcePersistence.addBookToCollection(
+            bookFingerprintKey: key, collectionName: "Sci-Fi"
+        )
+
+        let perBookDir = try makeTempDir(label: "coll")
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "collA"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectCollections()
+
+        let destPersistence = try makePersistence()
+        _ = try await insertBook(destPersistence, title: "Coll Book")
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "collB"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restoreCollections(from: data)
+
+        let restored = try await destPersistence.fetchAllCollections()
+        #expect(restored.contains { $0.name == "Sci-Fi" })
+        let books = try await destPersistence.fetchBooksInCollection(name: "Sci-Fi")
+        #expect(books.contains(key))
+    }
+
+    // MARK: - Book Sources
+
+    @Test func bookSourcesRoundTrip() async throws {
+        let (sourceContainer, sourcePersistence) = try makePersistenceAndContainer()
+        // Insert a BookSource directly via ModelContext (no PersistenceActor extension yet).
+        let mc = ModelContext(sourceContainer)
+        let src = BookSource(
+            sourceURL: "https://example.com",
+            sourceName: "Example",
+            sourceGroup: "Test",
+            sourceType: 0,
+            enabled: true,
+            searchURL: "https://example.com/?q={{key}}",
+            header: nil,
+            customOrder: 1
+        )
+        mc.insert(src)
+        try mc.save()
+
+        let perBookDir = try makeTempDir(label: "bs")
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "bsA"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectBookSources()
+
+        let (destContainer, destPersistence) = try makePersistenceAndContainer()
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "bsB"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restoreBookSources(from: data)
+
+        let mcDest = ModelContext(destContainer)
+        let restored = try mcDest.fetch(FetchDescriptor<BookSource>())
+        #expect(restored.count == 1)
+        #expect(restored.first?.sourceURL == "https://example.com")
+        #expect(restored.first?.sourceName == "Example")
+    }
+
+    // MARK: - Per-book settings
+
+    @Test func perBookSettingsRoundTrip() async throws {
+        let perBookDirA = try makeTempDir(label: "pbA")
+        let perBookDirB = try makeTempDir(label: "pbB")
+
+        let sourcePersistence = try makePersistence()
+        let fp = try await insertBook(sourcePersistence, title: "PB Book")
+        let key = fp.canonicalKey
+
+        let override = PerBookSettingsOverride(
+            fontSize: 22,
+            fontName: "serif",
+            lineSpacing: 1.8,
+            letterSpacing: nil,
+            themeName: "sepia",
+            readingMode: nil
+        )
+        try PerBookSettingsStore.save(override, for: key, baseURL: perBookDirA)
+
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "pbA"),
+            perBookSettingsBaseURL: perBookDirA
+        )
+        let data = try await collector.collectPerBookSettings()
+
+        let destPersistence = try makePersistence()
+        _ = try await insertBook(destPersistence, title: "PB Book")
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "pbB"),
+            perBookSettingsBaseURL: perBookDirB
+        )
+        try await restorer.restorePerBookSettings(from: data)
+
+        let restored = PerBookSettingsStore.settings(for: key, baseURL: perBookDirB)
+        #expect(restored?.fontSize == 22)
+        #expect(restored?.fontName == "serif")
+        #expect(restored?.lineSpacing == 1.8)
+        #expect(restored?.themeName == "sepia")
+        #expect(restored?.readingMode == nil)
+    }
+
+    // MARK: - Replacement Rules
+
+    @Test func replacementRulesRoundTrip() async throws {
+        let (sourceContainer, sourcePersistence) = try makePersistenceAndContainer()
+        let mc = ModelContext(sourceContainer)
+        let rule = ContentReplacementRule(
+            pattern: "foo",
+            replacement: "bar",
+            isRegex: false,
+            scopeKey: "",
+            enabled: true,
+            order: 1,
+            label: "demo rule"
+        )
+        mc.insert(rule)
+        try mc.save()
+
+        let perBookDir = try makeTempDir(label: "rr")
+        let collector = BackupDataCollector(
+            persistence: sourcePersistence,
+            defaults: makeIsolatedDefaults(label: "rrA"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectReplacementRules()
+
+        let (destContainer, destPersistence) = try makePersistenceAndContainer()
+        let restorer = BackupDataRestorer(
+            persistence: destPersistence,
+            defaults: makeIsolatedDefaults(label: "rrB"),
+            perBookSettingsBaseURL: perBookDir
+        )
+        try await restorer.restoreReplacementRules(from: data)
+
+        let mcDest = ModelContext(destContainer)
+        let restored = try mcDest.fetch(FetchDescriptor<ContentReplacementRule>())
+        #expect(restored.count == 1)
+        #expect(restored.first?.pattern == "foo")
+        #expect(restored.first?.replacement == "bar")
+        #expect(restored.first?.label == "demo rule")
+    }
+
+    // MARK: - Book count
+
+    @Test func bookCountReflectsLibrarySize() async throws {
+        let persistence = try makePersistence()
+        let collector = BackupDataCollector(
+            persistence: persistence,
+            defaults: makeIsolatedDefaults(label: "count"),
+            perBookSettingsBaseURL: try makeTempDir(label: "count")
+        )
+        let initialCount = await collector.getBookCount()
+        #expect(initialCount == 0)
+
+        _ = try await insertBook(persistence, title: "B1", sha: String(repeating: "a", count: 64))
+        _ = try await insertBook(persistence, title: "B2", sha: String(repeating: "b", count: 64))
+
+        let postCount = await collector.getBookCount()
+        #expect(postCount == 2)
+    }
+
+    // MARK: - Schema version forward compat
+
+    @Test func collectorEmitsSchemaVersion1() async throws {
+        let persistence = try makePersistence()
+        let collector = BackupDataCollector(
+            persistence: persistence,
+            defaults: makeIsolatedDefaults(label: "schema"),
+            perBookSettingsBaseURL: try makeTempDir(label: "schema")
+        )
+        let data = try await collector.collectCollections()
+        let envelope = try JSONDecoder().decode(BackupCollectionsEnvelope.self, from: data)
+        #expect(envelope.schemaVersion == 1)
+    }
+}
+
+// MARK: - Test-local atomic counter
+
+/// Minimal atomic int for unique suite naming across parallel tests.
+final class Atomic<Value>: @unchecked Sendable where Value: Numeric {
+    private let lock = NSLock()
+    private var value: Value
+    init(_ initial: Value) { self.value = initial }
+    func incrementAndGet() -> Value {
+        lock.lock(); defer { lock.unlock() }
+        value += 1
+        return value
+    }
+}
