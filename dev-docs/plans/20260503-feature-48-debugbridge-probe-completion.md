@@ -9,7 +9,7 @@
 **Source**: `docs/features.md` row #49 (PLANNED, High) for resolver/open/snapshot scope. Row #48 = DUPLICATE, row #50 = TODO for per-format work.
 **Phase**: Phase-1 prerequisite for feature #45 (Verification Harness Sweep)
 **GH issue**: not yet filed (will be filed at PLANNED status, mirror under "GH: #N" in Notes)
-**Status**: AUDIT-CAP REACHED at v3 (Round 3) — split accepted; this plan covers #49 only. Round-3 fixes pending #49's Gate 3 entry.
+**Status**: v4 — Round-3 surface fixes applied; plan covers #49 only.
 
 ## Audit cap reached — Round 3 verdict (2026-05-03)
 
@@ -45,22 +45,29 @@ Until the user picks, the plan stays at v3 and feature #48 stays `TODO`.
 
 - **DRAFT (v1)** — initial plan, sent to Codex for audit (Gate 2)
 - **v2** — incorporated Codex audit findings on 2026-05-03 (Round 1). See "Audit fixes applied" below. Major shape changes: AZW3 host retargeted to `FoliateSpikeView`, eval surface redesigned around per-host evaluator registration, `awaitNextRegister` replaced by keyed `awaitReader(fingerprintKey:)`, sentence-index probe and fixture-leak fix carved out, xcodegen DEBUG-only resource pattern resolved.
-- **v3 (this) — incorporated Codex audit findings on 2026-05-03 (Round 2).** Five surgical fixes:
+- **v4 — Round-3 surface fixes applied on 2026-05-03 (post split-accept).** Six compile-correctness edits, no scope change:
+  (1) `CheckedContinuation` → `CheckedThrowingContinuation` everywhere it appears (Swift convention for throwing continuations).
+  (2) `DebugReaderRegistry.activeReader` documented as **weak** to match the live code; `awaitReader` sketch reads through a weak `current` accessor instead of a strong stored property.
+  (3) `open(bookId:position:)` sketch rewritten against actual types: `RealDebugBridgeContext.userDefaults` (not `settingsStore`); instantiate `ReaderSettingsStore(defaults: userDefaults)` to read `readingMode`; `FormatCapabilities.capabilities(for:)` receives the existing `BookRecord.fingerprint.format` (`BookFormat`) instead of a stringly-typed `format`.
+  (4) `positionProvider` now closes over a class-backed reference (a small `@MainActor` holder updated by the host) so each call performs a live read; the v3 `[currentLocator]` capture-list pattern is documented as wrong (capture-list with a value type snapshots at registration time, not a live binding).
+  (5) `evalUnsupported` JSON file path normalized to the existing `Caches/DebugBridge/eval-<bridge>.json` convention used by the live code (no `dest=` URL parameter — `DebugCommand.eval` doesn't have one); the v2 → v3 audit-fix table entry that introduced `eval-result-<uuid>.json` is corrected accordingly.
+  (6) Status line updated to v4; this revision-history entry added.
+- **v3 — incorporated Codex audit findings on 2026-05-03 (Round 2).** Five surgical fixes:
   1. `awaitReader` waiter ownership — each waiter gets a UUID token; timeout removes by token identity, not first-match (fixes race when two callers wait on the same key with different timeouts).
   2. Concrete DEBUG-only probe injection API for hosts — every reader host gains a `wireDebugProbe: ((DebugReaderProbeAdapter) -> Void)?` parameter with explicit per-format callback contract (selection coordinates, render-phase changes, seek-completion).
   3. `open(bookId:position:)` validates BEFORE posting `.debugBridgeOpenBook` — order is now: book lookup → position validation → unified-mode check → notification post.
   4. Foliate post-seek disambiguation — accepting the narrowed limitation (Option B): `open?position=` for AZW3 only supported from a clean reader state. Documented in Open Questions and Goal section. Verification flows always start from `vreader-debug://reset`.
-  5. Explicit unknown-bridge error + build-script behavior — unknown `bridge` writes `evalUnsupported(bridge:)` to `Caches/eval-result-<uuid>.json` with the known-bridges list; build-phase script uses `rsync -a` (idempotent on empty dir) and `inputFiles` references the parent `DebugFixtures/` directory.
+  5. Explicit unknown-bridge error + build-script behavior — unknown `bridge` writes `evalUnsupported(bridge:)` to `Caches/DebugBridge/eval-<bridge>.json` (existing convention used by the live code; no `dest=` URL parameter exists for eval) with the known-bridges list; build-phase script uses `rsync -a` (idempotent on empty dir) and `inputFiles` references the parent `DebugFixtures/` directory. **Corrected in v4** — v3 erroneously specified `Caches/eval-result-<uuid>.json` and a non-existent `dest=` URL parameter.
 
 ## Audit fixes applied — Round 2 (Codex 2026-05-03)
 
 | Finding | Severity | Resolution |
 |---------|----------|-----------|
-| `awaitReader` waiter ownership: storing waiters as `[String: [Continuation]]` and removing the FIRST waiter on timeout means two callers waiting on the same key with different timeouts can resume the wrong continuation. | Critical | **Each waiter gets a UUID token.** Storage becomes `[String: [(token: UUID, continuation: CheckedContinuation<DebugReaderProbe, Error>)]]`. Timeout removes the entry whose token matches the timeout task's token, never the first match. See revised sketch in "`awaitReader(fingerprintKey:timeout:)` replaces `awaitNextRegister`" below. |
+| `awaitReader` waiter ownership: storing waiters as `[String: [Continuation]]` and removing the FIRST waiter on timeout means two callers waiting on the same key with different timeouts can resume the wrong continuation. | Critical | **Each waiter gets a UUID token.** Storage becomes `[String: [(token: UUID, continuation: CheckedThrowingContinuation<DebugReaderProbe, Error>)]]` (throwing continuation per Swift convention — corrected in v4 from `CheckedContinuation`). Timeout removes the entry whose token matches the timeout task's token, never the first match. See revised sketch in "`awaitReader(fingerprintKey:timeout:)` replaces `awaitNextRegister`" below. |
 | Concrete DEBUG-only probe injection API for hosts is unspecified — the plan claims hosts populate the probe but doesn't add the API parameter. | High | **Every reader host gains a DEBUG-only `wireDebugProbe: ((DebugReaderProbeAdapter) -> Void)? = nil` parameter** (`#if DEBUG` gated at the parameter site). `ReaderContainerView` constructs the adapter, passes `wireDebugProbe` to the host, and the host invokes it after the underlying view (WKWebView / UITextView / PDFView) is ready. Per-host callback contract spelled out in "Per-host probe injection contract" below. |
 | `open(bookId:position:)` posts `.debugBridgeOpenBook` BEFORE validating position — malformed position opens the reader and then throws, two side effects from one bad call. | High | **Reorder: book lookup → position validation → unified-mode check → notification post.** Validation runs before any side effect; the bridge writes `openPositionUnresolvable` / `openPositionUnsupportedInUnifiedMode` to `lastError.json` and returns without opening anything. Revised `open(bookId:position:)` sketch shows the new order. |
 | Foliate post-seek disambiguation: spontaneous relocate during arming window may resolve the wrong continuation (called out in v2 risks but not resolved). | Medium | **Accepted limitation (Option B).** `open?position=` for AZW3 only supports clean-reader-state seeks (no prior interactive seek within 500ms of the arming window). Verification flows always start from `vreader-debug://reset`, so they never hit this case. Documented in Goal section + Open Questions. Sequence-number disambiguation (Option A) deferred until empirical data shows it's needed. |
-| `eval?bridge=<unknown>` behavior was an Open Question; build-phase script behavior on empty fixture dir was unspecified. | Medium | **Unknown bridge writes `evalUnsupported(bridge: <name>)`** to `Caches/eval-result-<uuid>.json` (matches existing eval-result file pattern), payload includes `knownBridges: [<list>]` for diagnostics. **Build-phase script uses `rsync -a --include='*/' --include='*' --exclude='*' DebugFixtures/ dest/`** (idempotent, doesn't fail on empty); `inputFiles` references the parent `DebugFixtures/` directory so Xcode invalidates correctly when fixtures change. Updated `project.yml` stanza in WI-9. |
+| `eval?bridge=<unknown>` behavior was an Open Question; build-phase script behavior on empty fixture dir was unspecified. | Medium | **Unknown bridge writes `evalUnsupported(bridge: <name>)`** to `Caches/DebugBridge/eval-<bridge>.json` (the existing live-code convention used by `RealDebugBridgeContext.eval`; `DebugCommand.eval` has no `dest=` URL parameter — corrected in v4 from the original v3 claim of `Caches/eval-result-<uuid>.json`). Payload includes `knownBridges: [<list>]` for diagnostics. **Build-phase script uses `rsync -a --include='*/' --include='*' --exclude='*' DebugFixtures/ dest/`** (idempotent, doesn't fail on empty); `inputFiles` references the parent `DebugFixtures/` directory so Xcode invalidates correctly when fixtures change. Updated `project.yml` stanza in WI-9. |
 
 ## Audit fixes applied — Round 1 (Codex 2026-05-03)
 
@@ -69,11 +76,11 @@ Until the user picks, the plan stays at v3 and feature #48 stays `TODO`.
 | Plan targets `FoliateReaderContainerView` for AZW3, but `ReaderContainerView.nativeReaderView` routes `.azw3` to `FoliateSpikeView` (live AZW3 renderer). `FoliateReaderContainerView` exists but is not on the live dispatch path. | Critical | **Retarget WIs 4 and 6 to `FoliateSpikeView`.** Surface area updated: `FoliateSpikeView.swift` (203 LOC) replaces `FoliateViewBridge.swift` / `FoliateReaderContainerView.swift` as the per-format settle + eval host. The wiring shape (`onWebViewReady`, `onRenderCommitted`) is the same; only the file name and the existing message-handler routing change. `FoliateViewBridge.swift` and `FoliateReaderContainerView.swift` are explicitly **out of scope** for #48 (they're not on the dispatch path). If/when the dispatcher converges to the container view, follow-up plan re-targets the same wiring. |
 | `TTSService.State` is `Sendable, Equatable` only — no `RawRepresentable`, so `state.rawValue` won't compile. | Critical | **Drop `state.rawValue`.** Snapshot ships `ttsOffsetUTF16: Int?` only (sourced from `TTSService.currentOffsetUTF16`). A small extension `TTSService.State.publicName: String` (`"idle" / "speaking" / "paused"`) is added inside `vreader/Services/TTS/TTSService.swift` (`#if DEBUG`-gated extension at end of file, ~10 LOC) and surfaced via `probe.ttsStateProvider`. The probe API name is `currentTTSState() -> String?`; the rendered string comes from `publicName`, not `rawValue`. |
 | `LocatorValidationError` is `Sendable` only, not `Equatable`. The proposed `DebugPositionResolverError: Equatable` with `.validationFailed(LocatorValidationError)` won't compile. | Critical | **Reshape `DebugPositionResolverError`.** Replace the associated value with a flat string: `case validationFailed(reason: String)`. The resolver maps `LocatorValidationError` cases to stable strings (`"negativePageIndex"`, `"negativeUTF16Offset"`, `"invertedUTF16Range"`, `"nonFiniteProgression"`) before throwing. Keeps the resolver `Equatable` for tests; doesn't require a separate change to `Locator.swift`. (If a future feature genuinely needs `Equatable` on `LocatorValidationError`, that's a one-line standalone PR — not part of #48.) |
-| `[weak Locator?]` is impossible — `Locator` is a value type. The example `positionProvider: { [weak currentLocator] in ... }` doesn't compile. | Critical | **Drop the weak capture.** `currentLocator` is `@State Locator?` (a value); the closure captures by value via `[currentLocator]` or by direct capture. Updated example uses `{ currentLocator.flatMap(DebugPositionFormatter.format(_:)) }` with the closure capturing the SwiftUI `@State` access pattern (which the compiler resolves through the property wrapper). No weak references in the rewritten DEBUG `.onAppear` example. |
+| `[weak Locator?]` is impossible — `Locator` is a value type. The example `positionProvider: { [weak currentLocator] in ... }` doesn't compile. | Critical | **Drop the weak capture.** `currentLocator` is `@State Locator?` (a value); the closure captures by value via `[currentLocator]` or by direct capture. Updated example uses `{ currentLocator.flatMap(DebugPositionFormatter.format(_:)) }` with the closure capturing the SwiftUI `@State` access pattern (which the compiler resolves through the property wrapper). No weak references in the rewritten DEBUG `.onAppear` example. **(Refined again in v4 Fix #4: a value-type capture list still snapshots at registration time, so the probe would never observe locator updates. v4 routes through a `@MainActor` class-backed `DebugLocatorHolder` that the host updates on every locator change; the closure captures the holder by reference and performs a live read each call.)** |
 | "Optional protocol methods" is not Swift terminology. | Low | **Renamed throughout to "default-implemented" (i.e. the protocol declares the method; an extension provides a default body).** All references in the plan now say "default-implemented so existing adapters compile." |
 | xcodegen `excludes:` is **not** per-build-config. Open Question 1's "exclude in base, re-add in DEBUG" pattern is not supported. | Critical | **Pick the simplest viable approach: build-phase script that copies fixtures only when `${CONFIGURATION}` is `Debug`.** `project.yml` keeps the fixtures source-listed for the test bundle (so unit tests find them in `Bundle(for: ...)`), but they are removed from the *app* target's `sources:` and instead copied at build time by a `Run Script` build phase that no-ops in Release. **Why this beats the alternatives** (Debug-only target: requires duplicating settings, risks drift; separate XcodeGen spec: invalidates `xcodegen generate` workflow and breaks the docs-sync rule). Build-phase script is one stanza in `project.yml`, runs only when `[ "${CONFIGURATION}" = "Debug" ]`, and the existing `verify-release-no-debugbridge.sh` validates the result. WI-9 details the exact `project.yml` stanza. |
 | Fixture leak (`war-and-peace.txt` ships in Release) is a standalone bug, not a #48 work item. | Critical | **Carved out.** WI-9 of v2 only adds new fixtures and the build-phase script that gates the *new* fixtures directory. The pre-existing `war-and-peace.txt` Release leak is removed from #48's scope; the calling agent will file it as a separate `docs/bugs.md` row (the build-phase script will subsume the fix once the bug PR retargets `war-and-peace.txt` into the same `DebugFixtures/` directory, but that's a coordination point, not a #48 deliverable). |
-| `awaitNextRegister(timeout:)` 100ms heuristic is unsound (race window is arbitrary, depends on push timing). | Critical | **Replaced with `awaitReader(fingerprintKey:timeout:)`.** Algorithm: (1) check `current` registry — if a probe matching the key is already registered, return it immediately. (2) Otherwise install a continuation in a `[String: [CheckedContinuation<DebugReaderProbe, Error>]]` keyed by `fingerprintKey`. (3) `register(_:)` resumes ALL waiters whose key matches the newly-registered probe's key. (4) On timeout, the continuation is removed and resumed with `awaitReaderTimeout`. Multiple stale-reader-disappear/reappear cycles handled correctly because the matcher uses key equality, not "next register event." Tests cover: (a) reader already present, (b) reader registers after wait begins, (c) wrong-key reader registers (waiter still waiting), (d) timeout, (e) multiple waiters for same key (all resume). |
+| `awaitNextRegister(timeout:)` 100ms heuristic is unsound (race window is arbitrary, depends on push timing). | Critical | **Replaced with `awaitReader(fingerprintKey:timeout:)`.** Algorithm: (1) check `current` registry (which dereferences a weak `activeReader` — corrected in v4 to match the live code) — if a probe matching the key is already registered, return it immediately. (2) Otherwise install a continuation in a `[String: [CheckedThrowingContinuation<DebugReaderProbe, Error>]]` keyed by `fingerprintKey` (throwing continuation per Swift convention — corrected in v4). (3) `register(_:)` resumes ALL waiters whose key matches the newly-registered probe's key. (4) On timeout, the continuation is removed and resumed with `awaitReaderTimeout`. Multiple stale-reader-disappear/reappear cycles handled correctly because the matcher uses key equality, not "next register event." Tests cover: (a) reader already present, (b) reader registers after wait begins, (c) wrong-key reader registers (waiter still waiting), (d) timeout, (e) multiple waiters for same key (all resume). |
 | Live `eval` ownership: `DebugReaderProbeAdapter.jsEvaluator` alone is insufficient — each format's bridge must surface its evaluator through the active reader registration. | High | **Spelled out per format.** EPUB: `EPUBWebViewBridge` adds `onWebViewReady: ((WKWebView) -> Void)?` SwiftUI prop, invoked at end of `makeUIView`. `EPUBReaderHost` (the format host already used by the dispatcher) captures the WKWebView and assigns the probe's `jsEvaluator` closure. Foliate (AZW3): `FoliateSpikeView` adds the same `onWebViewReady` callback (its existing `Coordinator` already holds `weak var webView: WKWebView?`); the host wraps it into the probe's evaluator. PDF/TXT/MD: no eval support — the probe's default `currentTTSState() == nil` pattern applies; eval throws `evalUnsupported(format:)` per the existing v1 behavior. **No new SwiftUI host file is created**: `FoliateSpikeView` IS the host, and `EPUBReaderHost` is in `ReaderFormatHosts.swift`. |
 | `eval?bridge=` semantics: current code uses `bridge` only as the output filename; doesn't validate format match. Goal section example seeds `alice-epub` then evals `bridge=foliate` — semantically wrong. | High | **Add bridge-vs-format validation.** Allowed `bridge` values map to formats: `"epub" → "epub"`, `"foliate" → "azw3"` (and future `"mobi"`), `"unified" → reserved for future use`. Validation runs in `RealDebugBridgeContext.eval` after the active probe is fetched. If `bridge=foliate` and the active probe's `format == "epub"`, the bridge writes an error file with `error: "bridge mismatch: requested=foliate active=epub"` and returns. Goal section example fixed: now seeds `alice-epub` then evals `bridge=epub`, and a separate Foliate example seeds `sample-azw3` then evals `bridge=foliate`. |
 | `open?position=` for unified renderer (`UnifiedTextRenderer`) is unscoped. Unified path uses different navigation primitives. | Medium | **Native-mode-only in #48.** Explicitly documented in the Goal section and the resolver doc-comment: `open?position=` is supported when `ReaderContainerView` is in native mode (the dispatcher routes to a format host). When `settingsStore.readingMode == .unified` AND the format has `.unifiedReflow` capability (TXT/MD currently; potentially EPUB), `open?position=` returns `openPositionUnsupportedInUnifiedMode(format:)`. A separate follow-up feature can add unified-mode seek if #45 needs it. |
@@ -259,7 +266,7 @@ EPUB and Foliate-AZW3 hosts both already have the `WKWebView` available in their
        "knownBridges": ["epub", "foliate"]
      }
      ```
-     File path: `Caches/DebugBridge/eval-result-<uuid>.json` (existing per-eval result file pattern; the `dest` URL parameter, if provided, controls the file name — same as success path). The bridge then returns; nothing else runs. Listing `knownBridges` lets the consumer surface a useful diagnostic without re-reading the source.
+     File path: `Caches/DebugBridge/eval-<bridge>.json` (existing live-code convention — `RealDebugBridgeContext.eval` already writes success and error payloads to this exact path; there is no `dest=` URL parameter on `DebugCommand.eval`). The bridge then returns; nothing else runs. Listing `knownBridges` lets the consumer surface a useful diagnostic without re-reading the source. The error payload extends the existing eval-error shape (which today carries `bridge`, `ts`, `error`, optional `fingerprintKey`, optional `format`) with two additional keys: `evalUnsupported: <bridge name>` and `knownBridges: ["epub", "foliate"]`.
    - **If `bridge` is known but active probe's format ≠ expected** → write `bridgeMismatch` error file with `requested` and `active` keys, return.
    - **Else** build evaluator JS (JSON.stringify wrapper), call `probe.evaluateJavaScript(_:)`, write result to the eval-result file.
 
@@ -312,11 +319,34 @@ init(
 
 ```swift
 #if DEBUG
+// `currentLocator` is a value type (`Locator?`). A capture-list closure like
+// `{ [currentLocator] in ... }` (the v3 sketch) takes a SNAPSHOT of the
+// value at registration time — every probe read returns the same stale
+// initial value forever. v4 routes the live read through a tiny
+// @MainActor class-backed holder that the SwiftUI view updates whenever
+// the locator changes; the closure captures the holder by reference so
+// each call performs a live read.
+//
+// Concretely (in `ReaderContainerView`):
+//   #if DEBUG
+//   @StateObject private var debugLocatorHolder = DebugLocatorHolder()
+//   #endif
+//
+//   .onChange(of: currentLocator) { _, new in debugLocatorHolder.value = new }
+//
+// where DebugLocatorHolder is:
+//   #if DEBUG
+//   @MainActor final class DebugLocatorHolder: ObservableObject {
+//       var value: Locator?
+//   }
+//   #endif
+//
 let probe = DebugReaderProbeAdapter(
     fingerprintKey: book.fingerprintKey,
     format: book.format,
-    positionProvider: { [currentLocator] in
-        currentLocator.flatMap(DebugPositionFormatter.format(_:))
+    positionProvider: { [weak debugLocatorHolder] in
+        // Live read each call — not a registration-time snapshot.
+        debugLocatorHolder?.value.flatMap(DebugPositionFormatter.format(_:))
     }
 )
 // Universal providers (set on every format)
@@ -420,33 +450,43 @@ extension DebugReaderRegistry {
 }
 ```
 
-Implementation sketch (v3 — each waiter owns a unique token; timeout removes by token identity, not first-match):
+Implementation sketch (v4 — each waiter owns a unique token; timeout removes by token identity, not first-match. **Storage is weak** — the registry's `activeReader` is a `weak var` in the live code, so `current` is a computed property that dereferences it. If the SwiftUI host holding the probe deallocates without unregistering, `current` simply reads as nil and `awaitReader` treats the slot as "no active reader" rather than "still registered"):
 
 ```swift
 @MainActor
 final class DebugReaderRegistry {
-    private(set) var current: DebugReaderProbe?
+    /// Live code stores this weakly so a forgotten unregister never keeps the
+    /// presenting view alive. `current` reads through the weak slot — when the
+    /// referent has deallocated this returns nil, which `awaitReader` treats
+    /// as "no active reader" (no need for an explicit unregister to be
+    /// observed).
+    private weak var activeReader: AnyObject?
+    var current: DebugReaderProbe? { activeReader as? DebugReaderProbe }
 
     /// Each waiter is identified by a UUID token so a per-waiter timeout
     /// can remove the *specific* continuation it owns, not the first one
     /// in the array. Without this, two callers waiting on the same key
     /// with different timeouts would race: the shorter timeout would
     /// remove (and resume-with-timeout) the longer caller's continuation.
+    ///
+    /// `CheckedThrowingContinuation` (not `CheckedContinuation`) is the
+    /// Swift convention for continuations that may resume with an error —
+    /// the timeout branch resumes with `awaitReaderTimeout`.
     private struct Waiter {
         let token: UUID
-        let continuation: CheckedContinuation<DebugReaderProbe, Error>
+        let continuation: CheckedThrowingContinuation<DebugReaderProbe, Error>
     }
     private var waiters: [String: [Waiter]] = [:]
 
     func register(_ probe: DebugReaderProbe) {
-        current = probe
+        activeReader = probe
         let key = probe.fingerprintKey
         let pending = waiters.removeValue(forKey: key) ?? []
         for w in pending { w.continuation.resume(returning: probe) }
     }
 
     func unregister(_ probe: DebugReaderProbe) {
-        if current === probe { current = nil }
+        if activeReader === probe as AnyObject { activeReader = nil }
         // Waiters keyed by other fingerprintKeys persist; they're for a future register.
     }
 
@@ -702,7 +742,7 @@ Add fields per "Snapshot schema additions" table. Bump `currentSchemaVersion` to
 
 ### Modified + split: `vreader/Services/DebugBridge/RealDebugBridgeContext.swift`
 
-`open(bookId:position:)` becomes (v3 — **validate fully before any side effect**, then post notification, then await reader and seek):
+`open(bookId:position:)` becomes (v4 — **validate fully before any side effect**, then post notification, then await reader and seek; references against the actual live types):
 
 ```swift
 func open(bookId: String, position: String?) async throws {
@@ -712,34 +752,44 @@ func open(bookId: String, position: String?) async throws {
         throw DebugBridgeContextError.bookNotFound(bookId)
     }
 
+    // BookRecord exposes the format via `bookRecord.fingerprint.format`
+    // (a `BookFormat` enum). The bridge's user-facing strings stay raw values
+    // so error payloads remain stable across the existing wire format.
+    let bookFormat: BookFormat = bookRecord.fingerprint.format
+    let formatString: String = bookFormat.rawValue
+
     // 2. If position provided, validate against the format BEFORE any side effect.
     //    Malformed position must NOT open the reader: previously the post-then-throw
     //    order produced two side effects from one bad call.
     var resolvedLocator: Locator? = nil
     if let positionString = position {
-        guard let fingerprint = DocumentFingerprint(canonicalKey: bookRecord.fingerprintKey) else {
-            throw DebugBridgeContextError.openPositionUnresolvable(
-                format: bookRecord.format, position: positionString
-            )
-        }
+        let fingerprint = bookRecord.fingerprint  // already typed; no canonicalKey re-parse
         do {
             resolvedLocator = try DebugPositionResolver.resolve(
                 positionString: positionString, bookFingerprint: fingerprint
             )
         } catch {
             throw DebugBridgeContextError.openPositionUnresolvable(
-                format: bookRecord.format, position: positionString
+                format: formatString, position: positionString
             )
         }
 
-        // 3. Unified-renderer guard: if settings put the reader in unified mode for
-        //    a format with .unifiedReflow capability, position seek is unsupported.
-        //    Reject before opening anything.
-        if settingsStore.readingMode == .unified
-            && FormatCapabilities.capabilities(for: bookRecord.format).contains(.unifiedReflow)
-        {
+        // 3. Unified-renderer guard: if settings put the reader in unified mode
+        //    for a format with .unifiedReflow capability, position seek is
+        //    unsupported. `RealDebugBridgeContext` does NOT hold a
+        //    ReaderSettingsStore — it stores `userDefaults: UserDefaults`
+        //    (verified against the live code at
+        //    vreader/Services/DebugBridge/RealDebugBridgeContext.swift). To
+        //    read the reading mode, instantiate a transient store from those
+        //    same defaults; same pattern that `theme(...)` already uses on
+        //    this type.
+        let store = ReaderSettingsStore(defaults: userDefaults)
+        // FormatCapabilities.capabilities(for:) takes BookFormat (verified
+        // against the live signature at vreader/Models/FormatCapabilities.swift).
+        let caps = FormatCapabilities.capabilities(for: bookFormat)
+        if store.readingMode == .unified && caps.contains(.unifiedReflow) {
             throw DebugBridgeContextError.openPositionUnsupportedInUnifiedMode(
-                format: bookRecord.format
+                format: formatString
             )
         }
     }
@@ -766,7 +816,12 @@ static let openSeekTimeoutSeconds: TimeInterval = 10.0
 
 **Order rationale.** The previous (v2) order had two failure modes for one URL: a bad position would (1) open the reader at last-saved position, then (2) throw `openPositionUnresolvable` to `lastError.json`. A consumer reading `lastError.json` would see "open failed" but the reader is actually open, just at the wrong location — confusing and breaks the "every command writes one outcome" contract. v3 validates everything that can be validated locally before any side effect, so a bad-position URL is a pure no-op + error file write.
 
-`FormatCapabilities` is read here (not `Locator`) so the unified-mode guard runs without instantiating any reader machinery. The capability lookup is pure (a switch on format string).
+**v4 type fidelity.** Three live-code facts the v3 sketch got wrong, corrected here:
+1. `RealDebugBridgeContext` stores `userDefaults: UserDefaults` (not `settingsStore`) — the existing `theme(...)` handler already follows the "instantiate a transient `ReaderSettingsStore(defaults: userDefaults)`" pattern, and `open` reuses it.
+2. `FormatCapabilities.capabilities(for:)` takes `BookFormat` (the enum), not `String`. The existing `BookRecord` already exposes the typed format via `bookRecord.fingerprint.format`, so no string-based lookup or re-parse of `canonicalKey` is required.
+3. `BookRecord` itself has no top-level `format: String` — only `fingerprint.format: BookFormat`. The wire-level error payloads still carry strings; we derive them from `bookFormat.rawValue` once at the top of the function.
+
+`FormatCapabilities` is read here (not `Locator`) so the unified-mode guard runs without instantiating any reader machinery. The capability lookup is pure (a switch on `BookFormat`).
 
 Tests cover:
 - Malformed position string → reader is NOT opened, `lastError.json` contains `openPositionUnresolvable`.
@@ -862,13 +917,17 @@ The dispatcher constructs the adapter and populates **universal** closures (thos
 ```swift
 #if DEBUG
 .onAppear {
+    // v4: positionProvider must perform a LIVE read on each call. A value-type
+    // capture list like `[currentLocator]` (v3) snapshots the value at
+    // registration time, so the probe would forever report the initial
+    // locator. The fix is a small class-backed holder that the host updates
+    // whenever the SwiftUI `@State Locator?` changes; the closure captures
+    // the holder by reference and reads `.value` on every invocation.
     let probe = DebugReaderProbeAdapter(
         fingerprintKey: book.fingerprintKey,
         format: book.format,
-        positionProvider: { [currentLocator] in
-            // currentLocator is `@State Locator?` (value type — captured by value).
-            // No `weak` modifier; Locator is a struct.
-            currentLocator.flatMap(DebugPositionFormatter.format(_:))
+        positionProvider: { [weak debugLocatorHolder] in
+            debugLocatorHolder?.value.flatMap(DebugPositionFormatter.format(_:))
         }
     )
     // Universal providers (set on every format — no UIKit/WKWebView dependency).
@@ -880,6 +939,11 @@ The dispatcher constructs the adapter and populates **universal** closures (thos
     // Per-format closures (settleStrategy, jsEvaluator, renderPhaseProvider,
     // selectionProvider, seekStrategy) are populated by the format host
     // through the `wireDebugProbe` parameter — see nativeReaderView below.
+}
+.onChange(of: currentLocator) { _, newValue in
+    // Push every locator update into the holder so the probe's
+    // positionProvider closure reads the freshest value on its next call.
+    debugLocatorHolder.value = newValue
 }
 #endif
 ```
@@ -911,7 +975,7 @@ func nativeReaderView(fingerprint: DocumentFingerprint) -> some View {
 }
 ```
 
-(Note: `[weak ttsService]` is fine because `TTSService` is a class; `[weak currentLocator]` was wrong because `Locator` is a struct, fixed per Round-1 audit fix on `[weak Locator?]`.)
+(Note: `[weak ttsService]` is fine because `TTSService` is a class; `[weak currentLocator]` was wrong because `Locator` is a struct (Round-1 fix). v4 goes further: the v3 `[currentLocator]` capture-list pattern is also wrong because a value-type capture-list closure snapshots the value at registration time and never re-reads. The v4 pattern routes through a `@MainActor` class-backed `DebugLocatorHolder` that the host updates on every locator change; the closure captures the holder by reference (`[weak debugLocatorHolder]`) and reads `.value` live each call.)
 
 ### Modified: `vreader/Services/TTS/TTSService.swift`
 
@@ -1018,7 +1082,7 @@ The `cfi` parameter rename was completed in #44 already (parser uses `position`)
 3. **`open?position=` for the unified renderer** (carved out). Confirmed native-mode-only in #48. Is that scoping acceptable to #45? Suggest: yes, native-mode is the higher-fidelity rendering path that verification cares about.
 4. **`awaitReader` timeout default.** 10s assumes worst-case device launch + reader navigation. Confirm against device measurements or accept 10s as a conservative starting point.
 5. **Foliate post-seek `relocate` arming** — **resolved in v3 Round-2 (Option B).** `open?position=` for AZW3 only supports clean-reader-state seeks (no prior interactive seek within 500ms of arming). Verification flows always begin with `vreader-debug://reset`, so this is invisible in practice. WI-4 still logs arming + relocate pairs so future consumers (if any) can revisit the limitation with empirical data; the sequence-number disambiguation alternative (Option A) is deferred until a real consumer hits the limitation.
-6. **Eval target for non-webview readers** — **resolved in v3 Round-2 Fix #5a.** Unknown `bridge` value (anything not in `DebugBridgeFormatBridgeMap.knownBridges`, e.g. `bridge=banana`, `bridge=txt`, `bridge=pdf`) writes `evalUnsupported(bridge: <name>)` to `Caches/eval-result-<uuid>.json` (matches the existing eval-result file pattern). The error JSON payload includes the list of known bridges for diagnostics. See "Live `eval` evaluator" design decision for the file shape.
+6. **Eval target for non-webview readers** — **resolved in v3 Round-2 Fix #5a; file path corrected in v4.** Unknown `bridge` value (anything not in `DebugBridgeFormatBridgeMap.knownBridges`, e.g. `bridge=banana`, `bridge=txt`, `bridge=pdf`) writes `evalUnsupported(bridge: <name>)` to `Caches/DebugBridge/eval-<bridge>.json` (the existing convention used by the live `RealDebugBridgeContext.eval`; `DebugCommand.eval` has no `dest=` parameter). The error JSON payload includes the list of known bridges for diagnostics. See "Live `eval` evaluator" design decision for the file shape.
 7. **Snapshot schema migration story.** Bumping `currentSchemaVersion` 1 → 2 is the chosen approach; consumers re-read the version field. Alternative was a `v2` sub-object; rejected because no live consumer needs v1 stability.
 8. **WI-6 (eval) test strategy.** Mock-WKWebView is harder than mocking other classes; tests today route through `DebugReaderProbeAdapter.jsEvaluator` closure which is already injectable. Closure-level testing is sufficient for the wrapper logic; a real-WebView integration test rides on the manual-test-checklist (WI-10).
 9. **`seekStrategy` failure mode.** Should it be fatal to `open` (current plan: throw `seekFailed`), or best-effort (open succeeds, seek failure logged but bridge.lastError unset)? The verification flows want loud failure; defaulting to fatal seems right but flagging.
@@ -1026,13 +1090,12 @@ The `cfi` parameter rename was completed in #44 already (parser uses `position`)
 
 ## Acceptance gate
 
-This plan (v3) moves to Gate 2 (Codex audit, **round 3**) once written. Implementation may begin only after:
-- Zero open Critical/High/Medium audit findings (or explicit accept-with-rationale entries).
-- Recommendation on whether to split into #48a/#48b accepted or rejected.
+This plan (v4) covers feature **#49 only** (resolver / registry / `open` / snapshot wiring; per-format host work moved to #50). Per the audit-cap escalation, Round 3's split recommendation was accepted in PR #170; v4 applies the six surface fixes Codex flagged in Round 3 without re-opening scope. Implementation may begin against this v4 once #49's Gate 2 is recorded.
 
-After implementation, Gate 4 (per-PR audit) and Gate 5 (slice verification per WI; full acceptance pass on the final WI — verified by running both success-bar URL sequences from the Goal section against a fresh simulator install).
+After implementation, Gate 4 (per-PR audit) and Gate 5 (slice verification per WI; full acceptance pass on the final WI of #49 — verified against the success-bar URL sequence from the Goal section against a fresh simulator install).
 
 ## Audit reference
 
 - **Codex Round 1 (Gate 2, 2026-05-03):** findings codified in "Audit fixes applied — Round 1" table. v2 of the plan addressed every Critical and High finding; Low findings (test count, file path, renderPhase naming) folded into the surface area + WI-1 acceptance criteria.
 - **Codex Round 2 (Gate 2, 2026-05-03):** findings codified in "Audit fixes applied — Round 2" table at top of this doc. v3 addresses all five Round-2 findings: (1) `awaitReader` waiter ownership now uses UUID tokens; (2) DEBUG-only `wireDebugProbe` parameter formalized on every reader host with per-host callback contract; (3) `open(bookId:position:)` validates fully before posting `.debugBridgeOpenBook`; (4) Foliate post-seek limitation accepted (Option B — clean-reader-state only, verification flows always start from `reset`); (5) unknown `bridge` writes `evalUnsupported(bridge:)` with `knownBridges` list, build-phase script uses idempotent `rsync -a` with parent-directory `inputFiles`. Open questions reduced from 10 to ~7 (3 Round-2 questions resolved inline).
+- **Codex Round 3 (Gate 2, 2026-05-03) — audit cap reached, split accepted in PR #170.** Round 3 returned six compile-correctness surface findings (continuation type, registry weak/strong consistency, `open()` references against actual types, `positionProvider` live-read, eval file path, status line). v4 applies them as surgical edits without re-revising Round-2 design decisions or pulling per-format host work back into scope. Per the workflow rule's audit-cap clause, v4 is the user's final say — it does not go through Round 4. Per-format work tracks separately under #50.
