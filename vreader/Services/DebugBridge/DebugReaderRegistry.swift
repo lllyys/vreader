@@ -37,7 +37,57 @@ protocol DebugReaderProbe: AnyObject {
     /// JSONSerialization so the bridge can splat the value into eval
     /// output without double-encoding.
     func evaluateJavaScript(_ script: String) async throws -> Data
+
+    // MARK: - Schema v2 accessors (feature #49 WI-1)
+    //
+    // These are default-implemented so existing adopters (e.g.
+    // `DebugReaderProbeAdapter`) compile without changes. Per-format hosts
+    // override when they have richer state to surface (feature #50 will wire
+    // these for the per-format snapshot enrichment).
+
+    /// Current TTS state name (`DebugSnapshot.TTSStateValue`). Nil means no
+    /// TTS state available — either no service wired, or the host doesn't
+    /// surface TTS yet.
+    var currentTTSState: String? { get }
+
+    /// Current TTS UTF-16 offset within the active book. Nil when not in a
+    /// TTS-capable state.
+    var currentTTSOffsetUTF16: Int? { get }
+
+    /// Render phase name (`DebugSnapshot.RenderPhaseValue`). Default is
+    /// `idle`; per-format hosts override during loading / rendering / settle
+    /// transitions.
+    var currentRenderPhase: String { get }
+
+    /// Settings provenance — `"global"` or `"perBook"` from
+    /// `DebugSnapshot.SettingsProvenanceValue`. Nil when the host doesn't
+    /// surface this distinction yet.
+    var currentSettingsProvenance: String? { get }
 }
+
+// Default implementations so existing adopters compile without per-host
+// changes. Per-format hosts (TXT/EPUB/Foliate/PDF) override during
+// feature #50 to wire real values.
+extension DebugReaderProbe {
+    var currentTTSState: String? { nil }
+    var currentTTSOffsetUTF16: Int? { nil }
+    var currentRenderPhase: String { DebugSnapshot.RenderPhaseValue.idle }
+    var currentSettingsProvenance: String? { nil }
+}
+
+#if DEBUG
+// DEBUG-only mapping from TTSService.State to the snapshot wire value.
+// Lives next to the protocol because both are DEBUG-only.
+extension TTSService.State {
+    var publicName: String {
+        switch self {
+        case .idle:     return DebugSnapshot.TTSStateValue.idle
+        case .speaking: return DebugSnapshot.TTSStateValue.speaking
+        case .paused:   return DebugSnapshot.TTSStateValue.paused
+        }
+    }
+}
+#endif
 
 /// Errors thrown by `DebugReaderProbe.evaluateJavaScript`.
 enum DebugReaderProbeError: Error, Equatable {
