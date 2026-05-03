@@ -3,7 +3,7 @@
 Shared instructions for all AI agents (Claude, Codex, etc.).
 
 - You are an AI assistant working on the project.
-- **Read ************`docs/architecture.md`************ before making any code changes. Update it when adding new layers, patterns, services, or changing how components communicate.**
+- **Read `docs/architecture.md` before making any code changes. Update it when adding new layers, patterns, services, or changing how components communicate.**
 - Use English unless another language is requested.
 - Follow the working agreement:
   - Run `git status -sb` at session start.
@@ -12,11 +12,11 @@ Shared instructions for all AI agents (Claude, Codex, etc.).
   - Do not commit unless explicitly requested.
   - Keep code files under \~300 lines (split proactively).
   - Keep features local; avoid cross-feature imports unless truly shared.
-  - **Research before building**: For new features, search for industry best practices,  
-    established conventions, and proven solutions (web search, official docs, prior art in  
+  - **Research before building**: For new features, search for industry best practices,
+    established conventions, and proven solutions (web search, official docs, prior art in
     popular open-source projects). Don't invent when a well-tested pattern exists.
-  - **Edge cases are not optional**: Brainstorm as many edge cases as possible — empty input,  
-    null/undefined, max values, concurrent access, Unicode/CJK, RTL text, rapid repeated  
+  - **Edge cases are not optional**: Brainstorm as many edge cases as possible — empty input,
+    null/undefined, max values, concurrent access, Unicode/CJK, RTL text, rapid repeated
     actions, network failures, permission denials. Write tests for every one.
   - **Test-first is mandatory** for new behavior:
     - Write a failing test (RED), implement minimally (GREEN), refactor (REFACTOR).
@@ -24,27 +24,41 @@ Shared instructions for all AI agents (Claude, Codex, etc.).
     - Exceptions: CSS-only, docs, config. See `.claude/rules/10-tdd.md` for full scope.
   - Run `xcodebuild test -only-testing:vreaderTests` for unit test gates. Skip UI tests during development.
   - Default simulator: **iPhone 17 Pro** (Dynamic Island — catches safe area bugs).
-  - **Task workflow** (three files, one flow):
-    - `docs/tasks.md` — **inbox**. User writes free-form descriptions. Agent triages (classify only, do not fix or implement during triage). See `docs/tasks.md` for classification rules, deduplication, and triage record format.
-    - `docs/bugs.md` — **bug tracker**. Something implemented but broken. Follow the bug fix workflow defined in `docs/bugs.md` (Understand → RED → GREEN → REFACTOR → Verify → Track).
-    - `docs/features.md` — **feature tracker**. Something never implemented. Must be planned before implementation (Problem, Scope, Edge Cases, Test Plan, Acceptance Criteria). See `docs/features.md` for plan template and statuses.
+  - **Verification harness** (DEBUG only): `vreader-debug://` URL scheme drives reset / seed / open / settle / snapshot / eval from `xcrun simctl openurl`, so verification runs don't need computer-use for reproduction or assertion. See `docs/subsystems/debug-bridge.md`.
+  - **Version bump per PR**: every PR must include a `chore: bump version to X.Y.Z` commit as its last commit before opening — patch for fixes/docs/chores, minor for new features, major for breaking changes. Tag is cut from the merge commit on `main` post-merge. See `.claude/rules/40-version-bump.md`.
+  - **Docs sync per PR**: when a PR adds a service, schema, notification, environment key, or user-visible feature, update `docs/architecture.md` and/or `README.md` in the same PR (separate commit before the version bump). Triggers + checklist in `.claude/rules/24-doc-sync.md`.
+  - **Merge gate — fix-or-implement**: a PR that references an open bug (`Refs #N` against `docs/bugs.md`) does not merge until that bug's status is `FIXED`. A PR that references an open feature does not merge until the feature reaches `DONE`. Tracker-only updates (re-classifying severity, correcting a recommendation, adding screenshots) ride along with the fix PR — they don't ship as standalone merges. Pure meta-process changes (rule additions, repo reorgs, tooling) are exempt because they don't reference a bug/feature row.
+  - **Close gate — verified, not just merged**: a GitHub Issue does NOT close until the work is end-to-end verified against a real environment — not just unit tests. Symmetric for both trackers:
+    - **Bugs**: `docs/bugs.md` status `FIXED` means "code shipped to main with passing tests" (the merge gate). Closing the GH issue requires a separate device-verification pass: install the new build on device/simulator, run the original repro, confirm the actual symptom is gone.
+    - **Features**: `docs/features.md` status `DONE` means "implementation merged with passing tests" (the merge gate). Closing the GH issue requires reaching status `VERIFIED`: every acceptance criterion exercised end-to-end (XCUITest + DebugBridge auto-verification, or an explicit on-device manual verification log) — for non-UI features, end-to-end against a real backend (e.g., backup → restore round-trip against a live WebDAV server, not just an in-memory mock).
+    - The closure comment must cite the verification (commit SHA + what was tested + what was observed). Until then, the GH issue stays open with a "shipped in vX.Y.Z, awaiting verification" comment so the work doesn't drop off the radar.
+  - **Feature implementation workflow** (binding 6-gate sequence — never skip a gate). Full rule at `.claude/rules/47-feature-workflow.md`. Summary: Plan → Independent plan audit → TDD implementation → Implementation audit loop → Device/integration verification → Merge.
+  - **Task workflow** (three files, one flow). The `## Rules` section at the top of each tracker is **binding** — it's the authoritative workflow for that file, not decorative prose:
+    - `docs/tasks.md` — **inbox**. User writes free-form descriptions. Agent triages (classify only, do not fix or implement during triage). Classification rules, deduplication, and triage record format are at the top of the file.
+    - `docs/bugs.md` — **bug tracker**. Something implemented but broken. Bug fix workflow (Understand → RED → GREEN → REFACTOR → Verify → Track) is at the top of the file.
+    - `docs/features.md` — **feature tracker**. Something never implemented. Must be planned before implementation (Problem, Scope, Edge Cases, Test Plan, Acceptance Criteria). Plan template and statuses are at the top of the file.
   - **Key rules**:
     - Bugs vs features: broken implementation → `docs/bugs.md`; never implemented → `docs/features.md`. Never mix.
     - Triage is classification only — do not fix bugs or implement features during triage.
     - Features must reach `PLANNED` status before `IN PROGRESS`. Exception: features resolved incidentally by a bug fix.
-  - **GitHub Issues** (selective mirror, not full sync):
-    - **When to create**: High-severity bugs, release blockers, and major features (`Priority: High`). Do not mirror every tracker row.
-    - **On create**: Add `GH: #123` to the Notes column in bugs.md/features.md. Use labels: `bug`/`feature`, `severity:high`/`severity:medium`.
-    - **PRs use ********`Refs #N`**, not `Fixes #N` — prevents premature auto-close.
-    - **On resolve** (post-merge finalizer, do not close before merge):
-      1. Verify markdown status is updated (FIXED/DONE).
+  - **GitHub Issues** (asymmetric mirror — features track planning, bugs stay selective):
+    - **When to create — features**: every feature that reaches `PLANNED` status gets a GH issue. Trigger is mechanical (status = PLANNED + no `GH: #N` already in Notes → create). Idempotent: skip creation if `GH: #N` is already present. **Why mechanical not priority-based**: a `PLANNED` feature has problem + scope + edge cases + test plan + acceptance criteria — exactly the threshold where contributors benefit from a public handle for `Refs #N`, design discussion, and verification follow-up. Priority-based mirroring is leaky in this repo's history (medium features mirrored, some high ones not).
+    - **When to create — bugs**: stay selective. High-severity bugs, release blockers, externally reported regressions, or bugs that need public discussion. Do NOT mirror every bug row — bugs are reactive and most resolve in <1 PR; the GH overhead doesn't pay off.
+    - **When NOT to create (either tracker)**: status is `DEFERRED`, `WONT DO`, `DUPLICATE`, or feature was resolved incidentally by a bug fix.
+    - **Local-only escape hatch**: a feature that's planned but explicitly should not be mirrored to GH gets `Mirror: no` in the Notes column. The rule respects this and skips creation.
+    - **GH issue body = pointer, not second source of truth**: title `Feature #N: <short summary>` or `Bug #N: <short summary>`. Body has (1) short problem statement, (2) link back to the row + plan in `docs/features.md` / `docs/bugs.md`, (3) acceptance criteria copied once for readability, (4) explicit "Source of truth: `docs/features.md`" line. Design decisions and scope changes happen in the markdown tracker; GH comments that materially change scope must be ported back to the tracker in the same PR.
+    - **On create**: add `GH: #123` to the Notes column. Use labels: `bug` or `enhancement` (GitHub's "feature" label is named `enhancement`); plus `severity:high`/`severity:medium` if priority warrants.
+    - **PRs use `Refs #N`**, not `Fixes #N` — prevents premature auto-close.
+    - **On resolve** (post-merge finalizer, do not close before merge AND do not close before verification — see "Close gate — verified, not just merged" above):
+      1. Verify markdown status is updated to terminal-verified state (`FIXED` then device-verified for bugs; `VERIFIED` for features).
       2. Verify fix is on `main`.
-      3. Post closure comment: commit SHA, test evidence, cause summary (bugs) or acceptance result (features).
-      4. Run `gh issue close #N`.
+      3. Run the verification pass (re-run repro for bugs; exercise acceptance criteria for features).
+      4. Post closure comment: commit SHA, what was tested, what was observed, cause summary (bugs) or acceptance result (features).
+      5. Run `gh issue close #N`.
+      Between merge and verification, leave the issue open with a "shipped in vX.Y.Z, awaiting verification" comment.
     - **Exception**: Small single-issue fixes may use `Fixes #N` in PR body for auto-close.
     - **Partial delivery**: Keep issue open. Use task checklist in issue body or split into follow-up issues.
 - AI coding tool auth:
   - **Prefer subscription auth over API keys** for all AI coding tools (Claude Code, Codex CLI, Gemini CLI). Subscription plans are dramatically cheaper for sustained coding sessions — API billing can cost 10–30x more.
   - Claude Code: log in with Claude Max subscription. Codex CLI: `codex login` with ChatGPT Plus/Pro. Gemini CLI: Google account login.
   - API keys work as a fallback for light or automated usage.
-
