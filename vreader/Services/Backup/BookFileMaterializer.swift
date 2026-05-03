@@ -1,0 +1,268 @@
+// Purpose: Downloads + verifies + imports book blobs from a backup manifest
+// for feature #46's WebDAV materializing restore. Single responsibility:
+// given [BackupLibraryEntry], make sure each blob is locally present (either
+// already-imported or freshly downloaded + imported via BookImporter).
+//
+// Design (per audited plan dev-docs/plans/20260503-feature-46-...):
+// - Serial over entries, monotonic progress callback, no parallelism by
+//   default — avoids saturating WebDAV and EPUB pre-extraction churn.
+// - Triple verification on download: byte count → SHA-256 → final
+//   ImportResult.fingerprintKey vs manifest.fingerprintKey. The byte-count
+//   check is cheap; SHA-256 catches in-flight corruption; the
+//   import-fingerprint check catches extension/format confusion.
+// - Preflight rehash on existing local files. BookImporter.atomicCopyToSandbox
+//   trusts an existing final file without verifying its bytes; if a prior
+//   crashed import left corrupt content there, the materializer re-downloads
+//   rather than silently registering a row pointing at bad bytes.
+//
+// @coordinates-with: BackupBlobStore.swift, BookImporting (BookImporter),
+//   BackupLibraryEntry (BackupSectionDTOs.swift),
+//   dev-docs/plans/20260503-feature-46-materializing-restore.md
+
+import CryptoKit
+import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.vreader.app", category: "BookFileMaterializer")
+
+/// Per-entry outcome from `materialize`. Caller (WebDAVProvider.restore)
+/// aggregates these into a `BackupError.materializePartiallyFailed` if any
+/// downloads/imports failed; happy-path entries proceed to metadata restore.
+struct MaterializeResult: Sendable {
+    let entry: BackupLibraryEntry
+    let outcome: Outcome
+
+    enum Outcome: Sendable, Equatable {
+        case alreadyLocal                                     // hash verified
+        case downloaded(fingerprintKey: String)
+        case downloadFailed(BackupBlobStoreError)
+        case sizeAfterDownloadMismatch(expected: Int64, actual: Int64)
+        case sha256Mismatch(expected: String, actual: String)
+        case importFailed(String)                              // ImportError stringified
+        case fingerprintMismatchAfterImport(expected: String, actual: String)
+    }
+
+    /// True for `.alreadyLocal` and `.downloaded`. False otherwise.
+    var isSuccess: Bool {
+        switch outcome {
+        case .alreadyLocal, .downloaded: return true
+        default: return false
+        }
+    }
+}
+
+/// Resolves the local sandbox URL for a fingerprint key — mirrors
+/// `LibraryBookItem.resolvedFileURL`'s convention (colons → underscores)
+/// without depending on a SwiftData entity. Injected so tests can use a
+/// throw-away temp directory.
+typealias SandboxURLResolver = @Sendable (_ fingerprintKey: String, _ originalExtension: String) -> URL
+
+final class BookFileMaterializer: Sendable {
+
+    private let blobStore: any BackupBlobReading
+    private let importer: any BookImporting
+    private let resolveSandboxURL: SandboxURLResolver
+    private let tempDirectory: URL
+
+    init(
+        blobStore: any BackupBlobReading,
+        importer: any BookImporting,
+        tempDirectory: URL,
+        resolveSandboxURL: @escaping SandboxURLResolver = BookFileMaterializer.defaultSandboxResolver
+    ) {
+        self.blobStore = blobStore
+        self.importer = importer
+        self.tempDirectory = tempDirectory
+        self.resolveSandboxURL = resolveSandboxURL
+    }
+
+    // MARK: - Default resolver
+
+    /// Mirrors `LibraryBookItem.resolvedFileURL`: Application Support /
+    /// ImportedBooks / `<fingerprintKey-with-colons-as-underscores>.<ext>`.
+    static let defaultSandboxResolver: SandboxURLResolver = { fingerprintKey, originalExtension in
+        let booksDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedBooks", isDirectory: true)
+        let safeName = fingerprintKey.replacingOccurrences(of: ":", with: "_")
+        return booksDir
+            .appendingPathComponent(safeName)
+            .appendingPathExtension(originalExtension)
+    }
+
+    // MARK: - Classify
+
+    /// Splits entries into (alreadyLocal, needsDownload). For an entry whose
+    /// resolved sandbox URL exists locally, hashes the file and verifies
+    /// SHA-256 against the manifest — mismatch counts as needsDownload.
+    func classify(
+        _ entries: [BackupLibraryEntry]
+    ) async -> (alreadyLocal: [BackupLibraryEntry], needsDownload: [BackupLibraryEntry]) {
+        var alreadyLocal: [BackupLibraryEntry] = []
+        var needsDownload: [BackupLibraryEntry] = []
+        for entry in entries {
+            let localURL = resolveSandboxURL(entry.fingerprintKey, entry.originalExtension)
+            if FileManager.default.fileExists(atPath: localURL.path),
+               let localHash = try? localFileSHA256(at: localURL),
+               localHash == entry.sha256 {
+                alreadyLocal.append(entry)
+            } else {
+                needsDownload.append(entry)
+            }
+        }
+        return (alreadyLocal, needsDownload)
+    }
+
+    // MARK: - Materialize
+
+    /// Downloads + verifies + imports each entry serially. Reports progress
+    /// 0...1 across the batch.
+    func materialize(
+        _ entries: [BackupLibraryEntry],
+        progress: @Sendable (Double) -> Void
+    ) async -> [MaterializeResult] {
+        var results: [MaterializeResult] = []
+        results.reserveCapacity(entries.count)
+        progress(0.0)
+        guard !entries.isEmpty else {
+            progress(1.0)
+            return results
+        }
+        for (index, entry) in entries.enumerated() {
+            let result = await materializeOne(entry)
+            results.append(result)
+            progress(Double(index + 1) / Double(entries.count))
+        }
+        return results
+    }
+
+    // MARK: - Per-entry algorithm
+
+    private func materializeOne(_ entry: BackupLibraryEntry) async -> MaterializeResult {
+        let localURL = resolveSandboxURL(entry.fingerprintKey, entry.originalExtension)
+
+        // Step 1: existing local file → preflight hash.
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            if let localHash = try? localFileSHA256(at: localURL), localHash == entry.sha256 {
+                return MaterializeResult(entry: entry, outcome: .alreadyLocal)
+            }
+            // Corrupt local file (wrong bytes for the fingerprint). Remove
+            // before download — BookImporter would otherwise trust the
+            // existing file at the final path without rehashing.
+            try? FileManager.default.removeItem(at: localURL)
+        }
+
+        // Step 2: download.
+        let bytes: Data
+        do {
+            bytes = try await blobStore.download(from: entry.blobPath)
+        } catch let error as BackupBlobStoreError {
+            return MaterializeResult(entry: entry, outcome: .downloadFailed(error))
+        } catch {
+            return MaterializeResult(
+                entry: entry,
+                outcome: .downloadFailed(.underlying("\(error)"))
+            )
+        }
+
+        // Step 3: byte-count check (cheap, catches truncation).
+        if Int64(bytes.count) != entry.byteCount {
+            return MaterializeResult(
+                entry: entry,
+                outcome: .sizeAfterDownloadMismatch(expected: entry.byteCount, actual: Int64(bytes.count))
+            )
+        }
+
+        // Step 4: SHA-256 check (catches corruption that slipped past size).
+        let downloadedHash = sha256Hex(of: bytes)
+        if downloadedHash != entry.sha256 {
+            return MaterializeResult(
+                entry: entry,
+                outcome: .sha256Mismatch(expected: entry.sha256, actual: downloadedHash)
+            )
+        }
+
+        // Step 5: write to a temp file with originalExtension so BookImporter
+        // can derive format from the extension. Path includes the SHA-256 to
+        // stay unique across concurrent restores.
+        let tempURL: URL
+        do {
+            try FileManager.default.createDirectory(
+                at: tempDirectory, withIntermediateDirectories: true
+            )
+            tempURL = tempDirectory
+                .appendingPathComponent("restore_\(entry.sha256)")
+                .appendingPathExtension(entry.originalExtension)
+            try bytes.write(to: tempURL)
+        } catch {
+            return MaterializeResult(
+                entry: entry,
+                outcome: .importFailed("temp write failed: \(error)")
+            )
+        }
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        // Step 6: import via the production importer (re-extracts metadata,
+        // saves cover, fires indexing notification, applies dedupe).
+        let importResult: ImportResult
+        do {
+            importResult = try await importer.importFile(at: tempURL, source: .restore)
+        } catch let importErr as ImportError {
+            return MaterializeResult(
+                entry: entry,
+                outcome: .importFailed("\(importErr)")
+            )
+        } catch {
+            return MaterializeResult(
+                entry: entry,
+                outcome: .importFailed("\(error)")
+            )
+        }
+
+        // Step 7: verify the import landed at the manifest's fingerprint.
+        // Catches extension/format confusion: if BookImporter detected a
+        // different format from the bytes than the manifest claimed, the
+        // resulting fingerprintKey won't match.
+        guard importResult.fingerprintKey == entry.fingerprintKey else {
+            return MaterializeResult(
+                entry: entry,
+                outcome: .fingerprintMismatchAfterImport(
+                    expected: entry.fingerprintKey,
+                    actual: importResult.fingerprintKey
+                )
+            )
+        }
+
+        return MaterializeResult(
+            entry: entry,
+            outcome: .downloaded(fingerprintKey: importResult.fingerprintKey)
+        )
+    }
+
+    // MARK: - Hashing helpers
+
+    /// Streaming SHA-256 of a local file (chunked so very-large blobs don't
+    /// spike memory). Returns lowercase hex matching `entry.sha256` format.
+    private func localFileSHA256(at url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        let chunkSize = 64 * 1024
+        while true {
+            let chunk = try handle.read(upToCount: chunkSize) ?? Data()
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
+        }
+        return hexString(Data(hasher.finalize()))
+    }
+
+    /// SHA-256 of an in-memory byte buffer. Used for downloaded blobs which
+    /// are already fully resident.
+    private func sha256Hex(of data: Data) -> String {
+        hexString(Data(SHA256.hash(data: data)))
+    }
+
+    private func hexString(_ data: Data) -> String {
+        data.map { String(format: "%02x", $0) }.joined()
+    }
+}
