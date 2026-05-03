@@ -40,6 +40,10 @@ Describe issues in plain text below. The agent will triage them.
 
 ## Triaged
 
+2026-05-03 | DUPLICATE OF bug #110 | WebDAV Tailscale URL — same ATS issue captured in screenshot. Already FIXED in v3.10.9 (PR #139). GH #136 reopened pending device verification on iPhone.
+
+> 2026-05-03 | NEEDS-INFO | WebDAV localhost auth failed with user claim "password is correct" — earlier curl test (`curl -u vreader:1xxxx -X PROPFIND http://127.0.0.1:8080/`) returned 401, suggesting server creds didn't match. User now claims password IS correct. Need: (a) what username/password is in the WebDAV server (htpasswd / Docker env)? (b) what credentials are stored in vreader's keychain right now (Settings → WebDAV → re-type to confirm)? (c) does the same curl from Mac with those exact creds also 401? If curl succeeds and vreader 401s, that's a new bug (vreader sending creds wrong). If curl also 401s, server creds genuinely don't match keychain → user-config.
+
 2026-04-12 | bug #109 | TXT chapter mode progress bar shows book progress (GH #31) — implemented but broken; fix landed in bfd8345 but never recorded in tracker. Status FIXED, GH issue still OPEN (needs closure).
 
 2026-03-22 | bug #102 | EPUB fails to load chapter content — chapter navigation or content rendering broken
