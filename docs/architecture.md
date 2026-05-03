@@ -114,7 +114,9 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `KeychainService`                    | Keychain                   | Secure credential storage (used by `WebDAVProviderFactory`)               |
 | `BookSourcePipeline`                 | Actor + HTTP / rule engine | Search → BookInfo → TOC → Content scraping for Legado-style web novels    |
 | `SyncService`                        | CloudKit (feature-flagged) | Coordinates sync with `SyncConflictResolver`, tombstones, change tokens   |
-| `DebugBridge`                        | URL handler (DEBUG-only)   | `vreader-debug://` reset/seed/open/settle/snapshot/eval; see `docs/subsystems/debug-bridge.md` |
+| `DebugBridge`                        | URL handler (DEBUG-only)   | `vreader-debug://` reset/seed/open/settle/snapshot/eval; feature #49 added position-aware open + DebugSnapshot schema v2 (TTS state, render phase, settings provenance); see `docs/subsystems/debug-bridge.md` |
+| `DebugPositionResolver`              | —                          | Pure parser: `?position=<value>` string → typed `DebugPosition` per BookFormat (TXT/MD UTF-16 offset, EPUB CFI, AZW3 Foliate-CFI, PDF page). Native-mode-only; unified-renderer rejects via `openPositionUnsupportedInUnifiedMode`. Feature #49 WI-7a. |
+| `DebugReaderRegistry.awaitReader`    | DebugReaderRegistry singleton | Token-based keyed waiter that resumes when a reader matching `fingerprintKey` registers. Concurrent waiters with different timeouts each get their own continuation (UUID-token ownership). Feature #49 WI-7a. |
 | `ImportJobQueue`                     | Actor                      | Serializes book imports (avoids parallel `BookImporter` writes)           |
 | `LibraryRefreshService`              | NotificationCenter         | Coalesces library refresh requests across views                           |
 | `FeatureFlags`                       | Static                     | Compile/runtime flag resolution (`SyncService` and others gate on it)     |
