@@ -4,6 +4,13 @@ import SwiftData
 @main
 @MainActor
 struct VReaderApp: App {
+    /// Captures `application(_:handleEventsForBackgroundURLSession:completionHandler:)`
+    /// so the lazy-download coordinator can invoke the handler when its
+    /// background URLSession finishes delivering queued events.
+    /// SwiftUI's App lifecycle doesn't expose this hook directly.
+    /// Feature #47 WI-3b.
+    @UIApplicationDelegateAdaptor(VReaderAppDelegate.self) private var appDelegate
+
     private let modelContainer: ModelContainer?
     private let initError: String?
     /// Cached content view to avoid recreating the ViewModel on every `body` evaluation.

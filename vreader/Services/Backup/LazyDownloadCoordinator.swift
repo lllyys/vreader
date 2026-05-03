@@ -181,6 +181,37 @@ final class LazyDownloadCoordinator {
         progressByKey.removeValue(forKey: fingerprintKey)
     }
 
+    // MARK: - Background-event handler invocation
+
+    /// Called by `LazyDownloadDelegate.urlSessionDidFinishEvents` after
+    /// iOS has finished delivering all queued background events for the
+    /// session. Retrieves the stored UIApplicationDelegate completion
+    /// handler (registered when iOS relaunched the app via
+    /// `application(_:handleEventsForBackgroundURLSession:completionHandler:)`)
+    /// and invokes it. iOS will not release the app's background-launch
+    /// grace period until the handler runs.
+    ///
+    /// `handlerProvider` is injected only in tests — production reads
+    /// `VReaderAppDelegate.takeBackgroundHandler(for:)`.
+    func didFinishBackgroundEvents(
+        sessionIdentifier: String,
+        handlerProvider: ((String) -> (() -> Void)?)? = nil
+    ) {
+        let take = handlerProvider ?? { id in
+            VReaderAppDelegate.takeBackgroundHandler(for: id)
+        }
+        guard let handler = take(sessionIdentifier) else {
+            log.info(
+                "didFinishBackgroundEvents: no handler for session \(sessionIdentifier, privacy: .public) (foreground events?)"
+            )
+            return
+        }
+        handler()
+        log.info(
+            "didFinishBackgroundEvents: invoked handler for session \(sessionIdentifier, privacy: .public)"
+        )
+    }
+
     /// Test seam — wipes all coordinator state. Production never calls this.
     func reset() {
         progressByKey = [:]

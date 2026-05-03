@@ -34,7 +34,8 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 
 ### 1. App Layer (`vreader/App/`)
 
-- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV5), migration plan (V1→V2→V3→V4→V5), test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature.
+- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV6), migration plan (V1→V2→V3→V4→V5→V6), test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature. Adopts `@UIApplicationDelegateAdaptor(VReaderAppDelegate.self)` for background-URLSession completion-handler delivery (feature #47).
+- `VReaderAppDelegate.swift` — `UIApplicationDelegate` adapter that captures `application(_:handleEventsForBackgroundURLSession:completionHandler:)` into a MainActor-isolated static dictionary keyed by URLSession identifier. The lazy-download coordinator retrieves and invokes the handler from `LazyDownloadDelegate.urlSessionDidFinishEvents` so iOS releases the app's background-launch grace period.
 
 ### 2. Library Layer (`vreader/Views/LibraryView.swift`, `vreader/ViewModels/LibraryViewModel.swift`)
 

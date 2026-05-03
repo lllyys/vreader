@@ -101,6 +101,25 @@ final class LazyDownloadDelegate: NSObject, URLSessionDownloadDelegate, @uncheck
         }
     }
 
+    /// Called by URLSession when all background events for the session
+    /// have been delivered. Forwards to the coordinator if alive, but
+    /// ALWAYS invokes the stored UIApplicationDelegate completion
+    /// handler — iOS will not release the app's background-launch grace
+    /// period until that handler runs, even if the coordinator was
+    /// torn down (test harness, app shutting down, etc.).
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        let identifier = session.configuration.identifier ?? ""
+        Task { @MainActor [weak coordinator] in
+            if let coordinator {
+                coordinator.didFinishBackgroundEvents(sessionIdentifier: identifier)
+            } else {
+                // Coordinator is gone — invoke the AppDelegate handler
+                // directly so iOS doesn't leak the grace period.
+                VReaderAppDelegate.takeBackgroundHandler(for: identifier)?()
+            }
+        }
+    }
+
     /// Task completed (success or error). Errors here mean the task itself
     /// failed (network, server 4xx/5xx, cancelled).
     func urlSession(
