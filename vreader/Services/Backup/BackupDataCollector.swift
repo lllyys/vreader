@@ -201,6 +201,34 @@ final class BackupDataCollector: BackupDataCollecting, @unchecked Sendable {
         ((try? await persistence.fetchAllLibraryBooks()) ?? []).count
     }
 
+    func collectLibraryManifest() async throws -> Data {
+        let projections = (try? await persistence.fetchAllBooksForBackup()) ?? []
+        let entries: [BackupLibraryEntry] = projections.compactMap { projection in
+            guard let format = BookFormat(rawValue: projection.format) else {
+                log.error("Skipping projection with unknown format \(projection.format, privacy: .public)")
+                return nil
+            }
+            return BackupLibraryEntry(
+                fingerprintKey: projection.fingerprintKey,
+                format: projection.format,
+                sha256: projection.sha256,
+                byteCount: projection.byteCount,
+                originalExtension: projection.originalExtension,
+                title: projection.title,
+                author: projection.author,
+                addedAt: projection.addedAt,
+                lastOpenedAt: projection.lastOpenedAt,
+                blobPath: BlobPath.make(
+                    format: format,
+                    sha256: projection.sha256,
+                    byteCount: projection.byteCount
+                )
+            )
+        }
+        let envelope = BackupLibraryManifestEnvelope(schemaVersion: 1, books: entries)
+        return try encode(envelope)
+    }
+
     // MARK: - Helpers
 
     private func encode<T: Encodable>(_ value: T) throws -> Data {

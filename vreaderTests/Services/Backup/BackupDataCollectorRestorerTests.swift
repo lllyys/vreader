@@ -10,6 +10,92 @@ import Foundation
 import SwiftData
 @testable import vreader
 
+// MARK: - Library Manifest collection (feature #46 WI-6)
+
+@Suite("BackupDataCollector — collectLibraryManifest (feature #46 WI-6)")
+struct BackupDataCollectorLibraryManifestTests {
+
+    private func makeCollector(persistence: PersistenceActor) -> BackupDataCollector {
+        BackupDataCollector(
+            persistence: persistence,
+            defaults: UserDefaults(suiteName: "manifest-test-\(UUID().uuidString)")!,
+            perBookSettingsBaseURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("pbs-\(UUID().uuidString)", isDirectory: true)
+        )
+    }
+
+    @Test func emptyLibrary_emitsEmptyManifest() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        let collector = makeCollector(persistence: persistence)
+        let data = try await collector.collectLibraryManifest()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(BackupLibraryManifestEnvelope.self, from: data)
+        #expect(envelope.schemaVersion == 1)
+        #expect(envelope.books.isEmpty)
+    }
+
+    @Test func multipleBooks_emitsOneEntryPerBook_withCorrectBlobPath() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        let collector = makeCollector(persistence: persistence)
+        let key1 = try await CollectionTestHelper.insertBook(
+            persistence: persistence,
+            title: "Alice",
+            sha: String(repeating: "a", count: 64),
+            byteCount: 1024
+        )
+        let key2 = try await CollectionTestHelper.insertBook(
+            persistence: persistence,
+            title: "MOBI Book",
+            sha: String(repeating: "b", count: 64),
+            byteCount: 4096
+        )
+
+        let data = try await collector.collectLibraryManifest()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(BackupLibraryManifestEnvelope.self, from: data)
+        #expect(envelope.books.count == 2)
+        let keys = envelope.books.map(\.fingerprintKey)
+        #expect(keys == keys.sorted())
+        #expect(Set(keys) == Set([key1, key2]))
+        for entry in envelope.books {
+            guard let format = BookFormat(rawValue: entry.format) else {
+                Issue.record("unknown format \(entry.format)")
+                continue
+            }
+            let expected = BlobPath.make(format: format, sha256: entry.sha256, byteCount: entry.byteCount)
+            #expect(entry.blobPath == expected)
+        }
+    }
+
+    @Test func mobiBook_preservesOriginalExtensionInManifest() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        let collector = makeCollector(persistence: persistence)
+        let sha = String(repeating: "c", count: 64)
+        let fp = DocumentFingerprint(contentSHA256: sha, fileByteCount: 8192, format: .azw3)
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "Old Kindle Book",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date(),
+            originalExtension: "mobi"
+        )
+        _ = try await persistence.insertBook(record)
+        let data = try await collector.collectLibraryManifest()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(BackupLibraryManifestEnvelope.self, from: data)
+        #expect(envelope.books.count == 1)
+        #expect(envelope.books[0].originalExtension == "mobi")
+        #expect(envelope.books[0].format == "azw3")
+    }
+}
+
 @Suite("BackupDataCollector + BackupDataRestorer")
 struct BackupCollectorRestorerSuite {
 

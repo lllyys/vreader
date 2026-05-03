@@ -25,6 +25,26 @@ protocol BackupDataCollecting: Sendable {
     func collectPerBookSettings() async throws -> Data
     func collectReplacementRules() async throws -> Data
     func getBookCount() async -> Int
+
+    /// Feature #46 (WI-6): emits `library-manifest.json` carrying one
+    /// `BackupLibraryEntry` per local book. Allows the restorer (WI-7+)
+    /// to download missing book blobs on a fresh device. Default impl
+    /// returns an empty manifest envelope so older provider impls stay
+    /// source-compatible.
+    func collectLibraryManifest() async throws -> Data
+}
+
+extension BackupDataCollecting {
+    func collectLibraryManifest() async throws -> Data {
+        let envelope = BackupLibraryManifestEnvelope(
+            schemaVersion: 1,
+            books: []
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(envelope)
+    }
 }
 
 // MARK: - BackupDataRestoring Protocol
