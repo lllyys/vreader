@@ -1,9 +1,15 @@
 # Feature #48 — DebugBridge Probe Completion (Implementation Plan)
 
-**Source**: `docs/features.md` row #48 (TODO, High priority) — "DebugBridge probe completion — settle hooks, live eval, richer snapshots, fixture path"
+> **2026-05-03 — UMBRELLA SPLIT.** Per `.claude/rules/47-feature-workflow.md` audit-cap escalation, feature #48 was split into two smaller features:
+> - **#49** — Phase-A: registry / `open` / snapshot wiring. Picks up the WIs in this plan that don't touch per-format host code (originally numbered WIs 0, 1, 7, 8 in the plan's "Sequencing" section). Round-3 surface fixes (compile-correctness on `open()` referenced types, continuation type, registry weak/strong consistency) must land in #49's WI-0a.
+> - **#50** — Phase-B: per-format settle hooks + live `eval` + host injection API. The part that took 3 audit rounds without converging. Plan TODO; will be written fresh after #49 lands.
+>
+> #48 itself is now `DUPLICATE` in the tracker. This plan is retained as the audit log + the source of truth for #49's scope (and will be referenced when #50's plan is written).
+
+**Source**: `docs/features.md` row #49 (PLANNED, High) for resolver/open/snapshot scope. Row #48 = DUPLICATE, row #50 = TODO for per-format work.
 **Phase**: Phase-1 prerequisite for feature #45 (Verification Harness Sweep)
 **GH issue**: not yet filed (will be filed at PLANNED status, mirror under "GH: #N" in Notes)
-**Status**: AUDIT-CAP REACHED at v3 (Round 3) — escalated per `.claude/rules/47-feature-workflow.md`; user decision required before Gate 3.
+**Status**: AUDIT-CAP REACHED at v3 (Round 3) — split accepted; this plan covers #49 only. Round-3 fixes pending #49's Gate 3 entry.
 
 ## Audit cap reached — Round 3 verdict (2026-05-03)
 
