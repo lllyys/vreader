@@ -70,6 +70,39 @@ final class DebugCommandTests: XCTestCase {
         XCTAssertEqual(cmd, .open(bookId: bookId, position: nil))
     }
 
+    // MARK: - feature #49 WI-0 grammar reconciliation
+
+    func test_parse_openWithLegacyCFIParam_throwsInvalidParam() {
+        // The legacy `cfi=` parameter was renamed to `position=` in feature
+        // #49's grammar-reconciliation WI. Any caller still using `cfi` must
+        // get a clear error rather than silently opening at the start —
+        // otherwise verification flows that pass `cfi=...` would think the
+        // open succeeded when actually the position was dropped.
+        let bookId = "550e8400-e29b-41d4-a716-446655440000"
+        let url = URL(string: "vreader-debug://open?bookId=\(bookId)&cfi=foo")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "cfi")
+        }
+    }
+
+    func test_parse_openWithCFIAndPosition_throwsInvalidParam() {
+        // If both `cfi` and `position` are supplied, the legacy `cfi` still
+        // takes precedence as the rejection — caller must remove `cfi`.
+        let bookId = "550e8400-e29b-41d4-a716-446655440000"
+        let url = URL(string: "vreader-debug://open?bookId=\(bookId)&cfi=foo&position=bar")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "cfi")
+        }
+    }
+
     func test_parse_openMissingBookId_throwsMissingParam() {
         let url = URL(string: "vreader-debug://open")!
         XCTAssertThrowsError(try DebugCommand.parse(url)) { error in

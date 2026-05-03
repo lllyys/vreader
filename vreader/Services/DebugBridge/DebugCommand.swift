@@ -12,7 +12,11 @@ import Foundation
 ///
 /// - `reset` — wipe library and reset settings.
 /// - `seed?fixture=<name>` — seed a bundled fixture book.
-/// - `open?bookId=<uuid>[&cfi=<position>]` — open a book at an optional position.
+/// - `open?bookId=<uuid>[&position=<value>]` — open a book at an optional
+///   position. Position format depends on the book format; a future feature
+///   #49 WI ships a `DebugPositionResolver` for native-mode TXT/EPUB/PDF.
+///   The legacy `?cfi=<value>` parameter is rejected — feature #49 WI-0
+///   reconciled the grammar to use `position` consistently across all formats.
 /// - `theme?mode=<dark|light>[&fontSize=<int>]` — set appearance state.
 /// - `settle?token=<id>` — write `Caches/ready-<id>.json` after layout settles.
 /// - `snapshot?dest=<file>` — write semantic state JSON to the app container.
@@ -75,8 +79,15 @@ extension DebugCommand {
             let bookId = try requireParam("bookId", in: params)
             // Parameter is named `position` to match the documented grammar
             // and the public `DebugCommand.open(bookId:position:)` shape.
-            // (Earlier draft used `cfi`; renamed for consistency with the
-            // doc and the universal-position concept used elsewhere.)
+            // Reject the legacy `cfi` parameter explicitly so any caller still
+            // using the old grammar gets a clear error rather than silently
+            // opening at the start (feature #49 WI-0 grammar reconciliation).
+            if params["cfi"] != nil {
+                throw DebugCommandError.invalidParam(
+                    "cfi",
+                    reason: "Use 'position' — 'cfi' was renamed in feature #49 WI-0 grammar reconciliation"
+                )
+            }
             let position = nonEmpty(params["position"])
             return .open(bookId: bookId, position: position)
 
