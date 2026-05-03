@@ -30,8 +30,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
         GENERATE_INFOPLIST_FILE: YES
-        CURRENT_PROJECT_VERSION: 8
-        MARKETING_VERSION: 3.10.7
+        CURRENT_PROJECT_VERSION: 9
+        MARKETING_VERSION: 3.10.8
         INFOPLIST_KEY_CFBundleDisplayName: vreader
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
