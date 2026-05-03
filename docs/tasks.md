@@ -40,9 +40,9 @@ Describe issues in plain text below. The agent will triage them.
 
 ## Triaged
 
-2026-05-03 | DUPLICATE OF bug #110 | WebDAV Tailscale URL — same ATS issue captured in screenshot. Already FIXED in v3.10.9 (PR #139). GH #136 reopened pending device verification on iPhone.
+2026-05-03 | DUPLICATE OF bug #110 | WebDAV Tailscale URL — same ATS issue captured in screenshot. FIXED in v3.10.9 (PR #139); end-to-end verified 2026-05-03 against rclone-backed `vreader-webdav-host` over Tailscale on simulator (build 10) — connection succeeds once system HTTP-proxy bypass includes `*.ts.net`. GH #136 closed.
 
-> 2026-05-03 | NEEDS-INFO | WebDAV localhost auth failed with user claim "password is correct" — earlier curl test (`curl -u vreader:1xxxx -X PROPFIND http://127.0.0.1:8080/`) returned 401, suggesting server creds didn't match. User now claims password IS correct. Need: (a) what username/password is in the WebDAV server (htpasswd / Docker env)? (b) what credentials are stored in vreader's keychain right now (Settings → WebDAV → re-type to confirm)? (c) does the same curl from Mac with those exact creds also 401? If curl succeeds and vreader 401s, that's a new bug (vreader sending creds wrong). If curl also 401s, server creds genuinely don't match keychain → user-config.
+2026-05-03 | NO-ACTION | WebDAV localhost auth failed (earlier 401, then 502 over Tailscale) — root cause was a system HTTP proxy on the Mac (`127.0.0.1:7897`, ClashX/Surge-style) whose bypass list excluded `*.ts.net`. iOS Simulator inherits the Mac's proxy → URLSession funnelled Tailscale traffic through the proxy → 502 Bad Gateway. Localhost worked because it was already in the bypass list. Not a vreader bug — user-side network config. Resolution: add `*.ts.net` and `100.64.0.0/10` to the proxy bypass list. Stale Docker WebDAV container (`bytemark/webdav` on port 8080) was also masking the rclone server's creds — removed in same session.
 
 2026-04-12 | bug #109 | TXT chapter mode progress bar shows book progress (GH #31) — implemented but broken; fix landed in bfd8345 but never recorded in tracker. Status FIXED, GH issue still OPEN (needs closure).
 
