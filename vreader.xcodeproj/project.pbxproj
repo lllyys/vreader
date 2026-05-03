@@ -143,6 +143,7 @@
 		2DB8779FF53587C400452428 /* FileAvailabilityStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6362591D3F62B4BC84CE136A /* FileAvailabilityStateMachineTests.swift */; };
 		2DBB3E013C7117D610B1679F /* BookImporterOriginalExtensionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8562BBBE45039B72EAF9E5 /* BookImporterOriginalExtensionTests.swift */; };
 		2DDEE520E3606572AED3598F /* LibraryRefreshService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC254C94AE749FFA8AACCE4 /* LibraryRefreshService.swift */; };
+		2E4D176937CECE96A39EAC18 /* RemoteBookCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF7D174AC38392C14C17F1F7 /* RemoteBookCatalog.swift */; };
 		2E988A3214761CEAEF22D451 /* HTMLHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4349ACADC38E53A4D87D5D5A /* HTMLHelper.swift */; };
 		2E9BB5052DD152DD52BB0D45 /* TXTReaderPlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 480E5268D197F33E8C0B6CFC /* TXTReaderPlaceholderTests.swift */; };
 		2F558CF136B69212E668F2D3 /* EPUBParserProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3C15E361FF460BCE57B8675 /* EPUBParserProtocol.swift */; };
@@ -675,6 +676,7 @@
 		E82E02103AE2B5E39F5F6C66 /* LibraryEmptyStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 292131FE5DD09EAEDDD3191C /* LibraryEmptyStateTests.swift */; };
 		E8353217B517055A09014AE7 /* EPUBTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A457F48D22CD5B4952817701 /* EPUBTypes.swift */; };
 		E9177AEFF47DA3EFEAC13C50 /* TXTChunkedLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A069D350D0DC6B4C000E1D43 /* TXTChunkedLoaderTests.swift */; };
+		E92C78246E46B2DFE76DE0A2 /* RemoteBookCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B006129C2FCEC99B9FBB91 /* RemoteBookCatalogTests.swift */; };
 		E92CBF70F353E737625B557F /* AIRequestCacheKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C1B40888B5C8213559B111 /* AIRequestCacheKeyTests.swift */; };
 		E963BC203166854BFF9C69A4 /* zip.js in Resources */ = {isa = PBXBuildFile; fileRef = DBA51F184E6AA5F2FD1F5456 /* zip.js */; };
 		E9AAB1E1CE8C74F9517CBEC3 /* SearchQueryExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69C7229E97D0F8B543683A02 /* SearchQueryExecutor.swift */; };
@@ -1171,6 +1173,7 @@
 		939BC09F1D771D2E22301ED3 /* V1toV2MigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V1toV2MigrationTests.swift; sourceTree = "<group>"; };
 		9452FAFFDEBDF03FF6CCEBB1 /* MDParserProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDParserProtocol.swift; sourceTree = "<group>"; };
 		94C32FCAEDE0062125F6A51E /* DebugSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugSnapshot.swift; sourceTree = "<group>"; };
+		95B006129C2FCEC99B9FBB91 /* RemoteBookCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteBookCatalogTests.swift; sourceTree = "<group>"; };
 		96A2FE9743AF484093A21969 /* TTSServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSServiceTests.swift; sourceTree = "<group>"; };
 		96BE19585BF1F4C8174F7219 /* HighlightRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightRecord.swift; sourceTree = "<group>"; };
 		96E10DBA312E3C1934B36E63 /* MockAnnotationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAnnotationStore.swift; sourceTree = "<group>"; };
@@ -1377,6 +1380,7 @@
 		DE2038A4D36C4355AC5C7BF5 /* SearchLocatorSliceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchLocatorSliceTests.swift; sourceTree = "<group>"; };
 		DE360E19106AAA7A1FCEEEB9 /* legado_source_minimal.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = legado_source_minimal.json; sourceTree = "<group>"; };
 		DE5CAE41C429B6868957C540 /* ExportTestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTestFixtures.swift; sourceTree = "<group>"; };
+		DF7D174AC38392C14C17F1F7 /* RemoteBookCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteBookCatalog.swift; sourceTree = "<group>"; };
 		E026EDF24B39D1CD50B39389 /* CollectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectionTests.swift; sourceTree = "<group>"; };
 		E02C0C97FFE66E8DEC728D64 /* SyncRecordDTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRecordDTOs.swift; sourceTree = "<group>"; };
 		E07FB35EC9805F51CAD10444 /* ThemeBackgroundStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeBackgroundStore.swift; sourceTree = "<group>"; };
@@ -1656,6 +1660,7 @@
 				159BB4EBD79ECE6657D50EC1 /* LazyDownloadDelegate.swift */,
 				592405D887F7AE66A58FA8D9 /* LazyDownloadTaskMeta.swift */,
 				DB6CE81404902AB359536964 /* PROPFINDParser.swift */,
+				DF7D174AC38392C14C17F1F7 /* RemoteBookCatalog.swift */,
 				9DAC16C19C7D4C72EFC950C9 /* WebDAVBlobStore.swift */,
 				4946129FECC6C9BA7A7F16A1 /* WebDAVClient.swift */,
 				D408C9CE57D4C437A72C0D18 /* WebDAVNetworkPolicy.swift */,
@@ -2577,6 +2582,7 @@
 				E124CB39746DB0B59D0390C3 /* LazyDownloadReattachTests.swift */,
 				5753714B6AF8A111E400D35A /* LazyDownloadTaskMetaTests.swift */,
 				4D9501ED4FB49C6035FDF5BB /* MockBackupProvider.swift */,
+				95B006129C2FCEC99B9FBB91 /* RemoteBookCatalogTests.swift */,
 				D9A7B601E9791FB068616C98 /* WebDAVATSTests.swift */,
 				C3F1695C0E7481CB3EA2B8A3 /* WebDAVBackupIntegrationTests.swift */,
 				C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */,
@@ -3338,6 +3344,7 @@
 				800F472661AB1030CC54DB46 /* ReadingTimeFormatterTests.swift in Sources */,
 				75F2C31298F0C62115778DED /* RealDebugBridgeContextTests.swift in Sources */,
 				6B7F71BDB5ECEA83F19496FC /* ReflowableTextSourceTests.swift in Sources */,
+				E92C78246E46B2DFE76DE0A2 /* RemoteBookCatalogTests.swift in Sources */,
 				0246F6958C782714D1E5FAB4 /* ReplacementTransformTests.swift in Sources */,
 				48C743A0324468FF7507F157 /* RuleEngineTests.swift in Sources */,
 				FD253FA0CEB159E2B1299BD4 /* SchemaV1Tests.swift in Sources */,
@@ -3689,6 +3696,7 @@
 				432C40433346C054B7EC5D07 /* ReduceMotionHelper.swift in Sources */,
 				A84E7CDEED71FF118D2DD7DC /* ReflowableTextSource.swift in Sources */,
 				909ADB564394665014A94D74 /* RegexRuleEvaluator.swift in Sources */,
+				2E4D176937CECE96A39EAC18 /* RemoteBookCatalog.swift in Sources */,
 				054050637EFD8ACE415BCF2E /* ReplacementRulesView.swift in Sources */,
 				8A5EFD4729B7E4BE9D2CA38E /* ReplacementTransform.swift in Sources */,
 				357C70E2DA8091ED4022D40E /* RuleEngine.swift in Sources */,
@@ -3918,13 +3926,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 55;
+				CURRENT_PROJECT_VERSION = 56;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.11.23;
+				MARKETING_VERSION = 3.11.24;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4068,13 +4076,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 55;
+				CURRENT_PROJECT_VERSION = 56;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.11.23;
+				MARKETING_VERSION = 3.11.24;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
