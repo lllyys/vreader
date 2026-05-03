@@ -269,6 +269,7 @@
 		581D8C5F46D4CAAD4DA31EF8 /* FoliateViewCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 506F86FDA1498276D10E5E7B /* FoliateViewCoordinator.swift */; };
 		5895F86BFE58FBFBAA7D8424 /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F6250C22449E7E83591620 /* SyncStatusView.swift */; };
 		58F98A74EEAB6D0C39616B5D /* UnifiedTextRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F7F45FFFEE431C41E618EF2 /* UnifiedTextRendererTests.swift */; };
+		594C442CEEA499384283D6B7 /* SelectiveRestoreCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD987912F59B7B7CD80B064 /* SelectiveRestoreCoordinator.swift */; };
 		59B8E65739F0BDF9F099D348 /* SearchQueryExecutorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B1246EC0EE34D326231F60 /* SearchQueryExecutorTests.swift */; };
 		59C50A731FA0022482A38792 /* WCAGContrastTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A2A16647F198641F11AC9C1 /* WCAGContrastTests.swift */; };
 		5A39B7FF78E085A0F6696BE6 /* CSSRuleEvaluatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 152689657913035E5579B762 /* CSSRuleEvaluatorTests.swift */; };
@@ -609,6 +610,7 @@
 		CEAEA28FA9D03BDAACC97CBF /* SyncOutboundQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B00C0FE14AB02EDE7E9EDD /* SyncOutboundQueueTests.swift */; };
 		CFC40B5FB55F37C092A70338 /* VReaderAnnotationParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36D5CFF47A223349C004E39 /* VReaderAnnotationParserTests.swift */; };
 		CFF2F7127E363B96F2B6429B /* LibraryBookItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E3D2050D82A39083191EDDA /* LibraryBookItem.swift */; };
+		D007D50EE76181258F5D0681 /* SelectiveRestoreCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9358413A64690874ED7AB67D /* SelectiveRestoreCoordinatorTests.swift */; };
 		D0373F025DFBBEF9FAD19788 /* LazyDownloadBackgroundEventsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F891C451718B4BC9AC7BCEC /* LazyDownloadBackgroundEventsTests.swift */; };
 		D08EB57C5EBC9C9542476015 /* MetadataExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BC5F159064D57CFAE2A676 /* MetadataExtractorTests.swift */; };
 		D0E3C146DC0F8D0978B419E7 /* AIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C4804D4D5F435DF10014C5 /* AIError.swift */; };
@@ -1167,6 +1169,7 @@
 		92676552DDABC9E3D5E7DC76 /* HapticFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticFeedback.swift; sourceTree = "<group>"; };
 		9279142901B3666BD14E0B20 /* DebugCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugCommandTests.swift; sourceTree = "<group>"; };
 		92AB43BED5AC7096E7278A16 /* QuoteRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuoteRecoveryTests.swift; sourceTree = "<group>"; };
+		9358413A64690874ED7AB67D /* SelectiveRestoreCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectiveRestoreCoordinatorTests.swift; sourceTree = "<group>"; };
 		936C16A4F1B2B55E63922EE7 /* ChapterProgressCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterProgressCalculator.swift; sourceTree = "<group>"; };
 		9380720966F3E3F6F8A0D407 /* DebugReaderRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugReaderRegistry.swift; sourceTree = "<group>"; };
 		93955827511F55BEEFCA2307 /* BookSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookSource.swift; sourceTree = "<group>"; };
@@ -1377,6 +1380,7 @@
 		DDB7C7EC41A96F5D4B53E983 /* ReaderNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderNotifications.swift; sourceTree = "<group>"; };
 		DDC88500940FCA638D86E8E4 /* PDFReaderContainerView+Overlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PDFReaderContainerView+Overlays.swift"; sourceTree = "<group>"; };
 		DDD7F2C7E93907B97A730010 /* HighlightListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightListViewModel.swift; sourceTree = "<group>"; };
+		DDD987912F59B7B7CD80B064 /* SelectiveRestoreCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectiveRestoreCoordinator.swift; sourceTree = "<group>"; };
 		DE2038A4D36C4355AC5C7BF5 /* SearchLocatorSliceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchLocatorSliceTests.swift; sourceTree = "<group>"; };
 		DE360E19106AAA7A1FCEEEB9 /* legado_source_minimal.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = legado_source_minimal.json; sourceTree = "<group>"; };
 		DE5CAE41C429B6868957C540 /* ExportTestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTestFixtures.swift; sourceTree = "<group>"; };
@@ -1661,6 +1665,7 @@
 				592405D887F7AE66A58FA8D9 /* LazyDownloadTaskMeta.swift */,
 				DB6CE81404902AB359536964 /* PROPFINDParser.swift */,
 				DF7D174AC38392C14C17F1F7 /* RemoteBookCatalog.swift */,
+				DDD987912F59B7B7CD80B064 /* SelectiveRestoreCoordinator.swift */,
 				9DAC16C19C7D4C72EFC950C9 /* WebDAVBlobStore.swift */,
 				4946129FECC6C9BA7A7F16A1 /* WebDAVClient.swift */,
 				D408C9CE57D4C437A72C0D18 /* WebDAVNetworkPolicy.swift */,
@@ -2583,6 +2588,7 @@
 				5753714B6AF8A111E400D35A /* LazyDownloadTaskMetaTests.swift */,
 				4D9501ED4FB49C6035FDF5BB /* MockBackupProvider.swift */,
 				95B006129C2FCEC99B9FBB91 /* RemoteBookCatalogTests.swift */,
+				9358413A64690874ED7AB67D /* SelectiveRestoreCoordinatorTests.swift */,
 				D9A7B601E9791FB068616C98 /* WebDAVATSTests.swift */,
 				C3F1695C0E7481CB3EA2B8A3 /* WebDAVBackupIntegrationTests.swift */,
 				C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */,
@@ -3358,6 +3364,7 @@
 				8CB7B605DFC452B422BBEC4F /* SearchTextNormalizerTests.swift in Sources */,
 				8BBE50E626A6524E8C6DB59D /* SearchViewModelTests.swift in Sources */,
 				F14370F35DEFDB725452B5CA /* SearchWiringTests.swift in Sources */,
+				D007D50EE76181258F5D0681 /* SelectiveRestoreCoordinatorTests.swift in Sources */,
 				4A87A6889CFFC099EE0AFBD6 /* SeriesTagPersistenceTests.swift in Sources */,
 				088EB6A1D2B736BB8B643B30 /* SimpTradTransformTests.swift in Sources */,
 				30F629136C9EED9FCD557222 /* SmokeTests.swift in Sources */,
@@ -3719,6 +3726,7 @@
 				74BEA01C5E4B3E080D2BF2FD /* SearchTokenizer.swift in Sources */,
 				1C9B4E21A97013A7CC409925 /* SearchView.swift in Sources */,
 				2F69DF71FDE5AF4FF920C3B2 /* SearchViewModel.swift in Sources */,
+				594C442CEEA499384283D6B7 /* SelectiveRestoreCoordinator.swift in Sources */,
 				8FFE1DA9C8F17FC318BE81BD /* SettingsView.swift in Sources */,
 				EBB6F00E3C34370C7C2CB369 /* ShareSheet.swift in Sources */,
 				6BA38351098A88991EC589D3 /* SimpTradDictionary.swift in Sources */,
@@ -3926,13 +3934,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 56;
+				CURRENT_PROJECT_VERSION = 57;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.11.24;
+				MARKETING_VERSION = 3.11.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4076,13 +4084,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 56;
+				CURRENT_PROJECT_VERSION = 57;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.11.24;
+				MARKETING_VERSION = 3.11.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
