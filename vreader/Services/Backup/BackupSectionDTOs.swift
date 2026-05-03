@@ -207,3 +207,62 @@ struct BackupReplacementRule: Codable, Sendable, Equatable {
     let label: String
     let createdAt: Date
 }
+
+// MARK: - Library Manifest (feature #46 WI-2)
+
+/// Library manifest section emitted as `library-manifest.json` inside the
+/// backup ZIP starting with feature #46. Backward-compatible: old (v1-format)
+/// backups without this section restore exactly as before — metadata-only,
+/// no book materialization. New backups carry one entry per local book so the
+/// restorer can download missing blobs and reconstruct the library on a
+/// fresh device.
+struct BackupLibraryManifestEnvelope: Codable, Sendable, Equatable, BackupVersionedEnvelope {
+    let schemaVersion: Int
+    let books: [BackupLibraryEntry]
+}
+
+/// Per-book entry in the library manifest. Carries the canonical fingerprint
+/// fields plus the blob path on the WebDAV server so the materializer doesn't
+/// need to recompute it from format + sha256 + byteCount on every entry.
+///
+/// `originalExtension` is non-optional here (the projection coalesces nil to
+/// the canonical extension before emission, see `BackupBookProjection` /
+/// `PersistenceActor.fetchAllBooksForBackup`).
+struct BackupLibraryEntry: Codable, Sendable, Equatable {
+    /// Canonical `{format}:{sha256}:{byteCount}` — primary key for re-attaching
+    /// positions/annotations after restore.
+    let fingerprintKey: String
+
+    /// Canonical `BookFormat.rawValue` — `"epub"`, `"azw3"`, `"txt"`, `"md"`, `"pdf"`.
+    let format: String
+
+    /// Hex SHA-256 of the original file bytes.
+    let sha256: String
+
+    /// Original file byte count.
+    let byteCount: Int64
+
+    /// Original source extension at import time, e.g. `"mobi"` for AZW3-canonical
+    /// books that were imported as `.mobi`. Used by the materializer to write
+    /// the downloaded blob to a temp file with the user's original extension.
+    let originalExtension: String
+
+    /// Display-only title and author. The materializer re-extracts these from
+    /// the imported file via `MetadataExtractor`; they're carried in the manifest
+    /// so future selective-restore UI (feature #47) can show them before
+    /// downloading the blob.
+    let title: String?
+    let author: String?
+
+    /// When the user added the book to their library.
+    let addedAt: Date
+
+    /// When the book was last opened, if ever. Restored alongside the position
+    /// so the restored library shows the right "Last Read" sort order.
+    let lastOpenedAt: Date?
+
+    /// Content-addressed WebDAV path to the blob, e.g.
+    /// `"VReader/books/azw3/<sha256>_<byteCount>.azw3"`. Always agrees with
+    /// `BlobPath.make(format:sha256:byteCount:)`.
+    let blobPath: String
+}

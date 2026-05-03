@@ -89,6 +89,14 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 - **Root cause**: Import writes to DB but no notification to reader to re-render
 - **Fix**: Added `.readerHighlightsDidImport` notification; all format containers observe and call `coordinator.restoreAll()`
 
+### Bug #111 — DebugFixtures resources ship in Release builds
+- **Repro**: build vreader at Release configuration, inspect `vreader.app/Resources/`. The bundled `war-and-peace.txt` is present.
+- **Expected**: DebugFixtures present only in DEBUG builds.
+- **Actual**: included in every configuration's Resources copy phase.
+- **Discovery**: Codex audit of feature #48 plan (2026-05-03) verified against `vreader.xcodeproj/project.pbxproj` line 2986.
+- **Why not trivial**: xcodegen `sources.excludes` is not per-build-config. Real fix needs one of: (a) move fixtures to a Debug-only target, (b) build-phase script that copies fixtures only when `$(CONFIGURATION) == Debug`, (c) a separate XcodeGen spec generated only for Debug, or (d) preprocessor-based `#if DEBUG` resource access (defeats the leak in code but keeps the bytes in the bundle — partial fix).
+- **Risk**: leaks ~3MB of test data into shipped Release builds. Not a security issue (fixture is a public-domain text), but bloats App Store binary and surfaces a debug feature in Spotlight on user devices.
+
 
 ## Summary
 
@@ -205,3 +213,4 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 | 108| AZW3/Foliate reader: center tap does not toggle chrome                                                 | Foliate/* | Medium   | TODO     | Toolbar stays visible on center tap in FoliateSpikeView. EPUB chrome toggle works. WKWebView may consume tap. |
 | 109| TXT chapter mode: progress bar shows book progress instead of chapter progress                         | TXT/*     | Medium   | FIXED    | Fixed in bfd8345. Added currentChapterLocalUTF16 to TXTReaderViewModel; bridge stores local offset, persistence converts to global. 4 new tests. GH: #31 |
 | 110| WebDAV Test Connection blocked by App Transport Security on Tailscale URL                              | Backup/*  | High     | FIXED    | Migrated project.yml from auto-generated Info.plist to managed Info.plist via XcodeGen `info.properties`; added `NSAppTransportSecurity > NSAllowsArbitraryLoads = true`. 2 regression tests in `WebDAVATSTests.swift`. GH: #136 |
+| 111| DebugFixtures resources ship in Release builds                                                         | DevTools/*| Medium   | TODO     | `vreader/Resources/DebugFixtures/war-and-peace.txt` is included in the production Resources copy phase (verified in `vreader.xcodeproj/project.pbxproj`). Surfaced by Codex audit of feature #48 plan (2026-05-03). xcodegen `excludes` is not per-build-config, so a real fix needs a build-phase script, separate target, or generated config-conditional source spec. |
