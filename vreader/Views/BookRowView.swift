@@ -58,10 +58,11 @@ struct BookRowView: View {
 
             // Reading metadata
             VStack(alignment: .trailing, spacing: 2) {
-                // Format badge
-                Text(book.formatBadge)
-                    .font(.caption2)
-                    .fontWeight(.semibold)
+                // Format badge OR file-state indicator (feature #47).
+                // Non-`.local` rows replace the format badge with a
+                // status icon so the user immediately sees the row is
+                // remote / downloading / failed.
+                fileStateBadge
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(formatColor.opacity(0.15))
@@ -87,6 +88,45 @@ struct BookRowView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Double tap to open")
+    }
+
+    // MARK: - File-state badge (feature #47 WI-5)
+
+    /// Replaces the format badge for non-`.local` rows so the user
+    /// sees the row's transfer state at a glance. Display logic:
+    ///   - `.local` → format badge ("EPUB", "PDF", …)
+    ///   - `.remoteOnly` → cloud + "Remote"
+    ///   - `.downloading` → arrow.down.circle + "Downloading"
+    ///   - `.failed` → exclamationmark.icloud + "Retry"
+    ///   - `.missingRemote` → xmark.icloud + "Missing"
+    @ViewBuilder
+    private var fileStateBadge: some View {
+        switch book.fileState {
+        case .local:
+            Text(book.formatBadge)
+                .font(.caption2)
+                .fontWeight(.semibold)
+        case .remoteOnly:
+            Label("Remote", systemImage: "cloud")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .labelStyle(.titleAndIcon)
+        case .downloading:
+            Label("Downloading", systemImage: "arrow.down.circle")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .labelStyle(.titleAndIcon)
+        case .failed:
+            Label("Retry", systemImage: "exclamationmark.icloud")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .labelStyle(.titleAndIcon)
+        case .missingRemote:
+            Label("Missing", systemImage: "xmark.icloud")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .labelStyle(.titleAndIcon)
+        }
     }
 
     // MARK: - Private

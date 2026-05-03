@@ -476,10 +476,17 @@ struct LibraryView: View {
             Label("Info", systemImage: "info.circle")
         }
 
-        Button {
-            bookToShare = book
-        } label: {
-            Label("Share", systemImage: "square.and.arrow.up")
+        // Share gated by feature #47 WI-5: only `.local` rows have
+        // bytes to share. Remote-only / downloading / failed / missing
+        // rows omit the menu item rather than showing it disabled —
+        // less noise in the menu, fewer "why is this greyed out?"
+        // questions.
+        if book.canShare {
+            Button {
+                bookToShare = book
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
         }
 
         Divider()
@@ -580,7 +587,23 @@ struct LibraryView: View {
 
     /// Hides the library toolbar before pushing to the reader,
     /// eliminating the toolbar flash during the push animation.
+    /// Feature #47 WI-5 gate: only `.local` rows open the reader.
+    /// Tapping a non-`.local` row posts a notification that the
+    /// download sheet (WI-6) listens for; until that ships, taps on
+    /// remote rows are silent so the user doesn't see a broken
+    /// reader-open path.
     private func openBook(_ book: LibraryBookItem) {
+        guard book.isReadable else {
+            NotificationCenter.default.post(
+                name: .libraryRowTappedWhileNotLocal,
+                object: nil,
+                userInfo: [
+                    "fingerprintKey": book.fingerprintKey,
+                    "fileState": book.fileState.rawValue
+                ]
+            )
+            return
+        }
         isPushingReader = true
         navigationPath.append(book)
     }

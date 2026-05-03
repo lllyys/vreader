@@ -27,6 +27,15 @@ extension Notification.Name {
     /// `BookFileState.rawValue`). Library rows observe this to refresh
     /// without a full fetch.
     static let bookFileStateDidChange = Notification.Name("vreader.backup.bookFileStateDidChange")
+
+    /// Posted when the user taps a library row whose `fileState` isn't
+    /// `.local`. The picker / download-sheet UI (#47 WI-6) observes this
+    /// to surface the right CTA (kick off lazy download for `.remoteOnly`
+    /// or `.failed`, show "downloading" status for `.downloading`,
+    /// explain "blob lost" for `.missingRemote`). Until WI-6 ships
+    /// the sheet, the LibraryView no-ops silently after posting.
+    /// `userInfo`: `["fingerprintKey": String, "fileState": String]`.
+    static let libraryRowTappedWhileNotLocal = Notification.Name("vreader.backup.libraryRowTappedWhileNotLocal")
 }
 
 private let log = Logger(subsystem: "com.vreader.app", category: "LazyDownloadCoordinator")
