@@ -49,6 +49,15 @@ struct BookRecord: Sendable, Equatable {
     /// When the book was last opened. Read-only mirror of Book.lastOpenedAt;
     /// set by reader open flows, not by insertBook.
     let lastOpenedAt: Date?
+    /// File-presence state (feature #47 WI-1). Defaults to `.local` for
+    /// new imports; remote-only / downloading / failed states are written
+    /// by the lazy-download coordinator (#47 WI-3) and selective restore
+    /// (#47 WI-4).
+    let fileState: BookFileState
+    /// Server-side blob path on the WebDAV backup server (feature #47 WI-1).
+    /// Nil for local-only books that have never been uploaded; populated for
+    /// rows materialized from a backup or pending download.
+    let blobPath: String?
 
     init(
         fingerprintKey: String,
@@ -60,7 +69,9 @@ struct BookRecord: Sendable, Equatable {
         detectedEncoding: String?,
         addedAt: Date,
         originalExtension: String? = nil,
-        lastOpenedAt: Date? = nil
+        lastOpenedAt: Date? = nil,
+        fileState: BookFileState = .local,
+        blobPath: String? = nil
     ) {
         self.fingerprintKey = fingerprintKey
         self.title = title
@@ -72,6 +83,8 @@ struct BookRecord: Sendable, Equatable {
         self.addedAt = addedAt
         self.originalExtension = originalExtension
         self.lastOpenedAt = lastOpenedAt
+        self.fileState = fileState
+        self.blobPath = blobPath
     }
 }
 
@@ -131,6 +144,10 @@ actor PersistenceActor: BookPersisting {
             originalExtension: record.originalExtension
         )
         book.detectedEncoding = record.detectedEncoding
+        // Feature #47 WI-2: write fileState/blobPath if the record overrides
+        // the SwiftData defaults (.local / nil). Most callers use defaults.
+        book.fileState = record.fileState.rawValue
+        book.blobPath = record.blobPath
         context.insert(book)
 
         do {
@@ -175,7 +192,9 @@ actor PersistenceActor: BookPersisting {
             detectedEncoding: book.detectedEncoding,
             addedAt: book.addedAt,
             originalExtension: book.originalExtension,
-            lastOpenedAt: book.lastOpenedAt
+            lastOpenedAt: book.lastOpenedAt,
+            fileState: BookFileState(rawValue: book.fileState) ?? .local,
+            blobPath: book.blobPath
         )
     }
 }

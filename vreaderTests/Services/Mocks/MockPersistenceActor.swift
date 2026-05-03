@@ -58,7 +58,9 @@ actor MockPersistenceActor: BookPersisting {
             detectedEncoding: book.detectedEncoding,
             addedAt: book.addedAt,
             originalExtension: book.originalExtension,
-            lastOpenedAt: book.lastOpenedAt
+            lastOpenedAt: book.lastOpenedAt,
+            fileState: book.fileState,
+            blobPath: book.blobPath
         )
         books[key] = book
     }

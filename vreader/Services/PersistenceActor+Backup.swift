@@ -31,6 +31,13 @@ struct BackupBookProjection: Sendable, Equatable {
     let author: String?
     let addedAt: Date
     let lastOpenedAt: Date?
+    /// Feature #47 WI-2: file-presence state for selective-restore /
+    /// lazy-download UI. Defaults to `.local` for V5-era rows that pre-date
+    /// SchemaV6 (the migration writes `"local"`).
+    let fileState: BookFileState
+    /// Server-side blob path when known (feature #47). Nil for `.local` rows
+    /// that have never been uploaded; populated for `.remoteOnly` rows.
+    let blobPath: String?
 }
 
 extension PersistenceActor {
@@ -61,7 +68,9 @@ extension PersistenceActor {
                 title: book.title,
                 author: book.author,
                 addedAt: book.addedAt,
-                lastOpenedAt: book.lastOpenedAt
+                lastOpenedAt: book.lastOpenedAt,
+                fileState: BookFileState(rawValue: book.fileState) ?? .local,
+                blobPath: book.blobPath
             )
         }
     }
