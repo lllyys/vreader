@@ -75,6 +75,30 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
         if simulateAuthFailure { throw WebDAVError.authenticationFailed }
         if simulateConnectionFailure { throw WebDAVError.connectionFailed("mock") }
     }
+
+    // MARK: Feature #46 (WI-3) — atomic blob publication primitives
+
+    func move(fromPath: String, toPath: String) async throws {
+        methodCalls.append(("MOVE", "\(fromPath) -> \(toPath)"))
+        if simulateAuthFailure { throw WebDAVError.authenticationFailed }
+        if simulateConnectionFailure { throw WebDAVError.connectionFailed("mock") }
+        guard let data = files.removeValue(forKey: fromPath) else {
+            throw WebDAVError.notFound(fromPath)
+        }
+        // Overwrite: F semantics — fail if destination already exists.
+        guard files[toPath] == nil else {
+            throw WebDAVError.httpError(412)
+        }
+        files[toPath] = data
+    }
+
+    func existsWithSize(at path: String) async throws -> Int64? {
+        methodCalls.append(("PROPFIND-exists", path))
+        if simulateAuthFailure { throw WebDAVError.authenticationFailed }
+        if simulateConnectionFailure { throw WebDAVError.connectionFailed("mock") }
+        guard let data = files[path] else { return nil }
+        return Int64(data.count)
+    }
 }
 
 // MARK: - Mock Data Collector

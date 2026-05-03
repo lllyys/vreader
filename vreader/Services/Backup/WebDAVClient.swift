@@ -56,6 +56,27 @@ protocol WebDAVTransport: Sendable {
     func listDirectory(path: String) async throws -> [WebDAVEntry]
     func createDirectory(path: String) async throws
     func testConnection() async throws
+
+    // MARK: Feature #46 (WI-3) — atomic blob publication primitives
+
+    /// Atomically renames `fromPath` to `toPath` via WebDAV `MOVE` (RFC 4918 §9.9).
+    ///
+    /// Used by feature #46's `BookFileMaterializer` to publish content-addressed
+    /// blobs after a temp upload, so the final blob path is either fully present
+    /// or absent — never half-written.
+    ///
+    /// `Overwrite: F` so a pre-existing blob at the destination is preserved
+    /// (content-addressing guarantees identical bytes already converged there).
+    /// Throws `WebDAVError.httpError(412)` when the destination already exists.
+    func move(fromPath: String, toPath: String) async throws
+
+    /// Returns the resource's byte count, or nil if it doesn't exist (404).
+    ///
+    /// Implemented as `PROPFIND Depth: 0` rather than `HEAD` because some
+    /// WebDAV servers don't expose `getcontentlength` on HEAD responses.
+    /// Used by feature #46 to dedupe blob uploads — if the server already has
+    /// the blob with matching size, skip the PUT.
+    func existsWithSize(at path: String) async throws -> Int64?
 }
 
 // MARK: - WebDAVClient
@@ -169,6 +190,33 @@ struct WebDAVClient: Sendable {
         var request = URLRequest(url: buildURL(path: normalized))
         request.httpMethod = "MKCOL"
         request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    /// Builds a MOVE request (RFC 4918 §9.9). Requires `Destination` header
+    /// set to an absolute URL on the same server. `Overwrite: F` by default
+    /// so the operation fails (412 Precondition Failed) if the destination
+    /// already exists — desirable for content-addressed publication where
+    /// identical bytes have already converged at the destination.
+    func buildMOVERequest(fromPath: String, toPath: String, overwrite: Bool = false) -> URLRequest {
+        var request = URLRequest(url: buildURL(path: fromPath))
+        request.httpMethod = "MOVE"
+        request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        request.setValue(buildURL(path: toPath).absoluteString, forHTTPHeaderField: "Destination")
+        request.setValue(overwrite ? "T" : "F", forHTTPHeaderField: "Overwrite")
+        return request
+    }
+
+    /// Builds a `PROPFIND Depth: 0` request for a single resource — used to
+    /// check existence + read `getcontentlength` without enumerating children.
+    /// Same XML body as the directory PROPFIND for consistency.
+    func buildPROPFINDExistsRequest(path: String) -> URLRequest {
+        var request = URLRequest(url: buildURL(path: path))
+        request.httpMethod = "PROPFIND"
+        request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        request.setValue("0", forHTTPHeaderField: "Depth")
+        request.setValue("application/xml", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(Self.propfindBody.utf8)
         return request
     }
 
@@ -288,6 +336,45 @@ extension WebDAVClient: WebDAVTransport {
             throw WebDAVError.connectionFailed("Invalid response")
         }
         try Self.checkHTTPStatus(httpResponse.statusCode, url: request.url!)
+    }
+
+    // MARK: Feature #46 (WI-3) — atomic blob publication primitives
+
+    func move(fromPath: String, toPath: String) async throws {
+        let request = buildMOVERequest(fromPath: fromPath, toPath: toPath, overwrite: false)
+        let (_, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw WebDAVError.connectionFailed("Invalid response")
+        }
+        // 201 Created and 204 No Content are the documented MOVE successes.
+        // 412 Precondition Failed (destination already exists with Overwrite: F)
+        // is mapped to httpError so the caller (BackupBlobStore.putBlobAtomically)
+        // can recognize "destination already converged" and treat it as success.
+        try Self.checkHTTPStatus(httpResponse.statusCode, url: request.url!)
+    }
+
+    func existsWithSize(at path: String) async throws -> Int64? {
+        let request = buildPROPFINDExistsRequest(path: path)
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw WebDAVError.connectionFailed("Invalid response")
+        }
+        // 404 → resource doesn't exist; this is the cheap "is there a blob"
+        // signal the materializer needs and is NOT an error condition.
+        if httpResponse.statusCode == 404 {
+            return nil
+        }
+        try Self.checkHTTPStatus(httpResponse.statusCode, url: request.url!)
+        let entries = try Self.parsePROPFINDResponse(data)
+        // Depth: 0 should return exactly one response (the resource itself).
+        // If the server returns multiple anyway (some implementations include
+        // children even at Depth: 0), the first non-directory entry is ours.
+        if let first = entries.first(where: { !$0.isDirectory }) {
+            return first.contentLength
+        }
+        // Resource exists but isn't a file (could be a collection) — treat
+        // as not-a-blob, return nil. Caller can decide to upload anyway.
+        return nil
     }
 }
 

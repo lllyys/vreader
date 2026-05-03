@@ -244,6 +244,51 @@ struct WebDAVClientTests {
         #expect(request.value(forHTTPHeaderField: "Authorization") != nil)
     }
 
+    // MARK: - MOVE + PROPFIND-exists (feature #46 WI-3)
+
+    @Test func buildMOVERequest_hasCorrectMethodAndDestination() {
+        let client = makeClient()
+        let request = client.buildMOVERequest(
+            fromPath: "VReader/uploads/tmp/abc.part",
+            toPath: "VReader/books/epub/sha_1024.epub"
+        )
+        #expect(request.httpMethod == "MOVE")
+        #expect(request.value(forHTTPHeaderField: "Authorization") != nil)
+        let dest = request.value(forHTTPHeaderField: "Destination") ?? ""
+        // Destination is an absolute URL on the same server (RFC 4918 §10.3).
+        #expect(dest == "https://dav.example.com/dav/VReader/books/epub/sha_1024.epub")
+        // Default Overwrite: F so a pre-existing destination is preserved
+        // (content-addressing means identical bytes already converged).
+        #expect(request.value(forHTTPHeaderField: "Overwrite") == "F")
+    }
+
+    @Test func buildMOVERequest_overwriteTrue_setsOverwriteHeader() {
+        let client = makeClient()
+        let request = client.buildMOVERequest(
+            fromPath: "from",
+            toPath: "to",
+            overwrite: true
+        )
+        #expect(request.value(forHTTPHeaderField: "Overwrite") == "T")
+    }
+
+    @Test func buildPROPFINDExistsRequest_usesDepthZero() {
+        // Depth: 0 distinguishes "tell me about THIS resource" from the
+        // existing buildPROPFINDRequest which uses Depth: 1 to enumerate
+        // children. Used by `existsWithSize` to cheaply check a single blob.
+        let client = makeClient()
+        let request = client.buildPROPFINDExistsRequest(
+            path: "VReader/books/epub/sha_1024.epub"
+        )
+        #expect(request.httpMethod == "PROPFIND")
+        #expect(request.value(forHTTPHeaderField: "Depth") == "0")
+        #expect(request.value(forHTTPHeaderField: "Authorization") != nil)
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/xml")
+        // Body asks for getcontentlength + getlastmodified + resourcetype.
+        let body = request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        #expect(body.contains("<D:getcontentlength/>"))
+    }
+
     // MARK: - HTTP Status Handling
 
     @Test func checkStatus_200_succeeds() throws {
