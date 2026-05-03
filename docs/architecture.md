@@ -97,11 +97,15 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `BookContentCache`                   | In-memory                  | Text cache for AI context loading (TXT/MD only)                           |
 | `PreferenceStore`                    | UserDefaults               | Sort order, view mode persistence                                         |
 | `CustomCoverStore`                   | JPEG files                 | Custom book cover images                                                  |
-| `WebDAVClient`                       | HTTP                       | Low-level WebDAV transport (PROPFIND/PUT/GET/DELETE/MKCOL)                |
+| `WebDAVClient`                       | HTTP                       | Low-level WebDAV transport (PROPFIND/PUT/GET/DELETE/MKCOL/MOVE)           |
 | `WebDAVProvider`                     | `WebDAVClient`             | `BackupProvider` impl — backup/restore/list/delete over a WebDAV server   |
-| `WebDAVProviderFactory`              | `KeychainService`          | Assembles a `WebDAVProvider` from saved credentials + live persistence    |
-| `BackupDataCollector`                | `PersistenceActor`         | Serializes 7 versioned JSON sections (annotations, positions, settings, …) |
+| `WebDAVProviderFactory`              | `KeychainService`          | Assembles a `WebDAVProvider` from saved credentials + live persistence + live `BookImporter` (feature #46) |
+| `BackupDataCollector`                | `PersistenceActor`         | Serializes 8 versioned JSON sections (annotations, positions, settings, library-manifest, …) |
 | `BackupDataRestorer`                 | `PersistenceActor`         | Decodes + dedupes by UUID/profileKey; rejects future schema versions      |
+| `BlobPath`                           | —                          | Pure utility: `(format, sha256, byteCount)` ↔ `VReader/books/<format>/<sha>_<bytes>.<ext>` (feature #46) |
+| `BackupBlobStore` (protocol pair)    | —                          | Transport-neutral read (`BackupBlobReading`) + write (`BackupBlobWriting`) blob API |
+| `WebDAVBlobStore`                    | `WebDAVTransport`          | Adapter that owns the temp+MOVE atomic-publication algorithm (feature #46) |
+| `BookFileMaterializer`               | `BackupBlobReading` + `BookImporting` | Restore-side: download + size/SHA-256 verify + import via `BookImporter`. Preflight-rehashes existing local files to catch corrupt content (feature #46). |
 | `FoliateURLSchemeHandler`            | WKURLSchemeHandler         | Scheme-handler implementation (not on the live load path; see Foliate-js Bridge note) |
 | `FoliateMessageParser`               | Pure functions             | Parses raw JS message bodies into typed Swift events                      |
 | `FoliateJSEscaper`                   | Pure functions             | Escapes/sanitizes strings for safe JS/CSS interpolation in Foliate bridge |
@@ -125,6 +129,8 @@ SwiftData SchemaV5 entities:
 - `BookSource`, `ContentReplacementRule` (added in SchemaV4)
 
 `PersistenceActor.fetchAllBooksForBackup() -> [BackupBookProjection]` (in `PersistenceActor+Backup.swift`) returns a Sendable value-type view of every book — used by feature #46's WebDAV backup to emit `library-manifest.json` without leaking `@Model` instances across the actor boundary. Legacy V4 rows (no `originalExtension`) coalesce to the canonical extension for their format.
+
+**Feature #46 — WebDAV materializing restore (data layer)**: backup ZIPs now carry an additional `library-manifest.json` section (one `BackupLibraryEntry` per book, including content-addressed `blobPath`). On `backup`, `WebDAVProvider` uploads each missing book blob atomically — `WebDAVBlobStore` PUTs to `VReader/uploads/tmp/<uuid>.part`, PROPFIND-verifies the size, then `MOVE`s into the canonical `VReader/books/<format>/<sha256>_<byteCount>.<ext>` path. Repeat backups skip already-published blobs via PROPFIND-by-size dedupe. On `restore`, when the manifest is present and a `BookImporter` is wired in (production: via `\.bookImporter` SwiftUI Environment), `BookFileMaterializer` downloads + verifies + imports each missing blob before metadata sections apply. v1-format backups (no manifest) restore as before — books silently skipped if missing locally. The 412 response from `MOVE Overwrite: F` is treated as "blob already converged" (content-addressing). 501 from `MOVE` raises `BackupBlobStoreError.serverCapabilityMissing` — no silent atomicity loss.
 
 Backup section JSONs (`vreader/Services/Backup/BackupSectionDTOs.swift`) are
 versioned via the `BackupVersionedEnvelope` protocol. Restore validates exact

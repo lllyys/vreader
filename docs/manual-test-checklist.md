@@ -134,6 +134,15 @@ Last regenerated: 2026-04-12. Last tested: 2026-04-04 (simulator interactive pas
 - [ ] Backup → archive uploaded to server <!-- SKIP: needs WebDAV server -->
 - [ ] Restore → data recovered from server <!-- SKIP: needs WebDAV server -->
 
+## Sync — WebDAV materializing restore (feature #46) — Gate 5 verification
+
+- [ ] Backup with 2-3 books → server has `VReader/books/<format>/<sha>_<bytes>.<ext>` blobs
+- [ ] Verify `library-manifest.json` present in the new ZIP (download + inspect via `xcrun simctl get_app_container`)
+- [ ] Wipe library via `vreader-debug://reset` → library empty
+- [ ] Restore → all books reappear with original metadata + reading position + originalExtension preserved (MOBI test case)
+- [ ] Second consecutive backup → zero blob PUTs (PROPFIND dedupe verified via WebDAV server logs)
+- [ ] MOVE-unsupported server → clear `serverCapabilityMissing` error surfaced (cannot test without a non-MOVE server; check error handling code path)
+
 ## ~~Sync — iCloud (feature #10) — WONT DO, not needed~~
 
 ## AZW3/MOBI Reader (Foliate spike)
