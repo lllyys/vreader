@@ -236,6 +236,98 @@ struct WebDAVProviderBackupWithManifestTests {
         #expect(secondBlobPuts == 0)
         #expect(secondTempPuts == 0)
     }
+
+    // MARK: - Feature #46 (WI-8) — restore materializes blobs when manifest present
+
+    @Test func restore_withManifestAndImporter_materializesMissingBooks() async throws {
+        let dataA = Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: 0xA1, count: 256)
+        let dataB = Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: 0xB1, count: 384)
+        let entryA = Self.entry(dataA, format: .epub)
+        let entryB = Self.entry(dataB, format: .epub)
+
+        // Backup: first build the ZIP + upload blobs to a server using a
+        // backup-side rig (separate sandbox containing the source files).
+        let (backupProvider, backupTransport, _) = try await Self.makeRig(
+            entries: [(dataA, entryA), (dataB, entryB)]
+        )
+        _ = try await backupProvider.backup { _ in }
+
+        // Restore-side: fresh empty sandbox, inject the production
+        // BookImporter+MockPersistenceActor so we can verify books land.
+        let restoreSandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("restore-sandbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: restoreSandbox, withIntermediateDirectories: true)
+        let mockPersistence = MockPersistenceActor()
+        let bookImporter = BookImporter(persistence: mockPersistence, sandboxBooksDirectory: restoreSandbox)
+
+        let restoreResolver: SandboxURLResolver = { fingerprintKey, originalExtension in
+            let safeName = fingerprintKey.replacingOccurrences(of: ":", with: "_")
+            return restoreSandbox.appendingPathComponent(safeName).appendingPathExtension(originalExtension)
+        }
+
+        // Use the SAME mock transport (so the blobs uploaded in backup phase
+        // are visible to restore). Also replay listBackups to populate the
+        // metadataCache before calling restore.
+        let restoreProvider = WebDAVProvider(
+            transport: backupTransport,
+            dataCollector: StubCollector(manifestEntries: []),  // unused in restore
+            dataRestorer: NoopRestorer(),
+            deviceName: "TestDevice",
+            appVersion: "test",
+            sandboxResolver: restoreResolver,
+            bookImporter: bookImporter,
+            materializeTempDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("restore-temp-\(UUID().uuidString)")
+        )
+        let backups = try await restoreProvider.listBackups()
+        guard let backupId = backups.first?.id else {
+            Issue.record("no backup metadata returned")
+            return
+        }
+
+        try await restoreProvider.restore(backupId: backupId) { _ in }
+
+        // Both books were imported into MockPersistenceActor.
+        let storedA = await mockPersistence.book(forKey: entryA.fingerprintKey)
+        let storedB = await mockPersistence.book(forKey: entryB.fingerprintKey)
+        #expect(storedA != nil)
+        #expect(storedB != nil)
+        #expect(storedA?.originalExtension == entryA.originalExtension)
+    }
+
+    @Test func restore_v1FormatBackup_skipsMaterializationGracefully() async throws {
+        // Build a v1-format ZIP (no library-manifest.json). Restore should
+        // succeed without trying to materialize anything, even with an
+        // importer wired in.
+        let mock = MockWebDAVTransport()
+        let collector = StubCollector(manifestEntries: [])
+        // Provider that DOES inject an importer — but the backup ZIP it
+        // produces will still include library-manifest.json (with empty books).
+        // To simulate a true v1 format, we backup with the empty-manifest path
+        // then verify restore doesn't crash + doesn't try to fetch any blobs.
+        let restoreSandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("v1-sandbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: restoreSandbox, withIntermediateDirectories: true)
+        let mockPersistence = MockPersistenceActor()
+        let bookImporter = BookImporter(persistence: mockPersistence, sandboxBooksDirectory: restoreSandbox)
+        let provider = WebDAVProvider(
+            transport: mock,
+            dataCollector: collector,
+            dataRestorer: NoopRestorer(),
+            deviceName: "TestDevice",
+            appVersion: "test",
+            bookImporter: bookImporter
+        )
+
+        // Empty backup (no books → empty manifest).
+        let metadata = try await provider.backup { _ in }
+        try await provider.restore(backupId: metadata.id) { _ in }
+        // Restore completed without error and didn't try to materialize.
+        let materializeCalls = mock.methodCalls.filter {
+            $0.path.hasPrefix("VReader/books/")
+        }
+        #expect(materializeCalls.isEmpty)
+    }
 }
 
 // MARK: - Mock Data Collector

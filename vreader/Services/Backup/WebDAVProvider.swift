@@ -83,8 +83,19 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
     /// Defaults to the production resolver shared with `BookFileMaterializer`.
     private let sandboxResolver: SandboxURLResolver
 
+    /// Optional importer used by feature #46 (WI-8) to materialize books
+    /// from manifest blobs during restore. Nil → manifest-extended restore
+    /// is skipped (v1-format backups still restore as today).
+    private let bookImporter: (any BookImporting)?
+
+    /// Temp directory for restore-side blob downloads before BookImporter
+    /// adopts them. Created under `FileManager.default.temporaryDirectory`
+    /// by default.
+    private let materializeTempDirectory: URL
+
     /// Blob store wrapping the same transport. Used by feature #46 to publish
-    /// content-addressed book blobs atomically (PUT-tmp → PROPFIND-verify → MOVE).
+    /// content-addressed book blobs atomically (PUT-tmp → PROPFIND-verify → MOVE)
+    /// and to read blobs during materializing restore.
     private let blobStore: WebDAVBlobStore
 
     /// In-memory cache of known backup metadata, keyed by ID.
@@ -96,7 +107,10 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
         dataRestorer: BackupDataRestoring,
         deviceName: String,
         appVersion: String,
-        sandboxResolver: @escaping SandboxURLResolver = BookFileMaterializer.defaultSandboxResolver
+        sandboxResolver: @escaping SandboxURLResolver = BookFileMaterializer.defaultSandboxResolver,
+        bookImporter: (any BookImporting)? = nil,
+        materializeTempDirectory: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VReaderRestore", isDirectory: true)
     ) {
         self.transport = transport
         self.dataCollector = dataCollector
@@ -104,6 +118,8 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
         self.deviceName = deviceName
         self.appVersion = appVersion
         self.sandboxResolver = sandboxResolver
+        self.bookImporter = bookImporter
+        self.materializeTempDirectory = materializeTempDirectory
         self.blobStore = WebDAVBlobStore(transport: transport)
     }
 
@@ -291,11 +307,37 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
 
         progress(0.55)
 
-        // Apply restored data to local database via BackupDataRestoring delegate.
-        // Each file is optional — missing entries are silently skipped (forward compatibility).
-        // Each tuple: (zip filename, user-facing section label, restore fn).
-        // The label is what shows up in BackupError.restorePartiallyFailed —
-        // it must not leak internal filenames.
+        // Phase A — feature #46 (WI-8): if the ZIP carries library-manifest.json
+        // AND this provider was constructed with a BookImporter, materialize
+        // missing book blobs into the local sandbox BEFORE applying metadata
+        // sections. Older v1-format backups (no manifest) skip this phase
+        // and restore exactly as today.
+        var materializeFailedTitles: [String] = []
+        if let importer = bookImporter,
+           let manifestData = try? ZIPWriter.extractEntry(named: "library-manifest.json", from: zipData),
+           let manifest = decodeManifest(manifestData),
+           !manifest.books.isEmpty {
+            let materializer = BookFileMaterializer(
+                blobStore: blobStore,
+                importer: importer,
+                tempDirectory: materializeTempDirectory,
+                resolveSandboxURL: sandboxResolver
+            )
+            let results = await materializer.materialize(
+                manifest.books
+            ) { fraction in
+                // Allocate 0.55 → 0.75 to materialization. The remaining
+                // metadata-section restore consumes 0.75 → 1.0.
+                progress(0.55 + 0.20 * fraction)
+            }
+            for result in results where !result.isSuccess {
+                materializeFailedTitles.append(result.entry.title ?? result.entry.fingerprintKey)
+            }
+        }
+
+        // Phase B — apply restored data to local database via BackupDataRestoring.
+        // Each file is optional; missing entries are silently skipped.
+        // Per-section errors don't abort the loop.
         let restoreFiles: [(filename: String, label: String, fn: (Data) async throws -> Void)] = [
             ("annotations.json", "annotations", dataRestorer.restoreAnnotations),
             ("positions.json", "reading positions", dataRestorer.restorePositions),
@@ -306,6 +348,8 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
             ("replacement-rules.json", "replacement rules", dataRestorer.restoreReplacementRules),
         ]
 
+        let restorePhaseStart = (bookImporter != nil) ? 0.75 : 0.55
+        let restorePhaseSpan = 1.0 - restorePhaseStart
         let totalFiles = Double(restoreFiles.count)
         var failedLabels: [String] = []
         for (index, item) in restoreFiles.enumerated() {
@@ -313,20 +357,32 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
                 do {
                     try await item.fn(entryData)
                 } catch {
-                    // Per-section restore errors don't abort the loop —
-                    // restoring the remaining sections is more useful than
-                    // bailing out and leaving the user with a half-applied
-                    // archive that's hard to reason about.
                     failedLabels.append(item.label)
                 }
             }
-            progress(0.55 + 0.40 * Double(index + 1) / totalFiles)
+            progress(restorePhaseStart + restorePhaseSpan * Double(index + 1) / totalFiles)
         }
 
         progress(1.0)
+
+        // Surface partial failures from EITHER phase so the user knows what
+        // didn't make it. Materialization failures are reported separately
+        // from metadata-section failures (different failure classes).
+        if !materializeFailedTitles.isEmpty {
+            throw BackupError.restorePartiallyFailed(
+                "books not materialized: \(materializeFailedTitles.joined(separator: ", "))"
+                + (failedLabels.isEmpty ? "" : "; sections: \(failedLabels.joined(separator: ", "))")
+            )
+        }
         if !failedLabels.isEmpty {
             throw BackupError.restorePartiallyFailed(failedLabels.joined(separator: ", "))
         }
+    }
+
+    private func decodeManifest(_ data: Data) -> BackupLibraryManifestEnvelope? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(BackupLibraryManifestEnvelope.self, from: data)
     }
 
     func listBackups() async throws -> [BackupMetadata] {
