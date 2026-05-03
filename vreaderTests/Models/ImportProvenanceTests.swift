@@ -17,8 +17,24 @@ struct ImportProvenanceTests {
         }
     }
 
-    @Test func importSourceHasFourCases() {
-        #expect(ImportSource.allCases.count == 4)
+    @Test func importSourceHasFiveCases() {
+        // .restore added in feature #46 WI-0b. Tracks every source path so backup
+        // materializing-restore can be distinguished from user-driven imports.
+        #expect(ImportSource.allCases.count == 5)
+    }
+
+    @Test func importSourceContainsRestoreCase() {
+        // Backup restore needs its own provenance so we can distinguish a book
+        // that arrived via WebDAV restore from one the user imported themselves.
+        #expect(ImportSource.allCases.contains(.restore))
+    }
+
+    @Test func importSourceRestoreRoundTripsAsRestore() throws {
+        // String rawValue for `.restore` must be stable — older clients that
+        // see this case need to either decode it or fail predictably.
+        let data = try JSONEncoder().encode(ImportSource.restore)
+        let decoded = try JSONDecoder().decode(ImportSource.self, from: data)
+        #expect(decoded == .restore)
     }
 
     // MARK: - Codable Round-Trip
