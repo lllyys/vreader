@@ -96,6 +96,8 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
 | 43 | Extract and display cover images from EPUB/AZW3               | Library/*    | Medium   | DONE      | EPUB OPF + AZW3 MOBI header parsing. 46 tests. Bug #107 for white-edge padding. GH: #121                                                                                        |
 | 44 | DebugBridge — debug-only URL scheme + state dumper for autonomous testing | DevTools/*  | High | DONE | DEBUG-only `vreader-debug://` handler with 7 commands (reset/seed/theme/open/settle/snapshot/eval). Active-reader registry, fixture catalog, stable error codes, release-gate script. 93 unit tests. Doc at `docs/subsystems/debug-bridge.md`. Future: per-format settle hooks, real WKWebView evaluator on EPUB/AZW3, selection probe field. |
 | 45 | Verification harness sweep — retire the "Needs device verification" backlog | DevTools/* | High | PLANNED | XCUITest + DebugBridge recipes for 13 of 15 simulator-automatable backlog items. Adds VERIFIED status. Depends on #44. See plan below. |
+| 46 | WebDAV backup includes book files — materializing restore reconstructs library | Backup/* | High | PLANNED | Phase 1 of two-feature split. Adds `library-manifest.json` to the backup ZIP and uploads missing whole-file book blobs to `VReader/books/<format>/<sha256>_<byteCount>.<ext>` (content-addressed, deduped). Restore downloads every missing blob into the sandbox before applying metadata. Preserves the existing invariant that a `Book` row always points to a readable local file — no `BookFileState`, no remote-only rows, no UI redesign. See plan below. Phase 2 = feature #47. |
+| 47 | WebDAV restore — selective book picker + lazy-on-tap downloads | Backup/* | Medium | TODO | Phase 2 of feature #46. Introduces `BookFileState` (`local / remoteOnly / downloading / failed / missingRemote`), library rows for un-downloaded books with cloud icons, "Restore selectively…" picker against the manifest, on-tap blob fetch via `URLSessionConfiguration.isDiscretionary`, Wi-Fi-only cellular policy, "Clean unused remote files" GC action. Depends on feature #46 shipping the blob storage + manifest layout. See plan below. |
 
 ### Feature #44 — DebugBridge — Plan
 
@@ -194,4 +196,141 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
   - CI prints a summary line per verification (`PASS feature_11_epub_highlighting in 4.2s`) so tracker updates are mechanical.
   - No verification test uses `sleep` or `Thread.sleep` for synchronization — `settle` and explicit waiters only.
   - Total LOC for harness helpers under 500; per-feature tests average ~80 LOC. Files under 300-line guideline.
+
+### Feature #46 — WebDAV materializing restore — Plan
+
+- **Problem**: Feature #29 (WebDAV backup, PR #128) is metadata-only by design — the ZIP contains positions, annotations, settings, collections, book-sources, per-book-settings, and replacement-rules keyed by `bookFingerprintKey`, but **no book file bytes**. `BackupDataCollector.swift:12` documents the trade-off as "Books that no longer exist on the restoring device are silently skipped." The user-visible consequence: restoring a backup to a fresh device leaves the library empty, because every position/highlight/note references a fingerprint that doesn't match any local book. The backup is unusable for its primary purpose (recover my library after wipe / new device). Addresses the gap reported 2026-05-03.
+
+- **Scope**:
+  - **Included**:
+    - New `library-manifest.json` section in the backup ZIP. Per book: title, author, format, fingerprint key (`{format}:{sha256}:{byteCount}`), SHA-256, byte count, original filename, detected encoding (TXT only), addedAt, lastOpenedAt, blob path. SchemaVersion field for forward compat.
+    - Backup uploads missing whole-file book blobs to a content-addressed path on the WebDAV server: `VReader/books/<format>/<sha256>_<byteCount>.<ext>` (NOT `<fingerprintKey>` — colons in the key are awkward across servers/tools; canonical fingerprintKey lives only inside the manifest).
+    - Atomic upload pattern: `PUT` to `VReader/uploads/tmp/<uuid>.part` → verify size via PROPFIND `getcontentlength` → `MOVE` into final blob path. Direct `PUT` to the final path can leave a corrupt blob on a partial upload; the temp+MOVE pattern guarantees blobs are either fully present or absent.
+    - Existence check before upload: PROPFIND on the final blob path (NOT HEAD — some WebDAV servers don't implement HEAD reliably; PROPFIND is portable and `WebDAVClient` already supports it). If present and `getcontentlength` matches, skip upload (content-addressed dedupe — identical bytes converge across snapshots).
+    - Restore order change: download every missing blob from the manifest into the app sandbox at the canonical `Documents/Books/<sanitized-original-filename>` path → run `BookImporter` to register `BookRecord` rows → run the existing metadata restore (positions/annotations/etc.). Metadata restore continues to silently skip un-resolvable fingerprints (defensive — the manifest *should* have provided everything, but a partial blob download must not crash restore).
+    - Progress UI: per-blob download progress, total bytes, ETA. Pre-restore confirmation dialog when total missing bytes exceed a threshold (proposal: 100 MB) so the user can cancel before a slow transfer starts.
+    - Backup progress UI gains a per-blob upload phase distinct from the metadata-ZIP phase.
+    - Backward compat: a backup ZIP without `library-manifest.json` (i.e., a v1-format snapshot from PR #128) restores exactly as it does today (metadata-only, books skipped). The new format is purely additive.
+  - **Excluded**:
+    - No `BookFileState` enum, no remote-only library rows, no cloud-download icons, no on-tap downloads — those are feature #47. Phase 1's invariant: every `Book` row continues to mean "readable local file at fingerprint-derived sandbox path." This is what keeps the surface area small.
+    - No selective restore picker — phase 1 always materializes everything in the chosen backup. Phase 2 adds the picker.
+    - No GC of orphaned book blobs when a backup is deleted. Blobs accumulate; a future "Clean unused remote files" action (phase 2) walks every backup manifest and deletes unreferenced blobs.
+    - No conditional `If-None-Match: *` create-if-absent — content-addressing makes "last writer wins" safe for identical bytes, and conditional WebDAV semantics aren't universally implemented. Use PROPFIND-then-PUT and tolerate the rare race.
+    - No background download (`URLSessionConfiguration.isDiscretionary`) in phase 1 — restore is foreground-driven from the user's tap on "Restore". Phase 2's lazy load benefits from background, but a foreground restore with progress UI is acceptable for v1.
+    - No Cellular vs Wi-Fi policy in phase 1 — restore is explicit user action; the user accepts the data charge. Phase 2's lazy-load needs the toggle.
+    - No CloudKit / `CKAsset` / FileProvider / Background Assets path — those are different backends, not the same feature. Stay on WebDAV for the user's existing self-hosted setup.
+  - **Out of scope, deferred**:
+    - Chunked dedup (restic/borg-style) — overbuilt for personal libraries; whole-file SHA-256 is the right 80/20.
+    - rsync-style block diffs — EPUB/AZW3/PDF are already compressed/containerized; small metadata changes reshuffle bytes and defeat block-diffs.
+    - Cross-backup snapshot diffing (only ship blobs new since the last snapshot) — phase 1 already gets dedup-on-upload via PROPFIND existence checks; explicit diffs are an optimization for later.
+    - Encryption at rest — WebDAV server is user-controlled; encryption is a separate cross-cutting feature.
+
+- **Edge cases**:
+  - **Empty library at backup time**: `library-manifest.json` is present with `books: []`; restore is a no-op (also empty). No crash.
+  - **Backup with 0 books on device that have non-zero annotations** (orphan annotations from before): manifest lists 0 books, annotations restore continues to silently skip un-resolvable fingerprints. No regression vs current behavior.
+  - **Partial upload failure mid-backup**: `.part` file remains in `uploads/tmp/`; never moved to final path → next backup's PROPFIND skips this blob (because final path doesn't exist) and re-uploads. No duplicate. No corruption. Tmp files older than 7 days swept by an idempotent housekeeping pass at the start of each backup.
+  - **Partial download failure mid-restore**: BookRecord not yet registered for the failed blob; partial sandbox file deleted. Restore continues with the next blob and reports a per-book failure summary at the end (total succeeded / total failed, with retry option). User can re-run restore — already-downloaded blobs are skipped via local-file existence check.
+  - **WebDAV server out of space mid-upload**: 507 → surface clear error, leave `.part` for retry, abort backup. Existing `WebDAVError.quotaExceeded` covers it.
+  - **Two devices backing up to same WebDAV root with overlapping books**: content-addressed paths converge — both write the same `<sha256>_<byteCount>.<ext>` and PROPFIND skips the second upload. Safe by design.
+  - **SHA-256 collision**: not a real risk for SHA-256, but the path also encodes `byteCount` so a hypothetical collision with different sizes would still be distinguishable. A collision with identical size is cryptographically negligible for the threat model (personal backup).
+  - **Filename with characters illegal on the WebDAV server**: blob path uses only `[0-9a-f_.<format>]` so it's safe across servers. Original filename from manifest is sanitized for the sandbox at restore time (existing `BookImporter` rules apply).
+  - **Same fingerprint, different filenames across devices** (same content imported with different original names): blob path is identical (content-addressed); manifest carries the original filename for the restoring device's sandbox. Each device gets the filename from its source backup.
+  - **Books larger than available device storage at restore**: pre-restore confirmation dialog shows total bytes; if the user proceeds and storage runs out, restore aborts with a clear error and a "downloaded so far" summary.
+  - **Manifest references blob path that doesn't exist on server** (server pruned manually): restore reports per-book failure, continues with remaining blobs. Manifest schema has version field so a future format change can carry an explicit `blobETag` for stronger integrity.
+  - **User restores the same backup twice**: second restore's PROPFIND of local sandbox finds every blob already imported → all blob downloads skipped → metadata re-restore is idempotent (existing behavior). No duplicate library rows.
+  - **Concurrent backup and restore on different devices**: blob writes are content-addressed and atomic via temp+MOVE; metadata ZIPs have unique timestamp+UUID names. No conflict.
+  - **WebDAV server returns 301 redirect on `MOVE`**: existing `WebDAVClient` MKCOL trailing-slash bug (fixed in PR #128) taught us to normalize paths before MOVE. Apply the same normalization.
+  - **Manifest > 1 MB** (large library, e.g., 10k books): keep using JSONEncoder — 10k entries with the documented schema is ~3 MB, still trivial. No streaming parser needed at this scale.
+
+- **Test plan**:
+  - **Unit — manifest**:
+    - `LibraryManifestEncodingTests` — round-trip BookRecord array → JSON → array; schemaVersion present; all fields stable.
+    - `LibraryManifestSchemaCompatTests` — v1 ZIP (no manifest) loads with empty book list and triggers metadata-only restore path.
+  - **Unit — blob path**:
+    - `BlobPathTests` — fingerprintKey → `<format>/<sha256>_<byteCount>.<ext>` mapping, parameterized over all 5 formats. Round-trip: parse blob path back to (sha256, byteCount, format).
+  - **Unit — collector**:
+    - `BackupDataCollectorBlobTests` — given a fixture library of 3 books, manifest contains 3 entries with correct paths; missing-blob list is computed correctly against a fake WebDAV state.
+  - **Unit — restorer**:
+    - `BackupDataRestorerMaterializeTests` — manifest with 3 entries → restorer requests 3 downloads via injected `WebDAVClient` mock → registers 3 BookRecords → runs metadata restore.
+    - `BackupDataRestorerPartialFailureTests` — 1 of 3 downloads fails → 2 books imported, 1 reported in failure summary, restore overall succeeds with `restorePartiallyFailed` aggregate.
+  - **Unit — WebDAVProvider**:
+    - `WebDAVProviderBlobUploadTests` — temp+MOVE atomicity with mock client; abort mid-upload leaves `.part` and final path missing; retry succeeds.
+    - `WebDAVProviderDedupeTests` — PROPFIND returns existing blob with matching size → skip PUT; PROPFIND 404 → PUT executes.
+    - `WebDAVProviderTmpSweepTests` — `.part` files older than 7 days are deleted at backup start.
+  - **Integration — Docker WebDAV** (mirroring PR #128's existing integration test):
+    - `BackupBlobIntegrationTests` — backup library of 2 books → assert blobs at expected paths via raw curl probe; restore to empty library → assert 2 books present, positions/annotations re-attached.
+    - `BackupBlobReuploadTest` — back up the same library twice; second backup uploads zero blobs (PROPFIND dedupe).
+  - **Manual verification recipe** (recorded in `docs/manual-test-checklist.md`):
+    - On simulator: import 3 books → backup → wipe library via `vreader-debug://reset` → restore → assert 3 books visible with original positions/highlights.
+    - Destructive simulation: kill the app mid-upload → relaunch → re-run backup → verify no orphan `.part` files in `uploads/tmp/` after housekeeping sweep.
+
+- **Acceptance criteria**:
+  - A backup ZIP from feature #46 contains `library-manifest.json` plus the existing 8 metadata sections.
+  - WebDAV server after a backup has `VReader/books/<format>/<sha256>_<byteCount>.<ext>` for every book in the library; second consecutive backup uploads zero new blobs.
+  - Restoring a feature #46 backup to an **empty library** populates the library with every book referenced in the manifest, and positions/annotations re-attach correctly.
+  - Restoring a feature #29 backup (v1 format, no manifest) continues to work exactly as today — metadata-only, books silently skipped.
+  - Mid-upload kill leaves no corrupt blobs at the final path; the next backup attempt re-uploads cleanly.
+  - All unit + integration tests pass under `xcodebuild test -only-testing:vreaderTests`.
+  - LOC under ~300 per new file (`LibraryManifest.swift`, `BlobPath.swift`, additions to `BackupDataCollector.swift`, `BackupDataRestorer.swift`, `WebDAVProvider.swift`); no file exceeds the 300-line guideline.
+  - Manual recipe in `docs/manual-test-checklist.md` passes on iPhone 17 Pro Simulator against `lllyys/vreader-webdav-host`.
+  - `docs/architecture.md` updated: add `library-manifest.json` and the blob path layout to the Backup section; note the temp+MOVE upload pattern.
+
+### Feature #47 — WebDAV restore — selective picker + lazy-on-tap — Plan
+
+- **Problem**: Feature #46 ships materializing restore — the user gets their whole library back, but downloading every book up front can be slow or wasteful (large libraries, low-storage devices, secondary devices that only need a few books). Lazy-on-tap downloads and selective restore are the modern reading-app UX (Apple Books, Kindle, Readwise) and unblock multi-device usage. They also let users browse a backup's contents before committing storage.
+
+- **Scope**:
+  - **Included**:
+    - `BookFileState` enum on `BookRecord`: `local`, `remoteOnly`, `downloading`, `failed`, `missingRemote`.
+    - "Restore selectively…" mode in the WebDAV restore UI: lists every book from the chosen backup's `library-manifest.json` with title, author, size, format icon, last-opened date, checkbox. Default selection is none. "Restore all" remains a one-tap option that maps to phase-1 behavior.
+    - Library rows for `remoteOnly` books: cloud-download icon, size label, opening attempts the download. Position/annotation sidecars restore alongside the row even before the file is local (so a tap-to-download book lands at the saved position).
+    - Per-book download via `URLSessionConfiguration.isDiscretionary` background session — iOS schedules transfers when power/network are favorable.
+    - "Wi-Fi only" toggle in WebDAV settings (default ON for cellular-aware behavior). Honored by both lazy downloads and "Restore all".
+    - "Clean unused remote files" maintenance action in WebDAV settings: walks every backup manifest on the server, computes the union of referenced blob paths, deletes unreferenced blobs. Requires user confirmation with affected blob count + freed bytes estimate.
+    - Reader entry-point checks `BookFileState`: opening a `remoteOnly` book routes to a download flow (progress sheet), not the reader, until the file is `local`.
+    - Delete behavior: deleting a `remoteOnly` book removes the row only (no local file to delete); deleting a `local` book removes the file (existing behavior). Both leave the WebDAV blob untouched (GC is a separate explicit action).
+  - **Excluded**:
+    - No multi-device sync, no CRDT convergence — restore remains a one-shot user action, not continuous sync. Sync is a separate future feature.
+    - No partial book downloads (range-requested first chapters) — granularity is whole-book.
+    - No automatic retry of failed downloads — user retries via tap on the failed row. Surfacing transient vs permanent failure cleanly is enough; retry policy is out.
+    - No CloudKit migration — phase 2 stays on WebDAV.
+  - **Out of scope, deferred**:
+    - Backup retention policy ("keep last N snapshots, delete older") — independent feature.
+    - Per-book encryption — same cross-cutting concern as in feature #46.
+    - Read-while-downloading streaming — opens the door to PDF/EPUB streaming complexity that doesn't pay off in the iOS reader context.
+
+- **Edge cases**:
+  - **Open `remoteOnly` book offline**: download flow shows a clear "no network" error; row stays `remoteOnly` (does not flip to `failed`).
+  - **Cellular with Wi-Fi-only ON**: download is queued (not started); user sees a "Waiting for Wi-Fi" indicator. Background session resumes when Wi-Fi appears.
+  - **Cellular with Wi-Fi-only OFF**: download proceeds; cellular byte counter visible.
+  - **Selective restore picker on a backup with 10k books**: list is virtualized (`LazyVStack`) and supports filter/sort by title/size/date.
+  - **Open a book whose blob no longer exists on server** (manually deleted): download flow returns 404; row flips to `missingRemote`; user can delete the orphan row.
+  - **Concurrent downloads of multiple books**: serialized to 2-3 concurrent transfers (avoid saturating WebDAV); progress aggregated in a download tray.
+  - **Background download completion when app suspended**: standard `URLSessionDownloadDelegate` background-session callback wakes the app; file moved into sandbox; row flips to `local`.
+  - **"Clean unused remote files" run during a concurrent backup on another device**: GC reads manifests at start, deletes only blobs unreferenced at that moment; race window is acceptable because the next backup re-uploads any missing blobs (content-addressed convergence).
+  - **Storage pressure during lazy download**: iOS may evict the downloaded file under memory pressure if marked `isExcludedFromBackup` improperly — set the right resource flags.
+  - **Selective restore choice changes mid-download**: user can cancel an in-flight download from the row; row reverts to `remoteOnly`.
+
+- **Test plan**:
+  - **Unit**:
+    - `BookFileStateTests` — every state transition is valid; opening reader for non-`local` routes to download flow.
+    - `LazyDownloadCoordinatorTests` — concurrent download cap, retry on tap, Wi-Fi-only gating with mocked reachability.
+    - `RemoteBlobGarbageCollectorTests` — given 3 manifests with overlapping book sets, computes correct unreferenced-blob set.
+  - **ViewModel**:
+    - `SelectiveRestoreViewModelTests` — manifest filtering, selection toggling, "select all" semantics, pre-restore size computation.
+  - **Integration — Docker WebDAV**:
+    - `LazyDownloadIntegrationTests` — restore selectively (1 of 3 books) → library has 1 `local` and 2 `remoteOnly` rows → tap on one `remoteOnly` → download completes → row flips to `local` and reader opens at saved position.
+    - `RemoteGarbageCollectorIntegrationTests` — back up 2 libraries with one shared book → delete one backup's manifest → run GC → only the unique-to-that-backup blob is deleted; shared blob survives.
+  - **Manual verification**:
+    - On iPhone 17 Pro Simulator with `lllyys/vreader-webdav-host`: backup 5 books → wipe → selectively restore 2 → verify 5 rows visible (2 local, 3 remote) → tap a remote row → verify download + open at correct position. Repeat with Wi-Fi-only toggle and cellular reachability mocked via Network Link Conditioner.
+
+- **Acceptance criteria**:
+  - "Restore selectively…" picker correctly lists every book in the chosen backup's manifest and respects user selection.
+  - `remoteOnly` rows appear in the library with cloud-download icons and remain visible after app relaunch.
+  - Tap-to-download flips a row to `local` and opens at the saved position.
+  - "Wi-Fi only" toggle correctly defers cellular downloads to Wi-Fi; visible "waiting" state.
+  - "Clean unused remote files" deletes only blobs unreferenced by any backup manifest; concurrent backup on another device does not corrupt state.
+  - All unit + integration + ViewModel tests pass.
+  - LOC under ~300 per new file; reader entry-point change does not exceed 50 LOC delta in `ReaderContainerView`.
+  - `docs/architecture.md` updated: add `BookFileState`, lazy-download coordinator, GC action.
 
