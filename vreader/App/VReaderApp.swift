@@ -14,6 +14,12 @@ struct VReaderApp: App {
     /// (e.g. WebDAVSettingsView) that need direct access without protocol wrapping.
     private let persistenceActor: PersistenceActor?
 
+    /// Live BookImporter — exposed via SwiftUI Environment for feature #46's
+    /// WebDAV materializing restore (`WebDAVSettingsView` passes it through to
+    /// `WebDAVProviderFactory.make`). Nil if the SwiftData container failed
+    /// to construct.
+    private let bookImporterRef: (any BookImporting)?
+
     #if DEBUG
     /// Parsed launch argument overrides for UI testing.
     private let testConfig: TestLaunchConfig
@@ -39,6 +45,7 @@ struct VReaderApp: App {
             self.initError = "The library database could not be opened. It may need to be reset."
             self.contentView = nil
             self.persistenceActor = nil
+            self.bookImporterRef = nil
             self.debugBridge = nil
             return
         }
@@ -119,6 +126,7 @@ struct VReaderApp: App {
                 syncMonitor: syncMonitor
             )
             self.persistenceActor = persistence
+            self.bookImporterRef = importer
 
             #if DEBUG
             // Build the DebugBridge synchronously. The struct is
@@ -138,6 +146,7 @@ struct VReaderApp: App {
             self.initError = Self.sanitizedErrorMessage(error)
             self.contentView = nil
             self.persistenceActor = nil
+            self.bookImporterRef = nil
             #if DEBUG
             self.debugBridge = nil
             #endif
@@ -151,6 +160,7 @@ struct VReaderApp: App {
                 contentView
                     .modelContainer(modelContainer)
                     .environment(\.persistenceActor, persistenceActor)
+                    .environment(\.bookImporter, bookImporterRef)
                     .modifier(TestLaunchModifier(config: testConfig))
                     .onOpenURL { [debugBridge] url in
                         guard url.scheme == DebugCommand.scheme else { return }
@@ -163,6 +173,7 @@ struct VReaderApp: App {
                 contentView
                     .modelContainer(modelContainer)
                     .environment(\.persistenceActor, persistenceActor)
+                    .environment(\.bookImporter, bookImporterRef)
                 #endif
             } else {
                 VStack(spacing: 16) {

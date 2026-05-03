@@ -24,6 +24,12 @@ enum WebDAVProviderFactory {
 
     /// Constructs a fully-wired WebDAVProvider for the given persistence actor.
     /// Reads credentials from Keychain. Throws if credentials are missing or invalid.
+    ///
+    /// `bookImporter` enables feature #46's materializing restore. When omitted
+    /// (legacy callers / tests), restore falls back to v1-format behavior:
+    /// metadata-only, books silently skipped if missing locally. Production
+    /// callers (from `VReaderApp` via `WebDAVSettingsView`) pass the live
+    /// `BookImporter` so backup blobs land on a fresh device.
     @MainActor
     static func make(
         persistence: PersistenceActor,
@@ -31,7 +37,8 @@ enum WebDAVProviderFactory {
         defaults: UserDefaults = .standard,
         perBookSettingsBaseURL: URL = standardPerBookSettingsBaseURL,
         appVersion: String = currentAppVersion(),
-        deviceName: String = currentDeviceName()
+        deviceName: String = currentDeviceName(),
+        bookImporter: (any BookImporting)? = nil
     ) throws -> WebDAVProvider {
         guard
             let serverURL = try? keychain.readString(forAccount: serverURLAccount),
@@ -64,7 +71,8 @@ enum WebDAVProviderFactory {
             dataCollector: collector,
             dataRestorer: restorer,
             deviceName: deviceName,
-            appVersion: appVersion
+            appVersion: appVersion,
+            bookImporter: bookImporter
         )
     }
 

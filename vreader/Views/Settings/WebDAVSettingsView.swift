@@ -16,6 +16,7 @@ import SwiftUI
 struct WebDAVSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.persistenceActor) private var persistenceFromEnv
+    @Environment(\.bookImporter) private var bookImporterFromEnv
 
     @State private var serverURL = ""
     @State private var username = ""
@@ -308,7 +309,8 @@ struct WebDAVSettingsView: View {
         do {
             let provider = try WebDAVProviderFactory.make(
                 persistence: persistence,
-                keychain: keychain
+                keychain: keychain,
+                bookImporter: bookImporterFromEnv
             )
             let vm = BackupViewModel(provider: provider)
             backupVM = vm
