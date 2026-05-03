@@ -197,6 +197,7 @@
 		43BD02365D537972791DF4D5 /* ReaderAuditFixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43DA904E79F5CF69E46ECC26 /* ReaderAuditFixTests.swift */; };
 		43E5608C73F29F783F64BE8A /* ReaderNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB169F568633A25E157B4DE /* ReaderNavigationTests.swift */; };
 		44A1BF88B48D717D89913706 /* OPDSModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CA445AA96E5EEBA05B7C36 /* OPDSModels.swift */; };
+		45284DB279AD41866D7B0157 /* BookFileMaterializerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04ED79BFAD4BEF6B8A30F982 /* BookFileMaterializerTests.swift */; };
 		453E682BDF07AEB9D4DA6294 /* PaginationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA0C50C474AA2F96C39AAC94 /* PaginationCache.swift */; };
 		454342CEF3A2152B1EDD2455 /* TXTReaderContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725F9036150B858160ACFF7B /* TXTReaderContainerView.swift */; };
 		45EA62BA74F57E9AC57B1BA4 /* HighlightedSnippetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631D0375777D50E5B1EDF31C /* HighlightedSnippetTests.swift */; };
@@ -496,6 +497,7 @@
 		ACE4A8A746F082AEC08BB273 /* CustomCoverStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5955766DF21883C0C57B71E4 /* CustomCoverStoreTests.swift */; };
 		AD1910F64D226400933FDBA2 /* PDFHighlightRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8719A34DB441AF9DC6379DC9 /* PDFHighlightRenderer.swift */; };
 		AD27484127EA24D230616F48 /* TestConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59B2824739E67F567813198E /* TestConstants.swift */; };
+		AE171BC364B973E0F52D1B96 /* BookFileMaterializer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1889243163114A51950527F6 /* BookFileMaterializer.swift */; };
 		AE34D7222B4EAB4191316FD2 /* FoliateReaderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C919847EACB9AB94A03DF6E8 /* FoliateReaderViewModel.swift */; };
 		AECED765F5022DC96443D566 /* foliate-host.js in Resources */ = {isa = PBXBuildFile; fileRef = 8770E9DB2008B2B8B4B0A475 /* foliate-host.js */; };
 		AEFC819574E845429DFC9D78 /* ZIPReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2DB7F421D9D2E7492E12F89 /* ZIPReader.swift */; };
@@ -738,6 +740,7 @@
 		0378B284E969CD8625A89EA1 /* RealDebugBridgeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealDebugBridgeContext.swift; sourceTree = "<group>"; };
 		03FA3AC72012ED6686293475 /* ReadingStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStatsTests.swift; sourceTree = "<group>"; };
 		0459CAA7394555E5A8E17146 /* ReaderUnsupportedFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderUnsupportedFormatTests.swift; sourceTree = "<group>"; };
+		04ED79BFAD4BEF6B8A30F982 /* BookFileMaterializerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFileMaterializerTests.swift; sourceTree = "<group>"; };
 		050AAFD290B8995258D78AC2 /* FormatCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatCapabilities.swift; sourceTree = "<group>"; };
 		055FBEA382F82BE342A50C8E /* LocatorFactoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorFactoryTests.swift; sourceTree = "<group>"; };
 		0616892213196BCF802266F8 /* ContentHasherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentHasherTests.swift; sourceTree = "<group>"; };
@@ -783,6 +786,7 @@
 		16C77872C4F869769F4C83F7 /* ReaderContainerView+Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReaderContainerView+Sheets.swift"; sourceTree = "<group>"; };
 		16E293CFD61A19BB48B38963 /* HighlightableTextViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightableTextViewTests.swift; sourceTree = "<group>"; };
 		17E7FD8CD67F19A2213DB6F5 /* PDFViewBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFViewBridge.swift; sourceTree = "<group>"; };
+		1889243163114A51950527F6 /* BookFileMaterializer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFileMaterializer.swift; sourceTree = "<group>"; };
 		1920480AF349823757484C2D /* EPUBWebViewBridgeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBWebViewBridgeCoordinator.swift; sourceTree = "<group>"; };
 		19522F65C0947EFDCF9E4D2B /* TypographySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypographySettings.swift; sourceTree = "<group>"; };
 		199ADE9681576DB0AF6A6A94 /* SourceSharingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceSharingService.swift; sourceTree = "<group>"; };
@@ -1596,6 +1600,7 @@
 				8AB2B5F77B95D3402E699DA9 /* BackupProvider.swift */,
 				64D6B83FC65D64C1271E28F4 /* BackupSectionDTOs.swift */,
 				560129625F0E48471C0F4B62 /* BlobPath.swift */,
+				1889243163114A51950527F6 /* BookFileMaterializer.swift */,
 				DB6CE81404902AB359536964 /* PROPFINDParser.swift */,
 				9DAC16C19C7D4C72EFC950C9 /* WebDAVBlobStore.swift */,
 				4946129FECC6C9BA7A7F16A1 /* WebDAVClient.swift */,
@@ -2511,6 +2516,7 @@
 				F64BCF588EF860DD6C214737 /* BackupLibraryManifestTests.swift */,
 				ED150D276C082FEC194F2F31 /* BackupProviderContractTests.swift */,
 				BFB65788879E3D91E69E8BA5 /* BlobPathTests.swift */,
+				04ED79BFAD4BEF6B8A30F982 /* BookFileMaterializerTests.swift */,
 				4D9501ED4FB49C6035FDF5BB /* MockBackupProvider.swift */,
 				D9A7B601E9791FB068616C98 /* WebDAVATSTests.swift */,
 				C3F1695C0E7481CB3EA2B8A3 /* WebDAVBackupIntegrationTests.swift */,
@@ -3077,6 +3083,7 @@
 				90D2C41C30E622E119877967 /* BackupViewModelTests.swift in Sources */,
 				096B20388931B21DAA4DC091 /* BlobPathTests.swift in Sources */,
 				C205A1413A59C630A10ECEB7 /* BookContentCacheTests.swift in Sources */,
+				45284DB279AD41866D7B0157 /* BookFileMaterializerTests.swift in Sources */,
 				D41473E2CF7AB980E43C6C54 /* BookFormatAZW3Tests.swift in Sources */,
 				2B9E39AC289E006A1A8B25AE /* BookFormatTests.swift in Sources */,
 				301BA4423DE1212ADB315388 /* BookImporterAZW3Tests.swift in Sources */,
@@ -3368,6 +3375,7 @@
 				12EE1BD6335013980EFA3EC0 /* BookCardView.swift in Sources */,
 				AF32B348898F4110FED715F5 /* BookCollection.swift in Sources */,
 				BB796644EE14228057D77738 /* BookContentCache.swift in Sources */,
+				AE171BC364B973E0F52D1B96 /* BookFileMaterializer.swift in Sources */,
 				33B874FB4BB17A21ACA4468E /* BookFormat.swift in Sources */,
 				DF36D73AC9B53845BF561CBC /* BookImporter.swift in Sources */,
 				429316840ADE46912C2A89E9 /* BookImporting.swift in Sources */,
@@ -3802,13 +3810,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.10.25;
+				MARKETING_VERSION = 3.10.26;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -3952,13 +3960,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.10.25;
+				MARKETING_VERSION = 3.10.26;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
