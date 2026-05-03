@@ -5,6 +5,7 @@
 // @coordinates-with: WebDAVProvider.swift, WebDAVClient.swift, BackupProvider.swift
 
 import Testing
+import CryptoKit
 import Foundation
 @testable import vreader
 
@@ -109,6 +110,132 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
     /// When true, MOVE throws httpError(501) — simulates a server that
     /// doesn't implement MOVE.
     var simulateMoveNotImplemented = false
+}
+
+// MARK: - Feature #46 (WI-7) — provider backup integration with blob upload
+
+@Suite("WebDAVProvider — backup with library manifest (feature #46 WI-7)")
+struct WebDAVProviderBackupWithManifestTests {
+
+    /// Stub collector that returns a pre-baked manifest + minimal sections.
+    final class StubCollector: BackupDataCollecting, @unchecked Sendable {
+        let manifestEntries: [BackupLibraryEntry]
+        init(manifestEntries: [BackupLibraryEntry]) {
+            self.manifestEntries = manifestEntries
+        }
+        func collectAnnotations() async throws -> Data { Data("{}".utf8) }
+        func collectPositions() async throws -> Data { Data("{}".utf8) }
+        func collectSettings() async throws -> Data { Data("{}".utf8) }
+        func collectCollections() async throws -> Data { Data("{}".utf8) }
+        func collectBookSources() async throws -> Data { Data("{}".utf8) }
+        func collectPerBookSettings() async throws -> Data { Data("{}".utf8) }
+        func collectReplacementRules() async throws -> Data { Data("{}".utf8) }
+        func getBookCount() async -> Int { manifestEntries.count }
+        func collectLibraryManifest() async throws -> Data {
+            let envelope = BackupLibraryManifestEnvelope(schemaVersion: 1, books: manifestEntries)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            return try encoder.encode(envelope)
+        }
+    }
+
+    final class NoopRestorer: BackupDataRestoring, @unchecked Sendable {
+        func restoreAnnotations(from data: Data) async throws {}
+        func restorePositions(from data: Data) async throws {}
+        func restoreSettings(from data: Data) async throws {}
+        func restoreCollections(from data: Data) async throws {}
+        func restoreBookSources(from data: Data) async throws {}
+        func restorePerBookSettings(from data: Data) async throws {}
+        func restoreReplacementRules(from data: Data) async throws {}
+    }
+
+    private static func entry(_ data: Data, format: BookFormat = .epub, originalExtension: String? = nil) -> BackupLibraryEntry {
+        let sha = Data(SHA256.hash(data: data)).map { String(format: "%02x", $0) }.joined()
+        let bytes = Int64(data.count)
+        let ext = originalExtension ?? format.fileExtensions.first ?? format.rawValue
+        return BackupLibraryEntry(
+            fingerprintKey: "\(format.rawValue):\(sha):\(bytes)",
+            format: format.rawValue,
+            sha256: sha,
+            byteCount: bytes,
+            originalExtension: ext,
+            title: "T",
+            author: nil,
+            addedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastOpenedAt: nil,
+            blobPath: BlobPath.make(format: format, sha256: sha, byteCount: bytes)
+        )
+    }
+
+    private static func makeRig(
+        entries: [(Data, BackupLibraryEntry)]
+    ) async throws -> (WebDAVProvider, MockWebDAVTransport, URL) {
+        let mock = MockWebDAVTransport()
+        // Sandbox dir with a file per entry, named by the resolver convention.
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-sandbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+        for (data, entry) in entries {
+            let safeName = entry.fingerprintKey.replacingOccurrences(of: ":", with: "_")
+            let url = sandbox.appendingPathComponent(safeName).appendingPathExtension(entry.originalExtension)
+            try data.write(to: url)
+        }
+        let resolver: SandboxURLResolver = { fingerprintKey, originalExtension in
+            let safeName = fingerprintKey.replacingOccurrences(of: ":", with: "_")
+            return sandbox.appendingPathComponent(safeName).appendingPathExtension(originalExtension)
+        }
+        let provider = WebDAVProvider(
+            transport: mock,
+            dataCollector: StubCollector(manifestEntries: entries.map(\.1)),
+            dataRestorer: NoopRestorer(),
+            deviceName: "TestDevice",
+            appVersion: "test",
+            sandboxResolver: resolver
+        )
+        return (provider, mock, sandbox)
+    }
+
+    @Test func backup_withManifest_uploadsBlobsToCanonicalPaths() async throws {
+        let dataA = Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: 0xA0, count: 200)
+        let dataB = Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: 0xB0, count: 300)
+        let entryA = Self.entry(dataA, format: .epub)
+        let entryB = Self.entry(dataB, format: .epub)
+        let (provider, mock, _) = try await Self.makeRig(entries: [(dataA, entryA), (dataB, entryB)])
+
+        let metadata = try await provider.backup { _ in }
+        #expect(metadata.bookCount == 2)
+        // Blobs landed at the canonical content-addressed paths.
+        #expect(mock.files[entryA.blobPath] == dataA)
+        #expect(mock.files[entryB.blobPath] == dataB)
+        // Metadata ZIP also uploaded.
+        #expect(mock.files.keys.contains(where: { $0.contains(".vreader.zip") }))
+    }
+
+    @Test func backup_secondTime_dedupesBlobsViaPROPFIND() async throws {
+        let data = Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: 0xCC, count: 256)
+        let entry = Self.entry(data, format: .epub)
+        let (provider, mock, _) = try await Self.makeRig(entries: [(data, entry)])
+
+        // First backup: blob is uploaded.
+        _ = try await provider.backup { _ in }
+        let firstPutCount = mock.methodCalls.filter { $0.method == "PUT" }.count
+
+        mock.methodCalls.removeAll()
+        // Second backup: blob already at canonical path, should be skipped.
+        _ = try await provider.backup { _ in }
+        let secondBlobPuts = mock.methodCalls
+            .filter { $0.method == "PUT" && $0.path == entry.blobPath }
+            .count
+        let secondTempPuts = mock.methodCalls
+            .filter { $0.method == "PUT" && $0.path.contains("uploads/tmp/") }
+            .count
+        // Confirms: first round had at least one PUT (temp blob upload).
+        #expect(firstPutCount >= 1)
+        // Second round: zero blob PUTs at the final path AND zero temp PUTs.
+        // The metadata ZIP still gets a PUT, but it's at the backups path.
+        #expect(secondBlobPuts == 0)
+        #expect(secondTempPuts == 0)
+    }
 }
 
 // MARK: - Mock Data Collector

@@ -1,6 +1,11 @@
 // Purpose: BackupProvider conformance for WebDAV storage backends.
 // Creates ZIP backups of app data and uploads/downloads via WebDAVTransport.
 // Restore delegates to BackupDataRestoring protocol for persistence-layer writes.
+
+import OSLog
+
+private let log = Logger(subsystem: "com.vreader.app", category: "WebDAVProvider")
+
 //
 // Key decisions:
 // - Uses WebDAVTransport protocol for testability.
@@ -73,6 +78,15 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
     private let appVersion: String
     private let basePath = "VReader/backups"
 
+    /// Resolves the local sandbox URL for a (fingerprintKey, originalExtension)
+    /// — used by feature #46 (WI-7) to locate book bytes for blob upload.
+    /// Defaults to the production resolver shared with `BookFileMaterializer`.
+    private let sandboxResolver: SandboxURLResolver
+
+    /// Blob store wrapping the same transport. Used by feature #46 to publish
+    /// content-addressed book blobs atomically (PUT-tmp → PROPFIND-verify → MOVE).
+    private let blobStore: WebDAVBlobStore
+
     /// In-memory cache of known backup metadata, keyed by ID.
     private var metadataCache: [UUID: (metadata: BackupMetadata, remotePath: String)] = [:]
 
@@ -81,13 +95,16 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
         dataCollector: BackupDataCollecting,
         dataRestorer: BackupDataRestoring,
         deviceName: String,
-        appVersion: String
+        appVersion: String,
+        sandboxResolver: @escaping SandboxURLResolver = BookFileMaterializer.defaultSandboxResolver
     ) {
         self.transport = transport
         self.dataCollector = dataCollector
         self.dataRestorer = dataRestorer
         self.deviceName = deviceName
         self.appVersion = appVersion
+        self.sandboxResolver = sandboxResolver
+        self.blobStore = WebDAVBlobStore(transport: transport)
     }
 
     // MARK: - BackupProvider
@@ -95,28 +112,37 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
     func backup(progress: @Sendable (Double) -> Void) async throws -> BackupMetadata {
         progress(0.0)
 
-        // Phase 1: Collect data (0.0 → 0.4)
+        // Phase 1: Collect metadata sections + library manifest (0.0 → 0.30)
         let collected: [(String, Data)]
+        let manifestData: Data
+        let manifest: BackupLibraryManifestEnvelope
         let bookCount: Int
         do {
-            let a = try await dataCollector.collectAnnotations(); progress(0.06)
-            let p = try await dataCollector.collectPositions(); progress(0.12)
-            let s = try await dataCollector.collectSettings(); progress(0.18)
-            let c = try await dataCollector.collectCollections(); progress(0.24)
-            let bs = try await dataCollector.collectBookSources(); progress(0.30)
-            let pbs = try await dataCollector.collectPerBookSettings(); progress(0.35)
-            let rr = try await dataCollector.collectReplacementRules(); progress(0.38)
-            bookCount = await dataCollector.getBookCount(); progress(0.40)
+            let a = try await dataCollector.collectAnnotations(); progress(0.04)
+            let p = try await dataCollector.collectPositions(); progress(0.08)
+            let s = try await dataCollector.collectSettings(); progress(0.12)
+            let c = try await dataCollector.collectCollections(); progress(0.16)
+            let bs = try await dataCollector.collectBookSources(); progress(0.20)
+            let pbs = try await dataCollector.collectPerBookSettings(); progress(0.24)
+            let rr = try await dataCollector.collectReplacementRules(); progress(0.26)
+            manifestData = try await dataCollector.collectLibraryManifest(); progress(0.28)
+            bookCount = await dataCollector.getBookCount(); progress(0.30)
             collected = [
                 ("annotations.json", a), ("positions.json", p), ("settings.json", s),
                 ("collections.json", c), ("book-sources.json", bs), ("per-book-settings.json", pbs),
                 ("replacement-rules.json", rr),
+                ("library-manifest.json", manifestData),
             ]
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            manifest = (try? decoder.decode(BackupLibraryManifestEnvelope.self, from: manifestData))
+                ?? BackupLibraryManifestEnvelope(schemaVersion: 1, books: [])
         } catch {
             throw BackupError.archiveCreationFailed("Failed to collect data: \(error.localizedDescription)")
         }
 
-        // Phase 2: Create metadata and ZIP (0.4 → 0.5)
+        // Phase 2: Create metadata + ZIP (0.30 → 0.40)
         let backupId = UUID()
         let now = Date()
         let totalSize = Int64(collected.reduce(0) { $0 + $1.1.count })
@@ -138,19 +164,31 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
         guard let zipData = try? ZIPWriter.createArchive(entries: zipEntries) else {
             throw BackupError.archiveCreationFailed("Failed to create ZIP archive")
         }
-        progress(0.50)
+        progress(0.40)
 
-        // Phase 3: Upload to WebDAV (0.5 → 1.0)
-        let remotePath = makeRemotePath(id: backupId, date: now)
+        // Phase 3: Ensure server directory tree (0.40 → 0.45)
         do {
-            // Create each parent collection in turn — WebDAV MKCOL won't
-            // create intermediate directories on most servers, so a nested
-            // basePath like "VReader/backups" needs two MKCOLs.
             for ancestor in nestedAncestors(of: basePath) {
                 try await transport.createDirectory(path: ancestor)
             }
-            progress(0.55)
-            try await transport.upload(data: zipData, toPath: remotePath); progress(0.95)
+        } catch let error as WebDAVError {
+            throw BackupError.storageUnavailable("WebDAV mkdir failed: \(error)")
+        }
+        progress(0.45)
+
+        // Phase 4: Publish missing book blobs (0.45 → 0.85)
+        // Per feature #46: each book is uploaded as a content-addressed blob
+        // at VReader/books/<format>/<sha256>_<byteCount>.<ext>. PROPFIND-dedupe
+        // makes repeat backups cheap (only NEW books transfer bytes).
+        if !manifest.books.isEmpty {
+            try await uploadBlobs(manifest.books, progressBase: 0.45, progressSpan: 0.40, progress: progress)
+        }
+        progress(0.85)
+
+        // Phase 5: Upload metadata ZIP (0.85 → 1.0)
+        let remotePath = makeRemotePath(id: backupId, date: now)
+        do {
+            try await transport.upload(data: zipData, toPath: remotePath)
         } catch let error as WebDAVError {
             throw BackupError.storageUnavailable("WebDAV upload failed: \(error)")
         } catch {
@@ -160,6 +198,48 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
         metadataCache[backupId] = (metadata, remotePath)
         progress(1.0)
         return metadata
+    }
+
+    /// Uploads (or skips, if dedupe says they're already on the server) every
+    /// blob referenced by the manifest. Surfaces server-capability gaps as a
+    /// hard error so the user knows their server can't host atomic uploads.
+    private func uploadBlobs(
+        _ entries: [BackupLibraryEntry],
+        progressBase: Double,
+        progressSpan: Double,
+        progress: @Sendable (Double) -> Void
+    ) async throws {
+        // Books may share a parent directory; create them all idempotently.
+        // The blob path is "VReader/books/<format>/<sha256>_<byteCount>.<ext>"
+        // so we need at least "VReader/books" + per-format subdirs created.
+        var seenDirs: Set<String> = []
+        let count = max(entries.count, 1)
+        for (index, entry) in entries.enumerated() {
+            let dir = (entry.blobPath as NSString).deletingLastPathComponent
+            for ancestor in nestedAncestors(of: dir) where !seenDirs.contains(ancestor) {
+                seenDirs.insert(ancestor)
+                try? await transport.createDirectory(path: ancestor)
+            }
+
+            let localURL = sandboxResolver(entry.fingerprintKey, entry.originalExtension)
+            guard let bytes = try? Data(contentsOf: localURL) else {
+                log.error("Local blob missing for \(entry.fingerprintKey, privacy: .public) at \(localURL.path, privacy: .public); skipping upload")
+                progress(progressBase + progressSpan * Double(index + 1) / Double(count))
+                continue
+            }
+            do {
+                _ = try await blobStore.putBlobAtomically(
+                    bytes,
+                    to: entry.blobPath,
+                    expectedByteCount: entry.byteCount
+                )
+            } catch BackupBlobStoreError.serverCapabilityMissing(let cap) {
+                throw BackupError.storageUnavailable("Server doesn't support \(cap); cannot publish blobs atomically")
+            } catch {
+                throw BackupError.storageUnavailable("Blob upload failed for \(entry.fingerprintKey): \(error)")
+            }
+            progress(progressBase + progressSpan * Double(index + 1) / Double(count))
+        }
     }
 
     func restore(backupId: UUID, progress: @Sendable (Double) -> Void) async throws {
