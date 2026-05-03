@@ -92,7 +92,7 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
 | 41 | TTS auto-scroll/paginate                                      | Reader/*     | Medium   | DONE      | TTSHighlightCoordinator sets uiState.scrollToOffset from sentence start. TXT/MD only via same onChange wiring. Needs device verification                                         |
 | 42 | AZW3/KF8 + Foliate-js unified reader engine                   | Reader/*     | High     | PLANNED   | Replace EPUB bridge with Foliate-js `<foliate-view>`. EPUB+AZW3/MOBI via one engine. PDF/TXT unchanged. GH: #113                                                                |
 | 43 | Extract and display cover images from EPUB/AZW3               | Library/*    | Medium   | DONE      | EPUB OPF + AZW3 MOBI header parsing. 46 tests. Bug #107 for white-edge padding. GH: #121                                                                                        |
-| 44 | DebugBridge — debug-only URL scheme + state dumper for autonomous testing | DevTools/*  | High | DONE | DEBUG-only `vreader-debug://` handler with 7 commands (reset/seed/theme/open/settle/snapshot/eval). Active-reader registry, fixture catalog, stable error codes, release-gate script. 93 unit tests. Doc at `dev-docs/debug-bridge.md`. Future: per-format settle hooks, real WKWebView evaluator on EPUB/AZW3, selection probe field. |
+| 44 | DebugBridge — debug-only URL scheme + state dumper for autonomous testing | DevTools/*  | High | DONE | DEBUG-only `vreader-debug://` handler with 7 commands (reset/seed/theme/open/settle/snapshot/eval). Active-reader registry, fixture catalog, stable error codes, release-gate script. 93 unit tests. Doc at `docs/subsystems/debug-bridge.md`. Future: per-format settle hooks, real WKWebView evaluator on EPUB/AZW3, selection probe field. |
 | 45 | Verification harness sweep — retire the "Needs device verification" backlog | DevTools/* | High | PLANNED | XCUITest + DebugBridge recipes for 13 of 15 simulator-automatable backlog items. Adds VERIFIED status. Depends on #44. See plan below. |
 
 ### Feature #44 — DebugBridge — Plan
@@ -100,7 +100,7 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
 - **Problem**: Autonomous AI debug loop and XCUITest regression suite both need cheap, deterministic state setup and ground-truth state inspection. Currently every repro requires manual UI-driving (open library → tap book → scroll → set theme → ...). For WKWebView-heavy bugs (Foliate-js highlights, EPUB rendering, page navigation) there is no external way to read what the webview actually rendered. Vision-only inspection is too flaky for the hard bugs, which is the class that piles up in `docs/bugs.md`.
 
 - **Scope**:
-  - **Included**: A `#if DEBUG`-gated `DebugBridge` that handles the `vreader-debug://` URL scheme via `.onOpenURL` on `VReaderApp`. Commands: `reset`, `seed?fixture=<name>`, `open?bookId=<uuid>&cfi=<x>` (plus equivalent for TXT/MD/PDF positions), `theme?mode=<dark|light>&fontSize=<n>`, `settle?token=<id>` (writes ready-sentinel after Foliate `relocate` + native layout settles), `snapshot?dest=<file>` (semantic state JSON to app container), `eval?bridge=foliate&js=<base64>` (active WKWebView JS eval, result to container). Bundle a small set of fixture books in `vreader/Resources/DebugFixtures/` (alice.epub, war-and-peace.txt, sample.azw3, sample.pdf). Document one repro recipe per existing open bug (#107, #108, plus a few of the "Needs device verification" features) in `dev-docs/debug-bridge.md`.
+  - **Included**: A `#if DEBUG`-gated `DebugBridge` that handles the `vreader-debug://` URL scheme via `.onOpenURL` on `VReaderApp`. Commands: `reset`, `seed?fixture=<name>`, `open?bookId=<uuid>&cfi=<x>` (plus equivalent for TXT/MD/PDF positions), `theme?mode=<dark|light>&fontSize=<n>`, `settle?token=<id>` (writes ready-sentinel after Foliate `relocate` + native layout settles), `snapshot?dest=<file>` (semantic state JSON to app container), `eval?bridge=foliate&js=<base64>` (active WKWebView JS eval, result to container). Bundle a small set of fixture books in `vreader/Resources/DebugFixtures/` (alice.epub, war-and-peace.txt, sample.azw3, sample.pdf). Document one repro recipe per existing open bug (#107, #108, plus a few of the "Needs device verification" features) in `docs/subsystems/debug-bridge.md`.
   - **Excluded**: No release-build code path. No remote control over network. No authentication (device-local only, DEBUG-only). No fixture *editing* in the bridge — fixtures are read-only bundle resources. No replacement of XCUITest — DebugBridge is a state-setup peer, not a test runner. No screenshot capture from inside the bridge — caller uses `xcrun simctl io booted screenshot`. No mutation of SwiftData beyond the `reset` and `seed` commands.
   - **Out of scope, deferred**: Recording-and-replay of user gestures. Mocking the network layer. AI Genie state injection.
 
@@ -125,7 +125,7 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
   - Integration: `DebugBridgeIntegrationTests` (XCUITest) — launch with `vreader-debug://reset` then `seed` then `open` then `snapshot`, read back container JSON, assert state matches expected.
   - Integration: `DebugBridgeFoliateEvalTests` — open EPUB fixture, `eval` returns `document.querySelectorAll('.foliate-highlight').length` correctly after creating a highlight.
   - Build gate: a CI step asserts `vreader-debug` is **not** present in the Release bundle's Info.plist. Fail the build if found.
-  - Manual verification: one repro recipe in `dev-docs/debug-bridge.md` exercised end-to-end against current open bugs.
+  - Manual verification: one repro recipe in `docs/subsystems/debug-bridge.md` exercised end-to-end against current open bugs.
 
 - **Acceptance criteria**:
   - DEBUG build registers `vreader-debug://` and handles all six commands above with correct success/error JSON in the app container.
@@ -133,7 +133,7 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
   - `xcrun simctl openurl booted vreader-debug://snapshot?dest=state.json` followed by `simctl get_app_container booted <bundle-id> data` produces a valid JSON file with the documented schema (currentBookId, format, cfi/page, theme, fontSize, selection, highlightCount, renderPhase, lastError).
   - `settle` reliably blocks until the Foliate `relocate` event has fired and a frame has been committed (no mid-frame screenshots in the documented happy-path repro).
   - All unit + integration tests pass under `xcodebuild test -only-testing:vreaderTests` and `-only-testing:vreaderUITests`.
-  - `dev-docs/debug-bridge.md` documents the URL grammar, JSON schema, fixture catalogue, and one worked repro per currently-open bug.
+  - `docs/subsystems/debug-bridge.md` documents the URL grammar, JSON schema, fixture catalogue, and one worked repro per currently-open bug.
   - LOC under ~300 across new files (router, snapshotter, fixture loader, Foliate eval adapter); no file exceeds the project's 300-line guideline.
 
 ### Feature #45 — Verification harness sweep — Plan

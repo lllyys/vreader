@@ -30,12 +30,13 @@ The categories track what the live checklist covers — read it for the authorit
 Ask the user which category they want to test, then:
 
 1. Show the relevant test cases from the checklist.
-2. Help drive the simulator if the app is running. For tests that don't need real touch (state setup, snapshot assertion), prefer the DebugBridge: `xcrun simctl openurl booted vreader-debug://...` (see `dev-docs/debug-bridge.md`).
+2. Help drive the simulator if the app is running. For tests that don't need real touch (state setup, snapshot assertion), prefer the DebugBridge: `xcrun simctl openurl booted vreader-debug://...` (see `docs/subsystems/debug-bridge.md`).
 3. Record results.
 
 ## Files
 
 - Live checklist: `docs/manual-test-checklist.md`
-- DebugBridge reference: `dev-docs/debug-bridge.md`
+- DebugBridge reference: `docs/subsystems/debug-bridge.md`
 - Bug tracker: `docs/bugs.md`
 - Feature tracker: `docs/features.md`
+

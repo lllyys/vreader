@@ -73,7 +73,7 @@ VReader is a modern reading app designed for iPhone and iPad, built entirely by 
 
 ### Developer Tools (DEBUG-only)
 
-- **DebugBridge** — `vreader-debug://` URL scheme for autonomous testing. Drives the app from outside via `xcrun simctl openurl`: reset library, seed fixtures, set theme, open books, snapshot state to JSON. Compiled out of Release builds. Reference: [`dev-docs/debug-bridge.md`](dev-docs/debug-bridge.md)
+- **DebugBridge** — `vreader-debug://` URL scheme for autonomous testing. Drives the app from outside via `xcrun simctl openurl`: reset library, seed fixtures, set theme, open books, snapshot state to JSON. Compiled out of Release builds. Reference: [`docs/subsystems/debug-bridge.md`](docs/subsystems/debug-bridge.md)
 
 ## Tech Stack
 

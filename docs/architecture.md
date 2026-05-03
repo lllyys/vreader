@@ -9,7 +9,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 ```
 ┌──────────────────────────────────────────────────────┐
 │                    VReaderApp                         │
-│  SwiftData SchemaV3 · PersistenceActor · BookImporter│
+│  SwiftData SchemaV4 · PersistenceActor · BookImporter│
 └─────────────────────┬────────────────────────────────┘
                       │
           ┌───────────┴───────────┐
@@ -33,7 +33,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 
 ### 1. App Layer (`vreader/App/`)
 
-- `VReaderApp.swift` — SwiftData ModelContainer init, migration plan (V1→V2→V3), test seeding, error handling
+- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV4), migration plan (V1→V2→V3→V4), test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature.
 
 ### 2. Library Layer (`vreader/Views/LibraryView.swift`, `vreader/ViewModels/LibraryViewModel.swift`)
 
@@ -91,7 +91,11 @@ Each host owns its ViewModel lifecycle via `@State`:
 | `BookContentCache`                   | In-memory                  | Text cache for AI context loading (TXT/MD only)                           |
 | `PreferenceStore`                    | UserDefaults               | Sort order, view mode persistence                                         |
 | `CustomCoverStore`                   | JPEG files                 | Custom book cover images                                                  |
-| `WebDAVClient`                       | HTTP                       | Backup/restore to WebDAV server                                           |
+| `WebDAVClient`                       | HTTP                       | Low-level WebDAV transport (PROPFIND/PUT/GET/DELETE/MKCOL)                |
+| `WebDAVProvider`                     | `WebDAVClient`             | `BackupProvider` impl — backup/restore/list/delete over a WebDAV server   |
+| `WebDAVProviderFactory`              | `KeychainService`          | Assembles a `WebDAVProvider` from saved credentials + live persistence    |
+| `BackupDataCollector`                | `PersistenceActor`         | Serializes 7 versioned JSON sections (annotations, positions, settings, …) |
+| `BackupDataRestorer`                 | `PersistenceActor`         | Decodes + dedupes by UUID/profileKey; rejects future schema versions      |
 | `FoliateURLSchemeHandler`            | WKURLSchemeHandler         | Serves Foliate-js bundle + book files to WKWebView                        |
 | `FoliateMessageParser`               | Pure functions             | Parses raw JS message bodies into typed Swift events                      |
 | `FoliateJSEscaper`                   | Pure functions             | Escapes/sanitizes strings for safe JS/CSS interpolation in Foliate bridge |
@@ -103,6 +107,11 @@ SwiftData SchemaV4 entities:
 - `Book` (fingerprintKey unique) → `ReadingPosition`, `Highlight`, `Bookmark`, `AnnotationNote`, `BookCollection`
 - `ReadingSession`, `ReadingStats`
 - `BookSource`, `ContentReplacementRule` (added in SchemaV4)
+
+Backup section JSONs (`vreader/Services/Backup/BackupSectionDTOs.swift`) are
+versioned via the `BackupVersionedEnvelope` protocol. Restore validates exact
+`schemaVersion == 1` and raises `BackupRestoreError.unsupportedSchemaVersion`
+on mismatch, so a future v2 archive can't silently apply on a v1 client.
 
 Key types:
 

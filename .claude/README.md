@@ -124,4 +124,4 @@ Web/Tauri skills (`react-app-dev`, `tauri-*`, `tiptap-*`, `css-design-tdd`, `sho
 | `AGENTS.md` | Single source of truth for AI tool instructions (read by Claude, Codex, etc.) |
 | `CLAUDE.md` | Claude Code entry point — `@AGENTS.md` directive |
 | `CLAUDE.local.md` | Personal instructions (gitignored — create as needed) |
-| `dev-docs/debug-bridge.md` | Reference for the `vreader-debug://` URL scheme used by feature #44 |
+| `docs/subsystems/debug-bridge.md` | Reference for the `vreader-debug://` URL scheme used by feature #44 |

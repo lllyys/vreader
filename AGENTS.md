@@ -24,8 +24,9 @@ Shared instructions for all AI agents (Claude, Codex, etc.).
     - Exceptions: CSS-only, docs, config. See `.claude/rules/10-tdd.md` for full scope.
   - Run `xcodebuild test -only-testing:vreaderTests` for unit test gates. Skip UI tests during development.
   - Default simulator: **iPhone 17 Pro** (Dynamic Island — catches safe area bugs).
-  - **Verification harness** (DEBUG only): `vreader-debug://` URL scheme drives reset / seed / open / settle / snapshot / eval from `xcrun simctl openurl`, so verification runs don't need computer-use for reproduction or assertion. See `dev-docs/debug-bridge.md`.
+  - **Verification harness** (DEBUG only): `vreader-debug://` URL scheme drives reset / seed / open / settle / snapshot / eval from `xcrun simctl openurl`, so verification runs don't need computer-use for reproduction or assertion. See `docs/subsystems/debug-bridge.md`.
   - **Version bump per PR**: every PR must include a `chore: bump version to X.Y.Z` commit as its last commit before opening — patch for fixes/docs/chores, minor for new features, major for breaking changes. Tag is cut from the merge commit on `main` post-merge. See `.claude/rules/40-version-bump.md`.
+  - **Docs sync per PR**: when a PR adds a service, schema, notification, environment key, or user-visible feature, update `docs/architecture.md` and/or `README.md` in the same PR (separate commit before the version bump). Triggers + checklist in `.claude/rules/24-doc-sync.md`.
   - **Task workflow** (three files, one flow):
     - `docs/tasks.md` — **inbox**. User writes free-form descriptions. Agent triages (classify only, do not fix or implement during triage). See `docs/tasks.md` for classification rules, deduplication, and triage record format.
     - `docs/bugs.md` — **bug tracker**. Something implemented but broken. Follow the bug fix workflow defined in `docs/bugs.md` (Understand → RED → GREEN → REFACTOR → Verify → Track).

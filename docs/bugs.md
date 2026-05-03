@@ -8,7 +8,7 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 - **Partial implementations**: If something is partially implemented, the broken part is a bug here; the missing capability is a feature in `docs/features.md`. Link them.
 - **Source of truth**: This **Summary table** is the single source of truth for bug status.
 - **Open bug details**: Bugs with status TODO/IN PROGRESS/REOPENED should have an entry in `## Open Bug Details` with repro context. Move to archive on FIXED.
-- **History**: Root causes, solutions, and lessons for FIXED bugs are archived in `docs/archive/bugs-history.md`.
+- **History**: Root causes, solutions, and lessons for FIXED bugs are archived in `archive/bugs-history.md`.
 
 ## How to use
 
@@ -24,7 +24,7 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
   5. **Verify**: Run tests, confirm the fix, check for regressions. Run `/codex-toolkit:audit-fix` on changed files.
   6. **Track**: Update status in the Summary table to FIXED.
   7. Do NOT commit unless explicitly requested.
-  8. Record cause, solution, and lessons in `docs/archive/bugs-history.md`. Remove the bug's entry from `## Open Bug Details`.
+  8. Record cause, solution, and lessons in `archive/bugs-history.md`. Remove the bug's entry from `## Open Bug Details`.
 - **GitHub Issue closure** (post-merge finalizer — see `AGENTS.md` for full policy):
   - If the bug has a `GH: #N` in Notes, close the GitHub Issue only after:
     1. Status is FIXED in this file.
