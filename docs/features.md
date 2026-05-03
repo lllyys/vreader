@@ -19,11 +19,12 @@ Track features to be implemented here. Must be planned before implementation.
 3. Tell the agent: "implement feature #N" to start implementation
 4. Agent updates Status when done
 
-- **GitHub Issue closure** (post-merge finalizer — see `AGENTS.md` for full policy):
-  - If the feature has a `GH: #N` in Notes, close the GitHub Issue only after:
-    1. All acceptance criteria met and status is DONE in this file.
-    2. Implementation is merged to `main`.
-    3. Closure comment posted with commit SHA and acceptance result.
+- **GitHub Issue closure** (post-merge + post-verification finalizer — see `AGENTS.md` "Close gate — verified, not just merged" for the symmetric bug + feature rule):
+  - If the feature has a `GH: #N` in Notes, close the GitHub Issue only after **both** of the following:
+    1. **Merged**: implementation is on `main` and status in this file is `DONE` (every acceptance criterion implemented + tests passing).
+    2. **Verified**: status in this file has advanced to `VERIFIED` — every acceptance criterion exercised end-to-end (XCUITest + DebugBridge auto-verification, or an explicit on-device manual verification log; for non-UI features, end-to-end against a real backend such as a live WebDAV server, not just an in-memory mock).
+  - Closure comment cites the verification: commit SHA, what was tested, what was observed, acceptance-criterion-by-acceptance-criterion result.
+  - Between merge and verification (status `DONE` but not yet `VERIFIED`): leave the GH issue open with a "shipped in vX.Y.Z, awaiting verification" comment so the work does not drop off the radar.
   - Partial delivery: keep GitHub Issue open; use checklist or split follow-ups.
   - PRs use `Refs #N`, not `Fixes #N` (prevents premature auto-close).
 
@@ -96,8 +97,8 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
 | 43 | Extract and display cover images from EPUB/AZW3               | Library/*    | Medium   | DONE      | EPUB OPF + AZW3 MOBI header parsing. 46 tests. Bug #107 for white-edge padding. GH: #121                                                                                        |
 | 44 | DebugBridge — debug-only URL scheme + state dumper for autonomous testing | DevTools/*  | High | DONE | DEBUG-only `vreader-debug://` handler with 7 commands (reset/seed/theme/open/settle/snapshot/eval). Active-reader registry, fixture catalog, stable error codes, release-gate script. 93 unit tests. Doc at `docs/subsystems/debug-bridge.md`. Future: per-format settle hooks, real WKWebView evaluator on EPUB/AZW3, selection probe field. |
 | 45 | Verification harness sweep — retire the "Needs device verification" backlog | DevTools/* | High | PLANNED | XCUITest + DebugBridge recipes for 13 of 15 simulator-automatable backlog items. Adds VERIFIED status. Depends on #44. See plan below. |
-| 46 | WebDAV backup includes book files — materializing restore reconstructs library | Backup/* | High | PLANNED | Phase 1 of two-feature split. Adds `library-manifest.json` to the backup ZIP and uploads missing whole-file book blobs to `VReader/books/<format>/<sha256>_<byteCount>.<ext>` (content-addressed, deduped). Restore downloads every missing blob into the sandbox before applying metadata. Preserves the existing invariant that a `Book` row always points to a readable local file — no `BookFileState`, no remote-only rows, no UI redesign. See plan below. Phase 2 = feature #47. |
-| 47 | WebDAV restore — selective book picker + lazy-on-tap downloads | Backup/* | Medium | TODO | Phase 2 of feature #46. Introduces `BookFileState` (`local / remoteOnly / downloading / failed / missingRemote`), library rows for un-downloaded books with cloud icons, "Restore selectively…" picker against the manifest, on-tap blob fetch via `URLSessionConfiguration.isDiscretionary`, Wi-Fi-only cellular policy, "Clean unused remote files" GC action. Depends on feature #46 shipping the blob storage + manifest layout. See plan below. |
+| 46 | WebDAV backup includes book files — materializing restore reconstructs library | Backup/* | High | PLANNED | Phase 1 of two-feature split. Adds `library-manifest.json` to the backup ZIP and uploads missing whole-file book blobs to `VReader/books/<format>/<sha256>_<byteCount>.<ext>` (content-addressed, deduped). Restore downloads every missing blob into the sandbox before applying metadata. Preserves the existing invariant that a `Book` row always points to a readable local file — no `BookFileState`, no remote-only rows, no UI redesign. See plan below. Phase 2 = feature #47. GH: #144 |
+| 47 | WebDAV restore — selective book picker + lazy-on-tap downloads | Backup/* | Medium | PLANNED | Phase 2 of feature #46. Introduces `BookFileState` (`local / remoteOnly / downloading / failed / missingRemote`), library rows for un-downloaded books with cloud icons, "Restore selectively…" picker against the manifest, on-tap blob fetch via `URLSessionConfiguration.isDiscretionary`, Wi-Fi-only cellular policy, "Clean unused remote files" GC action. Depends on feature #46 shipping the blob storage + manifest layout. See plan below. GH: #145 |
 
 ### Feature #44 — DebugBridge — Plan
 
