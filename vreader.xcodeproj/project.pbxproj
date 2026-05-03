@@ -24,6 +24,7 @@
 		058C2F104DE6D10D81F907D9 /* AnnotationExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB9773A4631BEDEDD187F08 /* AnnotationExporterTests.swift */; };
 		05BE70789318FA085B9A735E /* AIChatViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E861A379A620B769CEA36300 /* AIChatViewModelTests.swift */; };
 		0681EC94635E9BBB798AAB77 /* SearchHighlightDismissTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62569DC663E2BDD2DC0155C3 /* SearchHighlightDismissTests.swift */; };
+		069B04BFCB5D0D4FA8EA5972 /* WebDAVNetworkPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D408C9CE57D4C437A72C0D18 /* WebDAVNetworkPolicy.swift */; };
 		06C8E85FDBC83E56C5BF3B64 /* EPUBProgressCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBBB555BA86F7648ACBC780F /* EPUBProgressCalculator.swift */; };
 		070F22DA080E6D84CC1EF73D /* TXTReflowableTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16D420A03BD524C247A78FB /* TXTReflowableTextSource.swift */; };
 		076CA91860D0CAF278F65B50 /* ReaderSettingsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32F75167F586CEA5F4E9002C /* ReaderSettingsPanel.swift */; };
@@ -82,6 +83,7 @@
 		1AC5FD48311C93B5CEB3702E /* BookImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FBDC41C60328ED4FB8A197 /* BookImporterTests.swift */; };
 		1B78DA4330A421FE2206B70C /* FoliateSearchAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8C36563D7885AD214F885A /* FoliateSearchAdapter.swift */; };
 		1BD4CC8621C43917629D4728 /* HighlightRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96BE19585BF1F4C8174F7219 /* HighlightRecord.swift */; };
+		1C44F27B696718DDCDCD8942 /* WebDAVNetworkPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2B73649BCBDBE8A99B210A9 /* WebDAVNetworkPolicyTests.swift */; };
 		1C78AB9020A2E03A196FA6A1 /* ChapterProgressCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 936C16A4F1B2B55E63922EE7 /* ChapterProgressCalculator.swift */; };
 		1C9B4E21A97013A7CC409925 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DAC8E20A001D7803A16AAD1 /* SearchView.swift */; };
 		1CB7C39AC6FE3B715D4B4305 /* V1toV2Migration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB16317C72EB6BBB61D77030 /* V1toV2Migration.swift */; };
@@ -1248,6 +1250,7 @@
 		B1DBBFF061B96088FFE84194 /* TXTService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTService.swift; sourceTree = "<group>"; };
 		B294CBB624E1CE03FEFA40E6 /* WebDAVProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProviderTests.swift; sourceTree = "<group>"; };
 		B2A04EAFA37410DA616E33D6 /* BackgroundDownloadSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloadSession.swift; sourceTree = "<group>"; };
+		B2B73649BCBDBE8A99B210A9 /* WebDAVNetworkPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVNetworkPolicyTests.swift; sourceTree = "<group>"; };
 		B2DB7F421D9D2E7492E12F89 /* ZIPReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZIPReader.swift; sourceTree = "<group>"; };
 		B34C87EDF46A4EFC99012268 /* AnnotationsPanelPlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationsPanelPlaceholderTests.swift; sourceTree = "<group>"; };
 		B3987200016FB6CA3D063E44 /* LocatorCanonicalHashTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorCanonicalHashTests.swift; sourceTree = "<group>"; };
@@ -1338,6 +1341,7 @@
 		D2EA03BEFDBB65F5D7533EDE /* SchemaV1Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaV1Tests.swift; sourceTree = "<group>"; };
 		D363190FCDF47ED48A1D7BC1 /* ReaderLifecycleHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderLifecycleHelper.swift; sourceTree = "<group>"; };
 		D36D5CFF47A223349C004E39 /* VReaderAnnotationParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VReaderAnnotationParserTests.swift; sourceTree = "<group>"; };
+		D408C9CE57D4C437A72C0D18 /* WebDAVNetworkPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVNetworkPolicy.swift; sourceTree = "<group>"; };
 		D432C9B43D1B6662B4605664 /* BookmarkListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkListViewModel.swift; sourceTree = "<group>"; };
 		D4B4E4FB28FD82376AE20A4F /* DocumentFingerprintValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentFingerprintValidationTests.swift; sourceTree = "<group>"; };
 		D52DADD2C2FB6330070EA6DE /* FileSizeFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSizeFormatter.swift; sourceTree = "<group>"; };
@@ -1649,6 +1653,7 @@
 				DB6CE81404902AB359536964 /* PROPFINDParser.swift */,
 				9DAC16C19C7D4C72EFC950C9 /* WebDAVBlobStore.swift */,
 				4946129FECC6C9BA7A7F16A1 /* WebDAVClient.swift */,
+				D408C9CE57D4C437A72C0D18 /* WebDAVNetworkPolicy.swift */,
 				C3EF8CE8D52815CF5156953C /* WebDAVProvider.swift */,
 				CEBBF9A79AEFC8CDEE7B3302 /* WebDAVProviderFactory.swift */,
 				151860CC8834DB8ACBF7E927 /* ZIPWriter.swift */,
@@ -2570,6 +2575,7 @@
 				C3F1695C0E7481CB3EA2B8A3 /* WebDAVBackupIntegrationTests.swift */,
 				C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */,
 				BE8121B86DA337766FD55AEF /* WebDAVClientTests.swift */,
+				B2B73649BCBDBE8A99B210A9 /* WebDAVNetworkPolicyTests.swift */,
 				B294CBB624E1CE03FEFA40E6 /* WebDAVProviderTests.swift */,
 			);
 			path = Backup;
@@ -3398,6 +3404,7 @@
 				4D66B6E16F96E24A0B01F7A9 /* WebDAVBackupIntegrationTests.swift in Sources */,
 				7F17555C4DA7C6845661BBB5 /* WebDAVBlobStoreTests.swift in Sources */,
 				6B19F49F1DECB5EF45BACC88 /* WebDAVClientTests.swift in Sources */,
+				1C44F27B696718DDCDCD8942 /* WebDAVNetworkPolicyTests.swift in Sources */,
 				77D706EE2E466C650B00C381 /* WebDAVProviderTests.swift in Sources */,
 				88B73AB500D0DFD555AC9363 /* WebPageEncodingDetectorTests.swift in Sources */,
 				E153024C836519993C468665 /* ZIPReaderTests.swift in Sources */,
@@ -3773,6 +3780,7 @@
 				4914FBDCD76FD1D972914081 /* VReaderAppDelegate.swift in Sources */,
 				539E581AA8A8427E199AC0A7 /* WebDAVBlobStore.swift in Sources */,
 				C5EEEAABF1F852CDABDA43F1 /* WebDAVClient.swift in Sources */,
+				069B04BFCB5D0D4FA8EA5972 /* WebDAVNetworkPolicy.swift in Sources */,
 				C64AA5071C05D395445A735D /* WebDAVProvider.swift in Sources */,
 				F2C53E71EFF6601811CE4003 /* WebDAVProviderFactory.swift in Sources */,
 				671D7F1B0A003041831E308E /* WebDAVSettingsView.swift in Sources */,
@@ -3902,13 +3910,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 53;
+				CURRENT_PROJECT_VERSION = 54;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.11.21;
+				MARKETING_VERSION = 3.11.22;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4052,13 +4060,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 53;
+				CURRENT_PROJECT_VERSION = 54;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.11.21;
+				MARKETING_VERSION = 3.11.22;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
