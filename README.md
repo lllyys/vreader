@@ -67,7 +67,7 @@ VReader is a modern reading app designed for iPhone and iPad, built entirely by 
 
 ### Sync & Backup
 
-- **WebDAV backup** — Archive to any WebDAV server (Nutstore compatible)
+- **WebDAV backup** — Archive to any WebDAV server (Nutstore compatible). For a self-hosted Mac setup with iCloud Drive sync, see [`lllyys/vreader-webdav-host`](https://github.com/lllyys/vreader-webdav-host).
 - **Per-book settings** — Font, theme, spacing overrides per book (JSON-persisted)
 - **Theme backgrounds** — Custom background images via PhotosPicker with per-theme opacity
 
