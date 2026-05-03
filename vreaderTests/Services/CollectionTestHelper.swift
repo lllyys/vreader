@@ -8,9 +8,9 @@ import SwiftData
 enum CollectionTestHelper {
 
     /// Creates an in-memory ModelContainer with the latest schema for testing.
-    /// Bumped to SchemaV5 in feature #46 WI-0a (added Book.originalExtension).
+    /// Bumped to SchemaV6 in feature #47 WI-1 (added Book.fileState + Book.blobPath).
     static func makeContainer() throws -> ModelContainer {
-        let schema = Schema(SchemaV5.models)
+        let schema = Schema(SchemaV6.models)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [config])
     }

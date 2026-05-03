@@ -54,6 +54,19 @@ final class Book {
     /// the canonical extension. New imports always populate this from the source URL.
     var originalExtension: String?
 
+    // MARK: - File State (SchemaV6, feature #47)
+
+    /// Raw value of BookFileState. Defaults to "local" so existing rows upgraded
+    /// from SchemaV5 light up as locally-present without a backfill.
+    /// Use `BookFileState(rawValue:)` to typecheck at the API surface.
+    var fileState: String = BookFileState.local.rawValue
+
+    /// Server-relative path of the WebDAV blob for this book, or nil if the
+    /// row never went through a backup that produced a blob path.
+    /// Format mirrors `BlobPath.make(...)` from feature #46:
+    /// `VReader/books/<format>/<sha256>_<byteCount>.<ext>`.
+    var blobPath: String?
+
     // MARK: - Import Provenance
 
     var provenance: ImportProvenance
