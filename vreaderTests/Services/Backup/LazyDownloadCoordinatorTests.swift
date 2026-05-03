@@ -1,7 +1,6 @@
-// Purpose: Tests for LazyDownloadCoordinator — verifies the @MainActor
-// observable state transitions in response to forwarded events from the
-// nonisolated LazyDownloadDelegate. Feature #47 WI-3a skeleton scope —
-// no lifecycle persistence (WI-3b) or import dispatch (WI-4a) yet.
+// Purpose: Tests for LazyDownloadCoordinator @MainActor observable state
+// transitions: progress, completion, failure, terminal-outcome ordering
+// invariants, and the prepareToDownload retry seam. Feature #47 WI-3a.
 
 import Testing
 import Foundation
@@ -32,6 +31,7 @@ struct LazyDownloadCoordinatorTests {
         let coord = LazyDownloadCoordinator()
         #expect(coord.progressByKey.isEmpty)
         #expect(coord.outcomes.isEmpty)
+        #expect(coord.terminalKeys.isEmpty)
     }
 
     // MARK: - Progress
@@ -53,6 +53,18 @@ struct LazyDownloadCoordinatorTests {
         #expect(coord.progressByKey["epub:b:2"]?.bytesWritten == 50)
     }
 
+    @Test func didProgress_unknownTotalBytesMapsToNil() {
+        // URLSession reports NSURLSessionTransferSizeUnknown == -1 when
+        // the server didn't send Content-Length. UI consumers must see
+        // this as nil so they render an indeterminate spinner instead of
+        // dividing by -1.
+        let coord = LazyDownloadCoordinator()
+        coord.didProgress(fingerprintKey: "k", bytesWritten: 42, totalBytes: -1)
+        let p = coord.progressByKey["k"]
+        #expect(p?.bytesWritten == 42)
+        #expect(p?.totalBytes == nil)
+    }
+
     // MARK: - Completion
 
     @Test func didFinishDownload_clearsProgressAndRecordsOutcome() {
@@ -65,6 +77,7 @@ struct LazyDownloadCoordinatorTests {
             stagedURL: staged
         )
         #expect(coord.progressByKey["epub:abc:1024"] == nil)
+        #expect(coord.terminalKeys.contains("epub:abc:1024"))
         if case .completed(_, let url) = coord.outcomes["epub:abc:1024"] {
             #expect(url == staged)
         } else {
@@ -82,6 +95,7 @@ struct LazyDownloadCoordinatorTests {
             reason: "network timeout"
         )
         #expect(coord.progressByKey["epub:abc:1024"] == nil)
+        #expect(coord.terminalKeys.contains("epub:abc:1024"))
         if case .failed(_, let reason) = coord.outcomes["epub:abc:1024"] {
             #expect(reason == "network timeout")
         } else {
@@ -89,14 +103,92 @@ struct LazyDownloadCoordinatorTests {
         }
     }
 
+    // MARK: - Terminal-outcome invariants
+
+    @Test func didProgress_afterCompletion_isIgnored() {
+        // The delegate hops to MainActor via independent Tasks, so a stale
+        // didWriteData callback can land after didFinish. Coordinator must
+        // not resurrect progress for a key that already completed.
+        let coord = LazyDownloadCoordinator()
+        let staged = URL(fileURLWithPath: "/tmp/staged.epub")
+        coord.didFinishDownload(fingerprintKey: "k", meta: makeMeta(), stagedURL: staged)
+        coord.didProgress(fingerprintKey: "k", bytesWritten: 999, totalBytes: 1024)
+        #expect(coord.progressByKey["k"] == nil)
+    }
+
+    @Test func didProgress_afterFailure_isIgnored() {
+        let coord = LazyDownloadCoordinator()
+        coord.didFinishDownloadFailed(fingerprintKey: "k", reason: "boom")
+        coord.didProgress(fingerprintKey: "k", bytesWritten: 1, totalBytes: 10)
+        #expect(coord.progressByKey["k"] == nil)
+    }
+
+    @Test func didFinishDownload_doesNotOverwriteFailure() {
+        // If a failure already landed (e.g., move-from-tmp error), a late
+        // success event must not silently flip the outcome to .completed.
+        let coord = LazyDownloadCoordinator()
+        coord.didFinishDownloadFailed(fingerprintKey: "k", reason: "boom")
+        coord.didFinishDownload(
+            fingerprintKey: "k",
+            meta: makeMeta(),
+            stagedURL: URL(fileURLWithPath: "/tmp/x.epub")
+        )
+        if case .failed(_, let reason) = coord.outcomes["k"] {
+            #expect(reason == "boom")
+        } else {
+            Issue.record("expected outcome to remain .failed")
+        }
+    }
+
+    @Test func didFinishDownloadFailed_doesNotOverwriteCompletion() {
+        let coord = LazyDownloadCoordinator()
+        let staged = URL(fileURLWithPath: "/tmp/x.epub")
+        coord.didFinishDownload(fingerprintKey: "k", meta: makeMeta(), stagedURL: staged)
+        coord.didFinishDownloadFailed(fingerprintKey: "k", reason: "late error")
+        if case .completed(_, let url) = coord.outcomes["k"] {
+            #expect(url == staged)
+        } else {
+            Issue.record("expected outcome to remain .completed")
+        }
+    }
+
+    @Test func didProgress_afterClearOutcome_isStillIgnored() {
+        // clearOutcome dismisses the UI-visible outcome but must NOT
+        // unblock late progress callbacks — terminal state is sticky.
+        let coord = LazyDownloadCoordinator()
+        coord.didFinishDownload(
+            fingerprintKey: "k",
+            meta: makeMeta(),
+            stagedURL: URL(fileURLWithPath: "/tmp/x.epub")
+        )
+        coord.clearOutcome(for: "k")
+        coord.didProgress(fingerprintKey: "k", bytesWritten: 1, totalBytes: 10)
+        #expect(coord.progressByKey["k"] == nil)
+        #expect(coord.terminalKeys.contains("k"))
+    }
+
     // MARK: - Outcome lifecycle
 
-    @Test func clearOutcome_removesOutcomeForKey() {
+    @Test func clearOutcome_removesOutcomeButNotTerminalGuard() {
         let coord = LazyDownloadCoordinator()
         coord.didFinishDownloadFailed(fingerprintKey: "k", reason: "x")
         #expect(coord.outcomes["k"] != nil)
         coord.clearOutcome(for: "k")
         #expect(coord.outcomes["k"] == nil)
+        #expect(coord.terminalKeys.contains("k"))
+    }
+
+    @Test func prepareToDownload_clearsOutcomeAndTerminalGuard() {
+        // Retry path: WI-4a's enqueue layer calls this before a fresh
+        // download starts so subsequent progress is accepted again.
+        let coord = LazyDownloadCoordinator()
+        coord.didFinishDownloadFailed(fingerprintKey: "k", reason: "x")
+        coord.prepareToDownload(fingerprintKey: "k")
+        #expect(coord.outcomes["k"] == nil)
+        #expect(coord.terminalKeys.contains("k") == false)
+
+        coord.didProgress(fingerprintKey: "k", bytesWritten: 5, totalBytes: 10)
+        #expect(coord.progressByKey["k"]?.bytesWritten == 5)
     }
 
     @Test func reset_clearsAllState() {
@@ -106,43 +198,6 @@ struct LazyDownloadCoordinatorTests {
         coord.reset()
         #expect(coord.progressByKey.isEmpty)
         #expect(coord.outcomes.isEmpty)
-    }
-}
-
-@Suite("LazyDownloadTaskMeta — feature #47 WI-3a")
-struct LazyDownloadTaskMetaTests {
-
-    @Test func encode_decode_roundTrips() throws {
-        let original = LazyDownloadTaskMeta(
-            fingerprintKey: "epub:abc:1024",
-            blobPath: "VReader/books/epub/foo_1024.epub",
-            expectedSHA256: String(repeating: "a", count: 64),
-            expectedByteCount: 1024,
-            originalExtension: "epub"
-        )
-        let encoded = try #require(original.encodeAsTaskDescription())
-        let decoded = try #require(LazyDownloadTaskMeta.decode(fromTaskDescription: encoded))
-        #expect(decoded == original)
-    }
-
-    @Test func decode_nilDescription_returnsNil() {
-        #expect(LazyDownloadTaskMeta.decode(fromTaskDescription: nil) == nil)
-    }
-
-    @Test func decode_garbageDescription_returnsNil() {
-        #expect(LazyDownloadTaskMeta.decode(fromTaskDescription: "not json") == nil)
-    }
-
-    @Test func decode_unknownSchemaVersion_returnsNil() throws {
-        // A future v2 task description must be rejected by a v1 client so
-        // the orphan handler kicks in (cancel + flip row to .failed).
-        let futureMeta = """
-        {"schemaVersion":99,"fingerprintKey":"k","blobPath":"p","expectedSHA256":"\(String(repeating: "a", count: 64))","expectedByteCount":1,"originalExtension":"epub"}
-        """
-        #expect(LazyDownloadTaskMeta.decode(fromTaskDescription: futureMeta) == nil)
-    }
-
-    @Test func currentSchemaVersionIsOne() {
-        #expect(LazyDownloadTaskMeta.currentSchemaVersion == 1)
+        #expect(coord.terminalKeys.isEmpty)
     }
 }

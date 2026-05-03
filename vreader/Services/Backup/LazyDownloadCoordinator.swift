@@ -22,7 +22,9 @@ private let log = Logger(subsystem: "com.vreader.app", category: "LazyDownloadCo
 struct LazyDownloadProgress: Sendable, Equatable {
     let fingerprintKey: String
     let bytesWritten: Int64
-    let totalBytes: Int64
+    /// nil when URLSession reports `NSURLSessionTransferSizeUnknown` (-1).
+    /// UI surfaces an indeterminate spinner in that case.
+    let totalBytes: Int64?
 }
 
 /// Completion outcome surfaced to UI consumers.
@@ -49,57 +51,94 @@ final class LazyDownloadCoordinator {
     /// frame and then forgetting the outcome).
     private(set) var outcomes: [String: LazyDownloadOutcome] = [:]
 
+    /// Sticky terminal-state guard. Survives `clearOutcome(for:)` so a
+    /// stale `didWriteData` callback that lands after the UI has already
+    /// dismissed the outcome can't resurrect `progressByKey`. Cleared only
+    /// by `prepareToDownload(fingerprintKey:)` — called by the enqueue
+    /// path before a fresh download starts — or by `reset()`. Concurrency
+    /// scoping note: the coordinator assumes a single in-flight download
+    /// per fingerprintKey at a time. Serialising enqueue is WI-4a's job
+    /// (`BookFileImportFinalizer` / `SelectiveRestoreCoordinator`).
+    private(set) var terminalKeys: Set<String> = []
+
     init() {}
 
     // MARK: - Delegate event handlers
 
     /// Called from `LazyDownloadDelegate` after hopping to MainActor.
+    /// Ignores progress events that arrive after a terminal event for the
+    /// same key — the delegate hops to MainActor via independent Tasks so
+    /// a stale didWriteData callback can land after didFinish, and the
+    /// `terminalKeys` guard outlives `clearOutcome(for:)` so a UI dismissal
+    /// of the outcome doesn't reopen the door for the stale event.
     func didProgress(fingerprintKey: String, bytesWritten: Int64, totalBytes: Int64) {
+        if terminalKeys.contains(fingerprintKey) { return }
+        let total: Int64? = (totalBytes >= 0) ? totalBytes : nil
         progressByKey[fingerprintKey] = LazyDownloadProgress(
             fingerprintKey: fingerprintKey,
             bytesWritten: bytesWritten,
-            totalBytes: totalBytes
+            totalBytes: total
         )
     }
 
     /// Called when the download body finished and was moved to `stagedURL`.
     /// The coordinator records the outcome; downstream WIs (4a) call into
     /// `BookFileImportFinalizer` to verify SHA-256 + import via BookImporter.
+    /// Ignored if the key already has a terminal outcome.
     func didFinishDownload(fingerprintKey: String, meta: LazyDownloadTaskMeta, stagedURL: URL) {
+        if terminalKeys.contains(fingerprintKey) { return }
         progressByKey.removeValue(forKey: fingerprintKey)
+        terminalKeys.insert(fingerprintKey)
         outcomes[fingerprintKey] = .completed(
             fingerprintKey: fingerprintKey,
             stagedURL: stagedURL
         )
         log.info(
-            "didFinishDownload: \(fingerprintKey, privacy: .public) → \(stagedURL.lastPathComponent, privacy: .public)"
+            "didFinishDownload: \(fingerprintKey, privacy: .private) → \(stagedURL.lastPathComponent, privacy: .private)"
         )
     }
 
     /// Called when the download failed (network, server, move-to-staging,
     /// etc.). Records the outcome so the row's UI can surface a retry CTA.
+    /// Ignored if the key already has a terminal outcome.
     func didFinishDownloadFailed(fingerprintKey: String, reason: String) {
+        if terminalKeys.contains(fingerprintKey) { return }
         progressByKey.removeValue(forKey: fingerprintKey)
+        terminalKeys.insert(fingerprintKey)
         outcomes[fingerprintKey] = .failed(
             fingerprintKey: fingerprintKey,
             reason: reason
         )
         log.error(
-            "didFinishDownloadFailed: \(fingerprintKey, privacy: .public) — \(reason, privacy: .public)"
+            "didFinishDownloadFailed: \(fingerprintKey, privacy: .private) — \(reason, privacy: .private)"
         )
     }
 
     // MARK: - Test/UI helpers
 
     /// Clears the outcome for a fingerprintKey (typically after the UI
-    /// renders the new state once).
+    /// renders the new state once). Does NOT clear the terminal-state
+    /// guard — a stale `didWriteData` callback that lands after the UI
+    /// has already dismissed the outcome must still be ignored.
     func clearOutcome(for fingerprintKey: String) {
         outcomes.removeValue(forKey: fingerprintKey)
+    }
+
+    /// Called by the enqueue path before a fresh download for `key` starts
+    /// (e.g., after the user taps Retry on a failed row). Clears any
+    /// outcome and the terminal-state guard so subsequent progress events
+    /// are accepted again. WI-3a doesn't ship the enqueue path yet — this
+    /// hook is the seam WI-4a will call from the request builder.
+    func prepareToDownload(fingerprintKey: String) {
+        outcomes.removeValue(forKey: fingerprintKey)
+        terminalKeys.remove(fingerprintKey)
+        progressByKey.removeValue(forKey: fingerprintKey)
     }
 
     /// Test seam — wipes all coordinator state. Production never calls this.
     func reset() {
         progressByKey = [:]
         outcomes = [:]
+        terminalKeys = []
     }
 }

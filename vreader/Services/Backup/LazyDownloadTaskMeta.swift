@@ -72,8 +72,20 @@ struct LazyDownloadTaskMeta: Codable, Sendable, Equatable {
             return nil
         }
         // Refuse versions we don't understand. Future v2 clients will
-        // accept v1; v1 won't accept v2.
-        guard meta.schemaVersion <= currentSchemaVersion else { return nil }
+        // accept v1; v1 won't accept v2. Reject 0/negative — those can
+        // only be a corrupt/malicious description.
+        guard (1...currentSchemaVersion).contains(meta.schemaVersion) else { return nil }
+        // Validate SHA-256 hex (64 hex chars) and extension shape so a
+        // corrupt taskDescription can't produce a path-traversing or
+        // hidden-file staged URL downstream.
+        let sha = meta.expectedSHA256
+        guard sha.count == 64,
+              sha.allSatisfy({ $0.isHexDigit }) else { return nil }
+        let ext = meta.originalExtension
+        guard !ext.isEmpty,
+              ext.count <= 8,
+              ext.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
+        guard meta.expectedByteCount >= 0 else { return nil }
         return meta
     }
 }
