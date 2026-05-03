@@ -82,6 +82,7 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
         methodCalls.append(("MOVE", "\(fromPath) -> \(toPath)"))
         if simulateAuthFailure { throw WebDAVError.authenticationFailed }
         if simulateConnectionFailure { throw WebDAVError.connectionFailed("mock") }
+        if simulateMoveNotImplemented { throw WebDAVError.httpError(501) }
         guard let data = files.removeValue(forKey: fromPath) else {
             throw WebDAVError.notFound(fromPath)
         }
@@ -96,9 +97,18 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
         methodCalls.append(("PROPFIND-exists", path))
         if simulateAuthFailure { throw WebDAVError.authenticationFailed }
         if simulateConnectionFailure { throw WebDAVError.connectionFailed("mock") }
+        if let override = existsWithSizeOverride { return override(path) }
         guard let data = files[path] else { return nil }
         return Int64(data.count)
     }
+
+    /// Per-test override for existsWithSize — lets blob-store tests simulate
+    /// truncated uploads (PUT succeeds but server reports a different size).
+    var existsWithSizeOverride: ((String) -> Int64?)?
+
+    /// When true, MOVE throws httpError(501) — simulates a server that
+    /// doesn't implement MOVE.
+    var simulateMoveNotImplemented = false
 }
 
 // MARK: - Mock Data Collector
