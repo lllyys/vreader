@@ -240,6 +240,7 @@
 		51F370150CAD9A865053266C /* HighlightIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FABEAF0841AD808F7EE48617 /* HighlightIntegrationTests.swift */; };
 		51F6D90704CD88D8F5160E19 /* FoliateStyleMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42E9BBD87941E0D6C66010EC /* FoliateStyleMapperTests.swift */; };
 		5365C69DAECEFAE3481247B3 /* TOCBuilderTXTTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49624FC3C8E1AC31E011351C /* TOCBuilderTXTTests.swift */; };
+		539E581AA8A8427E199AC0A7 /* WebDAVBlobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DAC16C19C7D4C72EFC950C9 /* WebDAVBlobStore.swift */; };
 		53DEE85CF4BDE11891B0E07A /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF5C12635DFA6BEE42EBB1CE /* KeychainServiceTests.swift */; };
 		53F990254493D95BE25D6BFD /* HighlightableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9E867C06CA165E731435125 /* HighlightableTextView.swift */; };
 		542FF947F7F993A2904D56C2 /* EPUBComplexityClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCA9065CD56F7F0C7AF165FE /* EPUBComplexityClassifier.swift */; };
@@ -363,6 +364,7 @@
 		7E84EE1334499F661728483E /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DE76057526BA48CAE2A83A /* UpdateChecker.swift */; };
 		7E88B70492874A1D1C0416D5 /* AnnotationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C86F6A1C143DB6AC9187FC0 /* AnnotationListView.swift */; };
 		7EE8C91043F4F20D39AF326B /* AITranslationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B992B24F86DF8CA23E1215 /* AITranslationViewModel.swift */; };
+		7F17555C4DA7C6845661BBB5 /* WebDAVBlobStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */; };
 		7FB683D3DC3F4D7B18DF9A67 /* DurableTombstoneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36FC80576CA3D3C7EB629247 /* DurableTombstoneStore.swift */; };
 		800F472661AB1030CC54DB46 /* ReadingTimeFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CED0BF7A8104C22C6E293BF /* ReadingTimeFormatterTests.swift */; };
 		8012757D10E8CB83AD54B641 /* LegadoCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98814DDDA2DB119CB5AA53A0 /* LegadoCompatibility.swift */; };
@@ -581,6 +583,7 @@
 		CD8C26CB53B0BE57CE214F00 /* TXTBridgeOffsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50B0954852C3621D008EE07 /* TXTBridgeOffsetTests.swift */; };
 		CD9751D76A3A9DBF872CA5D7 /* PersistenceActor+Library.swift in Sources */ = {isa = PBXBuildFile; fileRef = E46A786B20AA87E763D00F45 /* PersistenceActor+Library.swift */; };
 		CDEFF7EA8D302FE4D581C00E /* ReaderChromeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E236729BD7E4F24ADA78F24F /* ReaderChromeBar.swift */; };
+		CE3CD75789B4E025F0F87CF5 /* BackupBlobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 837009678FE3EE7B38B7CD8B /* BackupBlobStore.swift */; };
 		CE3D74414B1983EB35589EFD /* TypographySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19522F65C0947EFDCF9E4D2B /* TypographySettings.swift */; };
 		CE4F7166CB6366522769B314 /* HighlightRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F8AEC7D40405AE90840ABE4 /* HighlightRenderer.swift */; };
 		CEAEA28FA9D03BDAACC97CBF /* SyncOutboundQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B00C0FE14AB02EDE7E9EDD /* SyncOutboundQueueTests.swift */; };
@@ -1078,6 +1081,7 @@
 		82CF5610F301F9CE87D9BDE1 /* TransformsBug98Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformsBug98Tests.swift; sourceTree = "<group>"; };
 		831F853E3D42A27170BB0F92 /* ReadingPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingPosition.swift; sourceTree = "<group>"; };
 		836FCCC18D880D48A10BA38A /* MockEPUBParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockEPUBParser.swift; sourceTree = "<group>"; };
+		837009678FE3EE7B38B7CD8B /* BackupBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupBlobStore.swift; sourceTree = "<group>"; };
 		83B60F61628D0969B18B3A9B /* AIConsentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConsentView.swift; sourceTree = "<group>"; };
 		83BCFD179C107F7E997AEB88 /* AnnotationImporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationImporterTests.swift; sourceTree = "<group>"; };
 		83F36EF81271874A13417D45 /* OPDSEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPDSEntryView.swift; sourceTree = "<group>"; };
@@ -1149,6 +1153,7 @@
 		9CB5EAAB268616336D42EC30 /* FoliateHighlightRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateHighlightRendererTests.swift; sourceTree = "<group>"; };
 		9CE6D5875C20698F83D6EC1E /* HTTPTTSProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTTSProvider.swift; sourceTree = "<group>"; };
 		9CED0BF7A8104C22C6E293BF /* ReadingTimeFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingTimeFormatterTests.swift; sourceTree = "<group>"; };
+		9DAC16C19C7D4C72EFC950C9 /* WebDAVBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVBlobStore.swift; sourceTree = "<group>"; };
 		9DAD9A773D4AA9098981720D /* EPUBReaderViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderViewModelTests.swift; sourceTree = "<group>"; };
 		9DB1CCA367AE0B610F4526FC /* SearchIndexStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchIndexStore.swift; sourceTree = "<group>"; };
 		9DB260B5C0A147C9AE9A46DC /* BookInfoSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookInfoSheet.swift; sourceTree = "<group>"; };
@@ -1255,6 +1260,7 @@
 		C5CB5C659CC573EF448F0992 /* AIResponseCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIResponseCacheTests.swift; sourceTree = "<group>"; };
 		C6639753CB33EAECD6CF3010 /* TXTChunkedHighlightHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChunkedHighlightHelper.swift; sourceTree = "<group>"; };
 		C68E9908FEE2CDE00C6EB279 /* AISettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsViewModelTests.swift; sourceTree = "<group>"; };
+		C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVBlobStoreTests.swift; sourceTree = "<group>"; };
 		C775619D3C0E4641505CE2B8 /* Highlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlight.swift; sourceTree = "<group>"; };
 		C78C11958968AC75ED1EFB00 /* build-bundle.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-bundle.sh"; sourceTree = "<group>"; };
 		C7925E6E99AB9F8F0E40299E /* war-and-peace.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "war-and-peace.txt"; sourceTree = "<group>"; };
@@ -1584,12 +1590,14 @@
 		232456552E53357A5363638A /* Backup */ = {
 			isa = PBXGroup;
 			children = (
+				837009678FE3EE7B38B7CD8B /* BackupBlobStore.swift */,
 				DAAAF285B1D1B4F09E3AAD56 /* BackupDataCollector.swift */,
 				DA823268583E27AF564272EC /* BackupDataRestorer.swift */,
 				8AB2B5F77B95D3402E699DA9 /* BackupProvider.swift */,
 				64D6B83FC65D64C1271E28F4 /* BackupSectionDTOs.swift */,
 				560129625F0E48471C0F4B62 /* BlobPath.swift */,
 				DB6CE81404902AB359536964 /* PROPFINDParser.swift */,
+				9DAC16C19C7D4C72EFC950C9 /* WebDAVBlobStore.swift */,
 				4946129FECC6C9BA7A7F16A1 /* WebDAVClient.swift */,
 				C3EF8CE8D52815CF5156953C /* WebDAVProvider.swift */,
 				CEBBF9A79AEFC8CDEE7B3302 /* WebDAVProviderFactory.swift */,
@@ -2506,6 +2514,7 @@
 				4D9501ED4FB49C6035FDF5BB /* MockBackupProvider.swift */,
 				D9A7B601E9791FB068616C98 /* WebDAVATSTests.swift */,
 				C3F1695C0E7481CB3EA2B8A3 /* WebDAVBackupIntegrationTests.swift */,
+				C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */,
 				BE8121B86DA337766FD55AEF /* WebDAVClientTests.swift */,
 				B294CBB624E1CE03FEFA40E6 /* WebDAVProviderTests.swift */,
 			);
@@ -3298,6 +3307,7 @@
 				E44BC8CE480C18F6469C62DD /* WI9TestHelpers.swift in Sources */,
 				E5C970CD2DB58A81E743F7DA /* WebDAVATSTests.swift in Sources */,
 				4D66B6E16F96E24A0B01F7A9 /* WebDAVBackupIntegrationTests.swift in Sources */,
+				7F17555C4DA7C6845661BBB5 /* WebDAVBlobStoreTests.swift in Sources */,
 				6B19F49F1DECB5EF45BACC88 /* WebDAVClientTests.swift in Sources */,
 				77D706EE2E466C650B00C381 /* WebDAVProviderTests.swift in Sources */,
 				88B73AB500D0DFD555AC9363 /* WebPageEncodingDetectorTests.swift in Sources */,
@@ -3345,6 +3355,7 @@
 				0CDCF9DAE4BA56A30FA71097 /* AppLogger.swift in Sources */,
 				64709D1B5C006D3299C8ABAF /* AutoPageTurner.swift in Sources */,
 				6274548A4C4DDC1FCA13397C /* BackgroundIndexingCoordinator.swift in Sources */,
+				CE3CD75789B4E025F0F87CF5 /* BackupBlobStore.swift in Sources */,
 				C3129F763BDCF3AB47BC7098 /* BackupDataCollector.swift in Sources */,
 				DDFB32D1CC4508E794A67573 /* BackupDataRestorer.swift in Sources */,
 				238CEDFC273E8AD0026B77AB /* BackupProvider.swift in Sources */,
@@ -3660,6 +3671,7 @@
 				1CB7C39AC6FE3B715D4B4305 /* V1toV2Migration.swift in Sources */,
 				85A712EBB7E4B4DF30EDEA13 /* VReaderAnnotationParser.swift in Sources */,
 				F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */,
+				539E581AA8A8427E199AC0A7 /* WebDAVBlobStore.swift in Sources */,
 				C5EEEAABF1F852CDABDA43F1 /* WebDAVClient.swift in Sources */,
 				C64AA5071C05D395445A735D /* WebDAVProvider.swift in Sources */,
 				F2C53E71EFF6601811CE4003 /* WebDAVProviderFactory.swift in Sources */,
@@ -3790,13 +3802,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 26;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.10.24;
+				MARKETING_VERSION = 3.10.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -3940,13 +3952,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 26;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.10.24;
+				MARKETING_VERSION = 3.10.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
