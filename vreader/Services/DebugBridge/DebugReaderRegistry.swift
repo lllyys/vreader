@@ -17,7 +17,7 @@ import Foundation
 /// presenting view; the registry holds a weak reference to avoid retain
 /// cycles. AnyObject required so weakness is meaningful.
 @MainActor
-protocol DebugReaderProbe: AnyObject {
+protocol DebugReaderProbe: AnyObject, Sendable {
     /// Canonical fingerprint key of the book currently displayed.
     var fingerprintKey: String { get }
     /// Format name as used in DebugSnapshot ("txt", "md", "pdf", "epub", "azw3").
@@ -95,12 +95,29 @@ enum DebugReaderProbeError: Error, Equatable {
     case settleTimeout
 }
 
+/// Errors thrown by `DebugReaderRegistry.awaitReader`.
+enum DebugReaderRegistryError: Error, Equatable {
+    /// No reader matching the requested fingerprintKey registered before
+    /// the timeout expired.
+    case awaitReaderTimeout(fingerprintKey: String)
+}
+
 /// App-process registry of the currently-active reader. Single-entry: the
 /// app pushes one reader at a time, so newer registrations replace older.
 @MainActor
 final class DebugReaderRegistry {
     static let shared = DebugReaderRegistry()
     private weak var activeReader: AnyObject?
+
+    /// Per-key waiters added by `awaitReader(fingerprintKey:timeout:)`.
+    /// Each waiter carries a UUID token so timeouts remove by identity, not
+    /// by first-match — eliminating the race where two callers waiting on
+    /// the same key with different timeouts resume the wrong continuation.
+    private struct Waiter {
+        let token: UUID
+        let continuation: CheckedContinuation<DebugReaderProbe, Error>
+    }
+    private var waiters: [String: [Waiter]] = [:]
 
     private init() {}
 
@@ -110,8 +127,17 @@ final class DebugReaderRegistry {
     }
 
     /// Register `reader` as the active reader. Replaces any previous entry.
+    /// Resumes every awaiter whose `fingerprintKey` matches.
     func register(_ reader: DebugReaderProbe) {
         activeReader = reader
+        // Resume all waiters whose key matches the new reader's key.
+        let key = reader.fingerprintKey
+        if let bucket = waiters[key], !bucket.isEmpty {
+            waiters[key] = nil
+            for waiter in bucket {
+                waiter.continuation.resume(returning: reader)
+            }
+        }
     }
 
     /// Clear the registry if the given probe is the current entry.
@@ -124,8 +150,76 @@ final class DebugReaderRegistry {
     }
 
     /// Test seam — clear all state. Production paths use unregister.
+    /// Cancels every pending waiter with timeout for clean teardown.
     func reset() {
         activeReader = nil
+        let pendingByKey = waiters
+        waiters = [:]
+        for (key, bucket) in pendingByKey {
+            for waiter in bucket {
+                waiter.continuation.resume(
+                    throwing: DebugReaderRegistryError.awaitReaderTimeout(fingerprintKey: key)
+                )
+            }
+        }
+    }
+
+    /// Wait for a reader matching `fingerprintKey` to register.
+    ///
+    /// If a matching reader is already active, returns it immediately. Otherwise
+    /// suspends until a matching `register(_:)` call resumes the waiter or the
+    /// timeout fires. Token-based waiter ownership ensures concurrent waiters
+    /// on the same key with different timeouts each resume their OWN continuation.
+    ///
+    /// - Parameters:
+    ///   - fingerprintKey: The book's canonical fingerprint key.
+    ///   - timeout: How long to wait before throwing `awaitReaderTimeout`.
+    /// - Throws: `DebugReaderRegistryError.awaitReaderTimeout(fingerprintKey:)`
+    ///   if no matching reader registers in time.
+    func awaitReader(
+        fingerprintKey: String,
+        timeout: TimeInterval
+    ) async throws -> DebugReaderProbe {
+        // Fast path: a matching reader is already registered.
+        if let probe = current, probe.fingerprintKey == fingerprintKey {
+            return probe
+        }
+
+        let token = UUID()
+        let timeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.removeAndTimeout(fingerprintKey: fingerprintKey, token: token)
+        }
+
+        do {
+            return try await withCheckedThrowingContinuation { continuation in
+                let waiter = Waiter(token: token, continuation: continuation)
+                waiters[fingerprintKey, default: []].append(waiter)
+            }
+        } catch {
+            timeoutTask.cancel()
+            throw error
+        }
+    }
+
+    /// Internal: remove a specific waiter (by token) and resume it with a
+    /// timeout error. Identified by token so concurrent waiters on the same
+    /// key don't resume each other's continuations.
+    private func removeAndTimeout(fingerprintKey: String, token: UUID) {
+        guard var bucket = waiters[fingerprintKey],
+              let idx = bucket.firstIndex(where: { $0.token == token }) else {
+            return
+        }
+        let waiter = bucket.remove(at: idx)
+        if bucket.isEmpty {
+            waiters[fingerprintKey] = nil
+        } else {
+            waiters[fingerprintKey] = bucket
+        }
+        waiter.continuation.resume(
+            throwing: DebugReaderRegistryError.awaitReaderTimeout(fingerprintKey: fingerprintKey)
+        )
     }
 }
 
