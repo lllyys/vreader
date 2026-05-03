@@ -48,15 +48,6 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 <!-- For each TODO/IN PROGRESS/REOPENED bug, add a short entry here.
      Max 6 lines per bug. Remove on FIXED (move to archive). -->
 
-### Bug #110 — WebDAV Test Connection blocked by App Transport Security on Tailscale URL
-- **Repro**: Settings → WebDAV Backup → enter `http://<machine>.tail-XXXXX.ts.net:8080` + creds → tap Test Connection
-- **Expected**: HTTP 401 → "Authentication failed" (or success if creds valid)
-- **Actual**: "Connection error: The resource could not be loaded because the App Transport Security policy requires the use of a secure connection." (request never leaves the device)
-- **Root cause**: `project.yml` does not declare `NSAppTransportSecurity` exceptions. iOS ATS blocks HTTP to non-loopback hostnames. Localhost works because iOS treats loopback as exempt.
-- **Impact**: Tailscale-fronted use case (documented in WebDAVSettingsView footer + companion repo `vreader-webdav-host`) is broken. Plain HTTP to Nutstore/NextCloud/Synology over their public hostnames also fails for the same reason.
-- **Fix options**: (a) `NSAllowsLocalNetworking: YES` + per-domain `NSExceptionDomains` for `ts.net` — minimal exception, safest for App Store review; (b) `NSAllowsArbitraryLoads: YES` — broadest, but App Store may push back; (c) document HTTPS-only and ship with no ATS change. Recommend (a).
-- **Screenshots**: `docs/assets/images/clipboard-1777788873034-qu9x-1777788873038-void.png`
-
 ### Bug #103 — Cannot add highlight in native EPUB
 - **Repro**: Open EPUB in native reader, select text, tap Highlight
 - **Expected**: Highlight created and rendered in-page
@@ -213,4 +204,4 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 | 107| Cover images with light/white edges show visible "padding" in library grid                             | Library/* | Low      | TODO     | Cover art with white areas at edges blends into white page background, creating illusion of padding. Need auto-crop or contrast treatment. |
 | 108| AZW3/Foliate reader: center tap does not toggle chrome                                                 | Foliate/* | Medium   | TODO     | Toolbar stays visible on center tap in FoliateSpikeView. EPUB chrome toggle works. WKWebView may consume tap. |
 | 109| TXT chapter mode: progress bar shows book progress instead of chapter progress                         | TXT/*     | Medium   | FIXED    | Fixed in bfd8345. Added currentChapterLocalUTF16 to TXTReaderViewModel; bridge stores local offset, persistence converts to global. 4 new tests. GH: #31 |
-| 110| WebDAV Test Connection blocked by App Transport Security on Tailscale URL                              | Backup/*  | High     | TODO     | iOS ATS rejects plain HTTP to `*.ts.net` (and any non-loopback host). Test Connection on Tailscale URL fails with "The resource could not be loaded because the App Transport Security policy requires the use of a secure connection." Backup feature unusable over Tailscale despite being a documented use case. Fix: add NSAppTransportSecurity exception in project.yml (NSAllowsLocalNetworking + per-domain exception for `.ts.net`, OR NSAllowsArbitraryLoads with App Store-review caveat). GH: #136 |
+| 110| WebDAV Test Connection blocked by App Transport Security on Tailscale URL                              | Backup/*  | High     | FIXED    | Migrated project.yml from auto-generated Info.plist to managed Info.plist via XcodeGen `info.properties`; added `NSAppTransportSecurity > NSAllowsArbitraryLoads = true`. 2 regression tests in `WebDAVATSTests.swift`. GH: #136 |
