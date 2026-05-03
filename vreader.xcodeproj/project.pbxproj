@@ -310,7 +310,6 @@
 		6CC40A6DE2F14BB94A53006B /* FoliateMessageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB35F648E8E697C82E4C41DE /* FoliateMessageParserTests.swift */; };
 		6CFD5F91EEF10C009963AEB0 /* TextReaderUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E25002586402AAE67B29CE6 /* TextReaderUIState.swift */; };
 		6D073A0311A72B82FEF65852 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AC105D38A4A85CBCB79A772 /* KeychainService.swift */; };
-		6D8634B5E92ADD9F97E53650 /* war-and-peace.txt in Resources */ = {isa = PBXBuildFile; fileRef = C7925E6E99AB9F8F0E40299E /* war-and-peace.txt */; };
 		6DC960D68C180A1078911388 /* EPUBWebViewBridgeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1920480AF349823757484C2D /* EPUBWebViewBridgeCoordinator.swift */; };
 		6E224708E01276C14273E2E6 /* BookOpenPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80D6D1B18008B168D01FFF2 /* BookOpenPerformanceTests.swift */; };
 		6E5022EE67C6ACC27F614E77 /* Locator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C567EE93DC61BBB63CEAC20 /* Locator.swift */; };
@@ -1269,7 +1268,6 @@
 		C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVBlobStoreTests.swift; sourceTree = "<group>"; };
 		C775619D3C0E4641505CE2B8 /* Highlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlight.swift; sourceTree = "<group>"; };
 		C78C11958968AC75ED1EFB00 /* build-bundle.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-bundle.sh"; sourceTree = "<group>"; };
-		C7925E6E99AB9F8F0E40299E /* war-and-peace.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "war-and-peace.txt"; sourceTree = "<group>"; };
 		C80D6D1B18008B168D01FFF2 /* BookOpenPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookOpenPerformanceTests.swift; sourceTree = "<group>"; };
 		C85205257E8103AA80C08BAB /* BookmarkFeedbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkFeedbackTests.swift; sourceTree = "<group>"; };
 		C8E7C46539D19C4B3CFCD766 /* vreader.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = vreader.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1674,14 +1672,6 @@
 				B3CB57338FD24289DAC8ABE4 /* WI9TestHelpers.swift */,
 			);
 			path = ViewModels;
-			sourceTree = "<group>";
-		};
-		33C9C95B84405B9563BE1C5A /* DebugFixtures */ = {
-			isa = PBXGroup;
-			children = (
-				C7925E6E99AB9F8F0E40299E /* war-and-peace.txt */,
-			);
-			path = DebugFixtures;
 			sourceTree = "<group>";
 		};
 		348FFD7C230F685969954CD8 /* TTS */ = {
@@ -2870,7 +2860,6 @@
 		F7D114D6DCA6CD451CCDE86F /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				33C9C95B84405B9563BE1C5A /* DebugFixtures */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -2944,6 +2933,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = A3F71DFA7F4DABAEC89C3871 /* Build configuration list for PBXNativeTarget "vreader" */;
 			buildPhases = (
+				B38BE880DA857177F42D54E3 /* Copy DebugFixtures (DEBUG only) */,
 				50BDD7D268D53AEC3863C4E2 /* Sources */,
 				AAE6A9967BDF359CCF50BD13 /* Resources */,
 			);
@@ -3019,7 +3009,6 @@
 				892A9F3136477F52D3AECE11 /* text-walker.js in Resources */,
 				9F061845AF117F50834D2252 /* tts.js in Resources */,
 				A15032261BB154AE5E0AC38B /* view.js in Resources */,
-				6D8634B5E92ADD9F97E53650 /* war-and-peace.txt in Resources */,
 				E963BC203166854BFF9C69A4 /* zip.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -3051,6 +3040,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B38BE880DA857177F42D54E3 /* Copy DebugFixtures (DEBUG only) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/vreader/Resources/DebugFixtures",
+			);
+			name = "Copy DebugFixtures (DEBUG only)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/DebugFixtures",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nif [ \"${CONFIGURATION}\" != \"Debug\" ]; then\n  echo \"Skipping DebugFixtures (Release build)\"\n  exit 0\nfi\nSRC=\"${SRCROOT}/vreader/Resources/DebugFixtures\"\nDST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/DebugFixtures\"\nmkdir -p \"${DST}\"\n# rsync handles empty directories gracefully and only re-copies\n# changed files — `cp -R src/*` would fail when SRC is empty.\nrsync -a --delete \"${SRC}/\" \"${DST}/\"\necho \"Copied DebugFixtures: ${SRC} → ${DST}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		49EC308C9C6E9ED9728F9D89 /* Sources */ = {
@@ -3814,13 +3826,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.11.1;
+				MARKETING_VERSION = 3.11.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -3964,13 +3976,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.11.1;
+				MARKETING_VERSION = 3.11.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

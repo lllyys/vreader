@@ -26,11 +26,37 @@ targets:
           - "Services/EPUB/FoliateJS/overlayer.js"
           - "Services/EPUB/FoliateJS/text-walker.js"
           - "Services/EPUB/FoliateJS/tts.js"
+          # Bug #111: DebugFixtures must NOT ship in Release. xcodegen `excludes`
+          # is not per-build-config, so we strip the directory from the source
+          # phase entirely and re-inject it via a Debug-only Run Script below.
+          - "Resources/DebugFixtures/**"
+    preBuildScripts:
+      # Bug #111: Copy DebugFixtures into the bundle ONLY when building Debug.
+      # Release builds get nothing — verified by running `find vreader.app -name
+      # 'war-and-peace*'` after a Release build (should return zero results).
+      - name: "Copy DebugFixtures (DEBUG only)"
+        script: |
+          set -euo pipefail
+          if [ "${CONFIGURATION}" != "Debug" ]; then
+            echo "Skipping DebugFixtures (Release build)"
+            exit 0
+          fi
+          SRC="${SRCROOT}/vreader/Resources/DebugFixtures"
+          DST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/DebugFixtures"
+          mkdir -p "${DST}"
+          # rsync handles empty directories gracefully and only re-copies
+          # changed files — `cp -R src/*` would fail when SRC is empty.
+          rsync -a --delete "${SRC}/" "${DST}/"
+          echo "Copied DebugFixtures: ${SRC} → ${DST}"
+        inputFiles:
+          - "$(SRCROOT)/vreader/Resources/DebugFixtures"
+        outputFiles:
+          - "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/DebugFixtures"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
-        CURRENT_PROJECT_VERSION: 33
-        MARKETING_VERSION: 3.11.1
+        CURRENT_PROJECT_VERSION: 34
+        MARKETING_VERSION: 3.11.2
     info:
       # XcodeGen writes vreader/SupportingFiles/Info.plist with this content.
       # We need a real Info.plist (not Xcode's auto-generated one) because
