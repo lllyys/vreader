@@ -40,6 +40,8 @@ Describe issues in plain text below. The agent will triage them.
 
 ## Triaged
 
+2026-05-03 | feature #46 | WebDAV restore leaves library empty — backup is metadata-only by design (`BackupDataCollector.swift:12` "Books that no longer exist on the restoring device are silently skipped"). Inspected the user's ZIP (`2026-05-03T08-07-21Z_cfaff06e.vreader.zip`): 8 JSON sections, `metadata.json` records `bookCount: 5`, `positions.json` has 5 entries keyed by fingerprint, but no book files. On a fresh / empty library, restoration finds no matching books and silently no-ops. New feature scope: include book bytes in the archive so restore reconstructs the library.
+
 2026-05-03 | DUPLICATE OF bug #110 | WebDAV Tailscale URL — same ATS issue captured in screenshot. FIXED in v3.10.9 (PR #139); end-to-end verified 2026-05-03 against rclone-backed `vreader-webdav-host` over Tailscale on simulator (build 10) — connection succeeds once system HTTP-proxy bypass includes `*.ts.net`. GH #136 closed.
 
 2026-05-03 | NO-ACTION | WebDAV localhost auth failed (earlier 401, then 502 over Tailscale) — root cause was a system HTTP proxy on the Mac (`127.0.0.1:7897`, ClashX/Surge-style) whose bypass list excluded `*.ts.net`. iOS Simulator inherits the Mac's proxy → URLSession funnelled Tailscale traffic through the proxy → 502 Bad Gateway. Localhost worked because it was already in the bypass list. Not a vreader bug — user-side network config. Resolution: add `*.ts.net` and `100.64.0.0/10` to the proxy bypass list. Stale Docker WebDAV container (`bytemark/webdav` on port 8080) was also masking the rclone server's creds — removed in same session.
