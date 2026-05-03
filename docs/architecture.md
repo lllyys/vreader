@@ -2,7 +2,7 @@
 
 ## Overview
 
-VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT, EPUB, PDF, and MD formats with dual rendering modes (Native UIKit bridges + Unified TextKit 2 reflow).
+VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT, EPUB, AZW3/MOBI, PDF, and Markdown formats with dual rendering modes (native UIKit/WebView bridges + unified TextKit 2 reflow). AZW3/MOBI is rendered via Foliate-js inside a WKWebView; the unified path falls back to a placeholder for AZW3 today.
 
 ## System Diagram
 
@@ -20,13 +20,14 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
     │  PreferenceStore │   │  ReaderChromeBar (overlay)│
     └─────────────────┘   └──────┬───────────────────┘
                                  │
-        ┌────────┬───────────┬───┴────┐
-        │        │           │        │
-    ┌───▼──┐ ┌──▼───┐  ┌───▼──┐ ┌──▼───┐
-    │ TXT  │ │ EPUB │  │ PDF  │ │  MD  │
-    │Bridge│ │Bridge│  │Bridge│ │Bridge│
-    └──────┘ └──────┘  └──────┘ └──────┘
-    UITextView WKWebView PDFKit  UITextView
+        ┌────────┬───────────┬───┴────┬─────────┐
+        │        │           │        │         │
+    ┌───▼──┐ ┌──▼───┐  ┌───▼──┐ ┌──▼───┐ ┌────▼─────┐
+    │ TXT  │ │ EPUB │  │ PDF  │ │  MD  │ │  AZW3 /  │
+    │Bridge│ │Bridge│  │Bridge│ │Bridge│ │  MOBI    │
+    └──────┘ └──────┘  └──────┘ └──────┘ └──────────┘
+    UITextView WKWebView PDFKit  UITextView WKWebView
+                                            (Foliate-js)
 ```
 
 ## Layers
@@ -47,8 +48,8 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 
 `ReaderContainerView.swift` routes to format-specific readers:
 
-- If unified mode + format supports reflow → `UnifiedTextRenderer`
-- Else → native format host (UIKit bridge)
+- If unified mode is on and `FormatCapabilities.unifiedReflow` is true → `unifiedReaderView` (TXT/MD/EPUB → `UnifiedTextRenderer`; AZW3 has no unified case yet and falls back to `UnifiedPlaceholderView`).
+- Else → native format host. AZW3/MOBI specifically routes to `FoliateSpikeView` (`ReaderContainerView.swift:368`), not `FoliateReaderHost`. The host wrapper exists but isn't currently in the dispatch path.
 
 #### Chrome
 
@@ -62,11 +63,11 @@ Each host owns its ViewModel lifecycle via `@State`:
 - `EPUBReaderHost` → `EPUBReaderContainerView` → `EPUBWebViewBridge` (WKWebView + JS injection)
 - `PDFReaderHost` → `PDFReaderContainerView` → `PDFViewBridge` (PDFKit)
 - `MDReaderHost` → `MDReaderContainerView` → reuses `TXTTextViewBridge` with NSAttributedString
-- `FoliateReaderHost` → `FoliateReaderContainerView` → `FoliateViewBridge` (WKWebView + Foliate-js, for AZW3/MOBI)
+- AZW3/MOBI is dispatched directly to `FoliateSpikeView` (the AZW3 spike landed before the host abstraction; convergence is deferred). `FoliateReaderHost` / `FoliateReaderContainerView` exist but are not currently wired into `ReaderContainerView`.
 
 #### Foliate-js Bridge (`vreader/Views/Reader/`, `vreader/Services/Foliate/`)
 
-`FoliateViewBridge` (UIViewRepresentable) creates a WKWebView with `FoliateURLSchemeHandler` for content serving. `FoliateViewCoordinator` (WKScriptMessageHandler + WKNavigationDelegate) receives JS messages, parses via `FoliateMessageParser`, and routes to typed callbacks. `FoliateHighlightRenderer` generates JS strings for SVG overlay annotations. `FoliateJSEscaper` provides shared sanitization for all JS/CSS string interpolation across the bridge. `FoliateReaderViewModel` maps bridge events to `Locator` for position persistence.
+`FoliateViewBridge` (UIViewRepresentable) hosts a WKWebView and uses `loadHTMLString` with the IIFE-bundled `foliate-bundle.js` inlined; books are handed to JS as base64 (no scheme handler in the live load path — `FoliateURLSchemeHandler` exists in the codebase but isn't wired into the active bridge today). `FoliateViewCoordinator` (WKScriptMessageHandler + WKNavigationDelegate) receives JS messages, parses via `FoliateMessageParser`, and routes to typed callbacks. `FoliateHighlightRenderer` generates JS strings for SVG overlay annotations — but it is **not** plugged in as a `HighlightRenderer` adapter today; AZW3 highlight create has a TODO for persistence/JS injection and overlay restore is a no-op placeholder (`FoliateReaderContainerView+Highlights.swift`). `FoliateJSEscaper` provides shared sanitization for all JS/CSS string interpolation across the bridge. `FoliateReaderViewModel` maps bridge events to `Locator` for position persistence.
 
 #### Unified Engine
 
@@ -74,11 +75,16 @@ Each host owns its ViewModel lifecycle via `@State`:
 
 ### 4. Coordinator Layer (`vreader/Views/Reader/`)
 
-| Coordinator                | Responsibility                                  | Setup Timing                                                          |
-| -------------------------- | ----------------------------------------------- | --------------------------------------------------------------------- |
-| `ReaderAICoordinator`      | AI ViewModels, text loading, context extraction | On AI/TTS invoke                                                      |
-| `ReaderSearchCoordinator`  | Search service, indexing, FTS5                  | Service+VM on reader open (`prepareService`), indexing on search open |
-| `ReaderUnifiedCoordinator` | Unified renderer state, text transforms         | On reader open (unified mode only)                                    |
+Cross-format coordinators that compose with multiple readers:
+
+| Coordinator                | Responsibility                                                      | Setup Timing                                                          |
+| -------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `ReaderAICoordinator`      | AI ViewModels, text loading, context extraction                     | On AI/TTS invoke                                                      |
+| `ReaderSearchCoordinator`  | Search service, indexing, FTS5                                      | Service+VM via `ensureSearchReady()` when the search sheet opens      |
+| `ReaderUnifiedCoordinator` | Unified renderer state, text transforms                             | On reader open (unified mode only)                                    |
+| `HighlightCoordinator`     | Persists via `HighlightPersisting`, dispatches to `HighlightRenderer` adapters | On reader open per format (TXT/MD/PDF/EPUB)                          |
+
+Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordinator`, `TXTTextViewBridgeCoordinator`) handle delegate / WKScriptMessageHandler plumbing for one bridge each; they're not cross-cutting and aren't enumerated here.
 
 ### 5. Services Layer (`vreader/Services/`)
 
@@ -96,9 +102,19 @@ Each host owns its ViewModel lifecycle via `@State`:
 | `WebDAVProviderFactory`              | `KeychainService`          | Assembles a `WebDAVProvider` from saved credentials + live persistence    |
 | `BackupDataCollector`                | `PersistenceActor`         | Serializes 7 versioned JSON sections (annotations, positions, settings, …) |
 | `BackupDataRestorer`                 | `PersistenceActor`         | Decodes + dedupes by UUID/profileKey; rejects future schema versions      |
-| `FoliateURLSchemeHandler`            | WKURLSchemeHandler         | Serves Foliate-js bundle + book files to WKWebView                        |
+| `FoliateURLSchemeHandler`            | WKURLSchemeHandler         | Scheme-handler implementation (not on the live load path; see Foliate-js Bridge note) |
 | `FoliateMessageParser`               | Pure functions             | Parses raw JS message bodies into typed Swift events                      |
 | `FoliateJSEscaper`                   | Pure functions             | Escapes/sanitizes strings for safe JS/CSS interpolation in Foliate bridge |
+| `ReaderSettingsStore`                | UserDefaults               | Global reader UI prefs: theme, typography, reading mode, EPUB layout, auto-page-turn, page-turn animation, Chinese conversion, custom background |
+| `PerBookSettingsStore`               | Per-book JSON files        | Per-book overrides on top of `ReaderSettingsStore` (font/theme/spacing) |
+| `KeychainService`                    | Keychain                   | Secure credential storage (used by `WebDAVProviderFactory`)               |
+| `BookSourcePipeline`                 | Actor + HTTP / rule engine | Search → BookInfo → TOC → Content scraping for Legado-style web novels    |
+| `SyncService`                        | CloudKit (feature-flagged) | Coordinates sync with `SyncConflictResolver`, tombstones, change tokens   |
+| `DebugBridge`                        | URL handler (DEBUG-only)   | `vreader-debug://` reset/seed/open/settle/snapshot/eval; see `docs/subsystems/debug-bridge.md` |
+| `ImportJobQueue`                     | Actor                      | Serializes book imports (avoids parallel `BookImporter` writes)           |
+| `LibraryRefreshService`              | NotificationCenter         | Coalesces library refresh requests across views                           |
+| `FeatureFlags`                       | Static                     | Compile/runtime flag resolution (`SyncService` and others gate on it)     |
+| `DictionaryLookup`                   | UIKit                      | System dictionary + AI-translate hooks for selected text                  |
 
 ### 6. Data Layer (`vreader/Models/`)
 
@@ -116,39 +132,43 @@ on mismatch, so a future v2 archive can't silently apply on a v1 client.
 Key types:
 
 - `DocumentFingerprint` — `{format}:{SHA256}:{byteCount}` deterministic identity
-- `Locator` — universal position: href+progression (EPUB), page (PDF), UTF-16 offset (TXT/MD)
+- `Locator` — universal position: href+progression+CFI (EPUB/AZW3), page (PDF), UTF-16 offset (TXT/MD)
 - `AnnotationAnchor` — format-agnostic location encoding for highlights/bookmarks
+- `FormatCapabilities` — per-`BookFormat` capability matrix (selection, highlights, search, TTS, native pagination, unified reflow, TOC, annotations) consulted by the dispatcher and feature gates
 
-## Notification Bus (`ReaderNotifications.swift`)
+## Notification Bus (`vreader/Views/Reader/ReaderNotifications.swift`)
 
 All cross-component communication uses NotificationCenter:
 
-| Notification                 | Payload             | Direction                                               |
-| ---------------------------- | ------------------- | ------------------------------------------------------- |
-| `.readerContentTapped`       | nil                 | Bridge → Container (toggle chrome)                      |
-| `.readerPositionDidChange`   | `Locator`           | Format container → ReaderContainerView → AI coordinator |
-| `.readerNavigateToLocator`   | `Locator`           | Container → Format container                            |
-| `.readerBookmarkRequested`   | nil                 | Chrome → Format container                               |
-| `.readerHighlightRequested`  | `TextSelectionInfo` | Bridge → Container                                      |
-| `.readerHighlightRemoved`    | UUID string         | HighlightListVM → Container                             |
-| `.readerDidClose`            | fingerprintKey      | ViewModel → LibraryView                                 |
-| `.readerAnnotationRequested` | `TextSelectionInfo` | Bridge → Container                                      |
-| `.readerDefineRequested`     | `TextSelectionInfo` | Bridge → Container (dictionary)                         |
-| `.readerTranslateRequested`  | `TextSelectionInfo` | Bridge → Container (AI translate)                       |
-| `.searchHighlightClear`      | nil                 | SearchViewModel → Bridges                               |
-| `.readerPreviousPage`        | nil                 | TapZoneOverlay → Container                              |
-| `.readerNextPage`            | nil                 | TapZoneOverlay → Container                              |
+| Notification                   | Payload              | Direction                                               |
+| ------------------------------ | -------------------- | ------------------------------------------------------- |
+| `.readerContentTapped`         | nil                  | Bridge → Container (toggle chrome)                      |
+| `.readerPositionDidChange`     | `Locator`            | Format container → ReaderContainerView → AI coordinator |
+| `.readerNavigateToLocator`     | `Locator`            | Container → Format container                            |
+| `.readerBookmarkRequested`     | nil                  | Chrome → Format container                               |
+| `.readerTextSelected`          | `TextSelectionInfo`  | Bridge → Container (active selection state)            |
+| `.readerHighlightRequested`    | `TextSelectionInfo`  | Bridge → Container                                      |
+| `.readerHighlightRemoved`      | UUID string          | HighlightListVM → Container                             |
+| `.readerHighlightsDidImport`   | fingerprintKey       | Importer → format containers (refresh persisted highlights) |
+| `.readerDidClose`              | fingerprintKey       | ViewModel → LibraryView                                 |
+| `.readerAnnotationRequested`   | `TextSelectionInfo`  | Bridge → Container                                      |
+| `.readerDefineRequested`       | `TextSelectionInfo`  | Bridge → Container (dictionary)                         |
+| `.readerTranslateRequested`    | `TextSelectionInfo`  | Bridge → Container (AI translate)                       |
+| `.searchHighlightClear`        | nil                  | SearchViewModel → Bridges                               |
+| `.readerPreviousPage`          | nil                  | TapZoneOverlay → Container                              |
+| `.readerNextPage`              | nil                  | TapZoneOverlay → Container                              |
+| `.epubFootnoteDetected`        | footnote ref         | EPUB bridge → Container (footnote popup)                |
 
 ## Shared Reader UI State (Phase R3)
 
 `TextReaderUIState` (`@Observable`) holds UI state shared between TXT and MD containers:
 
-- Highlight/annotation state: `scrollToOffset`, `highlightRange`, `persistedHighlightRanges`, `pendingAnnotationInfo`, `annotationNoteText`
+- Highlight/annotation state: `scrollToOffset`, `highlightRange`, `highlightIsTemporary`, `persistedHighlightRanges`, `pendingAnnotationInfo`, `annotationNoteText`
 - Pagination state: `pageNavigator`, `pagedCurrentPage`, `autoPageTurner`
 - Reading progress: `readingProgress`
 - Helper methods: `syncPagedState()`, `updatePagination()`, `updateAutoPageTurner()`, `refreshPersistedHighlights()`
 
-Conforms to `ReaderNotificationHandlerStateProtocol` so `ReaderNotificationModifier` mutates it directly.
+Conforms to `ReaderNotificationHandlerStateProtocol` so `ReaderNotificationModifier` mutates it directly. Note: TXT extraction is partial — `TXTReaderContainerView` still holds some legacy `@State` alongside `uiState` and a follow-up pass would consolidate it.
 
 Format-specific state remains in each container:
 
@@ -159,11 +179,12 @@ Format-specific state remains in each container:
 
 `HighlightRenderer` protocol defines format-agnostic visual operations: `apply(record:)`, `remove(id:)`, `restore(records:)`.
 
-| Adapter                 | Format  | Mechanism                                                                           |
-| ----------------------- | ------- | ----------------------------------------------------------------------------------- |
-| `TextHighlightRenderer` | TXT, MD | Mutates `TextReaderUIState.persistedHighlightRanges`                                |
-| `EPUBHighlightRenderer` | EPUB    | Generates CSS Highlight API JS via `onInjectJS` callback                            |
-| `PDFHighlightRenderer`  | PDF     | Creates/removes `PDFAnnotation` objects; tracks `highlightId → [PDFAnnotation]` map |
+| Adapter                 | Format    | Mechanism                                                                           |
+| ----------------------- | --------- | ----------------------------------------------------------------------------------- |
+| `TextHighlightRenderer` | TXT, MD   | Mutates `TextReaderUIState.persistedHighlightRanges`                                |
+| `EPUBHighlightRenderer` | EPUB      | Generates CSS Highlight API JS via `onInjectJS` callback                            |
+| `PDFHighlightRenderer`  | PDF       | Creates/removes `PDFAnnotation` objects; tracks `highlightId → [PDFAnnotation]` map |
+| _(none yet)_            | AZW3/MOBI | Selection capture + CFI anchoring landed; `FoliateHighlightRenderer` exists for SVG-overlay JS but is not yet wired as a `HighlightRenderer` adapter. AZW3 highlight create/restore are TODO/no-op placeholders today. |
 
 `HighlightCoordinator` orchestrates the highlight lifecycle:
 
@@ -183,7 +204,7 @@ Each container creates its format-specific renderer and coordinator:
 2. **Coordinator** — Complex multi-subsystem flows managed by dedicated coordinator objects (AI, Search, Unified, Highlight)
 3. **Protocol injection** — `LibraryPersisting`, `BookImporting`, `PreferenceStoring`, `TTSProviderProtocol`, `HighlightRenderer` enable testing
 4. **Actor isolation** — `PersistenceActor` serializes all SwiftData writes; `TXTService` is actor-isolated
-5. **Deferred setup** — AI, search indexing, TOC building triggered on first use, not reader open
+5. **Deferred setup** — AI is wired on first AI/TTS invoke; the search service+VM are prepared via `ensureSearchReady()` only when the search sheet opens. TXT TOC is the exception — it's built eagerly on reader open so the chapter progress bar has data in legacy mode.
 6. **Observer** — NotificationCenter decouples format-specific readers from chrome and coordinators
 7. **Shared state extraction** — `TextReaderUIState` eliminates duplicated `@State` between TXT/MD containers (Phase R3)
 8. **Format adapters** — `HighlightRenderer` protocol with per-format adapters decouples highlight lifecycle from rendering mechanism (Phase R4a)
@@ -196,7 +217,7 @@ Each container creates its format-specific renderer and coordinator:
 | --------------------------------- | ------------------------------------------- |
 | Sample-based encoding (8KB)       | Fast TXT open for non-UTF-8 files           |
 | Chunked reader (UITableView)      | Large TXT files (>500K UTF-16)              |
-| Deferred coordinator setup        | Fast reader open (no AI/search/TOC upfront) |
+| Deferred coordinator setup        | AI wired on invoke; search prepared on sheet open. TXT TOC stays eager for the chapter progress bar |
 | Persistent FTS5 index             | Skip re-indexing on subsequent opens        |
 | Off-main-thread attributed string | Non-blocking TXT/MD rendering               |
 | PaginationCache                   | Avoid redundant TextKit layout passes       |
