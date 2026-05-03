@@ -385,6 +385,142 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
         return try? decoder.decode(BackupLibraryManifestEnvelope.self, from: data)
     }
 
+    // MARK: - Selective restore (feature #47 WI-6)
+
+    /// Fetches the backup ZIP for `backupId` and decodes its
+    /// `library-manifest.json` into the entries the picker UI shows.
+    /// - Returns nil for older backups (pre-#46) that don't carry a
+    ///   manifest — the UI displays "this backup has no recoverable
+    ///   book files; only metadata will restore".
+    /// - Throws `BackupError.backupNotFound` / `.storageUnavailable` /
+    ///   `.archiveCorrupted` for transport + ZIP errors.
+    func loadManifest(backupId: UUID) async throws -> [BackupLibraryEntry]? {
+        let zipData = try await fetchBackupZIP(backupId: backupId)
+        do {
+            return try RemoteBookCatalog.loadEntries(fromBackupZIP: zipData)
+        } catch RemoteBookCatalogError.manifestMissing {
+            return nil
+        } catch let error as RemoteBookCatalogError {
+            throw BackupError.archiveCorrupted("manifest decode failed: \(error)")
+        }
+    }
+
+    /// Picker-driven restore: preplant unselected manifest entries as
+    /// `.remoteOnly` rows, materialize the selected subset via the
+    /// existing `BookFileMaterializer`, then apply the metadata
+    /// sections present in the ZIP. Reading positions reattach to BOTH
+    /// `.local` and `.remoteOnly` rows by fingerprintKey.
+    /// - Throws `BackupError.backupNotFound` if the backup ID isn't
+    ///   known, `.archiveCorrupted` if the ZIP doesn't carry a
+    ///   manifest (caller should have checked via `loadManifest` first),
+    ///   `.restorePartiallyFailed` if some materializations failed.
+    /// - `persistence` is passed explicitly because `BookImporter`'s
+    ///   reference to it is private; the caller (BackupViewModel)
+    ///   already holds the live `PersistenceActor`.
+    func restoreSelectively(
+        backupId: UUID,
+        selectedKeys: Set<String>,
+        persistence: PersistenceActor,
+        progress: @Sendable (Double) -> Void
+    ) async throws -> SelectiveRestoreSummary {
+        guard let importer = bookImporter else {
+            throw BackupError.storageUnavailable("BookImporter not configured")
+        }
+        progress(0.0)
+        let zipData = try await fetchBackupZIP(backupId: backupId)
+        progress(0.10)
+
+        let manifest: [BackupLibraryEntry]
+        do {
+            manifest = try RemoteBookCatalog.loadEntries(fromBackupZIP: zipData)
+        } catch RemoteBookCatalogError.manifestMissing {
+            throw BackupError.archiveCorrupted(
+                "backup has no library-manifest.json — restore selectively requires a feature-#46+ backup"
+            )
+        } catch let error as RemoteBookCatalogError {
+            throw BackupError.archiveCorrupted("manifest decode failed: \(error)")
+        }
+        progress(0.15)
+
+        let materializer = BookFileMaterializer(
+            blobStore: blobStore,
+            importer: importer,
+            tempDirectory: materializeTempDirectory,
+            resolveSandboxURL: sandboxResolver
+        )
+
+        let coordinator = SelectiveRestoreCoordinator(
+            materializer: materializer,
+            persistence: persistence,
+            dataRestorer: dataRestorer
+        )
+
+        let sections = Self.extractMetadataSections(from: zipData)
+
+        let summary = try await coordinator.restoreSelectively(
+            manifest: manifest,
+            selectedKeys: selectedKeys,
+            metadataSections: sections,
+            progress: { fraction in
+                // 0.15..1.0 reserved for coordinator (preplant +
+                // materialize + metadata).
+                progress(0.15 + fraction * 0.85)
+            }
+        )
+
+        // Surface partial materialize failures the same way restore-all
+        // does so the BackupViewModel UX is uniform.
+        let failedTitles = summary.materialized
+            .filter { !$0.isSuccess }
+            .map { $0.entry.title ?? $0.entry.fingerprintKey }
+        if !failedTitles.isEmpty {
+            throw BackupError.restorePartiallyFailed(
+                "books not materialized: \(failedTitles.joined(separator: ", "))"
+            )
+        }
+        return summary
+    }
+
+    /// Cache-aware ZIP fetch shared by `loadManifest` and `restoreSelectively`.
+    private func fetchBackupZIP(backupId: UUID) async throws -> Data {
+        let remotePath: String
+        if let cached = metadataCache[backupId] {
+            remotePath = cached.remotePath
+        } else {
+            _ = try await listBackups()
+            guard let cached = metadataCache[backupId] else {
+                throw BackupError.backupNotFound(backupId)
+            }
+            remotePath = cached.remotePath
+        }
+        do {
+            return try await transport.download(fromPath: remotePath)
+        } catch let error as WebDAVError {
+            if case .notFound = error {
+                throw BackupError.backupNotFound(backupId)
+            }
+            throw BackupError.storageUnavailable("Download failed: \(error)")
+        }
+    }
+
+    /// Pulls each metadata section out of the ZIP into a
+    /// `SelectiveRestoreMetadataSections` value the coordinator
+    /// consumes. Missing sections are nil and skipped.
+    private static func extractMetadataSections(from zipData: Data) -> SelectiveRestoreMetadataSections {
+        func read(_ name: String) -> Data? {
+            try? ZIPWriter.extractEntry(named: name, from: zipData)
+        }
+        return SelectiveRestoreMetadataSections(
+            annotations: read("annotations.json"),
+            positions: read("positions.json"),
+            settings: read("settings.json"),
+            collections: read("collections.json"),
+            bookSources: read("book-sources.json"),
+            perBookSettings: read("per-book-settings.json"),
+            replacementRules: read("replacement-rules.json")
+        )
+    }
+
     func listBackups() async throws -> [BackupMetadata] {
         let entries: [WebDAVEntry]
         do {
