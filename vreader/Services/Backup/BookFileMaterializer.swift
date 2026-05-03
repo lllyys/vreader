@@ -61,6 +61,7 @@ final class BookFileMaterializer: Sendable {
 
     private let blobStore: any BackupBlobReading
     private let importer: any BookImporting
+    private let finalizer: BookFileImportFinalizer
     private let resolveSandboxURL: SandboxURLResolver
     private let tempDirectory: URL
 
@@ -72,6 +73,7 @@ final class BookFileMaterializer: Sendable {
     ) {
         self.blobStore = blobStore
         self.importer = importer
+        self.finalizer = BookFileImportFinalizer(importer: importer)
         self.tempDirectory = tempDirectory
         self.resolveSandboxURL = resolveSandboxURL
     }
@@ -173,16 +175,7 @@ final class BookFileMaterializer: Sendable {
             )
         }
 
-        // Step 4: SHA-256 check (catches corruption that slipped past size).
-        let downloadedHash = sha256Hex(of: bytes)
-        if downloadedHash != entry.sha256 {
-            return MaterializeResult(
-                entry: entry,
-                outcome: .sha256Mismatch(expected: entry.sha256, actual: downloadedHash)
-            )
-        }
-
-        // Step 5: write to a temp file with originalExtension so BookImporter
+        // Step 4: write to a temp file with originalExtension so BookImporter
         // can derive format from the extension. Path includes the SHA-256 to
         // stay unique across concurrent restores.
         let tempURL: URL
@@ -202,41 +195,12 @@ final class BookFileMaterializer: Sendable {
         }
         defer { try? FileManager.default.removeItem(at: tempURL) }
 
-        // Step 6: import via the production importer (re-extracts metadata,
-        // saves cover, fires indexing notification, applies dedupe).
-        let importResult: ImportResult
-        do {
-            importResult = try await importer.importFile(at: tempURL, source: .restore)
-        } catch let importErr as ImportError {
-            return MaterializeResult(
-                entry: entry,
-                outcome: .importFailed("\(importErr)")
-            )
-        } catch {
-            return MaterializeResult(
-                entry: entry,
-                outcome: .importFailed("\(error)")
-            )
-        }
-
-        // Step 7: verify the import landed at the manifest's fingerprint.
-        // Catches extension/format confusion: if BookImporter detected a
-        // different format from the bytes than the manifest claimed, the
-        // resulting fingerprintKey won't match.
-        guard importResult.fingerprintKey == entry.fingerprintKey else {
-            return MaterializeResult(
-                entry: entry,
-                outcome: .fingerprintMismatchAfterImport(
-                    expected: entry.fingerprintKey,
-                    actual: importResult.fingerprintKey
-                )
-            )
-        }
-
-        return MaterializeResult(
-            entry: entry,
-            outcome: .downloaded(fingerprintKey: importResult.fingerprintKey)
-        )
+        // Steps 5-7 (SHA verify + import + fingerprint match) are shared
+        // with the lazy-download path (#47 WI-4b) and live in the
+        // finalizer. The finalizer re-hashes the file rather than
+        // trusting an in-memory hash so both paths share identical
+        // verification semantics.
+        return await finalizer.finalize(localTempURL: tempURL, entry: entry)
     }
 
     // MARK: - Hashing helpers
@@ -254,12 +218,6 @@ final class BookFileMaterializer: Sendable {
             hasher.update(data: chunk)
         }
         return hexString(Data(hasher.finalize()))
-    }
-
-    /// SHA-256 of an in-memory byte buffer. Used for downloaded blobs which
-    /// are already fully resident.
-    private func sha256Hex(of data: Data) -> String {
-        hexString(Data(SHA256.hash(data: data)))
     }
 
     private func hexString(_ data: Data) -> String {
