@@ -459,15 +459,25 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
-    func test_open_withNonNilPosition_throwsNotImplemented() async throws {
-        // v0 rejects position rather than silently ignoring it. Repros that
-        // depend on opening at a specific location fail loudly instead of
-        // opening at the wrong place.
-        let key = try await CollectionTestHelper.insertBook(
-            persistence: persistence,
-            title: "Openable",
-            sha: String(repeating: "9", count: 64)
+    func test_open_withInvalidEpubPosition_throwsInvalidPosition() async throws {
+        // Feature #49 WI-7b: position is now parsed via DebugPositionResolver.
+        // EPUB requires a non-empty CFI; empty string → invalidPosition.
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "9", count: 64),
+            fileByteCount: 1024,
+            format: .epub
         )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "Openable",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
 
         let context = RealDebugBridgeContext(
             persistence: persistence,
@@ -475,23 +485,35 @@ final class RealDebugBridgeContextTests: XCTestCase {
             userDefaults: defaults
         )
         do {
-            try await context.open(bookId: key, position: "epubcfi(/6/4)")
-            XCTFail("expected notImplemented for non-nil position")
-        } catch DebugBridgeContextError.notImplemented(let cmd) {
-            XCTAssertEqual(cmd, "open.position")
+            try await context.open(bookId: fp.canonicalKey, position: "")
+            XCTFail("expected invalidPosition for empty EPUB position")
+        } catch DebugBridgeContextError.invalidPosition(let format, _, _) {
+            XCTAssertEqual(format, "epub")
         } catch {
-            XCTFail("expected notImplemented, got \(error)")
+            XCTFail("expected invalidPosition, got \(error)")
         }
     }
 
     @MainActor
-    func test_open_nonNilPosition_doesNotPostNotification() async throws {
-        // Verify the position-rejected case doesn't leak a partial side effect.
-        let key = try await CollectionTestHelper.insertBook(
-            persistence: persistence,
-            title: "Openable",
-            sha: String(repeating: "8", count: 64)
+    func test_open_invalidPosition_doesNotPostNotification() async throws {
+        // Verify the position-validation-rejected case doesn't leak a partial
+        // side effect. Notification is posted only AFTER position validation.
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "8", count: 64),
+            fileByteCount: 1024,
+            format: .pdf
         )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "Openable",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
 
         let exp = expectation(description: "no notification expected")
         exp.isInverted = true
@@ -510,9 +532,10 @@ final class RealDebugBridgeContextTests: XCTestCase {
             userDefaults: defaults
         )
         do {
-            try await context.open(bookId: key, position: "p:42")
+            // Negative page rejected by resolver → never reaches notification.
+            try await context.open(bookId: fp.canonicalKey, position: "-1")
             XCTFail("expected throw")
-        } catch DebugBridgeContextError.notImplemented {
+        } catch DebugBridgeContextError.invalidPosition {
             // expected
         }
         await fulfillment(of: [exp], timeout: 0.5)

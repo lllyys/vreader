@@ -26,6 +26,16 @@ enum DebugBridgeContextError: Error, Equatable {
     case settleTimeout
     case evalUnsupported(format: String)
     case evalFailed(String)
+    /// Feature #49 WI-7b: position string didn't match the format's expected
+    /// shape. Carries the format + raw position + a human-readable reason.
+    case invalidPosition(format: String, position: String, reason: String)
+    /// Feature #49 WI-7b: opening at a specific position is only supported
+    /// in native-mode for now. Unified-renderer mode (TXT/MD/EPUB through
+    /// the unified text renderer) doesn't have a stable seek API yet.
+    case openPositionUnsupportedInUnifiedMode(format: String)
+    /// Feature #49 WI-7b: awaitReader timed out waiting for a reader matching
+    /// `fingerprintKey` to register after the open notification was posted.
+    case openAwaitReaderTimeout(fingerprintKey: String)
 }
 
 /// Production DebugBridgeContext. Each handler is a thin wrapper over
@@ -107,19 +117,81 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// instead of opening at the wrong place. v1 will resolve position to
     /// a Locator and pass it to the reader.
     func open(bookId: String, position: String?) async throws {
-        if position != nil {
-            throw DebugBridgeContextError.notImplemented(command: "open.position")
-        }
+        // Step 1: book lookup — validate before any side effect (the v3 plan's
+        // "validate before posting notification" rule, Round-2 audit fix #3).
         let books = try await persistence.fetchAllLibraryBooks()
-        guard books.contains(where: { $0.fingerprintKey == bookId }) else {
+        guard let book = books.first(where: { $0.fingerprintKey == bookId }) else {
             throw DebugBridgeContextError.bookNotFound(bookId)
         }
+
+        // Step 2: position parse + format check (only when caller supplied
+        // a position). Resolver returns typed DebugPosition or throws
+        // invalidPositionForFormat → wrap as bridge-level invalidPosition.
+        let resolvedPosition: DebugPosition?
+        if let position {
+            do {
+                resolvedPosition = try DebugPositionResolver.resolve(position, format: book.format)
+            } catch let DebugPositionResolverError.invalidPositionForFormat(format, raw, reason) {
+                throw DebugBridgeContextError.invalidPosition(
+                    format: format,
+                    position: raw,
+                    reason: reason
+                )
+            } catch let DebugPositionResolverError.unknownFormat(format) {
+                throw DebugBridgeContextError.invalidPosition(
+                    format: format,
+                    position: position,
+                    reason: "Unknown book format."
+                )
+            } catch let DebugPositionResolverError.formatUnsupported(format) {
+                throw DebugBridgeContextError.openPositionUnsupportedInUnifiedMode(format: format)
+            }
+
+            // Step 3: unified-mode guard (per v3 plan Round-2 audit fix #3).
+            // Native-mode has reader-host seek paths; unified-mode (the unified
+            // text renderer that may consolidate TXT/MD/EPUB) doesn't have a
+            // stable seek API. Reject early so verification flows fail loudly.
+            let store = ReaderSettingsStore(defaults: userDefaults)
+            if store.readingMode == .unified,
+               let format = BookFormat(rawValue: book.format) {
+                let caps = FormatCapabilities.capabilities(for: format)
+                // Only formats whose unified-mode path supports seek are exempt.
+                // Today: PDF stays native-only; TXT/MD/EPUB unified mode lacks
+                // seek; AZW3 only renders in native (Foliate spike).
+                _ = caps  // capability table currently has no seek bit; gate by mode alone.
+                throw DebugBridgeContextError.openPositionUnsupportedInUnifiedMode(format: book.format)
+            }
+        } else {
+            resolvedPosition = nil
+        }
+
+        // Step 4: post notification — opens the reader. Library navigation
+        // observes `.debugBridgeOpenBook` and pushes the matching book.
         NotificationCenter.default.post(
             name: .debugBridgeOpenBook,
             object: nil,
             userInfo: ["fingerprintKey": bookId]
         )
         log.info("open: posted notification for \(bookId, privacy: .public)")
+
+        // Step 5: when a position was supplied, await the reader to register
+        // and then dispatch the seek. The actual seek implementation lives in
+        // per-format hosts (feature #50 WI-7b's host-side seekStrategy).
+        // For now, we just resolve the await — host-side seek wiring is a
+        // follow-up that consumes `resolvedPosition`.
+        if resolvedPosition != nil {
+            do {
+                let probe = try await DebugReaderRegistry.shared.awaitReader(
+                    fingerprintKey: bookId,
+                    timeout: 10.0
+                )
+                log.info("open: awaitReader resolved for \(probe.fingerprintKey, privacy: .public)")
+                // Seek dispatch deferred to feature #50 (per-format hosts populate
+                // a seek strategy on the probe; the bridge calls it here).
+            } catch DebugReaderRegistryError.awaitReaderTimeout(let key) {
+                throw DebugBridgeContextError.openAwaitReaderTimeout(fingerprintKey: key)
+            }
+        }
     }
 
     /// Set reader theme + optional font size. Mutates a transient

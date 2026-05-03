@@ -108,6 +108,12 @@ final class DebugBridge {
                 return "bridge.evalUnsupported: \(fmt)"
             case .evalFailed(let msg):
                 return "bridge.evalFailed: \(msg)"
+            case .invalidPosition(let format, let position, let reason):
+                return "bridge.invalidPosition: \(format) \(position) — \(reason)"
+            case .openPositionUnsupportedInUnifiedMode(let format):
+                return "bridge.openPositionUnsupportedInUnifiedMode: \(format)"
+            case .openAwaitReaderTimeout(let key):
+                return "bridge.openAwaitReaderTimeout: \(key)"
             }
         default:
             return "unknown: \(String(describing: type(of: error)))"
