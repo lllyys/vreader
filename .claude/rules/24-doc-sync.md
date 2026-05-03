@@ -1,12 +1,10 @@
 # 24 - Architecture & README Sync
 
-`docs/architecture.md` and `README.md` are checked-in claims about the
-codebase. Every PR that changes the code must check whether those claims still
-hold and update them in the same PR if not. Drift is a known problem here —
-schema versions, service names, notification names, and feature counts have
-all gone stale in the past because no one owned those lines at the moment of
-the change. The fix is to make the doc-update part of the same change set,
-not a separate cleanup pass.
+`docs/architecture.md` and `README.md` are checked-in claims about the codebase.
+Every PR that changes the code must check whether those claims still hold and
+update them in the same PR if not. Drift is a real problem here — the
+architecture doc currently still says "SwiftData SchemaV3" even though the
+schema migrated to V4 long ago, because nobody owned the line at the time.
 
 ## When to update `docs/architecture.md`
 
@@ -21,7 +19,6 @@ Update in the same PR whenever the code change touches any of:
 | New `Notification.Name` on the cross-component bus      | Notification Bus table (name, payload, direction)                 |
 | New `HighlightRenderer` adapter or other protocol impl  | Highlight System table or relevant pattern table                  |
 | New top-level directory under `vreader/` or `Services/` | File Organization tree                                            |
-| New subsystem reference under `docs/subsystems/`        | Cross-link from `docs/architecture.md` so the subsystem is discoverable |
 | New design pattern shared across features               | Key Design Patterns section                                       |
 | Performance optimization with cross-cutting impact      | Performance Optimizations table                                   |
 | Existing stated fact becomes wrong                      | Fix it. Stale-but-passing doc text is worse than no doc text      |
@@ -71,8 +68,16 @@ update commit.
 - **Adding a service to the Services Layer table without describing its
   purpose.** A bare row is no better than missing — the table's value is the
   one-line "what does this do" column.
-- **Bumping the feature count in README without updating ********`docs/features.md`********.**
+- **Bumping the feature count in README without updating ****`docs/features.md`****.**
   README's Status line cites the trackers; the trackers are authoritative.
+
+## Not covered by this rule
+
+This rule covers `docs/architecture.md` and `README.md` only. The live
+trackers (`docs/bugs.md`, `docs/features.md`, `docs/tasks.md`) carry their
+own workflow rules at the top of each file — those are binding for those
+files and govern bug/feature/task lifecycle, not architecture/README claim
+sync. AGENTS.md is the rule pointer.
 
 ## Rationale
 

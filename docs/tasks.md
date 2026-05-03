@@ -4,6 +4,8 @@ Describe issues in plain text below. The agent will triage them.
 
 ## Rules
 
+> **Binding for this file.** The triage rules, classification policy, and record format below govern every change made to `docs/tasks.md`. AGENTS.md treats them as the authoritative inbox-triage workflow.
+
 - **This file is an inbox, not a tracker.** Items stay here only until triaged.
 - **User writes free-form descriptions** under the "New" section. No table, no formatting required.
 - **Triage is classification only — not execution.** The agent does NOT fix bugs or implement features during triage. It only classifies and records.

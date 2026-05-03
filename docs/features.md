@@ -1,8 +1,10 @@
-#  Feature Tracker
+# Feature Tracker
 
 Track features to be implemented here. Must be planned before implementation.
 
 ## Rules
+
+> **Binding for this file.** The rules, statuses, and plan template below govern every change made to `docs/features.md`. AGENTS.md treats them as the authoritative feature-tracker workflow.
 
 - **Bugs vs features**: If something was implemented but doesn't work correctly, it is a **bug** — track it in `docs/bugs.md`. If something was never implemented, it is a **feature** — track it here. Never mix them.
 - **Partial implementations**: If something is partially implemented, the broken part is a bug in `docs/bugs.md`; the missing capability is a feature here. Link them.

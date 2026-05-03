@@ -27,10 +27,10 @@ Shared instructions for all AI agents (Claude, Codex, etc.).
   - **Verification harness** (DEBUG only): `vreader-debug://` URL scheme drives reset / seed / open / settle / snapshot / eval from `xcrun simctl openurl`, so verification runs don't need computer-use for reproduction or assertion. See `docs/subsystems/debug-bridge.md`.
   - **Version bump per PR**: every PR must include a `chore: bump version to X.Y.Z` commit as its last commit before opening — patch for fixes/docs/chores, minor for new features, major for breaking changes. Tag is cut from the merge commit on `main` post-merge. See `.claude/rules/40-version-bump.md`.
   - **Docs sync per PR**: when a PR adds a service, schema, notification, environment key, or user-visible feature, update `docs/architecture.md` and/or `README.md` in the same PR (separate commit before the version bump). Triggers + checklist in `.claude/rules/24-doc-sync.md`.
-  - **Task workflow** (three files, one flow):
-    - `docs/tasks.md` — **inbox**. User writes free-form descriptions. Agent triages (classify only, do not fix or implement during triage). See `docs/tasks.md` for classification rules, deduplication, and triage record format.
-    - `docs/bugs.md` — **bug tracker**. Something implemented but broken. Follow the bug fix workflow defined in `docs/bugs.md` (Understand → RED → GREEN → REFACTOR → Verify → Track).
-    - `docs/features.md` — **feature tracker**. Something never implemented. Must be planned before implementation (Problem, Scope, Edge Cases, Test Plan, Acceptance Criteria). See `docs/features.md` for plan template and statuses.
+  - **Task workflow** (three files, one flow). The `## Rules` section at the top of each tracker is **binding** — it's the authoritative workflow for that file, not decorative prose:
+    - `docs/tasks.md` — **inbox**. User writes free-form descriptions. Agent triages (classify only, do not fix or implement during triage). Classification rules, deduplication, and triage record format are at the top of the file.
+    - `docs/bugs.md` — **bug tracker**. Something implemented but broken. Bug fix workflow (Understand → RED → GREEN → REFACTOR → Verify → Track) is at the top of the file.
+    - `docs/features.md` — **feature tracker**. Something never implemented. Must be planned before implementation (Problem, Scope, Edge Cases, Test Plan, Acceptance Criteria). Plan template and statuses are at the top of the file.
   - **Key rules**:
     - Bugs vs features: broken implementation → `docs/bugs.md`; never implemented → `docs/features.md`. Never mix.
     - Triage is classification only — do not fix bugs or implement features during triage.

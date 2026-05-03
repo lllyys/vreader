@@ -4,6 +4,8 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 
 ## Rules
 
+> **Binding for this file.** The rules and workflow below govern every change made to `docs/bugs.md`. AGENTS.md treats them as the authoritative bug-tracker workflow.
+
 - **Bugs vs features**: If something was implemented but doesn't work correctly, it is a **bug** — track it here. If something was never implemented, it is a **feature** — track it in `docs/features.md`. Never mix them.
 - **Partial implementations**: If something is partially implemented, the broken part is a bug here; the missing capability is a feature in `docs/features.md`. Link them.
 - **Source of truth**: This **Summary table** is the single source of truth for bug status.
