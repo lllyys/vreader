@@ -22,7 +22,7 @@ import Foundation
 /// The Book row exists for every book the user has imported or restored.
 /// `fileState` describes whether the bytes for that row are present
 /// locally, on a remote backup server only, mid-transfer, or unrecoverable.
-public enum BookFileState: String, Sendable, Codable, CaseIterable, Equatable {
+public enum BookFileState: String, Sendable, Codable, CaseIterable, Equatable, Hashable {
     /// Bytes are present at the sandbox URL; fingerprint was verified at import.
     case local
 

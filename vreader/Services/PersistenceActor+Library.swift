@@ -42,7 +42,9 @@ extension PersistenceActor: LibraryPersisting {
                 totalReadingSeconds: stats?.totalReadingSeconds ?? 0,
                 lastReadAt: stats?.lastReadAt,
                 averagePagesPerHour: stats?.averagePagesPerHour,
-                averageWordsPerMinute: stats?.averageWordsPerMinute
+                averageWordsPerMinute: stats?.averageWordsPerMinute,
+                fileState: BookFileState(rawValue: book.fileState) ?? .local,
+                blobPath: book.blobPath
             )
         }
     }

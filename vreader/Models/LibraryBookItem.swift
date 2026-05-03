@@ -26,6 +26,68 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
     var lastReadAt: Date?
     let averagePagesPerHour: Double?
     let averageWordsPerMinute: Double?
+    /// File-presence state (feature #47). Drives row UI: cloud icon for
+    /// `.remoteOnly`, spinner for `.downloading`, retry CTA for `.failed`.
+    let fileState: BookFileState
+    /// Server-side blob path on the WebDAV backup (feature #47). Nil for
+    /// books that have never been backed up.
+    let blobPath: String?
+
+    /// Explicit memberwise init with feature #47 defaults so existing
+    /// call sites that pre-date `fileState`/`blobPath` continue to
+    /// compile; new call sites pass the persisted values through.
+    init(
+        fingerprintKey: String,
+        title: String,
+        author: String?,
+        coverImagePath: String?,
+        format: String,
+        fileByteCount: Int64,
+        addedAt: Date,
+        lastOpenedAt: Date?,
+        isFavorite: Bool,
+        totalReadingSeconds: Int,
+        lastReadAt: Date? = nil,
+        averagePagesPerHour: Double?,
+        averageWordsPerMinute: Double?,
+        fileState: BookFileState = .local,
+        blobPath: String? = nil
+    ) {
+        self.fingerprintKey = fingerprintKey
+        self.title = title
+        self.author = author
+        self.coverImagePath = coverImagePath
+        self.format = format
+        self.fileByteCount = fileByteCount
+        self.addedAt = addedAt
+        self.lastOpenedAt = lastOpenedAt
+        self.isFavorite = isFavorite
+        self.totalReadingSeconds = totalReadingSeconds
+        self.lastReadAt = lastReadAt
+        self.averagePagesPerHour = averagePagesPerHour
+        self.averageWordsPerMinute = averageWordsPerMinute
+        self.fileState = fileState
+        self.blobPath = blobPath
+    }
+
+    // MARK: - File-state helpers (feature #47 WI-5)
+
+    /// True when the row's bytes are local and the reader can open
+    /// directly. Drives the Share menu visibility, the row tap target,
+    /// and the reader-open gate.
+    var isReadable: Bool { fileState == .local }
+
+    /// True when tapping the row should kick off a lazy download.
+    /// `.remoteOnly` and `.failed` qualify; `.downloading` does not
+    /// (already in flight); `.missingRemote` does not (server lost
+    /// the blob — needs re-upload, not re-download).
+    var needsDownload: Bool { fileState.canDownload }
+
+    /// True when the Share menu should be visible. Omitted for any
+    /// non-`.local` row — sharing a remote-only book has no bytes to
+    /// share, and sharing a downloading row would block on the
+    /// transfer with no useful UX.
+    var canShare: Bool { isReadable }
 
     // MARK: - Computed Display Properties
 
