@@ -56,7 +56,9 @@ actor MockPersistenceActor: BookPersisting {
             fingerprint: book.fingerprint,
             provenance: provenance,
             detectedEncoding: book.detectedEncoding,
-            addedAt: book.addedAt
+            addedAt: book.addedAt,
+            originalExtension: book.originalExtension,
+            lastOpenedAt: book.lastOpenedAt
         )
         books[key] = book
     }

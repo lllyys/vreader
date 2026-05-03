@@ -49,6 +49,11 @@ final class Book {
     /// Stored for consistent reopen without re-detection.
     var detectedEncoding: String?
 
+    /// Original file extension at import time (e.g. "mobi", "prc", "azw" for AZW3-canonical books).
+    /// Nil for legacy rows imported before SchemaV5; the backup projection coalesces nil into
+    /// the canonical extension. New imports always populate this from the source URL.
+    var originalExtension: String?
+
     // MARK: - Import Provenance
 
     var provenance: ImportProvenance
@@ -100,7 +105,8 @@ final class Book {
         provenance: ImportProvenance,
         addedAt: Date = Date(),
         isFavorite: Bool = false,
-        tags: [String] = []
+        tags: [String] = [],
+        originalExtension: String? = nil
     ) {
         self.fingerprintKey = fingerprint.canonicalKey
         self.fingerprint = fingerprint
@@ -115,6 +121,7 @@ final class Book {
         self.addedAt = addedAt
         self.isFavorite = isFavorite
         self.tags = tags
+        self.originalExtension = originalExtension
         self.bookmarks = []
         self.highlights = []
         self.annotations = []

@@ -1,16 +1,70 @@
 // Purpose: Backup-only fetch/upsert helpers for entities that don't have a
-// dedicated PersistenceActor extension elsewhere (BookSource, ContentReplacementRule).
+// dedicated PersistenceActor extension elsewhere (BookSource, ContentReplacementRule),
+// plus BackupBookProjection — a Sendable value-type view of Book for the
+// library manifest (feature #46).
 //
 // These methods exist to keep the BackupDataCollector / BackupDataRestorer
 // off raw ModelContext while preserving actor isolation.
 //
 // @coordinates-with: BackupDataCollector.swift, BackupDataRestorer.swift,
-//   BookSource.swift, ContentReplacementRule.swift
+//   BookSource.swift, ContentReplacementRule.swift, Book.swift
 
 import Foundation
 import SwiftData
 
+// MARK: - Library Manifest Projection (feature #46 WI-0a)
+
+/// Sendable value-type projection of Book exposing the raw fingerprint fields
+/// needed by BackupDataCollector.collectLibraryManifest. Avoids leaking
+/// SwiftData @Model instances across the actor boundary.
+///
+/// `originalExtension` is non-optional in the projection: legacy rows missing
+/// the field are coalesced to the canonical extension for their format
+/// (e.g. all .azw3-formatted books default to "azw3").
+struct BackupBookProjection: Sendable, Equatable {
+    let fingerprintKey: String
+    let format: String           // canonical BookFormat.rawValue
+    let sha256: String
+    let byteCount: Int64
+    let originalExtension: String
+    let title: String?
+    let author: String?
+    let addedAt: Date
+    let lastOpenedAt: Date?
+}
+
 extension PersistenceActor {
+
+    // MARK: - Library Manifest
+
+    /// Returns every Book as a BackupBookProjection, sorted by fingerprintKey
+    /// for deterministic output across runs. Used by feature #46's
+    /// BackupDataCollector to emit `library-manifest.json` without leaking
+    /// @Model instances across the actor boundary.
+    func fetchAllBooksForBackup() throws -> [BackupBookProjection] {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<Book>(
+            sortBy: [SortDescriptor(\.fingerprintKey)]
+        )
+        let books = try context.fetch(descriptor)
+        return books.map { book in
+            // Coalesce nil originalExtension (legacy V4 rows) to the canonical
+            // extension for the format. Avoids forcing every consumer to
+            // handle the optional separately.
+            let canonicalExt = BookFormat(rawValue: book.format)?.fileExtensions.first ?? book.format
+            return BackupBookProjection(
+                fingerprintKey: book.fingerprintKey,
+                format: book.format,
+                sha256: book.fingerprint.contentSHA256,
+                byteCount: book.fingerprint.fileByteCount,
+                originalExtension: book.originalExtension ?? canonicalExt,
+                title: book.title,
+                author: book.author,
+                addedAt: book.addedAt,
+                lastOpenedAt: book.lastOpenedAt
+            )
+        }
+    }
 
     // MARK: - Book Sources
 

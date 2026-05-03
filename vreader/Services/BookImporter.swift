@@ -187,6 +187,12 @@ final class BookImporter: BookImporting, Sendable {
         )
 
         // Step 11: Persist book record
+        // Preserve the source URL's extension so backup → restore can reconstruct
+        // it on a fresh device. Particularly matters for MOBI/PRC/AZW which all
+        // collapse to canonical BookFormat.azw3 — without this, restore loses
+        // the user's original extension.
+        let pathExt = fileURL.pathExtension.lowercased()
+        let originalExt: String? = pathExt.isEmpty ? nil : pathExt
         let record = BookRecord(
             fingerprintKey: fingerprintKey,
             title: metadata.title,
@@ -195,7 +201,8 @@ final class BookImporter: BookImporting, Sendable {
             fingerprint: fingerprint,
             provenance: provenance,
             detectedEncoding: detectedEncoding,
-            addedAt: Date()
+            addedAt: Date(),
+            originalExtension: originalExt
         )
 
         let persisted: BookRecord

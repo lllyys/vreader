@@ -43,6 +43,36 @@ struct BookRecord: Sendable, Equatable {
     let provenance: ImportProvenance
     let detectedEncoding: String?
     let addedAt: Date
+    /// Original file extension at import time (e.g. "mobi" for AZW3-canonical books).
+    /// Optional for legacy callers; set on new imports from the source URL.
+    let originalExtension: String?
+    /// When the book was last opened. Read-only mirror of Book.lastOpenedAt;
+    /// set by reader open flows, not by insertBook.
+    let lastOpenedAt: Date?
+
+    init(
+        fingerprintKey: String,
+        title: String,
+        author: String?,
+        coverImagePath: String?,
+        fingerprint: DocumentFingerprint,
+        provenance: ImportProvenance,
+        detectedEncoding: String?,
+        addedAt: Date,
+        originalExtension: String? = nil,
+        lastOpenedAt: Date? = nil
+    ) {
+        self.fingerprintKey = fingerprintKey
+        self.title = title
+        self.author = author
+        self.coverImagePath = coverImagePath
+        self.fingerprint = fingerprint
+        self.provenance = provenance
+        self.detectedEncoding = detectedEncoding
+        self.addedAt = addedAt
+        self.originalExtension = originalExtension
+        self.lastOpenedAt = lastOpenedAt
+    }
 }
 
 /// Actor-isolated persistence layer for SwiftData writes.
@@ -97,7 +127,8 @@ actor PersistenceActor: BookPersisting {
             author: record.author,
             coverImagePath: record.coverImagePath,
             provenance: record.provenance,
-            addedAt: record.addedAt
+            addedAt: record.addedAt,
+            originalExtension: record.originalExtension
         )
         book.detectedEncoding = record.detectedEncoding
         context.insert(book)
@@ -142,7 +173,9 @@ actor PersistenceActor: BookPersisting {
             fingerprint: book.fingerprint,
             provenance: book.provenance,
             detectedEncoding: book.detectedEncoding,
-            addedAt: book.addedAt
+            addedAt: book.addedAt,
+            originalExtension: book.originalExtension,
+            lastOpenedAt: book.lastOpenedAt
         )
     }
 }

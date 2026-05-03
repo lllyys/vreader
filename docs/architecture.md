@@ -9,7 +9,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 ```
 ┌──────────────────────────────────────────────────────┐
 │                    VReaderApp                         │
-│  SwiftData SchemaV4 · PersistenceActor · BookImporter│
+│  SwiftData SchemaV5 · PersistenceActor · BookImporter│
 └─────────────────────┬────────────────────────────────┘
                       │
           ┌───────────┴───────────┐
@@ -34,7 +34,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 
 ### 1. App Layer (`vreader/App/`)
 
-- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV4), migration plan (V1→V2→V3→V4), test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature.
+- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV5), migration plan (V1→V2→V3→V4→V5), test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature.
 
 ### 2. Library Layer (`vreader/Views/LibraryView.swift`, `vreader/ViewModels/LibraryViewModel.swift`)
 
@@ -118,11 +118,13 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 
 ### 6. Data Layer (`vreader/Models/`)
 
-SwiftData SchemaV4 entities:
+SwiftData SchemaV5 entities:
 
-- `Book` (fingerprintKey unique) → `ReadingPosition`, `Highlight`, `Bookmark`, `AnnotationNote`, `BookCollection`
+- `Book` (fingerprintKey unique; gains `originalExtension: String?` in SchemaV5 for backup blob extension preservation) → `ReadingPosition`, `Highlight`, `Bookmark`, `AnnotationNote`, `BookCollection`
 - `ReadingSession`, `ReadingStats`
 - `BookSource`, `ContentReplacementRule` (added in SchemaV4)
+
+`PersistenceActor.fetchAllBooksForBackup() -> [BackupBookProjection]` (in `PersistenceActor+Backup.swift`) returns a Sendable value-type view of every book — used by feature #46's WebDAV backup to emit `library-manifest.json` without leaking `@Model` instances across the actor boundary. Legacy V4 rows (no `originalExtension`) coalesce to the canonical extension for their format.
 
 Backup section JSONs (`vreader/Services/Backup/BackupSectionDTOs.swift`) are
 versioned via the `BackupVersionedEnvelope` protocol. Restore validates exact
