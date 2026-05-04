@@ -35,6 +35,7 @@ Audit prompt must explicitly request:
 - **Cohesion check** — is the WI split right, or are some WIs too big or too small?
 
 **Acceptance bar**:
+
 - Zero open Critical/High/Medium findings.
 - Low findings either fixed in the plan or explicitly accepted with rationale (in the plan's "Known limitations" or "Audit fixes applied" section).
 - **Maximum 3 audit rounds**. If unresolved findings remain after round 3, stop and escalate to the user — accept, defer, or redesign.
@@ -70,6 +71,7 @@ Audit prompt focuses on:
 - Bridge safety (FoliateJSEscaper for JS interpolation, message parser edge cases)
 
 **Acceptance bar**:
+
 - Zero open Critical/High/Medium findings.
 - Low findings fixed or explicitly accepted with rationale in the PR body.
 - **Maximum 3 audit-fix rounds**. After round 3, escalate.
@@ -84,9 +86,11 @@ For each PR before it merges:
 - **Behavioral WIs** (anything that changes app behavior, persistence, networking, backup format, reader rendering, or UI flow): **slice verification** — exercise the slice end-to-end against the real environment available at this point. Run on iPhone 17 Pro Simulator with `vreader-debug://` harness; for backup/network features, against a real WebDAV server (or local Docker WebDAV equivalent); for reader features, with a fixture book.
 - **Final WI** (the one that completes the feature): full end-to-end acceptance pass — every acceptance criterion exercised. This is what flips the feature row from `DONE` to `VERIFIED`.
 
-Record slice verification in the PR description (what was run, what was observed). Record final acceptance verification in the PR description AND in the feature row's Notes.
+Record slice verification in the PR description (what was run, what was observed). Record final acceptance verification in a structured evidence file at `dev-docs/verification/feature-<id>-<YYYYMMDD>.md` per the schema in `dev-docs/verification/SCHEMA.md`. The PreToolUse hook `.claude/hooks/check_terminal_status_evidence.sh` blocks any tracker edit that flips a row to `VERIFIED` (features) or `FIXED` (bugs) without a matching evidence file.
 
-**Acceptance bar per PR**: every behavioral slice in the PR has been verified end-to-end at the level appropriate to its WI tier. Final WI requires full acceptance pass.
+**Acceptance bar per PR**: every behavioral slice in the PR has been verified end-to-end at the level appropriate to its WI tier. Final WI requires full acceptance pass + evidence file.
+
+**"Tooling unavailable" is NOT an acceptable deferral reason** unless a specific tool is named and confirmed missing (e.g., `xcrun simctl` returns "command not found", a real device is required and none is connected, the rclone WebDAV server is down). "I'll do it next session" is not a tool-unavailability claim — it's a discipline lapse. The Stop hook (`.claude/hooks/check_unfinished_verification.sh`) surfaces unverified `DONE` rows at session end so the gap doesn't quietly carry over.
 
 ## Gate 6 — Merge
 
@@ -102,18 +106,18 @@ PR may merge when ALL of the following hold:
 After merge:
 
 - Feature status moves to `DONE` only after **all** WIs are merged AND every acceptance criterion is implemented.
-- `VERIFIED` is a separate post-implementation status, set after Gate 5's final-WI acceptance pass lands and is recorded in the row.
+- `VERIFIED` is a separate post-implementation status, set after Gate 5's final-WI acceptance pass lands and is recorded in the row. Requires a `dev-docs/verification/feature-<id>-<YYYYMMDD>.md` evidence file (PreToolUse hook enforces).
 - GH issue closes per close-gate rule (closure comment cites the verification: commit SHA + what was tested + what was observed).
 
 ## Audit count by feature size
 
 To keep the audit cost honest:
 
-| Size | WIs | Plan audits | PR audits |
-|------|-----|------------|-----------|
-| Small | 1 PR | 1 | 1 |
-| Medium | 2-4 WIs | 1 | 1 per WI |
-| Large | 5+ WIs | 1+ rounds (until clean) | 1 per WI; mechanical low-risk WIs that share the same surface MAY batch under one audit |
+| Size   | WIs     | Plan audits             | PR audits                                                                               |
+| ------ | ------- | ----------------------- | --------------------------------------------------------------------------------------- |
+| Small  | 1 PR    | 1                       | 1                                                                                       |
+| Medium | 2-4 WIs | 1                       | 1 per WI                                                                                |
+| Large  | 5+ WIs  | 1+ rounds (until clean) | 1 per WI; mechanical low-risk WIs that share the same surface MAY batch under one audit |
 
 If a feature is genuinely 10+ WIs, consider whether the plan should split into multiple features.
 
@@ -152,3 +156,4 @@ Feature #46 (WebDAV materializing restore, 11 WIs, High priority):
 - **Gate 4 (Impl audit)**: per-PR via `/fix-issue` audit loop.
 - **Gate 5 (Verification)**: WI-0a, WI-0b, WI-1, WI-2 = foundational, no device verify. WI-7 (provider integration) = slice verify against Docker WebDAV. WI-10 (UI) = device verify on simulator. Final WI = full acceptance pass (backup → wipe → restore with positions/annotations).
 - **Gate 6 (Merge + close)**: each WI's PR merges through its own gate. Final WI moves feature row to `DONE`. After Gate 5 final acceptance pass: row → `VERIFIED`, GH #144 closes with citation.
+
