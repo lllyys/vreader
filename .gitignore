@@ -17,3 +17,16 @@ DerivedData/
 
 # Test books (local only)
 test-books/
+
+# Claude Code local-only artifacts (personal, not shared across the team)
+# - settings.local.json: per-user permission allowlist
+# - *.local.{md,json,yaml,yml}: any file that opts in to local-only via the
+#   `.local.` infix (Claude Code convention)
+# - tdd-guardian/state.json: per-run TDD state, regenerated on each invocation
+.claude/settings.local.json
+.claude/*.local.json
+.claude/*.local.md
+.claude/*.local.yaml
+.claude/*.local.yml
+.claude/state.json
+.claude/tdd-guardian/state.json
