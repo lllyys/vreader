@@ -26,6 +26,8 @@ import UniformTypeIdentifiers
 /// Main library view for the book collection.
 struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.lazyDownloadCoordinator) private var lazyDownloadCoordinator
+    @Environment(\.webDAVNetworkPolicy) private var webDAVNetworkPolicy
     @State private var viewModel: LibraryViewModel
     @State private var bookToDelete: LibraryBookItem?
     @State private var bookForInfo: LibraryBookItem?
@@ -87,6 +89,53 @@ struct LibraryView: View {
                 // Load collections eagerly for context menu "Add to Collection" (bug #85)
                 let persistence = PersistenceActor(modelContainer: modelContext.container)
                 collectionRecords = (try? await persistence.fetchAllCollections()) ?? []
+            }
+            // Feature #47 WI-6: row tap on a non-`.local` row → kick
+            // off lazy download. The notification is posted from
+            // `openBook(_:)` (LibraryView.swift:openBook) when the
+            // user taps a remote-only / failed row. We look up the
+            // matching book in viewModel.books, build a request via
+            // saved Keychain credentials, and call enqueue. Errors
+            // surface as the existing viewModel.errorMessage banner.
+            .onReceive(NotificationCenter.default.publisher(for: .libraryRowTappedWhileNotLocal)) { notification in
+                guard let key = notification.userInfo?["fingerprintKey"] as? String,
+                      let book = viewModel.books.first(where: { $0.fingerprintKey == key }),
+                      book.needsDownload,
+                      let blobPath = book.blobPath,
+                      let coordinator = lazyDownloadCoordinator,
+                      let policy = webDAVNetworkPolicy else { return }
+                // fingerprintKey shape: "<format>:<sha256>:<byteCount>"
+                let parts = book.fingerprintKey.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+                guard parts.count == 3,
+                      let bytes = Int64(parts[2]) else { return }
+                let sha = String(parts[1])
+                let ext = (BookFormat(rawValue: book.format)?.fileExtensions.first) ?? book.format
+                let builder: WebDAVDownloadRequestBuilder
+                do {
+                    builder = try WebDAVProviderFactory.makeRequestBuilder()
+                } catch {
+                    viewModel.setError("Cannot start download: \(error.localizedDescription)")
+                    return
+                }
+                let result = coordinator.enqueue(
+                    fingerprintKey: book.fingerprintKey,
+                    blobPath: blobPath,
+                    expectedSHA256: sha,
+                    expectedByteCount: bytes,
+                    originalExtension: ext,
+                    requestBuilder: builder,
+                    policy: policy
+                )
+                switch result {
+                case .deferredWiFi:
+                    viewModel.setError("Wi-Fi only — turn on the toggle in Backup settings to allow cellular.")
+                case .notReady:
+                    viewModel.setError("Lazy-download coordinator unavailable.")
+                case .taskDescriptionEncodeFailed:
+                    viewModel.setError("Internal error encoding download task.")
+                case .started:
+                    break  // progress observable via @Observable coordinator
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { notification in
                 // Bug #45 v4: Update in-memory lastReadAt and re-sort immediately.

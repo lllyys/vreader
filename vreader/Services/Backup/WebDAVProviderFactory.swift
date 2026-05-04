@@ -76,6 +76,32 @@ enum WebDAVProviderFactory {
         )
     }
 
+    /// Builds just the lazy-download request builder from saved
+    /// credentials. Used by the row-tap → enqueue path (#47 WI-6) so
+    /// taps on remote-only rows don't have to round-trip a full
+    /// `WebDAVProvider`. Throws `missingCredentials` /
+    /// `invalidServerURL` for the same reasons `make(...)` does.
+    @MainActor
+    static func makeRequestBuilder(
+        keychain: KeychainService = KeychainService()
+    ) throws -> WebDAVDownloadRequestBuilder {
+        guard
+            let serverURL = try? keychain.readString(forAccount: serverURLAccount),
+            !serverURL.isEmpty,
+            let username = try? keychain.readString(forAccount: usernameAccount),
+            !username.isEmpty,
+            let password = try? keychain.readString(forAccount: passwordAccount),
+            !password.isEmpty
+        else {
+            throw WebDAVProviderFactoryError.missingCredentials
+        }
+        guard let url = URL(string: serverURL), url.scheme != nil else {
+            throw WebDAVProviderFactoryError.invalidServerURL(serverURL)
+        }
+        let client = WebDAVClient(serverURL: url, username: username, password: password)
+        return WebDAVDownloadRequestBuilder(client: client)
+    }
+
     /// Default per-book-settings storage location (mirrors ReaderContainerView).
     static let standardPerBookSettingsBaseURL: URL = {
         FileManager.default
