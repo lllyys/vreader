@@ -20,6 +20,9 @@
 
 import SwiftUI
 import Combine
+import OSLog
+
+private let log = Logger(subsystem: "com.vreader.app", category: "LibraryView")
 import PhotosUI
 import UniformTypeIdentifiers
 
@@ -101,12 +104,32 @@ struct LibraryView: View {
             // saved Keychain credentials, and call enqueue. Errors
             // surface as the existing viewModel.errorMessage banner.
             .onReceive(NotificationCenter.default.publisher(for: .libraryRowTappedWhileNotLocal)) { notification in
-                guard let key = notification.userInfo?["fingerprintKey"] as? String,
-                      let book = viewModel.books.first(where: { $0.fingerprintKey == key }),
-                      book.needsDownload,
-                      let blobPath = book.blobPath,
-                      let coordinator = lazyDownloadCoordinator,
-                      let policy = webDAVNetworkPolicy else { return }
+                log.info("rowTap observer fired")
+                guard let key = notification.userInfo?["fingerprintKey"] as? String else {
+                    log.error("rowTap observer: missing fingerprintKey in userInfo")
+                    return
+                }
+                guard let book = viewModel.books.first(where: { $0.fingerprintKey == key }) else {
+                    log.error("rowTap observer: book not found in viewModel.books for key=\(key, privacy: .public)")
+                    return
+                }
+                guard book.needsDownload else {
+                    log.error("rowTap observer: book.needsDownload=false for fileState=\(book.fileState.rawValue, privacy: .public)")
+                    return
+                }
+                guard let blobPath = book.blobPath else {
+                    log.error("rowTap observer: book.blobPath is nil for \(key, privacy: .public)")
+                    return
+                }
+                guard let coordinator = lazyDownloadCoordinator else {
+                    log.error("rowTap observer: lazyDownloadCoordinator is nil from Environment")
+                    return
+                }
+                guard let policy = webDAVNetworkPolicy else {
+                    log.error("rowTap observer: webDAVNetworkPolicy is nil from Environment")
+                    return
+                }
+                log.info("rowTap observer: all guards passed; coordinator + policy + blobPath OK")
                 // fingerprintKey shape: "<format>:<sha256>:<byteCount>"
                 let parts = book.fingerprintKey.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
                 guard parts.count == 3,
@@ -649,7 +672,9 @@ struct LibraryView: View {
     /// remote rows are silent so the user doesn't see a broken
     /// reader-open path.
     private func openBook(_ book: LibraryBookItem) {
+        log.info("openBook: \(book.fingerprintKey, privacy: .public) fileState=\(book.fileState.rawValue, privacy: .public) isReadable=\(book.isReadable, privacy: .public)")
         guard book.isReadable else {
+            log.info("openBook: posting libraryRowTappedWhileNotLocal for \(book.fingerprintKey, privacy: .public)")
             NotificationCenter.default.post(
                 name: .libraryRowTappedWhileNotLocal,
                 object: nil,

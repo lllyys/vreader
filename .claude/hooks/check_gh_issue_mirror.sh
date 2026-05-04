@@ -97,7 +97,9 @@ NEW="$(new_content)"
 # NEW that either (a) didn't exist in OLD, or (b) had different
 # status/notes than OLD. For each such row, require `GH: #N` (or the
 # kind-appropriate Mirror escape) in the Notes column.
-MISSING="$(KIND="$KIND" NEW_CONTENT="$NEW" OLD_CONTENT="$OLD" python3 <<'PYEOF'
+MISSING_FILE="$(mktemp)"
+trap 'rm -f "$MISSING_FILE"' EXIT
+KIND="$KIND" NEW_CONTENT="$NEW" OLD_CONTENT="$OLD" python3 - >"$MISSING_FILE" <<'PYEOF'
 import os, re, sys
 
 KIND = os.environ["KIND"]
@@ -170,7 +172,8 @@ for rid, (status, notes) in new_rows.items():
 if missing:
     print(",".join(missing))
 PYEOF
-)"
+
+MISSING="$(cat "$MISSING_FILE")"
 
 if [[ -z "$MISSING" ]]; then
     exit 0
