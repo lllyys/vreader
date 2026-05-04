@@ -32,6 +32,9 @@ struct LibraryView: View {
     @State private var bookToDelete: LibraryBookItem?
     @State private var bookForInfo: LibraryBookItem?
     @State private var bookToShare: LibraryBookItem?
+    /// Bound to BookDownloadSheet — set when the user taps a non-`.local`
+    /// row, cleared on success/cancel. Feature #47 WI-6.
+    @State private var bookForDownloadSheet: LibraryBookItem?
     @State private var isShowingImporter = false
     @State private var isShowingSettings = false
     @State private var isShowingAIChat = false
@@ -134,7 +137,8 @@ struct LibraryView: View {
                 case .taskDescriptionEncodeFailed:
                     viewModel.setError("Internal error encoding download task.")
                 case .started:
-                    break  // progress observable via @Observable coordinator
+                    // Surface the sheet so the user sees progress.
+                    bookForDownloadSheet = book
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { notification in
@@ -207,6 +211,9 @@ struct LibraryView: View {
             }
             .sheet(item: $bookToShare) { book in
                 ShareSheet(book: book)
+            }
+            .sheet(item: $bookForDownloadSheet) { book in
+                BookDownloadSheet(book: book, presentedBook: $bookForDownloadSheet)
             }
             .sheet(isPresented: $isShowingSettings) {
                 SettingsView()

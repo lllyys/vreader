@@ -99,6 +99,81 @@ final class BackupViewModel {
         }
     }
 
+    // MARK: - Selective restore (feature #47 WI-6)
+
+    /// Loaded library manifest from the most recent `loadManifest(for:)` call.
+    /// Nil before any load OR when the backup has no manifest (legacy
+    /// pre-#46 backup) OR when the load failed (errorMessage set).
+    var loadedManifest: [BackupLibraryEntry]?
+
+    /// True while `loadManifest(for:)` is in flight.
+    var isLoadingManifest: Bool = false
+
+    /// True while `performSelectiveRestore(...)` is in flight.
+    var isRestoringSelectively: Bool = false
+
+    /// Most recent selective-restore summary. UI uses this to show
+    /// "N imported · M marked for download" after the picker resolves.
+    var lastSelectiveRestoreSummary: SelectiveRestoreSummary?
+
+    /// Fetches and decodes `library-manifest.json` from the chosen
+    /// backup. Sets `loadedManifest` to the decoded list on success,
+    /// nil on any error. The picker view binds to `loadedManifest` and
+    /// `errorMessage`.
+    func loadManifest(for backupId: UUID) async {
+        guard let webdav = provider as? WebDAVProvider else {
+            errorMessage = "Selective restore requires a WebDAV backup."
+            return
+        }
+        isLoadingManifest = true
+        errorMessage = nil
+        loadedManifest = nil
+        defer { isLoadingManifest = false }
+        do {
+            loadedManifest = try await webdav.loadManifest(backupId: backupId)
+            if loadedManifest == nil {
+                errorMessage = "This backup has no recoverable book files (older format)."
+            }
+        } catch {
+            log.error("loadManifest failed: \(String(describing: error), privacy: .public)")
+            errorMessage = userMessage(for: error, action: "Failed to load backup manifest")
+        }
+    }
+
+    /// Picker-driven restore. `selectedKeys` is the user's tick set;
+    /// every other manifest entry lands as a `.remoteOnly` row that
+    /// the lazy-download coordinator fetches on tap.
+    func performSelectiveRestore(
+        backupId: UUID,
+        selectedKeys: Set<String>,
+        persistence: PersistenceActor
+    ) async {
+        guard let webdav = provider as? WebDAVProvider else {
+            errorMessage = "Selective restore requires a WebDAV backup."
+            return
+        }
+        isRestoringSelectively = true
+        restoreProgress = 0.0
+        errorMessage = nil
+        lastSelectiveRestoreSummary = nil
+        defer { isRestoringSelectively = false }
+        do {
+            let summary = try await webdav.restoreSelectively(
+                backupId: backupId,
+                selectedKeys: selectedKeys,
+                persistence: persistence
+            ) { [weak self] progress in
+                Task { @MainActor [weak self] in
+                    self?.restoreProgress = progress
+                }
+            }
+            lastSelectiveRestoreSummary = summary
+        } catch {
+            log.error("restoreSelectively failed: \(String(describing: error), privacy: .public)")
+            errorMessage = userMessage(for: error, action: "Selective restore failed")
+        }
+    }
+
     /// Restores the given backup. Caller is responsible for confirming destructive intent.
     func performRestore(backupId: UUID) async {
         isRestoring = true
