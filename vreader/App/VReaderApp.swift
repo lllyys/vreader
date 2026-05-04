@@ -158,15 +158,22 @@ struct VReaderApp: App {
             self.webDAVNetworkPolicy = MainActor.assumeIsolated {
                 WebDAVNetworkPolicy()
             }
+            // Hold the delegate locally so we can wire its weak
+            // back-pointer to the coordinator after both are
+            // constructed. URLSession retains the delegate, so
+            // dropping our reference here is fine — the back-pointer
+            // is what makes delegate events observable.
+            let lazyDelegate = LazyDownloadDelegate()
             let backgroundSession = URLSessionBackgroundSession(
                 identifier: "com.vreader.app.book-downloads",
-                delegate: LazyDownloadDelegate()
+                delegate: lazyDelegate
             )
             self.lazyDownloadCoordinator = MainActor.assumeIsolated {
                 let coord = LazyDownloadCoordinator(
                     session: backgroundSession,
                     persistence: persistence
                 )
+                lazyDelegate.coordinator = coord
                 return coord
             }
 
