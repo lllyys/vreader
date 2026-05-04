@@ -168,10 +168,17 @@ struct VReaderApp: App {
                 identifier: "com.vreader.app.book-downloads",
                 delegate: lazyDelegate
             )
+            // Bug #115 (#47 WI-4b): wire LazyDownloadFinalizer into the
+            // coordinator. Without this, didFinishDownload only records
+            // the .completed outcome — the staged file never moves to
+            // the canonical sandbox path and the Book row stays
+            // .remoteOnly forever, so the library row never refreshes.
+            let lazyFinalizer = LazyDownloadFinalizer(persistence: persistence)
             self.lazyDownloadCoordinator = MainActor.assumeIsolated {
                 let coord = LazyDownloadCoordinator(
                     session: backgroundSession,
-                    persistence: persistence
+                    persistence: persistence,
+                    finalizer: lazyFinalizer
                 )
                 lazyDelegate.coordinator = coord
                 return coord

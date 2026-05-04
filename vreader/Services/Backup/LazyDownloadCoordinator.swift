@@ -89,21 +89,47 @@ final class LazyDownloadCoordinator {
 
     private let session: (any BackgroundDownloadSessioning)?
     private let persistence: PersistenceActor?
+    /// Bug #115 (#47 WI-4b): runs after `didFinishDownload` to verify SHA,
+    /// move staged → canonical sandbox, and flip Book.fileState to `.local`.
+    /// Optional so the skeleton init still works for unit tests of
+    /// progress/outcome state transitions in isolation.
+    private let finalizer: LazyDownloadFinalizer?
 
     /// Skeleton init for tests that don't need lifecycle persistence
     /// (WI-3a tests pass through this path).
     init() {
         self.session = nil
         self.persistence = nil
+        self.finalizer = nil
         self.didCompleteReattach = true
     }
 
-    /// Production / WI-3b init. Triggers reattach + reconcile in a child
-    /// Task — callers can `await coordinator.waitForReattach()` to barrier
-    /// on completion in tests.
+    /// WI-3b init for tests that exercise reattach/reconcile semantics
+    /// without the WI-4b finalizer. Outcome is `.completed` after
+    /// `didFinishDownload`; persistence stays at whatever the test
+    /// seeded (typically `.downloading`).
     init(session: any BackgroundDownloadSessioning, persistence: PersistenceActor) {
         self.session = session
         self.persistence = persistence
+        self.finalizer = nil
+        Task { [weak self] in
+            await self?.reattachAndReconcile()
+        }
+    }
+
+    /// Production init (#47 WI-4b). On `didFinishDownload`, the finalizer
+    /// runs asynchronously: SHA-verify, move staged → canonical sandbox,
+    /// flip `Book.fileState` to `.local`, and post
+    /// `.bookFileStateDidChange`. Use this everywhere a real download is
+    /// being driven; the 2-arg init is reserved for race-semantics tests.
+    init(
+        session: any BackgroundDownloadSessioning,
+        persistence: PersistenceActor,
+        finalizer: LazyDownloadFinalizer
+    ) {
+        self.session = session
+        self.persistence = persistence
+        self.finalizer = finalizer
         Task { [weak self] in
             await self?.reattachAndReconcile()
         }
@@ -137,9 +163,17 @@ final class LazyDownloadCoordinator {
     }
 
     /// Called when the download body finished and was moved to `stagedURL`.
-    /// The coordinator records the outcome; downstream WIs (4a) call into
-    /// `BookFileImportFinalizer` to verify SHA-256 + import via BookImporter.
-    /// Ignored if the key already has a terminal outcome.
+    /// Records the `.completed` outcome synchronously (preserving the
+    /// terminal-state race contract — late progress/failure callbacks
+    /// must observe terminal state immediately), then runs
+    /// `LazyDownloadFinalizer` asynchronously to verify SHA-256, move the
+    /// staged file to the canonical sandbox path, and flip
+    /// `Book.fileState` from `.remoteOnly` to `.local`. Posts
+    /// `.bookFileStateDidChange` on success so library rows can refresh
+    /// without polling. On finalize failure, the outcome is flipped to
+    /// `.failed` and `terminalKeys` is cleared so the user's next tap
+    /// can retry the download. Ignored if the key already has a terminal
+    /// outcome.
     func didFinishDownload(fingerprintKey: String, meta: LazyDownloadTaskMeta, stagedURL: URL) {
         if terminalKeys.contains(fingerprintKey) { return }
         progressByKey.removeValue(forKey: fingerprintKey)
@@ -151,6 +185,41 @@ final class LazyDownloadCoordinator {
         log.info(
             "didFinishDownload: \(fingerprintKey, privacy: .private) → \(stagedURL.lastPathComponent, privacy: .private)"
         )
+
+        // No finalizer (skeleton init or test override): caller owns the
+        // post-download promotion. The unit-test path uses this; production
+        // always has one wired by the WI-4b integration.
+        guard let finalizer else { return }
+
+        // Production path — finalize asynchronously so the delegate's
+        // MainActor hop returns quickly. Captures `finalizer`/`meta` by
+        // value; `[weak self]` so the coordinator's lifetime isn't
+        // extended past app teardown.
+        Task { [weak self] in
+            do {
+                try await finalizer.finalize(stagedURL: stagedURL, meta: meta)
+                NotificationCenter.default.post(
+                    name: .bookFileStateDidChange,
+                    object: nil,
+                    userInfo: [
+                        "fingerprintKey": fingerprintKey,
+                        "state": BookFileState.local.rawValue
+                    ]
+                )
+            } catch {
+                let reason = "\(error)"
+                self?.outcomes[fingerprintKey] = .failed(
+                    fingerprintKey: fingerprintKey,
+                    reason: reason
+                )
+                // Allow the user's next tap to retry: clear the terminal
+                // guard so didProgress/didFinishDownload accept again.
+                self?.terminalKeys.remove(fingerprintKey)
+                log.error(
+                    "didFinishDownload: finalize failed for \(fingerprintKey, privacy: .private): \(reason, privacy: .private)"
+                )
+            }
+        }
     }
 
     /// Called when the download failed (network, server, move-to-staging,

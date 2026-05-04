@@ -174,6 +174,16 @@ struct LibraryView: View {
                     Task { await viewModel.refresh(force: true) }
                 }
             }
+            // Bug #115 (#47 WI-4b): when the lazy-download finalizer flips
+            // a row from `.remoteOnly` to `.local`, refresh the library so
+            // the row reflects the new state immediately. Without this,
+            // the picker-restored row stays gray until app relaunch even
+            // though the file has been downloaded and the DB row updated.
+            // Force-refresh bypasses the 5s throttle — a single tap-driven
+            // download isn't a polling burst.
+            .onReceive(NotificationCenter.default.publisher(for: .bookFileStateDidChange)) { _ in
+                Task { await viewModel.refresh(force: true) }
+            }
             #if DEBUG
             // Feature #44 DebugBridge — vreader-debug://open posts this so
             // automated tests can navigate to a specific book without
