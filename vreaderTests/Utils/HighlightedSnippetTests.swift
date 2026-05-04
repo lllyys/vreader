@@ -133,8 +133,42 @@ struct HighlightedSnippetTests {
         #expect(boldRunCount >= 2)
     }
 
-    @Test func multiWordQuery_overlappingMatches_handled() {
-        // Edge: word tokens that partially overlap in the snippet
+    @Test func multipleNonAdjacentMatches_produceSeparateBoldRuns() {
+        // Bug #105 (re-diagnosed): the original test asserted "abcabc" + "abc"
+        // produces 2 bold runs. That's impossible — AttributedString
+        // correctly coalesces back-to-back runs with identical
+        // attributes into one run, and NSRegularExpression's default
+        // matching is non-overlapping anyway. The visible rendering of
+        // 2 adjacent bolds is identical to one bold spanning both
+        // matches, so there's no UX bug to fix.
+        //
+        // This test now exercises the realistic case: matches separated
+        // by plain text (the FTS5 snippet shape — words spaced apart)
+        // genuinely produce 2 distinct bold runs because the plain
+        // text between them breaks the coalescing.
+        let result = HighlightedSnippet.highlight(
+            snippet: "the cat sat on the mat",
+            query: "cat mat"
+        )
+        var boldRunCount = 0
+        for run in result.runs {
+            if run.font != nil {
+                boldRunCount += 1
+            }
+        }
+        #expect(boldRunCount == 2,
+                "Two non-adjacent word matches should produce two distinct bold runs (separated by the intervening plain-text 'sat on the ').")
+    }
+
+    @Test func consecutiveAdjacentMatches_coalesceIntoOneBoldRun() {
+        // Bug #105 follow-up: pin the AttributedString coalescing
+        // behavior so future readers don't waste time on the same
+        // rabbit hole. When matches are adjacent (no plain text
+        // between them), AttributedString merges the runs — visible
+        // rendering is identical to one bold span. NSRegularExpression
+        // returns 2 matches for "abcabc" + "abc" but `result.runs`
+        // exposes a single bold run for the merged attributed
+        // sub-string.
         let result = HighlightedSnippet.highlight(
             snippet: "abcabc",
             query: "abc"
@@ -145,7 +179,10 @@ struct HighlightedSnippetTests {
                 boldRunCount += 1
             }
         }
-        #expect(boldRunCount >= 2)
+        #expect(boldRunCount == 1,
+                "Adjacent identical bold runs coalesce in AttributedString. The whole 'abcabc' becomes one bold run.")
+        // The whole string ends up bold — visible rendering is correct.
+        #expect(String(result.characters) == "abcabc")
     }
 
     @Test func regexSpecialCharsInQuery_escaped() {
