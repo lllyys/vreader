@@ -27,6 +27,19 @@ struct VReaderApp: App {
     /// to construct.
     private let bookImporterRef: (any BookImporting)?
 
+    /// Live LazyDownloadCoordinator (#47) — exposed via SwiftUI Environment
+    /// so library rows + the future BookDownloadSheet can call enqueue when
+    /// the user taps a `.remoteOnly` row. Constructed alongside the
+    /// persistence actor so it can run reattach + reconcile at boot.
+    /// `@MainActor`-isolated; safe to read in any view body.
+    @MainActor private let lazyDownloadCoordinator: LazyDownloadCoordinator?
+
+    /// Live WebDAVNetworkPolicy (#47) — exposed via SwiftUI Environment so
+    /// the WebDAV settings UI's Wi-Fi-only toggle round-trips through one
+    /// shared instance and the lazy-download enqueue path consults the
+    /// same policy state the user toggled.
+    @MainActor private let webDAVNetworkPolicy: WebDAVNetworkPolicy?
+
     #if DEBUG
     /// Parsed launch argument overrides for UI testing.
     private let testConfig: TestLaunchConfig
@@ -53,6 +66,8 @@ struct VReaderApp: App {
             self.contentView = nil
             self.persistenceActor = nil
             self.bookImporterRef = nil
+            self.lazyDownloadCoordinator = nil
+            self.webDAVNetworkPolicy = nil
             self.debugBridge = nil
             return
         }
@@ -135,6 +150,26 @@ struct VReaderApp: App {
             self.persistenceActor = persistence
             self.bookImporterRef = importer
 
+            // Feature #47: construct the policy + lazy-download
+            // coordinator alongside the persistence actor so reattach
+            // + reconcile run at boot. MainActor.assumeIsolated is
+            // safe because @MainActor on the App struct guarantees
+            // init() runs on main.
+            self.webDAVNetworkPolicy = MainActor.assumeIsolated {
+                WebDAVNetworkPolicy()
+            }
+            let backgroundSession = URLSessionBackgroundSession(
+                identifier: "com.vreader.app.book-downloads",
+                delegate: LazyDownloadDelegate()
+            )
+            self.lazyDownloadCoordinator = MainActor.assumeIsolated {
+                let coord = LazyDownloadCoordinator(
+                    session: backgroundSession,
+                    persistence: persistence
+                )
+                return coord
+            }
+
             #if DEBUG
             // Build the DebugBridge synchronously. The struct is
             // @MainActor-isolated, so init() runs on the main actor and
@@ -154,6 +189,8 @@ struct VReaderApp: App {
             self.contentView = nil
             self.persistenceActor = nil
             self.bookImporterRef = nil
+            self.lazyDownloadCoordinator = nil
+            self.webDAVNetworkPolicy = nil
             #if DEBUG
             self.debugBridge = nil
             #endif
@@ -168,6 +205,8 @@ struct VReaderApp: App {
                     .modelContainer(modelContainer)
                     .environment(\.persistenceActor, persistenceActor)
                     .environment(\.bookImporter, bookImporterRef)
+                    .environment(\.lazyDownloadCoordinator, lazyDownloadCoordinator)
+                    .environment(\.webDAVNetworkPolicy, webDAVNetworkPolicy)
                     .modifier(TestLaunchModifier(config: testConfig))
                     .onOpenURL { [debugBridge] url in
                         guard url.scheme == DebugCommand.scheme else { return }
@@ -181,6 +220,8 @@ struct VReaderApp: App {
                     .modelContainer(modelContainer)
                     .environment(\.persistenceActor, persistenceActor)
                     .environment(\.bookImporter, bookImporterRef)
+                    .environment(\.lazyDownloadCoordinator, lazyDownloadCoordinator)
+                    .environment(\.webDAVNetworkPolicy, webDAVNetworkPolicy)
                 #endif
             } else {
                 VStack(spacing: 16) {
