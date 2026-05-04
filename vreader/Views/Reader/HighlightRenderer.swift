@@ -28,5 +28,34 @@ protocol HighlightRenderer: AnyObject {
     func remove(id: UUID)
 
     /// Restore all saved highlights (e.g., on file/page open).
-    func restore(records: [HighlightRecord])
+    ///
+    /// `forHref` carries the chapter context as an immutable input —
+    /// EPUB renderer needs it to filter records to the page being
+    /// restored. Threading it through the call (instead of reading
+    /// shared mutable state on the renderer) keeps two concurrent
+    /// restores for different chapters from cross-wiring (bug #103
+    /// follow-up). Pass `nil` for renderers that don't filter by
+    /// chapter (TXT, PDF).
+    ///
+    /// Optional `using` evaluator routes the produced JS to a specific
+    /// destination (e.g., the page-ready WKWebView's evaluateJavaScript)
+    /// without mutating the renderer's persistent `onInjectJS` callback —
+    /// avoids the bug #103 race where a highlight created mid-restore
+    /// would have its JS misrouted to the restore-only callback.
+    /// Nil falls back to the renderer's normal delivery path.
+    func restore(
+        records: [HighlightRecord],
+        forHref href: String?,
+        using evaluator: ((String) -> Void)?
+    )
+}
+
+extension HighlightRenderer {
+    /// Convenience: existing call sites that don't need explicit routing
+    /// (e.g., `handleRemoval`'s re-render) keep working unchanged. The
+    /// renderer's mutable `currentHref` (where applicable) is consulted
+    /// in this path.
+    func restore(records: [HighlightRecord]) {
+        restore(records: records, forHref: nil, using: nil)
+    }
 }

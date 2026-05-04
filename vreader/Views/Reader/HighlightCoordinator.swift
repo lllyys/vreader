@@ -74,11 +74,28 @@ final class HighlightCoordinator {
 
     /// Fetches and restores all saved highlights from persistence.
     /// On fetch failure, leaves current visuals unchanged (avoids destructive reset).
-    func restoreAll() async {
+    ///
+    /// Bug #103: optional `using` evaluator routes the produced JS to a
+    /// caller-supplied destination (e.g., the page-ready WKWebView's
+    /// evaluateJavaScript) without mutating the renderer's persistent
+    /// `onInjectJS` callback. This avoids the original swap pattern in
+    /// `restoreHighlightsOnLoad` which would misroute concurrent
+    /// highlight-creation JS to the temporary restore-only callback.
+    ///
+    /// Bug #103 follow-up: `forHref` is the chapter context captured
+    /// at call time. Threading it as immutable input prevents two
+    /// concurrent restores for different chapters (fast page
+    /// navigation) from cross-wiring through the renderer's shared
+    /// mutable `currentHref` — the second call would otherwise
+    /// generate JS for a chapter the first call didn't intend.
+    func restoreAll(
+        forHref href: String? = nil,
+        using evaluator: ((String) -> Void)? = nil
+    ) async {
         guard let records = try? await persistence.fetchHighlights(
             forBookWithKey: bookFingerprintKey
         ) else { return }
-        renderer.restore(records: records)
+        renderer.restore(records: records, forHref: href, using: evaluator)
     }
 }
 #endif

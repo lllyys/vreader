@@ -39,7 +39,15 @@ final class TextHighlightRenderer: HighlightRenderer {
         uiState.highlightRange = nil
     }
 
-    func restore(records: [HighlightRecord]) {
+    func restore(
+        records: [HighlightRecord],
+        forHref href: String?,
+        using evaluator: ((String) -> Void)?
+    ) {
+        // TextHighlightRenderer doesn't filter by chapter and doesn't
+        // go through a JS evaluator — it mutates UIKit state directly.
+        // Both parameters are EPUB-specific; ignored here.
+        _ = (href, evaluator)
         uiState.refreshPersistedHighlights(from: records)
     }
 }

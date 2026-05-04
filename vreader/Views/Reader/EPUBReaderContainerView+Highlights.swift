@@ -145,13 +145,21 @@ extension EPUBReaderContainerView {
         highlightRenderer.currentHref = href
 
         if let coordinator = highlightCoordinator {
-            // Temporarily redirect renderer output to the evaluateJS closure
-            // for immediate injection (page is ready now).
-            let originalCallback = highlightRenderer.onInjectJS
-            highlightRenderer.onInjectJS = evaluateJS
+            // Bug #103: pass `evaluateJS` directly through the restore
+            // call instead of swapping `onInjectJS`. A user-driven
+            // highlight created during the restore await window now
+            // continues to use `onInjectJS` (the normal callback) and
+            // lands at the right destination — instead of being
+            // misrouted to this temporary page-ready evaluator.
+            //
+            // Bug #103 follow-up: capture `href` immutably and pass it
+            // into the restore call so a second `restoreHighlightsOnLoad`
+            // (e.g., user-fast-navigates to a new chapter) doesn't
+            // make this call's JS reflect the new chapter's records
+            // via the shared mutable `currentHref`.
+            let capturedHref = href
             Task {
-                await coordinator.restoreAll()
-                highlightRenderer.onInjectJS = originalCallback
+                await coordinator.restoreAll(forHref: capturedHref, using: evaluateJS)
             }
         } else {
             // Fallback: direct fetch if coordinator not ready

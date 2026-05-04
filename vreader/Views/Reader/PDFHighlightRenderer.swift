@@ -55,7 +55,14 @@ final class PDFHighlightRenderer: HighlightRenderer {
         }
     }
 
-    func restore(records: [HighlightRecord]) {
+    func restore(
+        records: [HighlightRecord],
+        forHref href: String?,
+        using evaluator: ((String) -> Void)?
+    ) {
+        // PDF doesn't filter by chapter and goes through PDFAnnotation,
+        // not JS — both parameters are EPUB-specific; ignored here.
+        _ = (href, evaluator)
         guard let document else { return }
         annotationMap = PDFAnnotationBridge.restoreHighlights(
             for: document, from: records

@@ -51,12 +51,36 @@ final class EPUBHighlightRenderer: HighlightRenderer {
         deliverOrBuffer(js)
     }
 
-    func restore(records: [HighlightRecord]) {
-        guard let href = currentHref, !href.isEmpty else { return }
+    func restore(
+        records: [HighlightRecord],
+        forHref href: String?,
+        using evaluator: ((String) -> Void)?
+    ) {
+        // Bug #103 follow-up (Codex round 1 High): prefer the call's
+        // explicit `forHref` over the renderer's mutable `currentHref`.
+        // On fast chapter navigation, two concurrent
+        // `restore(forHref: A, using: evalA)` and
+        // `restore(forHref: B, using: evalB)` calls would otherwise
+        // both read whichever value `currentHref` happens to hold by
+        // the time they resume — cross-wiring chapter-B JS into evalA.
+        // Falling back to `currentHref` only when the caller didn't
+        // pass `forHref` keeps the existing `handleRemoval` path
+        // (no async gap) working unchanged.
+        let resolvedHref = href ?? currentHref
+        guard let chapter = resolvedHref, !chapter.isEmpty else { return }
         let js = EPUBHighlightActions.restoreHighlightsJS(
-            highlights: records, currentHref: href
+            highlights: records, currentHref: chapter
         )
-        if !js.isEmpty {
+        guard !js.isEmpty else { return }
+        // When an explicit evaluator is provided, use it directly
+        // instead of routing through `onInjectJS`. This keeps the
+        // page-ready injection path scoped to the restore call —
+        // a concurrent `apply()` or `remove()` from a user-driven
+        // highlight creation continues to use `onInjectJS` and lands
+        // at the normal callback, not the restore-only one.
+        if let evaluator {
+            evaluator(js)
+        } else {
             deliverOrBuffer(js)
         }
     }

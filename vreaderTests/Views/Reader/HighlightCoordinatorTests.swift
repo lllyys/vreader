@@ -56,9 +56,18 @@ private final class MockRenderer: HighlightRenderer {
         removedIds.append(id)
     }
 
-    func restore(records: [HighlightRecord]) {
+    var lastRestoreEvaluatorWasNonNil: Bool = false
+    var lastRestoreHref: String?
+
+    func restore(
+        records: [HighlightRecord],
+        forHref href: String?,
+        using evaluator: ((String) -> Void)?
+    ) {
         restoreCalls += 1
         lastRestoredRecords = records
+        lastRestoreHref = href
+        lastRestoreEvaluatorWasNonNil = (evaluator != nil)
     }
 }
 

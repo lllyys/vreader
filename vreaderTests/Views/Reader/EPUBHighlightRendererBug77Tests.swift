@@ -56,6 +56,42 @@ private func makeEPUBRecord(id: UUID = UUID()) -> HighlightRecord {
 private final class MockPersistence77: HighlightPersisting, @unchecked Sendable {
     var stubbedHighlights: [HighlightRecord] = []
 
+    /// Bug #103 race test gate. When armed, `fetchHighlights` stores a
+    /// continuation and signals `armed → true` so the test can wait
+    /// for the suspension explicitly. Without the handshake, the test
+    /// would race between "did restore reach the await?" and "did
+    /// create+release run too early?" — Codex round 2 finding.
+    private var pendingFetchGate: CheckedContinuation<Void, Never>?
+    private var fetchGateRequested: Bool = false
+    private var fetchIsPausedContinuation: CheckedContinuation<Void, Never>?
+    private(set) var fetchIsPaused: Bool = false
+
+    /// Arms the gate. Call BEFORE starting the Task that will hit
+    /// `fetchHighlights`.
+    func pauseFetchUntilReleased() {
+        fetchGateRequested = true
+    }
+
+    /// Suspends until `fetchHighlights` has installed its continuation
+    /// and is genuinely paused. Use after starting the restore Task
+    /// and before triggering the concurrent action under test.
+    func waitForFetchToBeArmed() async {
+        guard !fetchIsPaused else { return }
+        await withCheckedContinuation { cont in
+            self.fetchIsPausedContinuation = cont
+        }
+    }
+
+    /// Releases the gate. Resumes the suspended `fetchHighlights`.
+    func releaseFetchGate() {
+        if let cont = pendingFetchGate {
+            pendingFetchGate = nil
+            cont.resume()
+        }
+        fetchIsPaused = false
+        fetchGateRequested = false
+    }
+
     func addHighlight(
         locator: Locator, selectedText: String, color: String,
         note: String?, toBookWithKey key: String
@@ -78,7 +114,17 @@ private final class MockPersistence77: HighlightPersisting, @unchecked Sendable 
     func updateHighlightColor(highlightId: UUID, color: String) async throws {}
 
     func fetchHighlights(forBookWithKey key: String) async throws -> [HighlightRecord] {
-        stubbedHighlights
+        if fetchGateRequested {
+            await withCheckedContinuation { cont in
+                self.pendingFetchGate = cont
+                self.fetchIsPaused = true
+                if let waiter = self.fetchIsPausedContinuation {
+                    self.fetchIsPausedContinuation = nil
+                    waiter.resume()
+                }
+            }
+        }
+        return stubbedHighlights
     }
 }
 
@@ -137,10 +183,24 @@ struct EPUBHighlightRendererBug77Tests {
 
     @Test("highlight created during restore should be delivered to correct callback")
     func highlightDuringRestore_shouldNotBeMisdirected() async {
+        // Bug #103 fix: restore now passes its evaluator via the
+        // `using:` parameter on `restore(records:forHref:using:)`
+        // instead of mutating `onInjectJS`. So a `create()` running
+        // concurrently with `restoreAll(forHref:using:)` keeps using
+        // `onInjectJS` (the normal callback) and lands at the right
+        // destination — never on the temporary restore evaluator.
+        //
+        // To exercise the race deterministically, the persistence
+        // mock blocks inside `fetchHighlights` until we release the
+        // gate. We start `restoreAll(...)`, let it suspend on the
+        // fetch, then run `create()` to completion — that's exactly
+        // the timing window the pre-fix swap pattern lost the JS
+        // through. Then we release the gate and assert both routing
+        // directions.
         let renderer = EPUBHighlightRenderer()
-        renderer.currentHref = "chapter1.xhtml"
         let persistence = MockPersistence77()
         persistence.stubbedHighlights = [makeEPUBRecord()]
+        persistence.pauseFetchUntilReleased()
 
         let coordinator = HighlightCoordinator(
             renderer: renderer,
@@ -148,34 +208,52 @@ struct EPUBHighlightRendererBug77Tests {
             bookFingerprintKey: "test-book"
         )
 
-        // Simulate the normal callback (writes to pendingHighlightJS state)
-        var pendingJS: [String] = []
-        let normalCallback: (String) -> Void = { js in pendingJS.append(js) }
-        renderer.onInjectJS = normalCallback
+        @MainActor final class JSCollector { var values: [String] = [] }
+        let normalCollector = JSCollector()
+        let pageEvalCollector = JSCollector()
 
-        // Simulate restoreHighlightsOnLoad's callback swap pattern:
-        // 1. Save original
-        let original = renderer.onInjectJS
-        // 2. Replace with page-ready evaluator
-        var pageEvalJS: [String] = []
-        renderer.onInjectJS = { js in pageEvalJS.append(js) }
+        renderer.onInjectJS = { js in normalCollector.values.append(js) }
 
-        // 3. While restore is running, a NEW highlight is created
-        //    (user taps "Highlight" in confirmation dialog)
+        let pageEvaluator: @Sendable (String) -> Void = { js in
+            MainActor.assumeIsolated { pageEvalCollector.values.append(js) }
+        }
+
+        // Start restore. It will suspend inside fetchHighlights waiting
+        // for the gate. Use a Task (not async let) so we can start it,
+        // wait for the explicit "fetch is paused" handshake, then run
+        // create() to completion before releasing the gate.
+        let restoreTask = Task {
+            await coordinator.restoreAll(forHref: "chapter1.xhtml", using: pageEvaluator)
+        }
+        // Deterministic wait: returns only after fetchHighlights has
+        // installed its continuation. No yield-loop guesswork.
+        await persistence.waitForFetchToBeArmed()
+
+        // Restore is now suspended at fetchHighlights. Create a
+        // highlight — its JS must go through onInjectJS (the normal
+        // callback), not the temporary pageEvaluator.
         let newRecord = await coordinator.create(
             locator: makeEPUBLocator(),
             selectedText: "new highlight"
         )
 
-        // 4. Restore original callback
-        renderer.onInjectJS = original
+        // Release the gate; restore now resumes, fetches, and emits
+        // its JS into the page evaluator.
+        persistence.releaseFetchGate()
+        await restoreTask.value
 
-        // The new highlight's JS was sent to pageEvalJS (the restore callback)
-        // instead of pendingJS (the normal state-update callback).
-        // BUG: The new highlight JS should have gone to the normal callback.
         #expect(newRecord != nil)
-        #expect(!pendingJS.isEmpty,
-                "New highlight JS should be delivered to the normal callback, not the temporary restore callback")
+        // Bug #103 invariant: create's JS lands at the normal callback...
+        #expect(!normalCollector.values.isEmpty,
+                "create()'s JS must land at onInjectJS (the normal callback) — not the page evaluator")
+        #expect(normalCollector.values.count == 1, "exactly one create JS")
+        // ...and restore's JS lands at the page evaluator, never on the normal callback.
+        #expect(!pageEvalCollector.values.isEmpty,
+                "restore's JS must land at the page evaluator")
+        // Strict separation: the two destinations don't share strings.
+        let crosstalk = Set(normalCollector.values).intersection(Set(pageEvalCollector.values))
+        #expect(crosstalk.isEmpty,
+                "no JS string should appear in both callback destinations — got crosstalk: \(crosstalk)")
     }
 
     // -----------------------------------------------------------------------

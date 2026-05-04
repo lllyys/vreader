@@ -24,7 +24,12 @@ final class MockHighlightRenderer: HighlightRenderer {
         removedIds.append(id)
     }
 
-    func restore(records: [HighlightRecord]) {
+    func restore(
+        records: [HighlightRecord],
+        forHref href: String?,
+        using evaluator: ((String) -> Void)?
+    ) {
+        _ = (href, evaluator)
         restoredRecords.append(records)
     }
 }
