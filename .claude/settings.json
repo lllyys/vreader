@@ -29,6 +29,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check_codex_audit_artifact.sh",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "Stop": [
@@ -37,6 +47,11 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check_unfinished_verification.sh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check_audit_debt.sh",
             "timeout": 15
           }
         ]

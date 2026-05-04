@@ -163,6 +163,40 @@ If Codex MCP is unavailable, perform a manual audit:
 
 Read each changed file, analyze, fix Critical/High issues.
 
+#### 4g. Write the audit log artifact
+
+**Required before Phase 6.** The PreToolUse hook
+`.claude/hooks/check_codex_audit_artifact.sh` blocks `gh pr merge`
+without an audit log. Write the file BEFORE attempting the merge so
+the hook passes.
+
+Path: `.claude/codex-audits/<branch-with-slashes-replaced-by-hyphens>-audit.md`
+
+Required frontmatter:
+
+```markdown
+---
+branch: <current branch name, exactly as `git branch --show-current` returns>
+threadId: <Codex MCP thread id from the audit>
+rounds: <integer ≥ 1>
+final_verdict: ship-as-is | follow-up-recommended | block-recommended
+date: YYYY-MM-DD
+---
+```
+
+Body should include, at minimum:
+- Per-round findings (file:line | severity | issue | fix).
+- Resolution note for each finding (fixed, accepted with rationale, deferred to follow-up bug).
+- Summary verdict statement.
+
+Commit the audit log alongside the fix (same commit as the version
+bump or a dedicated `chore: codex audit log for ...` commit).
+
+If you used the manual fallback (4f) instead of Codex MCP, write the
+same file with `threadId: manual-fallback` and a "Manual audit
+evidence" body section per `.claude/rules/47-feature-workflow.md`'s
+manual-fallback requirements.
+
 ### Phase 5: Gate
 
 Run up to 3 attempts:
