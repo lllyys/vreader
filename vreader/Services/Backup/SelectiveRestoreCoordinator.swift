@@ -117,6 +117,22 @@ struct SelectiveRestoreCoordinator: Sendable {
         if !unselected.isEmpty {
             let records = unselected.map { Self.makeRemoteOnlyRecord(from: $0) }
             try await persistence.insertRemoteOnlyBookRecords(records)
+            // Bug #116: notify the library so freshly-preplanted rows
+            // appear without an app relaunch. Reuses the existing
+            // `.bookFileStateDidChange` notification that LibraryView
+            // already observes for lazy-download finalize (bug #115).
+            // One post per key: the observer's force-refresh is
+            // re-entrancy-guarded, so N posts coalesce into one fetch.
+            for key in preplantedKeys {
+                NotificationCenter.default.post(
+                    name: .bookFileStateDidChange,
+                    object: nil,
+                    userInfo: [
+                        "fingerprintKey": key,
+                        "state": BookFileState.remoteOnly.rawValue
+                    ]
+                )
+            }
         }
         progress(0.10)
         log.info(

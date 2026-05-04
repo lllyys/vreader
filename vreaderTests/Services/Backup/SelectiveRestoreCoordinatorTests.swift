@@ -286,4 +286,52 @@ struct SelectiveRestoreCoordinatorTests {
         let remote = try await persistence.fingerprintKeys(withFileState: .remoteOnly)
         #expect(remote.isEmpty)
     }
+
+    // MARK: - Bug #116: preplant must notify Library so rows show without app relaunch
+
+    /// Reference holder for notification capture. The observer block runs
+    /// on `.main` queue but Swift concurrency doesn't see that, so we use
+    /// `nonisolated(unsafe)` access with the test confined to MainActor.
+    @MainActor
+    private final class PreplantNotificationCapture {
+        var receivedKeys: [String] = []
+    }
+
+    @MainActor
+    @Test func preplant_postsBookFileStateDidChange_perRow() async throws {
+        // Bug #116: SelectiveRestorePicker dismissal didn't refresh the
+        // library because the preplant path inserted .remoteOnly rows
+        // directly via PersistenceActor without notifying observers.
+        // After the fix, every preplanted row posts .bookFileStateDidChange
+        // so LibraryView's existing observer triggers a force-refresh.
+        let (coordinator, _, _, _) = try await Self.makeRig()
+        let entries = (0..<3).map { i in
+            Self.makeEntry(title: "B\(i)", bytes: Self.makeEPUBBytes(seed: UInt8(i)))
+        }
+        let expectedKeys = Set(entries.map(\.fingerprintKey))
+
+        let capture = PreplantNotificationCapture()
+        let token = NotificationCenter.default.addObserver(
+            forName: .bookFileStateDidChange, object: nil, queue: .main
+        ) { n in
+            let key = n.userInfo?["fingerprintKey"] as? String
+            MainActor.assumeIsolated {
+                if let key { capture.receivedKeys.append(key) }
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        _ = try await coordinator.restoreSelectively(
+            manifest: entries,
+            selectedKeys: [],
+            metadataSections: SelectiveRestoreMetadataSections(),
+            progress: { _ in }
+        )
+
+        // Drain the .main queue so .bookFileStateDidChange posts deliver
+        // before we assert. addObserver delivers on the next runloop tick.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(Set(capture.receivedKeys) == expectedKeys)
+    }
 }
