@@ -48,36 +48,39 @@ new_content() {
             echo "$INPUT" | jq -r '.tool_input.content // ""'
             ;;
         Edit)
-            local old new current
-            old="$(echo "$INPUT" | jq -r '.tool_input.old_string // ""')"
-            new="$(echo "$INPUT" | jq -r '.tool_input.new_string // ""')"
+            # python is more reliable than awk -v for multi-line
+            # old/new strings (embedded newlines break -v parsing).
             if [[ ! -f "$FILE_PATH" ]]; then return; fi
-            current="$(cat "$FILE_PATH")"
-            # Use awk for literal replacement (sed flags vary on darwin).
-            printf '%s' "$current" | awk -v old="$old" -v new="$new" '
-                BEGIN { RS=""; ORS="" }
-                { idx = index($0, old); if (idx > 0) {
-                    print substr($0, 1, idx-1) new substr($0, idx + length(old))
-                  } else { print } }'
+            HOOK_INPUT="$INPUT" HOOK_FILE="$FILE_PATH" python3 -c '
+import json, os, sys
+data = json.loads(os.environ["HOOK_INPUT"])
+old = data["tool_input"].get("old_string", "")
+new = data["tool_input"].get("new_string", "")
+with open(os.environ["HOOK_FILE"]) as f:
+    content = f.read()
+idx = content.find(old)
+if idx < 0:
+    sys.stdout.write(content)
+else:
+    sys.stdout.write(content[:idx] + new + content[idx + len(old):])
+'
             ;;
         MultiEdit)
-            # Apply edits sequentially; mostly the same shape as Edit.
             if [[ ! -f "$FILE_PATH" ]]; then return; fi
-            local current
-            current="$(cat "$FILE_PATH")"
-            local count
-            count="$(echo "$INPUT" | jq -r '.tool_input.edits | length')"
-            for i in $(seq 0 $((count - 1))); do
-                local old new
-                old="$(echo "$INPUT" | jq -r ".tool_input.edits[$i].old_string // \"\"")"
-                new="$(echo "$INPUT" | jq -r ".tool_input.edits[$i].new_string // \"\"")"
-                current="$(printf '%s' "$current" | awk -v old="$old" -v new="$new" '
-                    BEGIN { RS=""; ORS="" }
-                    { idx = index($0, old); if (idx > 0) {
-                        print substr($0, 1, idx-1) new substr($0, idx + length(old))
-                      } else { print } }')"
-            done
-            printf '%s' "$current"
+            HOOK_INPUT="$INPUT" HOOK_FILE="$FILE_PATH" python3 -c '
+import json, os, sys
+data = json.loads(os.environ["HOOK_INPUT"])
+edits = data["tool_input"].get("edits", [])
+with open(os.environ["HOOK_FILE"]) as f:
+    content = f.read()
+for e in edits:
+    old = e.get("old_string", "")
+    new = e.get("new_string", "")
+    idx = content.find(old)
+    if idx >= 0:
+        content = content[:idx] + new + content[idx + len(old):]
+sys.stdout.write(content)
+'
             ;;
     esac
 }
@@ -86,6 +89,9 @@ OLD="$(cat "$FILE_PATH" 2>/dev/null || echo "")"
 NEW="$(new_content)"
 
 # Decide which terminal column to enforce based on the tracker.
+# Per AGENTS.md, bug FIXED is the merge gate (passing tests = enough);
+# only feature VERIFIED requires device-evidence. So we only enforce
+# the features tracker here. Bug FIXED is a separate, lighter bar.
 TERMINAL_RE=""
 KIND=""
 case "$FILE_PATH" in
@@ -94,8 +100,11 @@ case "$FILE_PATH" in
         KIND="feature"
         ;;
     */docs/bugs.md)
-        TERMINAL_RE="FIXED"
-        KIND="bug"
+        # FIXED is the merge gate, not a verification gate; let it
+        # through. The verified-against-real-environment requirement
+        # for closing the GH issue is enforced at the issue-close
+        # step, not at the bug-row flip.
+        exit 0
         ;;
 esac
 

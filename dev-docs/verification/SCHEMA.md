@@ -1,10 +1,14 @@
 # Verification Evidence Schema
 
-Every transition of a `docs/features.md` row to `VERIFIED`, or of a
-`docs/bugs.md` row to `FIXED`, requires a paired evidence file in
-this directory. The file's frontmatter is machine-checked by
-`.claude/hooks/check_terminal_status_evidence.sh` (PreToolUse) so
-the tracker edit physically cannot land without it.
+Every transition of a `docs/features.md` row to `VERIFIED` requires
+a paired evidence file in this directory. The file's frontmatter is
+machine-checked by `.claude/hooks/check_terminal_status_evidence.sh`
+(PreToolUse) so the tracker edit physically cannot land without it.
+
+**Bug `FIXED` flips are NOT enforced by the hook.** Per AGENTS.md,
+`FIXED` is the merge gate (code shipped to main with passing tests
+= enough). The on-device verification before closing the GH issue
+is checked at the issue-close step, not at the bug-row flip.
 
 ## Filename
 

@@ -73,7 +73,17 @@ enum RemoteBookCatalog {
 
         let envelope: BackupLibraryManifestEnvelope
         do {
-            envelope = try JSONDecoder().decode(
+            // Mirror WebDAVProvider.decodeManifest's date strategy —
+            // backups encode `addedAt` / `lastOpenedAt` as ISO 8601
+            // strings (BackupDataCollector emits them via the same
+            // .iso8601 strategy). Without this, decode throws
+            // typeMismatch(Double) on every real backup. Caught by
+            // device verification of feature #47 — unit-test
+            // fixtures had used the default Double encoding so the
+            // miss passed unit tests.
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            envelope = try decoder.decode(
                 BackupLibraryManifestEnvelope.self, from: manifestData
             )
         } catch {

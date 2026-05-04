@@ -37,7 +37,14 @@ struct RemoteBookCatalogTests {
     }
 
     private static func makeManifestZIP(envelope: BackupLibraryManifestEnvelope) throws -> Data {
-        let json = try JSONEncoder().encode(envelope)
+        // Mirror BackupDataCollector's date strategy so the fixture
+        // matches what real backups encode. Without `.iso8601`,
+        // Date encodes as Double and the on-device decode path
+        // (which now uses .iso8601) won't trigger the bug. Caught
+        // by Gate-5 device verification of feature #47.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let json = try encoder.encode(envelope)
         return try ZIPWriter.createArchive(entries: [
             ZIPWriter.Entry(name: "library-manifest.json", data: json),
             ZIPWriter.Entry(name: "metadata.json", data: Data("{}".utf8))
