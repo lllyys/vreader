@@ -47,8 +47,8 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
     let onBookReady: @MainActor (String) -> Void
     let onError: @MainActor (String) -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onBookReady: onBookReady, onError: onError)
+    func makeCoordinator() -> FoliateSpikeView.Coordinator {
+        FoliateSpikeView.Coordinator(onBookReady: onBookReady, onError: onError)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -115,7 +115,9 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
 
+extension FoliateSpikeView {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         weak var webView: WKWebView?
         var bookBase64: String?
@@ -133,28 +135,44 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
                                    didReceive message: WKScriptMessage) {
             let name = message.name
             let body = message.body
-
             Task { @MainActor in
-                switch name {
-                case "bridge-ready":
-                    openBook()
+                await self.handleMessage(name: name, body: body)
+            }
+        }
 
-                case "book-ready":
-                    if let dict = body as? [String: Any] {
-                        let title = dict["title"] as? String ?? "Unknown"
-                        onBookReady(title)
-                        webView?.evaluateJavaScript("readerAPI.init({})") { _, _ in }
-                    }
+        /// MainActor-isolated message router. Extracted so unit tests
+        /// can exercise specific cases (bug #108) without constructing
+        /// a real `WKScriptMessage` (whose initializer is internal to
+        /// WebKit).
+        @MainActor
+        func handleMessage(name: String, body: Any) async {
+            switch name {
+            case "bridge-ready":
+                openBook()
 
-                case "error":
-                    if let dict = body as? [String: Any] {
-                        let msg = dict["message"] as? String ?? "Unknown error"
-                        onError(msg)
-                    }
-
-                default:
-                    break
+            case "book-ready":
+                if let dict = body as? [String: Any] {
+                    let title = dict["title"] as? String ?? "Unknown"
+                    onBookReady(title)
+                    webView?.evaluateJavaScript("readerAPI.init({})") { _, _ in }
                 }
+
+            case "tap":
+                // Bug #108: forward center-tap to the chrome-toggle
+                // observer in `ReaderContainerView`. Without this case
+                // the toolbar stayed visible because the JS bundle's
+                // `tap` message hit the default branch and silently
+                // no-oped.
+                NotificationCenter.default.post(name: .readerContentTapped, object: nil)
+
+            case "error":
+                if let dict = body as? [String: Any] {
+                    let msg = dict["message"] as? String ?? "Unknown error"
+                    onError(msg)
+                }
+
+            default:
+                break
             }
         }
 
