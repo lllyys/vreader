@@ -164,9 +164,31 @@ struct BookFileMaterializerTests {
     // MARK: - Already-local skip
 
     @Test func materialize_existingLocalFileWithMatchingHash_skipsDownload() async throws {
-        let (materializer, blobReader, _, sandbox, _) = try await Self.makeRig()
+        let (materializer, blobReader, persistence, sandbox, _) = try await Self.makeRig()
         let payload = Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: 0xAB, count: 512)
         let entry = Self.makeEntry(data: payload, format: .epub)
+        // Seed the persistence row so this is the "row + file consistent"
+        // happy path — bug #114 carved out the "row missing" sub-case
+        // below as a separate test.
+        let prior = BookRecord(
+            fingerprintKey: entry.fingerprintKey,
+            title: entry.title ?? "T",
+            author: entry.author,
+            coverImagePath: nil,
+            fingerprint: DocumentFingerprint(
+                contentSHA256: entry.sha256,
+                fileByteCount: entry.byteCount,
+                format: BookFormat(rawValue: entry.format) ?? .epub
+            ),
+            provenance: ImportProvenance(source: .filesApp, importedAt: Date(), originalURLBookmarkData: nil),
+            detectedEncoding: nil,
+            addedAt: entry.addedAt,
+            originalExtension: entry.originalExtension,
+            lastOpenedAt: entry.lastOpenedAt,
+            fileState: .local,
+            blobPath: nil
+        )
+        await persistence.seed(prior)
         // Pre-place the file at the resolved sandbox location with matching
         // bytes — materializer should hash + skip download.
         let safeName = entry.fingerprintKey.replacingOccurrences(of: ":", with: "_")
@@ -179,6 +201,46 @@ struct BookFileMaterializerTests {
         // Blob was not requested — we never called download.
         let stored = await blobReader.blobs
         #expect(stored.isEmpty)
+    }
+
+    // MARK: - Bug #114: orphan file (canonical file present, no SwiftData row)
+
+    @Test func materialize_localFilePresentButRowMissing_reimportsAndInsertsRow() async throws {
+        // Bug #114: deleteBook removes the SwiftData row but leaves the
+        // sandbox file in place. On next restore, the materializer's
+        // `.alreadyLocal` short-circuit returned success without ever
+        // calling BookImporter — so the row never came back and the
+        // book stayed invisible in the library.
+        //
+        // Fixed behavior: when the canonical file exists but no row
+        // exists for the fingerprintKey, treat the file as a download
+        // result and run the import path so the row gets inserted.
+        let (materializer, blobReader, persistence, sandbox, _) = try await Self.makeRig()
+        let payload = Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: 0x77, count: 512)
+        let entry = Self.makeEntry(data: payload, format: .epub)
+
+        // Pre-place the canonical file (the orphan) but DO NOT seed a row.
+        let safeName = entry.fingerprintKey.replacingOccurrences(of: ":", with: "_")
+        let localURL = sandbox.appendingPathComponent(safeName).appendingPathExtension(entry.originalExtension)
+        try payload.write(to: localURL)
+
+        // Confirm the orphan precondition before running the materializer.
+        let preRow = try await persistence.findBook(byFingerprintKey: entry.fingerprintKey)
+        #expect(preRow == nil)
+
+        let results = await materializer.materialize([entry]) { _ in }
+
+        #expect(results.count == 1)
+        // Either outcome is acceptable as long as it counts as success;
+        // the critical invariant is the row now exists.
+        #expect(results[0].isSuccess)
+        // Blob still not requested — we don't re-download an already-good file.
+        let stored = await blobReader.blobs
+        #expect(stored.isEmpty)
+        // The row got inserted.
+        let postRow = try await persistence.findBook(byFingerprintKey: entry.fingerprintKey)
+        #expect(postRow != nil)
+        #expect(postRow?.fingerprintKey == entry.fingerprintKey)
     }
 
     // MARK: - Corrupt local file (preflight rehash catches it)

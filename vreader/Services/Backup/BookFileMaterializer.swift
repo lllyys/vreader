@@ -143,10 +143,18 @@ final class BookFileMaterializer: Sendable {
     private func materializeOne(_ entry: BackupLibraryEntry) async -> MaterializeResult {
         let localURL = resolveSandboxURL(entry.fingerprintKey, entry.originalExtension)
 
-        // Step 1: existing local file → preflight hash.
+        // Step 1: existing local file → preflight hash + ensure SwiftData
+        // row exists for it. Bug #114: previously this short-circuited
+        // to `.alreadyLocal` whenever the file's SHA matched, but if the
+        // user had deleted the row earlier (which leaves the sandbox
+        // file behind today), the row never came back and the book
+        // stayed invisible in the library. Now we still skip the
+        // download (the bytes are good) but route through BookImporter
+        // so the row gets re-inserted on dedupe-miss. BookImporter's
+        // step 7 fast-paths the dedupe-hit case by replacing provenance.
         if FileManager.default.fileExists(atPath: localURL.path) {
             if let localHash = try? localFileSHA256(at: localURL), localHash == entry.sha256 {
-                return MaterializeResult(entry: entry, outcome: .alreadyLocal)
+                return await reimportLocalFile(entry: entry, at: localURL)
             }
             // Corrupt local file (wrong bytes for the fingerprint). Remove
             // before download — BookImporter would otherwise trust the
@@ -201,6 +209,44 @@ final class BookFileMaterializer: Sendable {
         // trusting an in-memory hash so both paths share identical
         // verification semantics.
         return await finalizer.finalize(localTempURL: tempURL, entry: entry)
+    }
+
+    /// Bug #114: when the canonical sandbox file is already present and
+    /// SHA-matches, route through BookImporter so the SwiftData row gets
+    /// reinserted if the user previously deleted it (the historical
+    /// deleteBook path leaves the file behind). Importer's step 7
+    /// fast-paths the dedupe-hit case to a `replaceProvenance` call,
+    /// so the row+file consistent case stays cheap. We map the result
+    /// back to `.alreadyLocal` because no new bytes transferred — the
+    /// caller's "imported / already had it" accounting still reads
+    /// correctly.
+    private func reimportLocalFile(
+        entry: BackupLibraryEntry,
+        at localURL: URL
+    ) async -> MaterializeResult {
+        let importResult: ImportResult
+        do {
+            importResult = try await importer.importFile(at: localURL, source: .restore)
+        } catch let error as ImportError {
+            return MaterializeResult(entry: entry, outcome: .importFailed("\(error)"))
+        } catch {
+            return MaterializeResult(entry: entry, outcome: .importFailed("\(error)"))
+        }
+        // Defensive: make sure the importer's computed fingerprintKey
+        // agrees with the manifest. A mismatch would mean the file at
+        // the canonical path doesn't actually carry the bytes the
+        // entry claims — preflight hash above should have caught it,
+        // but a final check is cheap.
+        guard importResult.fingerprintKey == entry.fingerprintKey else {
+            return MaterializeResult(
+                entry: entry,
+                outcome: .fingerprintMismatchAfterImport(
+                    expected: entry.fingerprintKey,
+                    actual: importResult.fingerprintKey
+                )
+            )
+        }
+        return MaterializeResult(entry: entry, outcome: .alreadyLocal)
     }
 
     // MARK: - Hashing helpers
