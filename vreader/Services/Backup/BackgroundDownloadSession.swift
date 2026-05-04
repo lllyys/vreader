@@ -32,9 +32,15 @@ struct LazyDownloadTaskDescriptor: Sendable, Equatable {
 protocol BackgroundDownloadSessioning: Sendable {
     /// All download tasks currently tracked by the underlying session.
     /// Called once at coordinator init to recover state from a session
-    /// that survived app termination. Future WIs (cancel, enqueue) will
-    /// add more methods.
+    /// that survived app termination.
     func allInFlightDownloads() async -> [LazyDownloadTaskDescriptor]
+
+    /// Starts a download task for `request` with the given persisted
+    /// `taskDescription` so the delegate can recover identity across
+    /// app termination. Returns the assigned task identifier so the
+    /// coordinator can track it. Production calls
+    /// `URLSessionDownloadTask.resume()`. Feature #47 WI-6.
+    func enqueueDownload(request: URLRequest, taskDescription: String) -> Int
 }
 
 /// Production wrapper around `URLSession.background(...)`. Owns the
@@ -72,5 +78,12 @@ final class URLSessionBackgroundSession: BackgroundDownloadSessioning, @unchecke
                 continuation.resume(returning: descriptors)
             }
         }
+    }
+
+    func enqueueDownload(request: URLRequest, taskDescription: String) -> Int {
+        let task = session.downloadTask(with: request)
+        task.taskDescription = taskDescription
+        task.resume()
+        return task.taskIdentifier
     }
 }

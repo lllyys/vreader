@@ -13,6 +13,9 @@ import SwiftData
 /// configure it before constructing the coordinator.
 final class MockBackgroundDownloadSession: BackgroundDownloadSessioning, @unchecked Sendable {
     private let descriptors: [LazyDownloadTaskDescriptor]
+    /// Records of every enqueueDownload call (request, taskDescription).
+    private(set) var enqueuedRequests: [(request: URLRequest, taskDescription: String)] = []
+    private var nextTaskID: Int = 100
 
     init(descriptors: [LazyDownloadTaskDescriptor]) {
         self.descriptors = descriptors
@@ -20,6 +23,13 @@ final class MockBackgroundDownloadSession: BackgroundDownloadSessioning, @unchec
 
     func allInFlightDownloads() async -> [LazyDownloadTaskDescriptor] {
         descriptors
+    }
+
+    func enqueueDownload(request: URLRequest, taskDescription: String) -> Int {
+        enqueuedRequests.append((request, taskDescription))
+        let id = nextTaskID
+        nextTaskID += 1
+        return id
     }
 }
 
@@ -46,6 +56,8 @@ final class GatedMockBackgroundDownloadSession: BackgroundDownloadSessioning, @u
         _ = await iter.next()
         return descriptors
     }
+
+    func enqueueDownload(request: URLRequest, taskDescription: String) -> Int { 0 }
 }
 
 @MainActor

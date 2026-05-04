@@ -190,6 +190,69 @@ final class LazyDownloadCoordinator {
         progressByKey.removeValue(forKey: fingerprintKey)
     }
 
+    // MARK: - Enqueue (feature #47 WI-6)
+
+    /// Outcome of an enqueue attempt. UI consumers branch on this:
+    /// `.started` → progress will follow; `.deferredWiFi` → show
+    /// "Waiting for Wi-Fi"; `.notReady` → coordinator wasn't built
+    /// with session+persistence (skeleton init).
+    enum EnqueueResult: Sendable, Equatable {
+        case started(taskIdentifier: Int)
+        case deferredWiFi
+        case notReady
+        case taskDescriptionEncodeFailed
+    }
+
+    /// Builds an authenticated request via `requestBuilder`, encodes the
+    /// fingerprint identity into `URLSessionDownloadTask.taskDescription`,
+    /// and starts the task on the underlying background URLSession.
+    /// Pre-conditions:
+    ///   - `policy.shouldStart()` must return true (caller checks the
+    ///     return value to surface "waiting for Wi-Fi" UX)
+    ///   - Coordinator must have been constructed with the
+    ///     session/persistence init (skeleton init returns `.notReady`)
+    ///
+    /// `prepareToDownload(fingerprintKey:)` is called for you so a
+    /// retry after a `.failed` outcome flips terminalKeys cleanly.
+    func enqueue(
+        fingerprintKey: String,
+        blobPath: String,
+        expectedSHA256: String,
+        expectedByteCount: Int64,
+        originalExtension: String,
+        requestBuilder: WebDAVDownloadRequestBuilder,
+        policy: WebDAVNetworkPolicy
+    ) -> EnqueueResult {
+        guard let session else { return .notReady }
+        guard policy.shouldStart() else { return .deferredWiFi }
+
+        let meta = LazyDownloadTaskMeta(
+            fingerprintKey: fingerprintKey,
+            blobPath: blobPath,
+            expectedSHA256: expectedSHA256,
+            expectedByteCount: expectedByteCount,
+            originalExtension: originalExtension
+        )
+        guard let encoded = meta.encodeAsTaskDescription() else {
+            return .taskDescriptionEncodeFailed
+        }
+
+        prepareToDownload(fingerprintKey: fingerprintKey)
+        let request = requestBuilder.authenticatedGETRequest(forBlobPath: blobPath)
+        let taskID = session.enqueueDownload(request: request, taskDescription: encoded)
+        // Seed indeterminate progress so the row shows a spinner
+        // immediately rather than after the first didWriteData callback.
+        progressByKey[fingerprintKey] = LazyDownloadProgress(
+            fingerprintKey: fingerprintKey,
+            bytesWritten: 0,
+            totalBytes: nil
+        )
+        log.info(
+            "enqueue: \(fingerprintKey, privacy: .private) → task #\(taskID, privacy: .public)"
+        )
+        return .started(taskIdentifier: taskID)
+    }
+
     // MARK: - Background-event handler invocation
 
     /// Called by `LazyDownloadDelegate.urlSessionDidFinishEvents` after
