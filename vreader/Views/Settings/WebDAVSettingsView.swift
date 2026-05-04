@@ -30,6 +30,11 @@ struct WebDAVSettingsView: View {
     @State private var restoreCandidate: BackupMetadata?
     @State private var showDeleteConfirm = false
     @State private var deleteCandidate: BackupMetadata?
+    /// Bound to SelectiveRestorePicker — set when the user taps
+    /// "Restore selectively…", cleared on dismiss. Feature #47 WI-6.
+    @State private var pickerCandidate: BackupMetadata?
+    @Environment(\.persistenceActor) private var persistenceActor
+    @Environment(\.webDAVNetworkPolicy) private var webDAVNetworkPolicy
 
     /// Keychain service for credential persistence.
     private let keychain: KeychainService
@@ -136,6 +141,29 @@ struct WebDAVSettingsView: View {
                 .accessibilityIdentifier("webdavClearButton")
             }
 
+            // Feature #47 WI-6: Wi-Fi-only toggle for lazy book downloads.
+            // Single source of truth — Wi-Fi-only also gates the
+            // restore-all "Restore" button on cellular (WI-7
+            // verification step).
+            if let policy = webDAVNetworkPolicy {
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { policy.wifiOnly },
+                        set: { policy.wifiOnly = $0 }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Wi-Fi only for book downloads")
+                            Text("When off, lazy book-blob downloads may use cellular data.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("webdavWiFiOnlyToggle")
+                } header: {
+                    Text("Network policy")
+                }
+            }
+
             backupSection
         }
         .navigationTitle("WebDAV Backup")
@@ -171,6 +199,28 @@ struct WebDAVSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This permanently removes the backup from the server.")
+        }
+        .sheet(item: $pickerCandidate) { backup in
+            // Picker mounts as a fresh sheet per backup so the
+            // BackupViewModel.loadManifest call fires from .task and
+            // the user sees a spinner instead of stale state.
+            NavigationStack {
+                if let vm = backupVM, let persistence = persistenceActor {
+                    SelectiveRestorePicker(
+                        backup: backup,
+                        viewModel: vm,
+                        persistence: persistence,
+                        dismiss: { pickerCandidate = nil }
+                    )
+                } else {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading backup details…")
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding()
+                }
+            }
         }
     }
 
@@ -266,6 +316,17 @@ struct WebDAVSettingsView: View {
                 .controlSize(.small)
                 .disabled(backupVM?.isRestoring == true || backupVM?.isBackingUp == true)
                 .accessibilityIdentifier("webdavRestoreButton-\(backup.id.uuidString)")
+
+                Button {
+                    pickerCandidate = backup
+                } label: {
+                    Label("Pick…", systemImage: "checklist")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(backupVM?.isRestoring == true || backupVM?.isBackingUp == true)
+                .accessibilityIdentifier("webdavSelectivePickerButton-\(backup.id.uuidString)")
 
                 Button(role: .destructive) {
                     deleteCandidate = backup
