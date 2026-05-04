@@ -135,8 +135,15 @@ private struct CoverContainerView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
+                // Bug #107: bump stroke opacity 0.2 → 0.35 so covers
+                // with white/light edges visibly delineate against the
+                // white library-grid background. The previous 0.2 was
+                // effectively invisible on white, making AZW3 covers
+                // like 被讨厌的勇气 look like they had top padding.
+                // Stays subtle (still 0.5pt) so darker covers don't
+                // get a heavy outline.
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 0.5)
+                    .stroke(Color.gray.opacity(0.35), lineWidth: 0.5)
             )
             .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
     }
