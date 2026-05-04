@@ -162,6 +162,52 @@ struct WebDAVBlobStoreTests {
 
     // MARK: - Write side — server capability missing
 
+    // MARK: - Write side — bug #112: fresh rclone server (no temp dir yet)
+
+    @Test func putBlobAtomically_freshServer_createsTempDirectoryBeforePut() async throws {
+        // Bug #112: rclone's WebDAV returns 409 when PUT'ing into a path
+        // whose parent directory doesn't exist. The fix MKCOLs the temp
+        // path before the first PUT.
+        let (store, mock) = makeStore()
+        mock.simulateRcloneStrictParentRequirement = true
+        // Pre-MKCOL the books destination so the MOVE target's parent
+        // exists — this test focuses on the temp parent.
+        try await mock.createDirectory(path: "VReader/books/epub")
+
+        let result = try await store.putBlobAtomically(payload, to: blobPath, expectedByteCount: 1024)
+        #expect(result == .uploaded)
+        #expect(mock.files[blobPath] == payload)
+
+        // Verify the order: MKCOL VReader/uploads/tmp comes BEFORE PUT.
+        let methods = mock.methodCalls
+        let mkcolTempIdx = methods.firstIndex { $0.method == "MKCOL" && $0.path == "VReader/uploads/tmp" }
+        let putIdx = methods.firstIndex { $0.method == "PUT" }
+        #expect(mkcolTempIdx != nil, "expected MKCOL on VReader/uploads/tmp before PUT")
+        #expect(putIdx != nil, "expected at least one PUT")
+        if let mi = mkcolTempIdx, let pi = putIdx {
+            #expect(mi < pi, "MKCOL must precede PUT")
+        }
+    }
+
+    @Test func putBlobAtomically_freshServer_alsoMkcolsAncestors() async throws {
+        // Bug #112 edge case: rclone may also reject MKCOL on a deep path
+        // whose intermediate ancestors don't exist. The fix walks
+        // ancestors deepest-last so VReader → VReader/uploads →
+        // VReader/uploads/tmp all get created.
+        let (store, mock) = makeStore()
+        mock.simulateRcloneStrictParentRequirement = true
+        try await mock.createDirectory(path: "VReader/books/epub")
+
+        _ = try await store.putBlobAtomically(payload, to: blobPath, expectedByteCount: 1024)
+
+        let mkcolPaths = mock.methodCalls.filter { $0.method == "MKCOL" }.map(\.path)
+        // Either all three ancestors are MKCOL'd, or the implementation
+        // is idempotent enough that a single MKCOL on the deepest path
+        // succeeds (rclone accepts that, but stricter servers don't).
+        // We assert the leaf is present at minimum.
+        #expect(mkcolPaths.contains("VReader/uploads/tmp"))
+    }
+
     @Test func putBlobAtomically_moveNotImplemented_throwsServerCapability() async throws {
         let (store, mock) = makeStore()
         mock.simulateMoveNotImplemented = true

@@ -27,6 +27,12 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
         methodCalls.append(("PUT", path))
         if simulateAuthFailure { throw WebDAVError.authenticationFailed }
         if simulateConnectionFailure { throw WebDAVError.connectionFailed("mock") }
+        if simulateRcloneStrictParentRequirement {
+            let parent = (path as NSString).deletingLastPathComponent
+            if !parent.isEmpty, !mkcolPaths.contains(parent) {
+                throw WebDAVError.httpError(409)
+            }
+        }
         files[path] = data
     }
 
@@ -70,6 +76,10 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
         if simulateAuthFailure { throw WebDAVError.authenticationFailed }
         // Directories are just paths ending with /
         files[path] = Data()
+        // Track the path for the rclone-strict-parent gate (bug #112).
+        // Stored without trailing slash so callers using either form match.
+        let normalized = path.hasSuffix("/") ? String(path.dropLast()) : path
+        mkcolPaths.insert(normalized)
     }
 
     func testConnection() async throws {
@@ -110,6 +120,15 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
     /// When true, MOVE throws httpError(501) — simulates a server that
     /// doesn't implement MOVE.
     var simulateMoveNotImplemented = false
+
+    /// When true, PUT to a path whose parent directory hasn't been MKCOL'd
+    /// throws httpError(409) — simulates rclone's WebDAV behavior on a
+    /// fresh target where intermediate paths don't exist yet (bug #112).
+    /// Directories are tracked by the set of paths previously MKCOL'd.
+    var simulateRcloneStrictParentRequirement = false
+    /// Set of directory paths that have been MKCOL'd. Used together with
+    /// `simulateRcloneStrictParentRequirement` to gate uploads.
+    var mkcolPaths: Set<String> = []
 }
 
 // MARK: - Feature #46 (WI-7) — provider backup integration with blob upload

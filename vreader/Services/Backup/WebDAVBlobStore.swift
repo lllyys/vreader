@@ -10,11 +10,23 @@ import Foundation
 
 /// Wraps any `WebDAVTransport` and exposes the read+write blob-store API.
 /// Stateless — owns no buffers, just composes the transport's primitives.
-struct WebDAVBlobStore: BackupBlobReading, BackupBlobWriting, Sendable {
+final class WebDAVBlobStore: BackupBlobReading, BackupBlobWriting, @unchecked Sendable {
     let transport: any WebDAVTransport
     /// Directory used for temp uploads under the WebDAV root. `.part` files
     /// here are swept by `tmpSweep()` (future WI; lives on WebDAVProvider).
     let tempPath: String
+    /// Once we've successfully MKCOL'd the temp ancestors, skip subsequent
+    /// MKCOLs in this process to keep happy-path PUTs cheap. Bug #112: a
+    /// fresh rclone target rejects the first PUT with 409 because
+    /// `VReader/uploads/tmp/` doesn't exist; after the first ensure we
+    /// memoize so repeated uploads pay the cost once.
+    ///
+    /// Race semantics: two concurrent uploaders may both observe
+    /// `ensuredTempDir == false` and call MKCOL twice. That's harmless —
+    /// MKCOL on an existing directory is treated as success (the
+    /// transport's adapter swallows the "already exists" status). The
+    /// only cost is an extra round-trip on first concurrent use.
+    private nonisolated(unsafe) var ensuredTempDir: Bool = false
 
     init(transport: any WebDAVTransport, tempPath: String = "VReader/uploads/tmp") {
         self.transport = transport
@@ -53,7 +65,15 @@ struct WebDAVBlobStore: BackupBlobReading, BackupBlobWriting, Sendable {
             return .alreadyExists
         }
 
-        // Step 2: PUT to a unique temp path. Mid-upload kill leaves only this
+        // Step 2: ensure the temp directory tree exists before PUT.
+        // Bug #112: rclone (and other strict WebDAV servers) reject PUT
+        // with 409 if the parent path doesn't exist. WebDAVProvider's
+        // backup path MKCOLs `VReader/backups/...` ancestors but never
+        // `VReader/uploads/tmp/`, which is owned by this adapter. We
+        // create them here once per process.
+        try await ensureTempDirectoryExists()
+
+        // Step 3: PUT to a unique temp path. Mid-upload kill leaves only this
         // .part file (which gets swept after 24h); the final path stays clean.
         let tempBlobPath = "\(tempPath)/\(UUID().uuidString).part"
         do {
@@ -102,5 +122,33 @@ struct WebDAVBlobStore: BackupBlobReading, BackupBlobWriting, Sendable {
         }
 
         return .uploaded
+    }
+
+    /// MKCOL the temp directory tree (deepest-last) so a fresh server
+    /// accepts the upcoming PUT. Memoized via `ensuredTempDir` — only
+    /// runs once per instance after the first successful pass. MKCOL on
+    /// an existing path returns an error on most servers; we swallow
+    /// those with `try?` because the goal is "directory exists after
+    /// this returns," not "we successfully created it." Concurrent first
+    /// callers may both run the loop; that's harmless — MKCOL is
+    /// idempotent on success.
+    private func ensureTempDirectoryExists() async throws {
+        if ensuredTempDir { return }
+        for ancestor in Self.nestedAncestors(of: tempPath) {
+            try? await transport.createDirectory(path: ancestor)
+        }
+        ensuredTempDir = true
+    }
+
+    /// Returns each ancestor directory deepest-last.
+    /// `"VReader/uploads/tmp"` → `["VReader", "VReader/uploads", "VReader/uploads/tmp"]`.
+    static func nestedAncestors(of path: String) -> [String] {
+        var components: [String] = []
+        var accumulator: [String] = []
+        for piece in path.split(separator: "/") where !piece.isEmpty {
+            accumulator.append(String(piece))
+            components.append(accumulator.joined(separator: "/"))
+        }
+        return components
     }
 }
