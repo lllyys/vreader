@@ -86,4 +86,81 @@ Note: this is a warning, not a block. The session may still end.
 EOF
 fi
 
+# --- Mirror debt scan (mechanical-mirror rule, AGENTS.md) ---
+# Both trackers: surface mirror-required rows that lack GH cross-refs.
+# Scoped to actionable debt per Codex's design recommendation:
+#   features: PLANNED / IN PROGRESS / DONE / VERIFIED without GH:#N
+#   bugs:     anything not in {DUPLICATE, WONT FIX, WONT DO, DEFERRED}
+#             without GH:#N AND without "Mirror: no" escape.
+
+if command -v python3 >/dev/null 2>&1; then
+    BUGS_FILE="$PROJECT_DIR/docs/bugs.md"
+    FEATURES_FILE="$PROJECT_DIR/docs/features.md"
+    MIRROR_DEBT="$(BUGS="$BUGS_FILE" FEATURES="$FEATURES_FILE" python3 <<'PYEOF'
+import os, re
+
+GH_RE = re.compile(r"GH:\s*#?\d+")
+MIRROR_NO_FEATURE = re.compile(r"Mirror:\s*no", re.IGNORECASE)
+MIRROR_NO_BUG = re.compile(r"Mirror:\s*no\s*[—-]\s*local-only", re.IGNORECASE)
+ID_RE = re.compile(r"^\| *(\d+) *\|")
+
+def scan(path, kind):
+    if not os.path.exists(path):
+        return []
+    out = []
+    with open(path) as f:
+        for line in f:
+            m = ID_RE.match(line)
+            if not m:
+                continue
+            rid = m.group(1)
+            cells = [c.strip() for c in line.split("|")]
+            if len(cells) < 7:
+                continue
+            status = cells[5]
+            notes = cells[6]
+            if kind == "feature":
+                if status not in {"PLANNED", "IN PROGRESS", "DONE", "VERIFIED"}:
+                    continue
+            else:
+                if status in {"DUPLICATE", "WONT FIX", "WONT DO", "DEFERRED", ""}:
+                    continue
+            if GH_RE.search(notes):
+                continue
+            if kind == "feature" and MIRROR_NO_FEATURE.search(notes):
+                continue
+            if kind == "bug" and MIRROR_NO_BUG.search(notes):
+                continue
+            out.append(rid)
+    return out
+
+bug_debt = scan(os.environ["BUGS"], "bug")
+feature_debt = scan(os.environ["FEATURES"], "feature")
+parts = []
+if bug_debt:
+    head = ", ".join(f"#{r}" for r in bug_debt[:8])
+    extra = "" if len(bug_debt) <= 8 else f" (+{len(bug_debt) - 8} more)"
+    parts.append(f"BUG-DEBT|{len(bug_debt)}|{head}{extra}")
+if feature_debt:
+    head = ", ".join(f"#{r}" for r in feature_debt[:8])
+    extra = "" if len(feature_debt) <= 8 else f" (+{len(feature_debt) - 8} more)"
+    parts.append(f"FEATURE-DEBT|{len(feature_debt)}|{head}{extra}")
+if parts:
+    print("\n".join(parts))
+PYEOF
+    )"
+
+    if [[ -n "$MIRROR_DEBT" ]]; then
+        echo "[mirror-debt-hook] Unmirrored tracker rows (per AGENTS.md mechanical-mirror rule):" >&2
+        echo "$MIRROR_DEBT" | while IFS='|' read -r kind count ids; do
+            label="${kind/-DEBT/}"
+            echo "  ${label} rows lacking GH:#N: ${count} — ${ids}" >&2
+        done
+        echo "" >&2
+        echo "Open a GH issue per row (or use \`/file-bug\` / \`/file-feature\` slash commands)" >&2
+        echo "and add \`GH: #N\` to the Notes column. \`Mirror: no\` (features) and" >&2
+        echo "\`Mirror: no — local-only\` (bugs only, terminal status) bypass." >&2
+    fi
+fi
+
 exit 0
