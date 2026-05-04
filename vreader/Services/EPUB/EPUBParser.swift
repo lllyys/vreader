@@ -112,14 +112,33 @@ actor EPUBParser: EPUBParserProtocol {
                 _ = try? await zip.extractEntry(path: chapterPath, to: cacheDir)
             }
         }
-        // PERF: Defer CSS/font/nav extraction to background — don't block first chapter display.
+
+        // Bug #104: extract nav.xhtml + ncx SYNCHRONOUSLY before computing
+        // metadata. The previous code deferred this to a background
+        // Task.detached, so on first-open `extractNavTitles` ran before
+        // the files existed and every chapter fell back to "Section N".
+        // Nav files are tiny (typically < 5 KB) so extracting them on
+        // the open path is cheap. CSS/fonts stay deferred — they're
+        // only consumed by WKWebView's file:// fetch, which has its
+        // own on-demand extraction path.
+        if let navHref = result.navHref {
+            let navPath = opfDirRel.isEmpty ? navHref : "\(opfDirRel)/\(navHref)"
+            if !fm.fileExists(atPath: cacheDir.appendingPathComponent(navPath).path) {
+                _ = try? await zip.extractEntry(path: navPath, to: cacheDir)
+            }
+        }
+        if let ncxHref = result.ncxHref {
+            let ncxPath = opfDirRel.isEmpty ? ncxHref : "\(opfDirRel)/\(ncxHref)"
+            if !fm.fileExists(atPath: cacheDir.appendingPathComponent(ncxPath).path) {
+                _ = try? await zip.extractEntry(path: ncxPath, to: cacheDir)
+            }
+        }
+
+        // PERF: Defer CSS/font extraction to background — don't block first chapter display.
         // WKWebView will request these via file:// URLs; they'll be extracted on-demand
         // by contentForSpineItem's lazy extraction path. Pre-extract in background for speed.
         let capturedZip = zip
         let capturedCacheDir = cacheDir
-        let capturedOpfDirRel = opfDirRel
-        let capturedNavHref = result.navHref
-        let capturedNcxHref = result.ncxHref
         Task.detached(priority: .utility) {
             let styleExtensions: Set<String> = ["css", "ttf", "otf", "woff", "woff2"]
             for entry in await capturedZip.listEntries() {
@@ -129,23 +148,9 @@ actor EPUBParser: EPUBParserProtocol {
                     _ = try? await capturedZip.extractEntry(path: entry.path, to: capturedCacheDir)
                 }
             }
-            // Nav/NCX for TOC titles
-            if let navHref = capturedNavHref {
-                let navPath = capturedOpfDirRel.isEmpty ? navHref : "\(capturedOpfDirRel)/\(navHref)"
-                if !FileManager.default.fileExists(atPath: capturedCacheDir.appendingPathComponent(navPath).path) {
-                    _ = try? await capturedZip.extractEntry(path: navPath, to: capturedCacheDir)
-                }
-            }
-            if let ncxHref = capturedNcxHref {
-                let ncxPath = capturedOpfDirRel.isEmpty ? ncxHref : "\(capturedOpfDirRel)/\(ncxHref)"
-                if !FileManager.default.fileExists(atPath: capturedCacheDir.appendingPathComponent(ncxPath).path) {
-                    _ = try? await capturedZip.extractEntry(path: ncxPath, to: capturedCacheDir)
-                }
-            }
         }
 
-        // PERF: Return metadata immediately. Nav titles resolved if files are cached,
-        // otherwise titles will be generic (e.g., "Section 1"). Not blocking open for this.
+        // Nav titles now resolve correctly on first open (bug #104).
         var metadata = result.metadata
         let opfDirURL = opfURL.deletingLastPathComponent()
         let navTitles = Self.extractNavTitles(
