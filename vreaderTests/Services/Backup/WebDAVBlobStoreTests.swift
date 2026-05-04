@@ -208,6 +208,65 @@ struct WebDAVBlobStoreTests {
         #expect(mkcolPaths.contains("VReader/uploads/tmp"))
     }
 
+    // MARK: - Bug #117: failed MKCOL must not poison memoization
+
+    @Test func ensureTempDir_failureDoesNotPoisonMemoization() async throws {
+        // Bug #117: ensureTempDirectoryExists() previously swallowed every
+        // MKCOL error with try? then unconditionally set ensuredTempDir.
+        // A transient auth/network failure on first MKCOL would memoize
+        // "directory ready" while the directory didn't actually exist —
+        // every later upload in the same process would skip the ensure
+        // step and keep failing 409.
+        let (store, mock) = makeStore()
+        mock.simulateRcloneStrictParentRequirement = true
+        try await mock.createDirectory(path: "VReader/books/epub")
+
+        // First call: MKCOL on the LEAF temp path throws auth.
+        var firstAttempt = true
+        mock.mkcolInterceptor = { path in
+            if firstAttempt && path == "VReader/uploads/tmp" {
+                return .authenticationFailed
+            }
+            return nil
+        }
+
+        do {
+            _ = try await store.putBlobAtomically(payload, to: blobPath, expectedByteCount: 1024)
+            Issue.record("expected first putBlobAtomically to throw — auth failed mid-ensure")
+        } catch {
+            // Expected — auth error propagates out of ensureTempDirectoryExists.
+        }
+        // Clear interceptor so the retry path can succeed.
+        firstAttempt = false
+        mock.mkcolInterceptor = nil
+
+        // Second call MUST re-run the MKCOL chain (the failed memoization
+        // would skip it and 409 would surface again).
+        let result = try await store.putBlobAtomically(payload, to: blobPath, expectedByteCount: 1024)
+        #expect(result == .uploaded)
+
+        // Two MKCOLs on the leaf path = ensure ran twice.
+        let leafMkcols = mock.methodCalls.filter { $0.method == "MKCOL" && $0.path == "VReader/uploads/tmp" }
+        #expect(leafMkcols.count == 2, "expected MKCOL on leaf path on both first (failed) and second (success) attempts; got \(leafMkcols.count)")
+    }
+
+    @Test func putBlobAtomically_freshServer_alsoMkcolsAncestors_orderedFullChain() async throws {
+        // Bug #117 sub-finding: the original test only asserted the leaf
+        // MKCOL existed. Strengthen to verify the full ancestor chain
+        // (deepest-last) is created — a regression that stopped
+        // creating `VReader` would still 409 on stricter servers.
+        let (store, mock) = makeStore()
+        mock.simulateRcloneStrictParentRequirement = true
+        try await mock.createDirectory(path: "VReader/books/epub")
+
+        _ = try await store.putBlobAtomically(payload, to: blobPath, expectedByteCount: 1024)
+
+        let mkcolsInOrder = mock.methodCalls.filter { $0.method == "MKCOL" }.map(\.path)
+        // Drop the test-setup MKCOL that pre-created VReader/books/epub.
+        let storeMkcols = mkcolsInOrder.filter { $0.hasPrefix("VReader/uploads") || $0 == "VReader" }
+        #expect(storeMkcols == ["VReader", "VReader/uploads", "VReader/uploads/tmp"])
+    }
+
     @Test func putBlobAtomically_moveNotImplemented_throwsServerCapability() async throws {
         let (store, mock) = makeStore()
         mock.simulateMoveNotImplemented = true

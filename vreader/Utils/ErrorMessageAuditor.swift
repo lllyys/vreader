@@ -54,6 +54,8 @@ enum ErrorMessageAuditor {
             return "The requested item could not be found."
         case .invalidContent:
             return "The content could not be processed."
+        case .partialBulkInsert(let insertedKeys, _):
+            return "Some items were saved (\(insertedKeys.count)), but others could not be processed."
         }
     }
 

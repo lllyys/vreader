@@ -16,6 +16,15 @@ import SwiftData
 enum PersistenceError: Error, Sendable {
     case recordNotFound(String)
     case invalidContent(String)
+    /// Bulk-insert pipeline failed partway through. `insertedKeys` carries
+    /// the fingerprintKeys that were successfully persisted in input order
+    /// before the failure, so callers (e.g., `SelectiveRestoreCoordinator`
+    /// in bug #119's fix) can still react to the partial result —
+    /// notify subscribers for what landed, log the rest as "manual repair
+    /// required." `underlyingDescription` is the original error
+    /// rendered as a string (Sendable) from the failing record's
+    /// `insertBook` call.
+    case partialBulkInsert(insertedKeys: [String], underlyingDescription: String)
 }
 
 /// Protocol for persistence operations, enabling mock injection in tests.

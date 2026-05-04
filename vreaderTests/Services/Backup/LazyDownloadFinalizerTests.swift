@@ -235,6 +235,157 @@ struct LazyDownloadFinalizerTests {
         }
     }
 
+    // MARK: - Bug #118 follow-up: tryPromoteFromDisk recovery path
+
+    @Test func tryPromoteFromDisk_canonicalFileWithMatchingSHA_promotesToLocal() async throws {
+        // Recovery path: previous finalize moved the staged file into the
+        // canonical sandbox path but the persistence save failed,
+        // leaving the row at .downloading even though bytes are local.
+        // Reattach should call this and recover rather than discarding
+        // valid local bytes.
+        let staged = try makeStagedFile(extensionName: "epub", byteCount: 1024)
+        defer { try? FileManager.default.removeItem(at: staged.url.deletingLastPathComponent()) }
+        let fingerprintKey = "epub:\(staged.sha256):\(staged.bytes)"
+
+        let persistence = try makePersistence()
+        // Seed a .downloading row (simulating the half-promoted state).
+        let fingerprint = DocumentFingerprint(
+            contentSHA256: staged.sha256,
+            fileByteCount: staged.bytes,
+            format: .epub
+        )
+        let downloadingRecord = BookRecord(
+            fingerprintKey: fingerprintKey,
+            title: "Test",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fingerprint,
+            provenance: ImportProvenance(source: .restore, importedAt: Date(), originalURLBookmarkData: nil),
+            detectedEncoding: nil,
+            addedAt: Date(),
+            originalExtension: "epub",
+            lastOpenedAt: nil,
+            fileState: .downloading,
+            blobPath: "VReader/books/epub/\(staged.sha256)_\(staged.bytes).epub"
+        )
+        _ = try await persistence.insertBook(downloadingRecord)
+
+        let (booksDir, resolver) = makeIsolatedResolver()
+        defer { try? FileManager.default.removeItem(at: booksDir) }
+
+        // Pre-place the file at the canonical path so it looks like a
+        // previous finalize moved it before the save failed.
+        let canonical = resolver(fingerprintKey, "epub")
+        try FileManager.default.createDirectory(at: canonical.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(contentsOf: staged.url).write(to: canonical)
+
+        let finalizer = LazyDownloadFinalizer(persistence: persistence, canonicalURLResolver: resolver)
+        let recovered = await finalizer.tryPromoteFromDisk(
+            fingerprintKey: fingerprintKey,
+            expectedSHA: staged.sha256,
+            candidateExtensions: ["epub"]
+        )
+
+        #expect(recovered == canonical)
+
+        let localKeys = try await persistence.fingerprintKeys(withFileState: .local)
+        #expect(localKeys.contains(fingerprintKey))
+        let downloadingKeys = try await persistence.fingerprintKeys(withFileState: .downloading)
+        #expect(!downloadingKeys.contains(fingerprintKey))
+    }
+
+    @Test func tryPromoteFromDisk_secondCandidateExtensionMatches() async throws {
+        // Bug #118 follow-up (Codex round 2): an AZW3 book imported as
+        // .mobi has originalExtension="mobi" on the row but the live
+        // lazy-download path writes the file under "azw3" (the canonical
+        // BookFormat extension). Recovery must try BOTH so a
+        // post-finalize file lookup succeeds regardless of which path
+        // wrote it.
+        let staged = try makeStagedFile(extensionName: "azw3", byteCount: 1024)
+        defer { try? FileManager.default.removeItem(at: staged.url.deletingLastPathComponent()) }
+        let fingerprintKey = "azw3:\(staged.sha256):\(staged.bytes)"
+
+        let persistence = try makePersistence()
+        let fingerprint = DocumentFingerprint(
+            contentSHA256: staged.sha256,
+            fileByteCount: staged.bytes,
+            format: .azw3
+        )
+        let downloadingRecord = BookRecord(
+            fingerprintKey: fingerprintKey,
+            title: "Test",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fingerprint,
+            provenance: ImportProvenance(source: .restore, importedAt: Date(), originalURLBookmarkData: nil),
+            detectedEncoding: nil,
+            addedAt: Date(),
+            originalExtension: "mobi",
+            lastOpenedAt: nil,
+            fileState: .downloading,
+            blobPath: "VReader/books/azw3/\(staged.sha256)_\(staged.bytes).azw3"
+        )
+        _ = try await persistence.insertBook(downloadingRecord)
+
+        let (booksDir, resolver) = makeIsolatedResolver()
+        defer { try? FileManager.default.removeItem(at: booksDir) }
+
+        // File is at <key>.azw3 (canonical), NOT at <key>.mobi.
+        let canonicalAZW3 = resolver(fingerprintKey, "azw3")
+        try FileManager.default.createDirectory(at: canonicalAZW3.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(contentsOf: staged.url).write(to: canonicalAZW3)
+
+        let finalizer = LazyDownloadFinalizer(persistence: persistence, canonicalURLResolver: resolver)
+        // Recovery tries .mobi first (originalExtension), misses, falls
+        // through to .azw3 (canonical), finds the file, recovers.
+        let recovered = await finalizer.tryPromoteFromDisk(
+            fingerprintKey: fingerprintKey,
+            expectedSHA: staged.sha256,
+            candidateExtensions: ["mobi", "azw3"]
+        )
+        #expect(recovered == canonicalAZW3)
+        let localKeys = try await persistence.fingerprintKeys(withFileState: .local)
+        #expect(localKeys.contains(fingerprintKey))
+    }
+
+    @Test func tryPromoteFromDisk_canonicalFileMissing_returnsNil() async throws {
+        let persistence = try makePersistence()
+        let (booksDir, resolver) = makeIsolatedResolver()
+        defer { try? FileManager.default.removeItem(at: booksDir) }
+        let finalizer = LazyDownloadFinalizer(persistence: persistence, canonicalURLResolver: resolver)
+        let result = await finalizer.tryPromoteFromDisk(
+            fingerprintKey: "epub:\(String(repeating: "a", count: 64)):1024",
+            expectedSHA: String(repeating: "a", count: 64),
+            candidateExtensions: ["epub"]
+        )
+        #expect(result == nil)
+    }
+
+    @Test func tryPromoteFromDisk_canonicalFileWithWrongSHA_returnsNil() async throws {
+        let staged = try makeStagedFile(extensionName: "epub", byteCount: 1024)
+        defer { try? FileManager.default.removeItem(at: staged.url.deletingLastPathComponent()) }
+        let fingerprintKey = "epub:\(staged.sha256):\(staged.bytes)"
+
+        let persistence = try makePersistence()
+        let (booksDir, resolver) = makeIsolatedResolver()
+        defer { try? FileManager.default.removeItem(at: booksDir) }
+
+        // Pre-place a file at the canonical path with WRONG bytes.
+        let canonical = resolver(fingerprintKey, "epub")
+        try FileManager.default.createDirectory(at: canonical.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: 0xCC, count: 1024).write(to: canonical)
+
+        let finalizer = LazyDownloadFinalizer(persistence: persistence, canonicalURLResolver: resolver)
+        let result = await finalizer.tryPromoteFromDisk(
+            fingerprintKey: fingerprintKey,
+            expectedSHA: staged.sha256,
+            candidateExtensions: ["epub"]
+        )
+        #expect(result == nil)
+        // Wrong-bytes file is left in place — caller decides cleanup.
+        #expect(FileManager.default.fileExists(atPath: canonical.path))
+    }
+
     @Test func finalize_overwritesPreexistingCanonicalFile() async throws {
         // Retry after a partial failure: the canonical file may already
         // exist from a previous attempt. Finalize must replace it.

@@ -189,4 +189,31 @@ struct PersistenceActorRemoteOnlyTests {
         let fetched = try await persistence.findBook(byFingerprintKey: local.fingerprintKey)
         #expect(fetched?.blobPath == "p1")
     }
+
+    // MARK: - Bug #118: atomic promote (.local + blobPath=nil in one save)
+
+    @Test func promoteToLocalClearBlob_setsLocalAndClearsBlobInOneSave() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        let sha = String(repeating: "a", count: 64)
+        let record = makeRecord(sha: sha, fileState: .downloading, blobPath: "VReader/books/epub/old.epub")
+        _ = try await persistence.insertBook(record)
+
+        try await persistence.promoteToLocalClearBlob(fingerprintKey: record.fingerprintKey)
+
+        let fetched = try await persistence.findBook(byFingerprintKey: record.fingerprintKey)
+        #expect(fetched?.fileState == .local)
+        #expect(fetched?.blobPath == nil)
+    }
+
+    @Test func promoteToLocalClearBlob_unknownKey_throwsRecordNotFound() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        do {
+            try await persistence.promoteToLocalClearBlob(fingerprintKey: "nope:nope:0")
+            Issue.record("expected throw")
+        } catch let PersistenceError.recordNotFound(key) {
+            #expect(key == "nope:nope:0")
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
 }

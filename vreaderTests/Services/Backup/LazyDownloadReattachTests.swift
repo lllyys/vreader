@@ -5,6 +5,7 @@
 
 import Testing
 import Foundation
+import CryptoKit
 import SwiftData
 @testable import vreader
 
@@ -408,5 +409,103 @@ struct LazyDownloadReattachTests {
         await coord.waitForReattach()
         #expect(coord.progressByKey.isEmpty)
         #expect(coord.outcomes.isEmpty)
+    }
+
+    // MARK: - Bug #118 follow-up: end-to-end reattach recovery suppresses .failed
+
+    @Test func reattach_canonicalFileOnDiskWithMatchingSHA_recoversToLocalAndSuppressesFailed() async throws {
+        // Bug #118 follow-up (Codex round 2): when a `.downloading` row
+        // has no live URLSession task BUT the canonical sandbox file
+        // already exists with matching SHA — the previous finalize
+        // moved the file but the persistence save failed — reattach
+        // must recover the row to `.local` rather than flipping to
+        // `.failed`. Without recovery, valid local bytes get discarded
+        // and the next user tap re-downloads.
+        let persistence = try CollectionTestHelper.makePersistence()
+        let sha = validSHA("a")
+        let row = makeRecord(sha: sha, fileState: .downloading)
+        _ = try await persistence.insertBook(row)
+
+        // Build an isolated sandbox + matching file.
+        let booksDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LazyReattachRecoveryBooks-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: booksDir) }
+
+        let resolver: @Sendable (String, String) -> URL = { key, ext in
+            let safe = key.replacingOccurrences(of: ":", with: "_")
+            return booksDir.appendingPathComponent(safe).appendingPathExtension(ext)
+        }
+        // makeRecord uses 1024-byte size + sha = "aaa...". Build bytes
+        // that hash to the seeded sha so localFileSHA256 agrees.
+        let canonical = resolver(row.fingerprintKey, "epub")
+        // The seed `validSHA("a")` is a 64-char "a" string — a synthetic
+        // fingerprint that won't match real bytes. Override the
+        // verifier by writing bytes with the synthetic SHA pre-baked
+        // via direct DocumentFingerprint — but that's not possible
+        // here. Instead, write 1024 real bytes + use their actual SHA
+        // for the seeded record, not validSHA("a"). Re-do.
+        let realPayload = Data(repeating: 0xAB, count: 1024)
+        let realSHA = realPayload.withUnsafeBytes { ptr -> String in
+            let bytes = ptr.bindMemory(to: UInt8.self).baseAddress!
+            var hash = [UInt8](repeating: 0, count: 32)
+            // Use CryptoKit-equivalent — Foundation's CC_SHA256.
+            // For test simplicity, fall through to CryptoKit:
+            return ""
+        }
+        // Easier: use CryptoKit directly via the test helper pattern.
+        let realSHA2 = Data(SHA256.hash(data: realPayload)).map { String(format: "%02x", $0) }.joined()
+        _ = realSHA  // unused — using realSHA2
+
+        // Rebuild row with the real SHA + write the file.
+        let realFingerprint = DocumentFingerprint(
+            contentSHA256: realSHA2,
+            fileByteCount: 1024,
+            format: .epub
+        )
+        let realRow = BookRecord(
+            fingerprintKey: realFingerprint.canonicalKey,
+            title: "Recovery Test",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: realFingerprint,
+            provenance: ImportProvenance(source: .restore, importedAt: Date(), originalURLBookmarkData: nil),
+            detectedEncoding: nil,
+            addedAt: Date(),
+            originalExtension: "epub",
+            lastOpenedAt: nil,
+            fileState: .downloading,
+            blobPath: "VReader/books/epub/\(realSHA2)_1024.epub"
+        )
+        _ = try await persistence.insertBook(realRow)
+
+        let realCanonical = resolver(realRow.fingerprintKey, "epub")
+        try FileManager.default.createDirectory(at: realCanonical.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try realPayload.write(to: realCanonical)
+
+        let finalizer = LazyDownloadFinalizer(persistence: persistence, canonicalURLResolver: resolver)
+        let session = MockBackgroundDownloadSession(descriptors: [])
+        let coord = LazyDownloadCoordinator(session: session, persistence: persistence, finalizer: finalizer)
+        await coord.waitForReattach()
+
+        // The seeded row (`row`) had a synthetic SHA so it can't recover
+        // — reattach should flip it to .failed via the original path.
+        // The realRow has matching bytes — reattach must recover it to
+        // .local and NOT flip to .failed.
+        let local = try await persistence.fingerprintKeys(withFileState: .local)
+        #expect(local.contains(realRow.fingerprintKey), "row with on-disk file + matching SHA should be recovered to .local")
+        let failed = try await persistence.fingerprintKeys(withFileState: .failed)
+        #expect(!failed.contains(realRow.fingerprintKey), "recovered row must NOT be flipped to .failed")
+
+        // Coordinator outcome reflects success.
+        if case .completed(let key, let stagedURL) = coord.outcomes[realRow.fingerprintKey] {
+            #expect(key == realRow.fingerprintKey)
+            #expect(stagedURL == realCanonical)
+        } else {
+            Issue.record("expected .completed outcome for recovered row, got \(String(describing: coord.outcomes[realRow.fingerprintKey]))")
+        }
+
+        // The synthetic-SHA row (no matching disk file) STILL flips to .failed.
+        #expect(failed.contains(row.fingerprintKey))
     }
 }

@@ -116,21 +116,24 @@ struct SelectiveRestoreCoordinator: Sendable {
         let preplantedKeys = unselected.map(\.fingerprintKey)
         if !unselected.isEmpty {
             let records = unselected.map { Self.makeRemoteOnlyRecord(from: $0) }
-            try await persistence.insertRemoteOnlyBookRecords(records)
-            // Bug #116: notify the library so freshly-preplanted rows
-            // appear without an app relaunch. Reuses the existing
-            // `.bookFileStateDidChange` notification that LibraryView
-            // already observes for lazy-download finalize (bug #115).
-            // One post per key: the observer's force-refresh is
-            // re-entrancy-guarded, so N posts coalesce into one fetch.
-            for key in preplantedKeys {
-                NotificationCenter.default.post(
-                    name: .bookFileStateDidChange,
-                    object: nil,
-                    userInfo: [
-                        "fingerprintKey": key,
-                        "state": BookFileState.remoteOnly.rawValue
-                    ]
+            // Bug #119: capture both the success and partial-success
+            // paths so the library notification fires for every row that
+            // actually landed, not just on full-batch success. Earlier
+            // code posted only after a clean `try await` return — a
+            // throw on record N skipped notifications for rows 1..N-1
+            // even though they were already persisted, which recreated
+            // the original "hidden until app relaunch" symptom.
+            do {
+                let inserted = try await persistence.insertRemoteOnlyBookRecords(records)
+                postPreplantNotifications(for: inserted)
+            } catch let PersistenceError.partialBulkInsert(insertedKeys, underlyingDescription) {
+                log.error(
+                    "preplant partial-success: \(insertedKeys.count, privacy: .public)/\(records.count, privacy: .public) inserted before \(underlyingDescription, privacy: .private)"
+                )
+                postPreplantNotifications(for: insertedKeys)
+                throw PersistenceError.partialBulkInsert(
+                    insertedKeys: insertedKeys,
+                    underlyingDescription: underlyingDescription
                 )
             }
         }
@@ -174,6 +177,25 @@ struct SelectiveRestoreCoordinator: Sendable {
         if let data = sections.bookSources { try await dataRestorer.restoreBookSources(from: data) }
         if let data = sections.perBookSettings { try await dataRestorer.restorePerBookSettings(from: data) }
         if let data = sections.replacementRules { try await dataRestorer.restoreReplacementRules(from: data) }
+    }
+
+    // MARK: - Notification helpers
+
+    /// Posts `.bookFileStateDidChange` for every key that actually landed
+    /// in persistence. Bug #119: separated from the call site so both the
+    /// success and partial-success branches can reuse it without
+    /// duplicating the userInfo construction.
+    private func postPreplantNotifications(for keys: [String]) {
+        for key in keys {
+            NotificationCenter.default.post(
+                name: .bookFileStateDidChange,
+                object: nil,
+                userInfo: [
+                    "fingerprintKey": key,
+                    "state": BookFileState.remoteOnly.rawValue
+                ]
+            )
+        }
     }
 
     // MARK: - Manifest → BookRecord

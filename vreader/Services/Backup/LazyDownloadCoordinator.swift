@@ -431,6 +431,54 @@ final class LazyDownloadCoordinator {
             // delegate's finish callback raced reattach and won — let
             // WI-4a's finalizer advance persistence to `.local` next.
             if case .completed = outcomes[key] { continue }
+
+            // Bug #118 follow-up (Codex Medium): before flipping a
+            // .downloading row to .failed, check whether a previous
+            // finalize already moved the file to its canonical sandbox
+            // path but failed at the persistence save. If the file
+            // exists with matching SHA, retry the promote rather than
+            // discard valid local bytes. Skipped silently when no
+            // finalizer is wired (skeleton init / 2-arg init for
+            // race-semantics tests) — that path stays at the original
+            // `.failed` reconcile semantics.
+            if let finalizer {
+                if let bookRecord = try? await persistence.findBook(byFingerprintKey: key) {
+                    // Try both the row's preserved originalExtension AND
+                    // the canonical format extension — the live lazy-
+                    // download path uses `BookFormat.fileExtensions.first`
+                    // while restored rows carry the user's import-time
+                    // extension. For preserved-extension formats (AZW3
+                    // imported as .mobi) these disagree and the file
+                    // could be at either name. Order: original first
+                    // (preserves user-visible extension when both work),
+                    // canonical fallback.
+                    var candidates: [String] = []
+                    if let original = bookRecord.originalExtension { candidates.append(original) }
+                    let canonicalExt = bookRecord.fingerprint.format.fileExtensions.first ?? bookRecord.fingerprint.format.rawValue
+                    if !candidates.contains(canonicalExt) { candidates.append(canonicalExt) }
+                    if let canonical = await finalizer.tryPromoteFromDisk(
+                        fingerprintKey: key,
+                        expectedSHA: bookRecord.fingerprint.contentSHA256,
+                        candidateExtensions: candidates
+                    ) {
+                        terminalKeys.insert(key)
+                        outcomes[key] = .completed(fingerprintKey: key, stagedURL: canonical)
+                        NotificationCenter.default.post(
+                            name: .bookFileStateDidChange,
+                            object: nil,
+                            userInfo: [
+                                "fingerprintKey": key,
+                                "state": BookFileState.local.rawValue
+                            ]
+                        )
+                        log.info(
+                            "reconcile: \(key, privacy: .private) → .local (recovered from canonical-file-on-disk)"
+                        )
+                        continue
+                    }
+                }
+            }
+
             do {
                 try await persistence.setBookFileState(fingerprintKey: key, newState: .failed)
             } catch {

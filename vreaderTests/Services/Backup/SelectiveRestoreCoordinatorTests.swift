@@ -297,6 +297,78 @@ struct SelectiveRestoreCoordinatorTests {
         var receivedKeys: [String] = []
     }
 
+    // MARK: - Bug #119: partial-success preplant still notifies for landed rows
+
+    @MainActor
+    @Test func preplant_partialSuccess_notifiesForLandedRowsOnly() async throws {
+        // Bug #119: insertRemoteOnlyBookRecords has documented partial-success
+        // semantics — earlier rows persist before a later row throws. The
+        // earlier #116 fix posted notifications only after a clean
+        // try-await return, so a throw on record N skipped notifications
+        // for rows 1..N-1 even though they were already in the DB. The
+        // fix uses the new partialBulkInsert error to drain insertedKeys
+        // and still notify for what landed. Reproduce: build a 3-entry
+        // manifest where entry #2's fingerprintKey doesn't match its
+        // canonical key (insertBook throws .invalidContent on it).
+        let (coordinator, persistence, _, _) = try await Self.makeRig()
+        let goodA = Self.makeEntry(title: "A", bytes: Self.makeEPUBBytes(seed: 1))
+        let goodC = Self.makeEntry(title: "C", bytes: Self.makeEPUBBytes(seed: 3))
+        // Entry B carries a fingerprintKey that doesn't match its
+        // computed fingerprint — trips PersistenceError.invalidContent
+        // inside insertBook.
+        let realB = Self.makeEntry(title: "B", bytes: Self.makeEPUBBytes(seed: 2))
+        let badB = BackupLibraryEntry(
+            fingerprintKey: "epub:0000000000000000000000000000000000000000000000000000000000000000:9999",
+            format: realB.format,
+            sha256: realB.sha256,
+            byteCount: realB.byteCount,
+            originalExtension: realB.originalExtension,
+            title: realB.title,
+            author: realB.author,
+            addedAt: realB.addedAt,
+            lastOpenedAt: realB.lastOpenedAt,
+            blobPath: realB.blobPath
+        )
+
+        let capture = PreplantNotificationCapture()
+        let token = NotificationCenter.default.addObserver(
+            forName: .bookFileStateDidChange, object: nil, queue: .main
+        ) { n in
+            let key = n.userInfo?["fingerprintKey"] as? String
+            MainActor.assumeIsolated {
+                if let key { capture.receivedKeys.append(key) }
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        do {
+            _ = try await coordinator.restoreSelectively(
+                manifest: [goodA, badB, goodC],
+                selectedKeys: [],
+                metadataSections: SelectiveRestoreMetadataSections(),
+                progress: { _ in }
+            )
+            Issue.record("expected throw on bad entry B")
+        } catch let PersistenceError.partialBulkInsert(insertedKeys, _) {
+            // Phase 1 throws after row A inserts but row B trips invalidContent.
+            #expect(insertedKeys == [goodA.fingerprintKey])
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        // Bug #119 invariant: notifications fire for what actually
+        // landed. Row A is persisted, so the user must see it on the
+        // next library refresh — not stranded until app relaunch.
+        #expect(capture.receivedKeys == [goodA.fingerprintKey])
+
+        // Sanity: persistence really has only row A, not B or C (the
+        // throw stopped Phase 1 mid-batch).
+        let remoteKeys = try await persistence.fingerprintKeys(withFileState: .remoteOnly)
+        #expect(remoteKeys == [goodA.fingerprintKey])
+    }
+
     @MainActor
     @Test func preplant_postsBookFileStateDidChange_perRow() async throws {
         // Bug #116: SelectiveRestorePicker dismissal didn't refresh the

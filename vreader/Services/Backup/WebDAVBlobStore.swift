@@ -70,8 +70,15 @@ final class WebDAVBlobStore: BackupBlobReading, BackupBlobWriting, @unchecked Se
         // with 409 if the parent path doesn't exist. WebDAVProvider's
         // backup path MKCOLs `VReader/backups/...` ancestors but never
         // `VReader/uploads/tmp/`, which is owned by this adapter. We
-        // create them here once per process.
-        try await ensureTempDirectoryExists()
+        // create them here once per process. Bug #117: real MKCOL
+        // failures (auth/network) propagate as BackupBlobStoreError so
+        // the caller sees a typed error and the next attempt re-runs
+        // the ensure pass.
+        do {
+            try await ensureTempDirectoryExists()
+        } catch let error as WebDAVError {
+            throw BackupBlobStoreError.underlying("MKCOL temp dir failed: \(error)")
+        }
 
         // Step 3: PUT to a unique temp path. Mid-upload kill leaves only this
         // .part file (which gets swept after 24h); the final path stays clean.
@@ -126,16 +133,29 @@ final class WebDAVBlobStore: BackupBlobReading, BackupBlobWriting, @unchecked Se
 
     /// MKCOL the temp directory tree (deepest-last) so a fresh server
     /// accepts the upcoming PUT. Memoized via `ensuredTempDir` — only
-    /// runs once per instance after the first successful pass. MKCOL on
-    /// an existing path returns an error on most servers; we swallow
-    /// those with `try?` because the goal is "directory exists after
-    /// this returns," not "we successfully created it." Concurrent first
-    /// callers may both run the loop; that's harmless — MKCOL is
-    /// idempotent on success.
+    /// runs once per instance after a fully-successful pass.
+    ///
+    /// Bug #117: an earlier version swallowed every MKCOL error with
+    /// `try?` and unconditionally set the memoization flag. A
+    /// transient/auth/network failure on the first MKCOL would poison
+    /// the flag and every later upload in the process would skip the
+    /// ensure step and keep failing 409. The fix below propagates real
+    /// failures so the next call retries from scratch.
+    ///
+    /// "Already exists" is handled at the transport layer:
+    /// `WebDAVClient.createDirectory` treats HTTP 405 (Method Not
+    /// Allowed — the standard MKCOL-already-exists response) as
+    /// success. So an error reaching this method means a real failure
+    /// (auth, network, permission, server-capability) and propagating
+    /// it is correct.
+    ///
+    /// Concurrency: two first-callers may both run the loop. That's
+    /// harmless — MKCOL is idempotent and the transport's 405 handling
+    /// catches the second call's "already exists" response.
     private func ensureTempDirectoryExists() async throws {
         if ensuredTempDir { return }
         for ancestor in Self.nestedAncestors(of: tempPath) {
-            try? await transport.createDirectory(path: ancestor)
+            try await transport.createDirectory(path: ancestor)
         }
         ensuredTempDir = true
     }

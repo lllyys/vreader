@@ -74,6 +74,9 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
     func createDirectory(path: String) async throws {
         methodCalls.append(("MKCOL", path))
         if simulateAuthFailure { throw WebDAVError.authenticationFailed }
+        if let interceptor = mkcolInterceptor, let err = interceptor(path) {
+            throw err
+        }
         // Directories are just paths ending with /
         files[path] = Data()
         // Track the path for the rclone-strict-parent gate (bug #112).
@@ -81,6 +84,12 @@ final class MockWebDAVTransport: WebDAVTransport, @unchecked Sendable {
         let normalized = path.hasSuffix("/") ? String(path.dropLast()) : path
         mkcolPaths.insert(normalized)
     }
+
+    /// Optional per-call MKCOL interceptor. Returning a non-nil error from
+    /// the closure makes that specific MKCOL call throw — used by bug #117
+    /// regression tests to simulate a transient/auth failure on the first
+    /// MKCOL while letting later MKCOLs succeed.
+    var mkcolInterceptor: ((String) -> WebDAVError?)?
 
     func testConnection() async throws {
         if simulateAuthFailure { throw WebDAVError.authenticationFailed }

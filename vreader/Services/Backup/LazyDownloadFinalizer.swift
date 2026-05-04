@@ -111,13 +111,19 @@ struct LazyDownloadFinalizer: Sendable {
             throw Failure.moveToSandboxFailed("\(error)")
         }
 
-        // Step 3: persistence — fileState=.local, blobPath=nil. The blob
-        // pointer is no longer needed: the file lives in the sandbox now,
-        // and a future re-upload would reconstruct the path from the
-        // canonical {format}/{sha}_{bytes}.{ext} layout.
+        // Step 3: persistence — fileState=.local AND blobPath=nil in a
+        // single atomic save (bug #118). The blob pointer is no longer
+        // needed: the file lives in the sandbox now, and a future
+        // re-upload would reconstruct the path from the canonical
+        // {format}/{sha}_{bytes}.{ext} layout.
+        //
+        // Atomicity matters because
+        // `LazyDownloadCoordinator.reattachAndReconcile` only scans
+        // `.downloading` rows — a row left half-promoted to `.local`
+        // with a stale `blobPath` would never be reconciled and would
+        // ship inconsistent state to a future backup pass.
         do {
-            try await persistence.setBookFileState(fingerprintKey: meta.fingerprintKey, newState: .local)
-            try await persistence.setBlobPath(fingerprintKey: meta.fingerprintKey, blobPath: nil)
+            try await persistence.promoteToLocalClearBlob(fingerprintKey: meta.fingerprintKey)
         } catch {
             log.error(
                 "persistence update failed for \(meta.fingerprintKey, privacy: .private) (file already moved): \(String(describing: error), privacy: .private)"
@@ -128,5 +134,53 @@ struct LazyDownloadFinalizer: Sendable {
         log.info(
             "finalize succeeded for \(meta.fingerprintKey, privacy: .private) → \(canonical.lastPathComponent, privacy: .private)"
         )
+    }
+
+    /// Bug #118 follow-up (Codex Medium): recovery path used by
+    /// `LazyDownloadCoordinator.reattachAndReconcile`. If the previous
+    /// finalize attempt moved the staged file to its canonical sandbox
+    /// path but failed at the persistence save, the row sits at
+    /// `.downloading` even though the bytes are local with the right
+    /// SHA. Without recovery, reconcile would flip the row to `.failed`
+    /// and the next user tap would re-download bytes that already exist.
+    ///
+    /// Returns `true` if the row was successfully promoted to `.local`,
+    /// `false` if the canonical file is missing, has the wrong SHA, or
+    /// the persistence save fails again. The caller should fall through
+    /// to its existing `.failed` reconcile path on `false`.
+    func tryPromoteFromDisk(
+        fingerprintKey: String,
+        expectedSHA: String,
+        candidateExtensions: [String]
+    ) async -> URL? {
+        // Bug #118 follow-up (Codex round 2): the live lazy-download path
+        // computes its `originalExtension` from `BookFormat.fileExtensions.first`
+        // (e.g., `azw3` for `.azw3` format), while a row's
+        // `Book.originalExtension` carries the user's import-time
+        // extension (e.g., `mobi` for an AZW3 book imported as .mobi).
+        // For preserved-extension formats these can disagree, so the
+        // canonical file might exist under either name. Try every
+        // candidate the caller hands us; the first match wins.
+        guard !candidateExtensions.isEmpty else { return nil }
+        for ext in candidateExtensions {
+            let canonical = canonicalURLResolver(fingerprintKey, ext)
+            guard FileManager.default.fileExists(atPath: canonical.path) else { continue }
+            guard let actualSHA = try? BookFileImportFinalizer.localFileSHA256(at: canonical),
+                  actualSHA == expectedSHA
+            else { continue }
+            do {
+                try await persistence.promoteToLocalClearBlob(fingerprintKey: fingerprintKey)
+                log.info(
+                    "tryPromoteFromDisk recovered \(fingerprintKey, privacy: .private) → .local (file already at canonical path: \(canonical.lastPathComponent, privacy: .private))"
+                )
+                return canonical
+            } catch {
+                log.error(
+                    "tryPromoteFromDisk persistence failed for \(fingerprintKey, privacy: .private): \(String(describing: error), privacy: .private)"
+                )
+                return nil
+            }
+        }
+        return nil
     }
 }
