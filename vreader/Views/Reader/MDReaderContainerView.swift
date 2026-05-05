@@ -191,6 +191,23 @@ struct MDReaderContainerView: View {
                 interval: settingsStore?.autoPageTurnInterval ?? 5.0
             )
         }
+        // Bug #132: wire TTS sentence highlight + auto-scroll. The
+        // coordinator is instantiated in onAppear but its updateHighlight
+        // entry point was never invoked — the observation was missing.
+        .onChange(of: ttsService?.currentOffsetUTF16) { _, newOffset in
+            guard let newOffset, let coordinator = ttsHighlightCoordinator else { return }
+            if let text = viewModel.renderedText {
+                coordinator.ensureConfigured(text: text)
+            }
+            coordinator.updateHighlight(offset: newOffset)
+        }
+        .onChange(of: ttsService?.state) { _, newState in
+            // Clear highlight when TTS stops; updateHighlight handles
+            // the .speaking and .paused transitions.
+            if newState == .idle {
+                ttsHighlightCoordinator?.clearHighlight()
+            }
+        }
         .readerNotificationHandlers(
             deps: makeNotificationDeps(),
             uiState: uiState,

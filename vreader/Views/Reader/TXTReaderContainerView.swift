@@ -228,6 +228,12 @@ struct TXTReaderContainerView: View {
                     }
                 }
             }
+            // Bug #132: instantiate TTS highlight coordinator (was missing
+            // entirely — feature #40/#41 weren't wired in TXT). Mirror
+            // MDReaderContainerView's onAppear pattern.
+            if let tts = ttsService, ttsHighlightCoordinator == nil {
+                ttsHighlightCoordinator = TTSHighlightCoordinator(ttsService: tts, uiState: uiState)
+            }
         }
         .task(id: attrStringKey) {
             let config = settingsStore?.txtViewConfig ?? TXTViewConfig()
@@ -365,6 +371,21 @@ struct TXTReaderContainerView: View {
                 isPagedMode: isPagedMode,
                 interval: settingsStore?.autoPageTurnInterval ?? 5.0
             )
+        }
+        // Bug #132: wire TTS sentence highlight + auto-scroll. Coordinator
+        // is instantiated in `.task` above; this observation drives its
+        // entry point.
+        .onChange(of: ttsService?.currentOffsetUTF16) { _, newOffset in
+            guard let newOffset, let coordinator = ttsHighlightCoordinator else { return }
+            if let text = viewModel.textContent {
+                coordinator.ensureConfigured(text: text)
+            }
+            coordinator.updateHighlight(offset: newOffset)
+        }
+        .onChange(of: ttsService?.state) { _, newState in
+            if newState == .idle {
+                ttsHighlightCoordinator?.clearHighlight()
+            }
         }
         .readerNotificationHandlers(
             deps: makeNotificationDeps(),
