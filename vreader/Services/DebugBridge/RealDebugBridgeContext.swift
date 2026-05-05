@@ -8,6 +8,13 @@
 // it injects into LibraryViewModel and stores it as a `let debugBridge`
 // property. .onOpenURL captures the bridge by value and dispatches to
 // it. There is no global indirection — the bridge is owned by the App.
+//
+// Per-command handlers split across extension files for the 300-line LOC
+// guideline (feature #44 acceptance criterion (g)):
+//   - reset, seed, open, theme — this file
+//   - settle — RealDebugBridgeContext+Settle.swift
+//   - snapshot — RealDebugBridgeContext+Snapshot.swift
+//   - eval — RealDebugBridgeContext+Eval.swift
 
 #if DEBUG
 
@@ -44,15 +51,19 @@ enum DebugBridgeContextError: Error, Equatable {
 /// across WI-5; un-implemented ones throw.
 @MainActor
 final class RealDebugBridgeContext: DebugBridgeContext {
-    private let persistence: PersistenceActor
+    /// Internal so extension files (Settle/Snapshot/Eval) can reach it.
+    let persistence: PersistenceActor
     private let importer: BookImporting
     /// Bundle that holds DEBUG fixture resources. Defaults to `Bundle.main`;
     /// tests inject a custom bundle so they don't depend on app installation.
     private let fixtureBundle: Bundle
     /// UserDefaults suite that backs reader settings. Defaults to `.standard`;
-    /// tests inject a unique suite to avoid polluting global state.
-    private let userDefaults: UserDefaults
-    private let log = Logger(subsystem: "com.vreader.app", category: "DebugBridge")
+    /// tests inject a unique suite to avoid polluting global state. Internal
+    /// so the +Snapshot extension can read it.
+    let userDefaults: UserDefaults
+    /// Internal so extension files (Settle/Snapshot/Eval) can log under the
+    /// same category — keeps log lines indistinguishable from pre-split.
+    let log = Logger(subsystem: "com.vreader.app", category: "DebugBridge")
 
     init(
         persistence: PersistenceActor,
@@ -228,279 +239,9 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         log.info("theme: mode=\(target.rawValue, privacy: .public) fontSize=\(fontSize.map(String.init) ?? "unchanged", privacy: .public)")
     }
 
-    /// Wait for the active reader to settle, then write
-    /// `Caches/DebugBridge/ready-<token>.json` with the current state.
-    /// On settle timeout OR when no reader is presented, writes a sentinel
-    /// file with `error: <reason>` rather than throwing — the host-side
-    /// waiter always has a file to inspect after its own timeout expires.
-    ///
-    /// The timeout is enforced by the bridge, not just the probe — a
-    /// probe that hangs instead of throwing settleTimeout still produces
-    /// the sentinel. Throws only on infrastructure failures (file write).
-    func settle(token: String) async throws {
-        try await settleWithTimeout(token: token, timeoutSeconds: Self.settleTimeoutSeconds)
-    }
-
-    /// Internal test seam — same logic as `settle` but accepts a custom
-    /// timeout so tests can exercise the race without waiting 30s.
-    func settleWithTimeout(token: String, timeoutSeconds: TimeInterval) async throws {
-        // Bug #125: when no reader is registered we still write a sentinel —
-        // the verification harness has no way to distinguish "URL accepted but
-        // hung" from "URL accepted but no probe to settle on" without a file
-        // on disk. Mirror eval's noActiveReader pattern: write the sentinel
-        // with error="no active reader" and return without throwing.
-        guard let probe = DebugReaderRegistry.shared.current else {
-            try writeReadySentinel(
-                token: token,
-                probe: nil,
-                error: "no active reader"
-            )
-            log.error("settle: ready-\(token, privacy: .public).json with error=no active reader")
-            return
-        }
-        var settleError: String?
-        do {
-            try await withTimeout(seconds: timeoutSeconds) {
-                try await probe.awaitSettle(timeout: timeoutSeconds)
-            }
-        } catch DebugReaderProbeError.settleTimeout {
-            settleError = "settle timeout"
-        } catch SettleTimeoutSentinel.timedOut {
-            settleError = "settle timeout"
-        } catch {
-            settleError = String(describing: error)
-        }
-
-        try writeReadySentinel(token: token, probe: probe, error: settleError)
-        if let err = settleError {
-            log.error("settle: ready-\(token, privacy: .public).json with error=\(err, privacy: .public)")
-        } else {
-            log.info("settle: wrote ready-\(token, privacy: .public).json")
-        }
-    }
-
-    /// Writes the `ready-<token>.json` sentinel. Probe-shaped fields
-    /// (`fingerprintKey`, `format`, `position`) are only included when a
-    /// probe was registered — for the no-active-reader case the keys are
-    /// omitted so they read as `null` in JSON, matching `DebugSnapshot`'s
-    /// "field is partial / unavailable" convention. When `error` is
-    /// present, `phase: "unknown"` is also set per the existing
-    /// timeout-path shape.
-    private func writeReadySentinel(
-        token: String,
-        probe: DebugReaderProbe?,
-        error: String?
-    ) throws {
-        var payload: [String: Any] = [
-            "token": token,
-            "ts": ISO8601DateFormatter().string(from: Date())
-        ]
-        if let probe {
-            payload["fingerprintKey"] = probe.fingerprintKey
-            payload["format"] = probe.format
-            payload["position"] = probe.currentPositionString as Any
-        }
-        if let error {
-            payload["error"] = error
-            payload["phase"] = "unknown"  // probe doesn't yet report a render phase
-        }
-        let data = try JSONSerialization.data(
-            withJSONObject: payload,
-            options: [.prettyPrinted, .sortedKeys]
-        )
-        let outputURL = try Self.snapshotsDirectory()
-            .appendingPathComponent("ready-\(token).json")
-        try data.write(to: outputURL, options: .atomic)
-    }
-
-    /// Race a MainActor-isolated operation against a timer; whichever
-    /// finishes first wins, the loser is cancelled. Used to bound
-    /// settle's awaitSettle even if a probe hangs without honoring its
-    /// own timeout parameter. MainActor-isolated by construction so the
-    /// operation can capture `@MainActor` references (the probe).
-    private func withTimeout(
-        seconds: TimeInterval,
-        operation: @escaping @MainActor () async throws -> Void
-    ) async throws {
-        let work = Task { @MainActor in try await operation() }
-        let timer = Task {
-            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            work.cancel()
-        }
-        defer { timer.cancel() }
-        do {
-            try await work.value
-        } catch is CancellationError {
-            throw SettleTimeoutSentinel.timedOut
-        }
-    }
-
-    /// Internal sentinel — leaks to caller only as `settleError = "settle timeout"`.
-    private enum SettleTimeoutSentinel: Error {
-        case timedOut
-    }
-
-    /// Default settle timeout. Not URL-configurable in v0; harness can
-    /// shorten by triggering its own timeout if needed.
-    static let settleTimeoutSeconds: TimeInterval = 30.0
-
-    /// Build a state snapshot and write the JSON to
-    /// `Library/Caches/DebugBridge/{dest}` in the app container.
-    /// `dest` is a parser-validated basename (`[A-Za-z0-9._-]{1,64}`,
-    /// no slashes, no dot-only sequences). Path traversal is structurally
-    /// impossible.
-    ///
-    /// Reader-derived fields (currentBookId, format, position) are
-    /// populated from `DebugReaderRegistry.shared.current` when a reader
-    /// is presented. Without an active reader they remain nil and stay
-    /// in the `partial` array. `selection` always stays in `partial` —
-    /// selection probe lands when readers expose their selection state.
-    func snapshot(dest: String, lastErrorMessage: String?) async throws {
-        let store = ReaderSettingsStore(defaults: userDefaults)
-        let highlightCount = try await totalHighlightCount()
-        let probe = DebugReaderRegistry.shared.current
-
-        // Build `partial` dynamically. A reader-derived field stays
-        // partial when the probe can't supply a value:
-        // - currentBookId/format require a probe at all
-        // - position additionally requires the probe to have wired a
-        //   positionProvider (default adapter has none)
-        // - selection is always partial in v0
-        var partial: [String] = ["selection"]
-        if probe == nil {
-            partial.append(contentsOf: ["currentBookId", "format", "position"])
-        } else if probe?.currentPositionString == nil {
-            partial.append("position")
-        }
-
-        let snap = DebugSnapshot(
-            schemaVersion: DebugSnapshot.currentSchemaVersion,
-            ts: ISO8601DateFormatter().string(from: Date()),
-            currentBookId: probe?.fingerprintKey,
-            format: probe?.format,
-            position: probe?.currentPositionString,
-            theme: themeName(from: store.theme),
-            fontSize: Int(store.typography.fontSize),
-            selection: nil,
-            highlightCount: highlightCount,
-            renderPhase: "idle",
-            lastError: lastErrorMessage,
-            partial: partial
-        )
-
-        let data = try DebugSnapshot.encoder.encode(snap)
-        let outputURL = try Self.snapshotsDirectory().appendingPathComponent(dest)
-        try data.write(to: outputURL, options: .atomic)
-        log.info("snapshot: wrote \(data.count) bytes to \(dest, privacy: .public)")
-    }
-
-    /// Output directory in the app container — readable from the host via
-    /// `xcrun simctl get_app_container <udid> com.vreader.app data`.
-    /// Created on first call; idempotent.
-    static func snapshotsDirectory() throws -> URL {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DebugBridge", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    private func themeName(from theme: ReaderTheme) -> String {
-        switch theme {
-        case .light: return "light"
-        case .sepia: return "sepia"
-        case .dark: return "dark"
-        }
-    }
-
-    private func totalHighlightCount() async throws -> Int {
-        try await persistence.countAllHighlights()
-    }
-
-    /// Evaluate JS in the active reader's webview and ALWAYS write
-    /// `Caches/DebugBridge/eval-<bridge>.json` — happy path with `result`
-    /// (raw JSON value), error path with `error` string. Throws only on
-    /// infrastructure failures (filesystem write); failure modes the
-    /// caller cares about (no reader, unsupported format, JS exception)
-    /// land in the JSON file so the host-side waiter has output to read.
-    func eval(bridge: String, js: String) async throws {
-        let probe = DebugReaderRegistry.shared.current
-        let outputURL = try Self.snapshotsDirectory()
-            .appendingPathComponent("eval-\(bridge).json")
-
-        guard let probe else {
-            try Self.writeEvalError(
-                outputURL: outputURL,
-                bridge: bridge,
-                fingerprintKey: nil,
-                format: nil,
-                error: "no active reader"
-            )
-            log.error("eval: noActiveReader → eval-\(bridge, privacy: .public).json")
-            return
-        }
-
-        do {
-            let resultData = try await probe.evaluateJavaScript(js)
-            // Splice raw JSON value into the result field — JSONSerialization
-            // accepts pre-encoded JSON via re-decoding to its native type.
-            let resultValue = try JSONSerialization.jsonObject(
-                with: resultData,
-                options: [.fragmentsAllowed]
-            )
-            let payload: [String: Any] = [
-                "bridge": bridge,
-                "ts": ISO8601DateFormatter().string(from: Date()),
-                "fingerprintKey": probe.fingerprintKey,
-                "format": probe.format,
-                "result": resultValue
-            ]
-            let out = try JSONSerialization.data(
-                withJSONObject: payload,
-                options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed]
-            )
-            try out.write(to: outputURL, options: .atomic)
-            log.info("eval: wrote eval-\(bridge, privacy: .public).json")
-        } catch DebugReaderProbeError.evalUnsupported(let fmt) {
-            try Self.writeEvalError(
-                outputURL: outputURL,
-                bridge: bridge,
-                fingerprintKey: probe.fingerprintKey,
-                format: probe.format,
-                error: "eval unsupported for format: \(fmt)"
-            )
-            log.error("eval: unsupported format \(fmt, privacy: .public)")
-        } catch {
-            try Self.writeEvalError(
-                outputURL: outputURL,
-                bridge: bridge,
-                fingerprintKey: probe.fingerprintKey,
-                format: probe.format,
-                error: String(describing: error)
-            )
-            log.error("eval: failed: \(String(describing: error), privacy: .public)")
-        }
-    }
-
-    private static func writeEvalError(
-        outputURL: URL,
-        bridge: String,
-        fingerprintKey: String?,
-        format: String?,
-        error: String
-    ) throws {
-        var payload: [String: Any] = [
-            "bridge": bridge,
-            "ts": ISO8601DateFormatter().string(from: Date()),
-            "error": error
-        ]
-        if let k = fingerprintKey { payload["fingerprintKey"] = k }
-        if let f = format { payload["format"] = f }
-        let data = try JSONSerialization.data(
-            withJSONObject: payload,
-            options: [.prettyPrinted, .sortedKeys]
-        )
-        try data.write(to: outputURL, options: .atomic)
-    }
+    // settle/settleWithTimeout/settleTimeoutSeconds → +Settle.swift
+    // snapshot/snapshotsDirectory → +Snapshot.swift
+    // eval → +Eval.swift
 }
 
 #endif
