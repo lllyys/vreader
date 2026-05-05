@@ -190,16 +190,21 @@ extension EPUBHighlightBridge {
             if (window.__foliate && window.__foliate.FootnoteDetector) {
                 try {
                     if (window.__foliate.FootnoteDetector.isFootnoteReference(a)) {
-                        e.preventDefault();
-                        e.stopPropagation();
+                        // Bug #138: post a message for analytics / future
+                        // inline-popover hookup. DO NOT preventDefault — the
+                        // popover observer was never wired in Swift, and
+                        // blocking the default scroll-to-anchor would leave
+                        // tapping a footnote feeling broken (nothing happens).
+                        // Letting the default behavior run gives the user
+                        // standard "scroll to footnote anchor" navigation.
                         var href = a.getAttribute('href');
-                        // Post to Swift for inline footnote display
                         window.webkit.messageHandlers.footnoteHandler.postMessage({
                             href: href,
                             text: a.textContent,
                             type: 'footnote'
                         });
-                        return;
+                        // Do NOT return / preventDefault: fall through so the
+                        // browser performs default in-page anchor navigation.
                     }
                 } catch (err) { /* detection failed, let link navigate normally */ }
             }
