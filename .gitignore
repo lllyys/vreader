@@ -30,3 +30,8 @@ test-books/
 .claude/*.local.yml
 .claude/state.json
 .claude/tdd-guardian/state.json
+# Cron / loop runtime locks (per-session)
+.claude/scheduled_tasks.lock
+
+# Tokenize / inspection scratch
+.tokenize/
