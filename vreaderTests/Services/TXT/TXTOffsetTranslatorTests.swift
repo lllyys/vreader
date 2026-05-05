@@ -106,7 +106,12 @@ struct TXTOffsetTranslatorTests {
     @Test("toGlobal with local offset beyond chapter length returns nil")
     func testToGlobalLocalBeyondLength() {
         let chapters = makeChapters(count: 3, chapterLength: 100)
-        #expect(TXTOffsetTranslator.toGlobal(chapterIndex: 0, localUTF16: 100, chapters: chapters) == nil)
+        // Terminal offset (== textLengthUTF16) is allowed per the audit fix
+        // in `TXTOffsetTranslator.toGlobal` ("Allow terminal offset for
+        // caret/position at chapter end") — used by callers placing the
+        // cursor right after the last character.
+        #expect(TXTOffsetTranslator.toGlobal(chapterIndex: 0, localUTF16: 100, chapters: chapters) == 100)
+        // Strictly past the terminal offset is out of range.
         #expect(TXTOffsetTranslator.toGlobal(chapterIndex: 0, localUTF16: 101, chapters: chapters) == nil)
     }
 

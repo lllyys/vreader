@@ -238,6 +238,12 @@ struct PerBookSettingsTests {
         let store = ReaderSettingsStore(defaults: defaults)
         store.typography.fontSize = 18
         store.theme = .light
+        // Explicit set: ReaderSettingsStore only writes a key to UserDefaults
+        // when the property is explicitly assigned. The defaults assertion
+        // below ("readingMode is 'native' after apply") only makes sense if
+        // the test first writes "native" — otherwise the lookup returns nil
+        // and the assertion is meaningless.
+        store.readingMode = .native
 
         // Verify global defaults are set to 18/light
         #expect(defaults.double(forKey: ReaderSettingsStore.typographyKey) != 0 || defaults.data(forKey: ReaderSettingsStore.typographyKey) != nil)

@@ -86,27 +86,40 @@ private nonisolated(unsafe) let sampleErrorBody: [String: Any] = [
 @Suite("FoliateViewCoordinator — message routing")
 struct FoliateViewCoordinatorMessageRoutingTests {
 
-    @Test("handleMessage bridge-ready with base64 triggers openBook JS evaluation")
+    @Test("handleMessage bridge-ready is a no-op — book opens via HTML-embedded base64, not via this callback")
     @MainActor
-    func bridgeReadyTriggersOpenBook() {
+    func bridgeReadyIsNoOp() {
+        // Production rewrote `bridge-ready` to a no-op. Foliate-js no longer
+        // depends on a JS callback to receive book bytes — the book is
+        // embedded directly in the HTML page as base64 (see `FoliateViewCoordinator.swift:113-116`
+        // and the `await readerAPI.open(file)` calls inside the inline JS at lines 225/247).
+        // bridge-ready remains as a confirmation marker; its handler must not
+        // evaluate JS or report any error, regardless of whether bookBase64
+        // is set.
         var jsEvaluated = false
-        let coordinator = makeCoordinator()
-        coordinator.bookBase64 = "dGVzdA==" // base64 for "test"
-        coordinator.jsEvaluator = { js in
-            if js.contains("readerAPI.open") { jsEvaluated = true }
-        }
-        coordinator.handleMessage(name: "bridge-ready", body: "")
-        #expect(jsEvaluated, "bridge-ready should trigger JS with readerAPI.open")
-    }
-
-    @Test("handleMessage bridge-ready without base64 reports error")
-    @MainActor
-    func bridgeReadyWithoutBase64ReportsError() {
         var receivedError: String?
         let coordinator = makeCoordinator(onError: { receivedError = $0 })
-        coordinator.jsEvaluator = { _ in }
+        coordinator.bookBase64 = "dGVzdA==" // base64 for "test"
+        coordinator.jsEvaluator = { _ in jsEvaluated = true }
         coordinator.handleMessage(name: "bridge-ready", body: "")
-        #expect(receivedError != nil, "Missing book data should report error")
+        #expect(!jsEvaluated, "bridge-ready must not trigger JS evaluation")
+        #expect(receivedError == nil, "bridge-ready must not report an error")
+    }
+
+    @Test("handleMessage bridge-ready remains a no-op even without base64")
+    @MainActor
+    func bridgeReadyWithoutBase64IsNoOp() {
+        // Symmetric assertion: with no bookBase64 set, bridge-ready is still
+        // a no-op. The legacy test was asserting an error was reported when
+        // bridge-ready handler used to read bookBase64; that handler path no
+        // longer exists.
+        var jsEvaluated = false
+        var receivedError: String?
+        let coordinator = makeCoordinator(onError: { receivedError = $0 })
+        coordinator.jsEvaluator = { _ in jsEvaluated = true }
+        coordinator.handleMessage(name: "bridge-ready", body: "")
+        #expect(!jsEvaluated)
+        #expect(receivedError == nil)
     }
 
     @Test("handleMessage book-ready calls onBookReady with parsed info")

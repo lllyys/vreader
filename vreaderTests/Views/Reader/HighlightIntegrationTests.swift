@@ -97,7 +97,13 @@ struct HighlightCoordinatorIntegrationTests {
 
         let highlightId = renderer.appliedRecords[0].highlightId
 
-        // Delete the first one
+        // Real flow: ViewModel.removeHighlight deletes from DB and posts
+        // `.readerHighlightRemoved` → ReaderNotificationModifier observes
+        // and calls `coordinator.handleRemoval`. The coordinator only
+        // updates the visual state (renderer.remove + re-fetch + restore).
+        // The DB delete is the ViewModel's responsibility, not the
+        // coordinator's. Mirror the production sequence here.
+        try await persistence.removeHighlight(highlightId: highlightId)
         await coordinator.handleRemoval(highlightId: highlightId)
 
         // Renderer.remove was called
