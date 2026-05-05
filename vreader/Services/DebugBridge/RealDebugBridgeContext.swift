@@ -89,9 +89,16 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         guard let entry = DebugFixtureCatalog.find(name: fixture) else {
             throw DebugBridgeContextError.unknownFixture(fixture)
         }
+        // Bug #124: the DebugFixtures Run Script in `project.yml` copies fixtures
+        // into `vreader.app/DebugFixtures/<name>.<ext>`. `Bundle.url(forResource:
+        // withExtension:)` only searches the bundle root, so we must point it at
+        // the subdirectory explicitly. The constant matches what the Run Script
+        // writes (and what `Self.fixtureBundleSubdirectory` documents) — keeping
+        // the two in sync is mechanical.
         guard let url = fixtureBundle.url(
             forResource: entry.resourceName,
-            withExtension: entry.resourceExtension
+            withExtension: entry.resourceExtension,
+            subdirectory: Self.fixtureBundleSubdirectory
         ) else {
             throw DebugBridgeContextError.fixtureResourceMissing("\(entry.resourceName).\(entry.resourceExtension)")
         }
@@ -99,6 +106,12 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         NotificationCenter.default.post(name: .debugBridgeLibraryChanged, object: nil)
         log.info("seed: imported \(entry.name, privacy: .public) → key=\(result.fingerprintKey, privacy: .public) duplicate=\(result.isDuplicate)")
     }
+
+    /// Subdirectory under the fixture bundle that the build phase copies
+    /// fixtures into. See `project.yml`'s "Copy DebugFixtures (DEBUG only)"
+    /// pre-build script for the writer side. Internal so tests can use the
+    /// same constant when staging fixture files.
+    static let fixtureBundleSubdirectory = "DebugFixtures"
 
     // MARK: - Stubs (filled in by later WI-5 commits)
 
