@@ -640,7 +640,8 @@ struct LibraryView: View {
     private var isAIChatAvailable: Bool {
         AIReaderAvailability.isAvailable(
             featureFlags: FeatureFlags.shared,
-            keychainService: KeychainService()
+            keychainService: KeychainService(),
+            consentManager: AIConsentManager()
         )
     }
 

@@ -144,6 +144,12 @@ struct ReaderContainerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerTranslateRequested)) { notification in
             guard let info = notification.object as? TextSelectionInfo else { return }
+            // Bug #90: even if a stale UI path or out-of-tree caller posts the
+            // notification, refuse to open the panel when AI consent isn't
+            // granted. The toolbar button + edit-menu translate action both
+            // gate on AIReaderAvailability.isAvailable already; this is the
+            // defense-in-depth layer at the sheet-presentation seam.
+            guard resolvedAICoordinator.isAIAvailable else { return }
             ensureAIReady()
             if let transVM = resolvedAICoordinator.translationViewModel {
                 transVM.originalText = info.selectedText

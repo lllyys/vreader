@@ -114,7 +114,8 @@ struct AIReaderIntegrationTests {
 
         let isAvailable = AIReaderAvailability.isAvailable(
             featureFlags: flags,
-            keychainService: keychain
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
         )
 
         #expect(!isAvailable, "AI button should be hidden when feature flag is OFF")
@@ -363,7 +364,7 @@ struct AIReaderIntegrationTests {
 @Suite("AIReaderAvailability")
 struct AIReaderAvailabilityTests {
 
-    @Test func availableWhenFlagEnabledAndKeyExists() {
+    @Test func availableWhenFlagEnabledAndKeyExistsAndConsentGranted() {
         let flags = FeatureFlags(environment: .prod)
         flags.setOverride(true, for: .aiAssistant)
         let keychain = WI11TestHelpers.makeKeychainService()
@@ -371,7 +372,8 @@ struct AIReaderAvailabilityTests {
 
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
-            keychainService: keychain
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
         )
 
         #expect(result == true)
@@ -385,7 +387,8 @@ struct AIReaderAvailabilityTests {
 
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
-            keychainService: keychain
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
         )
 
         #expect(result == false)
@@ -399,7 +402,8 @@ struct AIReaderAvailabilityTests {
 
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
-            keychainService: keychain
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
         )
 
         #expect(result == false)
@@ -413,10 +417,54 @@ struct AIReaderAvailabilityTests {
 
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
-            keychainService: keychain
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
         )
 
         #expect(result == false)
+    }
+
+    // MARK: - Bug #90: consent gate
+
+    @Test func unavailableWhenConsentRevoked() {
+        // The bug: feature flag on + API key saved + consent OFF used to return
+        // true, leaving AI affordances visible. Now isAvailable must return
+        // false when consent is missing.
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .aiAssistant)
+        let keychain = WI11TestHelpers.makeKeychainService()
+        try? keychain.saveString("sk-test-key", forAccount: AIService.apiKeyAccount)
+
+        let result = AIReaderAvailability.isAvailable(
+            featureFlags: flags,
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false)
+        )
+
+        #expect(result == false, "Bug #90: AI buttons must hide when consent is revoked")
+    }
+
+    @Test func availableTransitionsAcrossConsentRevoke() {
+        // After consent is granted then revoked, isAvailable must reflect the
+        // revoke immediately — no stale cached value.
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .aiAssistant)
+        let keychain = WI11TestHelpers.makeKeychainService()
+        try? keychain.saveString("sk-test-key", forAccount: AIService.apiKeyAccount)
+
+        let suiteName = "com.vreader.test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let manager = AIConsentManager(defaults: defaults)
+
+        manager.grantConsent()
+        #expect(AIReaderAvailability.isAvailable(
+            featureFlags: flags, keychainService: keychain, consentManager: manager
+        ) == true, "Available right after grant")
+
+        manager.revokeConsent()
+        #expect(AIReaderAvailability.isAvailable(
+            featureFlags: flags, keychainService: keychain, consentManager: manager
+        ) == false, "Unavailable right after revoke")
     }
 
     @Test func hasAPIKeyReturnsTrueWhenKeyExists() {

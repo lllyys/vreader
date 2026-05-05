@@ -329,7 +329,12 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             let chunkOffset = chunkIndex < chunkStartOffsets.count ? chunkStartOffsets[chunkIndex] : 0
             return TXTBridgeShared.buildReaderEditMenu(
                 range: range, textView: textView, suggestedActions: suggestedActions,
-                chunkOffset: chunkOffset
+                chunkOffset: chunkOffset,
+                isAITranslateAvailable: AIReaderAvailability.isAvailable(
+                    featureFlags: FeatureFlags.shared,
+                    keychainService: KeychainService(),
+                    consentManager: AIConsentManager()
+                )
             )
         }
 

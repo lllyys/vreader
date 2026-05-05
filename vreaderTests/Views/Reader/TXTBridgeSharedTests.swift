@@ -102,27 +102,54 @@ struct TXTBridgeSharedTests {
 
     // MARK: - buildReaderEditMenu
 
-    @Test @MainActor func buildReaderEditMenuReturnsTwoActions() {
+    @Test @MainActor func buildReaderEditMenuIncludesTranslateWhenAvailable() {
         let tv = UITextView()
         tv.text = "Hello World"
         let range = NSRange(location: 0, length: 5)
 
         let menu = TXTBridgeShared.buildReaderEditMenu(
-            range: range, textView: tv, suggestedActions: []
+            range: range, textView: tv, suggestedActions: [],
+            isAITranslateAvailable: true
         )
 
         #expect(menu != nil)
-        // First child is our inline menu with 2 actions
+        // Two inline menus: annotation (Highlight + Add Note) and lookup (Define + Translate).
         let children = menu!.children
-        #expect(children.count == 1)
-        if let inlineMenu = children.first as? UIMenu {
-            #expect(inlineMenu.children.count == 2)
-            if let highlight = inlineMenu.children.first as? UIAction {
-                #expect(highlight.title == "Highlight")
-            }
-            if let note = inlineMenu.children.last as? UIAction {
-                #expect(note.title == "Add Note")
-            }
+        #expect(children.count == 2)
+        if let annotationMenu = children.first as? UIMenu {
+            #expect(annotationMenu.children.count == 2)
+            #expect((annotationMenu.children.first as? UIAction)?.title == "Highlight")
+            #expect((annotationMenu.children.last as? UIAction)?.title == "Add Note")
+        }
+        if let lookupMenu = children.last as? UIMenu {
+            #expect(lookupMenu.children.count == 2)
+            // Define is always present; Translate appears when AI is available.
+            let titles = lookupMenu.children.compactMap { ($0 as? UIAction)?.title }
+            #expect(titles.contains(DictionaryLookup.defineMenuTitle))
+            #expect(titles.contains(DictionaryLookup.translateMenuTitle))
+        }
+    }
+
+    @Test @MainActor func buildReaderEditMenuOmitsTranslateWhenAIUnavailable() {
+        // Bug #90: when AI consent is revoked, the Translate action must NOT
+        // appear in the text-selection edit menu.
+        let tv = UITextView()
+        tv.text = "Hello World"
+        let range = NSRange(location: 0, length: 5)
+
+        let menu = TXTBridgeShared.buildReaderEditMenu(
+            range: range, textView: tv, suggestedActions: [],
+            isAITranslateAvailable: false
+        )
+
+        #expect(menu != nil)
+        let children = menu!.children
+        #expect(children.count == 2)
+        if let lookupMenu = children.last as? UIMenu {
+            #expect(lookupMenu.children.count == 1, "Lookup menu must contain only Define when AI is unavailable")
+            let titles = lookupMenu.children.compactMap { ($0 as? UIAction)?.title }
+            #expect(titles == [DictionaryLookup.defineMenuTitle])
+            #expect(!titles.contains(DictionaryLookup.translateMenuTitle))
         }
     }
 

@@ -148,7 +148,12 @@ extension TXTTextViewBridge {
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
             TXTBridgeShared.buildReaderEditMenu(
-                range: range, textView: textView, suggestedActions: suggestedActions
+                range: range, textView: textView, suggestedActions: suggestedActions,
+                isAITranslateAvailable: AIReaderAvailability.isAvailable(
+                    featureFlags: FeatureFlags.shared,
+                    keychainService: KeychainService(),
+                    consentManager: AIConsentManager()
+                )
             )
         }
 

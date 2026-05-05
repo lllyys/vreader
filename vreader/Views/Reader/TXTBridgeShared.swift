@@ -40,13 +40,20 @@ enum TXTBridgeShared {
         NotificationCenter.default.post(name: name, object: info)
     }
 
-    /// Builds the shared edit menu with Highlight, Add Note, Define, and Translate actions.
+    /// Builds the shared edit menu with Highlight, Add Note, Define, and
+    /// Translate actions.
+    ///
+    /// - Parameter isAITranslateAvailable: When false, the Translate action is
+    ///   omitted entirely. Callers should pass `AIReaderAvailability.isAvailable(...)`
+    ///   so that revoking AI consent (bug #90) hides the entry point instead
+    ///   of letting the user discover the failure mid-action.
     @MainActor
     static func buildReaderEditMenu(
         range: NSRange,
         textView: UITextView,
         suggestedActions: [UIMenuElement],
-        chunkOffset: Int = 0
+        chunkOffset: Int = 0,
+        isAITranslateAvailable: Bool = true
     ) -> UIMenu? {
         guard range.length > 0 else { return UIMenu(children: suggestedActions) }
 
@@ -80,14 +87,18 @@ enum TXTBridgeShared {
             )
         }
 
-        let translateAction = UIAction(
-            title: DictionaryLookup.translateMenuTitle,
-            image: UIImage(systemName: "character.book.closed")
-        ) { [weak textView] _ in
-            guard let textView else { return }
-            postSelectionNotification(
-                .readerTranslateRequested, from: textView, range: range, chunkOffset: chunkOffset
-            )
+        var lookupChildren: [UIMenuElement] = [defineAction]
+        if isAITranslateAvailable {
+            let translateAction = UIAction(
+                title: DictionaryLookup.translateMenuTitle,
+                image: UIImage(systemName: "character.book.closed")
+            ) { [weak textView] _ in
+                guard let textView else { return }
+                postSelectionNotification(
+                    .readerTranslateRequested, from: textView, range: range, chunkOffset: chunkOffset
+                )
+            }
+            lookupChildren.append(translateAction)
         }
 
         let annotationMenu = UIMenu(
@@ -96,7 +107,7 @@ enum TXTBridgeShared {
         )
         let lookupMenu = UIMenu(
             title: "", options: .displayInline,
-            children: [defineAction, translateAction]
+            children: lookupChildren
         )
         return UIMenu(children: [annotationMenu, lookupMenu] + suggestedActions)
     }

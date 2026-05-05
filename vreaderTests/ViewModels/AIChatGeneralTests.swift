@@ -129,7 +129,7 @@ struct AIChatGeneralTests {
 
     @Test @MainActor func generalChatAccessibleFromLibrary() {
         // Verify the LibraryView exposes AI chat availability check.
-        // The availability function must return true when feature + API key are set.
+        // The availability function must return true when feature + API key + consent are set.
         let flags = FeatureFlags(environment: .prod)
         flags.setOverride(true, for: .aiAssistant)
 
@@ -138,9 +138,10 @@ struct AIChatGeneralTests {
 
         let available = AIReaderAvailability.isAvailable(
             featureFlags: flags,
-            keychainService: keychain
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
         )
-        #expect(available, "AI chat should be available when flag is on and API key is set")
+        #expect(available, "AI chat should be available when flag is on, API key is set, and consent is granted")
     }
 
     // MARK: - Feature Flag Off Hides Chat
@@ -154,7 +155,8 @@ struct AIChatGeneralTests {
 
         let available = AIReaderAvailability.isAvailable(
             featureFlags: flags,
-            keychainService: keychain
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
         )
         #expect(!available, "AI chat should be hidden when feature flag is OFF")
     }
@@ -170,9 +172,27 @@ struct AIChatGeneralTests {
 
         let available = AIReaderAvailability.isAvailable(
             featureFlags: flags,
-            keychainService: keychain
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
         )
         #expect(!available, "AI chat should be hidden when no API key is set")
+    }
+
+    // MARK: - Consent Off Hides Chat (bug #90)
+
+    @Test @MainActor func consentOffHidesChat() {
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .aiAssistant)
+
+        let keychain = WI11TestHelpers.makeKeychainService()
+        try? keychain.saveString("test-api-key", forAccount: AIService.apiKeyAccount)
+
+        let available = AIReaderAvailability.isAvailable(
+            featureFlags: flags,
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false)
+        )
+        #expect(!available, "Bug #90: AI chat must hide when user consent is revoked")
     }
 
     // MARK: - General Chat Title
