@@ -191,6 +191,16 @@ struct MDReaderContainerView: View {
                 interval: settingsStore?.autoPageTurnInterval ?? 5.0
             )
         }
+        .onChange(of: settingsStore?.autoPageTurnInterval) { _, _ in
+            // Bug #137: live-apply interval changes for an already-running
+            // turner. Mirror of the TXT handler added in bug #131 fix.
+            guard settingsStore?.autoPageTurn == true else { return }
+            uiState.updateAutoPageTurner(
+                enabled: true,
+                isPagedMode: isPagedMode,
+                interval: settingsStore?.autoPageTurnInterval ?? 5.0
+            )
+        }
         // Bug #132: wire TTS sentence highlight + auto-scroll. The
         // coordinator is instantiated in onAppear but its updateHighlight
         // entry point was never invoked — the observation was missing.
