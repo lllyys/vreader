@@ -179,16 +179,34 @@ struct AnnotationsPanelView: View {
     // MARK: - Export (C02)
 
     private func exportAnnotations() async {
+        // Bug #130: every step propagates errors so failures surface via
+        // the existing `importMessage` alert path (renamed semantically as
+        // a generic "export/import status" channel — both flows are
+        // mutually exclusive in this view).
         let persistence = PersistenceActor(modelContainer: modelContainer)
-        let highlights = (try? await persistence.fetchHighlights(
-            forBookWithKey: bookFingerprintKey
-        )) ?? []
-        let bookmarks = (try? await persistence.fetchBookmarks(
-            forBookWithKey: bookFingerprintKey
-        )) ?? []
-        let notes = (try? await persistence.fetchAnnotations(
-            forBookWithKey: bookFingerprintKey
-        )) ?? []
+
+        var fetchErrors: [String] = []
+        let highlights: [HighlightRecord]
+        do {
+            highlights = try await persistence.fetchHighlights(forBookWithKey: bookFingerprintKey)
+        } catch {
+            fetchErrors.append("highlights")
+            highlights = []
+        }
+        let bookmarks: [BookmarkRecord]
+        do {
+            bookmarks = try await persistence.fetchBookmarks(forBookWithKey: bookFingerprintKey)
+        } catch {
+            fetchErrors.append("bookmarks")
+            bookmarks = []
+        }
+        let notes: [AnnotationRecord]
+        do {
+            notes = try await persistence.fetchAnnotations(forBookWithKey: bookFingerprintKey)
+        } catch {
+            fetchErrors.append("notes")
+            notes = []
+        }
 
         let payload = AnnotationExporter.buildPayload(
             highlights: highlights,
@@ -198,14 +216,27 @@ struct AnnotationsPanelView: View {
             bookAuthor: nil
         )
 
-        guard let data = try? AnnotationExporter.export(
-            payload: payload, format: .json
-        ) else { return }
+        let data: Data
+        do {
+            data = try AnnotationExporter.export(payload: payload, format: .json)
+        } catch {
+            importMessage = "Export failed: \(error.localizedDescription)"
+            return
+        }
 
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("annotations-export.json")
-        try? data.write(to: tempURL, options: .atomic)
+        do {
+            try data.write(to: tempURL, options: .atomic)
+        } catch {
+            importMessage = "Export failed: could not write temp file (\(error.localizedDescription))."
+            return
+        }
+
         exportedFileURL = tempURL
+        if !fetchErrors.isEmpty {
+            importMessage = "Exported with warnings: skipped \(fetchErrors.joined(separator: ", ")) (fetch failed)."
+        }
         isShowingExportShare = true
     }
 
