@@ -126,13 +126,6 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// can read it without an isolation hop.
     nonisolated static let fixtureBundleSubdirectory = "DebugFixtures"
 
-    // MARK: - Stubs (filled in by later WI-5 commits)
-
-    private func notImplemented(_ command: String) -> Error {
-        log.notice("\(command, privacy: .public): not yet implemented")
-        return DebugBridgeContextError.notImplemented(command: command)
-    }
-
     /// Verify the book exists and post a notification for LibraryView to
     /// push it onto the navigation stack. Throws `bookNotFound` if no book
     /// in the library has the given fingerprint key.
