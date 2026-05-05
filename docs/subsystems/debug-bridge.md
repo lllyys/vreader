@@ -17,6 +17,11 @@ If you're writing user-facing code, this isn't your file.
 # token; UDID is the second-to-last. Strip the parentheses around it.
 SIM_ID=$(xcrun simctl list devices booted | awk '/Booted/ {print $(NF-1); exit}' | tr -d '()')
 
+# One-time per fresh simulator: pre-grant the URL-scheme approval so iOS
+# does not present an "Open in 'vreader'?" alert on the first call.
+# See "iOS scheme-approval prompt" below for why this is needed.
+scripts/grant-debug-scheme-approval.sh "$SIM_ID"
+
 # Wipe library, seed a fixture, set theme.
 xcrun simctl openurl "$SIM_ID" "vreader-debug://reset"
 xcrun simctl openurl "$SIM_ID" "vreader-debug://seed?fixture=war-and-peace"
@@ -305,6 +310,37 @@ xcodebuild build -configuration Release -derivedDataPath /tmp/vreader-release-bu
 ```
 
 Exits 0 only if all six checks pass.
+
+`scripts/verify-debug-has-debugbridge.sh` is the inverse for Debug builds: confirms the URL scheme is wired into the Info.plist of the freshest Debug build. Catches regressions of bug #121 (DebugBridge.plist orphaned from Info.plist).
+
+## iOS scheme-approval prompt (bug #123)
+
+When `simctl openurl` (running as `CoreSimulatorBridge`) opens `vreader-debug://` on a simulator that has no prior approval entry, iOS LaunchServices presents a one-shot **"Open in 'vreader'?"** alert from `lsd`. The alert is the standard third-party scheme-approval prompt. Until someone taps **Open**, the URL is held by `lsd` and never reaches `.onOpenURL` — `simctl openurl` exits 0 because LaunchServices accepted the request, not because the app received it.
+
+After approval, the grant is persisted in:
+
+```
+~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Library/Preferences/com.apple.launchservices.schemeapproval.plist
+```
+
+with key:
+
+```
+"com.apple.CoreSimulator.CoreSimulatorBridge-->vreader-debug" = com.vreader.app
+```
+
+The key tells you the exact scope of the approval: source app `CoreSimulatorBridge` opening the `vreader-debug` scheme on this simulator. Other source apps (e.g. another iOS app calling `UIApplication.open`) would have their own approval entries. The grant survives reinstalls of the app bundle. It does *not* survive `simctl erase`.
+
+For automated verification (no human to tap **Open**), pre-grant the approval before the first `openurl`:
+
+```bash
+scripts/grant-debug-scheme-approval.sh         # uses booted device
+scripts/grant-debug-scheme-approval.sh <UDID>  # specific device
+```
+
+The script writes the plist entry directly. Idempotent — safe to run on every harness setup.
+
+In practice the prompt only appears on a freshly-erased simulator, because `lsd` retains the approval across plist edits, lsd restarts, and app reinstalls. The grant script is defense-in-depth: cheap to run, prevents the rare case where the harness lands on a fresh simulator and would otherwise hang on the first command.
 
 ## Adding a new fixture
 

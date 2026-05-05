@@ -64,12 +64,7 @@ for t in types:
 print(','.join(schemes))
 ")
 
-if [[ ",$URL_SCHEMES," == *",vreader-debug,"* ]]; then
-    echo "OK: vreader-debug URL scheme registered in Debug Info.plist"
-    echo "    schemes: $URL_SCHEMES"
-    echo "PASS: DebugBridge URL scheme is reachable from outside the app"
-    exit 0
-else
+if [[ ",$URL_SCHEMES," != *",vreader-debug,"* ]]; then
     echo "FAIL: vreader-debug URL scheme NOT registered in Debug Info.plist" >&2
     echo "    found schemes: ${URL_SCHEMES:-(none)}" >&2
     echo "" >&2
@@ -78,3 +73,58 @@ else
     echo "vreader/SupportingFiles/DebugBridge.plist" >&2
     exit 1
 fi
+echo "OK: vreader-debug URL scheme registered in Debug Info.plist"
+echo "    schemes: $URL_SCHEMES"
+
+# Bug #123 regression check: if a simulator is booted, also verify that
+# the LaunchServices scheme-approval entry is in place. Without it, the
+# first `simctl openurl` call hangs on iOS's "Open in 'vreader'?" alert.
+# This check is best-effort — no booted simulator means we can only
+# verify the bundle-level wiring (bug #121's gate), not the runtime
+# delivery path (bug #123's gate).
+BOOTED_UDIDS="$(xcrun simctl list devices booted -j 2>/dev/null \
+    | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for runtime, devices in data.get("devices", {}).items():
+    for d in devices:
+        if d.get("state") == "Booted":
+            print(d.get("udid", ""))
+' 2>/dev/null || true)"
+
+if [[ -z "$BOOTED_UDIDS" ]]; then
+    echo "NOTE: no booted simulator; skipping LaunchServices approval check (bug #123)"
+    echo "PASS: DebugBridge URL scheme is registered in the bundle (bug #121 gate)"
+    exit 0
+fi
+
+APPROVAL_KEY="com.apple.CoreSimulator.CoreSimulatorBridge-->vreader-debug"
+APPROVAL_FAIL=0
+for UDID in $BOOTED_UDIDS; do
+    PREF="$HOME/Library/Developer/CoreSimulator/Devices/${UDID}/data/Library/Preferences/com.apple.launchservices.schemeapproval.plist"
+    if [[ ! -f "$PREF" ]]; then
+        echo "WARN: ${UDID:0:8}…: schemeapproval.plist missing — first openurl will hang on iOS approval prompt" >&2
+        echo "      Run: scripts/grant-debug-scheme-approval.sh ${UDID}" >&2
+        APPROVAL_FAIL=1
+        continue
+    fi
+    APPROVED="$(/usr/libexec/PlistBuddy -c "Print :${APPROVAL_KEY}" "$PREF" 2>/dev/null || true)"
+    if [[ "$APPROVED" != "com.vreader.app" ]]; then
+        echo "WARN: ${UDID:0:8}…: vreader-debug not granted in LaunchServices (bug #123)" >&2
+        echo "      Run: scripts/grant-debug-scheme-approval.sh ${UDID}" >&2
+        APPROVAL_FAIL=1
+    else
+        echo "OK: ${UDID:0:8}…: vreader-debug pre-granted in LaunchServices"
+    fi
+done
+
+if [[ "$APPROVAL_FAIL" -eq 1 ]]; then
+    echo "PARTIAL: bundle wiring OK (bug #121); approval missing on at least one booted simulator (bug #123)" >&2
+    exit 1
+fi
+
+echo "PASS: DebugBridge URL scheme is registered (bug #121) and pre-approved on all booted simulators (bug #123)"
+exit 0
