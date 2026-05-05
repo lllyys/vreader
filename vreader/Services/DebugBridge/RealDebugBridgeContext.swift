@@ -110,8 +110,10 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// Subdirectory under the fixture bundle that the build phase copies
     /// fixtures into. See `project.yml`'s "Copy DebugFixtures (DEBUG only)"
     /// pre-build script for the writer side. Internal so tests can use the
-    /// same constant when staging fixture files.
-    static let fixtureBundleSubdirectory = "DebugFixtures"
+    /// same constant when staging fixture files. `nonisolated` so non-MainActor
+    /// callers (e.g. DebugFixtureCatalogTests, which runs on a default actor)
+    /// can read it without an isolation hop.
+    nonisolated static let fixtureBundleSubdirectory = "DebugFixtures"
 
     // MARK: - Stubs (filled in by later WI-5 commits)
 

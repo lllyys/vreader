@@ -46,19 +46,25 @@ final class DebugFixtureCatalogTests: XCTestCase {
 
     /// Every catalog entry must resolve to a real bundle resource.
     /// This is the gate that prevents catalog/bundle drift — adding a row
-    /// without dropping the file fails this test.
+    /// without dropping the file fails this test. It also doubles as a
+    /// regression gate for bug #124: the lookup must use the same
+    /// `subdirectory:` argument the production handler uses, so a future
+    /// regression in either place fails this test.
     func test_all_entriesResolveInTheTestBundle() {
         // The DEBUG main bundle (when running tests) contains the app's
-        // bundled resources. DebugFixtures are flat-copied to the bundle
-        // root by Xcode's resource pipeline.
+        // bundled resources. DebugFixtures are copied into the
+        // `DebugFixtures/` subdirectory by `project.yml`'s pre-build
+        // script — see `RealDebugBridgeContext.fixtureBundleSubdirectory`
+        // for the single source of truth.
         for fixture in DebugFixtureCatalog.all() {
             let url = Bundle.main.url(
                 forResource: fixture.resourceName,
-                withExtension: fixture.resourceExtension
+                withExtension: fixture.resourceExtension,
+                subdirectory: RealDebugBridgeContext.fixtureBundleSubdirectory
             )
             XCTAssertNotNil(
                 url,
-                "fixture \(fixture.name) declares \(fixture.resourceName).\(fixture.resourceExtension) but the bundle has no such file"
+                "fixture \(fixture.name) declares \(fixture.resourceName).\(fixture.resourceExtension) under \(RealDebugBridgeContext.fixtureBundleSubdirectory)/ but the bundle has no such file"
             )
         }
     }
