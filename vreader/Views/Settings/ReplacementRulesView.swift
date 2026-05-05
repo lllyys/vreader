@@ -20,6 +20,21 @@ struct ReplacementRulesView: View {
 
     var body: some View {
         List {
+            // Bug #128: replacement rules currently apply only in Unified
+            // reading mode (the native TXT/MD pipeline doesn't go through
+            // the text-transform layer). Surface this here so users don't
+            // silently configure rules that won't apply.
+            Section {
+                Label {
+                    Text("Rules apply only when reading in Unified mode. Switch from the reader's Settings → Reading Mode.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } icon: {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if rules.isEmpty {
                 ContentUnavailableView(
                     "No Replacement Rules",
