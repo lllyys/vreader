@@ -42,6 +42,16 @@ struct AIChatView: View {
                 .accessibilityIdentifier("chatClearButton")
                 .accessibilityLabel("Clear chat history")
             }
+            // Bug #94: keyboard-toolbar Done button as secondary dismissal —
+            // covers the case where the message list is short or empty and
+            // .scrollDismissesKeyboard has no scrollable surface to drag.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    isInputFocused = false
+                }
+                .accessibilityIdentifier("chatKeyboardDoneButton")
+            }
         }
     }
 
@@ -91,6 +101,19 @@ struct AIChatView: View {
                     }
                 }
             }
+            // Bug #94: scroll-to-dismiss + interactive drag matches the
+            // standard iOS chat-app keyboard dismissal pattern. Without this
+            // the keyboard stays up unless the user closes the whole AI sheet.
+            .scrollDismissesKeyboard(.interactively)
+        }
+        // Bug #94: tap-outside-input dismissal. `contentShape(Rectangle())`
+        // makes the empty space hit-testable; `onTapGesture` only fires for
+        // quick taps, so long-press text selection inside message bubbles
+        // still works (selection's long-press fires first). Empty-list
+        // taps also fall through here.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isInputFocused = false
         }
         .accessibilityIdentifier("chatMessageList")
     }
