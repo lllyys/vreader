@@ -34,11 +34,6 @@ extension TXTTextViewBridge {
         private static let maxRestoreRetries = 5
         var suppressScrollCallbacks = false
         var lastScrollToTarget: Int?
-        /// Guards search highlight from being cleared by programmatic scroll (bug #43 regression).
-        /// Uses a counter instead of a boolean (Issue 8) so overlapping programmatic scrolls
-        /// don't clear the guard prematurely — each scroll increments the counter, and
-        /// the guard is only lowered when all scrolls have settled (counter reaches 0).
-        var programmaticScrollCount = 0
 
         init(delegate: TXTTextViewBridgeDelegate?, config: TXTViewConfig = TXTViewConfig()) {
             self.delegate = delegate
@@ -69,11 +64,28 @@ extension TXTTextViewBridge {
         }
 
         /// Clears the current temporary search highlight and cancels any auto-clear timer.
-        /// Skips clearing when `programmaticScrollCount > 0` (bug #43 regression fix,
-        /// Issue 8: counter-based guard) so that search navigation scroll doesn't
-        /// immediately dismiss the highlight.
-        func clearSearchHighlightIfTemporary() {
-            guard programmaticScrollCount <= 0 else { return }
+        ///
+        /// When called with a `scrollView`, the clear only fires for scrolls that the
+        /// user is actually driving (`isTracking || isDragging || isDecelerating`).
+        /// Programmatic scrolls — and the late `scrollViewDidScroll` callbacks
+        /// TextKit 1's lazy layout dispatches well after `setContentOffset` returns —
+        /// have all three flags false, so they are correctly skipped.
+        ///
+        /// When called with `nil` (e.g. from `handleContentTap`, search-clear notification,
+        /// or any non-scroll-driven dismiss path), the clear is unconditional.
+        ///
+        /// Bug history: bug #43 first added an `isProgrammaticScroll` boolean guard;
+        /// Issue 8 upgraded it to a counter; bug #99 cause #3 surfaced that the
+        /// counter's 0.3s decrement was racing TextKit's late layout callbacks. The
+        /// `isTracking/isDragging/isDecelerating` triplet is the canonical signal —
+        /// it doesn't need a timer at all.
+        func clearSearchHighlightIfTemporary(scrollView: UIScrollView? = nil) {
+            if let scrollView,
+               !scrollView.isTracking,
+               !scrollView.isDragging,
+               !scrollView.isDecelerating {
+                return
+            }
             highlightClearTimer?.invalidate()
             highlightClearTimer = nil
             currentHighlightRange = nil
@@ -174,10 +186,15 @@ extension TXTTextViewBridge {
             if let htv = scrollView as? HighlightableTextView, htv.isReplacingText { return }
             guard let textView = scrollView as? UITextView else { return }
 
-            // Clear temporary search highlight on user scroll
+            // Clear temporary search highlight on user scroll. Pass the scrollView
+            // so the helper can distinguish user scrolls (clear) from programmatic-
+            // scroll-induced layout callbacks (skip). Bug #99.
             if currentHighlightRange != nil {
-                clearSearchHighlightIfTemporary()
-                rebuildHighlights(in: textView)
+                let beforeClear = currentHighlightRange
+                clearSearchHighlightIfTemporary(scrollView: scrollView)
+                if currentHighlightRange != beforeClear {
+                    rebuildHighlights(in: textView)
+                }
             }
 
             // Throttle: skip if called within the throttle interval

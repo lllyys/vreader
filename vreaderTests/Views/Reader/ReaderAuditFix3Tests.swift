@@ -116,55 +116,51 @@ struct PDFCancellableClearTimerTests {
     }
 }
 
-// MARK: - Issue 8: TXT overlapping programmatic scroll guards
+// MARK: - Bug #99 cause #3: TXT search-highlight clear-on-scroll gating
+//
+// Original (Issue 8): a `programmaticScrollCount` counter + 0.3s
+// timer-based decrement to guard against scroll-callback dismissal
+// during programmatic scroll. Bug #99 surfaced that 0.3s was racing
+// TextKit 1's lazy-layout `scrollViewDidScroll` callbacks (400-1200ms
+// late). Replaced (this branch) with a canonical-signal approach:
+// `clearSearchHighlightIfTemporary(scrollView:)` checks the scroll
+// view's `isTracking || isDragging || isDecelerating` triplet — true
+// only for user-driven scrolls; programmatic scrolls and their late
+// layout callbacks have all three false and skip the clear without
+// any timer. Tests mirror the new behavior.
 
-@Suite("AuditFix3 — Issue 8: TXT programmatic scroll counter")
-struct TXTProgrammaticScrollCounterTests {
-
-    @Test @MainActor
-    func coordinatorUsesCounterNotBoolean() {
-        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
-        #expect(coordinator.programmaticScrollCount == 0)
-    }
-
-    @Test @MainActor
-    func coordinatorCounterIncrementsOnProgrammaticScroll() {
-        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
-        coordinator.programmaticScrollCount += 1
-        #expect(coordinator.programmaticScrollCount == 1)
-        coordinator.programmaticScrollCount += 1
-        #expect(coordinator.programmaticScrollCount == 2)
-    }
+@Suite("Bug #99 — TXT search-highlight clear-on-scroll gating")
+struct TXTSearchHighlightGatingTests {
 
     @Test @MainActor
-    func coordinatorCounterDecrementsButNeverBelowZero() {
-        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
-        coordinator.programmaticScrollCount += 1
-        coordinator.programmaticScrollCount += 1
-        coordinator.programmaticScrollCount -= 1
-        #expect(coordinator.programmaticScrollCount == 1)
-        coordinator.programmaticScrollCount -= 1
-        #expect(coordinator.programmaticScrollCount == 0)
-    }
-
-    @Test @MainActor
-    func coordinatorPreservesHighlightWhenCounterPositive() {
+    func nilScrollView_clearsUnconditionally() {
+        // Non-scroll-driven dismissal paths (chrome tap, search-clear notification)
+        // pass scrollView: nil and clear without inspecting any flag.
         let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
         coordinator.currentHighlightRange = NSRange(location: 10, length: 5)
-        coordinator.programmaticScrollCount = 2
 
-        coordinator.clearSearchHighlightIfTemporary()
-        #expect(coordinator.currentHighlightRange == NSRange(location: 10, length: 5))
+        coordinator.clearSearchHighlightIfTemporary()  // nil
+
+        #expect(coordinator.currentHighlightRange == nil,
+                "nil scrollView (tap-driven dismiss) must clear unconditionally")
     }
 
     @Test @MainActor
-    func coordinatorClearsHighlightWhenCounterZero() {
+    func idleScrollView_skipsClear() {
+        // Programmatic scroll's late layout-driven callback shape: a
+        // UIScrollView whose isTracking/isDragging/isDecelerating are all
+        // false. The clear must skip — this is the bug #99 cause #3 fix.
         let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
         coordinator.currentHighlightRange = NSRange(location: 10, length: 5)
-        coordinator.programmaticScrollCount = 0
+        let idle = UIScrollView()
+        #expect(!idle.isTracking)
+        #expect(!idle.isDragging)
+        #expect(!idle.isDecelerating)
 
-        coordinator.clearSearchHighlightIfTemporary()
-        #expect(coordinator.currentHighlightRange == nil)
+        coordinator.clearSearchHighlightIfTemporary(scrollView: idle)
+
+        #expect(coordinator.currentHighlightRange == NSRange(location: 10, length: 5),
+                "Idle scroll-view callbacks must NOT clear the highlight (bug #99 cause #3)")
     }
 }
 

@@ -94,4 +94,103 @@ struct TXTTextViewBridgeConfigTests {
         let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
         #expect(coordinator.hasRestoredPosition == false)
     }
+
+    // MARK: - Bug #99 — search-highlight clear-on-scroll gating
+
+    /// Bug #99 cause #3: search highlight was cleared by `scrollViewDidScroll`
+    /// callbacks fired by TextKit 1's lazy layout pass after a programmatic
+    /// scroll, before the user could see the highlight.
+    ///
+    /// Fix: `clearSearchHighlightIfTemporary(scrollView:)` now uses the
+    /// scroll view's `isTracking || isDragging || isDecelerating` triplet
+    /// to distinguish user scrolls (clear) from programmatic-scroll-induced
+    /// layout callbacks (skip).
+    ///
+    /// Tests below verify the gating logic via UIScrollView's actual flags
+    /// — no timer, no clock injection.
+
+    @Test @MainActor func clearSearchHighlight_skipsWhenScrollViewIdle() {
+        // Programmatic scroll's late layout-driven callback shape: a
+        // UIScrollView whose isTracking/isDragging/isDecelerating are all
+        // false. The clear must skip — otherwise the highlight is dismissed
+        // before the user sees it.
+        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
+        coordinator.currentHighlightRange = NSRange(location: 0, length: 5)
+        let idleScrollView = UIScrollView()
+        // All three flags are false on a fresh UIScrollView with no user input.
+        #expect(!idleScrollView.isTracking)
+        #expect(!idleScrollView.isDragging)
+        #expect(!idleScrollView.isDecelerating)
+
+        coordinator.clearSearchHighlightIfTemporary(scrollView: idleScrollView)
+
+        #expect(coordinator.currentHighlightRange != nil,
+                "Idle-scroll-view callbacks must NOT clear the highlight (bug #99 cause #3)")
+    }
+
+    @Test @MainActor func clearSearchHighlight_clearsWhenCalledWithoutScrollView() {
+        // Non-scroll-driven dismissal paths (chrome tap, search-clear notification)
+        // pass scrollView: nil and should clear unconditionally.
+        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
+        coordinator.currentHighlightRange = NSRange(location: 0, length: 5)
+
+        coordinator.clearSearchHighlightIfTemporary()  // nil
+
+        #expect(coordinator.currentHighlightRange == nil,
+                "nil scrollView (e.g., tap dismiss) must clear unconditionally")
+    }
+
+    @Test @MainActor func clearSearchHighlight_clearsWhenScrollViewIsDragging() {
+        // Positive user-scroll path: `isDragging` is true → user is actively
+        // scrolling → highlight should dismiss as the user expects.
+        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
+        coordinator.currentHighlightRange = NSRange(location: 0, length: 5)
+
+        let dragging = StubScrollView()
+        dragging.stubIsDragging = true
+        coordinator.clearSearchHighlightIfTemporary(scrollView: dragging)
+
+        #expect(coordinator.currentHighlightRange == nil,
+                "User-driven scroll (isDragging) must clear the highlight")
+    }
+
+    @Test @MainActor func clearSearchHighlight_clearsWhenScrollViewIsDecelerating() {
+        // Positive user-scroll path: `isDecelerating` is true → user lifted
+        // finger but inertia is still scrolling → still a user scroll → clear.
+        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
+        coordinator.currentHighlightRange = NSRange(location: 0, length: 5)
+
+        let decelerating = StubScrollView()
+        decelerating.stubIsDecelerating = true
+        coordinator.clearSearchHighlightIfTemporary(scrollView: decelerating)
+
+        #expect(coordinator.currentHighlightRange == nil,
+                "User-driven scroll (isDecelerating) must clear the highlight")
+    }
+
+    @Test @MainActor func clearSearchHighlight_clearsWhenScrollViewIsTracking() {
+        // Positive user-scroll path: `isTracking` is true → user has finger
+        // on screen → still a user-driven interaction → clear.
+        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
+        coordinator.currentHighlightRange = NSRange(location: 0, length: 5)
+
+        let tracking = StubScrollView()
+        tracking.stubIsTracking = true
+        coordinator.clearSearchHighlightIfTemporary(scrollView: tracking)
+
+        #expect(coordinator.currentHighlightRange == nil,
+                "User-driven scroll (isTracking) must clear the highlight")
+    }
+}
+
+/// UIScrollView subclass that lets tests override the three user-interaction
+/// flags. UIScrollView's flags are read-only computed properties; subclassing
+/// is the canonical way to fake them without driving real touch events.
+private final class StubScrollView: UIScrollView {
+    var stubIsTracking: Bool = false
+    var stubIsDragging: Bool = false
+    var stubIsDecelerating: Bool = false
+    override var isTracking: Bool { stubIsTracking }
+    override var isDragging: Bool { stubIsDragging }
+    override var isDecelerating: Bool { stubIsDecelerating }
 }

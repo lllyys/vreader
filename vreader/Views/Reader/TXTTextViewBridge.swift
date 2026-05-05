@@ -170,24 +170,24 @@ struct TXTTextViewBridge: UIViewRepresentable {
             textView.textContainerInset = config.textInset
         }
 
-        // Programmatic scroll from search navigation
+        // Programmatic scroll from search navigation. Bug #99 (cause #3): the
+        // earlier `programmaticScrollCount` + 0.3s timer mechanism raced TextKit
+        // 1's lazy-layout `scrollViewDidScroll` callbacks (which can arrive
+        // 400-1200ms after `setContentOffset` returns). Replaced with a
+        // canonical-signal approach in `clearSearchHighlightIfTemporary`: the
+        // helper checks `scrollView.isTracking || isDragging || isDecelerating`
+        // and only clears for actual user-driven scrolls. Programmatic scrolls
+        // and their late layout callbacks all have those flags false, so they
+        // skip the clear without needing any timer.
         if let target = scrollToOffset,
            target != context.coordinator.lastScrollToTarget {
             context.coordinator.lastScrollToTarget = target
-            // Guard highlight from being cleared by the programmatic scroll (bug #43).
-            // Issue 8: Use counter so overlapping scrolls don't clear guard too early.
-            context.coordinator.programmaticScrollCount += 1
             let textLength = (textView.text as NSString?)?.length ?? 0
             if textLength > 0 {
                 let rangeEnd = min(textLength, target + 4096)
                 textView.layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: rangeEnd))
             }
             context.coordinator.attemptScrollRestore(in: textView, toCharOffset: target)
-            // Decrement the counter after scroll settles so user scrolls can dismiss normally
-            let coordinator = context.coordinator
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                coordinator.programmaticScrollCount = max(0, coordinator.programmaticScrollCount - 1)
-            }
         }
 
         // Scroll position restore is one-shot only (handled in makeUIView).

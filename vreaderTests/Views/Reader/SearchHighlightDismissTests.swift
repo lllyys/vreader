@@ -238,37 +238,34 @@ struct SearchHighlightDismissTests {
 
     // MARK: - Programmatic scroll guard (bug #43 regression)
 
+    // Bug #99 cause #3: replaced the `programmaticScrollCount` + 0.3s timer
+    // mechanism with a canonical-signal approach. The clear-on-scroll guard
+    // now reads the scroll view's `isTracking || isDragging || isDecelerating`
+    // triplet — true only for user scrolls; programmatic scrolls and their
+    // late layout-driven callbacks have all three false and skip the clear.
+
     @Test @MainActor func coordinatorPreservesHighlightDuringProgrammaticScroll() {
         let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
         coordinator.currentHighlightRange = NSRange(location: 10, length: 5)
 
-        // Mark as programmatic scroll — highlight should survive
-        coordinator.programmaticScrollCount = 1
-
-        // clearSearchHighlightIfTemporary should be a no-op during programmatic scroll
-        coordinator.clearSearchHighlightIfTemporary()
+        // Programmatic-scroll-induced layout callback shape: an idle
+        // UIScrollView with no user input. clearSearchHighlightIfTemporary
+        // must skip when called with this scroll view.
+        let idle = UIScrollView()
+        coordinator.clearSearchHighlightIfTemporary(scrollView: idle)
 
         #expect(coordinator.currentHighlightRange == NSRange(location: 10, length: 5))
     }
 
-    @Test @MainActor func coordinatorClearsHighlightOnUserScrollAfterProgrammaticScrollEnds() {
+    @Test @MainActor func coordinatorClearsHighlightWhenCalledWithoutScrollView() {
+        // Non-scroll-driven dismissal paths (chrome tap, search-clear notification)
+        // pass scrollView: nil and clear unconditionally.
         let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
         coordinator.currentHighlightRange = NSRange(location: 10, length: 5)
 
-        // Programmatic scroll active — should preserve
-        coordinator.programmaticScrollCount = 1
-        coordinator.clearSearchHighlightIfTemporary()
-        #expect(coordinator.currentHighlightRange == NSRange(location: 10, length: 5))
+        coordinator.clearSearchHighlightIfTemporary()  // nil
 
-        // Programmatic scroll ended — user scroll should clear
-        coordinator.programmaticScrollCount = 0
-        coordinator.clearSearchHighlightIfTemporary()
         #expect(coordinator.currentHighlightRange == nil)
-    }
-
-    @Test @MainActor func coordinatorProgrammaticScrollCountDefaultsToZero() {
-        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
-        #expect(coordinator.programmaticScrollCount == 0)
     }
 
     // MARK: - EPUB search highlight JS (bug #43)
