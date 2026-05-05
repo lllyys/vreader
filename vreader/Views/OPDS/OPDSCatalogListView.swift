@@ -24,6 +24,9 @@ struct OPDSCatalogListView: View {
     @State private var formPassword = ""
 
     private static let storageKey = "opds.savedCatalogs"
+    /// Bug #133: passwords are stored in Keychain, keyed by catalog UUID.
+    /// UserDefaults persists everything except the password.
+    private let keychain = KeychainService(serviceIdentifier: "com.vreader.opds")
 
     var body: some View {
         Group {
@@ -188,7 +191,7 @@ struct OPDSCatalogListView: View {
         }
     }
 
-    // MARK: - Persistence
+    // MARK: - Persistence (Bug #133: passwords in Keychain, rest in UserDefaults)
 
     private func loadCatalogs() {
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
@@ -196,11 +199,45 @@ struct OPDSCatalogListView: View {
             catalogs = []
             return
         }
-        catalogs = decoded
+
+        // Migrate any legacy plaintext entries: move password to Keychain,
+        // rewrite UserDefaults with password cleared. One-time per catalog.
+        var didMigrate = false
+        var migrated: [OPDSSavedCatalog] = []
+        for var c in decoded {
+            if let plaintext = c.password, !plaintext.isEmpty {
+                try? keychain.saveString(plaintext, forAccount: c.id.uuidString)
+                c.password = nil
+                didMigrate = true
+            }
+            // Hydrate password from Keychain (legacy or already-migrated).
+            if let stored = try? keychain.readString(forAccount: c.id.uuidString),
+               !stored.isEmpty {
+                c.password = stored
+            }
+            migrated.append(c)
+        }
+        catalogs = migrated
+        if didMigrate {
+            saveCatalogs()  // Rewrite UserDefaults with passwords stripped.
+        }
     }
 
     private func saveCatalogs() {
-        if let data = try? JSONEncoder().encode(catalogs) {
+        // Write to Keychain first; only UserDefaults sees a password-free copy.
+        for c in catalogs {
+            if let pw = c.password, !pw.isEmpty {
+                try? keychain.saveString(pw, forAccount: c.id.uuidString)
+            } else {
+                try? keychain.delete(forAccount: c.id.uuidString)
+            }
+        }
+        let stripped = catalogs.map { c -> OPDSSavedCatalog in
+            var copy = c
+            copy.password = nil
+            return copy
+        }
+        if let data = try? JSONEncoder().encode(stripped) {
             UserDefaults.standard.set(data, forKey: Self.storageKey)
         }
     }
@@ -232,6 +269,10 @@ struct OPDSCatalogListView: View {
     }
 
     private func deleteCatalog(_ catalog: OPDSSavedCatalog) {
+        // Bug #133: clear the Keychain entry too — saveCatalogs only writes
+        // for remaining catalogs, so the deleted catalog's password would
+        // leak otherwise.
+        try? keychain.delete(forAccount: catalog.id.uuidString)
         catalogs.removeAll { $0.id == catalog.id }
         saveCatalogs()
     }
