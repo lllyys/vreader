@@ -293,9 +293,18 @@ struct LibraryView: View {
                         collectionRecords = (try? await persistence.fetchAllCollections()) ?? []
                     },
                     onDeleteCollection: { name in
+                        // Bug #129: propagate the throw so CollectionSidebar
+                        // can surface failures via its existing alert path.
+                        // Refresh the records list either way (success or
+                        // failure) so the sidebar reflects current SwiftData
+                        // truth even on error.
                         let persistence = PersistenceActor(modelContainer: modelContext.container)
-                        try? await persistence.deleteCollection(name: name)
-                        collectionRecords = (try? await persistence.fetchAllCollections()) ?? []
+                        defer {
+                            Task { @MainActor in
+                                collectionRecords = (try? await persistence.fetchAllCollections()) ?? []
+                            }
+                        }
+                        try await persistence.deleteCollection(name: name)
                     }
                 )
             }

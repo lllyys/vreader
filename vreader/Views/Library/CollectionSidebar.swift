@@ -35,7 +35,7 @@ struct CollectionSidebar: View {
     let allTags: [String]
     let allSeries: [String]
     let onCreateCollection: (String) async -> Void
-    let onDeleteCollection: (String) async -> Void
+    let onDeleteCollection: (String) async throws -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var newCollectionName = ""
     @State private var isAddingCollection = false
@@ -84,7 +84,14 @@ struct CollectionSidebar: View {
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 Task {
-                                    await onDeleteCollection(collection.name)
+                                    do {
+                                        try await onDeleteCollection(collection.name)
+                                    } catch {
+                                        // Bug #129: surface the failure rather
+                                        // than silently swallowing via `try?`.
+                                        // The alert is already wired below.
+                                        errorMessage = "Failed to delete \"\(collection.name)\": \(error.localizedDescription)"
+                                    }
                                 }
                             } label: {
                                 Label("Delete", systemImage: "trash")
