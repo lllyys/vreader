@@ -129,3 +129,10 @@ fi
 
 echo "Granted: ${SCHEME}:// → ${TARGET_BUNDLE} on ${UDID}"
 echo "  plist: ${PREF}"
+echo
+echo "NOTE (bug #140): the simulator's LaunchServices daemon caches"
+echo "scheme approvals in memory. If openurl returns"
+echo "  LSApplicationWorkspaceErrorDomain 115"
+echo "after a fresh install, the daemon hasn't picked up the new plist"
+echo "entry yet. Restart the simulator to force a re-read:"
+echo "  xcrun simctl shutdown ${UDID} && xcrun simctl boot ${UDID}"
