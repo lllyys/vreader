@@ -33,6 +33,8 @@ struct ReaderSettingsPanel: View {
     @State private var isPerBookEnabled = false
     /// Photo picker state for theme background (feature #32).
     @State private var backgroundPickerItem: PhotosPickerItem?
+    /// Bug #134: surface theme-background load/save/remove failures.
+    @State private var backgroundErrorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -66,15 +68,46 @@ struct ReaderSettingsPanel: View {
         .onChange(of: store.readingMode) { _, _ in syncPerBookIfEnabled() }
         .onChange(of: store.chineseConversion) { _, _ in syncPerBookIfEnabled() }
         .onChange(of: backgroundPickerItem) { _, newItem in
+            // Bug #134: surface failures instead of silently swallowing.
             guard let item = newItem else { return }
             Task {
-                if let data = try? await item.loadTransferable(type: Data.self),
-                   let image = UIImage(data: data) {
-                    try? ThemeBackgroundStore.saveBackground(image, for: store.theme.rawValue)
+                let data: Data
+                do {
+                    guard let loaded = try await item.loadTransferable(type: Data.self) else {
+                        backgroundErrorMessage = "Selected image returned no data."
+                        backgroundPickerItem = nil
+                        return
+                    }
+                    data = loaded
+                } catch {
+                    backgroundErrorMessage = "Could not load image: \(error.localizedDescription)"
+                    backgroundPickerItem = nil
+                    return
+                }
+                guard let image = UIImage(data: data) else {
+                    backgroundErrorMessage = "Could not decode image — unsupported format?"
+                    backgroundPickerItem = nil
+                    return
+                }
+                do {
+                    try ThemeBackgroundStore.saveBackground(image, for: store.theme.rawValue)
                     store.useCustomBackground = true
+                } catch {
+                    backgroundErrorMessage = "Could not save background: \(error.localizedDescription)"
                 }
                 backgroundPickerItem = nil
             }
+        }
+        .alert(
+            "Background",
+            isPresented: .init(
+                get: { backgroundErrorMessage != nil },
+                set: { if !$0 { backgroundErrorMessage = nil } }
+            )
+        ) {
+            Button("OK") { backgroundErrorMessage = nil }
+        } message: {
+            Text(backgroundErrorMessage ?? "")
         }
         .accessibilityIdentifier("readerSettingsPanel")
     }
@@ -146,8 +179,13 @@ struct ReaderSettingsPanel: View {
                 .accessibilityLabel("Choose background image")
 
                 Button(role: .destructive) {
-                    try? ThemeBackgroundStore.removeBackground(for: store.theme.rawValue)
-                    store.useCustomBackground = false
+                    // Bug #134: surface removeBackground failures.
+                    do {
+                        try ThemeBackgroundStore.removeBackground(for: store.theme.rawValue)
+                        store.useCustomBackground = false
+                    } catch {
+                        backgroundErrorMessage = "Could not remove background: \(error.localizedDescription)"
+                    }
                 } label: {
                     Label("Remove Background", systemImage: "trash")
                 }
