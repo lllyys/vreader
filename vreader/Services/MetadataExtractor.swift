@@ -91,20 +91,30 @@ struct EPUBMetadataExtractor: MetadataExtractor {
 
     func extractCoverImage(from fileURL: URL) async -> UIImage? {
         guard let (metadata, opfDirPath) = try? await Self.parseEPUBMetadata(from: fileURL),
-              let coverHref = metadata.coverImageHref else {
+              let coverHref = metadata.coverImageHref,
+              let zip = try? ZIPReader(fileURL: fileURL) else {
             return nil
         }
 
-        // Resolve cover path relative to OPF directory within the archive.
-        let archivePath = Self.resolveArchivePath(coverHref: coverHref, opfDirPath: opfDirPath)
-
-        guard let zip = try? ZIPReader(fileURL: fileURL),
-              let entry = await zip.entry(forPath: archivePath),
-              let imageData = try? await zip.extractData(for: entry) else {
-            return nil
+        // Bug #122: some EPUBs declare cover hrefs that don't resolve
+        // spec-compliantly (publisher mistakes — e.g., href="OEBPS/cover.jpg"
+        // for an OPF at OEBPS/content.opf joins to "OEBPS/OEBPS/cover.jpg"
+        // which doesn't exist). Try a cascade of candidate paths and
+        // return the first one whose bytes decode as a valid UIImage.
+        let entries = await zip.listEntries()
+        let candidates = Self.coverPathCandidates(
+            coverHref: coverHref,
+            opfDirPath: opfDirPath,
+            entries: entries
+        )
+        for candidate in candidates {
+            if let entry = await zip.entry(forPath: candidate),
+               let imageData = try? await zip.extractData(for: entry),
+               let image = UIImage(data: imageData) {
+                return image
+            }
         }
-
-        return UIImage(data: imageData)
+        return nil
     }
 
     // MARK: - Private
@@ -155,6 +165,93 @@ struct EPUBMetadataExtractor: MetadataExtractor {
         }
 
         return resolved.joined(separator: "/")
+    }
+
+    /// Builds the ordered list of archive paths to try for cover-image
+    /// extraction. The caller probes them in order; the first one whose
+    /// bytes decode as a valid `UIImage` is returned to the user.
+    ///
+    /// Order (bug #122):
+    /// 1. Spec-compliant resolved path (`resolveArchivePath`).
+    /// 2. Bare-basename match: any image-extension entry whose basename
+    ///    equals `coverHref`'s basename, case-insensitive. Catches the
+    ///    common publisher mistake of declaring `href="OEBPS/cover.jpg"`
+    ///    against an OPF at `OEBPS/content.opf` when the real cover is
+    ///    at `OEBPS/Images/cover.jpg`. Multiple matches are ranked: any
+    ///    entry inside the OPF directory tree comes before entries
+    ///    outside it. Within a rank tier, archive order is preserved.
+    /// 3. Archive-root canonical cover: `cover.{jpg,jpeg,png,gif}` at
+    ///    the archive root, case-insensitive. Last resort when neither
+    ///    the OPF declaration nor the basename pattern resolves.
+    ///
+    /// The list is de-duplicated while preserving first-seen order so
+    /// the caller probes each entry at most once.
+    static func coverPathCandidates(
+        coverHref: String,
+        opfDirPath: String,
+        entries: [ZIPEntry]
+    ) -> [String] {
+        var candidates: [String] = []
+        var seen: Set<String> = []
+        func add(_ path: String) {
+            guard !path.isEmpty, seen.insert(path).inserted else { return }
+            candidates.append(path)
+        }
+
+        // 1. Spec-compliant resolved path.
+        add(Self.resolveArchivePath(coverHref: coverHref, opfDirPath: opfDirPath))
+
+        // 2. Bare-basename match (image extensions only).
+        // Real-world EPUBs almost always have one cover.jpg per book, but if a
+        // packager left a thumbnail or backup file with the same basename we
+        // prefer the one that sits inside the OPF directory tree — that is
+        // the location a publisher would actually associate with the book.
+        let coverBasename = (coverHref as NSString).lastPathComponent.lowercased()
+        if !coverBasename.isEmpty {
+            // Normalize the OPF-dir prefix once (with trailing slash) so we
+            // can do a single hasPrefix check. Empty opfDirPath means the OPF
+            // sits at the archive root, so every entry counts as inside.
+            let opfPrefix = opfDirPath.isEmpty ? "" : "\(opfDirPath)/"
+            var insideOPF: [String] = []
+            var outsideOPF: [String] = []
+            for entry in entries where !entry.isDirectory {
+                let path = entry.path
+                guard Self.hasImageExtension(path) else { continue }
+                guard (path as NSString).lastPathComponent.lowercased() == coverBasename else { continue }
+                if opfPrefix.isEmpty || path.hasPrefix(opfPrefix) {
+                    insideOPF.append(path)
+                } else {
+                    outsideOPF.append(path)
+                }
+            }
+            for path in insideOPF { add(path) }
+            for path in outsideOPF { add(path) }
+        }
+
+        // 3. Archive-root canonical cover.
+        let canonicalCoverNames: Set<String> = ["cover.jpg", "cover.jpeg", "cover.png", "cover.gif"]
+        for entry in entries where !entry.isDirectory {
+            let path = entry.path
+            // Root-level only — must not contain a "/" separator. Match the
+            // basename case-insensitively.
+            guard !path.contains("/") else { continue }
+            if canonicalCoverNames.contains(path.lowercased()) {
+                add(path)
+            }
+        }
+
+        return candidates
+    }
+
+    /// True when `path` ends with an image-file extension we accept for
+    /// covers. Case-insensitive.
+    private static func hasImageExtension(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        return lower.hasSuffix(".jpg")
+            || lower.hasSuffix(".jpeg")
+            || lower.hasSuffix(".png")
+            || lower.hasSuffix(".gif")
+            || lower.hasSuffix(".webp")
     }
 }
 

@@ -489,6 +489,47 @@ struct EPUBMetadataExtractorTests {
         #expect(image != nil, "Should resolve ../ path relative to OPF directory")
     }
 
+    // MARK: - Bug #122 — redundant-prefix cover href
+
+    @Test("extractCoverImage — bug #122: redundant-prefix href falls back to basename")
+    func extractCoverImage_redundantPrefixHref() async throws {
+        // Reproduce the "道诡异仙" EPUB shape: OPF lives at OEBPS/content.opf
+        // and declares <item href="OEBPS/cover.jpg" id="cover"/>. Spec join
+        // → "OEBPS/OEBPS/cover.jpg" which doesn't exist in the archive. The
+        // real cover sits at OEBPS/Images/cover.jpg with the same basename.
+        // Without the bug-#122 fallback chain, extractCoverImage returns nil.
+        let jpegData = Self.makeTestJPEGData()
+        let opf = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>Redundant Prefix EPUB</dc:title>
+            <meta name="cover" content="cover-id"/>
+          </metadata>
+          <manifest>
+            <item id="cover-id" href="OEBPS/cover.jpg" media-type="image/jpeg"/>
+            <item id="ch1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+          </manifest>
+          <spine>
+            <itemref idref="ch1"/>
+          </spine>
+        </package>
+        """
+
+        // Place the actual cover at OEBPS/Images/cover.jpg (createMinimalEPUB
+        // prepends OEBPS/ to coverPath).
+        let epubURL = try Self.createMinimalEPUB(
+            opfXML: opf,
+            coverPath: "Images/cover.jpg",
+            coverData: jpegData
+        )
+        defer { try? FileManager.default.removeItem(at: epubURL) }
+
+        let extractor = EPUBMetadataExtractor()
+        let image = await extractor.extractCoverImage(from: epubURL)
+        #expect(image != nil, "Bug #122: basename fallback should locate OEBPS/Images/cover.jpg")
+    }
+
     // MARK: - Protocol Default
 
     @Test("MetadataExtractor default extractCoverImage returns nil")
