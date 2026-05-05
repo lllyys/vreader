@@ -303,37 +303,10 @@ struct BookImporterTests {
         #expect(result.title.contains("日本語テスト"))
     }
 
-    // MARK: - Indexing Trigger
-
-    @Test func indexingTriggerPosted() async throws {
-        let fileURL = try makeTempTxtFile(content: "trigger test")
-        defer { try? FileManager.default.removeItem(at: fileURL) }
-
-        let (importer, _, sandbox) = try await makeImporter()
-        defer { try? FileManager.default.removeItem(at: sandbox) }
-
-        // Use actor-isolated state to avoid data race
-        let collector = NotificationCollector()
-        let token = NotificationCenter.default.addObserver(
-            forName: BookImporter.indexingNeededNotification,
-            object: nil,
-            queue: .main
-        ) { notification in
-            let key = notification.userInfo?["fingerprintKey"] as? String
-            Task { await collector.record(hasFingerprintKey: key != nil) }
-        }
-        defer { NotificationCenter.default.removeObserver(token) }
-
-        _ = try await importer.importFile(at: fileURL, source: .filesApp)
-
-        // Give main queue a chance to process the notification
-        try await Task.sleep(for: .milliseconds(50))
-
-        let count = await collector.count
-        #expect(count > 0, "Expected indexing notification to be posted")
-        let hasKey = await collector.hasFingerprintKey
-        #expect(hasKey, "Expected fingerprintKey in notification userInfo")
-    }
+    // Bug #139: `indexingTriggerPosted` test removed alongside its
+    // production source. The notification was dead code (no production
+    // observer); lazy indexing in `ReaderSearchCoordinator` is the real
+    // path. Other tests in this suite cover import-success regression.
 }
 
 // MARK: - Test Helpers

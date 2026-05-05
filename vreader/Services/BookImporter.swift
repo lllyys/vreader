@@ -29,8 +29,12 @@ struct ImportResult: Sendable, Equatable {
 /// Orchestrates the book import pipeline.
 final class BookImporter: BookImporting, Sendable {
 
-    /// Posted after a successful import. `userInfo["fingerprintKey"]` contains the key.
-    static let indexingNeededNotification = Notification.Name("BookImporter.indexingNeeded")
+    // Bug #139: `indexingNeededNotification` removed — was forward-looking
+    // dead code. The header comment claimed "the indexer is a separate
+    // concern" listening on the notification, but the indexer landed
+    // differently: `ReaderSearchCoordinator.indexBookContent` runs lazily
+    // when the user opens the search panel. Nothing in production observed
+    // the notification.
 
     private let persistence: any BookPersisting
     private let sandboxBooksDirectory: URL
@@ -218,12 +222,8 @@ final class BookImporter: BookImporting, Sendable {
             throw ImportError.persistenceFailed
         }
 
-        // Step 12: Emit indexing trigger
-        NotificationCenter.default.post(
-            name: Self.indexingNeededNotification,
-            object: nil,
-            userInfo: ["fingerprintKey": fingerprintKey]
-        )
+        // Bug #139: Step 12 (indexing-trigger notification) removed. Lazy
+        // indexing on search-open is the actual production path.
 
         // Step 13: EPUB pre-extraction for instant open (WI-8)
         if persisted.fingerprint.format == .epub {
