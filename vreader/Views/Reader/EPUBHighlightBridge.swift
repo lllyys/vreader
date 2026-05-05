@@ -265,13 +265,13 @@ enum EPUBHighlightBridge {
     // MARK: - Private Helpers
 
     /// Escapes a string for safe inclusion in single-quoted JS string literals.
+    /// Bug #135: delegates to the shared `FoliateJSEscaper` so EPUB and Foliate
+    /// readers share a single vetted escape implementation. Adds coverage for
+    /// `\t`, U+2028, and U+2029 — the latter two are ECMAScript line
+    /// terminators that broke search-highlight JS for queries containing
+    /// legit Unicode separators (e.g., some CJK ebooks).
     private static func jsEscape(_ string: String) -> String {
-        string
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
+        FoliateJSEscaper.escapeForJSString(string)
     }
 
     /// Extracts an Int from a JS message value (handles Int, Double, NSNumber).

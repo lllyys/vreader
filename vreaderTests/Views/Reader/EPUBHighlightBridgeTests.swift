@@ -233,8 +233,13 @@ struct EPUBHighlightBridgeTests {
             range: range,
             color: "blue"
         )
-        // Should not contain unescaped quotes that would break JS
-        #expect(!js.contains("'quotes\""))
+        // Bug #135: jsEscape now delegates to FoliateJSEscaper. Single
+        // quotes (the delimiter) and backslashes are escaped; double
+        // quotes inside a single-quoted string don't need escaping per
+        // ECMAScript and are passed through. Assert that the apostrophe
+        // is escaped (the only one that would actually break the string
+        // literal) rather than over-asserting on `"`.
+        #expect(js.contains("\\'quotes"))
         #expect(js.contains("createHighlight"))
     }
 
@@ -267,8 +272,33 @@ struct EPUBHighlightBridgeTests {
     func removeHighlightJSEscapesSpecialChars() {
         let js = EPUBHighlightBridge.removeHighlightJS(id: "id'with\"quotes")
         #expect(js.contains("removeHighlight"))
-        // Verify no unescaped quotes that would break JS
-        #expect(!js.contains("'with\""))
+        // Bug #135: only the apostrophe needs escaping inside a single-
+        // quoted string literal. Double-quote pass-through is correct
+        // per ECMAScript.
+        #expect(js.contains("id\\'with\"quotes"))
+    }
+
+    @Test("searchHighlightJS escapes U+2028 / U+2029 / tab — bug #135")
+    func searchHighlightEscapesECMAScriptLineTerminators() {
+        // Per ECMAScript, U+2028 and U+2029 terminate string literals.
+        // A search query containing one of these (legit in some CJK
+        // ebooks) would have produced a SyntaxError in the embedded
+        // window.find() call. Bug #135 fixes it by routing through
+        // FoliateJSEscaper.
+        let queryWith2028 = "before\u{2028}after"
+        let queryWith2029 = "before\u{2029}after"
+        let queryWithTab = "before\tafter"
+        let js2028 = EPUBHighlightBridge.searchHighlightJS(textQuote: queryWith2028)
+        let js2029 = EPUBHighlightBridge.searchHighlightJS(textQuote: queryWith2029)
+        let jsTab = EPUBHighlightBridge.searchHighlightJS(textQuote: queryWithTab)
+        // Raw separator chars must NOT appear in the generated JS;
+        // their escape sequences must.
+        #expect(!js2028.contains("\u{2028}"))
+        #expect(js2028.contains("\\u2028"))
+        #expect(!js2029.contains("\u{2029}"))
+        #expect(js2029.contains("\\u2029"))
+        #expect(!jsTab.contains("\t"))
+        #expect(jsTab.contains("\\t"))
     }
 
     // MARK: - Restore Highlights JS
