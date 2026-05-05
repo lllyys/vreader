@@ -120,10 +120,9 @@ enum EPUBPaginationHelper {
     /// Generates JavaScript to inject or replace the pagination CSS style element.
     static func injectPaginationCSSJS(viewportWidth: CGFloat, viewportHeight: CGFloat) -> String {
         let css = paginationCSS(viewportWidth: viewportWidth, viewportHeight: viewportHeight)
-        let escaped = css
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
+        // Bug #136: delegate to the shared escape helper for parity with
+        // FoliateJSEscaper-routed sites and the bug #135 fix.
+        let escaped = FoliateJSEscaper.escapeForJSString(css)
         return """
         (function() {
             var existing = document.getElementById('vreader-pagination');

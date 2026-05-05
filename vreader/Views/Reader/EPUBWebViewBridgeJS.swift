@@ -47,10 +47,11 @@ extension EPUBWebViewBridge {
            let endRange = cssContent.range(of: "</style>", options: .backwards) {
             cssContent = String(cssContent[startRange.upperBound..<endRange.lowerBound])
         }
-        let escaped = cssContent
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
+        // Bug #136: delegate to the shared escape helper. Adds coverage
+        // for `\r`, `\t`, U+2028, U+2029 — strict superset of the prior
+        // inline escape. CSS inputs here are app-generated today; this
+        // is the consolidation half of the bug #135 / #136 cluster.
+        let escaped = FoliateJSEscaper.escapeForJSString(cssContent)
         return """
         (function() {
             var existing = document.getElementById('vreader-theme');
