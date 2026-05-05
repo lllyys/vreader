@@ -32,7 +32,7 @@ enum FoliateTTSAdapter {
     /// - Parameter granularity: Segmentation level ("word" or "sentence").
     /// - Returns: JavaScript string to evaluate in WKWebView.
     static func initTTSJS(granularity: String) -> String {
-        let escaped = escapeForJS(granularity)
+        let escaped = FoliateJSEscaper.escapeForJSString(granularity)
         return "readerAPI.initTTS('\(escaped)')"
     }
 
@@ -58,7 +58,7 @@ enum FoliateTTSAdapter {
     /// - Parameter mark: The mark name (numeric string from Intl.Segmenter).
     /// - Returns: JavaScript string to evaluate in WKWebView.
     static func setMarkJS(mark: String) -> String {
-        let escaped = escapeForJS(mark)
+        let escaped = FoliateJSEscaper.escapeForJSString(mark)
         return "readerAPI.tts.setMark('\(escaped)')"
     }
 
@@ -78,15 +78,12 @@ enum FoliateTTSAdapter {
 
     // MARK: - Private Helpers
 
-    /// Escape a string for safe embedding in a single-quoted JS string literal.
-    /// Handles backslashes, single quotes, and newlines.
-    private static func escapeForJS(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-    }
+    // Note: prior in-file `escapeForJS` removed in favor of the shared
+    // `FoliateJSEscaper.escapeForJSString` (single source of truth, also
+    // covers `\t`, U+2028, U+2029 — see bug #135 for the EPUB-side fix
+    // that established this pattern). Inputs to `initTTSJS` and
+    // `setMarkJS` are constrained today, so this is consolidation rather
+    // than an active vulnerability fix.
 
     /// Parse a single mark dictionary into a FoliateTTSMark.
     /// Returns nil if any required field is missing or has wrong type.
