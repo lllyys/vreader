@@ -1,14 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Partial Info.plist included only in DEBUG builds (feature #44 DebugBridge).
-  Wired via per-configuration INFOPLIST_FILE: vreader target Debug config
-  references this file; Release config leaves INFOPLIST_FILE unset so the
-  vreader-debug URL scheme is absent from shipped builds.
+  Source-of-truth for the vreader-debug:// URL scheme registration
+  (feature #44 DebugBridge). Used in Debug builds only.
 
-  Xcode (14+) merges this file with auto-generated keys from
-  GENERATE_INFOPLIST_FILE=YES, so app metadata (display name, orientations,
-  etc.) continues to come from build settings.
+  Build flow (bug #121 fix in PR for issue #235):
+  1. This file is excluded from the vreader target's Resources phase
+     (see project.yml `sources.excludes`), so it is NEVER copied as a
+     sibling resource into the .app bundle. iOS doesn't read URL types
+     from sibling plists anyway — that was the original mistake.
+  2. project.yml `postCompileScripts: "Inject DebugBridge URL types
+     (DEBUG only)"` reads this file at build time and surgically merges
+     its `CFBundleURLTypes` into the BUILT Info.plist (Debug only).
+  3. Release builds skip the inject step (gated on CONFIGURATION),
+     so the URL scheme is absent from shipped builds — verified by
+     `scripts/verify-release-no-debugbridge.sh`.
+  4. Regression of (1)+(2) is verified by
+     `scripts/verify-debug-has-debugbridge.sh`.
+
+  Editing this file: keep `CFBundleURLTypes` as the only top-level
+  key. The build script asserts this and fails Debug builds otherwise
+  — to inject any other Info.plist key, route it through the main
+  `vreader/SupportingFiles/Info.plist` (and update Release-leak gate
+  if the change is Debug-only).
 -->
 <plist version="1.0">
 <dict>

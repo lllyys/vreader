@@ -423,7 +423,6 @@
 		88B73AB500D0DFD555AC9363 /* WebPageEncodingDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB19A1C01A25FDB23FA3E7DB /* WebPageEncodingDetectorTests.swift */; };
 		891E1E70B176150B071E464F /* AIContextExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20237121BB4ACF22C0818BA4 /* AIContextExtractorTests.swift */; };
 		892A9F3136477F52D3AECE11 /* text-walker.js in Resources */ = {isa = PBXBuildFile; fileRef = 43CD38D8708AAE752995001B /* text-walker.js */; };
-		8978E73FE03693DF5FE39E7C /* DebugBridge.plist in Resources */ = {isa = PBXBuildFile; fileRef = FA912F1B1CBF0A17BA1318F2 /* DebugBridge.plist */; };
 		8A3AE73DD5935F4E45882E38 /* AccessibilityFormatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABC4CE4DBCD7E5A52BC4E511 /* AccessibilityFormatters.swift */; };
 		8A5EFD4729B7E4BE9D2CA38E /* ReplacementTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AF84D4FD4FAA3232D18AA96 /* ReplacementTransform.swift */; };
 		8AE1A6146EC01A464580BBA9 /* DeviceIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B8B24C49B7E5DCAC2B9667 /* DeviceIdentityTests.swift */; };
@@ -1497,7 +1496,6 @@
 		F9102277C4126793229AEEB9 /* SearchHitToLocatorResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchHitToLocatorResolverTests.swift; sourceTree = "<group>"; };
 		F971403A2807A2788FD2D99F /* BookSourceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookSourceListView.swift; sourceTree = "<group>"; };
 		F9D9F31A3F96B73C8E3653E6 /* MDTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDTextExtractor.swift; sourceTree = "<group>"; };
-		FA912F1B1CBF0A17BA1318F2 /* DebugBridge.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = DebugBridge.plist; sourceTree = "<group>"; };
 		FABEAF0841AD808F7EE48617 /* HighlightIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightIntegrationTests.swift; sourceTree = "<group>"; };
 		FB17C932D5188B36F01F024A /* AnnotationExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationExporter.swift; sourceTree = "<group>"; };
 		FB5AB21F49D361F1160920C0 /* ContentReplacementRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentReplacementRule.swift; sourceTree = "<group>"; };
@@ -2140,7 +2138,6 @@
 		801B39BD7F4496940F6E5283 /* SupportingFiles */ = {
 			isa = PBXGroup;
 			children = (
-				FA912F1B1CBF0A17BA1318F2 /* DebugBridge.plist */,
 				CB182FC977C25E932E0BE1D3 /* Info.plist */,
 			);
 			path = SupportingFiles;
@@ -3066,6 +3063,7 @@
 			buildPhases = (
 				B38BE880DA857177F42D54E3 /* Copy DebugFixtures (DEBUG only) */,
 				50BDD7D268D53AEC3863C4E2 /* Sources */,
+				0EB4E7C1282F0082F0677DA7 /* Inject DebugBridge URL types (DEBUG only) */,
 				AAE6A9967BDF359CCF50BD13 /* Resources */,
 			);
 			buildRules = (
@@ -3120,7 +3118,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				10835FE4B33B176F7668ADF7 /* Assets.xcassets in Resources */,
-				8978E73FE03693DF5FE39E7C /* DebugBridge.plist in Resources */,
 				95D2D252390D26AFDBBAF43C /* SPIKE_RESULTS.md in Resources */,
 				B92977C8479C518FEDF9E5F3 /* build-bundle.sh in Resources */,
 				F6F40F9E52D3ED8B95323D65 /* epub.js in Resources */,
@@ -3174,6 +3171,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		0EB4E7C1282F0082F0677DA7 /* Inject DebugBridge URL types (DEBUG only) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/vreader/SupportingFiles/DebugBridge.plist",
+			);
+			name = "Inject DebugBridge URL types (DEBUG only)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nif [ \"${CONFIGURATION}\" != \"Debug\" ]; then\n  echo \"Skipping DebugBridge URL injection (Release build)\"\n  exit 0\nfi\nSRC_PLIST=\"${SRCROOT}/vreader/SupportingFiles/DebugBridge.plist\"\nDST_PLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n# Fail fast in Debug if the source is missing — silent success\n# would re-introduce bug #121 without anyone noticing.\nif [ ! -f \"${SRC_PLIST}\" ]; then\n  echo \"error: ${SRC_PLIST} not found; cannot inject DebugBridge URL types (bug #121 regression risk)\" >&2\n  exit 1\nfi\nif [ ! -f \"${DST_PLIST}\" ]; then\n  echo \"error: built Info.plist not found at ${DST_PLIST}\" >&2\n  exit 1\nfi\n# Surgical merge using Python plistlib so we:\n#   1. Assert DebugBridge.plist has only the expected top-level key\n#      (`CFBundleURLTypes`) — refuses to silently inject other keys.\n#   2. Preserve any pre-existing CFBundleURLTypes in Info.plist\n#      (future-safe: if a base URL scheme is later added to the\n#      main Info.plist, we don't strip it).\n#   3. Idempotent: replace any prior debug-bridge entry by its\n#      `CFBundleURLName` so re-runs don't append duplicates.\n/usr/bin/env python3 - \"${SRC_PLIST}\" \"${DST_PLIST}\" <<'PY'\nimport plistlib, sys\nsrc_path, dst_path = sys.argv[1], sys.argv[2]\nwith open(src_path, \"rb\") as f: src = plistlib.load(f)\n# Assert: source has only what we expect.\nif set(src.keys()) != {\"CFBundleURLTypes\"}:\n    sys.exit(f\"error: {src_path} has unexpected top-level keys: {sorted(src.keys())}; expected only ['CFBundleURLTypes']\")\nsrc_url_types = src[\"CFBundleURLTypes\"]\nif not isinstance(src_url_types, list):\n    sys.exit(f\"error: {src_path} CFBundleURLTypes is not an array\")\nwith open(dst_path, \"rb\") as f: dst = plistlib.load(f)\nexisting = dst.get(\"CFBundleURLTypes\", []) or []\n# Drop any existing debug-bridge entries by URL name (idempotency).\nDEBUG_NAME = \"vreader.debug-bridge\"\nexisting = [e for e in existing if e.get(\"CFBundleURLName\") != DEBUG_NAME]\n# Append the debug-bridge URL types from DebugBridge.plist.\nexisting.extend(src_url_types)\ndst[\"CFBundleURLTypes\"] = existing\nwith open(dst_path, \"wb\") as f: plistlib.dump(dst, f)\nprint(f\"Injected {len(src_url_types)} DebugBridge URL type(s) into {dst_path}; total now {len(existing)}\")\nPY\n";
+		};
 		B38BE880DA857177F42D54E3 /* Copy DebugFixtures (DEBUG only) */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;

@@ -30,6 +30,13 @@ targets:
           # is not per-build-config, so we strip the directory from the source
           # phase entirely and re-inject it via a Debug-only Run Script below.
           - "Resources/DebugFixtures/**"
+          # Bug #121: DebugBridge.plist must NOT ship as a sibling Resources-phase
+          # file in Release (and is useless to ship in Debug since iOS doesn't read
+          # CFBundleURLTypes from sibling plists). Strip it from the source phase
+          # entirely; in Debug, the Run Script below merges its CFBundleURLTypes
+          # into the BUILT Info.plist so the vreader-debug:// URL scheme actually
+          # registers with iOS.
+          - "SupportingFiles/DebugBridge.plist"
     preBuildScripts:
       # Bug #111: Copy DebugFixtures into the bundle ONLY when building Debug.
       # Release builds get nothing — verified by running `find vreader.app -name
@@ -52,6 +59,77 @@ targets:
           - "$(SRCROOT)/vreader/Resources/DebugFixtures"
         outputFiles:
           - "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/DebugFixtures"
+    postCompileScripts:
+      # Bug #121: Merge DebugBridge.plist's CFBundleURLTypes into the BUILT
+      # Info.plist when building Debug. Runs AFTER Xcode processes Info.plist
+      # (so we can modify it) but BEFORE code signing.
+      #
+      # Why postCompileScripts and not preBuildScripts: the BUILT Info.plist at
+      # ${TARGET_BUILD_DIR}/${INFOPLIST_PATH} doesn't exist until after the
+      # plist-processing build phase runs.
+      #
+      # Why merge into the BUILT plist instead of generating a per-config
+      # source plist: keeps a single source of truth for the base Info.plist
+      # (no Info-Debug.plist drifting from Info-Release.plist).
+      #
+      # Why this is hook-safe: scripts/verify-release-no-debugbridge.sh runs
+      # against the Release .app and must continue to pass — this script is
+      # gated on `${CONFIGURATION}` == Debug, so it's a no-op for Release.
+      - name: "Inject DebugBridge URL types (DEBUG only)"
+        script: |
+          set -euo pipefail
+          if [ "${CONFIGURATION}" != "Debug" ]; then
+            echo "Skipping DebugBridge URL injection (Release build)"
+            exit 0
+          fi
+          SRC_PLIST="${SRCROOT}/vreader/SupportingFiles/DebugBridge.plist"
+          DST_PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          # Fail fast in Debug if the source is missing — silent success
+          # would re-introduce bug #121 without anyone noticing.
+          if [ ! -f "${SRC_PLIST}" ]; then
+            echo "error: ${SRC_PLIST} not found; cannot inject DebugBridge URL types (bug #121 regression risk)" >&2
+            exit 1
+          fi
+          if [ ! -f "${DST_PLIST}" ]; then
+            echo "error: built Info.plist not found at ${DST_PLIST}" >&2
+            exit 1
+          fi
+          # Surgical merge using Python plistlib so we:
+          #   1. Assert DebugBridge.plist has only the expected top-level key
+          #      (`CFBundleURLTypes`) — refuses to silently inject other keys.
+          #   2. Preserve any pre-existing CFBundleURLTypes in Info.plist
+          #      (future-safe: if a base URL scheme is later added to the
+          #      main Info.plist, we don't strip it).
+          #   3. Idempotent: replace any prior debug-bridge entry by its
+          #      `CFBundleURLName` so re-runs don't append duplicates.
+          /usr/bin/env python3 - "${SRC_PLIST}" "${DST_PLIST}" <<'PY'
+          import plistlib, sys
+          src_path, dst_path = sys.argv[1], sys.argv[2]
+          with open(src_path, "rb") as f: src = plistlib.load(f)
+          # Assert: source has only what we expect.
+          if set(src.keys()) != {"CFBundleURLTypes"}:
+              sys.exit(f"error: {src_path} has unexpected top-level keys: {sorted(src.keys())}; expected only ['CFBundleURLTypes']")
+          src_url_types = src["CFBundleURLTypes"]
+          if not isinstance(src_url_types, list):
+              sys.exit(f"error: {src_path} CFBundleURLTypes is not an array")
+          with open(dst_path, "rb") as f: dst = plistlib.load(f)
+          existing = dst.get("CFBundleURLTypes", []) or []
+          # Drop any existing debug-bridge entries by URL name (idempotency).
+          DEBUG_NAME = "vreader.debug-bridge"
+          existing = [e for e in existing if e.get("CFBundleURLName") != DEBUG_NAME]
+          # Append the debug-bridge URL types from DebugBridge.plist.
+          existing.extend(src_url_types)
+          dst["CFBundleURLTypes"] = existing
+          with open(dst_path, "wb") as f: plistlib.dump(dst, f)
+          print(f"Injected {len(src_url_types)} DebugBridge URL type(s) into {dst_path}; total now {len(existing)}")
+          PY
+        inputFiles:
+          - "$(SRCROOT)/vreader/SupportingFiles/DebugBridge.plist"
+        # No outputFiles: the script modifies the Info.plist that Xcode's own
+        # plist-processing phase writes; declaring it as an output here would
+        # cause a "duplicate output file" build failure. Lack of outputFiles
+        # means Xcode runs the script every build (acceptable — the script is
+        # idempotent and < 0.1s).
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
