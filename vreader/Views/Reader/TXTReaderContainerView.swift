@@ -325,7 +325,46 @@ struct TXTReaderContainerView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerContentTapped)) { _ in
+            // Bug #131: pause auto-page-turner on tap so the user has time
+            // to read the chrome they just summoned, mirroring MDReaderContainerView.
             isChromeVisible.toggle()
+            uiState.autoPageTurner?.pause()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerNextPage)) { _ in
+            // Bug #131: manual page-turn pauses auto-turner so the user
+            // doesn't get a second auto-turn one beat after their swipe.
+            guard isPagedMode else { return }
+            uiState.pageNavigator?.nextPage()
+            if let offset = uiState.syncPagedState() {
+                viewModel.updateScrollPosition(charOffsetUTF16: offset)
+            }
+            uiState.autoPageTurner?.pause()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerPreviousPage)) { _ in
+            guard isPagedMode else { return }
+            uiState.pageNavigator?.previousPage()
+            if let offset = uiState.syncPagedState() {
+                viewModel.updateScrollPosition(charOffsetUTF16: offset)
+            }
+            uiState.autoPageTurner?.pause()
+        }
+        .onChange(of: settingsStore?.autoPageTurn) { _, newValue in
+            // Bug #131: live-apply the autoPageTurn toggle without requiring
+            // the user to close + reopen the book.
+            uiState.updateAutoPageTurner(
+                enabled: newValue ?? false,
+                isPagedMode: isPagedMode,
+                interval: settingsStore?.autoPageTurnInterval ?? 5.0
+            )
+        }
+        .onChange(of: settingsStore?.autoPageTurnInterval) { _, _ in
+            // Bug #131: re-apply interval changes for an already-running turner.
+            guard settingsStore?.autoPageTurn == true else { return }
+            uiState.updateAutoPageTurner(
+                enabled: true,
+                isPagedMode: isPagedMode,
+                interval: settingsStore?.autoPageTurnInterval ?? 5.0
+            )
         }
         .readerNotificationHandlers(
             deps: makeNotificationDeps(),
