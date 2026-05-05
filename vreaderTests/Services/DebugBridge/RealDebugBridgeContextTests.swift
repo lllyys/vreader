@@ -59,10 +59,15 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     /// Writes a fake fixture file into a temp directory and returns a Bundle
-    /// rooted at that directory. Bundle.url(forResource:withExtension:) finds
-    /// loose files in any directory you point it at.
+    /// rooted at that directory. The file is placed inside a `DebugFixtures/`
+    /// subdirectory to mirror the real `vreader.app/DebugFixtures/<name>.<ext>`
+    /// layout produced by `project.yml`'s "Copy DebugFixtures (DEBUG only)"
+    /// pre-build script. Putting it at the bundle root would test a different
+    /// layout than production and miss bug #124.
     private func makeFixtureBundle(name: String, ext: String, contents: String) throws -> Bundle {
-        let path = fixtureBundleDir.appendingPathComponent("\(name).\(ext)")
+        let subdirURL = fixtureBundleDir.appendingPathComponent("DebugFixtures", isDirectory: true)
+        try FileManager.default.createDirectory(at: subdirURL, withIntermediateDirectories: true)
+        let path = subdirURL.appendingPathComponent("\(name).\(ext)")
         try contents.data(using: .utf8)!.write(to: path)
         return Bundle(url: fixtureBundleDir)!
     }
