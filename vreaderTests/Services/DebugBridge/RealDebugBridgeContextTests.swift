@@ -554,19 +554,38 @@ final class RealDebugBridgeContextTests: XCTestCase {
     // MARK: - settle / eval (active-reader registry)
 
     @MainActor
-    func test_settle_withoutActiveReader_throwsNoActiveReader() async {
+    func test_settle_withoutActiveReader_writesNoActiveReaderSentinelButDoesNotThrow() async throws {
+        // Bug #125: settle without an active reader used to throw
+        // `noActiveReader` and write nothing. The doc promise is "a hung
+        // probe still produces the sentinel" — applies to the no-active-reader
+        // case too. settle now mirrors eval's noActiveReader pattern: writes
+        // `ready-<token>.json` carrying `error: "no active reader"` and does
+        // NOT throw, so a verification harness can poll the file regardless
+        // of reader state.
         DebugReaderRegistry.shared.reset()
         let context = RealDebugBridgeContext(
             persistence: persistence, importer: importer, userDefaults: defaults
         )
-        do {
-            try await context.settle(token: "abc")
-            XCTFail("expected noActiveReader")
-        } catch DebugBridgeContextError.noActiveReader {
-            // expected
-        } catch {
-            XCTFail("expected noActiveReader, got \(error)")
-        }
+        let token = "no-reader-\(UUID().uuidString)"
+        try await context.settle(token: token)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "no active reader",
+                       "no-active-reader must surface in JSON file, not as a thrown error")
+        XCTAssertEqual(json?["token"] as? String, token)
+        XCTAssertEqual(json?["phase"] as? String, "unknown",
+                       "phase: unknown matches the timeout-path payload shape")
+        XCTAssertNil(json?["fingerprintKey"],
+                     "no probe → no fingerprintKey")
+        XCTAssertNil(json?["format"],
+                     "no probe → no format")
+        XCTAssertNil(json?["position"],
+                     "no probe → no position")
+        try? FileManager.default.removeItem(at: url)
     }
 
     @MainActor

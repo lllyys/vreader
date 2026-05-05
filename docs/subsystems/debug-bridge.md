@@ -172,7 +172,7 @@ Error reporting comes in two flavors:
 | `bridge.fixtureResourceMissing: <basename>` | Catalog entry exists but bundle file is absent |
 | `bridge.notImplemented: <command>`          | Path not yet wired (e.g. `open.position`)      |
 | `bridge.bookNotFound: <bookId>`             | `open` received an unknown fingerprint key     |
-| `bridge.noActiveReader`                     | `settle` / `eval` ran with no reader presented |
+| `bridge.noActiveReader`                     | `eval` ran with no reader presented (NOT `settle` — see below) |
 | `bridge.settleTimeout`                      | `settle` gave up after 30s                     |
 | `bridge.evalUnsupported: <format>`          | Active reader doesn't support JS eval          |
 | `bridge.evalFailed: <msg>`                  | JS execution threw                             |
@@ -181,10 +181,12 @@ Error reporting comes in two flavors:
 
 | File                 | Possible `error` values                                                                |
 | -------------------- | -------------------------------------------------------------------------------------- |
-| `ready-<token>.json` | `"settle timeout"` (with `phase: "unknown"`)                                           |
+| `ready-<token>.json` | `"settle timeout"` (with `phase: "unknown"`), `"no active reader"` (bug #125 — also with `phase: "unknown"`; probe-shaped fields `fingerprintKey`/`format`/`position` are absent on this path) |
 | `eval-<bridge>.json` | `"no active reader"`, `"eval unsupported for format: <fmt>"`, raw JS error description |
 
-If you need stable codes for these files (e.g., for a verification harness), assert on the snapshot's `lastError` after running the failing command — it uses the stable prefixes and is the recommended assertion surface.
+For `settle` specifically: the no-active-reader case is reported via the sentinel file (`error: "no active reader"`), NOT via `snapshot.lastError`. `settle` does not throw on this path, so the bridge's `lastError` stays clear. Verification harnesses must poll `ready-<token>.json` regardless of reader state.
+
+For `eval` and the rest of the failure space, assert on the snapshot's `lastError` after running the failing command — it uses the stable prefixes and is the recommended assertion surface.
 
 ## Architecture
 

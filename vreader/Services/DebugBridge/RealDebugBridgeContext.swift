@@ -230,10 +230,9 @@ final class RealDebugBridgeContext: DebugBridgeContext {
 
     /// Wait for the active reader to settle, then write
     /// `Caches/DebugBridge/ready-<token>.json` with the current state.
-    /// Throws `noActiveReader` if no reader is presented. On settle
-    /// timeout, writes a sentinel file with `error: "settle timeout"`
-    /// rather than throwing — so the host-side waiter has a file to
-    /// inspect after its own timeout expires.
+    /// On settle timeout OR when no reader is presented, writes a sentinel
+    /// file with `error: <reason>` rather than throwing — the host-side
+    /// waiter always has a file to inspect after its own timeout expires.
     ///
     /// The timeout is enforced by the bridge, not just the probe — a
     /// probe that hangs instead of throwing settleTimeout still produces
@@ -245,8 +244,19 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// Internal test seam — same logic as `settle` but accepts a custom
     /// timeout so tests can exercise the race without waiting 30s.
     func settleWithTimeout(token: String, timeoutSeconds: TimeInterval) async throws {
+        // Bug #125: when no reader is registered we still write a sentinel —
+        // the verification harness has no way to distinguish "URL accepted but
+        // hung" from "URL accepted but no probe to settle on" without a file
+        // on disk. Mirror eval's noActiveReader pattern: write the sentinel
+        // with error="no active reader" and return without throwing.
         guard let probe = DebugReaderRegistry.shared.current else {
-            throw DebugBridgeContextError.noActiveReader
+            try writeReadySentinel(
+                token: token,
+                probe: nil,
+                error: "no active reader"
+            )
+            log.error("settle: ready-\(token, privacy: .public).json with error=no active reader")
+            return
         }
         var settleError: String?
         do {
@@ -261,15 +271,37 @@ final class RealDebugBridgeContext: DebugBridgeContext {
             settleError = String(describing: error)
         }
 
+        try writeReadySentinel(token: token, probe: probe, error: settleError)
+        if let err = settleError {
+            log.error("settle: ready-\(token, privacy: .public).json with error=\(err, privacy: .public)")
+        } else {
+            log.info("settle: wrote ready-\(token, privacy: .public).json")
+        }
+    }
+
+    /// Writes the `ready-<token>.json` sentinel. Probe-shaped fields
+    /// (`fingerprintKey`, `format`, `position`) are only included when a
+    /// probe was registered — for the no-active-reader case the keys are
+    /// omitted so they read as `null` in JSON, matching `DebugSnapshot`'s
+    /// "field is partial / unavailable" convention. When `error` is
+    /// present, `phase: "unknown"` is also set per the existing
+    /// timeout-path shape.
+    private func writeReadySentinel(
+        token: String,
+        probe: DebugReaderProbe?,
+        error: String?
+    ) throws {
         var payload: [String: Any] = [
             "token": token,
-            "ts": ISO8601DateFormatter().string(from: Date()),
-            "fingerprintKey": probe.fingerprintKey,
-            "format": probe.format,
-            "position": probe.currentPositionString as Any
+            "ts": ISO8601DateFormatter().string(from: Date())
         ]
-        if let err = settleError {
-            payload["error"] = err
+        if let probe {
+            payload["fingerprintKey"] = probe.fingerprintKey
+            payload["format"] = probe.format
+            payload["position"] = probe.currentPositionString as Any
+        }
+        if let error {
+            payload["error"] = error
             payload["phase"] = "unknown"  // probe doesn't yet report a render phase
         }
         let data = try JSONSerialization.data(
@@ -279,11 +311,6 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         let outputURL = try Self.snapshotsDirectory()
             .appendingPathComponent("ready-\(token).json")
         try data.write(to: outputURL, options: .atomic)
-        if let err = settleError {
-            log.error("settle: ready-\(token, privacy: .public).json with error=\(err, privacy: .public)")
-        } else {
-            log.info("settle: wrote ready-\(token, privacy: .public).json")
-        }
     }
 
     /// Race a MainActor-isolated operation against a timer; whichever
