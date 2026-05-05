@@ -208,7 +208,8 @@ struct ReaderContainerView: View {
                 store: settingsStore,
                 tapZoneStore: tapZoneStore,
                 bookFingerprintKey: book.fingerprintKey,
-                perBookBaseURL: Self.perBookSettingsBaseURL
+                perBookBaseURL: Self.perBookSettingsBaseURL,
+                formatCapabilities: BookFormat(rawValue: book.format.lowercased())?.capabilities
             )
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)

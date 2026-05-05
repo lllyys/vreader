@@ -24,6 +24,11 @@ struct ReaderSettingsPanel: View {
     var bookFingerprintKey: String?
     /// Base URL for per-book settings storage.
     var perBookBaseURL: URL?
+    /// Capabilities of the current book's format. Used to gate settings whose
+    /// effect depends on the active rendering path (bug #120). When nil, the
+    /// panel falls back to "available everywhere" — preserves backward compat
+    /// for callers (and tests/previews) that don't supply the value.
+    var formatCapabilities: FormatCapabilities? = nil
     /// Whether per-book settings are currently enabled for this book.
     @State private var isPerBookEnabled = false
     /// Photo picker state for theme background (feature #32).
@@ -316,6 +321,48 @@ struct ReaderSettingsPanel: View {
 
     // MARK: - Chinese Conversion (E04)
 
+    /// Whether the Simp/Trad transform actually applies in the current state.
+    /// Bug #120: the transform is wired only into Unified mode's
+    /// `activeTransforms`; Native mode (the default) is a no-op for this
+    /// setting, AND formats without `.unifiedReflow` (PDF, complex EPUB) never
+    /// run through the unified pipeline regardless of mode. Disabling the
+    /// picker in those cases prevents a silent UX dead-end.
+    ///
+    /// Residual gap (separate sub-bug): EPUB books are reported as
+    /// `.unifiedReflow`-capable here based on format alone, but a complex EPUB
+    /// can fall back to native WKWebView at render time (`ReaderUnifiedDispatch.swift:73`).
+    /// In that case the picker shows enabled even though the transform is a
+    /// runtime no-op. The render-time `isComplexEPUB` signal isn't available
+    /// at panel-open time, so this guard intentionally errs on "show enabled"
+    /// for EPUBs to avoid a false-disable for the simple-EPUB-in-unified path
+    /// where the conversion does work.
+    private var chineseConversionSupported: Bool {
+        guard store.readingMode == .unified else { return false }
+        // If the caller didn't supply capabilities (e.g. older tests, previews),
+        // fall back to "trust user preference" so the picker stays enabled —
+        // matches the pre-fix behavior for unsupplied callers.
+        guard let caps = formatCapabilities else { return true }
+        return caps.contains(.unifiedReflow)
+    }
+
+    /// Why the picker is disabled, used to pick the right footer/hint copy.
+    /// Returns nil when the picker is enabled.
+    private enum ChineseConversionDisableReason {
+        case nativeMode       // user is in Native; Unified mode would enable it
+        case formatUnsupported // format never supports unified reflow (PDF)
+    }
+    private var chineseConversionDisableReason: ChineseConversionDisableReason? {
+        if let caps = formatCapabilities, !caps.contains(.unifiedReflow) {
+            // Format-level disqualifier wins regardless of readingMode —
+            // PDF can't convert even if user picks Unified.
+            return .formatUnsupported
+        }
+        if store.readingMode != .unified {
+            return .nativeMode
+        }
+        return nil
+    }
+
     @ViewBuilder
     private var chineseConversionSection: some View {
         Section {
@@ -325,10 +372,39 @@ struct ReaderSettingsPanel: View {
                 Text("Trad \u{2192} Simp").tag(ChineseConversionDirection.tradToSimp)
             }
             .pickerStyle(.segmented)
+            .disabled(chineseConversionDisableReason != nil)
             .accessibilityLabel("Chinese text conversion")
+            .accessibilityHint(chineseConversionAccessibilityHint)
         } footer: {
+            chineseConversionFooter
+        }
+    }
+
+    private var chineseConversionAccessibilityHint: String {
+        switch chineseConversionDisableReason {
+        case nil:
+            return "Choose conversion direction between Simplified and Traditional Chinese"
+        case .nativeMode:
+            return "Disabled — switch Reading Mode to Unified to convert Chinese text"
+        case .formatUnsupported:
+            return "Disabled — this book's format does not support text conversion"
+        }
+    }
+
+    @ViewBuilder
+    private var chineseConversionFooter: some View {
+        switch chineseConversionDisableReason {
+        case nil:
             Text("Convert Chinese text between Simplified and Traditional scripts.")
                 .font(.caption)
+        case .nativeMode:
+            Text("Available in Unified reading mode only. Native mode does not yet convert Chinese text.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .formatUnsupported:
+            Text("Not supported for this book's format.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
