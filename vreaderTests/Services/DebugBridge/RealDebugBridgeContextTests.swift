@@ -295,7 +295,10 @@ final class RealDebugBridgeContextTests: XCTestCase {
         let data = try Data(contentsOf: url)
         let snap = try JSONDecoder().decode(DebugSnapshot.self, from: data)
 
-        XCTAssertEqual(snap.schemaVersion, 1)
+        // Stays in sync with `DebugSnapshot.currentSchemaVersion` so a
+        // future bump fails this test loudly. Bumped to 2 by feature #49
+        // WI-1 (commit 74a5443); the test wasn't updated then.
+        XCTAssertEqual(snap.schemaVersion, DebugSnapshot.currentSchemaVersion)
         XCTAssertFalse(snap.ts.isEmpty)
         XCTAssertEqual(snap.theme, "dark")
         XCTAssertEqual(snap.fontSize, 22)
