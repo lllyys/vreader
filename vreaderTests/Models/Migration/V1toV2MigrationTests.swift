@@ -23,8 +23,11 @@ struct V1toV2MigrationTests {
     }
 
     @Test func migrationPlanIncludesBothSchemas() {
-        let schemas = VReaderMigrationPlan.schemas
-        #expect(schemas.count == 2)
+        // Assertion checks what the test name claims — V1 AND V2 are present —
+        // not a hardcoded count, which drifts as later schema versions ship.
+        let schemaNames = VReaderMigrationPlan.schemas.map { String(describing: $0) }
+        #expect(schemaNames.contains("SchemaV1"))
+        #expect(schemaNames.contains("SchemaV2"))
     }
 
     @Test func migrationPlanHasNoExplicitStages() {

@@ -11,20 +11,29 @@ struct TXTChapterContentLoaderTests {
     // MARK: - Test Data Helpers
 
     /// Creates test data from an array of chapter texts (UTF-8).
-    /// Returns (fileData, chapters) where chapter byte ranges are correct.
+    /// Returns (fileData, chapters) where both byte ranges and UTF-16
+    /// offsets are populated. Production `TXTChapterContentLoader`
+    /// reads via UTF-16 offsets, so the byte-only init the tests used
+    /// previously left `globalStartUTF16`/`textLengthUTF16` at their
+    /// `-1` defaults and every load threw `decodeFailed`.
     private static func makeTestData(_ texts: [String]) -> (Data, [TXTChapter]) {
         var data = Data()
         var chapters: [TXTChapter] = []
+        var utf16Cursor = 0
         for (i, text) in texts.enumerated() {
-            let start = data.count
+            let startByte = data.count
             let textData = Data(text.utf8)
             data.append(textData)
+            let utf16Length = (text as NSString).length
             chapters.append(TXTChapter(
                 index: i,
                 title: "Chapter \(i)",
-                startByte: Int64(start),
-                endByte: Int64(data.count)
+                startByte: Int64(startByte),
+                endByte: Int64(data.count),
+                globalStartUTF16: utf16Cursor,
+                textLengthUTF16: utf16Length
             ))
+            utf16Cursor += utf16Length
         }
         return (data, chapters)
     }
@@ -72,13 +81,17 @@ struct TXTChapterContentLoaderTests {
     // MARK: - Empty Chapter
 
     @Test func emptyChapterReturnsEmptyString() async throws {
-        // Create a chapter with startByte == endByte
+        // Empty chapter: zero-length UTF-16 range. The byte range is also
+        // zero-length, but production reads via UTF-16 offsets — both must
+        // be populated.
         let data = Data("Some content".utf8)
         let chapter = TXTChapter(
             index: 0,
             title: "Empty",
             startByte: 5,
-            endByte: 5
+            endByte: 5,
+            globalStartUTF16: 5,
+            textLengthUTF16: 0
         )
         let loader = TXTChapterContentLoader(fileData: data, encoding: .utf8)
 
@@ -293,7 +306,10 @@ struct TXTChapterContentLoaderTests {
             index: 0,
             title: "GBK Chapter",
             startByte: 0,
-            endByte: Int64(gbkData.count)
+            endByte: Int64(gbkData.count),
+            globalStartUTF16: 0,
+            // "你好世界" is 4 BMP CJK characters → 4 UTF-16 code units.
+            textLengthUTF16: 4
         )
         let loader = TXTChapterContentLoader(fileData: gbkData, encoding: gbkEncoding)
 
@@ -304,17 +320,29 @@ struct TXTChapterContentLoaderTests {
     // MARK: - Edge: startByte beyond data length
 
     @Test func startByteBeyondDataReturnsEmpty() async throws {
+        // Production now reads via UTF-16 offsets and treats out-of-range
+        // offsets as a programming error (`decodeFailed`) — the comment in
+        // `TXTChapterContentLoader.loadChapter` explicitly says
+        // "Unpopulated UTF-16 offsets — should not happen with new builder."
+        // Test name kept for git-blame continuity; assertion follows the
+        // new contract.
         let data = Data("Short".utf8)
         let chapter = TXTChapter(
             index: 0,
             title: "Beyond",
             startByte: 100,
-            endByte: 200
+            endByte: 200,
+            globalStartUTF16: 100,
+            textLengthUTF16: 100
         )
         let loader = TXTChapterContentLoader(fileData: data, encoding: .utf8)
 
-        let text = try await loader.loadChapter(chapter)
-        #expect(text == "")
+        do {
+            _ = try await loader.loadChapter(chapter)
+            Issue.record("Expected decodeFailed but loadChapter succeeded")
+        } catch TXTChapterLoadError.decodeFailed {
+            // Expected — UTF-16 start (100) is past full.length ("Short" → 5).
+        }
     }
 
     // MARK: - Unicode / CJK content

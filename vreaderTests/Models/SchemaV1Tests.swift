@@ -60,8 +60,11 @@ struct SchemaV1Tests {
     // MARK: - Migration Plan
 
     @Test func migrationPlanHasSchemas() {
-        let schemas = VReaderMigrationPlan.schemas
-        #expect(schemas.count == 2) // V1 + V2
+        // Pin V1's presence; the count grows over time as new schema versions
+        // ship (V3, V4, V5, V6, …), so a hardcoded literal would drift.
+        let schemaNames = VReaderMigrationPlan.schemas.map { String(describing: $0) }
+        #expect(!schemaNames.isEmpty)
+        #expect(schemaNames.contains("SchemaV1"))
     }
 
     @Test func migrationPlanHasNoExplicitStages() {
