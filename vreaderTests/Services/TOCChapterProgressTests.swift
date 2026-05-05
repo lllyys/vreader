@@ -127,17 +127,40 @@ struct TOCChapterProgressTests {
             tocEntries: entries,
             totalTextLengthUTF16: 1000
         )
-        // Before first entry = preamble, treat as chapter 0.
-        // Production currently clamps fraction to 0 for any offset before
-        // the first entry (see TOCChapterProgress.swift:65 — `max(0, ...)`)
-        // — i.e., it doesn't model preamble progress as a fraction of
-        // (0 → first_entry). The test's original expectation (fraction
-        // ≈ 0.5) reflected the better UX choice but never matched
-        // production.
-        //
-        // Bug #127 (GH #271) tracks the production fix; this test is
-        // updated to current behavior so the suite is green. When the
-        // bug fix lands the assertion flips back to fraction ≈ 0.5.
+        // Bug #127 fix: preamble (offset before first TOC entry) is mapped
+        // proportionally within virtual chapter 0 — fraction = offset /
+        // first_entry_offset. Here 50 / 100 = 0.5.
+        #expect(result != nil)
+        #expect(result!.chapterIndex == 0)
+        #expect(abs(result!.fraction - 0.5) < 0.01)
+    }
+
+    @Test("offset at exactly the first TOC entry transitions cleanly")
+    func atFirstEntry() {
+        let entries = makeTOCEntries(offsets: [100, 500])
+        let result = TOCChapterProgress.progress(
+            currentOffsetUTF16: 100,
+            tocEntries: entries,
+            totalTextLengthUTF16: 1000
+        )
+        // Edge: at exactly the first-entry boundary, the preamble branch
+        // shouldn't fire (`<` not `<=`). Should land in chapter 0 (the
+        // first real chapter) at fraction=0.
+        #expect(result != nil)
+        #expect(result!.chapterIndex == 0)
+        #expect(result!.fraction == 0)
+    }
+
+    @Test("preamble with first entry at offset 0 returns fraction 0")
+    func preambleZeroLength() {
+        let entries = makeTOCEntries(offsets: [0, 500])
+        let result = TOCChapterProgress.progress(
+            currentOffsetUTF16: 0,
+            tocEntries: entries,
+            totalTextLengthUTF16: 1000
+        )
+        // Edge: when first entry is at offset 0, there's no preamble
+        // region. Falls into chapter 0 at fraction=0.
         #expect(result != nil)
         #expect(result!.chapterIndex == 0)
         #expect(result!.fraction == 0)

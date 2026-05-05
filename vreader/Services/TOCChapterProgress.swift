@@ -38,6 +38,24 @@ enum TOCChapterProgress {
         let starts = tocEntries.compactMap { $0.locator.charOffsetUTF16 }
         guard !starts.isEmpty else { return nil }
 
+        // Bug #127: preamble (offset before first TOC entry) — Foreword,
+        // Preface, etc. — is treated as virtual chapter 0 with proportional
+        // fraction `currentOffset / first_entry_offset`. Earlier behavior
+        // clamped this region to fraction=0, which made the progress bar
+        // appear stuck at "Chapter 1, 0%" until the reader reached the
+        // first chapter title. Now the preamble shows real progress.
+        if currentOffsetUTF16 < starts[0] {
+            let preambleLen = starts[0]
+            let fraction = preambleLen > 0
+                ? Double(currentOffsetUTF16) / Double(preambleLen)
+                : 0
+            return TOCChapterProgressResult(
+                chapterIndex: 0,
+                fraction: max(0, min(1, fraction)),
+                totalChapters: starts.count
+            )
+        }
+
         // Find which chapter the current offset falls in.
         var chapterIdx = 0
         for (i, start) in starts.enumerated() {
