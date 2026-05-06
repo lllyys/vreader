@@ -41,6 +41,12 @@ struct LibraryView: View {
     @State private var isShowingImporter = false
     @State private var isShowingSettings = false
     @State private var isShowingAIChat = false
+    /// Bug #93: cache the general-chat VM across sheet open/close cycles
+    /// so multi-turn history is preserved when the user dismisses and
+    /// re-opens the chat. Created lazily on first sheet open and reused
+    /// for the rest of the LibraryView's lifetime. Same pattern as
+    /// `ReaderAICoordinator` ownership in `ReaderContainerView`.
+    @State private var generalChatVM: AIChatViewModel?
     @State private var isShowingOPDSCatalogs = false
     @State private var isShowingCollections = false
     @State private var activeFilter: LibraryFilter = .allBooks
@@ -253,7 +259,7 @@ struct LibraryView: View {
             }
             .sheet(isPresented: $isShowingAIChat) {
                 NavigationStack {
-                    AIChatView(viewModel: makeGeneralChatViewModel())
+                    AIChatView(viewModel: resolvedGeneralChatVM)
                         .navigationTitle("AI Chat")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
@@ -652,6 +658,23 @@ struct LibraryView: View {
             keychainService: KeychainService(),
             consentManager: AIConsentManager()
         )
+    }
+
+    /// Bug #93: lazily resolves the general-chat VM, caching it in `@State`
+    /// so it survives sheet dismiss/re-present. SwiftUI re-runs the
+    /// `.sheet { ... }` closure each time the sheet is shown — the
+    /// pre-fix path always produced a fresh VM with empty messages, so
+    /// closing and reopening the sheet wiped multi-turn history.
+    /// Mirrors the existing `resolvedAICoordinator` lazy-cache pattern
+    /// in `ReaderContainerView`. The async dispatch keeps SwiftUI from
+    /// observing a state mutation during view body evaluation.
+    private var resolvedGeneralChatVM: AIChatViewModel {
+        if let existing = generalChatVM { return existing }
+        let vm = makeGeneralChatViewModel()
+        DispatchQueue.main.async {
+            generalChatVM = vm
+        }
+        return vm
     }
 
     /// Creates an AIChatViewModel for general (non-book) chat.

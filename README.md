@@ -191,7 +191,7 @@ Shared rules for all AI agents live in ``:
 
 ## Status
 
-Active development. See [features](docs/features.md) (36 done) and [bugs](docs/bugs.md) (98 fixed) for current state.
+Active development. See [features](docs/features.md) (38 done) and [bugs](docs/bugs.md) (139 fixed) for current state.
 
 ## License
 
