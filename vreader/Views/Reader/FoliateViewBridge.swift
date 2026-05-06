@@ -28,6 +28,12 @@ struct FoliateViewBridge: UIViewRepresentable {
     /// Book file format extension (e.g., "azw3", "epub", "mobi").
     let bookFormat: String
 
+    /// Bug #141: book identity for the DebugBridge eval registry binding.
+    /// Threaded through to the Coordinator so `webView(_:didFinish:)` can
+    /// register `(webView, fingerprintKey)` together — same keyed-binding
+    /// shape as the bug #126 EPUB fix.
+    var fingerprintKey: String?
+
     /// Optional saved CFI to restore reading position after book-ready.
     var lastLocationCFI: String?
 
@@ -88,6 +94,9 @@ struct FoliateViewBridge: UIViewRepresentable {
 
         let coordinator = context.coordinator
         coordinator.lastLocationCFI = lastLocationCFI
+        #if DEBUG
+        coordinator.fingerprintKey = fingerprintKey
+        #endif
 
         // Read book file as base64 — embedded directly in HTML (not via evaluateJavaScript,
         // which has size limits for large payloads).
@@ -195,6 +204,9 @@ struct FoliateViewBridge: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         let coordinator = context.coordinator
+        #if DEBUG
+        coordinator.fingerprintKey = fingerprintKey
+        #endif
         guard coordinator.isReaderReady else { return }
 
         // Detect theme CSS changes

@@ -174,6 +174,7 @@ struct FoliateReaderContainerView: View {
         FoliateViewBridge(
             bookURL: fileURL,
             bookFormat: viewModel.bookFingerprint.format.rawValue,
+            fingerprintKey: viewModel.bookFingerprintKey,
             lastLocationCFI: lastLocationCFI,
             themeCSS: settingsStore.map { store in
                 FoliateStyleMapper.themeCSS(

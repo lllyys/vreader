@@ -148,6 +148,37 @@ final class DebugReaderRegistry {
     /// stays on the eval path.
     var rawActiveEPUBWebViewKeyForTests: String? { activeEPUBWebViewKey }
     var rawActiveEPUBWebViewForTests: WKWebView? { activeEPUBWebViewRef }
+
+    /// Bug #141: weak side-channel ref to the active Foliate (AZW3/MOBI)
+    /// webview. Mirrors the EPUB binding above — same keyed-protection
+    /// shape, same lifecycle, just a separate slot because Foliate's
+    /// rendering host is independent of `EPUBWebViewBridge`.
+    /// Set by `FoliateViewCoordinator.webView(_:didFinish:)` via
+    /// `setActiveFoliateWebView(_:for:)`. Read by `foliateWebView(for:)`
+    /// which enforces the same fingerprintKey match. Weak.
+    private weak var activeFoliateWebViewRef: WKWebView?
+    private var activeFoliateWebViewKey: String?
+
+    /// Set the active Foliate webview for `fingerprintKey`. Replaces any
+    /// previous binding regardless of key — newer wins, mirroring the
+    /// EPUB and probe-registration policies.
+    func setActiveFoliateWebView(_ webView: WKWebView, for fingerprintKey: String) {
+        activeFoliateWebViewRef = webView
+        activeFoliateWebViewKey = fingerprintKey
+    }
+
+    /// Return the active Foliate webview iff it was registered for
+    /// `fingerprintKey`. Returns nil when no webview is registered, when
+    /// the registered webview was deallocated (weak ref cleared), or
+    /// when the registered key doesn't match.
+    func foliateWebView(for fingerprintKey: String) -> WKWebView? {
+        guard activeFoliateWebViewKey == fingerprintKey else { return nil }
+        return activeFoliateWebViewRef
+    }
+
+    /// Test seam — symmetric to the EPUB pair.
+    var rawActiveFoliateWebViewKeyForTests: String? { activeFoliateWebViewKey }
+    var rawActiveFoliateWebViewForTests: WKWebView? { activeFoliateWebViewRef }
     #endif
 
     /// Per-key waiters added by `awaitReader(fingerprintKey:timeout:)`.
@@ -197,6 +228,11 @@ final class DebugReaderRegistry {
                 activeEPUBWebViewRef = nil
                 activeEPUBWebViewKey = nil
             }
+            // Bug #141: same protection for the Foliate webview slot.
+            if activeFoliateWebViewKey == reader.fingerprintKey {
+                activeFoliateWebViewRef = nil
+                activeFoliateWebViewKey = nil
+            }
             #endif
         }
     }
@@ -208,6 +244,8 @@ final class DebugReaderRegistry {
         #if canImport(WebKit)
         activeEPUBWebViewRef = nil
         activeEPUBWebViewKey = nil
+        activeFoliateWebViewRef = nil
+        activeFoliateWebViewKey = nil
         #endif
         let pendingByKey = waiters
         waiters = [:]

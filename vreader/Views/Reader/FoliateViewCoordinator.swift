@@ -45,6 +45,15 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
     /// Whether the reader is ready (book-ready received). Guards JS calls in updateUIView.
     var isReaderReady = false
 
+    #if DEBUG
+    /// Bug #141: book identity used to bind the live `WKWebView` to a
+    /// fingerprintKey in `DebugReaderRegistry` from the navigation
+    /// delegate's `webView(_:didFinish:)`. Set by `FoliateViewBridge`
+    /// from the SwiftUI binding in both `makeUIView` and `updateUIView`.
+    /// DEBUG-only.
+    var fingerprintKey: String?
+    #endif
+
     // MARK: - Callbacks
 
     private let onBookReady: @MainActor (FoliateBookInfo) -> Void
@@ -172,6 +181,19 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
     ) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
         return Self.shouldAllowNavigation(to: url) ? .allow : .cancel
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Bug #141: register the live WKWebView with DebugReaderRegistry,
+        // paired with the book's fingerprintKey so eval can verify book
+        // identity at call-time. Skip when the fingerprintKey hasn't been
+        // threaded yet — silently dropping is preferable to binding to
+        // no key. Mirrors the bug #126 EPUB pattern.
+        #if DEBUG
+        if let key = fingerprintKey {
+            DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: key)
+        }
+        #endif
     }
 
     nonisolated func webView(

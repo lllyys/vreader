@@ -127,6 +127,66 @@ final class DebugReaderRegistryTests: XCTestCase {
     // instances often outlive an `autoreleasepool` block during test
     // runs. The compile-time declaration is the contract; the runtime
     // weak-drop is covered by on-device verification (bug #126 evidence).
+
+    // MARK: - Bug #141: keyed activeFoliateWebView binding (AZW3/MOBI)
+    //
+    // Symmetric with the EPUB binding above. Same lifecycle, same
+    // stale-protection contract, separate slot.
+
+    func test_foliateWebView_initiallyNil_forAnyKey() {
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "any-key"))
+    }
+
+    func test_setActiveFoliateWebView_returnsForMatchingKey() {
+        let webView = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1")
+        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k1") === webView)
+    }
+
+    func test_setActiveFoliateWebView_returnsNilForMismatchedKey() {
+        // Same stale-protection regression seam as the EPUB pair.
+        let webView = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "outgoing-book")
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "incoming-book"))
+    }
+
+    func test_setActiveFoliateWebView_replacesPreviousBinding() {
+        let webViewA = WKWebView(frame: .zero)
+        let webViewB = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webViewA, for: "k1")
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webViewB, for: "k2")
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1"))
+        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k2") === webViewB)
+    }
+
+    func test_unregister_clearsFoliateWebViewWhenKeyMatches() {
+        let webView = WKWebView(frame: .zero)
+        let probe = StubProbe(key: "k1", fmt: "azw3")
+        DebugReaderRegistry.shared.register(probe)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1")
+        DebugReaderRegistry.shared.unregister(probe)
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1"))
+    }
+
+    func test_reset_clearsFoliateWebView() {
+        let webView = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1")
+        DebugReaderRegistry.shared.reset()
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1"))
+        XCTAssertNil(DebugReaderRegistry.shared.rawActiveFoliateWebViewKeyForTests)
+    }
+
+    func test_epubAndFoliateBindings_areIndependent() {
+        // Setting one binding must not clear the other; setting the same
+        // key on both is a normal multi-host scenario (e.g., quick
+        // format-switching between books) and both slots should retain.
+        let epubWebView = WKWebView(frame: .zero)
+        let foliateWebView = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(epubWebView, for: "k1")
+        DebugReaderRegistry.shared.setActiveFoliateWebView(foliateWebView, for: "k1")
+        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k1") === epubWebView)
+        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k1") === foliateWebView)
+    }
     #endif
 }
 

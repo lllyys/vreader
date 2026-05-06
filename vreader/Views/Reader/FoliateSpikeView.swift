@@ -7,6 +7,12 @@ import WebKit
 
 struct FoliateSpikeView: View {
     let bookURL: URL
+    /// Bug #141: book identity for the DebugBridge eval registry binding.
+    /// Optional so existing call sites (previews, tests) stay
+    /// source-compatible. Threaded into the spike's WKWebView coordinator
+    /// so `webView(_:didFinish:)` can pair `(webView, fingerprintKey)` in
+    /// `DebugReaderRegistry`.
+    var fingerprintKey: String?
 
     @State private var isBookReady = false
     @State private var bookTitle = ""
@@ -16,6 +22,7 @@ struct FoliateSpikeView: View {
         ZStack {
             FoliateSpikeWebView(
                 bookURL: bookURL,
+                fingerprintKey: fingerprintKey,
                 onBookReady: { title in
                     isBookReady = true
                     bookTitle = title
@@ -44,11 +51,19 @@ struct FoliateSpikeView: View {
 
 private struct FoliateSpikeWebView: UIViewRepresentable {
     let bookURL: URL
+    /// Bug #141: threaded from FoliateSpikeView for DebugBridge registry
+    /// binding. Set on the Coordinator so didFinish can register the
+    /// live webview with `setActiveFoliateWebView(_:for:)`.
+    let fingerprintKey: String?
     let onBookReady: @MainActor (String) -> Void
     let onError: @MainActor (String) -> Void
 
     func makeCoordinator() -> FoliateSpikeView.Coordinator {
-        FoliateSpikeView.Coordinator(onBookReady: onBookReady, onError: onError)
+        let coord = FoliateSpikeView.Coordinator(onBookReady: onBookReady, onError: onError)
+        #if DEBUG
+        coord.fingerprintKey = fingerprintKey
+        #endif
+        return coord
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -124,6 +139,13 @@ extension FoliateSpikeView {
         var bookExt: String?
         let onBookReady: @MainActor (String) -> Void
         let onError: @MainActor (String) -> Void
+        #if DEBUG
+        /// Bug #141: book identity for the DebugBridge eval registry
+        /// binding. Set by FoliateSpikeWebView.makeCoordinator() from the
+        /// SwiftUI binding. didFinish reads this to register the live
+        /// `WKWebView` against the book's key.
+        var fingerprintKey: String?
+        #endif
 
         init(onBookReady: @escaping @MainActor (String) -> Void,
              onError: @escaping @MainActor (String) -> Void) {
@@ -174,6 +196,18 @@ extension FoliateSpikeView {
             default:
                 break
             }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Bug #141: register the live spike WKWebView with
+            // DebugReaderRegistry, paired with the book's fingerprintKey
+            // so eval can verify identity at call-time. Mirrors the bug
+            // #126 EPUB pattern. Skip when key not yet threaded.
+            #if DEBUG
+            if let key = fingerprintKey {
+                DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: key)
+            }
+            #endif
         }
 
         func webView(_ webView: WKWebView,

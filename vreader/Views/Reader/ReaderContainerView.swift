@@ -278,6 +278,28 @@ struct ReaderContainerView: View {
                         options: [.fragmentsAllowed]
                     )
                 }
+            } else if resolvedBookFormat == .azw3 {
+                // BookFormat.azw3 covers all Foliate-rendered formats
+                // (azw3/azw/mobi/prc per FormatCapabilities); the
+                // FoliateViewBridge is the single host for all of them.
+                // Bug #141: wire jsEvaluator for AZW3/MOBI via the same
+                // keyed-binding pattern as the bug #126 EPUB fix. Foliate
+                // hosts a separate WKWebView (FoliateViewBridge) registered
+                // via `setActiveFoliateWebView(_:for:)` from the
+                // FoliateViewCoordinator's didFinish.
+                let key = book.fingerprintKey
+                let formatString = book.format
+                probe.jsEvaluator = { @MainActor script in
+                    guard let webView = DebugReaderRegistry.shared.foliateWebView(for: key) else {
+                        throw DebugReaderProbeError.evalUnsupported(format: formatString)
+                    }
+                    let raw = try await webView.evaluateJavaScript(script)
+                    let normalized: Any = raw ?? NSNull()
+                    return try JSONSerialization.data(
+                        withJSONObject: normalized,
+                        options: [.fragmentsAllowed]
+                    )
+                }
             }
             debugProbe = probe
             DebugReaderRegistry.shared.register(probe)
@@ -395,7 +417,7 @@ struct ReaderContainerView: View {
                 ttsService: ttsService
             )
         case "azw3":
-            FoliateSpikeView(bookURL: resolvedFileURL)
+            FoliateSpikeView(bookURL: resolvedFileURL, fingerprintKey: book.fingerprintKey)
         default:
             unsupportedFormatView(format: book.format.uppercased())
         }
