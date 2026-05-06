@@ -295,19 +295,44 @@ struct TXTServiceTests {
         _ = segmentTexts
     }
 
-    @Test func decodeWithHint_fallsBack_whenHintEncodingFailsToDecode() {
-        // Codex round-2 finding: previous test couldn't prove the
-        // fallback branch was exercised. The new `decodeWithHint` seam
-        // lets the test inject a hint that doesn't decode the data,
-        // forcing the fallback to `decodeText`.
-        // Use UTF-8 data with a hint of "UTF-16" (data has no UTF-16 BOM
-        // and odd byte count → String(data:, encoding: .utf16) returns nil)
-        // — fallback path runs.
+    @Test func decodeWithHint_fallsBack_whenHintEncodingIsUnknown() {
+        // Codex round-2 finding (bug #99 fix): the previous test
+        // couldn't prove the fallback branch was exercised. The new
+        // `decodeWithHint` seam lets the test inject a hint that
+        // doesn't resolve, forcing the fallback to `decodeText`.
+        //
+        // Bug #150 fix (GH #338): an earlier version of this test was
+        // named `..._whenHintEncodingFailsToDecode` and tried to
+        // trigger the fallback by feeding UTF-8 bytes with hint
+        // "UTF-16", expecting `String(data:, encoding: .utf16)` to
+        // return nil. It does NOT — Foundation's UTF-16 decoder is
+        // lenient: it interprets the bytes as UTF-16 code units
+        // regardless of content (and silently drops a trailing odd
+        // byte), so the hint path "succeeded" with gibberish like
+        // `䡥汬漬…` and the fallback never fired. Codex review of the
+        // re-fix flagged that "fails to decode" naming was misleading
+        // (we exercise the *unknown-name* sub-case, not the
+        // *decoder-rejects-bytes* sub-case — Foundation is too
+        // permissive to reliably hit the latter from a unit test).
+        //
+        // The robust trigger: pass an UNKNOWN encoding name.
+        // `TXTService.encodingFromName` returns nil for any name not
+        // in its switch table, which short-circuits the hint path at
+        // `decodeWithHint:369` (the `if let hintEnc = ...` guard fails
+        // on the encoding side, not the decoder side) and routes
+        // straight to `decodeText`.
         let utf8Text = "Hello, plain UTF-8 text."
         let utf8Data = Data(utf8Text.utf8)
-        let result = TXTService.decodeWithHint(utf8Data, hintName: "UTF-16")
-        // Hint decode fails (no UTF-16 BOM); fallback decodeText succeeds via UTF-8.
-        #expect(result?.0 == utf8Text, "fallback must produce the UTF-8 decoded string when the hint fails")
+        let hintName = "ZZZ-NotReal"
+        // Codex Low fix: guard against future aliasing — if a real
+        // alias gets added under this name, the test must fail loudly
+        // rather than silently degrading to a hint-succeeds path.
+        #expect(TXTService.encodingFromName(hintName) == nil,
+                "fixture invariant: hint name must resolve to nil so the fallback branch runs")
+
+        let result = TXTService.decodeWithHint(utf8Data, hintName: hintName)
+        // Unknown hint → hint path skipped → fallback decodeText succeeds via UTF-8.
+        #expect(result?.0 == utf8Text, "fallback must produce the UTF-8 decoded string when the hint encoding is unknown")
         #expect(result?.1 == "UTF-8", "fallback's encoding name should reflect the actual successful decoder")
     }
 
