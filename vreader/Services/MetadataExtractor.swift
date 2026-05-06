@@ -264,11 +264,31 @@ struct PDFMetadataExtractor: MetadataExtractor {
     }
 }
 
-/// Extractor for AZW3/MOBI files. Title from filename (EXTH title parsing is
-/// out of scope). Cover image is extracted by native MOBI header parsing.
+/// Extractor for AZW3/MOBI files. Title from EXTH 503 (Updated title) +
+/// author from EXTH 100, parsed natively from the MOBI binary. Falls back
+/// to filename-derived title when EXTH is unavailable (truncated file,
+/// missing EXTH header, or non-MOBI content). Cover image is extracted by
+/// native MOBI header parsing (`MOBICoverExtractor`).
+///
+/// Bug #149 / GH #340 fix: pre-fix returned `.fromFilename(fileURL)`
+/// unconditionally, so imported AZW3 books showed their filename as the
+/// title even when EXTH metadata was present.
 struct AZW3MetadataExtractor: MetadataExtractor {
     func extractMetadata(from fileURL: URL) async throws -> BookMetadata {
-        .fromFilename(fileURL)
+        let exth = MOBIMetadataParser.extractTitleAndAuthor(from: fileURL)
+        if exth.title != nil || exth.author != nil {
+            // Use EXTH-extracted title when available; fall back to filename
+            // for the title field if EXTH 503 was missing but EXTH 100 was
+            // present (rare, but possible for files with only an author).
+            let fallback = BookMetadata.fromFilename(fileURL)
+            return BookMetadata(
+                title: exth.title ?? fallback.title,
+                author: exth.author,
+                coverImagePath: nil
+            )
+        }
+        // No EXTH 503 / 100 → keep historical filename-based fallback.
+        return .fromFilename(fileURL)
     }
 
     func extractCoverImage(from fileURL: URL) async -> UIImage? {
