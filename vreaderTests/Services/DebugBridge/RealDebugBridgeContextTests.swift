@@ -182,6 +182,27 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertEqual(books.count, 1, "second seed of same fixture must not duplicate")
     }
 
+    /// Bug #143 / GH #310: end-to-end seed of the bundled `mini-azw3` fixture
+    /// imports through the real `BookImporter` onto the `BookFormat.azw3`
+    /// (Foliate) path. Uses `Bundle.main` directly — the production bundle the
+    /// app reads — so the pre-build rsync of `vreader/Resources/DebugFixtures/`
+    /// is actually exercised and the catalog ↔ binary ↔ format triple is
+    /// verified end-to-end. This is the slice that `DebugFixtureCatalogTests`
+    /// alone cannot prove.
+    @MainActor
+    func test_seed_miniAzw3_importsAzw3FromBundle() async throws {
+        // Default fixtureBundle = Bundle.main, which contains
+        // `DebugFixtures/mini-azw3.azw3` after the Debug-only pre-build rsync.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        try await context.seed(fixture: "mini-azw3")
+
+        let books = try await persistence.fetchAllLibraryBooks()
+        XCTAssertEqual(books.count, 1, "seed must import exactly one AZW3 book")
+        XCTAssertEqual(books.first?.format, "azw3",
+                       "BookImporter must resolve .azw3 extension to BookFormat.azw3 (Foliate path)")
+    }
+
     // MARK: - error propagation through DebugBridge.lastError
 
     @MainActor

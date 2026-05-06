@@ -12,7 +12,7 @@ final class DebugFixtureCatalogTests: XCTestCase {
 
     func test_all_returnsKnownFixtureNames() {
         let names = DebugFixtureCatalog.all().map { $0.name }
-        XCTAssertEqual(Set(names), ["war-and-peace", "mini-epub3"])
+        XCTAssertEqual(Set(names), ["war-and-peace", "mini-epub3", "mini-azw3"])
     }
 
     func test_find_miniEpub3_returnsEPUBFixture() throws {
@@ -21,6 +21,14 @@ final class DebugFixtureCatalogTests: XCTestCase {
         XCTAssertEqual(entry.format, .epub)
         XCTAssertEqual(entry.resourceName, "mini-epub3")
         XCTAssertEqual(entry.resourceExtension, "epub")
+    }
+
+    func test_find_miniAzw3_returnsAZW3Fixture() throws {
+        let entry = try XCTUnwrap(DebugFixtureCatalog.find(name: "mini-azw3"))
+        XCTAssertEqual(entry.name, "mini-azw3")
+        XCTAssertEqual(entry.format, .azw3)
+        XCTAssertEqual(entry.resourceName, "mini-azw3")
+        XCTAssertEqual(entry.resourceExtension, "azw3")
     }
 
     func test_find_byName_returnsMatchingFixture() throws {

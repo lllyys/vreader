@@ -40,6 +40,12 @@ enum DebugFixtureCatalog {
     private static let entries: [DebugFixture] = [
         DebugFixture(name: "war-and-peace", format: .txt,  resourceName: "war-and-peace", resourceExtension: "txt"),
         DebugFixture(name: "mini-epub3",    format: .epub, resourceName: "mini-epub3",    resourceExtension: "epub"),
+        // Public-domain MOBI ("The Masque of the Red Death", Edgar Allan Poe,
+        // Project Gutenberg ebook 1064). Stored under the .azw3 extension
+        // because vreader's `BookFormat.azw3` collapses MOBI/AZW/AZW3/PRC into
+        // one importer path; Foliate-js sniffs the magic bytes at runtime.
+        // 128 KB compressed. Unblocks Foliate eval device-verification (bug #143).
+        DebugFixture(name: "mini-azw3",     format: .azw3, resourceName: "mini-azw3",     resourceExtension: "azw3"),
     ]
 
     /// All catalog entries.
