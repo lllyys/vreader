@@ -1,0 +1,20 @@
+{
+  "currentBookId" : "txt:ab0252d45435997c23e8a8825ad0cce0f564c36d3a4a370cd056fdea1842a038:1708",
+  "fontSize" : 22,
+  "format" : "txt",
+  "highlightCount" : 1,
+  "lastError" : null,
+  "partial" : [
+    "selection",
+    "position"
+  ],
+  "position" : null,
+  "renderPhase" : "idle",
+  "schemaVersion" : 2,
+  "selection" : null,
+  "settingsProvenance" : null,
+  "theme" : "dark",
+  "ts" : "2026-05-06T03:38:43Z",
+  "ttsOffsetUTF16" : null,
+  "ttsState" : null
+}

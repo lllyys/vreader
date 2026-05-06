@@ -1,0 +1,20 @@
+{
+  "currentBookId" : "epub:f284fd074ccd1d3c1a78985464d9e1be27975f4029f3c2ddef8428ca10684af4:2198",
+  "fontSize" : 22,
+  "format" : "epub",
+  "highlightCount" : 1,
+  "lastError" : null,
+  "partial" : [
+    "selection",
+    "position"
+  ],
+  "position" : null,
+  "renderPhase" : "idle",
+  "schemaVersion" : 2,
+  "selection" : null,
+  "settingsProvenance" : null,
+  "theme" : "dark",
+  "ts" : "2026-05-06T03:39:14Z",
+  "ttsOffsetUTF16" : null,
+  "ttsState" : null
+}
