@@ -83,24 +83,52 @@ extension TXTChunkedReaderBridge.Coordinator {
         activeHighlightChunkIndex = chunkIndex
         activeHighlightLocalRange = localRange
 
+        // Bug #99 cause #1: any prior pending-render auto-clear is
+        // superseded by this new highlight. Always invalidate the
+        // existing timer + clear any pending flag before deciding
+        // what to do.
+        highlightClearTimer?.invalidate()
+        highlightClearTimer = nil
+        pendingAutoClearForChunk = nil
+
         // Rebuild the cell with highlight baked in (bug #47 v10)
-        if let cell = tableView.cellForRow(at: IndexPath(row: chunkIndex, section: 0)) as? TXTChunkedReaderBridge.ChunkedTextCell {
-            rebuildHighlightCell(cell, chunkIndex: chunkIndex)
+        let visibleCell = tableView.cellForRow(at: IndexPath(row: chunkIndex, section: 0)) as? TXTChunkedReaderBridge.ChunkedTextCell
+        if let visibleCell {
+            rebuildHighlightCell(visibleCell, chunkIndex: chunkIndex)
         }
 
         // Only auto-clear temporary highlights (search navigation).
         // User-created highlights persist until replaced or navigated away (bug #54).
+        guard isTemporary else { return }
+
+        if visibleCell != nil {
+            // Cell is already visible: start the 3 s timer immediately.
+            startHighlightAutoClearTimer(in: tableView)
+        } else {
+            // Bug #99 cause #1: cell isn't visible yet (e.g. scroll
+            // animation still running after a search-result tap).
+            // Defer timer start to `cellForRowAt` — once the cell
+            // actually renders with the highlight, then start the
+            // 3 s clock. Without this defer, a slow scroll can let
+            // the timer fire before the user ever sees the highlight.
+            pendingAutoClearForChunk = chunkIndex
+        }
+    }
+
+    /// Bug #99 cause #1: extracted timer-start so both the
+    /// already-visible path (in `applyHighlight`) and the
+    /// becomes-visible path (in `cellForRowAt`) share the same
+    /// 3 s auto-clear semantics. `clearHighlight` now fully resets
+    /// active state too (Codex round-1 audit fix), so this closure
+    /// no longer needs to nil out activeHighlightChunkIndex /
+    /// activeHighlightLocalRange manually.
+    func startHighlightAutoClearTimer(in tableView: UITableView) {
         highlightClearTimer?.invalidate()
-        highlightClearTimer = nil
-        if isTemporary {
-            highlightClearTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self, weak tableView] _ in
-                DispatchQueue.main.async {
-                    guard let self, let tableView else { return }
-                    self.activeHighlightChunkIndex = nil
-                    self.activeHighlightLocalRange = nil
-                    self.clearHighlight(in: tableView)
-                    self.lastHighlightRange = nil
-                }
+        highlightClearTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self, weak tableView] _ in
+            DispatchQueue.main.async {
+                guard let self, let tableView else { return }
+                self.clearHighlight(in: tableView)
+                self.lastHighlightRange = nil
             }
         }
     }
@@ -110,6 +138,18 @@ extension TXTChunkedReaderBridge.Coordinator {
     func clearHighlight(in tableView: UITableView) {
         highlightClearTimer?.invalidate()
         highlightClearTimer = nil
+        // Bug #99 cause #1: clear the deferred-timer flag too so a late
+        // cell render doesn't kick off a fresh timer for an already-
+        // cleared highlight.
+        pendingAutoClearForChunk = nil
+        // Codex round-1 audit fix: also nil out the active state so a
+        // later `cellForRowAt` for an off-screen chunk doesn't see a
+        // stale active range and redraw the highlight after clear.
+        // Pre-fix only the visible-cell visual state was reset; the
+        // active state survived, so an off-screen render path could
+        // re-apply the cleared highlight.
+        activeHighlightChunkIndex = nil
+        activeHighlightLocalRange = nil
         for cell in tableView.visibleCells {
             guard let chunkedCell = cell as? TXTChunkedReaderBridge.ChunkedTextCell else { continue }
             let chunkIndex = chunkedCell.textContentView.tag

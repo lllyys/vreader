@@ -204,6 +204,16 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         /// Internal access needed by TXTChunkedHighlightHelper extension.
         var highlightClearTimer: Timer?
 
+        /// Bug #99 cause #1: chunk index whose first render should
+        /// kick off the auto-clear timer. When `applyHighlight` is
+        /// called and the destination cell isn't visible, starting
+        /// the 3 s timer immediately can race the scroll completion
+        /// (cell becomes visible AFTER timer fires → highlight is
+        /// cleared before user sees it). Setting this flag instead
+        /// defers timer start to `cellForRowAt`, which fires when
+        /// the cell actually renders.
+        var pendingAutoClearForChunk: Int?
+
         init(delegate: TXTTextViewBridgeDelegate?) {
             self.delegate = delegate
         }
@@ -268,6 +278,16 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             cell.textContentView.backgroundColor = config.backgroundColor
             cell.textContentView.delegate = self
             cell.textContentView.tag = index  // Store chunk index for offset calculation
+
+            // Bug #99 cause #1: kick off the deferred auto-clear timer
+            // when the chunk that owns the active highlight finally
+            // renders. Pre-fix: timer started in applyHighlight even
+            // when cell wasn't visible — slow scroll could let the
+            // timer fire before the user saw the highlight.
+            if let pending = pendingAutoClearForChunk, pending == index, active != nil {
+                pendingAutoClearForChunk = nil
+                startHighlightAutoClearTimer(in: tableView)
+            }
 
             return cell
         }
