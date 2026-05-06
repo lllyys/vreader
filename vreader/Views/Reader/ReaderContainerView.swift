@@ -187,14 +187,31 @@ struct ReaderContainerView: View {
         // short-lived `ReaderSettingsStore`; this observer mirrors the
         // change into the @State-owned store so an open reader re-themes
         // without an app relaunch.
+        //
+        // Bug #145: respect per-book override semantics. The bridge
+        // command writes the GLOBAL default. When the active book has
+        // a per-book override that explicitly sets a field
+        // (`themeName != nil` / `fontSize != nil`), per-book wins for
+        // that field — skip applying the bridge's value to keep
+        // session state consistent with what reopen would re-apply.
+        // Fields the per-book override leaves nil still inherit from
+        // global, so the bridge change does take effect there.
         .onReceive(NotificationCenter.default.publisher(for: .debugBridgeThemeChanged)) { notification in
             guard let userInfo = notification.userInfo else { return }
-            if let modeRaw = userInfo["mode"] as? String,
+            let perBook = PerBookSettingsStore.settings(
+                for: book.fingerprintKey,
+                baseURL: Self.perBookSettingsBaseURL
+            )
+            // Theme: skip when per-book themeName is explicitly set.
+            if perBook?.themeName == nil,
+               let modeRaw = userInfo["mode"] as? String,
                let theme = ReaderTheme(rawValue: modeRaw),
                settingsStore.theme != theme {
                 settingsStore.theme = theme
             }
-            if let fontSize = userInfo["fontSize"] as? Int {
+            // Font size: skip when per-book fontSize is explicitly set.
+            if perBook?.fontSize == nil,
+               let fontSize = userInfo["fontSize"] as? Int {
                 var typography = settingsStore.typography
                 let newSize = Double(fontSize)
                 if typography.fontSize != newSize {
