@@ -216,6 +216,109 @@ struct TXTServiceTests {
         guard let (_, fullName) = TXTService.decodeText(data) else { return }
         #expect(sampleName == fullName)
     }
+
+    // MARK: - Bug #99 cause #2: unified decode entry point
+
+    @Test func decodeForDisplayAndSearch_emptyData() {
+        let result = TXTService.decodeForDisplayAndSearch(Data())
+        #expect(result?.0 == "")
+        #expect(result?.1 == "UTF-8")
+    }
+
+    @Test func decodeForDisplayAndSearch_utf8() {
+        let text = "Hello, World! 你好世界 🌍"
+        let data = Data(text.utf8)
+        guard let (decoded, encName) = TXTService.decodeForDisplayAndSearch(data) else {
+            Issue.record("expected non-nil decode for UTF-8 data")
+            return
+        }
+        #expect(decoded == text)
+        #expect(encName == "UTF-8")
+    }
+
+    @Test func decodeForDisplayAndSearch_gbk_searchAndDisplayProduceSameString() async throws {
+        // Bug #99 cause #2 regression seam: the search-indexing path
+        // (via `TXTTextExtractor.decodeFile`) and the display-loading path
+        // (via `TXTService.open`) must produce IDENTICAL decoded strings
+        // for the same data, so UTF-16 offsets align.
+        let text = "你好世界，这是一段GBK编码的中文文本。Hello mixed content with both CJK and Latin."
+        let gbk = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+            CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+        ))
+        guard let data = text.data(using: gbk) else {
+            Issue.record("Could not encode test string as GBK")
+            return
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bug-99-cause2-\(UUID().uuidString).txt")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        // Path 1: Display (TXTService.open).
+        let svc = TXTService()
+        let displayMeta = try await svc.open(url: url)
+        await svc.close()
+
+        // Path 2: Search index (TXTTextExtractor.decodeFile internally).
+        let extractor = TXTTextExtractor()
+        let extractionResult = try await extractor.extractWithOffsets(from: url)
+
+        // Stronger assertion (Codex round-1 finding): extractor's reassembled
+        // text must EXACTLY match display's text. Different bytes-to-string
+        // mappings would produce different reassembled strings.
+        let segmentTexts = extractionResult.textUnits.map { $0.text }
+        // The reassembled text isn't trivially the joined units (segmentation
+        // strips empty segments + uses paragraph separators). Instead,
+        // assert the UTF-16 length matches AND each segment substring exists
+        // at its claimed offset in the display string.
+        #expect(displayMeta.totalTextLengthUTF16 == displayMeta.text.utf16.count)
+
+        let displayUTF16 = displayMeta.text.utf16
+        for (idx, unit) in extractionResult.textUnits.enumerated() {
+            guard let baseOffset = extractionResult.segmentBaseOffsets[idx] else {
+                Issue.record("Segment \(idx) missing base offset")
+                continue
+            }
+            let segmentUTF16Count = unit.text.utf16.count
+            #expect(baseOffset + segmentUTF16Count <= displayUTF16.count,
+                    "Segment \(idx) at offset \(baseOffset) + length \(segmentUTF16Count) overflows display string of length \(displayUTF16.count)")
+
+            // Verify the segment text exists at the claimed offset in the
+            // display string — this is the exact contract search relies on.
+            let segmentStartIdx = displayUTF16.index(displayUTF16.startIndex, offsetBy: baseOffset)
+            let segmentEndIdx = displayUTF16.index(segmentStartIdx, offsetBy: segmentUTF16Count)
+            let displaySlice = String(displayUTF16[segmentStartIdx..<segmentEndIdx]) ?? ""
+            #expect(displaySlice == unit.text,
+                    "Segment \(idx) at offset \(baseOffset) doesn't match display string slice")
+        }
+        _ = segmentTexts
+    }
+
+    @Test func decodeWithHint_fallsBack_whenHintEncodingFailsToDecode() {
+        // Codex round-2 finding: previous test couldn't prove the
+        // fallback branch was exercised. The new `decodeWithHint` seam
+        // lets the test inject a hint that doesn't decode the data,
+        // forcing the fallback to `decodeText`.
+        // Use UTF-8 data with a hint of "UTF-16" (data has no UTF-16 BOM
+        // and odd byte count → String(data:, encoding: .utf16) returns nil)
+        // — fallback path runs.
+        let utf8Text = "Hello, plain UTF-8 text."
+        let utf8Data = Data(utf8Text.utf8)
+        let result = TXTService.decodeWithHint(utf8Data, hintName: "UTF-16")
+        // Hint decode fails (no UTF-16 BOM); fallback decodeText succeeds via UTF-8.
+        #expect(result?.0 == utf8Text, "fallback must produce the UTF-8 decoded string when the hint fails")
+        #expect(result?.1 == "UTF-8", "fallback's encoding name should reflect the actual successful decoder")
+    }
+
+    @Test func decodeWithHint_succeedsViaHint_whenEncodingMatches() {
+        // Symmetric: the hint succeeds, fallback is NOT invoked.
+        let utf8Text = "Symmetric path test"
+        let utf8Data = Data(utf8Text.utf8)
+        let result = TXTService.decodeWithHint(utf8Data, hintName: "UTF-8")
+        #expect(result?.0 == utf8Text)
+        #expect(result?.1 == "UTF-8")
+    }
 }
 
 // MARK: - SearchService offset restoration (bug #61)

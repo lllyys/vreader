@@ -37,11 +37,17 @@ struct TXTTextExtractor: SearchTextExtractor {
         return extractWithOffsets(from: text)
     }
 
-    /// Decodes a TXT file using the same pipeline as the reader (TXTService.decodeText),
-    /// ensuring search indexes the same text the user sees.
+    /// Bug #99 cause #2: decode via the unified `decodeForDisplayAndSearch`
+    /// entry point so the search index uses the SAME bytes-to-String mapping
+    /// (and therefore the same UTF-16 offsets) that `TXTService.open` /
+    /// `openChapterBased` give the reader display. Pre-fix: this called
+    /// `decodeText` directly, which skips the sample-hint path used by the
+    /// display — for non-UTF-8 files where sample-detection and NSString
+    /// heuristic could disagree, search hits landed on wrong characters
+    /// because the offsets indexed differed from the offsets rendered.
     private static func decodeFile(at url: URL) throws -> String {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        if let (text, _) = TXTService.decodeText(data) {
+        if let (text, _) = TXTService.decodeForDisplayAndSearch(data) {
             return text
         }
         throw TXTTextExtractorError.decodingFailed(

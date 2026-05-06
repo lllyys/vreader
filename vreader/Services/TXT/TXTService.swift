@@ -38,16 +38,12 @@ actor TXTService: TXTServiceProtocol {
             // Use mappedIfSafe to avoid copying entire file into heap memory
             let data = try Data(contentsOf: url, options: .mappedIfSafe)
 
-            // Phase 1: Detect encoding from 8KB sample (fast)
-            let hintName = Self.detectEncodingFromSample(data)
+            // Bug #99 cause #2: single decode entry point shared with the
+            // search-indexing path so display and search always agree on
+            // offsets.
             let text: String
             let detectedEncoding: String
-
-            if let hintEnc = Self.encodingFromName(hintName),
-               let decoded = String(data: data, encoding: hintEnc) {
-                text = decoded
-                detectedEncoding = hintName
-            } else if let (decoded, enc) = Self.decodeText(data) {
+            if let (decoded, enc) = Self.decodeForDisplayAndSearch(data) {
                 text = decoded
                 detectedEncoding = enc
             } else {
@@ -104,7 +100,18 @@ actor TXTService: TXTServiceProtocol {
                     )
                 }
 
-                let encodingName = Self.detectEncodingFromSample(data)
+                // Bug #99 cause #2: align with `open(url:)` and the search
+                // path by using the unified decode entry point. Pre-fix:
+                // this branch picked encoding from sample-detection only
+                // with NO fallback — display could fail to decode and throw,
+                // while the search path's `decodeText` succeeded with a
+                // different encoding, producing a string with offsets the
+                // chapter loader couldn't reach.
+                guard let (decodedFullText, encodingName) = Self.decodeForDisplayAndSearch(data) else {
+                    throw TXTServiceError.decodingFailed(
+                        "Could not decode the file with any supported encoding"
+                    )
+                }
                 let encoding = Self.encodingFromName(encodingName) ?? .utf8
                 let cacheDir = Self.cacheDirectory(for: url)
                 let fileModDate = Self.fileModificationDate(url: url) ?? Date()
@@ -113,10 +120,19 @@ actor TXTService: TXTServiceProtocol {
                 // Old streaming-block caches used byte offsets — incompatible.
                 // Detect by checking if startByte == 0 for all chapters (full-text
                 // builder sets startByte=0 since byte offsets are unused).
+                //
+                // Bug #99 cause #2 (Codex round-1 audit): also reject the
+                // cache when its `detectedEncoding` doesn't match the
+                // freshly-detected encoding. Pre-fix, cache reuse was
+                // keyed only on byte count + mtime; a decode-pipeline
+                // change could pair stale UTF-16 chapter offsets with a
+                // freshly decoded string, producing chapter ranges that
+                // overflow or fall on wrong boundaries.
                 if let cachedIndex = TXTChapterIndexStore.load(
                     cacheDir: cacheDir, fileByteCount: fileByteCount, fileModDate: fileModDate
                 ), cachedIndex.totalTextLengthUTF16 > 0,
-                   cachedIndex.chapters.first.map({ $0.startByte == 0 }) ?? false {
+                   cachedIndex.chapters.first.map({ $0.startByte == 0 }) ?? false,
+                   cachedIndex.detectedEncoding == encodingName {
                     let loader = TXTChapterContentLoader(fileData: data, encoding: encoding)
                     return TXTChapterOpenResult(
                         chapterIndex: cachedIndex, contentLoader: loader,
@@ -126,9 +142,12 @@ actor TXTService: TXTServiceProtocol {
 
                 // GH #30 (Legado strategy): Decode full file → regex → chapters
                 // with exact UTF-16 offsets. One system for TOC + content + position.
-                guard let fullString = String(data: data, encoding: encoding) else {
-                    throw TXTServiceError.decodingFailed("Failed to decode with \(encodingName)")
-                }
+                // Bug #99 cause #2: reuse the already-decoded `decodedFullText`
+                // from the unified decode call above — re-decoding via
+                // `String(data:encoding:)` could pick different bytes when
+                // the unified decode fell back through NSString heuristic
+                // (which has subtle differences from raw String(data:encoding:)).
+                let fullString = decodedFullText
                 let fullText = fullString as NSString
                 // GH #30: Detect rule from full text (not a sample) to match the
                 // TOC path. A 512K sample can pick a different rule than full-text,
@@ -326,6 +345,34 @@ actor TXTService: TXTServiceProtocol {
 
     // MARK: - Encoding Detection
 
+    /// Bug #99 cause #2: single source of truth for "load and decode TXT bytes
+    /// to a String + encoding name". Use this from BOTH display paths
+    /// (`open`, `openChapterBased`) AND the search-indexing path
+    /// (`TXTTextExtractor.decodeFile`) so the two surfaces always agree on
+    /// the decoded bytes. Pre-fix: display used sample-detection-then-decode
+    /// while search jumped straight to `decodeText`; for non-UTF-8 files
+    /// where the sample detector and NSString heuristic could disagree, the
+    /// two paths produced different decoded strings → different UTF-16
+    /// offsets → search hits landed on the wrong characters.
+    ///
+    /// Strategy: prefer sample-detection (fast, accurate for CJK), fall back
+    /// to `decodeText` only when the sample-suggested encoding fails to decode
+    /// (e.g. ambiguous bytes near the sample boundary).
+    static func decodeForDisplayAndSearch(_ data: Data) -> (String, String)? {
+        if data.isEmpty { return ("", "UTF-8") }
+        return decodeWithHint(data, hintName: detectEncodingFromSample(data))
+    }
+
+    /// Inner helper exposed for testing the sample-hint vs fallback branch
+    /// independently. Production callers go through `decodeForDisplayAndSearch`.
+    static func decodeWithHint(_ data: Data, hintName: String) -> (String, String)? {
+        if let hintEnc = encodingFromName(hintName),
+           let decoded = String(data: data, encoding: hintEnc) {
+            return (decoded, hintName)
+        }
+        return decodeText(data)
+    }
+
     /// Detects encoding and decodes text data.
     ///
     /// Strategy:
@@ -333,6 +380,11 @@ actor TXTService: TXTServiceProtocol {
     /// 2. NSString heuristic detection (handles GBK, Big5, Shift_JIS, etc.).
     /// 3. Manual fallback list with CJK encodings before catch-all single-byte encodings.
     /// 4. ISO-8859-1 last — it accepts any byte sequence and acts as a catch-all.
+    ///
+    /// Note: production callers should prefer `decodeForDisplayAndSearch(_:)`
+    /// (bug #99 cause #2) so display and search agree on offsets. Direct
+    /// callers of `decodeText` skip the sample-hint path and risk diverging
+    /// from `open`/`openChapterBased`.
     static func decodeText(_ data: Data) -> (String, String)? {
         // Empty data is valid UTF-8
         if data.isEmpty {

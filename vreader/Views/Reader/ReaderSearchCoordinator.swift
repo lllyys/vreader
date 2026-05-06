@@ -68,7 +68,20 @@ final class ReaderSearchCoordinator {
             fingerprintKey: fingerprint.canonicalKey
         )
         let inMemoryIndexed = await service.isIndexed(fingerprint: fingerprint)
-        let alreadyIndexed = alreadyPersisted || inMemoryIndexed
+        var alreadyIndexed = alreadyPersisted || inMemoryIndexed
+
+        // Bug #99 cause #2: when the TXT decode pipeline changed (display
+        // and search now share `decodeForDisplayAndSearch`), pre-existing
+        // FTS5 indexes built against the old `decodeText`-only path may
+        // hold offsets that don't align with the new display string for
+        // non-UTF-8 files. Force a reindex when the persistent index's
+        // `decode_version` doesn't match the current pipeline. Limited
+        // to TXT — other formats aren't affected by this change.
+        if alreadyPersisted, format == "txt",
+           store.requiresReindex(fingerprintKey: fingerprint.canonicalKey) {
+            try? store.removeBook(fingerprintKey: fingerprint.canonicalKey)
+            alreadyIndexed = false
+        }
 
         if alreadyIndexed {
             // Restore persisted segment offsets for valid locators (bug #61)

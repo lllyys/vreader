@@ -105,7 +105,24 @@ final class SearchIndexStore: @unchecked Sendable {
                 segment_base_offsets TEXT
             )
         """)
+
+        // Bug #99 cause #2: per-row `decode_version` records which decode
+        // pipeline version produced the indexed offsets. When the decode
+        // pipeline changes (e.g. fix that aligns search with display),
+        // existing rows with older versions must be reindexed because
+        // their offsets reference a different decoded string. Idempotent
+        // ALTER (SQLite errors on duplicate column; ignore).
+        do {
+            try core.exec("ALTER TABLE search_metadata ADD COLUMN decode_version TEXT")
+        } catch {
+            // Column already exists — that's fine.
+        }
     }
+
+    /// Bug #99 cause #2: bump this when the TXT decode pipeline changes
+    /// in a way that affects UTF-16 offsets. Indexes built with older
+    /// versions will be force-reindexed on next access.
+    static let currentDecodeVersion: String = "2"
 
     // MARK: - Indexing
 
@@ -143,14 +160,16 @@ final class SearchIndexStore: @unchecked Sendable {
                 for unit in textUnits {
                     try indexSpans(fingerprintKey: fingerprintKey, sourceUnitId: unit.sourceUnitId, text: unit.text)
                 }
-                // Record in metadata (WI-F06)
+                // Record in metadata (WI-F06).
+                // Bug #99 cause #2: tag the row with the current decode-version
+                // so a future decode-pipeline change can detect stale indexes.
                 let now = ISO8601DateFormatter().string(from: Date())
                 try core.execBind(
                     """
-                    INSERT OR REPLACE INTO search_metadata(fingerprint_key, indexed_at)
-                    VALUES (?, ?)
+                    INSERT OR REPLACE INTO search_metadata(fingerprint_key, indexed_at, decode_version)
+                    VALUES (?, ?, ?)
                     """,
-                    params: [fingerprintKey, now]
+                    params: [fingerprintKey, now, Self.currentDecodeVersion]
                 )
 
                 try core.exec("COMMIT")
@@ -201,6 +220,34 @@ final class SearchIndexStore: @unchecked Sendable {
     }
 
     // MARK: - Persistent Index Metadata (WI-F06)
+
+    /// Bug #99 cause #2: returns true when the indexed offsets were produced
+    /// by an older decode pipeline (or no version recorded — rows from
+    /// before the column existed). Callers should treat this as "force
+    /// reindex" and rebuild the index for this book before serving search.
+    func requiresReindex(fingerprintKey: String) -> Bool {
+        core.withLock {
+            do {
+                let rows = try core.query(
+                    "SELECT decode_version FROM search_metadata WHERE fingerprint_key = ? LIMIT 1",
+                    params: [fingerprintKey]
+                ) { reader -> String in
+                    reader.text(0)
+                }
+                guard let stored = rows.first else {
+                    // No metadata row → not indexed at all → not "needs reindex"
+                    // in this contract (caller should index fresh anyway).
+                    return false
+                }
+                // Stored is "" (legacy row pre-column → NULL → "" via reader)
+                // OR != current version → needs reindex.
+                return stored != Self.currentDecodeVersion
+            } catch {
+                // On query error, conservatively assume reindex is safer than stale.
+                return true
+            }
+        }
+    }
 
     /// Checks whether a book has been indexed (has a metadata row).
     func isBookIndexed(fingerprintKey: String) -> Bool {
