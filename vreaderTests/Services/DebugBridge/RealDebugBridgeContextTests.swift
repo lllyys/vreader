@@ -272,6 +272,83 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertEqual(store.typography.fontSize, 19.0, accuracy: 0.001, "nil fontSize should not overwrite")
     }
 
+    // MARK: - Bug #144: theme command posts debugBridgeThemeChanged notification
+
+    @MainActor
+    func test_theme_postsThemeChangedNotificationWithMode() async throws {
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+
+        let exp = expectation(description: "themeChanged notification posted")
+        nonisolated(unsafe) var receivedMode: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeThemeChanged, object: nil, queue: .main
+        ) { notification in
+            receivedMode = notification.userInfo?["mode"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.theme(mode: .light, fontSize: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedMode, "light")
+    }
+
+    @MainActor
+    func test_theme_postsThemeChangedNotificationWithFontSize() async throws {
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+
+        let exp = expectation(description: "themeChanged notification posted with fontSize")
+        nonisolated(unsafe) var receivedFontSize: Int?
+        nonisolated(unsafe) var receivedMode: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeThemeChanged, object: nil, queue: .main
+        ) { notification in
+            receivedMode = notification.userInfo?["mode"] as? String
+            receivedFontSize = notification.userInfo?["fontSize"] as? Int
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.theme(mode: .dark, fontSize: 22)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedMode, "dark")
+        XCTAssertEqual(receivedFontSize, 22)
+    }
+
+    @MainActor
+    func test_theme_postsThemeChangedNotificationWithoutFontSizeWhenNil() async throws {
+        // When fontSize is nil, the userInfo must NOT contain a "fontSize"
+        // key — observers can use that to distinguish "user didn't set font"
+        // from "user set font to 0" (though 0 isn't a valid clamp anyway).
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+
+        let exp = expectation(description: "themeChanged notification without fontSize")
+        nonisolated(unsafe) var hasFontSize: Bool = false
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeThemeChanged, object: nil, queue: .main
+        ) { notification in
+            hasFontSize = notification.userInfo?["fontSize"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.theme(mode: .dark, fontSize: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertFalse(hasFontSize, "userInfo must omit fontSize when nil was passed")
+    }
+
     // MARK: - snapshot
 
     @MainActor

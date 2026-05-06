@@ -23,6 +23,18 @@ extension Notification.Name {
     /// in the UI without requiring an app relaunch.
     /// No userInfo.
     static let debugBridgeLibraryChanged = Notification.Name("vreader.debugBridge.libraryChanged")
+
+    /// Posted by RealDebugBridgeContext.theme after writing UserDefaults
+    /// so an active reader's `@State`-owned `ReaderSettingsStore` can
+    /// re-theme without an app relaunch (bug #144). The bridge command
+    /// updates the persistent default; this notification gives live
+    /// readers a chance to pick up the change too.
+    ///
+    /// userInfo:
+    /// - `"mode"`: String — "dark" or "light" (ReaderTheme.rawValue)
+    /// - `"fontSize"`: Int? — optional new font size, present only when
+    ///   the bridge command included a fontSize parameter.
+    static let debugBridgeThemeChanged = Notification.Name("vreader.debugBridge.themeChanged")
 }
 
 #endif

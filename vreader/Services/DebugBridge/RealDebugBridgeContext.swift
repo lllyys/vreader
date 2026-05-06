@@ -229,6 +229,19 @@ final class RealDebugBridgeContext: DebugBridgeContext {
             typography.fontSize = Double(fontSize)
             store.typography = typography
         }
+        // Bug #144: this short-lived store wrote to UserDefaults but
+        // didn't propagate to the active reader's @State-owned settings
+        // store. Post a notification so live readers can re-apply the
+        // new theme without an app relaunch.
+        var userInfo: [AnyHashable: Any] = ["mode": target.rawValue]
+        if let fontSize {
+            userInfo["fontSize"] = fontSize
+        }
+        NotificationCenter.default.post(
+            name: .debugBridgeThemeChanged,
+            object: nil,
+            userInfo: userInfo
+        )
         log.info("theme: mode=\(target.rawValue, privacy: .public) fontSize=\(fontSize.map(String.init) ?? "unchanged", privacy: .public)")
     }
 

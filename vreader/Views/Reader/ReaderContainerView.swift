@@ -181,6 +181,29 @@ struct ReaderContainerView: View {
                 resolvedAICoordinator.chatViewModel?.bookContext = resolvedAICoordinator.currentTextContent
             }
         }
+        #if DEBUG
+        // Bug #144: pull bridge-driven theme changes into the live store.
+        // `RealDebugBridgeContext.theme(_:_:)` writes UserDefaults via a
+        // short-lived `ReaderSettingsStore`; this observer mirrors the
+        // change into the @State-owned store so an open reader re-themes
+        // without an app relaunch.
+        .onReceive(NotificationCenter.default.publisher(for: .debugBridgeThemeChanged)) { notification in
+            guard let userInfo = notification.userInfo else { return }
+            if let modeRaw = userInfo["mode"] as? String,
+               let theme = ReaderTheme(rawValue: modeRaw),
+               settingsStore.theme != theme {
+                settingsStore.theme = theme
+            }
+            if let fontSize = userInfo["fontSize"] as? Int {
+                var typography = settingsStore.typography
+                let newSize = Double(fontSize)
+                if typography.fontSize != newSize {
+                    typography.fontSize = newSize
+                    settingsStore.typography = typography
+                }
+            }
+        }
+        #endif
         // PERF: Single deferred .task for all non-critical setup.
         // Per-book settings, search prep, and replacement rules all deferred
         // to avoid contending with the format host's file-open .task.
