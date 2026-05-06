@@ -63,4 +63,102 @@ import UIKit
         let s2 = ReaderSettingsStore(defaults: d); #expect(s2.theme == .sepia); #expect(s2.typography.fontSize == 24)
         d.removePersistentDomain(forName: n)
     }
+
+    // MARK: - Bug #147: reconcileFromDefaults
+
+    @Test @MainActor func reconcileFromDefaults_resetsThemeFromGlobalAfterPerBookDisable() {
+        // Bug #147 scenario:
+        // 1. User has global theme=dark in UserDefaults.
+        // 2. Per-book override sets theme=light during the active session.
+        //    Mimic this with applyResolvedSettings, which suppresses
+        //    persistence (defaults stay dark, live store goes light).
+        // 3. User disables per-book; file deleted, live store still light.
+        // 4. reconcileFromDefaults pulls back the global dark.
+        let n = "RSS-rec-theme-\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: n)!
+        d.set("dark", forKey: ReaderSettingsStore.themeKey)
+        let s = ReaderSettingsStore(defaults: d)
+        #expect(s.theme == .dark)
+
+        // Per-book-active session mutates live store via the resolver
+        // (which suppresses persistence so defaults stays at "dark").
+        let resolvedAsLight = ResolvedSettings(
+            fontSize: s.typography.fontSize, fontName: s.typography.fontFamily.rawValue,
+            lineSpacing: s.typography.lineSpacing,
+            letterSpacing: s.typography.cjkSpacing ? s.typography.fontSize * 0.05 : 0,
+            themeName: "light", readingMode: s.readingMode.rawValue
+        )
+        s.applyResolvedSettings(resolvedAsLight)
+        #expect(s.theme == .light, "per-book override has been applied to live store")
+
+        // Per-book disable: file deleted, then reconcile.
+        s.reconcileFromDefaults()
+        #expect(s.theme == .dark, "reconcile should mirror the global default back")
+        d.removePersistentDomain(forName: n)
+    }
+
+    @Test func reconcileFromDefaults_isIdempotent() {
+        // No external writes: reconcile should be a no-op (no value
+        // changes, no persistence churn).
+        let s = makeStore()
+        let snapshotTheme = s.theme
+        let snapshotFontSize = s.typography.fontSize
+        s.reconcileFromDefaults()
+        #expect(s.theme == snapshotTheme)
+        #expect(s.typography.fontSize == snapshotFontSize)
+    }
+
+    @Test @MainActor func reconcileFromDefaults_resetsToDefaultTypographyWhenDefaultsHasNoEntry() {
+        // Codex round-1 finding: the previous reconcile only assigned
+        // typography when defaults had a decodable entry, leaving live
+        // per-book typography in place when no global entry existed.
+        // After the round-2 refactor, reconcile resets to TypographySettings()
+        // (the init's fallback) when defaults has no `readerTypography`.
+        let n = "RSS-rec-empty-\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: n)!
+        // Defaults has nothing — fresh suite.
+        let s = ReaderSettingsStore(defaults: d)
+        let defaultTypography = s.typography  // = TypographySettings()
+
+        // Simulate per-book-active: set typography to a different size.
+        let resolved = ResolvedSettings(
+            fontSize: defaultTypography.fontSize + 8,
+            fontName: defaultTypography.fontFamily.rawValue,
+            lineSpacing: defaultTypography.lineSpacing,
+            letterSpacing: 0,
+            themeName: s.theme.rawValue, readingMode: s.readingMode.rawValue
+        )
+        s.applyResolvedSettings(resolved)
+        #expect(s.typography.fontSize == defaultTypography.fontSize + 8)
+
+        // Reconcile while defaults still has no `readerTypography` entry.
+        // Must reset to TypographySettings() — NOT keep the live value.
+        s.reconcileFromDefaults()
+        #expect(s.typography == defaultTypography,
+                "reconcile must reset typography to default when defaults has no entry")
+        d.removePersistentDomain(forName: n)
+    }
+
+    @Test @MainActor func reconcileFromDefaults_resetsFontSizeFromGlobalAfterPerBookDisable() {
+        let n = "RSS-rec-font-\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: n)!
+        let s = ReaderSettingsStore(defaults: d)
+        let globalSize = s.typography.fontSize
+
+        // Per-book-active: applyResolvedSettings to a different size
+        // (suppresses persistence — defaults stays at globalSize).
+        let resolved = ResolvedSettings(
+            fontSize: globalSize + 6, fontName: s.typography.fontFamily.rawValue,
+            lineSpacing: s.typography.lineSpacing,
+            letterSpacing: 0,
+            themeName: s.theme.rawValue, readingMode: s.readingMode.rawValue
+        )
+        s.applyResolvedSettings(resolved)
+        #expect(s.typography.fontSize == globalSize + 6)
+
+        // Per-book disable + reconcile: store back to global.
+        s.reconcileFromDefaults()
+        #expect(s.typography.fontSize == globalSize, "reconcile should reset font size to global")
+        d.removePersistentDomain(forName: n)
+    }
 }

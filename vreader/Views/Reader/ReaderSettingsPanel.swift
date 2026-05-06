@@ -522,6 +522,11 @@ struct ReaderSettingsPanel: View {
     private func deletePerBookOverride() {
         guard let key = bookFingerprintKey, let baseURL = perBookBaseURL else { return }
         PerBookSettingsStore.delete(for: key, baseURL: baseURL)
+        // Bug #147: re-resolve from globals so the live reader reflects
+        // the new state immediately. Without this, the live store keeps
+        // whatever values were applied while the override was active
+        // until the user closes and reopens the reader.
+        store.reconcileFromDefaults()
     }
 
     private func syncPerBookIfEnabled() {

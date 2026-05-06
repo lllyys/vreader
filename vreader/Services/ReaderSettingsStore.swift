@@ -52,18 +52,88 @@ final class ReaderSettingsStore {
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.theme = ReaderTheme(rawValue: defaults.string(forKey: Self.themeKey) ?? "") ?? .default
-        self.readingMode = ReadingMode(rawValue: defaults.string(forKey: Self.readingModeKey) ?? "") ?? .native
-        if let data = defaults.data(forKey: Self.typographyKey), let d = try? JSONDecoder().decode(TypographySettings.self, from: data) { self.typography = d } else { self.typography = TypographySettings() }
-        self.epubLayout = EPUBLayoutPreference(rawValue: defaults.string(forKey: Self.epubLayoutKey) ?? "") ?? .scroll
-        self.pageTurnAnimation = PageTurnAnimation(rawValue: defaults.string(forKey: Self.pageTurnAnimationKey) ?? "") ?? .none
-        self.chineseConversion = ChineseConversionDirection(rawValue: defaults.string(forKey: Self.chineseConversionKey) ?? "") ?? .none
+        self.theme = Self.loadTheme(defaults)
+        self.readingMode = Self.loadReadingMode(defaults)
+        self.typography = Self.loadTypography(defaults)
+        self.epubLayout = Self.loadEPUBLayout(defaults)
+        self.pageTurnAnimation = Self.loadPageTurnAnimation(defaults)
+        self.chineseConversion = Self.loadChineseConversion(defaults)
         self.autoPageTurn = defaults.bool(forKey: Self.autoPageTurnKey)
-        let storedInterval = defaults.double(forKey: Self.autoPageTurnIntervalKey)
-        self.autoPageTurnInterval = storedInterval > 0 ? max(1.0, min(60.0, storedInterval)) : 5.0
+        self.autoPageTurnInterval = Self.loadAutoPageTurnInterval(defaults)
         self.useCustomBackground = defaults.bool(forKey: Self.useCustomBackgroundKey)
-        self._backgroundOpacity = min(max((defaults.object(forKey: Self.backgroundOpacityKey) as? Double) ?? 0.15, 0.0), 1.0)
+        self._backgroundOpacity = Self.loadBackgroundOpacity(defaults)
     }
+
+    // MARK: - Loaders (single source of truth for init + reconcile)
+
+    private static func loadTheme(_ defaults: UserDefaults) -> ReaderTheme {
+        ReaderTheme(rawValue: defaults.string(forKey: themeKey) ?? "") ?? .default
+    }
+    private static func loadReadingMode(_ defaults: UserDefaults) -> ReadingMode {
+        ReadingMode(rawValue: defaults.string(forKey: readingModeKey) ?? "") ?? .native
+    }
+    private static func loadTypography(_ defaults: UserDefaults) -> TypographySettings {
+        if let data = defaults.data(forKey: typographyKey),
+           let parsed = try? JSONDecoder().decode(TypographySettings.self, from: data) {
+            return parsed
+        }
+        return TypographySettings()
+    }
+    private static func loadEPUBLayout(_ defaults: UserDefaults) -> EPUBLayoutPreference {
+        EPUBLayoutPreference(rawValue: defaults.string(forKey: epubLayoutKey) ?? "") ?? .scroll
+    }
+    private static func loadPageTurnAnimation(_ defaults: UserDefaults) -> PageTurnAnimation {
+        PageTurnAnimation(rawValue: defaults.string(forKey: pageTurnAnimationKey) ?? "") ?? .none
+    }
+    private static func loadChineseConversion(_ defaults: UserDefaults) -> ChineseConversionDirection {
+        ChineseConversionDirection(rawValue: defaults.string(forKey: chineseConversionKey) ?? "") ?? .none
+    }
+    private static func loadAutoPageTurnInterval(_ defaults: UserDefaults) -> TimeInterval {
+        let stored = defaults.double(forKey: autoPageTurnIntervalKey)
+        return stored > 0 ? max(1.0, min(60.0, stored)) : 5.0
+    }
+    private static func loadBackgroundOpacity(_ defaults: UserDefaults) -> Double {
+        min(max((defaults.object(forKey: backgroundOpacityKey) as? Double) ?? 0.15, 0.0), 1.0)
+    }
+    /// Bug #147: re-reads every key from UserDefaults and mirrors the
+    /// values into this store. Used by `ReaderSettingsPanel` after
+    /// disabling a per-book override — the override file is deleted but
+    /// the live store still holds the per-book values until reopen.
+    /// This method recomputes from the global defaults so the live
+    /// reader reflects the new state immediately.
+    /// Idempotent — when defaults already match, no writes happen.
+    /// Suppresses persistence (defaults are the source of truth here;
+    /// double-writing the same value is harmless but wasteful).
+    func reconcileFromDefaults() {
+        suppressPersistence = true
+        defer { suppressPersistence = false }
+        let newTheme = Self.loadTheme(defaults)
+        if theme != newTheme { theme = newTheme }
+        let newReadingMode = Self.loadReadingMode(defaults)
+        if readingMode != newReadingMode { readingMode = newReadingMode }
+        // Codex audit fix: load typography unconditionally (with default
+        // fallback when defaults has no entry) — same shape as init.
+        // The previous version only assigned when defaults had a
+        // decodable value, leaving live per-book typography in place
+        // for the common "global typography never customized" case.
+        let newTypography = Self.loadTypography(defaults)
+        if typography != newTypography { typography = newTypography }
+        let newEPUBLayout = Self.loadEPUBLayout(defaults)
+        if epubLayout != newEPUBLayout { epubLayout = newEPUBLayout }
+        let newPageTurn = Self.loadPageTurnAnimation(defaults)
+        if pageTurnAnimation != newPageTurn { pageTurnAnimation = newPageTurn }
+        let newChinese = Self.loadChineseConversion(defaults)
+        if chineseConversion != newChinese { chineseConversion = newChinese }
+        let newAutoPage = defaults.bool(forKey: Self.autoPageTurnKey)
+        if autoPageTurn != newAutoPage { autoPageTurn = newAutoPage }
+        let newInterval = Self.loadAutoPageTurnInterval(defaults)
+        if autoPageTurnInterval != newInterval { autoPageTurnInterval = newInterval }
+        let newUseCustomBg = defaults.bool(forKey: Self.useCustomBackgroundKey)
+        if useCustomBackground != newUseCustomBg { useCustomBackground = newUseCustomBg }
+        let newOpacity = Self.loadBackgroundOpacity(defaults)
+        if backgroundOpacity != newOpacity { backgroundOpacity = newOpacity }
+    }
+
     /// Applies resolved per-book settings onto this store instance (bug #84).
     /// Suppresses UserDefaults persistence so per-book overrides don't leak into global defaults.
     func applyResolvedSettings(_ resolved: ResolvedSettings) {
