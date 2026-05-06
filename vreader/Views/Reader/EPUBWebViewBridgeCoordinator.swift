@@ -26,6 +26,9 @@ extension EPUBWebViewBridge {
         /// `webView(_:didFinish:)`. Set by `EPUBWebViewBridge.updateUIView`
         /// from the SwiftUI binding. DEBUG-only.
         var fingerprintKey: String?
+        /// Bug #142: per-reader instance token paired with fingerprintKey.
+        /// See registry's `setActiveEPUBWebView(_:for:token:)`.
+        var readerToken: UUID?
         #endif
         /// Callback for text selection events.
         var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
@@ -154,13 +157,15 @@ extension EPUBWebViewBridge {
             // refresh the registry's weak ref correctly. Safe to set
             // unconditionally; weak ref + `===` check on dismantle.
             #if DEBUG
-            // Bug #126: register the webview with DebugReaderRegistry,
-            // paired with the book's fingerprintKey so eval can verify
-            // identity at call-time. Skip the registration when the
-            // fingerprintKey hasn't been threaded yet — silently dropping
-            // is preferable to binding the webview to no key.
-            if let key = fingerprintKey {
-                DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: key)
+            // Bug #126: register the webview with DebugReaderRegistry
+            // paired with the book's fingerprintKey + per-reader token
+            // (bug #142) so eval can verify both book identity AND that
+            // this is the active reader instance, not an outgoing same-
+            // book webview firing didFinish late. Skip when either has
+            // not been threaded yet — silently dropping is preferable
+            // to binding to a half-identity.
+            if let key = fingerprintKey, let token = readerToken {
+                DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: key, token: token)
             }
             #endif
 

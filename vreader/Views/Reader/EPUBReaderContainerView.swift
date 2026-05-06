@@ -23,6 +23,8 @@ struct EPUBReaderContainerView: View {
     /// reject stale-webview matches. Optional so existing call sites
     /// (tests, previews) remain source-compatible.
     var fingerprintKey: String?
+    /// Bug #142: per-reader instance token paired with fingerprintKey.
+    var readerToken: UUID?
 
     /// OPF directory — spine hrefs are resolved relative to this.
     @State var resourceBase: URL?
@@ -317,6 +319,7 @@ struct EPUBReaderContainerView: View {
             scrollFraction: seekScrollFraction,
             currentHref: viewModel.currentPosition?.href,
             fingerprintKey: fingerprintKey,
+            readerToken: readerToken,
             onProgressChange: { scrollFraction in
                 guard let position = viewModel.currentPosition,
                       let metadata = viewModel.metadata else { return }

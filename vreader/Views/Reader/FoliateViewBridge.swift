@@ -33,6 +33,9 @@ struct FoliateViewBridge: UIViewRepresentable {
     /// register `(webView, fingerprintKey)` together — same keyed-binding
     /// shape as the bug #126 EPUB fix.
     var fingerprintKey: String?
+    /// Bug #142: per-reader instance token paired with fingerprintKey.
+    /// Same shape as the EPUB binding.
+    var readerToken: UUID?
 
     /// Optional saved CFI to restore reading position after book-ready.
     var lastLocationCFI: String?
@@ -96,6 +99,7 @@ struct FoliateViewBridge: UIViewRepresentable {
         coordinator.lastLocationCFI = lastLocationCFI
         #if DEBUG
         coordinator.fingerprintKey = fingerprintKey
+        coordinator.readerToken = readerToken
         #endif
 
         // Read book file as base64 — embedded directly in HTML (not via evaluateJavaScript,
@@ -206,6 +210,7 @@ struct FoliateViewBridge: UIViewRepresentable {
         let coordinator = context.coordinator
         #if DEBUG
         coordinator.fingerprintKey = fingerprintKey
+        coordinator.readerToken = readerToken
         #endif
         guard coordinator.isReaderReady else { return }
 

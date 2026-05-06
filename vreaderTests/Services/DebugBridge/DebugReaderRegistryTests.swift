@@ -14,6 +14,11 @@ import WebKit
 @MainActor
 final class DebugReaderRegistryTests: XCTestCase {
 
+    /// Stable token for tests that don't care about per-reader instance
+    /// disambiguation (the bug #142 race seam). Tests that DO exercise
+    /// the race generate their own UUIDs in the test body.
+    private let testToken = UUID()
+
     override func setUp() {
         super.setUp()
         DebugReaderRegistry.shared.reset()
@@ -77,13 +82,13 @@ final class DebugReaderRegistryTests: XCTestCase {
 
     #if canImport(WebKit)
     func test_epubWebView_initiallyNil_forAnyKey() {
-        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "any-key"))
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "any-key", token: testToken))
     }
 
     func test_setActiveEPUBWebView_returnsForMatchingKey() {
         let webView = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1")
-        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k1") === webView)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1", token: testToken)
+        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k1", token: testToken) === webView)
     }
 
     func test_setActiveEPUBWebView_returnsNilForMismatchedKey() {
@@ -92,33 +97,33 @@ final class DebugReaderRegistryTests: XCTestCase {
         // book. Codex audit (2026-05-06) flagged this as the High finding
         // on the initial fix.
         let webView = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "outgoing-book")
-        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "incoming-book"))
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "outgoing-book", token: testToken)
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "incoming-book", token: testToken))
     }
 
     func test_setActiveEPUBWebView_replacesPreviousBinding() {
         let webViewA = WKWebView(frame: .zero)
         let webViewB = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveEPUBWebView(webViewA, for: "k1")
-        DebugReaderRegistry.shared.setActiveEPUBWebView(webViewB, for: "k2")
-        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1"))
-        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k2") === webViewB)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webViewA, for: "k1", token: testToken)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webViewB, for: "k2", token: testToken)
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1", token: testToken))
+        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k2", token: testToken) === webViewB)
     }
 
     func test_unregister_clearsEPUBWebViewWhenKeyMatches() {
         let webView = WKWebView(frame: .zero)
         let probe = StubProbe(key: "k1", fmt: "epub")
         DebugReaderRegistry.shared.register(probe)
-        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1")
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1", token: testToken)
         DebugReaderRegistry.shared.unregister(probe)
-        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1"))
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1", token: testToken))
     }
 
     func test_reset_clearsEPUBWebView() {
         let webView = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1")
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1", token: testToken)
         DebugReaderRegistry.shared.reset()
-        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1"))
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1", token: testToken))
         XCTAssertNil(DebugReaderRegistry.shared.rawActiveEPUBWebViewKeyForTests)
     }
 
@@ -134,45 +139,45 @@ final class DebugReaderRegistryTests: XCTestCase {
     // stale-protection contract, separate slot.
 
     func test_foliateWebView_initiallyNil_forAnyKey() {
-        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "any-key"))
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "any-key", token: testToken))
     }
 
     func test_setActiveFoliateWebView_returnsForMatchingKey() {
         let webView = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1")
-        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k1") === webView)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1", token: testToken)
+        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k1", token: testToken) === webView)
     }
 
     func test_setActiveFoliateWebView_returnsNilForMismatchedKey() {
         // Same stale-protection regression seam as the EPUB pair.
         let webView = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "outgoing-book")
-        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "incoming-book"))
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "outgoing-book", token: testToken)
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "incoming-book", token: testToken))
     }
 
     func test_setActiveFoliateWebView_replacesPreviousBinding() {
         let webViewA = WKWebView(frame: .zero)
         let webViewB = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveFoliateWebView(webViewA, for: "k1")
-        DebugReaderRegistry.shared.setActiveFoliateWebView(webViewB, for: "k2")
-        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1"))
-        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k2") === webViewB)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webViewA, for: "k1", token: testToken)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webViewB, for: "k2", token: testToken)
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1", token: testToken))
+        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k2", token: testToken) === webViewB)
     }
 
     func test_unregister_clearsFoliateWebViewWhenKeyMatches() {
         let webView = WKWebView(frame: .zero)
         let probe = StubProbe(key: "k1", fmt: "azw3")
         DebugReaderRegistry.shared.register(probe)
-        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1")
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1", token: testToken)
         DebugReaderRegistry.shared.unregister(probe)
-        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1"))
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1", token: testToken))
     }
 
     func test_reset_clearsFoliateWebView() {
         let webView = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1")
+        DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: "k1", token: testToken)
         DebugReaderRegistry.shared.reset()
-        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1"))
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1", token: testToken))
         XCTAssertNil(DebugReaderRegistry.shared.rawActiveFoliateWebViewKeyForTests)
     }
 
@@ -182,10 +187,99 @@ final class DebugReaderRegistryTests: XCTestCase {
         // format-switching between books) and both slots should retain.
         let epubWebView = WKWebView(frame: .zero)
         let foliateWebView = WKWebView(frame: .zero)
-        DebugReaderRegistry.shared.setActiveEPUBWebView(epubWebView, for: "k1")
-        DebugReaderRegistry.shared.setActiveFoliateWebView(foliateWebView, for: "k1")
-        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k1") === epubWebView)
-        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k1") === foliateWebView)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(epubWebView, for: "k1", token: testToken)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(foliateWebView, for: "k1", token: testToken)
+        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k1", token: testToken) === epubWebView)
+        XCTAssertTrue(DebugReaderRegistry.shared.foliateWebView(for: "k1", token: testToken) === foliateWebView)
+    }
+
+    // MARK: - Bug #142: per-reader instance token disambiguates same-book reopens
+
+    func test_epubWebView_returnsNilForSameKeyDifferentToken() {
+        // Bug #142 regression seam: two readers with the same fingerprintKey
+        // (the same book closed and reopened) get distinct tokens. A late
+        // didFinish from the outgoing reader's webview re-registers under
+        // the same key but the outgoing reader's old token. The new
+        // reader's eval must NOT see that webview.
+        let outgoingWebView = WKWebView(frame: .zero)
+        let outgoingToken = UUID()
+        let incomingToken = UUID()
+
+        // Outgoing reader registers, then a late didFinish hits same key.
+        DebugReaderRegistry.shared.setActiveEPUBWebView(outgoingWebView, for: "k1", token: outgoingToken)
+        // Incoming reader (same book, same key, different token) asks.
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1", token: incomingToken))
+    }
+
+    func test_foliateWebView_returnsNilForSameKeyDifferentToken() {
+        // Same-book reopen race for the Foliate (AZW3/MOBI) binding.
+        let outgoingWebView = WKWebView(frame: .zero)
+        let outgoingToken = UUID()
+        let incomingToken = UUID()
+
+        DebugReaderRegistry.shared.setActiveFoliateWebView(outgoingWebView, for: "k1", token: outgoingToken)
+        XCTAssertNil(DebugReaderRegistry.shared.foliateWebView(for: "k1", token: incomingToken))
+    }
+
+    func test_setActiveEPUBWebView_replacesBindingForSameKeyNewToken() {
+        // The "newer wins" policy must hold across token changes too —
+        // the incoming reader's didFinish overwrites the outgoing slot.
+        // Note: with `setExpectedReaderToken` set, only matching tokens
+        // can write. This test exercises the unset (test-default) path.
+        let outgoingWebView = WKWebView(frame: .zero)
+        let incomingWebView = WKWebView(frame: .zero)
+        let outgoingToken = UUID()
+        let incomingToken = UUID()
+
+        DebugReaderRegistry.shared.setActiveEPUBWebView(outgoingWebView, for: "k1", token: outgoingToken)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(incomingWebView, for: "k1", token: incomingToken)
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1", token: outgoingToken))
+        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k1", token: incomingToken) === incomingWebView)
+    }
+
+    // MARK: - Bug #142: stale-write protection (Codex round-1 ordering test)
+
+    func test_epubWebView_lateStaleDidFinishCannotClobberCurrentReader() {
+        // Codex round-1 ordering test: register newer reader (T2),
+        // then simulate a stale didFinish from outgoing reader (T1)
+        // arriving AFTER. The current reader's eval lookup must still
+        // return the new webview, NOT nil and NOT the old webview.
+        let oldWebView = WKWebView(frame: .zero)
+        let newWebView = WKWebView(frame: .zero)
+        let oldToken = UUID()
+        let newToken = UUID()
+
+        // New reader mounts: registry expects newToken first.
+        DebugReaderRegistry.shared.setExpectedReaderToken(newToken)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(newWebView, for: "k1", token: newToken)
+
+        // Stale didFinish from outgoing reader fires AFTER the new reader
+        // already established its binding. Registry must reject the
+        // stale write — not clobber the (newWebView, k1, newToken) slot.
+        DebugReaderRegistry.shared.setActiveEPUBWebView(oldWebView, for: "k1", token: oldToken)
+
+        // Current reader's eval looks up with newToken. Must return new.
+        XCTAssertTrue(
+            DebugReaderRegistry.shared.epubWebView(for: "k1", token: newToken) === newWebView,
+            "Stale didFinish (outgoing token) must not clobber current reader's binding"
+        )
+    }
+
+    func test_foliateWebView_lateStaleDidFinishCannotClobberCurrentReader() {
+        // Same ordering test for the Foliate slot.
+        let oldWebView = WKWebView(frame: .zero)
+        let newWebView = WKWebView(frame: .zero)
+        let oldToken = UUID()
+        let newToken = UUID()
+
+        DebugReaderRegistry.shared.setExpectedReaderToken(newToken)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(newWebView, for: "k1", token: newToken)
+        DebugReaderRegistry.shared.setActiveFoliateWebView(oldWebView, for: "k1", token: oldToken)
+
+        XCTAssertTrue(
+            DebugReaderRegistry.shared.foliateWebView(for: "k1", token: newToken) === newWebView,
+            "Stale didFinish (outgoing token) must not clobber current Foliate binding"
+        )
     }
     #endif
 }

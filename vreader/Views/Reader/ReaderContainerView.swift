@@ -71,6 +71,15 @@ struct ReaderContainerView: View {
     /// Shared pagination cache for the unified renderer (B13).
     @State var paginationCache = PaginationCache()
 
+    /// Bug #142: per-reader instance token. Generated once per
+    /// ReaderContainerView mount and threaded into both EPUB and Foliate
+    /// bridges so the DebugBridge registry can disambiguate same-book
+    /// reopens (a late didFinish from an outgoing webview cannot match
+    /// the new reader's token even if the fingerprintKey matches).
+    /// Used by the DEBUG-only registry API; the field itself is plain
+    /// state with no Release-build cost beyond a UUID.
+    @State private var readerToken: UUID = UUID()
+
     #if DEBUG
     /// DebugBridge probe (feature #44). Registers on appear, unregisters on
     /// disappear. Holds a closure that the registry queries for the current
@@ -267,8 +276,9 @@ struct ReaderContainerView: View {
             // case/aliasing drift can't silently disable the wiring.
             if resolvedBookFormat == .epub {
                 let key = book.fingerprintKey
+                let token = readerToken
                 probe.jsEvaluator = { @MainActor script in
-                    guard let webView = DebugReaderRegistry.shared.epubWebView(for: key) else {
+                    guard let webView = DebugReaderRegistry.shared.epubWebView(for: key, token: token) else {
                         throw DebugReaderProbeError.evalUnsupported(format: "epub")
                     }
                     let raw = try await webView.evaluateJavaScript(script)
@@ -288,9 +298,10 @@ struct ReaderContainerView: View {
                 // via `setActiveFoliateWebView(_:for:)` from the
                 // FoliateViewCoordinator's didFinish.
                 let key = book.fingerprintKey
+                let token = readerToken
                 let formatString = book.format
                 probe.jsEvaluator = { @MainActor script in
-                    guard let webView = DebugReaderRegistry.shared.foliateWebView(for: key) else {
+                    guard let webView = DebugReaderRegistry.shared.foliateWebView(for: key, token: token) else {
                         throw DebugReaderProbeError.evalUnsupported(format: formatString)
                     }
                     let raw = try await webView.evaluateJavaScript(script)
@@ -302,6 +313,12 @@ struct ReaderContainerView: View {
                 }
             }
             debugProbe = probe
+            // Bug #142: tell the registry the expected token BEFORE
+            // registering the probe — that way, if a coordinator's
+            // didFinish from an outgoing reader fires concurrently, the
+            // registry can reject the stale write rather than clobber
+            // the new reader's binding.
+            DebugReaderRegistry.shared.setExpectedReaderToken(readerToken)
             DebugReaderRegistry.shared.register(probe)
         }
         .onDisappear {
@@ -390,7 +407,8 @@ struct ReaderContainerView: View {
                 fingerprint: fingerprint,
                 modelContainer: modelContext.container,
                 settingsStore: settingsStore,
-                ttsService: ttsService
+                ttsService: ttsService,
+                readerToken: readerToken
             )
         case "pdf":
             PDFReaderHost(
@@ -417,7 +435,11 @@ struct ReaderContainerView: View {
                 ttsService: ttsService
             )
         case "azw3":
-            FoliateSpikeView(bookURL: resolvedFileURL, fingerprintKey: book.fingerprintKey)
+            FoliateSpikeView(
+                bookURL: resolvedFileURL,
+                fingerprintKey: book.fingerprintKey,
+                readerToken: readerToken
+            )
         default:
             unsupportedFormatView(format: book.format.uppercased())
         }

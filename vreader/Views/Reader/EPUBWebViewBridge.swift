@@ -59,6 +59,14 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     /// didFinish from an outgoing book from being matched against an
     /// incoming reader's eval call.
     var fingerprintKey: String?
+    /// Bug #142: per-reader instance token. Generated once in
+    /// `ReaderContainerView.onAppear` and threaded alongside
+    /// `fingerprintKey`. Required to disambiguate the same-book reopen
+    /// race where a late `didFinish` from an outgoing webview can
+    /// re-register itself under the same key after the new reader
+    /// already registered. The registry's `epubWebView(for:token:)`
+    /// requires both to match.
+    var readerToken: UUID?
     /// Called when scroll progress changes (0.0...1.0).
     let onProgressChange: @MainActor (Double) -> Void
     /// Called when WKWebView fails to load content.
@@ -159,6 +167,7 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.currentHref = currentHref
         #if DEBUG
         context.coordinator.fingerprintKey = fingerprintKey
+        context.coordinator.readerToken = readerToken
         #endif
         context.coordinator.onSelectionEvent = onSelectionEvent
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
@@ -182,6 +191,7 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.currentHref = currentHref
         #if DEBUG
         context.coordinator.fingerprintKey = fingerprintKey
+        context.coordinator.readerToken = readerToken
         #endif
         context.coordinator.onSelectionEvent = onSelectionEvent
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad

@@ -13,6 +13,8 @@ struct FoliateSpikeView: View {
     /// so `webView(_:didFinish:)` can pair `(webView, fingerprintKey)` in
     /// `DebugReaderRegistry`.
     var fingerprintKey: String?
+    /// Bug #142: per-reader instance token paired with fingerprintKey.
+    var readerToken: UUID?
 
     @State private var isBookReady = false
     @State private var bookTitle = ""
@@ -23,6 +25,7 @@ struct FoliateSpikeView: View {
             FoliateSpikeWebView(
                 bookURL: bookURL,
                 fingerprintKey: fingerprintKey,
+                readerToken: readerToken,
                 onBookReady: { title in
                     isBookReady = true
                     bookTitle = title
@@ -53,8 +56,10 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
     let bookURL: URL
     /// Bug #141: threaded from FoliateSpikeView for DebugBridge registry
     /// binding. Set on the Coordinator so didFinish can register the
-    /// live webview with `setActiveFoliateWebView(_:for:)`.
+    /// live webview with `setActiveFoliateWebView(_:for:token:)`.
     let fingerprintKey: String?
+    /// Bug #142: per-reader instance token paired with fingerprintKey.
+    let readerToken: UUID?
     let onBookReady: @MainActor (String) -> Void
     let onError: @MainActor (String) -> Void
 
@@ -62,6 +67,7 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         let coord = FoliateSpikeView.Coordinator(onBookReady: onBookReady, onError: onError)
         #if DEBUG
         coord.fingerprintKey = fingerprintKey
+        coord.readerToken = readerToken
         #endif
         return coord
     }
@@ -145,6 +151,8 @@ extension FoliateSpikeView {
         /// SwiftUI binding. didFinish reads this to register the live
         /// `WKWebView` against the book's key.
         var fingerprintKey: String?
+        /// Bug #142: per-reader instance token paired with fingerprintKey.
+        var readerToken: UUID?
         #endif
 
         init(onBookReady: @escaping @MainActor (String) -> Void,
@@ -204,8 +212,8 @@ extension FoliateSpikeView {
             // so eval can verify identity at call-time. Mirrors the bug
             // #126 EPUB pattern. Skip when key not yet threaded.
             #if DEBUG
-            if let key = fingerprintKey {
-                DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: key)
+            if let key = fingerprintKey, let token = readerToken {
+                DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: key, token: token)
             }
             #endif
         }

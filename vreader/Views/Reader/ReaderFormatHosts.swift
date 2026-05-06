@@ -127,6 +127,10 @@ struct EPUBReaderHost: View {
     let modelContainer: ModelContainer
     let settingsStore: ReaderSettingsStore
     let ttsService: TTSService
+    /// Bug #142: per-reader instance token from `ReaderContainerView`,
+    /// threaded into `EPUBReaderContainerView` → `EPUBWebViewBridge` →
+    /// coordinator's `webView(_:didFinish:)` registry registration.
+    var readerToken: UUID?
 
     @State private var viewModel: EPUBReaderViewModel?
     @State private var parser: EPUBParser?
@@ -141,7 +145,8 @@ struct EPUBReaderHost: View {
                     settingsStore: settingsStore,
                     modelContainer: modelContainer,
                     ttsService: ttsService,
-                    fingerprintKey: fingerprint.canonicalKey
+                    fingerprintKey: fingerprint.canonicalKey,
+                    readerToken: readerToken
                 )
             } else {
                 ProgressView()

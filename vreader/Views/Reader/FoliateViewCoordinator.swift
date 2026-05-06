@@ -52,6 +52,8 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
     /// from the SwiftUI binding in both `makeUIView` and `updateUIView`.
     /// DEBUG-only.
     var fingerprintKey: String?
+    /// Bug #142: per-reader instance token paired with fingerprintKey.
+    var readerToken: UUID?
     #endif
 
     // MARK: - Callbacks
@@ -190,8 +192,8 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
         // threaded yet — silently dropping is preferable to binding to
         // no key. Mirrors the bug #126 EPUB pattern.
         #if DEBUG
-        if let key = fingerprintKey {
-            DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: key)
+        if let key = fingerprintKey, let token = readerToken {
+            DebugReaderRegistry.shared.setActiveFoliateWebView(webView, for: key, token: token)
         }
         #endif
     }
