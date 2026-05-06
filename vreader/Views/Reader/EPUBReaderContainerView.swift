@@ -18,6 +18,11 @@ struct EPUBReaderContainerView: View {
     var settingsStore: ReaderSettingsStore?
     var modelContainer: ModelContainer?
     var ttsService: TTSService?
+    /// Bug #126: book identity threaded into `EPUBWebViewBridge` so the
+    /// DebugBridge eval registry can pair `(webView, fingerprintKey)` and
+    /// reject stale-webview matches. Optional so existing call sites
+    /// (tests, previews) remain source-compatible.
+    var fingerprintKey: String?
 
     /// OPF directory — spine hrefs are resolved relative to this.
     @State var resourceBase: URL?
@@ -311,6 +316,7 @@ struct EPUBReaderContainerView: View {
             },
             scrollFraction: seekScrollFraction,
             currentHref: viewModel.currentPosition?.href,
+            fingerprintKey: fingerprintKey,
             onProgressChange: { scrollFraction in
                 guard let position = viewModel.currentPosition,
                       let metadata = viewModel.metadata else { return }

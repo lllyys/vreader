@@ -6,6 +6,9 @@
 #if DEBUG
 
 import XCTest
+#if canImport(WebKit)
+import WebKit
+#endif
 @testable import vreader
 
 @MainActor
@@ -69,6 +72,62 @@ final class DebugReaderRegistryTests: XCTestCase {
         }
         XCTAssertNil(DebugReaderRegistry.shared.current, "registry must hold weak; probe should be gone")
     }
+
+    // MARK: - Bug #126: keyed activeEPUBWebView binding
+
+    #if canImport(WebKit)
+    func test_epubWebView_initiallyNil_forAnyKey() {
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "any-key"))
+    }
+
+    func test_setActiveEPUBWebView_returnsForMatchingKey() {
+        let webView = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1")
+        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k1") === webView)
+    }
+
+    func test_setActiveEPUBWebView_returnsNilForMismatchedKey() {
+        // Bug #126 stale-protection: a webview registered for an outgoing
+        // book must NOT be returned to a probe that asks about a different
+        // book. Codex audit (2026-05-06) flagged this as the High finding
+        // on the initial fix.
+        let webView = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "outgoing-book")
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "incoming-book"))
+    }
+
+    func test_setActiveEPUBWebView_replacesPreviousBinding() {
+        let webViewA = WKWebView(frame: .zero)
+        let webViewB = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webViewA, for: "k1")
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webViewB, for: "k2")
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1"))
+        XCTAssertTrue(DebugReaderRegistry.shared.epubWebView(for: "k2") === webViewB)
+    }
+
+    func test_unregister_clearsEPUBWebViewWhenKeyMatches() {
+        let webView = WKWebView(frame: .zero)
+        let probe = StubProbe(key: "k1", fmt: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1")
+        DebugReaderRegistry.shared.unregister(probe)
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1"))
+    }
+
+    func test_reset_clearsEPUBWebView() {
+        let webView = WKWebView(frame: .zero)
+        DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: "k1")
+        DebugReaderRegistry.shared.reset()
+        XCTAssertNil(DebugReaderRegistry.shared.epubWebView(for: "k1"))
+        XCTAssertNil(DebugReaderRegistry.shared.rawActiveEPUBWebViewKeyForTests)
+    }
+
+    // Note: the underlying ref (`activeEPUBWebViewRef`) is declared `weak`
+    // in source. A behavioral weak-drop test is flaky here — UIKit-class
+    // instances often outlive an `autoreleasepool` block during test
+    // runs. The compile-time declaration is the contract; the runtime
+    // weak-drop is covered by on-device verification (bug #126 evidence).
+    #endif
 }
 
 @MainActor

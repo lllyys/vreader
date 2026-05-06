@@ -140,7 +140,8 @@ struct EPUBReaderHost: View {
                     parser: parser,
                     settingsStore: settingsStore,
                     modelContainer: modelContainer,
-                    ttsService: ttsService
+                    ttsService: ttsService,
+                    fingerprintKey: fingerprint.canonicalKey
                 )
             } else {
                 ProgressView()

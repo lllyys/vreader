@@ -20,6 +20,13 @@ extension EPUBWebViewBridge {
         var allowedRoot: URL?
         /// Current chapter href for anchor construction.
         var currentHref: String?
+        #if DEBUG
+        /// Bug #126: book identity used to bind the live `WKWebView` to a
+        /// fingerprintKey in `DebugReaderRegistry` from
+        /// `webView(_:didFinish:)`. Set by `EPUBWebViewBridge.updateUIView`
+        /// from the SwiftUI binding. DEBUG-only.
+        var fingerprintKey: String?
+        #endif
         /// Callback for text selection events.
         var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
         /// Callback to restore highlights after page loads.
@@ -141,6 +148,22 @@ extension EPUBWebViewBridge {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Bug #126: register the webview with DebugReaderRegistry so
+            // `vreader-debug://eval?bridge=foliate` can reach it. This
+            // fires on every page load, so reuses across book opens
+            // refresh the registry's weak ref correctly. Safe to set
+            // unconditionally; weak ref + `===` check on dismantle.
+            #if DEBUG
+            // Bug #126: register the webview with DebugReaderRegistry,
+            // paired with the book's fingerprintKey so eval can verify
+            // identity at call-time. Skip the registration when the
+            // fingerprintKey hasn't been threaded yet — silently dropping
+            // is preferable to binding the webview to no key.
+            if let key = fingerprintKey {
+                DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: key)
+            }
+            #endif
+
             // Inject theme CSS after page finishes loading
             if let css = themeCSS {
                 let js = EPUBWebViewBridge.injectThemeCSSJS(css)

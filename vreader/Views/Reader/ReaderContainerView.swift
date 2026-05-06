@@ -257,6 +257,28 @@ struct ReaderContainerView: View {
                 // value here would mislead consumers into treating it as
                 // a real position.
             )
+            // Bug #126: wire jsEvaluator for EPUB. Closure captures the
+            // book's fingerprintKey and pulls the registry's keyed webview
+            // ref at call-time. The registry's `epubWebView(for:)` returns
+            // nil if the stored webview was registered for a different
+            // book — preventing a late didFinish from an outgoing reader
+            // from being matched against an incoming probe (Codex audit
+            // 2026-05-06). Compare on the typed enum, not raw string, so
+            // case/aliasing drift can't silently disable the wiring.
+            if resolvedBookFormat == .epub {
+                let key = book.fingerprintKey
+                probe.jsEvaluator = { @MainActor script in
+                    guard let webView = DebugReaderRegistry.shared.epubWebView(for: key) else {
+                        throw DebugReaderProbeError.evalUnsupported(format: "epub")
+                    }
+                    let raw = try await webView.evaluateJavaScript(script)
+                    let normalized: Any = raw ?? NSNull()
+                    return try JSONSerialization.data(
+                        withJSONObject: normalized,
+                        options: [.fragmentsAllowed]
+                    )
+                }
+            }
             debugProbe = probe
             DebugReaderRegistry.shared.register(probe)
         }

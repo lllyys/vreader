@@ -53,6 +53,12 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     var scrollFraction: Double?
     /// Current chapter href for anchor construction in selection events.
     var currentHref: String?
+    /// Bug #126: book identity for the DebugBridge eval registry binding.
+    /// Threaded through to the Coordinator so `webView(_:didFinish:)` can
+    /// register `(webView, fingerprintKey)` together — preventing a late
+    /// didFinish from an outgoing book from being matched against an
+    /// incoming reader's eval call.
+    var fingerprintKey: String?
     /// Called when scroll progress changes (0.0...1.0).
     let onProgressChange: @MainActor (Double) -> Void
     /// Called when WKWebView fails to load content.
@@ -151,6 +157,9 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.themeCSS = themeCSS
         context.coordinator.allowedRoot = baseDirectory
         context.coordinator.currentHref = currentHref
+        #if DEBUG
+        context.coordinator.fingerprintKey = fingerprintKey
+        #endif
         context.coordinator.onSelectionEvent = onSelectionEvent
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
         context.coordinator.isPaged = isPaged
@@ -171,6 +180,9 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         // Keep coordinator in sync with current props
         context.coordinator.currentHref = currentHref
+        #if DEBUG
+        context.coordinator.fingerprintKey = fingerprintKey
+        #endif
         context.coordinator.onSelectionEvent = onSelectionEvent
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
         context.coordinator.isPaged = isPaged

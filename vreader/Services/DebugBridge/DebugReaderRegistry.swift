@@ -12,6 +12,9 @@
 #if DEBUG
 
 import Foundation
+#if canImport(WebKit)
+import WebKit
+#endif
 
 /// Read-only handle to the active reader. Conformers are owned by their
 /// presenting view; the registry holds a weak reference to avoid retain
@@ -109,6 +112,44 @@ final class DebugReaderRegistry {
     static let shared = DebugReaderRegistry()
     private weak var activeReader: AnyObject?
 
+    /// Bug #126: weak side-channel ref to the active EPUB webview, paired
+    /// with the fingerprintKey of the book it belongs to. Set by
+    /// `EPUBWebViewBridgeCoordinator.webView(_:didFinish:)` via
+    /// `setActiveEPUBWebView(_:for:)`. Read by `epubWebView(for:)` which
+    /// returns the webview only if the requested key matches the stored
+    /// key — this guards against a late `didFinish` from an outgoing book
+    /// silently evaluating against the new active probe (Codex audit
+    /// 2026-05-06, branch `fix/issue-266-epub-jseval-wiring`). Weak —
+    /// registry must not keep the webview alive past its host.
+    #if canImport(WebKit)
+    private weak var activeEPUBWebViewRef: WKWebView?
+    private var activeEPUBWebViewKey: String?
+
+    /// Set the active EPUB webview for `fingerprintKey`. Replaces any
+    /// previous binding regardless of key — newer wins, mirroring the
+    /// `register(_:)` policy for the probe itself.
+    func setActiveEPUBWebView(_ webView: WKWebView, for fingerprintKey: String) {
+        activeEPUBWebViewRef = webView
+        activeEPUBWebViewKey = fingerprintKey
+    }
+
+    /// Return the active EPUB webview iff it was registered for
+    /// `fingerprintKey`. Returns nil when no webview is registered, when
+    /// the registered webview was deallocated (weak ref cleared), or
+    /// when the registered key doesn't match.
+    func epubWebView(for fingerprintKey: String) -> WKWebView? {
+        guard activeEPUBWebViewKey == fingerprintKey else { return nil }
+        return activeEPUBWebViewRef
+    }
+
+    /// Test seam — visibility into the raw stored ref / key without the
+    /// match check. Used by DebugReaderRegistryTests; production code
+    /// goes through `epubWebView(for:)` so stale-mismatch protection
+    /// stays on the eval path.
+    var rawActiveEPUBWebViewKeyForTests: String? { activeEPUBWebViewKey }
+    var rawActiveEPUBWebViewForTests: WKWebView? { activeEPUBWebViewRef }
+    #endif
+
     /// Per-key waiters added by `awaitReader(fingerprintKey:timeout:)`.
     /// Each waiter carries a UUID token so timeouts remove by identity, not
     /// by first-match — eliminating the race where two callers waiting on
@@ -146,6 +187,17 @@ final class DebugReaderRegistry {
     func unregister(_ reader: DebugReaderProbe) {
         if activeReader === reader as AnyObject {
             activeReader = nil
+            #if canImport(WebKit)
+            // Bug #126: also drop the EPUB-webview side-channel when its
+            // owning probe leaves. The didFinish callback can outlive
+            // the SwiftUI host briefly during dismantle; clearing here
+            // prevents an outgoing book's webview from being matched
+            // against an incoming reader's key.
+            if activeEPUBWebViewKey == reader.fingerprintKey {
+                activeEPUBWebViewRef = nil
+                activeEPUBWebViewKey = nil
+            }
+            #endif
         }
     }
 
@@ -153,6 +205,10 @@ final class DebugReaderRegistry {
     /// Cancels every pending waiter with timeout for clean teardown.
     func reset() {
         activeReader = nil
+        #if canImport(WebKit)
+        activeEPUBWebViewRef = nil
+        activeEPUBWebViewKey = nil
+        #endif
         let pendingByKey = waiters
         waiters = [:]
         for (key, bucket) in pendingByKey {
