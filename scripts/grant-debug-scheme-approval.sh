@@ -127,12 +127,43 @@ if [ "${ACTUAL}" != "${TARGET_BUNDLE}" ]; then
     exit 2
 fi
 
-echo "Granted: ${SCHEME}:// → ${TARGET_BUNDLE} on ${UDID}"
-echo "  plist: ${PREF}"
-echo
-echo "NOTE (bug #140): the simulator's LaunchServices daemon caches"
-echo "scheme approvals in memory. If openurl returns"
-echo "  LSApplicationWorkspaceErrorDomain 115"
-echo "after a fresh install, the daemon hasn't picked up the new plist"
-echo "entry yet. Restart the simulator to force a re-read:"
-echo "  xcrun simctl shutdown ${UDID} && xcrun simctl boot ${UDID}"
+echo "Granted (legacy plist): ${SCHEME}:// → ${TARGET_BUNDLE}"
+echo "  ${PREF}"
+
+# Bug #140: iOS 26.4 reads scheme approvals from a SQLite store, not the
+# user-prefs plist above. The plist write is kept for compatibility with
+# older iOS Simulator versions; the SQLite write below is what unblocks
+# `simctl openurl` on iOS 26.x.
+#
+# The store lives under <device>/Containers/Data/InternalDaemon/<id>/
+#   Library/Caches/com.apple.LaunchServices.SettingsStore.sql
+# with two tables (Election, LegacyElection). An identifier of just the
+# scheme name with userElection=1 is sufficient to mark the scheme as
+# user-approved — see GH #300 for the reverse-engineering trail.
+SQL_STORE_GLOB="${DEVICE_ROOT}/Containers/Data/InternalDaemon/*/Library/Caches/com.apple.LaunchServices.SettingsStore.sql"
+SQL_STORE=""
+for candidate in ${SQL_STORE_GLOB}; do
+    if [ -f "${candidate}" ]; then
+        SQL_STORE="${candidate}"
+        break
+    fi
+done
+
+if [ -z "${SQL_STORE}" ]; then
+    echo
+    echo "warning: no LaunchServices.SettingsStore.sql found for this device — skipping SQLite grant."
+    echo "         The legacy plist above may be sufficient on older iOS versions; on iOS 26.4+"
+    echo "         this means scheme-approval will NOT be granted, and openurl will return error 115."
+else
+    if sqlite3 "${SQL_STORE}" \
+        "INSERT OR REPLACE INTO Election (identifier, userElection) VALUES ('${SCHEME}', 1);" \
+        2>/dev/null; then
+        echo
+        echo "Granted (LSD SQLite): ${SCHEME} → userElection=1"
+        echo "  ${SQL_STORE}"
+    else
+        echo
+        echo "warning: could not write to LSD SQLite store at ${SQL_STORE}"
+        echo "         openurl may still return error 115 on iOS 26.4+."
+    fi
+fi
