@@ -80,7 +80,7 @@ VReader is a modern reading app designed for iPhone and iPad, built entirely by 
 | Component   | Technology                                                                                      |
 | ----------- | ----------------------------------------------------------------------------------------------- |
 | UI          | SwiftUI                                                                                         |
-| Persistence | SwiftData (SchemaV4)                                                                            |
+| Persistence | SwiftData (SchemaV6)                                                                            |
 | EPUB        | WKWebView bridge with CSS theme injection + JS highlight API                                    |
 | AZW3/MOBI   | [Foliate-js](https://github.com/johnfactotum/foliate-js) in WKWebView (IIFE bundle via esbuild) |
 | PDF         | PDFKit + PDFAnnotation for highlights                                                           |
@@ -191,7 +191,7 @@ Shared rules for all AI agents live in ``:
 
 ## Status
 
-Active development. See [features](docs/features.md) (38 done) and [bugs](docs/bugs.md) (143 fixed) for current state.
+Active development. See [features](docs/features.md) (40 done) and [bugs](docs/bugs.md) (147 fixed) for current state.
 
 ## License
 
