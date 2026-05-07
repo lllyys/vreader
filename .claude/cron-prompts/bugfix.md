@@ -1,0 +1,3 @@
+First, log the fire: run `mkdir -p .claude/cron-logs && echo "$(date -Iseconds) bugfix FIRED" >> .claude/cron-logs/bugfix.log`. Then perform the task below. At the end of this iteration, run `echo "$(date -Iseconds) bugfix ENDED <outcome>" >> .claude/cron-logs/bugfix.log` where <outcome> is one of: work_done | no_work_in_scope | blocked | error.
+
+Pick one open GitHub issue labeled `bug` from this repo (use `gh issue list --label bug --state open --json number,labels,title`). Prefer severity:high, then severity:medium, then others. Skip issues whose body or comments indicate they are blocked (waiting on fixture, multi-iteration scope, harness gap) — leave a one-line skip note in the issue and pick the next. Then run /fix-issue #N on the chosen issue.
