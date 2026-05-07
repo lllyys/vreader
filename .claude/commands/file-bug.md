@@ -1,5 +1,5 @@
 ---
-description: Create a GH issue for a bug row in docs/bugs.md and stamp `GH: #N` into its Notes column
+description: "Create a GH issue for a bug row in docs/bugs.md and stamp `GH: #N` into its Notes column"
 argument-hint: "<bug-id>"
 ---
 
@@ -76,12 +76,16 @@ Capture the issue URL from stdout. Extract the issue number (last path segment o
 
 ## Phase 3 — Update the row
 
-Use the `Edit` tool to add `GH: #<issue-number>` to the row's Notes column. Two patterns to handle:
+Use the `Edit` tool to insert `GH: #<issue-number>` into the row's Notes column. Markdown table rows end with `|`, so the insertion always goes **before the trailing `|`**, separated from prior content by exactly one space.
 
-a. Notes ends with content (typical): append ` GH: #<N>` (with leading space).
-b. Notes ends with `|` and trailing whitespace: insert ` GH: #<N>` before the trailing `|`.
+The Edit's `old_string` is the original full row line. The `new_string` is the same line with `GH: #<N>` inserted into the Notes cell.
 
-The Edit's `old_string` should be the original full row line. The `new_string` is the same line with `GH: #<N>` appended in the Notes cell.
+Two surface patterns (both yield the same outcome — the only difference is what whitespace already exists before the trailing `|`):
+
+a. **Notes ends with non-space content** (typical): `... existing notes |` → `... existing notes GH: #<N> |` (one leading space before `GH:`).
+b. **Notes already has trailing whitespace before the `|`**: `... existing notes   |` → `... existing notes GH: #<N> |` (collapse the run of trailing spaces to one).
+
+Never put `GH: #<N>` after the trailing `|` — that puts it outside the table cell and the mirror hook won't see it.
 
 The `check_gh_issue_mirror.sh` PreToolUse hook will allow this edit because the new content carries `GH: #N`.
 

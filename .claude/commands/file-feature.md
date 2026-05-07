@@ -1,5 +1,5 @@
 ---
-description: Create a GH issue for a feature row in docs/features.md and stamp `GH: #N` into its Notes column
+description: "Create a GH issue for a feature row in docs/features.md and stamp `GH: #N` into its Notes column"
 argument-hint: "<feature-id>"
 ---
 
@@ -66,10 +66,28 @@ Capture URL + extract issue number. Same failure-mode handling as `/file-bug` (n
 
 ## Phase 3 — Update the row
 
-Use the `Edit` tool to add `GH: #<issue-number>` to the Notes column. The `check_gh_issue_mirror.sh` PreToolUse hook will allow this edit because the new content carries `GH: #N`.
+Use the `Edit` tool to insert `GH: #<issue-number>` into the row's Notes column. Markdown table rows end with `|`, so the insertion always goes **before the trailing `|`**, separated from prior content by exactly one space.
 
-**Failure mode — issue created, row update failed**:
-Print the URL + the exact row line the user needs to write, exit nonzero.
+The Edit's `old_string` is the original full row line. The `new_string` is the same line with `GH: #<N>` inserted into the Notes cell.
+
+Two surface patterns (both yield the same outcome — the only difference is what whitespace already exists before the trailing `|`):
+
+a. **Notes ends with non-space content** (typical): `... existing notes |` → `... existing notes GH: #<N> |` (one leading space before `GH:`).
+b. **Notes already has trailing whitespace before the `|`**: `... existing notes   |` → `... existing notes GH: #<N> |` (collapse the run of trailing spaces to one).
+
+Never put `GH: #<N>` after the trailing `|` — that puts it outside the table cell and the mirror hook won't see it.
+
+The `check_gh_issue_mirror.sh` PreToolUse hook will allow this edit because the new content carries `GH: #N`.
+
+**Failure mode — issue created but row update failed**:
+This is the dangerous case. Print:
+```
+GH issue #<N> created at <URL>, but failed to update docs/features.md row.
+Manually add `GH: #<N>` to the Notes column of feature #<id>:
+
+  | <id> | ... | <status> | <existing notes> GH: #<N> |
+```
+Exit nonzero so the user sees the partial success.
 
 ## Phase 4 — Report
 
