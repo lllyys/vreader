@@ -285,3 +285,94 @@ Moved from `docs/bugs.md` to reduce file size. The Summary table in `docs/bugs.m
 - **Discovery**: surfaced by the Codex audit of feature #48's plan (2026-05-03) while verifying the planned test-fixture catalog could expand without bloating Release.
 - **Solution**: (1) added `Resources/DebugFixtures/**` to the app target's `excludes:` so the directory is fully stripped from the Resources copy phase; (2) added a `preBuildScripts:` Run Script that copies fixtures into the bundle's `DebugFixtures/` subdirectory ONLY when `${CONFIGURATION} == Debug`. Used `rsync -a --delete` so empty source dirs don't fail the script and changed fixtures invalidate Xcode's incremental build correctly. Verified end-to-end: Debug build produces `vreader.app/DebugFixtures/war-and-peace.txt`; Release build produces no `DebugFixtures/` anywhere in the bundle. `find vreader.app -name 'war-and-peace*'` returns zero results in Release.
 - **Lessons**: (1) xcodegen's `sources.excludes` is build-config-blind — it strips files from a target unconditionally. The honest pattern for "include in Debug only" is exclude unconditionally + re-inject via a `preBuildScripts:` Run Script that gates on `${CONFIGURATION}`. (2) `rsync -a --delete` is the right copy primitive for build phases; `cp -R src/* dst/` fails on empty sources and doesn't sync deletions. (3) Build-phase scripts need explicit `inputFiles` / `outputFiles` so Xcode can dependency-track them; without those, the script either runs every build (slow) or never re-runs when fixtures change (stale).
+
+<!-- Entries below moved 2026-05-07 from `docs/bugs.md` Open Bug Detail. -->
+<!-- All bugs were FIXED at the time of move; the Open Bug Detail section -->
+<!-- accumulated entries that should have been archived per the bugs.md rules. -->
+
+### Bug #103 — Cannot add highlight in native EPUB
+- **Repro**: Open EPUB in native reader, select text, tap Highlight
+- **Expected**: Highlight created and rendered in-page
+- **Actual**: JS silently dropped because `onInjectJS` is nil during race with `.task` setup
+- **Root cause**: `EPUBHighlightRenderer.onInjectJS` callback swap during `restoreHighlightsOnLoad` loses concurrent highlight JS
+- **RED tests**: `EPUBHighlightRendererBug77Tests.swift` (intentionally failing)
+
+### Bug #104 — EPUB 3 nav titles not extracted
+- **Repro**: Open EPUB with nav.xhtml containing real chapter titles
+- **Expected**: TOC shows "Chapter One: The Beginning"
+- **Actual**: Shows "Section 1" (fallback)
+- **Root cause**: Bug #74 fix (`withResolvedTitles`) incomplete — nav.xhtml parsing may not match spine hrefs
+- **RED test**: `EPUBParserTests.epub3NavTitlesExtracted`
+
+### Bug #105 — Highlighted snippet multi-word overlap
+- **Repro**: Search for a multi-word query where matches overlap in snippet text
+- **Expected**: Multiple bold runs for overlapping matches
+- **Actual**: Only 1 bold run
+- **RED test**: `HighlightedSnippetTests.multiWordQuery_overlappingMatches_handled`
+
+### Bug #106 — AZW3 reader stuck on "Opening book"
+- **Repro**: Import any .azw3 or .mobi file, tap to open
+- **Expected**: Book renders with text visible
+- **Actual**: Loading screen stays forever ("Opening book...")
+- **Root cause**: `WKURLSchemeHandler` + JS `fetch()` doesn't work on device. The `bridge-ready` event fires, `openBookJS()` runs `fetch('vreader-resource://localhost/book/file')`, but fetch fails silently. `book-ready` never arrives so `isLoading` stays true.
+- **Fix**: Switch to `loadHTMLString` + base64 book handoff (proven working in FoliateSpikeView)
+
+### Bug #107 — Cover images with light/white edges show visible "padding"
+- **Repro**: Import AZW3 book (被讨厌的勇气) with light-colored cover art edges, view in library grid
+- **Expected**: Cover fills card edge-to-edge with no visible gap
+- **Actual**: White areas at top of cover art blend into white page background, looks like padding
+- **Root cause**: Cover art content (not layout) — image fills container correctly but has white/light pixels at edges. Container size verified identical via debug overlay.
+- **Fix options**: Auto-crop white borders in CustomCoverStore, or add contrast background behind covers
+
+### Bug #99 — Search highlight missing in some TXT files
+- **Repro (cause #3, addressed by current PR)**: Open a medium-size TXT file (under the 500K-UTF-16 chunked-reader threshold). Search → tap a result. The yellow search highlight does not appear.
+- **Root cause #3 (programmaticScrollCount timing race)**: Old `clearSearchHighlightIfTemporary` skipped clearing when `programmaticScrollCount > 0` and decremented the counter via `DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)`. TextKit 1's lazy-layout `scrollViewDidScroll` callbacks for medium files arrive 400-1200ms after `setContentOffset` returns — past the 0.3s window. So the highlight got cleared by the late callback before the user could see it.
+- **Fix shipped (cause #3 only)**: Replaced the counter+timer with a canonical signal — `clearSearchHighlightIfTemporary(scrollView:)` checks `scrollView.isTracking || isDragging || isDecelerating`. Programmatic scrolls and their late layout callbacks have all three flags false (skip), user-driven scrolls have at least one true (clear). No timer needed. Tests in `TXTTextViewBridgeConfigTests` + `TXTSearchHighlightGatingTests` exercise both branches via a `StubScrollView` subclass.
+- **Remaining causes (open candidates, NOT addressed)**:
+  - **Cause #1**: Chunked reader (`TXTChunkedReaderBridge`) `applyHighlight` looks up `cellForRow(at: chunkIndex)`; if the destination cell isn't yet visible after `scrollToGlobalOffset`, no rebuild happens and the auto-clear timer can fire before the cell becomes visible.
+  - **Cause #2**: Encoding offset mismatch — search index built against detected encoding may not align with the bridge's displayed UTF-16 positions for non-UTF-8 TXTs.
+- **Fix scope (remaining)**: Cause #1 needs a "wait for cell to become visible" signal in the chunked-reader's apply path. Cause #2 needs investigation of `TXTService.detectEncodingFromSample` vs the bridge's `text` property to find where the offsets diverge.
+- **Caught by**: 2026-05-05 reading session (medium-size TXT search-tap). Initial investigation captured 2026-05-05; cause #3 fixed in PR #263 (v3.13.18).
+
+### Bug #123 — DebugBridge `.onOpenURL` handler doesn't fire — URL accepted but no dispatch
+- **Repro**: After bug #121 fix (v3.13.9), `simctl openurl booted vreader-debug://reset` returns exit 0 (URL is accepted by iOS — bug #121 is genuinely fixed). But the in-app handler does NOT fire: ZBOOK count stays at 3 before and after; no books wiped from `ImportedBooks/`; no log lines on `subsystem == com.vreader.app` during invocation; `Library/Caches/DebugBridge/` directory exists but stays empty (no `state.json`, no sentinel files for any of seven commands).
+- **Root cause**: iOS LaunchServices presents a one-shot **"Open in 'vreader'?"** approval prompt from `lsd` when `simctl openurl` (running as `CoreSimulatorBridge`) opens `vreader-debug://` on a simulator that has no prior approval entry for that source/scheme pair. Until the user taps **Open**, the URL is held by `lsd` and never reaches `.onOpenURL`. `simctl openurl` exits 0 because the request was accepted by LaunchServices (queued for approval), not because the app received the URL. Diagnosed by streaming `process == "SpringBoard"`: the log shows `Received request to activate alertItem: <SBUserNotificationAlert: ...; title: Open in "vreader"?; source: lsd; pid: 6184>` immediately after each `simctl openurl` call. After tapping Open once, the DIAG-instrumented `.onOpenURL` handler fires correctly on subsequent calls (verified in this fix — `reset: removed 3 book(s)` log line). The handler code in `vreader/App/VReaderApp.swift:225` is correct.
+- **Why bug #121's fix exposed this**: before bug #121, the URL scheme wasn't registered → `simctl openurl` returned `LSApplicationWorkspaceErrorDomain code=115` (no app handles this scheme). After bug #121, the scheme IS registered → `simctl openurl` reaches LaunchServices, which then enforces its third-party-scheme approval policy.
+- **Approval persistence**: once granted, the approval is stored at `~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Library/Preferences/com.apple.launchservices.schemeapproval.plist` with key `com.apple.CoreSimulator.CoreSimulatorBridge-->vreader-debug = com.vreader.app`. Survives reinstalls; does NOT survive `simctl erase`.
+- **Fix**: `scripts/grant-debug-scheme-approval.sh` writes the plist entry directly. Idempotent. Verification harness should call this once per fresh simulator before its first `simctl openurl`. Documented in `docs/subsystems/debug-bridge.md` § "iOS scheme-approval prompt (bug #123)".
+- **Impact (resolved)**: feature #44's command-surface criteria 3 and 4 are reachable again from a verification harness that uses the grant script. Feature #45's verification harness premise is unblocked.
+- **Caught by**: feature #44 re-verification post bug-#121-fix (commit `aff7085`, v3.13.9).
+
+### Bug #122 — EPUB cover extraction fails on books with redundant-prefix `href` in `<meta name="cover">` manifest entry
+- **Repro**: Import an EPUB whose `OEBPS/content.opf` declares the cover via `<item href="OEBPS/cover.jpg" id="cover" .../>` (publisher mistake — `href` should be relative to the OPF directory but is written as if absolute from archive root). Real-world example: "道诡异仙" EPUB.
+- **Root cause**: `MetadataExtractor.resolveArchivePath` joined `opfDirPath="OEBPS"` + `coverHref="OEBPS/cover.jpg"` → `"OEBPS/OEBPS/cover.jpg"`, which does not exist in the archive. The actual cover is at `OEBPS/Images/cover.jpg`. The previous `extractCoverImage` returned nil on the first archive miss with no fallback.
+- **Fix**: Added `EPUBMetadataExtractor.coverPathCandidates(coverHref:opfDirPath:entries:)` that emits an ordered, de-duplicated list of archive paths to try: (1) spec-compliant resolved path; (2) bare-basename match across image-extension entries (jpg/jpeg/png/gif/webp), case-insensitive, ranked so entries inside the OPF directory tree come before entries outside it; (3) archive-root canonical `cover.{jpg,jpeg,png,gif}`. `extractCoverImage` now opens the ZIP once and probes candidates in order, returning the first one whose bytes decode as a valid `UIImage`. End-to-end regression test in `EPUBMetadataExtractorTests.extractCoverImage_redundantPrefixHref` builds a synthetic EPUB matching the "道诡异仙" repro shape and asserts the basename fallback locates the real cover.
+- **Caught by**: feature #43 device-verification 2026-05-05. Evidence: `dev-docs/verification/feature-43-20260505.md`.
+- **Related (unproven)**: Same evidence file flags an AZW3 case where MOBICoverExtractor *should* have succeeded (EXTH 201 record valid, target record carries a valid JPEG) but `CustomCovers/` is empty. Cannot isolate without deterministic re-import; tracked separately, not addressed by this fix.
+
+### Bug #121 — DebugBridge URL scheme not registered in installed builds (orphaned `DebugBridge.plist`)
+- **Repro**: `xcrun simctl openurl booted vreader-debug://snapshot?dest=state.json` → returns `LSApplicationWorkspaceErrorDomain code=115` ("Simulator device failed to open"). Same for `seed`, `reset`, `theme`, `open`, `settle`, `eval`.
+- **Expected**: DEBUG build registers the scheme; the URL reaches the in-app handler; a `state.json` lands in `Library/Caches/DebugBridge/` (or the path the caller specified).
+- **Actual**: scheme not in `Info.plist`. `xcrun simctl get_app_container booted com.vreader.app | xargs -I{} plutil -p {}/Info.plist` shows `CFBundleURLTypes` absent.
+- **Root cause**: `vreader/SupportingFiles/DebugBridge.plist` exists with the right URL types declaration. Its own header claims it is "Wired via per-configuration INFOPLIST_FILE: vreader target Debug config references this file; Release config leaves INFOPLIST_FILE unset...". But `project.yml`'s `info:` block at line 60–87 hard-codes one path (`vreader/SupportingFiles/Info.plist`) for both configurations and there is no merge step. As a result `DebugBridge.plist` ships only as a sibling Resources-phase file (pbxproj line 3123) which iOS never consults for URL types.
+- **Impact**: every `simctl openurl vreader-debug://` invocation fails. Feature #45's whole verification harness is blocked. Every "Needs device verification" item that names DebugBridge as its driver was already silently impossible to run against an installed build.
+- **Caught by**: feature #44 device-verification 2026-05-05 (`dev-docs/verification/feature-44-20260505.md`). Bug #111 ("DebugFixtures resources ship in Release") fixed the *fixture leak* via a Debug-only Run Script, which is the model for the Right Fix here too.
+- **Fix scope**: 5–10 line `project.yml` change. Two viable shapes — (a) per-configuration `INFOPLIST_FILE` (one path for Debug, one for Release; the Debug one is a generated merge of `Info.plist` + `DebugBridge.plist`); or (b) a Debug-only Run Script that writes the URL types into the built `Info.plist` after the source plist is copied (mirroring the bug #111 DebugFixtures fix). After fix, re-run this verification + run `scripts/verify-release-no-debugbridge.sh` against a fresh Release build (it currently catches the sibling-file leak via line 90's `*DebugBridge*` filename glob — likely failing if anyone runs it).
+
+### Bug #88 — Imported annotations not visually highlighted
+- **Repro**: Import annotations JSON, check if highlights are rendered in reader
+- **Expected**: Imported highlights visible in the reader
+- **Actual**: DB records created but reader doesn't refresh visual highlights
+- **Root cause**: Import writes to DB but no notification to reader to re-render
+- **Fix**: Added `.readerHighlightsDidImport` notification; all format containers observe and call `coordinator.restoreAll()`
+
+### Bug #120 — Simp/Trad conversion has no visible effect in realistic cases (Native default + complex EPUBs)
+- **Repro**: Open any Chinese EPUB (e.g. "道诡异仙") in default settings; Reader Settings → Chinese Text → "Simp → Trad"; observe body text. Or: keep Native mode, set conversion to anything, observe.
+- **Expected**: Simplified chars (e.g. 关/图/无/让/还) swap to Traditional (關/圖/無/讓/還) in the rendered body.
+- **Actual**: Body text stays Simplified. Setting persists in UserDefaults and the picker UI updates, but no visible effect.
+- **Root cause**: Conversion is wired only into `unifiedCoordinator.activeTransforms` (`ReaderContainerView+Sheets.swift:117–124`, `ReaderContainerView.swift:193`). Two gaps stack: (a) Native mode (default) never builds `activeTransforms` so the setting is a no-op for the most common user state; (b) in Unified mode, complex EPUBs get `textContent == nil` and `ReaderUnifiedDispatch.swift:73–76` falls back to `nativeReaderView` (WKWebView) which doesn't consume the transforms either. Realistically every published Chinese EPUB takes the fallback. PDF/AZW3/MOBI native renderers also don't apply transforms.
+- **Caught by**: feature #28 device verification 2026-05-05. Evidence: `dev-docs/verification/feature-28-20260505.md`. SimpTradTransform unit tests pass — they verify the pure transform, not the wiring.
+- **Fix scope**: Two viable directions. (1) Route `activeTransforms` into the native EPUB WKWebView via JS message that swaps text nodes through `SimpTradDictionary` so the existing setting works for the realistic path. (2) Disable the picker (or show a "Unified mode only" footer) when the current book/format uses native rendering, so the setting doesn't claim to do something it can't.
+
+---
+
