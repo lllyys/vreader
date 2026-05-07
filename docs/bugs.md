@@ -39,6 +39,7 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 - `TODO` — not started
 - `IN PROGRESS` — being worked on
 - `FIXED` — fix verified in working tree (not necessarily committed)
+- `PARTIALLY FIXED` — primary cause / mitigation shipped, but a documented follow-up scope remains tracked in the Notes column. Treat as a soft-FIXED that doesn't qualify for archive yet because the GH issue stays open until the remaining scope lands or is explicitly deferred.
 - `REOPENED` — previously fixed but regressed; link to original fix
 - `DUPLICATE` — duplicate of another bug; note `DUPLICATE OF #N`
 - `WONT FIX` — intentional behavior or out of scope
