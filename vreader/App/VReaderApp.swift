@@ -78,9 +78,25 @@ struct VReaderApp: App {
 
             #if DEBUG
             // Use in-memory store for UI testing to ensure clean state
+            // BETWEEN launches — except when the test deliberately
+            // exercises terminate-then-relaunch persistence (`.positionTest`
+            // for the first launch, `.keepExisting` for the second). Those
+            // seeds need a disk-backed store so SwiftData rows survive
+            // process termination. Bug #151 (GH #423): in-memory store dies
+            // on `app.terminate()`, so the `.keepExisting` second launch
+            // saw an empty library.
+            //
+            // Whitelisted by explicit seed flags rather than inferred by
+            // exclusion so future seed enums default to in-memory (the
+            // safer test-isolation default) rather than silently picking
+            // up disk-backed cross-method state.
             let modelConfig: ModelConfiguration
             if config.isUITesting {
-                modelConfig = ModelConfiguration(isStoredInMemoryOnly: true)
+                let needsDiskBackedStore = config.seedPositionTest
+                    || config.seedKeepExisting
+                modelConfig = needsDiskBackedStore
+                    ? ModelConfiguration()
+                    : ModelConfiguration(isStoredInMemoryOnly: true)
             } else {
                 modelConfig = ModelConfiguration()
             }
@@ -282,6 +298,12 @@ struct TestLaunchConfig: Sendable {
     let seedBooks: Bool
     let seedPositionTest: Bool
     let seedCorruptDB: Bool
+    /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
+    /// SwiftData store to remain. Used for terminate-then-relaunch tests
+    /// (e.g. `testPositionSurvivesAppRelaunch`) where data continuity
+    /// across an `app.terminate()` is the assertion. Implies
+    /// disk-backed `ModelConfiguration` (bug #151 / GH #423).
+    let seedKeepExisting: Bool
     let colorSchemeOverride: ColorScheme?
     let dynamicTypeOverride: DynamicTypeSize?
     let enableAI: Bool
@@ -319,6 +341,7 @@ struct TestLaunchConfig: Sendable {
             seedBooks: args.contains("--seed-books"),
             seedPositionTest: args.contains("--seed-position-test"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
+            seedKeepExisting: args.contains("--uitesting-no-seed"),
             colorSchemeOverride: colorScheme,
             dynamicTypeOverride: dynamicType,
             enableAI: args.contains("--enable-ai"),
@@ -334,6 +357,7 @@ struct TestLaunchConfig: Sendable {
         seedBooks: false,
         seedPositionTest: false,
         seedCorruptDB: false,
+        seedKeepExisting: false,
         colorSchemeOverride: nil,
         dynamicTypeOverride: nil,
         enableAI: false,

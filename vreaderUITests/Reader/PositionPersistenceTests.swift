@@ -132,38 +132,14 @@ final class PositionPersistenceTests: XCTestCase {
         )
     }
 
-    func testPositionSurvivesAppRelaunch() throws {
-        // Bug #150 follow-up: this test currently fails after `app.terminate()`
-        // followed by `app = launchApp(seed: .keepExisting)` because the
-        // re-launched XCUIApplication doesn't observe the seeded book in
-        // the library. The `.keepExisting` flag passes `--uitesting-no-seed`
-        // to skip seeding, expecting the previous launch's SwiftData store
-        // to remain — but in practice the second launch comes up with the
-        // book missing (`tapBook` reports "Could not find book 'Position
-        // Test Book' in library"). The seed runs in the FIRST launch on a
-        // detached Task, the test scenario then exercises scrolling +
-        // navigate-back, and only THEN does terminate+relaunch happen.
-        //
-        // Two plausible causes, both out of scope for the bug #150 fix:
-        // 1. SwiftData store flush isn't durable enough across rapid
-        //    terminate/launch cycles (debounced or dependency on app
-        //    lifecycle hooks that the test bypasses).
-        // 2. XCUITest's terminate() takes the app out cleanly but
-        //    re-launch doesn't wait for the SwiftData store to re-open
-        //    its WAL before LibraryView's `.task` queries it, so the
-        //    initial fetch races and returns 0 rows.
-        //
-        // Skipped here so the suite is GREEN under bug #150's fix.
-        // Follow-up should investigate which of (1)/(2) is the real
-        // root cause and either fix the persistence flush timing or
-        // teach the test to wait for the row to appear after relaunch
-        // before tapping.
-        throw XCTSkip("Tracked as bug #151 (GH #423): app.terminate() + launchApp(.keepExisting) loses the seeded book in library. Separate harness/persistence-flush issue from the txtReaderContainer accessibility-query bug fixed under #150 (GH #421).")
-
-        // The remaining body is preserved verbatim so the next iteration
-        // can simply remove the throw above once the underlying issue is
-        // resolved. The .swift compiler still type-checks it.
-        // swiftlint:disable:next unreachable_code
+    func testPositionSurvivesAppRelaunch() {
+        // Bug #151 (GH #423) FIXED: when `--uitesting` is set, the
+        // SwiftData model store now uses disk-backed configuration for
+        // `.positionTest` and `.keepExisting` seeds (the two seeds that
+        // exercise terminate-then-relaunch persistence). Other seeds
+        // (`.empty`, `.books`, `.corruptDB`) keep the in-memory
+        // configuration so test methods stay isolated. See
+        // VReaderApp.swift::init() — `needsDiskBackedStore` branch.
         tapBook(titled: "Position Test Book", in: app)
 
         // Wait for content to load.
