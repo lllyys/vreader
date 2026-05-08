@@ -58,11 +58,12 @@ struct TXTReaderContainerView: View {
     @State private var initialRestoreOffset: Int?
     /// Navigation target from search results. Updated via notification.
     @State private var scrollToOffset: Int?
-    /// Match highlight range for search navigation (bug #43).
-    @State private var highlightRange: NSRange?
-    /// Whether the current highlight is temporary (search nav) or persistent (user-created).
-    /// Temporary highlights auto-clear after 3s; persistent ones survive cell reuse (bug #54).
-    @State private var highlightIsTemporary: Bool = true
+    // Bug #154 / GH #443: previously declared local @State `highlightRange` and
+    // `highlightIsTemporary` were orphans — `ReaderNotificationModifier`'s
+    // `.readerNavigateToLocator` handler writes `uiState.highlightRange` /
+    // `uiState.highlightIsTemporary` (TextReaderUIState), so the bridge
+    // wiring below reads from `uiState` directly. MDReaderContainerView was
+    // already correctly wired; only TXT regressed.
     /// Pending annotation info for the "Add Note" flow (bug #44).
     @State private var pendingAnnotationInfo: TextSelectionInfo?
     /// Text input for the annotation note.
@@ -468,8 +469,8 @@ struct TXTReaderContainerView: View {
             config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
             restoreOffset: initialRestoreOffset,
             scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
-            highlightRange: highlightRange,
-            highlightIsTemporary: highlightIsTemporary,
+            highlightRange: uiState.highlightRange,
+            highlightIsTemporary: uiState.highlightIsTemporary,
             persistedHighlights: persistedHighlightRanges,
             delegate: viewModel
         )
@@ -523,8 +524,8 @@ struct TXTReaderContainerView: View {
             delegate: viewModel,
             chunkStartOffsets: offsets,
             scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
-            highlightRange: highlightRange,
-            highlightIsTemporary: highlightIsTemporary,
+            highlightRange: uiState.highlightRange,
+            highlightIsTemporary: uiState.highlightIsTemporary,
             persistedHighlights: persistedHighlightRanges
         )
         .ignoresSafeArea(edges: .bottom)
