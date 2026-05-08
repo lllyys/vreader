@@ -96,7 +96,8 @@ enum LaunchHelper {
         dynamicType: TestDynamicType = .default,
         enableAI: Bool = false,
         enableSync: Bool = false,
-        reduceMotion: Bool = false
+        reduceMotion: Bool = false,
+        resetPreferences: Bool = false
     ) -> XCUIApplication {
         vreaderUITests_launchApp(
             seed: seed,
@@ -104,7 +105,8 @@ enum LaunchHelper {
             dynamicType: dynamicType,
             enableAI: enableAI,
             enableSync: enableSync,
-            reduceMotion: reduceMotion
+            reduceMotion: reduceMotion,
+            resetPreferences: resetPreferences
         )
     }
 }
@@ -118,6 +120,10 @@ enum LaunchHelper {
 ///   - enableAI: Whether to enable AI feature flag (default: `false`).
 ///   - enableSync: Whether to enable sync feature flag (default: `false`).
 ///   - reduceMotion: Whether to simulate reduce motion (default: `false`).
+///   - resetPreferences: Wipe known UserDefaults keys before seeding
+///     (default: `false`). Bug #152 / GH #426 — opt in for tests
+///     that depend on empty-state UI assertions (OPDS catalogs,
+///     theme, AI consent, etc.).
 /// - Returns: The launched `XCUIApplication` instance.
 @discardableResult
 func vreaderUITests_launchApp(
@@ -126,7 +132,8 @@ func vreaderUITests_launchApp(
     dynamicType: TestDynamicType = .default,
     enableAI: Bool = false,
     enableSync: Bool = false,
-    reduceMotion: Bool = false
+    reduceMotion: Bool = false,
+    resetPreferences: Bool = false
 ) -> XCUIApplication {
     let app = XCUIApplication()
 
@@ -153,6 +160,10 @@ func vreaderUITests_launchApp(
         args.append("--reduce-motion")
     }
 
+    if resetPreferences {
+        args.append("--reset-preferences")
+    }
+
     app.launchArguments = args
     app.launch()
 
@@ -167,7 +178,8 @@ func launchApp(
     dynamicType: TestDynamicType = .default,
     enableAI: Bool = false,
     enableSync: Bool = false,
-    reduceMotion: Bool = false
+    reduceMotion: Bool = false,
+    resetPreferences: Bool = false
 ) -> XCUIApplication {
     vreaderUITests_launchApp(
         seed: seed,
@@ -175,7 +187,8 @@ func launchApp(
         dynamicType: dynamicType,
         enableAI: enableAI,
         enableSync: enableSync,
-        reduceMotion: reduceMotion
+        reduceMotion: reduceMotion,
+        resetPreferences: resetPreferences
     )
 }
 

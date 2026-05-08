@@ -117,6 +117,19 @@ struct VReaderApp: App {
             // Uses Task.detached + semaphore to block init until seeding completes.
             // Bounded timeout prevents indefinite hang if seeding fails.
             if config.isUITesting {
+                // Bug #152 (GH #426): clear UserDefaults state BEFORE
+                // any production view reads it. `--reset-preferences`
+                // is opt-in: tests that want a deterministic empty
+                // state (e.g. OPDS empty-state) pass it; tests that
+                // exercise saved-preference behavior leave it off.
+                // Done synchronously on the calling thread because
+                // `removeObject(forKey:)` doesn't need the persistence
+                // actor and we want the wipe to happen before any
+                // ViewModel reads the keys at view-init time.
+                if config.seedResetPreferences {
+                    TestSeeder.clearKnownPreferences()
+                }
+
                 let persistence = PersistenceActor(modelContainer: container)
                 let seedConfig = config
                 let semaphore = DispatchSemaphore(value: 0)
@@ -304,6 +317,15 @@ struct TestLaunchConfig: Sendable {
     /// across an `app.terminate()` is the assertion. Implies
     /// disk-backed `ModelConfiguration` (bug #151 / GH #423).
     let seedKeepExisting: Bool
+    /// `--reset-preferences` — wipe every UserDefaults key in
+    /// `TestSeeder.knownPreferenceKeys` before the seeding step. Bug
+    /// #152 (GH #426): `--uitesting` only swaps the SwiftData store
+    /// for in-memory, but UserDefaults survives across
+    /// `XCUIApplication.launch()` cycles, so empty-state UI tests
+    /// flake based on residual OPDS / theme / AI-consent / etc.
+    /// state from prior simulator sessions. Opt-in so tests that
+    /// WANT to inherit prior preferences (rare) keep working.
+    let seedResetPreferences: Bool
     let colorSchemeOverride: ColorScheme?
     let dynamicTypeOverride: DynamicTypeSize?
     let enableAI: Bool
@@ -342,6 +364,7 @@ struct TestLaunchConfig: Sendable {
             seedPositionTest: args.contains("--seed-position-test"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
+            seedResetPreferences: args.contains("--reset-preferences"),
             colorSchemeOverride: colorScheme,
             dynamicTypeOverride: dynamicType,
             enableAI: args.contains("--enable-ai"),
@@ -358,6 +381,7 @@ struct TestLaunchConfig: Sendable {
         seedPositionTest: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
+        seedResetPreferences: false,
         colorSchemeOverride: nil,
         dynamicTypeOverride: nil,
         enableAI: false,

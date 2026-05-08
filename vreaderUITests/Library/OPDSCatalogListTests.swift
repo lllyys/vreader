@@ -100,4 +100,52 @@ final class OPDSCatalogListTests: XCTestCase {
 
         auditCurrentScreen(app: app)
     }
+
+    // MARK: - Empty State (with --reset-preferences, bug #152 / GH #426)
+
+    /// Verifies the empty-state shape is reachable in a deterministic
+    /// way using the `--reset-preferences` launch arg (bug #152 fix).
+    /// Without this flag the test would flake based on residual
+    /// UserDefaults state from prior simulator sessions, which is why
+    /// the rest of this suite uses state-invariant assertions only.
+    func testOPDSEmptyStateWithResetPreferences() {
+        // Re-launch with the new opt-in flag so `opds.savedCatalogs`
+        // is wiped before the OPDS view ever reads it.
+        app = launchApp(seed: .books, resetPreferences: true)
+
+        let toolbarButton = app.buttons["opdsCatalogsToolbarButton"]
+        XCTAssertTrue(toolbarButton.waitForHittable(timeout: 5))
+        toolbarButton.tap()
+
+        let emptyHeading = app.staticTexts["No OPDS Catalogs"]
+        XCTAssertTrue(
+            emptyHeading.waitForExistence(timeout: 5),
+            "Empty state heading should appear when OPDS catalogs are wiped via --reset-preferences"
+        )
+
+        let emptyDescription = app.staticTexts["Add an OPDS catalog server to browse and download books."]
+        XCTAssertTrue(
+            emptyDescription.waitForExistence(timeout: 3),
+            "Empty state descriptive copy should render alongside the heading"
+        )
+
+        // The empty-state's prominent Add Catalog button is queried by
+        // its label rather than its accessibilityIdentifier — iOS 26.4
+        // SwiftUI propagates the outer VStack's `opdsEmptyState`
+        // identifier down to descendant elements, shadowing
+        // `opdsAddCatalogEmpty` on the inner Button. Same propagation
+        // pattern as bug #150 (txtReaderContainer on UITextView).
+        // Querying by label text is robust to that quirk and still
+        // proves the call-to-action is reachable to the user.
+        let addCatalogPredicate = NSPredicate(format: "label == %@", "Add Catalog")
+        let addCatalogButton = app.buttons.matching(addCatalogPredicate).firstMatch
+        XCTAssertTrue(
+            addCatalogButton.waitForExistence(timeout: 3),
+            "Empty-state Add Catalog button should be reachable when catalogs UserDefaults is wiped"
+        )
+        XCTAssertTrue(
+            addCatalogButton.isHittable,
+            "Empty-state Add Catalog button should be hittable"
+        )
+    }
 }

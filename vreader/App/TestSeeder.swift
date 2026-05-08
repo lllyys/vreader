@@ -107,6 +107,59 @@ enum TestSeeder {
         }
     }
 
+    /// UserDefaults keys that production code persists app-state to.
+    /// Bug #152 (GH #426): `--uitesting` swaps the SwiftData store for
+    /// in-memory but UserDefaults survives across `XCUIApplication.launch()`
+    /// cycles, so empty-state UI assertions flake based on residual
+    /// state from prior simulator sessions. The `--reset-preferences`
+    /// launch arg invokes `clearKnownPreferences(in:)` to wipe this list.
+    ///
+    /// Keep this list aligned with where each subsystem persists. New
+    /// UserDefaults keys added to production code should be reflected
+    /// here so empty-state tests stay deterministic.
+    static let knownPreferenceKeys: [String] = [
+        // Library
+        "library.sortOrder",
+        "library.viewMode",
+        // Reader (mirrors BackupSettingsKeys.all + tap zones)
+        "readerTheme",
+        "readerTypography",
+        "readerReadingMode",
+        "readerUseCustomBackground",
+        "readerBackgroundOpacity",
+        "readerEPUBLayout",
+        "readerAutoPageTurn",
+        "readerAutoPageTurnInterval",
+        "readerPageTurnAnimation",
+        "readerChineseConversion",
+        "readerTapZoneConfig",
+        // OPDS
+        "opds.savedCatalogs",
+        // HTTP TTS
+        "httpTTSConfig",
+        // AI
+        "com.vreader.ai.configuration",
+        "com.vreader.ai.consentGranted",
+        "com.vreader.ai.consentDate",
+        // WebDAV
+        "com.vreader.webdav.wifiOnly",
+    ]
+
+    /// Removes every key in `knownPreferenceKeys` from the supplied
+    /// `UserDefaults`. Idempotent — keys that don't exist are skipped.
+    /// Bug #152 / GH #426 fix.
+    ///
+    /// - Parameter defaults: The store to wipe. Defaults to
+    ///   `UserDefaults.standard` so production callers don't need to
+    ///   know which store the app reads from. Tests can pass a
+    ///   purpose-built `UserDefaults(suiteName:)` to avoid touching
+    ///   the host's real preferences.
+    static func clearKnownPreferences(in defaults: UserDefaults = .standard) {
+        for key in knownPreferenceKeys {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     // MARK: - Fixture Data
 
     /// All fixture book records for seeding.
