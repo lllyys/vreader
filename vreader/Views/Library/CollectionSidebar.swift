@@ -26,6 +26,23 @@ enum LibraryFilter: Equatable, Hashable, Sendable {
         case .series(let name): return name
         }
     }
+
+    /// Bug #155: returns whether `book` should be visible under this filter.
+    /// `.allBooks` matches everything; `.collection(name)` is exact-string
+    /// membership against the book's `collectionNames` (case- and
+    /// Unicode-sensitive — duplicate-rejection at create time is what enforces
+    /// case-insensitivity, see CollectionPersistenceTests). `.tag` and
+    /// `.series` are not yet wired to the row DTO and pass through for now.
+    func matches(_ book: LibraryBookItem) -> Bool {
+        switch self {
+        case .allBooks:
+            return true
+        case .collection(let name):
+            return book.collectionNames.contains(name)
+        case .tag, .series:
+            return true
+        }
+    }
 }
 
 /// Sidebar for filtering library by collection, tag, or series.

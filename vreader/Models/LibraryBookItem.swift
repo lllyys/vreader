@@ -32,10 +32,14 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
     /// Server-side blob path on the WebDAV backup (feature #47). Nil for
     /// books that have never been backed up.
     let blobPath: String?
+    /// Names of `BookCollection`s this book belongs to (feature #34).
+    /// Drives library filter (`LibraryFilter.collection(name).matches(_:)`)
+    /// when the user selects a collection in the sidebar. Bug #155.
+    let collectionNames: [String]
 
-    /// Explicit memberwise init with feature #47 defaults so existing
-    /// call sites that pre-date `fileState`/`blobPath` continue to
-    /// compile; new call sites pass the persisted values through.
+    /// Explicit memberwise init with feature-#47 + bug-#155 defaults so
+    /// existing call sites that pre-date `fileState`/`blobPath`/`collectionNames`
+    /// continue to compile; new call sites pass the persisted values through.
     init(
         fingerprintKey: String,
         title: String,
@@ -51,7 +55,8 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
         averagePagesPerHour: Double?,
         averageWordsPerMinute: Double?,
         fileState: BookFileState = .local,
-        blobPath: String? = nil
+        blobPath: String? = nil,
+        collectionNames: [String] = []
     ) {
         self.fingerprintKey = fingerprintKey
         self.title = title
@@ -68,6 +73,7 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
         self.averageWordsPerMinute = averageWordsPerMinute
         self.fileState = fileState
         self.blobPath = blobPath
+        self.collectionNames = collectionNames
     }
 
     // MARK: - File-state helpers (feature #47 WI-5)
