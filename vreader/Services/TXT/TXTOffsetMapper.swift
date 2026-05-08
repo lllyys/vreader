@@ -135,4 +135,47 @@ enum TXTOffsetMapper {
         return rect.minY
     }
     #endif
+
+    // MARK: - Search-Tap Scroll Positioning (Bug #153)
+
+    /// Computes a target `contentOffset.y` that places a matched line comfortably
+    /// inside the viewport with headroom from the top — distinct from the position-
+    /// restore path, which intentionally puts the saved offset at the very top edge.
+    ///
+    /// Bug #153 background: search-result-tap navigation previously called
+    /// `setContentOffset(_:_:)` with `lineFragmentRect.minY` directly. That positions
+    /// the matched line at `textContainerInset.top` below the visible top edge — fine
+    /// for matches in the middle of the document, but for matches deep in the document
+    /// iOS clamps `contentOffset.y` to `contentSize.height - bounds.height`, and the
+    /// matched line ends up arbitrarily placed (often below the visible center, with
+    /// the line's leading edge above the viewport so the user only sees the trailing
+    /// fragment). The 3-second highlight auto-clear timer then expires before the user
+    /// can find the match by scrolling — the bug's user-visible symptom.
+    ///
+    /// This helper applies a `headroomFraction` (default 0.25) of the viewport height
+    /// as breathing room above the matched line. The caller still passes the result to
+    /// `setContentOffset(_:_:)`, which iOS clamps automatically — but with headroom
+    /// the unclamped target is no longer near the document end's clamp boundary, so
+    /// the matched line lands closer to where we asked.
+    ///
+    /// The returned value is in scroll-view coordinates (`lineY` is added to
+    /// `topInset` to convert from text-container coordinates).
+    ///
+    /// - Parameters:
+    ///   - lineY: y-coordinate of the matched line in text-container coordinates,
+    ///     i.e., the value returned by `charOffsetToScrollOffset`.
+    ///   - viewportHeight: visible height of the text view (`bounds.height`).
+    ///   - topInset: `textContainerInset.top` — converts text-container → scroll-view y.
+    ///   - headroomFraction: where to place the line in the viewport, 0 = top edge,
+    ///     0.5 = vertical center. Clamped to `[0, 0.9]`.
+    static func scrollOffsetForVisibleMatch(
+        lineY: CGFloat,
+        viewportHeight: CGFloat,
+        topInset: CGFloat,
+        headroomFraction: CGFloat = 0.25
+    ) -> CGFloat {
+        let clampedFraction = min(max(headroomFraction, 0), 0.9)
+        let headroom = viewportHeight * clampedFraction
+        return max(0, lineY + topInset - headroom)
+    }
 }

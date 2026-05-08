@@ -122,6 +122,54 @@ extension TXTTextViewBridge {
             textView.setContentOffset(CGPoint(x: 0, y: scrollY), animated: false)
         }
 
+        /// Scrolls so a search/navigation match is visible with headroom from the top
+        /// of the viewport (bug #153). Distinct from `attemptScrollRestore`, which puts
+        /// the saved offset at the top edge — that's correct for resuming a reading
+        /// session, but for search-tap navigation the user benefits from seeing context
+        /// before the match (and from the matched line not being pushed off-screen by
+        /// `setContentOffset` clamping when the match is near the document end).
+        ///
+        /// After positioning, also calls `UITextView.scrollRangeToVisible(_:)` as a
+        /// safety net: even if our computed target lands the line off-screen for some
+        /// edge case (very long wrapped paragraphs, post-clamp visual drift), the
+        /// system's "ensure visible" pass guarantees the highlight is in the viewport
+        /// before the 3 s auto-clear timer fires.
+        func scrollToMatchedOffset(in textView: UITextView, charOffset: Int, highlightRange: NSRange? = nil) {
+            guard textView.bounds.width > 0 else {
+                guard restoreRetryCount < Self.maxRestoreRetries else { return }
+                restoreRetryCount += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak textView] in
+                    guard let self, let textView else { return }
+                    self.scrollToMatchedOffset(in: textView, charOffset: charOffset, highlightRange: highlightRange)
+                }
+                return
+            }
+
+            let textLength = (textView.text as NSString?)?.length ?? 0
+            let clampedOffset = min(max(charOffset, 0), textLength)
+            let lineY = TXTOffsetMapper.charOffsetToScrollOffset(
+                charOffset: clampedOffset,
+                layoutManager: textView.layoutManager,
+                textContainer: textView.textContainer
+            )
+            let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
+                lineY: lineY,
+                viewportHeight: textView.bounds.height,
+                topInset: textView.textContainerInset.top
+            )
+            textView.setContentOffset(CGPoint(x: 0, y: scrollY), animated: false)
+
+            // Safety net: ensure the matched range is in the viewport even if the
+            // pre-clamp computation landed it just outside (very long wrapped paragraphs,
+            // post-clamp drift, etc.). `scrollRangeToVisible` is a no-op if already visible.
+            if let range = highlightRange,
+               range.location != NSNotFound,
+               range.location >= 0,
+               range.location + range.length <= textLength {
+                textView.scrollRangeToVisible(range)
+            }
+        }
+
         // MARK: - Content Tap (Toolbar Toggle)
 
         @objc func handleContentTap(_ gesture: UITapGestureRecognizer) {

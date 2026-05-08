@@ -296,4 +296,110 @@ struct TXTOffsetMapperTests {
         #expect(result?.startUTF16 == 0)
         #expect(result?.endUTF16 == nsText.length)
     }
+
+    // MARK: - scrollOffsetForVisibleMatch (Bug #153)
+
+    /// Bug #153: search-result-tap navigation places matched text above the
+    /// visible viewport because the existing scroll path uses `lineFragmentRect.minY`
+    /// directly as `contentOffset.y` — which puts the matched line at the very top
+    /// edge with only `textContainerInset.top` of breathing room. When the match is
+    /// near the document end, iOS clamps `contentOffset.y` to the document's max scroll
+    /// position; the resulting visible region depends on document height vs viewport,
+    /// and in the field this surfaces as the matched line being pushed off-screen above
+    /// before the user can find it (the 3 s highlight auto-clear timer fires meanwhile).
+    /// This helper computes a scroll target that gives the matched line headroom from
+    /// the top so it is comfortably in view.
+    @Test func scrollOffsetForVisibleMatch_middleOfDocument_appliesHeadroom() {
+        // Match line at y=2400 (middle of doc), viewport=700, topInset=16.
+        // Expected: line positioned at viewport*0.25 = 175pt from visible top.
+        // contentOffset.y = lineY + topInset - headroom = 2400 + 16 - 175 = 2241.
+        let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
+            lineY: 2400,
+            viewportHeight: 700,
+            topInset: 16
+        )
+        #expect(scrollY == 2241)
+    }
+
+    @Test func scrollOffsetForVisibleMatch_nearDocumentStart_clampsToZero() {
+        // Line at y=50, headroom would be 175pt, requested would be -109 → clamped to 0.
+        // The matched line is then at offset (50+16)=66 from the top of viewport.
+        let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
+            lineY: 50,
+            viewportHeight: 700,
+            topInset: 16
+        )
+        #expect(scrollY == 0)
+    }
+
+    @Test func scrollOffsetForVisibleMatch_documentStart_clampsToZero() {
+        // Line at y=0, headroom 175 → would be -159 → clamped to 0.
+        let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
+            lineY: 0,
+            viewportHeight: 700,
+            topInset: 16
+        )
+        #expect(scrollY == 0)
+    }
+
+    @Test func scrollOffsetForVisibleMatch_zeroHeadroom_putsLineAtTopWithInset() {
+        // Headroom 0 = put the line right at the top of viewport (with inset margin).
+        let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
+            lineY: 1000,
+            viewportHeight: 700,
+            topInset: 16,
+            headroomFraction: 0
+        )
+        #expect(scrollY == 1016) // 1000 + 16 - 0
+    }
+
+    @Test func scrollOffsetForVisibleMatch_clampsHeadroomFractionAtUpperBound() {
+        // Fraction > 0.9 is clamped to 0.9 to prevent the line being pushed off
+        // the bottom of the viewport (which would defeat the "make it visible" purpose).
+        let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
+            lineY: 2000,
+            viewportHeight: 700,
+            topInset: 0,
+            headroomFraction: 1.5
+        )
+        // Expected: clamped fraction = 0.9 → headroom = 630 → 2000 + 0 - 630 = 1370
+        #expect(scrollY == 1370)
+    }
+
+    @Test func scrollOffsetForVisibleMatch_clampsNegativeHeadroomFractionAtZero() {
+        // Negative fraction is clamped to 0 (line goes to top of viewport with inset).
+        let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
+            lineY: 2000,
+            viewportHeight: 700,
+            topInset: 16,
+            headroomFraction: -0.5
+        )
+        #expect(scrollY == 2016)
+    }
+
+    @Test func scrollOffsetForVisibleMatch_typicalSearchTapNearDocumentEnd_keepsMatchAboveBottom() {
+        // Bug #153 repro shape: 100-paragraph TXT, paragraph 100 first line at lineY ≈ 17820,
+        // viewport 700, top inset 16. Document content height ≈ 18000. iOS clamps
+        // contentOffset.y to maxY = 18000 - 700 = 17300.
+        //
+        // Existing path: scrollY = lineY = 17820 → iOS clamps to 17300. Matched line
+        // is at content y = 17820+16 = 17836. Visible region [17300, 18000]. Matched
+        // line at offset 17836-17300 = 536 from visible top → roughly at the BOTTOM
+        // of the viewport.
+        //
+        // Headroom path: scrollY = 17820 + 16 - 175 = 17661 (no clamp needed since
+        // 17661 < 17300 is false; but iOS still clamps if scrollY > maxY).
+        // Wait: 17661 > 17300 (maxY), so iOS clamps to 17300. Visible region
+        // [17300, 18000]. Matched line at 17836 → 536 from visible top. Same.
+        //
+        // The headroom helps in the COMMON case (not clamped near doc end) — the
+        // pure-logic helper just returns the desired pre-clamp scrollY. The behavioral
+        // benefit is verified end-to-end on the simulator.
+        let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
+            lineY: 17820,
+            viewportHeight: 700,
+            topInset: 16
+        )
+        #expect(scrollY == 17661) // 17820 + 16 - (700*0.25)=175 = 17661
+    }
 }

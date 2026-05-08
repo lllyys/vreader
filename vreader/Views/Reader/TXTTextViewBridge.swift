@@ -179,6 +179,11 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // and only clears for actual user-driven scrolls. Programmatic scrolls
         // and their late layout callbacks all have those flags false, so they
         // skip the clear without needing any timer.
+        //
+        // Bug #153: route through `scrollToMatchedOffset` (top-quarter headroom
+        // + `scrollRangeToVisible` safety net) so search-result navigation lands
+        // the matched text comfortably inside the viewport — distinct from the
+        // saved-position restore path, which is purposely top-edge.
         if let target = scrollToOffset,
            target != context.coordinator.lastScrollToTarget {
             context.coordinator.lastScrollToTarget = target
@@ -187,7 +192,11 @@ struct TXTTextViewBridge: UIViewRepresentable {
                 let rangeEnd = min(textLength, target + 4096)
                 textView.layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: rangeEnd))
             }
-            context.coordinator.attemptScrollRestore(in: textView, toCharOffset: target)
+            context.coordinator.scrollToMatchedOffset(
+                in: textView,
+                charOffset: target,
+                highlightRange: highlightRange
+            )
         }
 
         // Scroll position restore is one-shot only (handled in makeUIView).
