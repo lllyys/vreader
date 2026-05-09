@@ -439,6 +439,7 @@
 		8C5EFF0A113773C9FA1153E1 /* VoiceOverAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED80D7FC768F4B87E7DB036A /* VoiceOverAuditTests.swift */; };
 		8CAAA8CE24E5701C76A9A55F /* EncodingFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C483C40C61CC5C3F7B66030 /* EncodingFixtureTests.swift */; };
 		8CB7B605DFC452B422BBEC4F /* SearchTextNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC4E25069345D28610C64EC /* SearchTextNormalizerTests.swift */; };
+		8D9277E9CE45C89DFF9E268A /* TXTReaderContainerHighlightCoordinatorWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17C33D19BD1735676CA01BC /* TXTReaderContainerHighlightCoordinatorWiringTests.swift */; };
 		8DDE8D9EB1A613F6C2633FEE /* book_detail.html in Resources */ = {isa = PBXBuildFile; fileRef = D93B1B1740BEE1A1510B831A /* book_detail.html */; };
 		8E153D7C3B713EDDBF484A24 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 334D6D06A294323E149970E4 /* AIService.swift */; };
 		8E2E64928835A3533FDE10FA /* PDFAnnotationBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A064D62C86857484454D0BE3 /* PDFAnnotationBridge.swift */; };
@@ -1504,6 +1505,7 @@
 		F069A328AA628585D86B52B2 /* SyncStatusViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusViewTests.swift; sourceTree = "<group>"; };
 		F114D9F3F59EEF655D5327EA /* EPUBCoverParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBCoverParsingTests.swift; sourceTree = "<group>"; };
 		F16AF7EAA6EC1F1D0D126E75 /* BasePageNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasePageNavigator.swift; sourceTree = "<group>"; };
+		F17C33D19BD1735676CA01BC /* TXTReaderContainerHighlightCoordinatorWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderContainerHighlightCoordinatorWiringTests.swift; sourceTree = "<group>"; };
 		F213D0F6EFBD7D7088AAC40D /* TXTMDProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTMDProgressTests.swift; sourceTree = "<group>"; };
 		F2EFEE7A0EC5352A0BB1A994 /* utf16be_bom.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = utf16be_bom.txt; sourceTree = "<group>"; };
 		F31762497599885BCC803B1D /* ChapterProgressCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterProgressCalculatorTests.swift; sourceTree = "<group>"; };
@@ -1924,6 +1926,7 @@
 				47AA8588621686E377D9D496 /* TXTBridgeSharedTests.swift */,
 				C24D5425530ABBE0DDA4758F /* TXTChunkedHighlightDeferredTimerTests.swift */,
 				F213D0F6EFBD7D7088AAC40D /* TXTMDProgressTests.swift */,
+				F17C33D19BD1735676CA01BC /* TXTReaderContainerHighlightCoordinatorWiringTests.swift */,
 				7F71E759F980473A403CC70B /* TXTReaderContainerSearchHighlightWiringTests.swift */,
 				E1EF16A1A352B2C6BAE84556 /* UnifiedMDTests.swift */,
 				9F7F45FFFEE431C41E618EF2 /* UnifiedTextRendererTests.swift */,
@@ -3515,6 +3518,7 @@
 				7406A7805B98779AF9AA2F63 /* TXTMDProgressTests.swift in Sources */,
 				3548ECB80E9BAC95250F69E5 /* TXTOffsetMapperTests.swift in Sources */,
 				F064D551F461B2FA4C778D56 /* TXTOffsetTranslatorTests.swift in Sources */,
+				8D9277E9CE45C89DFF9E268A /* TXTReaderContainerHighlightCoordinatorWiringTests.swift in Sources */,
 				9E381EED77BF225B79F3D8E9 /* TXTReaderContainerSearchHighlightWiringTests.swift in Sources */,
 				4D4A49E8738329EC2B336683 /* TXTReaderViewModelTests.swift in Sources */,
 				B3E77B47634165E42FA68E11 /* TXTServiceTests.swift in Sources */,
@@ -4070,13 +4074,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 229;
+				CURRENT_PROJECT_VERSION = 230;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.14.120;
+				MARKETING_VERSION = 3.14.121;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4220,13 +4224,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 229;
+				CURRENT_PROJECT_VERSION = 230;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.14.120;
+				MARKETING_VERSION = 3.14.121;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
