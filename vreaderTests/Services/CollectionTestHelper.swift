@@ -1,5 +1,6 @@
 // Purpose: Shared test helpers for collection/tag/series persistence tests.
 
+import CryptoKit
 import Foundation
 import SwiftData
 @testable import vreader
@@ -27,6 +28,18 @@ enum CollectionTestHelper {
         DocumentFingerprint(
             contentSHA256: sha, fileByteCount: byteCount, format: format
         )
+    }
+
+    /// Deterministic well-formed `DocumentFingerprint` derived from an arbitrary
+    /// seed string. The returned fingerprint's `canonicalKey` will not equal
+    /// `seed` (since `seed` typically isn't a parseable canonical key — that's
+    /// the point), but it is otherwise an ordinary valid fingerprint and could
+    /// in principle collide with a real book's. Used as a fallback inside
+    /// `makeLocator(...)` so the rejection-path tests can run without trapping.
+    static func makeBogusFingerprint(seed: String) -> DocumentFingerprint {
+        let digest = SHA256.hash(data: Data(seed.utf8))
+        let sha = digest.map { String(format: "%02x", $0) }.joined()
+        return DocumentFingerprint(contentSHA256: sha, fileByteCount: 0, format: .epub)
     }
 
     static func makeProvenance() -> ImportProvenance {

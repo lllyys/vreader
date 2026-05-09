@@ -9,7 +9,12 @@ import Foundation
 struct PersistenceBookmarkTests {
 
     private func makeLocator(key: String, offset: Int = 0) -> Locator {
-        let fp = DocumentFingerprint(canonicalKey: key)!
+        // Tolerate deliberately-bogus keys (e.g. "wrong:key:123") used by
+        // mismatched-key rejection tests. A real canonical key parses;
+        // otherwise we derive a deterministic, well-formed fallback fingerprint
+        // so the rejection path can run without trapping on a force-unwrap.
+        let fp = DocumentFingerprint(canonicalKey: key)
+            ?? CollectionTestHelper.makeBogusFingerprint(seed: key)
         return Locator.validated(
             bookFingerprint: fp,
             charOffsetUTF16: offset,

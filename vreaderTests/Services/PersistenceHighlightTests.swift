@@ -9,7 +9,12 @@ import Foundation
 struct PersistenceHighlightTests {
 
     private func makeLocator(key: String, offset: Int = 0) -> Locator {
-        let fp = DocumentFingerprint(canonicalKey: key)!
+        // Tolerate deliberately-bogus keys (e.g. "wrong:key:123") used by
+        // mismatched-key rejection tests. A real canonical key parses;
+        // otherwise we derive a deterministic, well-formed fallback fingerprint
+        // so the rejection path can run without trapping on a force-unwrap.
+        let fp = DocumentFingerprint(canonicalKey: key)
+            ?? CollectionTestHelper.makeBogusFingerprint(seed: key)
         return Locator.validated(
             bookFingerprint: fp,
             charOffsetUTF16: offset,
@@ -63,12 +68,18 @@ struct PersistenceHighlightTests {
 
     @Test func addHighlightToMissingBookThrows() async throws {
         let persistence = try CollectionTestHelper.makePersistence()
-        let locator = makeLocator(key: "missing:key:999", offset: 0)
+        // A valid, parseable canonical key for a book that was never inserted —
+        // ensures the bookFingerprint/key guard passes and the persistence
+        // layer hits the actual missing-book lookup.
+        let missingKey = CollectionTestHelper.makeFingerprint(
+            sha: String(repeating: "b", count: 64), byteCount: 1, format: .epub
+        ).canonicalKey
+        let locator = makeLocator(key: missingKey, offset: 0)
 
         await #expect(throws: (any Error).self) {
             try await persistence.addHighlight(
                 locator: locator, selectedText: "x", color: "y",
-                note: nil, toBookWithKey: "missing:key:999"
+                note: nil, toBookWithKey: missingKey
             )
         }
     }
