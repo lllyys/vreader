@@ -18,8 +18,12 @@ struct FormatCapabilitiesTests {
         #expect(caps.contains(.nativePagination))
         #expect(caps.contains(.unifiedReflow))
         #expect(caps.contains(.annotations))
-        // Bug #156 / GH #456: TXT host wires AutoPageTurner.
-        #expect(caps.contains(.autoPageTurn))
+        // Bug #157 / GH #461: TXT host does NOT wire AutoPageTurner —
+        // `TXTReaderContainerView.updatePaginationIfNeeded()` is defined but
+        // never called, and there is no paged renderer that observes
+        // `pageNavigator.currentPage`. The toggle was previously incorrectly
+        // shown via the `reflowableBase` preset (regression from #156's gate).
+        #expect(!caps.contains(.autoPageTurn))
         // TXT does NOT have TOC
         #expect(!caps.contains(.toc))
     }
@@ -32,7 +36,12 @@ struct FormatCapabilitiesTests {
         #expect(caps.contains(.nativePagination))
         #expect(caps.contains(.unifiedReflow))
         #expect(caps.contains(.annotations))
-        // Bug #156 / GH #456: MD host wires AutoPageTurner.
+        // Bug #156 / GH #456: MD host wires AutoPageTurner end-to-end.
+        // `MDReaderContainerView` calls `updatePaginationIfNeeded()` from
+        // `.task` + `.onChange` of layout/fontSize and renders pages via
+        // `pagedReaderContent` (line 278) which observes
+        // `pageNavigator.currentPage`. Bug #157 confirmed MD is the only
+        // format with a fully wired paged renderer + AutoPageTurner.
         #expect(caps.contains(.autoPageTurn))
         // MD has TOC (headings)
         #expect(caps.contains(.toc))
@@ -73,17 +82,29 @@ struct FormatCapabilitiesTests {
         #expect(!caps.contains(.autoPageTurn))
     }
 
-    @Test func only_txt_and_md_supportAutoPageTurn() {
-        // Bug #156 / GH #456: regression-guard. If any future format gains
-        // working AutoPageTurner wiring (or TXT/MD lose it), this test
-        // forces the codebase to update both the capability set AND the
-        // ReaderSettingsPanel gate together.
+    @Test func txt_doesNotSupportAutoPageTurn() {
+        // Bug #157 / GH #461: TXT lost AutoPageTurner support after the
+        // verify cron discovered the renderer is not wired —
+        // `TXTReaderContainerView.updatePaginationIfNeeded()` is dead code,
+        // and there is no equivalent of MD's `pagedReaderContent` that
+        // observes `pageNavigator.currentPage`.
+        let caps = FormatCapabilities.capabilities(for: .txt)
+        #expect(!caps.contains(.autoPageTurn))
+    }
+
+    @Test func only_md_supportsAutoPageTurn() {
+        // Bug #157 / GH #461: regression-guard. After #157 narrowed the gate
+        // from {TXT, MD} to {MD only} (because `TXTReaderContainerView` never
+        // calls `updatePaginationIfNeeded()` and has no paged renderer), this
+        // test pins the capability set. If TXT later gains a real paged
+        // renderer + AutoPageTurner wiring, flip the case below AND verify the
+        // `ReaderSettingsPanel.autoPageTurnSection` gate together.
         for format in BookFormat.allCases {
             let caps = FormatCapabilities.capabilities(for: format)
             switch format {
-            case .txt, .md:
+            case .md:
                 #expect(caps.contains(.autoPageTurn), "Expected \(format) to support autoPageTurn")
-            case .epub, .pdf, .azw3:
+            case .txt, .epub, .pdf, .azw3:
                 #expect(!caps.contains(.autoPageTurn), "Expected \(format) to NOT support autoPageTurn")
             }
         }
