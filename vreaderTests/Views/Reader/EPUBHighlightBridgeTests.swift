@@ -392,5 +392,69 @@ struct EPUBHighlightBridgeTests {
         #expect(js.contains("removeHighlight"))
         #expect(js.contains("clearAllHighlights"))
     }
+
+    @Test("highlightAPIJS rewrites XPath for XHTML namespace (bug #159 / GH #472)")
+    func highlightAPIJS_rewritesXPathForXHTMLNamespace() {
+        // Bug #159 / GH #472: EPUB content is loaded as `application/xhtml+xml`,
+        // which means `documentElement.namespaceURI` is
+        // `http://www.w3.org/1999/xhtml`. XPath 1.0 element names without a
+        // namespace prefix do NOT match elements in a non-null default
+        // namespace, so `document.evaluate("/html/body/p[3]", ...)` returns
+        // null on EPUB pages. The selection-tracking JS produced unqualified
+        // paths and the highlight resolver couldn't find the nodes again.
+        // The fix rewrites unqualified element segments to `*[local-name()=...]`
+        // when the document has a namespace, so the same path matches the
+        // XHTML-namespaced elements regardless of their default namespace.
+        let js = EPUBHighlightBridge.highlightAPIJS
+        // The fix MUST add a `local-name()` predicate translation in the
+        // resolver. Pinning this token forces a deliberate review if anyone
+        // tries to remove the fix; the alternative (verifying behavior in JS
+        // runtime) requires a WKWebView + XHTML doc — out of scope for unit
+        // tests.
+        #expect(
+            js.contains("local-name()"),
+            "highlightAPIJS must rewrite XPath element names to use local-name() predicate so XHTML-namespaced EPUB pages can resolve selection paths back to nodes (bug #159)."
+        )
+    }
+
+    @Test("highlightAPIJS preserves text() and attribute axis steps when rewriting (bug #159)")
+    func highlightAPIJS_preservesNonElementSteps() {
+        // The XPath rewrite must NOT touch `/text()`, `/comment()`, etc. —
+        // those are namespace-agnostic XPath axes. If the rewrite blanket-
+        // replaces every `/<word>` with `*[local-name()=...]`, selection
+        // paths like `/html/body/p[3]/text()[1]` (the typical shape produced
+        // by `getXPath` for selected text nodes) would be corrupted into
+        // `*[local-name()="text"]()` — invalid XPath. This test pins that
+        // the source explicitly carries the `text()` token through.
+        let js = EPUBHighlightBridge.highlightAPIJS
+        #expect(
+            js.contains("text()"),
+            "highlightAPIJS must reference `text()` (the selection-path axis) so the XPath rewrite path can preserve it (bug #159)."
+        )
+    }
+
+    @Test("highlightAPIJS handles prefix-qualified element names (Codex audit, bug #159)")
+    func highlightAPIJS_handlesPrefixedElementNames() {
+        // Codex audit (round 1, Medium): EPUBs with mixed-namespace inline
+        // content (e.g. inline SVG declared via `xmlns:svg=...`) can produce
+        // selection paths whose element names carry a prefix like
+        // `/html/body/svg:svg/svg:text/text()[1]`. A naive regex that only
+        // accepts `[A-Za-z][A-Za-z0-9_-]*` for the captured name would
+        // consume only `/svg` and leave a stray `:svg` segment in the
+        // output, breaking the path. The fix accepts a single optional
+        // `:prefix` within the captured name and strips the prefix before
+        // emitting `*[local-name()="..."]`. This test pins the source
+        // pattern that enables that handling — both the colon in the
+        // character class and the `indexOf(':')` strip step must be present.
+        let js = EPUBHighlightBridge.highlightAPIJS
+        #expect(
+            js.contains("indexOf(':')"),
+            "highlightAPIJS must strip the namespace prefix from prefix-qualified element names so XPath like `/html/body/svg:svg` resolves to the SVG element regardless of its namespace (Codex audit, bug #159)."
+        )
+        #expect(
+            js.contains(":[A-Za-z"),
+            "highlightAPIJS regex must accept a `:prefix` segment inside the captured element name; otherwise prefixed steps like `/svg:svg` are corrupted by the rewrite (Codex audit, bug #159)."
+        )
+    }
 }
 #endif

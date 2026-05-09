@@ -206,9 +206,15 @@ struct ReaderSettingsStoreReadingModeTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    @Test func txtFormat_canUseUnified_whenSettingIsUnified() {
+    @Test func txtFormat_cannotUseUnified_evenWhenSettingIsUnified() {
+        // Bug #158 / GH #468: TXT lost `.unifiedReflow` because the unified
+        // TXT renderer truncated content + dropped chrome + blanked on
+        // toggle. The capability removal hides the broken path; the
+        // dispatcher's own `&& contains(.unifiedReflow)` guard prevents
+        // dispatch even if a stale persisted preference says `.unified`.
+        // This test pins that contract: TXT is always native-routed.
         let txtCaps = FormatCapabilities.capabilities(for: .txt)
-        #expect(txtCaps.contains(.unifiedReflow))
+        #expect(!txtCaps.contains(.unifiedReflow))
 
         let (store, defaults, suiteName) = makeStore()
         var mutableStore = store
@@ -216,7 +222,7 @@ struct ReaderSettingsStoreReadingModeTests {
 
         let shouldUseUnified = mutableStore.readingMode == .unified
             && txtCaps.contains(.unifiedReflow)
-        #expect(shouldUseUnified, "TXT should be eligible for unified when setting is .unified")
+        #expect(!shouldUseUnified, "TXT must always use native, even when setting is .unified (bug #158)")
 
         defaults.removePersistentDomain(forName: suiteName)
     }

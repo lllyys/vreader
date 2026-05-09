@@ -98,8 +98,39 @@ extension EPUBHighlightBridge {
 
         function resolveNodeFromXPath(xpath) {
             try {
+                // Bug #159 / GH #472: EPUB chapters load as
+                // `application/xhtml+xml`, so `documentElement.namespaceURI`
+                // is `http://www.w3.org/1999/xhtml`. XPath 1.0 element
+                // names without a prefix do NOT match elements that have
+                // a default namespace, so the unqualified paths produced
+                // by `getXPath` (e.g. `/html/body/p[3]/text()[1]`)
+                // returned null on EPUB pages and the highlight render
+                // pipeline silently failed (data persisted, but visual
+                // paint never happened). Rewrite element-name segments to
+                // `*[local-name()="name"]` so the same path resolves
+                // regardless of the element's namespace; preserve the
+                // axis tokens `text()`, `comment()`, `node()` so the
+                // selection-path shape continues to work.
+                var query = xpath;
+                var docNS = document.documentElement && document.documentElement.namespaceURI;
+                if (docNS) {
+                    // Codex audit fix: also tolerate prefix-qualified element
+                    // names like `svg:svg` or `math:mfrac` that can appear in
+                    // mixed-namespace XHTML (e.g. an EPUB with inline SVG
+                    // declared via `xmlns:svg=...`). The regex now accepts
+                    // a single optional colon inside the captured name; the
+                    // replacement strips the prefix and emits the local part.
+                    query = query.replace(/\\/([A-Za-z_][A-Za-z0-9_-]*(?::[A-Za-z_][A-Za-z0-9_-]*)?)/g, function(_, name) {
+                        if (name === 'text' || name === 'comment' || name === 'node') {
+                            return '/' + name;
+                        }
+                        var colon = name.indexOf(':');
+                        var local = colon >= 0 ? name.substring(colon + 1) : name;
+                        return '/*[local-name()="' + local + '"]';
+                    });
+                }
                 var result = document.evaluate(
-                    xpath, document, null,
+                    query, document, null,
                     XPathResult.FIRST_ORDERED_NODE_TYPE, null
                 );
                 return result.singleNodeValue;
@@ -118,26 +149,25 @@ extension EPUBHighlightBridge {
             } catch (e) { return null; }
         }
 
-        // === Highlight: Use foliate Overlayer (SVG) as primary, CSS Highlight API as fallback ===
+        // === Highlight: CSS Highlight API primary, foliate SVG Overlayer fallback ===
+        // Bug #159 / GH #472: the SVG Overlayer paints rectangles into a single
+        // SVG element absolutely-positioned over <html>. In paged EPUB mode (CSS
+        // multi-column layout), the SVG's bounding rect tracks the visible
+        // viewport but rect coordinates come from `range.getClientRects()` in
+        // document coords — content shifted into the next column visually
+        // appears at viewport y < column-height while its document y is >
+        // column-height, so the rect is clipped out of the SVG viewport. CSS
+        // Highlight API renders at text-paint time and follows column transforms
+        // automatically. Prefer it for user-driven highlights; keep the
+        // overlayer as a fallback for older WebKit (pre-iOS 17.2) where the
+        // CSS Highlight API isn't available.
 
         window.__vreader_createHighlight = function(id, startPath, startOffset, endPath, endOffset, color) {
             var range = buildRange(startPath, startOffset, endPath, endOffset);
             if (!range) return;
             var cssColor = colorMap[color] || color;
 
-            // Primary: foliate SVG Overlayer
-            if (window.__foliate && window.__foliate.overlayer) {
-                try {
-                    window.__foliate.overlayer.add(
-                        'hl-' + id, range,
-                        window.__foliate.Overlayer.highlight,
-                        { color: cssColor }
-                    );
-                    return;
-                } catch (e) { /* fall through to CSS Highlight API */ }
-            }
-
-            // Fallback: CSS Highlight API
+            // Primary: CSS Highlight API (layout-aware; survives column transforms)
             if (typeof CSS !== 'undefined' && CSS.highlights) {
                 try {
                     var highlight = new Highlight(range);
@@ -149,6 +179,18 @@ extension EPUBHighlightBridge {
                         style.textContent = '::highlight(vreader-' + id + ') { background-color: ' + cssColor + '; }';
                         document.head.appendChild(style);
                     }
+                    return;
+                } catch (e) { /* fall through to SVG Overlayer */ }
+            }
+
+            // Fallback: foliate SVG Overlayer (older WebKit without CSS Highlight API)
+            if (window.__foliate && window.__foliate.overlayer) {
+                try {
+                    window.__foliate.overlayer.add(
+                        'hl-' + id, range,
+                        window.__foliate.Overlayer.highlight,
+                        { color: cssColor }
+                    );
                 } catch (e) {}
             }
         };

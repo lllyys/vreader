@@ -351,8 +351,16 @@ window.__foliate = {
     getTextNodes: getTextNodes,
 };
 
-// Auto-setup: create overlayer instance and attach to body
-document.addEventListener('DOMContentLoaded', function() {
+// Auto-setup: create overlayer instance and attach to body.
+// Bug #159 / GH #472: this script is injected at .atDocumentEnd (just after
+// document parsing), which means `DOMContentLoaded` has already fired by
+// the time the listener gets registered — the callback never ran, and
+// `window.__foliate.overlayer` stayed undefined. Without the overlayer,
+// the user-flow highlight path silently failed (it falls back to CSS
+// Highlight API, which has its own latent issue tracked in #159). Use
+// the readyState check to invoke setup synchronously when the document
+// is already past the loading phase.
+function __vreader_setupFoliate() {
     const overlayer = new Overlayer();
     const container = document.body.parentElement || document.body;
     if (getComputedStyle(container).position === 'static') {
@@ -361,6 +369,11 @@ document.addEventListener('DOMContentLoaded', function() {
     container.appendChild(overlayer.element);
     window.__foliate.overlayer = overlayer;
     window.__foliate.tts = new TTSBridge();
-});
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', __vreader_setupFoliate);
+} else {
+    __vreader_setupFoliate();
+}
 
 })();
