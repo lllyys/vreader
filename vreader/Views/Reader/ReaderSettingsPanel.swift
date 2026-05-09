@@ -45,7 +45,17 @@ struct ReaderSettingsPanel: View {
                 epubLayoutSection
                 if store.epubLayout == .paged {
                     pageTurnAnimationSection
-                    autoPageTurnSection
+                    // Bug #156 / GH #456: only render the Auto Page Turn
+                    // toggle for formats whose reader host actually wires
+                    // `AutoPageTurner`. Today that's TXT and MD only —
+                    // EPUB / PDF / AZW3 / MOBI / Unified hosts don't
+                    // observe `store.autoPageTurn`, so the toggle would
+                    // silently no-op for those formats. Defaulting to
+                    // "show" when capabilities aren't supplied keeps
+                    // tests/previews/legacy callers working.
+                    if formatCapabilities?.contains(.autoPageTurn) ?? true {
+                        autoPageTurnSection
+                    }
                 }
                 fontSizeSection
                 lineSpacingSection

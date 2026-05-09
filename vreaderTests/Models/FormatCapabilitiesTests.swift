@@ -18,6 +18,8 @@ struct FormatCapabilitiesTests {
         #expect(caps.contains(.nativePagination))
         #expect(caps.contains(.unifiedReflow))
         #expect(caps.contains(.annotations))
+        // Bug #156 / GH #456: TXT host wires AutoPageTurner.
+        #expect(caps.contains(.autoPageTurn))
         // TXT does NOT have TOC
         #expect(!caps.contains(.toc))
     }
@@ -30,6 +32,8 @@ struct FormatCapabilitiesTests {
         #expect(caps.contains(.nativePagination))
         #expect(caps.contains(.unifiedReflow))
         #expect(caps.contains(.annotations))
+        // Bug #156 / GH #456: MD host wires AutoPageTurner.
+        #expect(caps.contains(.autoPageTurn))
         // MD has TOC (headings)
         #expect(caps.contains(.toc))
     }
@@ -45,6 +49,8 @@ struct FormatCapabilitiesTests {
         #expect(caps.contains(.unifiedReflow))
         #expect(caps.contains(.toc))
         #expect(caps.contains(.annotations))
+        // Bug #156 / GH #456: EPUB host does NOT yet wire AutoPageTurner.
+        #expect(!caps.contains(.autoPageTurn))
     }
 
     @Test func pdf_supportsSelection_highlights_pagination_notTTS_notUnifiedReflow() {
@@ -56,6 +62,31 @@ struct FormatCapabilitiesTests {
         // PDF never gets TTS or unifiedReflow
         #expect(!caps.contains(.tts))
         #expect(!caps.contains(.unifiedReflow))
+        // Bug #156 / GH #456: PDF host does NOT wire AutoPageTurner.
+        #expect(!caps.contains(.autoPageTurn))
+    }
+
+    @Test func azw3_doesNotSupportAutoPageTurn() {
+        // Bug #156 / GH #456: AZW3 / MOBI go through Foliate-js,
+        // which does not currently observe `store.autoPageTurn`.
+        let caps = FormatCapabilities.capabilities(for: .azw3)
+        #expect(!caps.contains(.autoPageTurn))
+    }
+
+    @Test func only_txt_and_md_supportAutoPageTurn() {
+        // Bug #156 / GH #456: regression-guard. If any future format gains
+        // working AutoPageTurner wiring (or TXT/MD lose it), this test
+        // forces the codebase to update both the capability set AND the
+        // ReaderSettingsPanel gate together.
+        for format in BookFormat.allCases {
+            let caps = FormatCapabilities.capabilities(for: format)
+            switch format {
+            case .txt, .md:
+                #expect(caps.contains(.autoPageTurn), "Expected \(format) to support autoPageTurn")
+            case .epub, .pdf, .azw3:
+                #expect(!caps.contains(.autoPageTurn), "Expected \(format) to NOT support autoPageTurn")
+            }
+        }
     }
 
     // MARK: - Universal Capabilities

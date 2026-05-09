@@ -16,6 +16,13 @@ struct FormatCapabilities: OptionSet, Sendable, Hashable {
     static let unifiedReflow    = FormatCapabilities(rawValue: 1 << 6)
     static let toc              = FormatCapabilities(rawValue: 1 << 7)
     static let annotations      = FormatCapabilities(rawValue: 1 << 8)
+    /// Bug #156 / GH #456: marks formats whose reader host wires
+    /// `AutoPageTurner` end-to-end. Currently only TXT and MD (via
+    /// `TextReaderUIState.updateAutoPageTurner`); EPUB / PDF / AZW3 /
+    /// MOBI / Unified hosts don't yet observe `store.autoPageTurn`.
+    /// `ReaderSettingsPanel.autoPageTurnSection` keys off this flag
+    /// to hide the toggle for formats that would silently no-op.
+    static let autoPageTurn     = FormatCapabilities(rawValue: 1 << 9)
 
     // MARK: - Presets
 
@@ -26,6 +33,7 @@ struct FormatCapabilities: OptionSet, Sendable, Hashable {
     private static let reflowableBase: FormatCapabilities = [
         .textSelection, .highlights, .tts,
         .nativePagination, .unifiedReflow, .annotations,
+        .autoPageTurn,
     ]
 
     // MARK: - Context-Aware Factory
