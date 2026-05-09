@@ -18,6 +18,14 @@ struct ReplacementRulesView: View {
     @State private var showingAddSheet = false
     @State private var editingRule: ContentReplacementRule?
 
+    /// Bug #128: the only mitigation users see for the native-mode no-op.
+    /// Pinned as a static constant so `ReplacementRulesViewBannerTests` can
+    /// regression-guard the copy + the substring "Unified mode" without
+    /// inspecting the view tree. Update the test in lockstep with any copy
+    /// change.
+    static let nativeModeBannerText =
+        "Rules apply only when reading in Unified mode. Switch from the reader's Settings → Reading Mode."
+
     var body: some View {
         List {
             // Bug #128: replacement rules currently apply only in Unified
@@ -26,7 +34,7 @@ struct ReplacementRulesView: View {
             // silently configure rules that won't apply.
             Section {
                 Label {
-                    Text("Rules apply only when reading in Unified mode. Switch from the reader's Settings → Reading Mode.")
+                    Text(Self.nativeModeBannerText)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } icon: {
