@@ -273,4 +273,46 @@ struct CollectionPersistenceTests {
         #expect(collections[1].name == "Middle")
         #expect(collections[2].name == "Zebra")
     }
+
+    // MARK: - Library Projection (Bug #155)
+
+    /// Bug #155 / GH #451: locks in that `PersistenceActor.fetchAllLibraryBooks`
+    /// projects each book's `bookCollections` membership into
+    /// `LibraryBookItem.collectionNames`. This is the persistence-side half of
+    /// the fix; the view-side filter helper is exercised by
+    /// `LibraryFilterTests`. Together they prove the chain
+    /// `Book.bookCollections → LibraryBookItem.collectionNames →
+    /// LibraryFilter.matches` is wired end-to-end.
+    @Test("fetchAllLibraryBooks projects collectionNames")
+    func fetchAllLibraryBooksProjectsCollectionNames() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        let bookKey = try await CollectionTestHelper.insertBook(
+            persistence: persistence
+        )
+        _ = try await persistence.createCollection(name: "Reading List")
+        _ = try await persistence.createCollection(name: "Sci-Fi")
+        try await persistence.addBookToCollection(
+            bookFingerprintKey: bookKey, collectionName: "Reading List"
+        )
+        try await persistence.addBookToCollection(
+            bookFingerprintKey: bookKey, collectionName: "Sci-Fi"
+        )
+
+        let items = try await persistence.fetchAllLibraryBooks()
+        let item = try #require(items.first { $0.fingerprintKey == bookKey })
+        // SwiftData relationship order isn't guaranteed; assert as a Set.
+        #expect(Set(item.collectionNames) == Set(["Reading List", "Sci-Fi"]))
+    }
+
+    @Test("fetchAllLibraryBooks projects empty collectionNames for unassigned book")
+    func fetchAllLibraryBooksEmptyCollectionNames() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        let bookKey = try await CollectionTestHelper.insertBook(
+            persistence: persistence
+        )
+
+        let items = try await persistence.fetchAllLibraryBooks()
+        let item = try #require(items.first { $0.fingerprintKey == bookKey })
+        #expect(item.collectionNames.isEmpty)
+    }
 }
