@@ -44,9 +44,20 @@ struct FormatCapabilities: OptionSet, Sendable, Hashable {
     /// AutoPageTurner wiring (bug #157 / GH #461). Add it back to TXT only
     /// when `TXTReaderContainerView` calls `updatePaginationIfNeeded()` and
     /// has a paged renderer mirroring `MDReaderContainerView.pagedReaderContent`.
+    /// `.unifiedReflow` is also excluded — bug #158 / GH #468 found that the
+    /// Unified renderer for TXT truncates content at ~12 lines, drops bottom
+    /// chrome (progress, pager, percentage), bypasses the chapter detector
+    /// (no TOC), and blanks out entirely when toggled from a non-zero Native
+    /// scroll offset. The capability is added back individually to MD (and
+    /// to simple EPUB / AZW3 in their own factory branches) where the
+    /// unified pipeline actually renders correctly. When `UnifiedScrollView`
+    /// gains a working TXT path, restore `.unifiedReflow` to TXT here AND
+    /// flip `txt_doesNotSupportUnifiedReflow` + the
+    /// `only_md_epub_azw3_supportUnifiedReflow_simpleEPUB` regression
+    /// guards together.
     private static let reflowableBase: FormatCapabilities = [
         .textSelection, .highlights, .tts,
-        .nativePagination, .unifiedReflow, .annotations,
+        .nativePagination, .annotations,
     ]
 
     // MARK: - Context-Aware Factory
@@ -68,10 +79,14 @@ struct FormatCapabilities: OptionSet, Sendable, Hashable {
             return universal.union(reflowableBase)
 
         case .md:
-            // MD adds `.toc` (heading-derived) and `.autoPageTurn`
+            // MD adds `.toc` (heading-derived), `.autoPageTurn`
             // (bug #157 — only MD has end-to-end paged renderer +
-            // AutoPageTurner wiring; see `reflowableBase` doc comment).
-            return universal.union(reflowableBase).union([.toc, .autoPageTurn])
+            // AutoPageTurner wiring; see `reflowableBase` doc comment),
+            // and `.unifiedReflow` (bug #158 — `reflowableBase` no longer
+            // grants this; MD's unified pipeline currently renders the
+            // reflowed body and is the only reflowable text format kept
+            // on the unified path while TXT is gated out).
+            return universal.union(reflowableBase).union([.toc, .autoPageTurn, .unifiedReflow])
 
         case .epub:
             var caps: FormatCapabilities = [

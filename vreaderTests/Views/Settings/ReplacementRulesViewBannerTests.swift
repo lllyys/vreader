@@ -39,6 +39,18 @@ struct ReplacementRulesViewBannerTests {
         ))
     }
 
+    @Test func bannerText_namesTXTAsUnsupported() {
+        // Bug #158 / GH #468: the picker is hidden for TXT, so the banner
+        // must call out that "switch to Unified" doesn't apply for TXT users
+        // — otherwise they hunt for a non-existent toggle. We require an
+        // explicit mention of TXT so a future copy change that drops the
+        // exclusion list flags here.
+        #expect(ReplacementRulesViewBannerTests.containsCaseInsensitive(
+            haystack: ReplacementRulesView.nativeModeBannerText,
+            needle: "TXT"
+        ))
+    }
+
     // MARK: - Helpers
 
     private static func containsCaseInsensitive(haystack: String, needle: String) -> Bool {

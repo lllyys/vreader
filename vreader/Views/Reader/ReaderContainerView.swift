@@ -240,8 +240,17 @@ struct ReaderContainerView: View {
             if resolvedBookFormat == .txt {
                 ensureTOCReady()
             }
-            // Replacement rules (unified mode only)
-            if settingsStore.readingMode == .unified {
+            // Replacement rules (unified mode only).
+            // Bug #158 / GH #468: also gate on `.unifiedReflow` capability.
+            // Without this, a TXT book whose per-book / global preference
+            // still persists `readingMode == .unified` from before #158's
+            // capability removal would trigger the rule pipeline even
+            // though the dispatcher (line 102-103) routes the format to
+            // the native renderer where rules don't apply. Same shape as
+            // the dispatcher's own check — single source of truth for
+            // "does unified actually run for this format right now."
+            if settingsStore.readingMode == .unified
+                && resolvedBookFormat.capabilities.contains(.unifiedReflow) {
                 await loadReplacementRules()
             }
         }

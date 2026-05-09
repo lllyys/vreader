@@ -314,6 +314,7 @@
 		65C927CBE6855076656719CE /* AccessibilityFormattersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 336495F8165F79A364CE9B09 /* AccessibilityFormattersTests.swift */; };
 		65E4EDF452B2195BA78BA7A3 /* SpeechSynthesizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D3EF2FFB105C9E0DF1EDF51 /* SpeechSynthesizing.swift */; };
 		65EB03B9632EFDE8EAF49ACC /* EPUBTextStripperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C842F00C6B506FC831E0347 /* EPUBTextStripperTests.swift */; };
+		65FDF3DF582C0F5E67305EED /* ReaderSettingsPanelReadingModeGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83246694DE80F5760F85506E /* ReaderSettingsPanelReadingModeGateTests.swift */; };
 		66EF1425722B3E84E4902AEC /* AnnotationsPanelViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00E5921EA2B5FE88656FED6 /* AnnotationsPanelViewTests.swift */; };
 		671D7F1B0A003041831E308E /* WebDAVSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BA6B74EE0E50E049C9BAC5C /* WebDAVSettingsView.swift */; };
 		672412B314F93503C6EC7BF9 /* BookSourcePipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62A3435893128F15D5FF2CF /* BookSourcePipelineTests.swift */; };
@@ -1165,6 +1166,7 @@
 		82BC782199D1750DA66D1BCC /* ReaderNotificationHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderNotificationHandlers.swift; sourceTree = "<group>"; };
 		82CF5610F301F9CE87D9BDE1 /* TransformsBug98Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformsBug98Tests.swift; sourceTree = "<group>"; };
 		831F853E3D42A27170BB0F92 /* ReadingPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingPosition.swift; sourceTree = "<group>"; };
+		83246694DE80F5760F85506E /* ReaderSettingsPanelReadingModeGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsPanelReadingModeGateTests.swift; sourceTree = "<group>"; };
 		836FCCC18D880D48A10BA38A /* MockEPUBParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockEPUBParser.swift; sourceTree = "<group>"; };
 		837009678FE3EE7B38B7CD8B /* BackupBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupBlobStore.swift; sourceTree = "<group>"; };
 		83B60F61628D0969B18B3A9B /* AIConsentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConsentView.swift; sourceTree = "<group>"; };
@@ -1912,6 +1914,7 @@
 				EF9547D23D813327B536EAD5 /* ReaderBottomOverlayTests.swift */,
 				4CC7EBBBE07E87F07CC0FE4F /* ReaderNotificationHandlerTests.swift */,
 				2B7C59839A119870BE9B6FF9 /* ReaderSelectionEventTests.swift */,
+				83246694DE80F5760F85506E /* ReaderSettingsPanelReadingModeGateTests.swift */,
 				63E4737FA3A880C3CC2BA07D /* ReadingProgressBarTests.swift */,
 				62569DC663E2BDD2DC0155C3 /* SearchHighlightDismissTests.swift */,
 				AB8FC6D57843EAC26DB980D3 /* SearchResultHighlightTests.swift */,
@@ -3452,6 +3455,7 @@
 				32F4E36941EDCA2C0D457777 /* ReaderNotificationHandlerTests.swift in Sources */,
 				A3B091692BEA8453C7246A12 /* ReaderPositionServiceTests.swift in Sources */,
 				82152E9125D5620CACFCEFF3 /* ReaderSelectionEventTests.swift in Sources */,
+				65FDF3DF582C0F5E67305EED /* ReaderSettingsPanelReadingModeGateTests.swift in Sources */,
 				B5114E58420F95EFB408CA82 /* ReaderSettingsStoreTests.swift in Sources */,
 				6173290A06E9E4303D363AE8 /* ReaderThemeCSSTests.swift in Sources */,
 				CB432F27C324A4EBC3D1F327 /* ReaderThemeTests.swift in Sources */,
@@ -4066,13 +4070,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 223;
+				CURRENT_PROJECT_VERSION = 224;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.14.114;
+				MARKETING_VERSION = 3.14.115;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4216,13 +4220,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 223;
+				CURRENT_PROJECT_VERSION = 224;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.14.114;
+				MARKETING_VERSION = 3.14.115;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

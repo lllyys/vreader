@@ -18,13 +18,17 @@ struct ReplacementRulesView: View {
     @State private var showingAddSheet = false
     @State private var editingRule: ContentReplacementRule?
 
-    /// Bug #128: the only mitigation users see for the native-mode no-op.
-    /// Pinned as a static constant so `ReplacementRulesViewBannerTests` can
-    /// regression-guard the copy + the substring "Unified mode" without
-    /// inspecting the view tree. Update the test in lockstep with any copy
-    /// change.
+    /// Bug #128 + bug #158: the only mitigation users see for the native-mode
+    /// no-op. After bug #158 capability-gated Unified mode away from TXT (its
+    /// renderer truncates content + drops chrome + blanks on toggle), the
+    /// banner now also names which formats actually have a working Unified
+    /// pipeline so a TXT user doesn't follow the "switch to Unified" hint
+    /// into a missing picker. Pinned as a static constant so
+    /// `ReplacementRulesViewBannerTests` can regression-guard the copy
+    /// without inspecting the view tree. Update the test in lockstep with any
+    /// copy change.
     static let nativeModeBannerText =
-        "Rules apply only when reading in Unified mode. Switch from the reader's Settings → Reading Mode."
+        "Rules apply only when reading in Unified mode (currently EPUB, MD, AZW3 — not TXT or PDF). Switch from the reader's Settings → Reading Mode."
 
     var body: some View {
         List {

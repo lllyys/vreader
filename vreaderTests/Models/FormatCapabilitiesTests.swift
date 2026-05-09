@@ -16,8 +16,14 @@ struct FormatCapabilitiesTests {
         #expect(caps.contains(.highlights))
         #expect(caps.contains(.tts))
         #expect(caps.contains(.nativePagination))
-        #expect(caps.contains(.unifiedReflow))
         #expect(caps.contains(.annotations))
+        // Bug #158 / GH #468: TXT lost `.unifiedReflow` after the verify cron
+        // discovered that `UnifiedScrollView` for TXT renders only the first
+        // ~12 lines, has no bottom chrome (no progress, no pager, no TOC),
+        // and blanks out completely when toggled from Native at a non-zero
+        // scroll position. Capability-gate matches #120/#156/#157 cheap-path
+        // pattern: hide the broken mode rather than ship a partial UX.
+        #expect(!caps.contains(.unifiedReflow))
         // Bug #157 / GH #461: TXT host does NOT wire AutoPageTurner —
         // `TXTReaderContainerView.updatePaginationIfNeeded()` is defined but
         // never called, and there is no paged renderer that observes
@@ -26,6 +32,35 @@ struct FormatCapabilitiesTests {
         #expect(!caps.contains(.autoPageTurn))
         // TXT does NOT have TOC
         #expect(!caps.contains(.toc))
+    }
+
+    @Test func txt_doesNotSupportUnifiedReflow() {
+        // Bug #158 / GH #468: regression-guard. Removing `.unifiedReflow` from
+        // `reflowableBase` is the cheap-path mitigation; this test pins the
+        // post-fix capability set. If TXT later gains a working unified
+        // renderer (full content, bottom chrome, TOC integration, no
+        // toggle-blank), flip this expectation AND verify the
+        // `ReaderSettingsPanel.readingModeSection` gate together.
+        let caps = FormatCapabilities.capabilities(for: .txt)
+        #expect(!caps.contains(.unifiedReflow))
+    }
+
+    @Test func only_md_epub_azw3_supportUnifiedReflow_simpleEPUB() {
+        // Bug #158 / GH #468: regression-guard for the post-fix capability
+        // gate. After #158 narrowed the `.unifiedReflow` set from
+        // {TXT, MD, simple-EPUB, AZW3} to {MD, simple-EPUB, AZW3}, this
+        // test pins the per-format expectation. Complex EPUB (covered by
+        // `capabilities_contextAware_epubComplex_noUnifiedReflow`) and PDF
+        // remain excluded — same as before.
+        for format in BookFormat.allCases {
+            let caps = FormatCapabilities.capabilities(for: format)
+            switch format {
+            case .md, .epub, .azw3:
+                #expect(caps.contains(.unifiedReflow), "Expected \(format) to support unifiedReflow")
+            case .txt, .pdf:
+                #expect(!caps.contains(.unifiedReflow), "Expected \(format) to NOT support unifiedReflow")
+            }
+        }
     }
 
     @Test func md_supportsTextSelection_highlights_tts_pagination() {

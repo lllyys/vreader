@@ -41,7 +41,15 @@ struct ReaderSettingsPanel: View {
             List {
                 themeSection
                 themeBackgroundSection
-                readingModeSection
+                // Bug #158 / GH #468: only show the Native/Unified picker
+                // when the format actually has a working unified pipeline.
+                // For TXT (and PDF) the unified renderer is broken or absent,
+                // so showing the toggle leads users into a partial-render
+                // dead-end. Defaulting to "show" when capabilities aren't
+                // supplied keeps tests/previews/legacy callers working.
+                if Self.shouldShowReadingModeSection(for: formatCapabilities) {
+                    readingModeSection
+                }
                 epubLayoutSection
                 if store.epubLayout == .paged {
                     pageTurnAnimationSection
@@ -219,6 +227,18 @@ struct ReaderSettingsPanel: View {
             Text("Native uses format-specific readers. Unified reflow engine is coming in V2.")
                 .font(.caption)
         }
+    }
+
+    /// Bug #158 / GH #468: gate for the Reading Mode picker.
+    /// Returns `true` when the picker should be visible — i.e. the active
+    /// format has a working unified pipeline. Returns `true` when
+    /// `formatCapabilities` is `nil` to preserve legacy/test/preview behavior
+    /// (matches the same default as the bug #156 auto-page-turn gate).
+    static func shouldShowReadingModeSection(
+        for capabilities: FormatCapabilities?
+    ) -> Bool {
+        guard let caps = capabilities else { return true }
+        return caps.contains(.unifiedReflow)
     }
 
     // MARK: - EPUB Layout
