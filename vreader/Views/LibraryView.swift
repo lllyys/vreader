@@ -635,6 +635,12 @@ struct LibraryView: View {
                                 collectionName: collection.name
                             )
                             collectionRecords = (try? await persistence.fetchAllCollections()) ?? []
+                            // Bug #155: also refresh viewModel.books so the
+                            // in-memory `LibraryBookItem.collectionNames` is
+                            // current — otherwise tapping the collection in
+                            // the sidebar filter shows an empty list because
+                            // the stale row still has `collectionNames: []`.
+                            await viewModel.refresh(force: true)
                         }
                     } label: {
                         Label(collection.name, systemImage: "folder")
