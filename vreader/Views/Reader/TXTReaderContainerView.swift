@@ -68,8 +68,6 @@ struct TXTReaderContainerView: View {
     @State private var pendingAnnotationInfo: TextSelectionInfo?
     /// Text input for the annotation note.
     @State private var annotationNoteText: String = ""
-    /// Persisted highlight ranges loaded from DB on file open (bug #55).
-    @State private var persistedHighlightRanges: [NSRange] = []
 
     /// Pre-built attributed string for chapter-based display (WI-6).
     @State private var chapterAttrString: NSAttributedString?
@@ -215,25 +213,27 @@ struct TXTReaderContainerView: View {
             } else {
                 initialRestoreOffset = viewModel.currentOffsetUTF16
             }
-            // Load persisted highlights from DB for visual rendering (bug #55)
-            if let container = modelContainer {
-                let persistence = PersistenceActor(modelContainer: container)
-                if let records = try? await persistence.fetchHighlights(
-                    forBookWithKey: viewModel.bookFingerprintKey
-                ) {
-                    persistedHighlightRanges = records.compactMap { record in
-                        guard let start = record.locator.charRangeStartUTF16,
-                              let end = record.locator.charRangeEndUTF16,
-                              end > start else { return nil }
-                        return NSRange(location: start, length: end - start)
-                    }
-                }
-            }
-            // Bug #132: instantiate TTS highlight coordinator (was missing
-            // entirely — feature #40/#41 weren't wired in TXT). Mirror
-            // MDReaderContainerView's onAppear pattern.
+            // Bug #160: instantiate the renderer + HighlightCoordinator so
+            // gesture-driven highlights actually reach the real PersistenceActor.
+            // Mirrors MDReaderContainerView's pattern. Without this, the
+            // .readerNotificationHandlers fallback (makeNoOpCoordinator with
+            // NoOpHighlightStore) silently dropped every Highlight UIAction.
+            let renderer = TextHighlightRenderer(uiState: uiState)
+            highlightRenderer = renderer
             if let tts = ttsService, ttsHighlightCoordinator == nil {
                 ttsHighlightCoordinator = TTSHighlightCoordinator(ttsService: tts, uiState: uiState)
+            }
+            // Wire coordinator + restore persisted highlights into uiState
+            // (the renderer writes there; the bridge reads from there).
+            if let container = modelContainer {
+                let persistence = PersistenceActor(modelContainer: container)
+                let coordinator = HighlightCoordinator(
+                    renderer: renderer,
+                    persistence: persistence,
+                    bookFingerprintKey: viewModel.bookFingerprintKey
+                )
+                highlightCoordinator = coordinator
+                await coordinator.restoreAll()
             }
         }
         .task(id: attrStringKey) {
@@ -471,7 +471,7 @@ struct TXTReaderContainerView: View {
             scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
             highlightRange: uiState.highlightRange,
             highlightIsTemporary: uiState.highlightIsTemporary,
-            persistedHighlights: persistedHighlightRanges,
+            persistedHighlights: uiState.persistedHighlightRanges,
             delegate: viewModel
         )
         .ignoresSafeArea(edges: .bottom)
@@ -526,7 +526,7 @@ struct TXTReaderContainerView: View {
             scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
             highlightRange: uiState.highlightRange,
             highlightIsTemporary: uiState.highlightIsTemporary,
-            persistedHighlights: persistedHighlightRanges
+            persistedHighlights: uiState.persistedHighlightRanges
         )
         .ignoresSafeArea(edges: .bottom)
         .accessibilityIdentifier("txtReaderChunkedContent")
