@@ -53,9 +53,32 @@ Plan around them; do not bypass.
 2. **Working tree**: `git status --porcelain`. If dirty, isolate work
    on a branch; do not revert unrelated changes.
 3. **Branch / sync**: `git fetch origin`. Confirm `main` is current.
-4. **Tracker baseline**: note the current row status. The skill's
-   transitions assume a starting status of `TODO` or `PLANNED`.
-   If already `IN PROGRESS`, resume at the appropriate gate.
+4. **Tracker baseline + entry-gate selection**: note the current row
+   status, then check whether `dev-docs/plans/*-feature-<id>-*.md`
+   exists. The two artifacts can disagree (the row's `PLANNED` may
+   have been set on the lighter row-template definition: Problem/
+   Scope/Edge Cases filled in). The combination decides where to
+   enter:
+
+   | Row status | `dev-docs/plans/*-feature-<id>-*.md` present? | Enter at |
+   |---|---|---|
+   | `TODO` | no | **Gate 1** (write the plan) |
+   | `TODO` | yes (drafted ahead, not yet audited) | **Gate 2** |
+   | `PLANNED` | no | **Gate 1** (drawing up the plan IS the work — do not bail out) |
+   | `PLANNED` | yes, no audit revision history | **Gate 2** |
+   | `PLANNED` | yes, audited (revision history shows clean Gate 2) | **Gate 3** |
+   | `IN PROGRESS` | yes (assumed) | **resume next pending WI / re-enter Gate 4 if a WI is mid-audit** |
+   | `DONE` | yes | **Gate 5b** (post-merge final acceptance) |
+   | `VERIFIED` | yes | already complete; nothing to do |
+
+   **Do not stop because the plan doc is missing.** Drawing up the
+   `dev-docs/plans/` doc is Gate 1's deliverable, not a precondition.
+   A row already at `PLANNED` whose dev-docs plan doesn't exist
+   means: row-level template was filled, full implementation plan
+   wasn't lifted yet — lift it now (Gate 1), audit it (Gate 2),
+   then proceed. Only TODO/IDEA-level rows whose row-template
+   itself is empty (no Problem/Scope/Edge Cases at all) need
+   triage before Gate 1 is meaningful — those redirect to /triage.
 5. **Bug-vs-feature sanity check**: re-confirm this is a feature
    (capability never implemented), not a bug (broken implementation).
    If it's a bug → STOP, redirect to `/fix-issue`.
@@ -68,7 +91,7 @@ Plan around them; do not bypass.
 |---|---|
 | Required artifact | `dev-docs/plans/YYYYMMDD-feature-<id>-<slug>.md` with all required sections (see below) |
 | Owner / auditor | Author = orchestrator (or Planner subagent). No auditor — that's Gate 2. |
-| Status transition | row stays `TODO` until Gate 2 passes; then → `PLANNED` |
+| Status transition | If row was `TODO`: stays `TODO` through Gate 1; flips to `PLANNED` only after Gate 2 passes. If row was already `PLANNED` (row-template definition filled but no plan doc): stays `PLANNED` — do NOT regress to `TODO`. The plan doc fills in what was missing |
 | Blocking hook | `check_gh_issue_mirror.sh` fires on the `PLANNED` flip (must have `GH: #N` in row Notes; create the issue here) |
 | Exit criteria | Plan file exists at the documented path with all required sections filled in |
 
