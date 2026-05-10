@@ -4,9 +4,30 @@
 // @coordinates-with EPUBWebViewBridge.swift, EPUBWebViewBridgeCoordinator.swift
 
 #if canImport(UIKit)
+import UIKit
 import WebKit
 
 extension EPUBWebViewBridge {
+
+    // MARK: - Scroll View Background
+
+    /// Bug #167: Resolves the WKWebView scroll-view background color so the
+    /// rubber-band overscroll area matches the current reader theme instead
+    /// of falling through to the host UIView (white by default).
+    /// Returns the input color if non-nil, otherwise `.clear` to preserve
+    /// the prior behaviour for any caller that hasn't yet been threaded
+    /// through with a themed color.
+    static func scrollViewBackgroundColor(for color: UIColor?) -> UIColor {
+        color ?? .clear
+    }
+
+    /// Bug #167: Single seam through which the bridge writes the scroll
+    /// view's `backgroundColor`. Exists so tests can exercise the actual
+    /// `UIScrollView.backgroundColor` assignment — not just the resolver
+    /// — and catch a wiring regression if anyone deletes the call site.
+    static func applyScrollViewBackground(to scrollView: UIScrollView, color: UIColor?) {
+        scrollView.backgroundColor = scrollViewBackgroundColor(for: color)
+    }
 
     // MARK: - Scroll to Fraction
 

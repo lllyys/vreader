@@ -48,6 +48,12 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     let baseDirectory: URL
     /// Optional CSS `<style>` tag to inject for theme overrides.
     var themeCSS: String?
+    /// Bug #167: opaque background color for the WKWebView's scroll view, so
+    /// the rubber-band overscroll area paints in the current theme color
+    /// instead of falling through to the host UIView (white by default).
+    /// `nil` preserves the prior `.clear` behaviour for any caller that
+    /// hasn't yet been threaded through.
+    var themeBackgroundColor: UIColor?
     /// Scroll fraction (0.0-1.0) to scroll to after the chapter loads.
     /// Set by the container view when seeking within a chapter.
     var scrollFraction: Double?
@@ -160,9 +166,14 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isOpaque = false
         webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
+        // Bug #167 wiring: keep this call. The seam itself is unit-tested in
+        // EPUBWebViewBridgeTests; deleting this line would silently re-introduce
+        // the white-bleed regression because the call-site wiring is not
+        // covered by tests (representable-context plumbing is too deep to mock).
+        Self.applyScrollViewBackground(to: webView.scrollView, color: themeBackgroundColor)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         context.coordinator.themeCSS = themeCSS
+        context.coordinator.themeBackgroundColor = themeBackgroundColor
         context.coordinator.allowedRoot = baseDirectory
         context.coordinator.currentHref = currentHref
         #if DEBUG
@@ -255,6 +266,18 @@ struct EPUBWebViewBridge: UIViewRepresentable {
                     if let error { AppLogger.epub.error("theme remove error: \(error)") }
                 }
             }
+        }
+
+        // Bug #167 wiring: keep the rubber-band overscroll area in sync
+        // with the current reader theme so it doesn't flash white.
+        // Compared separately from `themeCSS` so a theme change still
+        // restyles the scroll view even if the cascade above didn't run
+        // (e.g. URL also changed in the same update). As above, the seam
+        // is unit-tested but this call site is not — deleting it would
+        // silently re-introduce the regression on live theme switches.
+        if context.coordinator.themeBackgroundColor != themeBackgroundColor {
+            context.coordinator.themeBackgroundColor = themeBackgroundColor
+            Self.applyScrollViewBackground(to: webView.scrollView, color: themeBackgroundColor)
         }
 
         // Evaluate pending JS from container (e.g., highlight injection after persist)

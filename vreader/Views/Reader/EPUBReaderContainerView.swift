@@ -317,6 +317,7 @@ struct EPUBReaderContainerView: View {
                     fontFamily: $0.typography.fontFamily
                 )
             },
+            themeBackgroundColor: settingsStore?.theme.backgroundColor,
             scrollFraction: seekScrollFraction,
             currentHref: viewModel.currentPosition?.href,
             fingerprintKey: fingerprintKey,

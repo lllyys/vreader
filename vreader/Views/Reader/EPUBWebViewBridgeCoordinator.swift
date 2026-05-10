@@ -12,6 +12,11 @@ extension EPUBWebViewBridge {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var currentURL: URL?
         var themeCSS: String?
+        /// Bug #167: themed background color for the WKWebView's scroll
+        /// view. Tracked here so `updateUIView` can detect a theme change
+        /// and restyle the rubber-band overscroll area without reloading
+        /// the page.
+        var themeBackgroundColor: UIColor?
         /// Scroll fraction to apply after the next page load completes.
         var pendingScrollFraction: Double?
         /// Page index to navigate to after pagination setup (paged mode).
