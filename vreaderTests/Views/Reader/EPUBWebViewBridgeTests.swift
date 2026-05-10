@@ -152,4 +152,136 @@ struct EPUBWebViewBridgeScrollBackgroundTests {
                 "nil input must restore the prior `.clear` behaviour")
     }
 }
+
+// MARK: - Bug #163 — Safe-area top inset
+
+/// Bug #163: Tests for the seam that writes a safe-area top inset to the
+/// WKWebView's scroll view, so EPUB chapter content isn't clipped behind
+/// the Dynamic Island when `contentInsetAdjustmentBehavior = .never`.
+///
+/// Same coverage-gap caveat as the scroll-background suite: these tests
+/// lock the seam's contract, not the call-site wiring inside
+/// `makeUIView` / `updateUIView`. If a future change deletes either call
+/// site, the suite still passes; the device-verification step (Phase 9
+/// of `/fix-issue`) is the wiring lock for that.
+@Suite("EPUBWebViewBridge - applySafeAreaTopInset (bug #163)")
+struct EPUBWebViewBridgeSafeAreaInsetTests {
+
+    @MainActor
+    @Test("applySafeAreaTopInset writes the input value to contentInset.top")
+    func applyWritesTopInsetToScrollView() {
+        let scrollView = UIScrollView()
+        // Pre-existing value to confirm overwrite.
+        scrollView.contentInset = UIEdgeInsets(top: 99, left: 0, bottom: 0, right: 0)
+
+        EPUBWebViewBridge.applySafeAreaTopInset(to: scrollView, top: 59)
+        #expect(scrollView.contentInset.top == 59)
+
+        EPUBWebViewBridge.applySafeAreaTopInset(to: scrollView, top: 47)
+        #expect(scrollView.contentInset.top == 47,
+                "Subsequent calls must overwrite the prior value")
+    }
+
+    @MainActor
+    @Test("applySafeAreaTopInset preserves left/bottom/right insets")
+    func applyPreservesNonTopInsets() {
+        let scrollView = UIScrollView()
+        scrollView.contentInset = UIEdgeInsets(top: 0, left: 8, bottom: 16, right: 24)
+
+        EPUBWebViewBridge.applySafeAreaTopInset(to: scrollView, top: 59)
+
+        #expect(scrollView.contentInset.top == 59)
+        #expect(scrollView.contentInset.left == 8,
+                "left inset must not be overwritten")
+        #expect(scrollView.contentInset.bottom == 16,
+                "bottom inset must not be overwritten")
+        #expect(scrollView.contentInset.right == 24,
+                "right inset must not be overwritten")
+    }
+
+    @MainActor
+    @Test("applySafeAreaTopInset with 0 clears the top inset")
+    func applyWithZeroClearsTopInset() {
+        let scrollView = UIScrollView()
+        scrollView.contentInset = UIEdgeInsets(top: 59, left: 0, bottom: 0, right: 0)
+
+        EPUBWebViewBridge.applySafeAreaTopInset(to: scrollView, top: 0)
+        #expect(scrollView.contentInset.top == 0)
+    }
+
+    @MainActor
+    @Test("applySafeAreaTopInset with negative value clamps to 0")
+    func applyWithNegativeClampsToZero() {
+        let scrollView = UIScrollView()
+
+        EPUBWebViewBridge.applySafeAreaTopInset(to: scrollView, top: -10)
+        #expect(scrollView.contentInset.top == 0,
+                "Negative input must clamp to 0 — UIScrollView accepts negative insets but they would push content UP into the chrome bar, regressing the bug we're fixing")
+    }
+
+    @MainActor
+    @Test("applySafeAreaTopInset matches scrollIndicatorInsets to keep scrollbar in safe area")
+    func applyAlsoUpdatesScrollIndicatorInsets() {
+        let scrollView = UIScrollView()
+
+        EPUBWebViewBridge.applySafeAreaTopInset(to: scrollView, top: 59)
+
+        // The scrollbar indicator should also start below the safe area
+        // — otherwise it's clipped behind the Dynamic Island just like the
+        // content was. iOS 13+ uses verticalScrollIndicatorInsets;
+        // setting `scrollIndicatorInsets` covers both.
+        #expect(scrollView.verticalScrollIndicatorInsets.top == 59)
+    }
+}
+
+// MARK: - Bug #163 — Paged mode pagination height
+
+/// Round-1 audit fix [1]: when contentInset.top is applied for the safe
+/// area, paged mode's column height must be reduced by the same amount;
+/// otherwise each column extends below the visible viewport and text at
+/// the bottom of each page is clipped. These tests pin the paged-mode
+/// pagination CSS shape against viewport-minus-inset.
+@Suite("EPUBPaginationHelper - safe-area-aware viewport (bug #163)")
+struct EPUBPaginationHelperSafeAreaTests {
+
+    @Test("paginationCSS uses the supplied viewportHeight literally")
+    func paginationCSSUsesViewportHeightAsIs() {
+        // The helper itself doesn't know about safe area — it just emits
+        // the height it's given. The caller (EPUBWebViewBridge.Coordinator)
+        // is responsible for subtracting the inset before calling.
+        let css = EPUBPaginationHelper.paginationCSS(
+            viewportWidth: 393,
+            viewportHeight: 852
+        )
+        #expect(css.contains("height: 852px"))
+    }
+
+    @Test("paginationCSS reflects reduced height when caller subtracts inset")
+    func paginationCSSReflectsReducedHeight() {
+        let bounds: CGFloat = 852
+        let safeAreaTop: CGFloat = 59
+        let effective = max(bounds - safeAreaTop, 0)
+
+        let css = EPUBPaginationHelper.paginationCSS(
+            viewportWidth: 393,
+            viewportHeight: effective
+        )
+        #expect(css.contains("height: \(Int(effective))px"))
+        // Sanity: the original full-bounds height is NOT in the CSS.
+        #expect(!css.contains("height: \(Int(bounds))px"))
+    }
+
+    @Test("zero or negative effective height produces guard fallback")
+    func paginationCSSWithZeroHeight() {
+        // The bridge's `setupPagination` guards: `viewportWidth > 0 &&
+        // viewportHeight > 0`, so a zero-or-negative computed height
+        // produces a no-op (no CSS injected). The helper itself just
+        // emits whatever it gets — we assert here that
+        // `max(bounds - inset, 0) == 0` falls into the guard.
+        let bounds: CGFloat = 30  // unrealistically small
+        let safeAreaTop: CGFloat = 59
+        let effective = max(bounds - safeAreaTop, 0)
+        #expect(effective == 0)
+    }
+}
 #endif

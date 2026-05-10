@@ -29,6 +29,28 @@ extension EPUBWebViewBridge {
         scrollView.backgroundColor = scrollViewBackgroundColor(for: color)
     }
 
+    // MARK: - Safe Area Top Inset (bug #163)
+
+    /// Bug #163: WKWebView's scroll view has `contentInsetAdjustmentBehavior =
+    /// .never` (set in `makeUIView` so paginated layout's `scrollLeft` math
+    /// works correctly without the OS pre-shifting `contentOffset`). The
+    /// side-effect was that EPUB content started at y=0, clipped behind the
+    /// Dynamic Island on chapter start. This seam writes the safe-area top
+    /// inset directly so the content begins at the right place. Negative
+    /// inputs clamp to 0 — UIScrollView would happily accept a negative top
+    /// inset (pushing content UP) but that's exactly the regression we're
+    /// fixing, so guard against it here.
+    static func applySafeAreaTopInset(to scrollView: UIScrollView, top: CGFloat) {
+        let clamped = max(top, 0)
+        scrollView.contentInset.top = clamped
+        // The scroll indicator also needs to start below the safe area;
+        // otherwise the scrollbar is clipped behind the Dynamic Island
+        // identical to how the content was. `verticalScrollIndicatorInsets`
+        // is the modern API; on iOS 13+ writes here also reflect into
+        // legacy `scrollIndicatorInsets`.
+        scrollView.verticalScrollIndicatorInsets.top = clamped
+    }
+
     // MARK: - Scroll to Fraction
 
     /// Generates JavaScript that scrolls the page to a vertical fraction (0.0-1.0).

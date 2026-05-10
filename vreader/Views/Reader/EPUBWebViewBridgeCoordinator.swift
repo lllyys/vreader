@@ -17,6 +17,17 @@ extension EPUBWebViewBridge {
         /// and restyle the rubber-band overscroll area without reloading
         /// the page.
         var themeBackgroundColor: UIColor?
+        /// Bug #163: last applied safe-area top inset. Tracked so
+        /// `updateUIView` can detect changes (e.g. rotation, multi-window
+        /// resize) and re-apply the inset without reloading the page.
+        var safeAreaTopInset: CGFloat = 0
+        /// Bug #163 round-2 audit fix [1]: last-known paged-mode webview
+        /// bounds. Tracked so pure size changes (iPad split-screen / Stage
+        /// Manager / multitasking resize) — which keep `safeAreaTopInset`
+        /// constant but change `bounds.width`/`bounds.height` — re-trigger
+        /// `setupPagination(...)`. Without this, paged geometry stays
+        /// stale on resize.
+        var lastPagedBounds: CGRect = .zero
         /// Scroll fraction to apply after the next page load completes.
         var pendingScrollFraction: Double?
         /// Page index to navigate to after pagination setup (paged mode).
@@ -210,10 +221,23 @@ extension EPUBWebViewBridge {
         }
 
         /// Injects pagination CSS and queries total page count after layout settles.
+        ///
+        /// Bug #163: subtracts the safe-area top inset from viewport height
+        /// so paged columns aren't taller than the visible area below the
+        /// notch. Without this, applying `contentInset.top = safeAreaTop`
+        /// would push each column DOWN by `safeAreaTop` pt, clipping the
+        /// bottom of the column off-screen. Reading the inset from the
+        /// coordinator's tracked field (set by `EPUBWebViewBridge`'s
+        /// makeUIView/updateUIView) avoids changing the function's
+        /// signature for every caller.
         func setupPagination(webView: WKWebView) {
             let viewportWidth = webView.bounds.width
-            let viewportHeight = webView.bounds.height
+            let viewportHeight = max(webView.bounds.height - safeAreaTopInset, 0)
             guard viewportWidth > 0, viewportHeight > 0 else { return }
+            // Round-2 audit fix [1]: snapshot the bounds we paginated for so
+            // updateUIView can detect pure size changes that didn't go
+            // through the safe-area branch.
+            lastPagedBounds = webView.bounds
 
             let injectJS = EPUBPaginationHelper.injectPaginationCSSJS(
                 viewportWidth: viewportWidth, viewportHeight: viewportHeight

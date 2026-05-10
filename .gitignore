@@ -35,3 +35,6 @@ test-books/
 
 # Tokenize / inspection scratch
 .tokenize/
+
+# Secrets — local API keys, never commit
+.secrets/

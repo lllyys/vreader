@@ -54,6 +54,13 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     /// `nil` preserves the prior `.clear` behaviour for any caller that
     /// hasn't yet been threaded through.
     var themeBackgroundColor: UIColor?
+    /// Bug #163: top safe-area inset (typically the Dynamic Island /
+    /// status-bar safe area). Threaded in from the SwiftUI container so
+    /// the WKWebView's scroll view positions chapter content below the
+    /// notch. Default 0 preserves prior (broken) behaviour for any caller
+    /// that hasn't been wired through. Negative values clamp to 0 inside
+    /// the seam.
+    var safeAreaTopInset: CGFloat = 0
     /// Scroll fraction (0.0-1.0) to scroll to after the chapter loads.
     /// Set by the container view when seeking within a chapter.
     var scrollFraction: Double?
@@ -172,6 +179,12 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         // covered by tests (representable-context plumbing is too deep to mock).
         Self.applyScrollViewBackground(to: webView.scrollView, color: themeBackgroundColor)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        // Bug #163 wiring: keep this call. The seam is unit-tested in
+        // EPUBWebViewBridgeSafeAreaInsetTests; deleting this line would
+        // silently re-introduce content clipped behind the Dynamic Island
+        // because representable-context plumbing isn't covered by tests.
+        Self.applySafeAreaTopInset(to: webView.scrollView, top: safeAreaTopInset)
+        context.coordinator.safeAreaTopInset = safeAreaTopInset
         context.coordinator.themeCSS = themeCSS
         context.coordinator.themeBackgroundColor = themeBackgroundColor
         context.coordinator.allowedRoot = baseDirectory
@@ -278,6 +291,31 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         if context.coordinator.themeBackgroundColor != themeBackgroundColor {
             context.coordinator.themeBackgroundColor = themeBackgroundColor
             Self.applyScrollViewBackground(to: webView.scrollView, color: themeBackgroundColor)
+        }
+
+        // Bug #163 wiring: live-update the safe-area top inset on rotation
+        // / multi-window resize. Same coverage-gap caveat as the
+        // background path: the seam is unit-tested but this call site is
+        // not — deleting the call would silently re-introduce DI clipping
+        // when the user rotates the device mid-read.
+        let safeAreaChanged = context.coordinator.safeAreaTopInset != safeAreaTopInset
+        if safeAreaChanged {
+            context.coordinator.safeAreaTopInset = safeAreaTopInset
+            Self.applySafeAreaTopInset(to: webView.scrollView, top: safeAreaTopInset)
+        }
+
+        // Bug #163 paged-mode rebuild: pagination CSS pins column height
+        // to (bounds.height - safeAreaTopInset) and column width to
+        // bounds.width. Re-inject pagination CSS whenever EITHER the
+        // safe-area inset OR the webview bounds change while in paged
+        // mode (round-2 audit fix [1]). Pure bounds changes (iPad
+        // split-screen / Stage Manager / multitasking resize) also need
+        // a rebuild even if the safe-area inset stays constant.
+        if isPaged, context.coordinator.currentURL == contentURL {
+            let boundsChanged = context.coordinator.lastPagedBounds != webView.bounds
+            if safeAreaChanged || boundsChanged {
+                context.coordinator.setupPagination(webView: webView)
+            }
         }
 
         // Evaluate pending JS from container (e.g., highlight injection after persist)

@@ -306,22 +306,29 @@ struct EPUBReaderContainerView: View {
 
     @ViewBuilder
     private func readerContent(contentURL: URL, accessRoot: URL) -> some View {
-        EPUBWebViewBridge(
-            contentURL: contentURL,
-            baseDirectory: accessRoot,
-            themeCSS: settingsStore.map {
-                $0.theme.epubOverrideCSS(
-                    fontSize: $0.typography.fontSize,
-                    lineHeight: $0.typography.lineSpacing,
-                    letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0,
-                    fontFamily: $0.typography.fontFamily
-                )
-            },
-            themeBackgroundColor: settingsStore?.theme.backgroundColor,
-            scrollFraction: seekScrollFraction,
-            currentHref: viewModel.currentPosition?.href,
-            fingerprintKey: fingerprintKey,
-            readerToken: readerToken,
+        // Bug #163: GeometryReader gives us the SwiftUI safe-area top
+        // (Dynamic Island + status-bar). Threaded into the bridge so the
+        // WKWebView's scroll view positions chapter content below the
+        // notch instead of clipping behind it. GeometryReader fills the
+        // ZStack slot the bridge already occupies — no extra layout cost.
+        GeometryReader { proxy in
+            EPUBWebViewBridge(
+                contentURL: contentURL,
+                baseDirectory: accessRoot,
+                themeCSS: settingsStore.map {
+                    $0.theme.epubOverrideCSS(
+                        fontSize: $0.typography.fontSize,
+                        lineHeight: $0.typography.lineSpacing,
+                        letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0,
+                        fontFamily: $0.typography.fontFamily
+                    )
+                },
+                themeBackgroundColor: settingsStore?.theme.backgroundColor,
+                safeAreaTopInset: proxy.safeAreaInsets.top,
+                scrollFraction: seekScrollFraction,
+                currentHref: viewModel.currentPosition?.href,
+                fingerprintKey: fingerprintKey,
+                readerToken: readerToken,
             onProgressChange: { scrollFraction in
                 guard let position = viewModel.currentPosition,
                       let metadata = viewModel.metadata else { return }
@@ -367,9 +374,10 @@ struct EPUBReaderContainerView: View {
             onPaginationReady: { totalPages in
                 pageNavigator.totalPages = totalPages
             }
-        )
-        .ignoresSafeArea(edges: .bottom)
-        .accessibilityIdentifier("epubReaderContent")
+            )
+            .ignoresSafeArea(edges: .bottom)
+            .accessibilityIdentifier("epubReaderContent")
+        }
     }
 
 }
