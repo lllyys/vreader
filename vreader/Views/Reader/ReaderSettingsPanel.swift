@@ -29,6 +29,14 @@ struct ReaderSettingsPanel: View {
     /// panel falls back to "available everywhere" — preserves backward compat
     /// for callers (and tests/previews) that don't supply the value.
     var formatCapabilities: FormatCapabilities? = nil
+    /// The book's format identity. Some gates need to mirror the dispatch
+    /// switch in `ReaderUnifiedDispatch` directly (e.g. AZW3 falls to a
+    /// placeholder in unified mode without ever installing
+    /// `TapZoneOverlay`), so capability membership alone is too loose.
+    /// When nil, gates that key off this fall back to the
+    /// "available everywhere" default — preserves backward compat for
+    /// tests/previews/legacy callers that don't supply the value.
+    var bookFormat: BookFormat? = nil
     /// Whether per-book settings are currently enabled for this book.
     @State private var isPerBookEnabled = false
     /// Photo picker state for theme background (feature #32).
@@ -70,7 +78,25 @@ struct ReaderSettingsPanel: View {
                 fontFamilySection
                 cjkSection
                 chineseConversionSection
-                if tapZoneStore != nil { tapZoneSection }
+                // Bug #162 / GH #482: only show the Tap Zones section when
+                // the configured zones will actually take effect — that
+                // requires (a) the format has `.unifiedReflow` capability
+                // AND (b) the user is currently in Unified mode.
+                // `TapZoneOverlay` is wired only in `ReaderUnifiedDispatch`;
+                // native renderers post `.readerContentTapped` unconditionally
+                // and ignore zone config. Without this gate, users on the
+                // dominant native code path saw a configurable picker whose
+                // selections silently no-op'd. Defaulting to "show" when
+                // capabilities aren't supplied keeps tests/previews/legacy
+                // callers working — same shape as the bug #156 / #158 gates.
+                if tapZoneStore != nil
+                    && Self.shouldShowTapZonesSection(
+                        for: formatCapabilities,
+                        format: bookFormat,
+                        currentMode: store.readingMode
+                    ) {
+                    tapZoneSection
+                }
                 if bookFingerprintKey != nil { perBookSection }
                 previewSection
             }
@@ -239,6 +265,49 @@ struct ReaderSettingsPanel: View {
     ) -> Bool {
         guard let caps = capabilities else { return true }
         return caps.contains(.unifiedReflow)
+    }
+
+    /// Bug #162 / GH #482: gate for the Tap Zones section.
+    /// Returns `true` when the section should be visible — i.e. the
+    /// configured zones will actually take effect. Three conditions:
+    /// (a) the active format has `.unifiedReflow` capability (so the
+    /// user has a path to be in Unified mode), AND
+    /// (b) the user is currently in Unified mode, AND
+    /// (c) the dispatch switch in `ReaderUnifiedDispatch.unifiedReaderView`
+    /// installs `.tapZoneOverlay(...)` for this format — capability
+    /// membership alone is too loose because AZW3 has `.unifiedReflow`
+    /// but its unified path falls to `UnifiedPlaceholderView` (no overlay),
+    /// and PDF is excluded from the unified switch entirely.
+    /// Returns `true` when `formatCapabilities` is `nil` to preserve
+    /// legacy/test/preview behavior — same default as the bug #156 / #158
+    /// gates.
+    static func shouldShowTapZonesSection(
+        for capabilities: FormatCapabilities?,
+        format: BookFormat?,
+        currentMode: ReadingMode
+    ) -> Bool {
+        guard let caps = capabilities else { return true }
+        guard caps.contains(.unifiedReflow), currentMode == .unified else { return false }
+        guard let format = format else { return true }
+        return Self.unifiedDispatchInstallsTapZoneOverlay(for: format)
+    }
+
+    /// Mirrors the switch in `ReaderUnifiedDispatch.unifiedReaderView(fingerprint:)`.
+    /// Returns `true` for formats whose unified path installs
+    /// `.tapZoneOverlay(...)` on the rendered content. AZW3 falls to
+    /// `UnifiedPlaceholderView` (no overlay) and PDF has no unified case
+    /// at all, so both return `false` even though they may carry
+    /// `.unifiedReflow` (AZW3) or be Unified-capable in some sense (PDF
+    /// via complex-EPUB-style fallback). Complex-EPUB falls back to the
+    /// native WKWebView reader at runtime — same documented same-gap-as-
+    /// `chineseConversionSupported` caveat: the gate sees the simple-EPUB
+    /// default, so a complex EPUB still shows the picker. Threading an
+    /// `isComplexEPUB` runtime signal through is feature-class scope.
+    private static func unifiedDispatchInstallsTapZoneOverlay(for format: BookFormat) -> Bool {
+        switch format {
+        case .txt, .md, .epub: return true
+        case .pdf, .azw3: return false
+        }
     }
 
     // MARK: - EPUB Layout
