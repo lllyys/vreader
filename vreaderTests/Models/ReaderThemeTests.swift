@@ -171,5 +171,99 @@ struct ReaderThemeTests {
             #expect(css.contains("font-size: inherit !important"), "\(theme.rawValue) must override descendant text elements")
         }
     }
+
+    // Bug #168: EPUB font family setting must reach the CSS the WKWebView injects.
+
+    @Test func epubCSSInjectsSystemFontFamilyByDefault() {
+        // Default call (without fontFamily) keeps prior behaviour: system stack.
+        let css = ReaderTheme.light.epubOverrideCSS(fontSize: 18)
+        #expect(css.contains("font-family:"), "Default CSS must declare a font-family")
+        #expect(css.contains("-apple-system"), "Default stack should start with -apple-system for the system font")
+    }
+
+    @Test func epubCSSInjectsSerifStack() {
+        let css = ReaderTheme.light.epubOverrideCSS(fontSize: 18, fontFamily: .serif)
+        #expect(css.contains("Georgia"), "Serif stack must include Georgia")
+        #expect(css.contains("serif"), "Serif stack must end with the generic 'serif' family")
+        // Must not mistakenly emit the system stack.
+        #expect(!css.contains("-apple-system"), "Serif selection must not fall back to the system stack")
+    }
+
+    @Test func epubCSSInjectsMonospaceStack() {
+        let css = ReaderTheme.light.epubOverrideCSS(fontSize: 18, fontFamily: .monospace)
+        #expect(css.contains("Menlo"), "Monospace stack must include Menlo")
+        #expect(css.contains("monospace"), "Monospace stack must end with the generic 'monospace' family")
+        #expect(!css.contains("-apple-system"), "Monospace selection must not fall back to the system stack")
+    }
+
+    @Test func epubCSSFontFamilyAppliesUnderHtmlBody() {
+        // Bug #168 — the canonical face declaration lives on `html, body`;
+        // descendants pick it up via the broader `body *` sweep below. This
+        // test only checks that the declaration is present at the root and
+        // that the requested stack reaches it.
+        let css = ReaderTheme.light.epubOverrideCSS(fontSize: 18, fontFamily: .serif)
+        guard let htmlBodyRange = css.range(of: "html, body {") else {
+            Issue.record("CSS missing 'html, body {' selector"); return
+        }
+        let tail = css[htmlBodyRange.upperBound...]
+        guard let endRange = tail.range(of: "}") else {
+            Issue.record("CSS 'html, body {' rule has no closing brace"); return
+        }
+        let block = tail[..<endRange.lowerBound]
+        #expect(block.contains("font-family:"), "font-family must live inside the html, body rule")
+        #expect(block.contains("Georgia"), "Serif stack must reach the html, body rule body")
+    }
+
+    @Test func epubCSSFontFamilyForAllFamiliesAndThemes() {
+        for theme in ReaderTheme.allCases {
+            for family in ReaderFontFamily.allCases {
+                let css = theme.epubOverrideCSS(fontSize: 18, fontFamily: family)
+                #expect(css.contains("font-family:"),
+                        "\(theme.rawValue)/\(family.rawValue) must include font-family")
+            }
+        }
+    }
+
+    @Test func epubCSSForcesFontFamilyInheritOnAllDescendants() {
+        // Bug #168 — `font-family` on `html, body` alone loses to any book
+        // CSS that sets `font-family` on a descendant element (`p`, `em`,
+        // `cite`, `section`, attribute selectors, inline `style=...`).
+        // A broad `body *` sweep with `!important` is the only reliable
+        // way to ensure the user's pick wins across arbitrary EPUB CSS.
+        let css = ReaderTheme.light.epubOverrideCSS(fontSize: 18, fontFamily: .serif)
+        guard let sweepStart = css.range(of: "body * {") else {
+            Issue.record("CSS missing 'body *' sweep rule"); return
+        }
+        let tail = css[sweepStart.upperBound...]
+        guard let endRange = tail.range(of: "}") else {
+            Issue.record("'body *' rule has no closing brace"); return
+        }
+        let block = tail[..<endRange.lowerBound]
+        #expect(block.contains("font-family: inherit !important"),
+                "body * sweep must force font-family inheritance to beat any per-element book CSS")
+    }
+
+    @Test func epubCSSPinsPreCodeToMonospaceStack() {
+        // Semantic monospace for code/pre/samp/kbd must stay legible
+        // regardless of the user's body-font choice. Verify the rule
+        // explicitly pins these elements (and their descendants) to a
+        // monospace stack — not relying on inheritance — AND that the
+        // `font-family` declaration itself is `!important` (the block
+        // contains other `!important` declarations for sizing, so we
+        // pin the assertion to the family-stack-with-bang substring).
+        let css = ReaderTheme.light.epubOverrideCSS(fontSize: 18, fontFamily: .serif)
+        guard let preStart = css.range(of: "pre, code, samp, kbd") else {
+            Issue.record("CSS missing pre/code rule"); return
+        }
+        let tail = css[preStart.upperBound...]
+        guard let endRange = tail.range(of: "}") else {
+            Issue.record("pre/code rule has no closing brace"); return
+        }
+        let block = tail[..<endRange.lowerBound]
+        #expect(block.contains("font-family: ui-monospace"),
+                "pre/code/samp/kbd must explicitly pin font-family to ui-monospace stack")
+        #expect(block.contains("monospace !important"),
+                "the pre/code font-family declaration itself must be !important to beat the body * sweep above")
+    }
     #endif
 }

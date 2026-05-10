@@ -313,7 +313,8 @@ struct EPUBReaderContainerView: View {
                 $0.theme.epubOverrideCSS(
                     fontSize: $0.typography.fontSize,
                     lineHeight: $0.typography.lineSpacing,
-                    letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0
+                    letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0,
+                    fontFamily: $0.typography.fontFamily
                 )
             },
             scrollFraction: seekScrollFraction,

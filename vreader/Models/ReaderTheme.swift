@@ -69,10 +69,33 @@ enum ReaderTheme: String, Codable, CaseIterable, Sendable {
     /// Generates a `<style>` tag with CSS overrides for EPUB content rendering.
     /// Injected into WKWebView to apply the reader theme to XHTML content.
     ///
-    /// Issue 10: Uses `body *` wildcard instead of a hard-coded tag allowlist so that
-    /// all elements (including `pre`, `code`, etc.) inherit the user-chosen font size.
-    /// Headings (`h1`-`h6`) are excluded via `revert` so they keep their relative sizing.
-    func epubOverrideCSS(fontSize: CGFloat, lineHeight: CGFloat = 1.6, letterSpacing: CGFloat = 0) -> String {
+    /// Issue 10: Forces an explicit allowlist of body text elements
+    /// (`p, div, span, li, td, th, dd, dt, blockquote, figcaption`) to inherit
+    /// the user-chosen font size with `!important`, beating per-element rules
+    /// from book stylesheets. Headings (`h1`-`h6`) keep their relative sizing
+    /// via `font-size: revert !important`. `pre`/`code`/`samp`/`kbd` keep their
+    /// browser-default monospace font for semantic correctness.
+    ///
+    /// Bug #168: `fontFamily` is injected on `html, body`, then forced on
+    /// every descendant via `body * { font-family: inherit !important; }` so
+    /// per-element book-CSS declarations (`p { font-family: ... }`, attribute
+    /// selectors, etc.) can't beat the user's pick. Inline
+    /// `style="font-family: ... !important"` declarations still win because
+    /// inline author-important has higher specificity than stylesheet rules,
+    /// and `::before`/`::after` pseudo-elements are not targeted by this
+    /// sweep — both are rare in real EPUBs and accepted as residual gaps.
+    /// `pre`/`code`/`samp`/`kbd` and their descendants are intentionally
+    /// pinned to a semantic monospace stack (`ui-monospace, 'SF Mono', Menlo,
+    /// 'Courier New', monospace`) so code blocks stay legible regardless of
+    /// body-font choice. The CJK fallback is automatic: Latin-only faces
+    /// (Georgia, Menlo, etc.) have no CJK glyphs, so the platform falls
+    /// through to the system CJK font (PingFang SC / Hiragino).
+    func epubOverrideCSS(
+        fontSize: CGFloat,
+        lineHeight: CGFloat = 1.6,
+        letterSpacing: CGFloat = 0,
+        fontFamily: ReaderFontFamily = .system
+    ) -> String {
         let bg = cssColor(backgroundColor)
         let fg = cssColor(textColor)
         let secondary = cssColor(secondaryTextColor)
@@ -80,12 +103,14 @@ enum ReaderTheme: String, Codable, CaseIterable, Sendable {
         let lh = String(format: "%.2f", lineHeight)
         let ls = letterSpacing > 0 ? String(format: "%.2fem", letterSpacing) : "normal"
         let linkColor = self == .dark ? "rgb(120,170,255)" : "rgb(0,90,180)"
+        let fontStack = Self.cssFontStack(for: fontFamily)
         return """
         <style id="vreader-theme">\
         html, body { \
           background-color: \(bg) !important; \
           color: \(fg) !important; \
           font-size: \(size)px !important; \
+          font-family: \(fontStack) !important; \
           line-height: \(lh) !important; \
           letter-spacing: \(ls) !important; \
           -webkit-text-size-adjust: 100%; \
@@ -107,7 +132,11 @@ enum ReaderTheme: String, Codable, CaseIterable, Sendable {
           line-height: 1.3 !important; \
           color: \(fg) !important; \
         }\
-        pre, code, samp, kbd { \
+        body * { \
+          font-family: inherit !important; \
+        }\
+        pre, code, samp, kbd, pre *, code *, samp *, kbd * { \
+          font-family: ui-monospace, 'SF Mono', Menlo, 'Courier New', monospace !important; \
           font-size: 0.85em !important; \
           line-height: 1.45 !important; \
           white-space: pre-wrap !important; \
@@ -141,6 +170,23 @@ enum ReaderTheme: String, Codable, CaseIterable, Sendable {
         }\
         </style>
         """
+    }
+
+    /// CSS `font-family` stack for a given `ReaderFontFamily`.
+    ///
+    /// Each stack ends with the appropriate generic family so the platform can
+    /// fall back gracefully. CJK glyphs naturally fall through to the system
+    /// CJK font (PingFang SC / Hiragino) because Georgia / Menlo / etc. carry
+    /// only Latin coverage.
+    fileprivate static func cssFontStack(for family: ReaderFontFamily) -> String {
+        switch family {
+        case .system:
+            return "-apple-system, system-ui, sans-serif"
+        case .serif:
+            return "Georgia, 'Times New Roman', serif"
+        case .monospace:
+            return "'SF Mono', Menlo, 'Courier New', monospace"
+        }
     }
 
     /// Converts a UIColor to a CSS rgb() string.
