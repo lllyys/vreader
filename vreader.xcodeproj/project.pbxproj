@@ -557,6 +557,7 @@
 		B463893D3C3558483F25BDCF /* AISettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0C783DCFD9CFDD8F488F80 /* AISettingsViewModel.swift */; };
 		B47FA1294B60A0652B9F0BCA /* FoliateReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E141EA554A8E0C1C3B36250 /* FoliateReaderViewModelTests.swift */; };
 		B5114E58420F95EFB408CA82 /* ReaderSettingsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A86CD6BD10792F5107FFB5A /* ReaderSettingsStoreTests.swift */; };
+		B5EED69421D1469D01B8C392 /* ReaderSettingsPanelTapZonesGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0024CBCAE4AC02A47B58AE48 /* ReaderSettingsPanelTapZonesGateTests.swift */; };
 		B6390E651DCC967457775D96 /* AIReaderAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F90F835A126ABBB86752848 /* AIReaderAvailability.swift */; };
 		B64CAC947A1951E5ED22009C /* QuoteRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AEB48E4BF208D97EEF397C /* QuoteRecovery.swift */; };
 		B69C0AB6A9AECC0E9A1A8692 /* ReaderNotificationHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82BC782199D1750DA66D1BCC /* ReaderNotificationHandlers.swift */; };
@@ -785,6 +786,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0024CBCAE4AC02A47B58AE48 /* ReaderSettingsPanelTapZonesGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsPanelTapZonesGateTests.swift; sourceTree = "<group>"; };
 		0069CA3A00998B13DE06E424 /* LocatorIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorIntegrationTests.swift; sourceTree = "<group>"; };
 		00814B9C69A0E1190146095E /* PersistenceActor+Collections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+Collections.swift"; sourceTree = "<group>"; };
 		00B189F7F32FF82BCF254923 /* TXTTextChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTTextChunker.swift; sourceTree = "<group>"; };
@@ -1917,6 +1919,7 @@
 				4CC7EBBBE07E87F07CC0FE4F /* ReaderNotificationHandlerTests.swift */,
 				2B7C59839A119870BE9B6FF9 /* ReaderSelectionEventTests.swift */,
 				83246694DE80F5760F85506E /* ReaderSettingsPanelReadingModeGateTests.swift */,
+				0024CBCAE4AC02A47B58AE48 /* ReaderSettingsPanelTapZonesGateTests.swift */,
 				63E4737FA3A880C3CC2BA07D /* ReadingProgressBarTests.swift */,
 				62569DC663E2BDD2DC0155C3 /* SearchHighlightDismissTests.swift */,
 				AB8FC6D57843EAC26DB980D3 /* SearchResultHighlightTests.swift */,
@@ -3459,6 +3462,7 @@
 				A3B091692BEA8453C7246A12 /* ReaderPositionServiceTests.swift in Sources */,
 				82152E9125D5620CACFCEFF3 /* ReaderSelectionEventTests.swift in Sources */,
 				65FDF3DF582C0F5E67305EED /* ReaderSettingsPanelReadingModeGateTests.swift in Sources */,
+				B5EED69421D1469D01B8C392 /* ReaderSettingsPanelTapZonesGateTests.swift in Sources */,
 				B5114E58420F95EFB408CA82 /* ReaderSettingsStoreTests.swift in Sources */,
 				6173290A06E9E4303D363AE8 /* ReaderThemeCSSTests.swift in Sources */,
 				CB432F27C324A4EBC3D1F327 /* ReaderThemeTests.swift in Sources */,
@@ -4074,13 +4078,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 231;
+				CURRENT_PROJECT_VERSION = 232;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.14.122;
+				MARKETING_VERSION = 3.14.123;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4224,13 +4228,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 231;
+				CURRENT_PROJECT_VERSION = 232;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.14.122;
+				MARKETING_VERSION = 3.14.123;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
