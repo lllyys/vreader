@@ -355,6 +355,201 @@ struct TXTReaderViewModelPositionTests {
     }
 }
 
+// MARK: - Live Position Broadcast (Bug #164)
+
+/// Bug #164: native TXT (UITextView) scroll path was not posting
+/// `.readerPositionDidChange`, so `ReaderAICoordinator.currentLocator` stayed
+/// stale and TTS started from offset 0 even when the user had scrolled
+/// partway through. These tests pin the post: `updateScrollPosition` MUST
+/// emit `.readerPositionDidChange` with a Locator whose `charOffsetUTF16`
+/// matches the new (clamped) offset.
+@Suite("TXTReaderViewModel - Live Position Broadcast (bug #164)")
+@MainActor
+struct TXTReaderViewModelPositionBroadcastTests {
+
+    /// Captures the most-recent locator object posted on `.readerPositionDidChange`
+    /// AND counts how many times the notification fired during the lifetime
+    /// of the observer; tear down via the returned remove-closure (Swift
+    /// Testing has no XCTest-style teardown lambda).
+    ///
+    /// Round-1 audit fix [Low]: registered with `queue: nil` so delivery is
+    /// synchronous on the posting thread. With a non-nil queue the post is
+    /// enqueued and we'd be reading `captured` before it's populated, making
+    /// the assertions race-prone.
+    ///
+    /// Round-2 audit fix [Low]: also expose a fire-count so callers can
+    /// pin "exactly N broadcasts" rather than just "at least one".
+    private static func observeLocator() -> (capture: () -> Locator?, count: () -> Int, remove: () -> Void) {
+        nonisolated(unsafe) var captured: Locator?
+        nonisolated(unsafe) var fired: Int = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerPositionDidChange,
+            object: nil,
+            queue: nil
+        ) { notification in
+            captured = notification.object as? Locator
+            fired += 1
+        }
+        return (
+            capture: { captured },
+            count: { fired },
+            remove: { NotificationCenter.default.removeObserver(token) }
+        )
+    }
+
+    @Test("updateScrollPosition posts readerPositionDidChange with current locator")
+    func postsNotificationOnPositionUpdate() async {
+        let (vm, _, _, _) = await makeViewModel()
+        await vm.open(url: testURL)
+
+        let observer = Self.observeLocator()
+        defer { observer.remove() }
+
+        vm.updateScrollPosition(charOffsetUTF16: 17)
+
+        // Notification is posted synchronously inside updateScrollPosition,
+        // and the observer is registered with `queue: nil` (synchronous
+        // delivery on the posting thread), so the capture is populated by
+        // the time the call returns.
+        let locator = observer.capture()
+        #expect(locator != nil, "Expected .readerPositionDidChange to fire on scroll position change")
+        #expect(locator?.charOffsetUTF16 == 17)
+    }
+
+    @Test("clamped negative offset still broadcasts (offset==0)")
+    func postsNotificationWithClampedNegative() async {
+        let (vm, _, _, _) = await makeViewModel()
+        await vm.open(url: testURL)
+
+        let observer = Self.observeLocator()
+        defer { observer.remove() }
+
+        vm.updateScrollPosition(charOffsetUTF16: -50)
+
+        let locator = observer.capture()
+        #expect(locator != nil)
+        #expect(locator?.charOffsetUTF16 == 0)
+    }
+
+    @Test("clamped beyond-length offset broadcasts the clamped value")
+    func postsNotificationWithClampedBeyondLength() async {
+        let (vm, _, _, _) = await makeViewModel()
+        await vm.open(url: testURL)
+
+        let observer = Self.observeLocator()
+        defer { observer.remove() }
+
+        vm.updateScrollPosition(charOffsetUTF16: 999_999)
+
+        let locator = observer.capture()
+        #expect(locator != nil)
+        #expect(locator?.charOffsetUTF16 == testMetadata.totalTextLengthUTF16)
+    }
+
+    @Test("open with restored position seeds AI/TTS via post once")
+    func openSeedsRestoredPosition() async {
+        // Bug #164 round-1 audit fix [Medium]: the suppress window in
+        // `updateScrollPosition` drops storm-zero updates AND the legitimate
+        // restored offset. So `open()` must explicitly broadcast the
+        // restored locator once, otherwise `aiCoordinator.currentLocator`
+        // stays nil until the user scrolls past the suppress window —
+        // meaning TTS started immediately after open would still resolve
+        // offset 0.
+        let positionStore = MockPositionStore()
+        guard let savedLocator = Locator.validated(
+            bookFingerprint: testFingerprint,
+            totalProgression: 0.5,
+            charOffsetUTF16: 30
+        ) else {
+            Issue.record("Could not build seed locator")
+            return
+        }
+        await positionStore.seed(
+            bookFingerprintKey: testFingerprint.canonicalKey,
+            locator: savedLocator
+        )
+        let service = MockTXTService()
+        await service.setMetadata(testMetadata)
+        let sessionStore = MockSessionStore()
+        let clock = MockClock()
+        let tracker = ReadingSessionTracker(
+            clock: clock,
+            store: sessionStore,
+            deviceId: "test-device"
+        )
+        let vm = TXTReaderViewModel(
+            bookFingerprint: testFingerprint,
+            txtService: service,
+            positionStore: positionStore,
+            sessionTracker: tracker,
+            deviceId: "test-device",
+            positionSaveDebounceNs: 2_000_000_000
+        )
+
+        let observer = Self.observeLocator()
+        defer { observer.remove() }
+
+        await vm.open(url: testURL)
+
+        let locator = observer.capture()
+        #expect(locator != nil, "open() must broadcast the restored locator once so AI/TTS see the restored offset before any scroll event")
+        #expect(locator?.charOffsetUTF16 == 30)
+        // Round-2 audit fix [Low]: pin the broadcast count to exactly 1
+        // so a future regression that posts multiple times during open()
+        // (e.g. once from restore and once from a stray scroll callback)
+        // surfaces here.
+        #expect(observer.count() == 1, "open() must broadcast exactly once for the restored position; got \(observer.count())")
+    }
+
+    @Test("position broadcast suppressed during post-restore settling window")
+    func suppressedDuringRestoreWindow() async {
+        // Bug #164 + bug #58 interaction: scroll-position saves are suppressed
+        // during the settling window after a position restore (so a relayout
+        // storm doesn't overwrite the freshly-restored offset). The position
+        // broadcast must follow the same rule — otherwise the AI/TTS would
+        // see the storm-zero positions instead of the restored offset.
+        let positionStore = MockPositionStore()
+        guard let savedLocator = Locator.validated(
+            bookFingerprint: testFingerprint,
+            totalProgression: 0.5,
+            charOffsetUTF16: 30
+        ) else {
+            Issue.record("Could not build seed locator")
+            return
+        }
+        await positionStore.seed(
+            bookFingerprintKey: testFingerprint.canonicalKey,
+            locator: savedLocator
+        )
+        let service = MockTXTService()
+        await service.setMetadata(testMetadata)
+        let sessionStore = MockSessionStore()
+        let clock = MockClock()
+        let tracker = ReadingSessionTracker(
+            clock: clock,
+            store: sessionStore,
+            deviceId: "test-device"
+        )
+        let vm = TXTReaderViewModel(
+            bookFingerprint: testFingerprint,
+            txtService: service,
+            positionStore: positionStore,
+            sessionTracker: tracker,
+            deviceId: "test-device",
+            positionSaveDebounceNs: 2_000_000_000
+        )
+        await vm.open(url: testURL)
+
+        let observer = Self.observeLocator()
+        defer { observer.remove() }
+
+        // First updateScrollPosition during settle window with offset==0
+        // (TextKit relayout storm) must NOT trigger broadcast.
+        vm.updateScrollPosition(charOffsetUTF16: 0)
+        #expect(observer.capture() == nil, "Storm-zero updates inside settle window must not broadcast")
+    }
+}
+
 // MARK: - Selection
 
 @Suite("TXTReaderViewModel - Selection")

@@ -251,6 +251,14 @@ final class TXTReaderViewModel {
 
         // Stage 4: Update last opened (fire-and-forget)
         Task { await lifecycle.updateLastOpened() }
+
+        // Bug #164: seed AI/TTS with the restored locator. The suppress
+        // window in `updateScrollPosition` exists to drop TextKit relayout
+        // storms (storm-zero updates that would overwrite the restored
+        // offset downstream). It also drops the legitimate restored offset
+        // — so without an explicit post here, `startTTS()` would still see
+        // `aiCoordinator.currentLocator == nil` until the user scrolls.
+        broadcastPosition(makeLocator())
     }
 
     /// Opens the TXT file using chapter-based lazy loading (WI-5).
@@ -330,6 +338,12 @@ final class TXTReaderViewModel {
                 await loader.preloadAdjacent(currentIndex: idx, chapters: chapters)
             }
         }
+
+        // Bug #164 (round-1 audit fix): seed AI/TTS with the restored
+        // chapter-mode locator. Same rationale as `open(...)` above —
+        // suppress-window logic drops the storm-zero updates AND the
+        // legitimate restored offset, so we post once explicitly.
+        broadcastPosition(makeLocator())
     }
 
     // MARK: - Chapter Navigation (WI-5)
@@ -357,6 +371,14 @@ final class TXTReaderViewModel {
                     currentOffsetUTF16 = 0
                 }
             }
+            // Bug #164 (round-1 audit fix): chapter nav writes
+            // `currentOffsetUTF16` directly without going through
+            // `updateScrollPosition`, so without an explicit post AI/TTS
+            // would keep using the previous chapter's locator until the
+            // user scrolls. Round-2 audit fix: only broadcast on the
+            // successful-load path so a failed `loadChapter` doesn't emit
+            // a bogus position-change event.
+            broadcastPosition(makeLocator())
         } catch { errorMessage = "Failed to load chapter \(index + 1)." }
         let chapters = chIdx.chapters
         Task.detached { [index] in
@@ -478,7 +500,33 @@ final class TXTReaderViewModel {
             restoreSuppressUntil = nil
         }
 
-        lifecycle.recordProgressAndScheduleSave(locator: makeLocator())
+        let locator = makeLocator()
+        lifecycle.recordProgressAndScheduleSave(locator: locator)
+
+        // Bug #164: broadcast the live position so AI/TTS pick up the user's
+        // current scroll point. Native TXT (UITextView) was the only reader
+        // path that wasn't posting this notification, so `startTTS()` always
+        // saw `aiCoordinator.currentLocator == nil` and started from offset 0
+        // even after the user had scrolled. Posting AFTER the suppress check
+        // mirrors the existing save behaviour: storm-zero updates during the
+        // post-restore settling window must not overwrite the restored
+        // position downstream.
+        broadcastPosition(locator)
+    }
+
+    /// Bug #164: posts `.readerPositionDidChange` with the supplied locator
+    /// so the cross-component bus (AI coordinator / TTS) sees this view
+    /// model's live position. Single source of truth for "TXT position
+    /// changed" — every state mutation that moves the user's reading point
+    /// (scroll, chapter nav, restore-on-open) routes through here.
+    /// Suppress-window callers MUST gate this themselves (see
+    /// `updateScrollPosition`); explicit non-storm callers (open / chapter
+    /// nav) post unconditionally so the restored or jumped-to offset reaches
+    /// AI/TTS even before the first user-driven scroll.
+    private func broadcastPosition(_ locator: Locator) {
+        NotificationCenter.default.post(
+            name: .readerPositionDidChange, object: locator
+        )
     }
 
     // MARK: - Selection
