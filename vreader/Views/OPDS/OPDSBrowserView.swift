@@ -20,9 +20,22 @@ struct OPDSBrowserView: View {
     let credentials: OPDSCredentials?
 
     @State private var feed: OPDSFeed?
-    @State private var isLoading = false
+    // Bug #170 / GH #529 — Seed `isLoading = true` so the spinner renders
+    // on the very first body evaluation, before `loadFeed` actually flips
+    // the flag. Without this, the body's empty-Group branch (isLoading ==
+    // false && feed == nil && errorMessage == nil) renders a blank view in
+    // the window between view-appear and the load task starting.
+    @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var searchText = ""
+    // Bug #170 / GH #529 — Fire-once flag for the initial fetch. Flipped
+    // synchronously in `.onAppear` BEFORE the Task launches, so a second
+    // `.onAppear` (e.g., the user pushes a sub-feed then backs out, or
+    // SwiftUI re-runs onAppear during a layout pass) cannot start a
+    // duplicate page-1 fetch that would race the explicit `loadMoreRow`
+    // append=true path and overwrite the merged feed (Gate-4 round-1
+    // audit finding [1]).
+    @State private var hasStartedInitialLoad = false
 
     private let client = OPDSClient()
 
@@ -49,8 +62,26 @@ struct OPDSBrowserView: View {
         }
         .navigationTitle(feed?.title ?? catalogName)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await loadFeed(url: catalogURL)
+        // Bug #170 / GH #529 — `.onAppear` instead of `.task`. In the nested
+        // presentation chain `.sheet → NavigationStack → NavigationLink
+        // destination` (LibraryView → OPDSCatalogListView → OPDSBrowserView),
+        // `.task` was firing-and-immediately-cancelling on iOS 26, leaving
+        // the view in its initial state (no spinner, no entries, no error).
+        // `.onAppear` is unaffected; the wrapped `Task` outlives the
+        // dispatching frame and runs `loadFeed` to completion. The OPDS
+        // catalog fetch is short-lived, so we don't need `.task`'s
+        // auto-cancel-on-disappear behaviour.
+        //
+        // Fire-once via `hasStartedInitialLoad` (flipped synchronously
+        // before the Task launches). Retries on error must come from the
+        // explicit Retry button in `errorState` — `.onAppear` does NOT
+        // auto-retry, which prevents infinite-retry loops on a permanently
+        // broken catalog URL and matches what the user would expect after
+        // seeing an explicit error UI. (Gate-4 round-1 audit finding [1].)
+        .onAppear {
+            guard !hasStartedInitialLoad else { return }
+            hasStartedInitialLoad = true
+            Task { await loadFeed(url: catalogURL) }
         }
     }
 
