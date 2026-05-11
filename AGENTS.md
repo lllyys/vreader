@@ -66,3 +66,4 @@ Shared instructions for all AI agents (Claude, Codex, etc.).
   - **Prefer subscription auth over API keys** for all AI coding tools (Claude Code, Codex CLI, Gemini CLI). Subscription plans are dramatically cheaper for sustained coding sessions — API billing can cost 10–30x more.
   - Claude Code: log in with Claude Max subscription. Codex CLI: `codex login` with ChatGPT Plus/Pro. Gemini CLI: Google account login.
   - API keys work as a fallback for light or automated usage.
+  - **Local AI smoke test**: `.secrets/test-llm.sh` posts a one-shot prompt against OpenRouter's free tier to confirm the key + wire format work. Key lives in `.secrets/.env` (gitignored). Use this for quick external-LLM sanity checks; in-app AI features should be driven through the app's own provider profiles, not this script.
