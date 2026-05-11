@@ -58,6 +58,13 @@ struct AIReaderPanel: View {
     /// The currently selected tab.
     @State private var selectedTab: AIReaderTab = .summarize
 
+    /// Feature #50 WI-7: in-reader provider picker. Owned by this view
+    /// so its state survives tab changes and stays in sync with the
+    /// shared ProviderProfileStore across reopens. Constructed once on
+    /// init; the @State wrapper preserves the instance across body
+    /// re-evaluations.
+    @State private var providerPickerViewModel = AIProviderPickerViewModel()
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -96,6 +103,14 @@ struct AIReaderPanel: View {
                         onDismiss()
                     }
                     .accessibilityIdentifier("aiPanelDoneButton")
+                }
+                // Feature #50 WI-7: in-reader provider picker. Lives in
+                // the trailing slot so the user can flip the active
+                // provider without leaving the reader. Persists to the
+                // shared ProviderProfileStore; every in-flight AIService
+                // call picks the new provider up via resolveProvider.
+                ToolbarItem(placement: .topBarTrailing) {
+                    AIProviderPicker(viewModel: providerPickerViewModel)
                 }
             }
         }

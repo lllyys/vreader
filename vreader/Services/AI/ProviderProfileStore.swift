@@ -113,6 +113,7 @@ actor ProviderProfileStore {
             activeID: activeID,
             preferences: preferences
         )
+        Self.postDidChangeNotification()
     }
 
     /// Removes the profile with the given id. If the removed profile
@@ -130,6 +131,7 @@ actor ProviderProfileStore {
             activeID: nextActive,
             preferences: preferences
         )
+        Self.postDidChangeNotification()
     }
 
     /// Sets the active profile by id. Passing nil clears active.
@@ -143,6 +145,22 @@ actor ProviderProfileStore {
             activeID: id,
             preferences: preferences
         )
+        Self.postDidChangeNotification()
+    }
+
+    // MARK: - Notification
+
+    /// Posted on every mutation (upsert / remove / setActiveProfileID).
+    /// WI-7 round-1 audit finding [1]: lets the in-reader picker resync
+    /// while it stays presented — without this, edits made from the
+    /// Settings UI (rename, delete, active flip) won't reach an
+    /// already-open picker until its sheet is dismissed and reopened.
+    nonisolated private static func postDidChangeNotification() {
+        // NotificationCenter.default is thread-safe under Swift 6;
+        // posting from inside the actor's isolated context is allowed.
+        // Observers must handle delivery on whichever queue they want
+        // (the picker VM uses .main).
+        NotificationCenter.default.post(name: .providerProfilesDidChange, object: nil)
     }
 
     // MARK: - Private
@@ -166,4 +184,14 @@ actor ProviderProfileStore {
             keychain: keychain
         )
     }
+}
+
+extension Notification.Name {
+    /// Posted by `ProviderProfileStore` after every successful mutation
+    /// (`upsert`, `remove`, `setActiveProfileID`). Subscribed by
+    /// `AIProviderPickerViewModel` so the in-reader picker resyncs
+    /// while it stays presented (WI-7 round-1 audit finding [1]).
+    /// No userInfo — observers should call `loadSnapshot()` to read
+    /// the current state.
+    static let providerProfilesDidChange = Notification.Name("com.vreader.ai.providerProfilesDidChange")
 }
