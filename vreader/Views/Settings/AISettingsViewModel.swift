@@ -31,9 +31,34 @@ final class AISettingsViewModel {
     // MARK: - Published State
 
     /// Whether the AI assistant feature flag is enabled.
+    ///
+    /// Bug #167: previously a pure get/set computed property delegating to
+    /// `FeatureFlags.isEnabled` / `setOverride`. The `@Observable` macro
+    /// only instruments stored properties — a computed property whose body
+    /// reads/writes a non-Observable class (FeatureFlags is a plain
+    /// `Sendable` class with `OSAllocatedUnfairLock` for cross-actor
+    /// safety) bypasses the observation registrar entirely. As a result,
+    /// toggling the AI Settings switch persisted the flag correctly but
+    /// did NOT notify SwiftUI to re-render, so the conditional
+    /// `if viewModel.isAIEnabled` block in `AISettingsSection` (API Key,
+    /// Provider Configuration, Data & Privacy) stayed hidden until the
+    /// app was killed and relaunched. Switching to a stored property with
+    /// a `didSet` write-through to FeatureFlags makes the property
+    /// observable while keeping FeatureFlags' Sendable concurrency
+    /// contract intact.
+    ///
+    /// The `oldValue != isAIEnabled` guard dedupes the *write-through* to
+    /// FeatureFlags (and the resulting UserDefaults write) on same-value
+    /// assignments — e.g. `@Bindable` re-binding the toggle to its own
+    /// state on view rebuild. Whether the `@Observable` runtime also
+    /// skips the observation notification for same-value stored-property
+    /// writes is an implementation detail and not a contract this code
+    /// relies on.
     var isAIEnabled: Bool {
-        get { featureFlags.isEnabled(.aiAssistant) }
-        set { featureFlags.setOverride(newValue, for: .aiAssistant) }
+        didSet {
+            guard oldValue != isAIEnabled else { return }
+            featureFlags.setOverride(isAIEnabled, for: .aiAssistant)
+        }
     }
 
     /// The current API key input (not persisted until saveAPIKey() is called).
@@ -96,6 +121,14 @@ final class AISettingsViewModel {
         self.consentManager = consentManager
         self.keychainService = keychainService
         self.configurationStore = configurationStore
+
+        // Bug #167: seed `isAIEnabled` from FeatureFlags at init time so
+        // the storage starts in sync with the persisted flag. Reads after
+        // this point go through the @Observable-instrumented storage, not
+        // through FeatureFlags directly — the Settings sheet is the only
+        // writer to `aiAssistant`, so local mirror staleness isn't a
+        // concern in practice.
+        self.isAIEnabled = featureFlags.isEnabled(.aiAssistant)
 
         // Load existing API key state
         let existingKey = try? keychainService.readString(

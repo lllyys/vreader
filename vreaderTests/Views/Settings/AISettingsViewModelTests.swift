@@ -91,6 +91,124 @@ struct AISettingsViewModelTests {
         #expect(vm.isAIEnabled == false)
     }
 
+    // MARK: - Observation Notification (Bug #167)
+
+    /// Bug #167: `isAIEnabled` was a pure get/set computed property
+    /// delegating to `FeatureFlags.isEnabled` / `setOverride`. The
+    /// `@Observable` macro only instruments stored properties — a pure
+    /// computed property whose body reads/writes a non-Observable class
+    /// bypasses the observation registrar entirely. As a result, toggling
+    /// the AI Settings switch flipped the underlying flag in `FeatureFlags`
+    /// but did NOT notify SwiftUI to re-render, so the conditional
+    /// `if viewModel.isAIEnabled` block in `AISettingsSection` (API Key,
+    /// Provider Configuration, Data & Privacy) stayed hidden until the
+    /// app was killed and relaunched. This test pins the fix: writing
+    /// to `isAIEnabled` MUST fire the Observation tracker so dependent
+    /// views re-render.
+    @Test @MainActor func toggleNotifiesObservationTracker() {
+        let vm = makeViewModel(featureEnabled: false)
+        // Swift 6 strict concurrency: the `onChange` closure runs on the
+        // Observation registrar's executor, not @MainActor. Use a final
+        // reference type to capture state without crossing isolation.
+        final class FireFlag: @unchecked Sendable { var value = false }
+        let observationFired = FireFlag()
+
+        // Register interest in `isAIEnabled`. With the old computed
+        // property, the observation registrar wasn't touched by the
+        // getter, so this `withObservationTracking` block didn't subscribe
+        // to anything — and the subsequent setter wouldn't trigger the
+        // onChange. With the fix (stored property + didSet write-through),
+        // the macro-generated getter calls `_$observationRegistrar.access`
+        // and the setter calls `_$observationRegistrar.withMutation`,
+        // making this work end-to-end.
+        withObservationTracking {
+            _ = vm.isAIEnabled
+        } onChange: {
+            observationFired.value = true
+        }
+
+        vm.isAIEnabled = true
+
+        #expect(observationFired.value, "Toggling isAIEnabled must notify SwiftUI's Observation tracker so AISettingsSection re-renders the API Key / Provider Configuration / Data & Privacy sections without an app relaunch.")
+    }
+
+    /// Bug #167 supplement: the fix must NOT break the existing
+    /// write-through to FeatureFlags. Without write-through, the flag
+    /// wouldn't persist to UserDefaults and other parts of the app that
+    /// read `FeatureFlags.shared.isEnabled(.aiAssistant)` directly (e.g.
+    /// `AIReaderAvailability.isAvailable` gating the in-reader AI button)
+    /// wouldn't see the change.
+    @Test @MainActor func toggleStillWritesThroughToFeatureFlags() {
+        let flags = FeatureFlags(environment: .prod)
+        let vm = AISettingsViewModel(
+            featureFlags: flags,
+            consentManager: AIConsentManager(
+                defaults: UserDefaults(suiteName: "com.vreader.test.consent.\(UUID().uuidString)")!
+            ),
+            keychainService: KeychainService(
+                serviceIdentifier: "com.vreader.test.\(UUID().uuidString)"
+            ),
+            configurationStore: AIConfigurationStore(preferences: MockPreferenceStore())
+        )
+
+        #expect(flags.isEnabled(.aiAssistant) == false)
+
+        vm.isAIEnabled = true
+        #expect(flags.isEnabled(.aiAssistant) == true, "Setting isAIEnabled = true must write through to FeatureFlags so cross-app readers see the change.")
+
+        vm.isAIEnabled = false
+        #expect(flags.isEnabled(.aiAssistant) == false, "Setting isAIEnabled = false must write through to FeatureFlags so cross-app readers see the change.")
+    }
+
+    /// Bug #167 supplement: the `oldValue != isAIEnabled` guard inside
+    /// the didSet prevents redundant `FeatureFlags.setOverride` calls
+    /// (and the resulting redundant UserDefaults writes) when the toggle
+    /// is reassigned to its current value — e.g. SwiftUI's `@Bindable`
+    /// re-evaluating the same value during view rebinding.
+    ///
+    /// Note: we deliberately do NOT assert anything about whether the
+    /// `@Observable` macro skips the registrar notification for
+    /// same-value stored-property writes. That's an implementation detail
+    /// of the Observation runtime and not a contract this code can
+    /// promise. Pinning the user-visible side effect (FeatureFlags
+    /// write-through is deduped) is the meaningful invariant.
+    @Test @MainActor func idempotentSetIsNoOpAgainstFeatureFlags() {
+        // Use a real FeatureFlags instance backed by an in-memory
+        // UserDefaults suite so we can observe `aiAssistant` writes
+        // by counting UserDefaults change notifications for the key.
+        let suiteName = "com.vreader.test.featureflags.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let flags = FeatureFlags(
+            environment: .prod, persistenceDefaults: defaults
+        )
+
+        let vm = AISettingsViewModel(
+            featureFlags: flags,
+            consentManager: AIConsentManager(
+                defaults: UserDefaults(suiteName: "com.vreader.test.consent.\(UUID().uuidString)")!
+            ),
+            keychainService: KeychainService(
+                serviceIdentifier: "com.vreader.test.\(UUID().uuidString)"
+            ),
+            configurationStore: AIConfigurationStore(preferences: MockPreferenceStore())
+        )
+
+        // Flip to true once
+        vm.isAIEnabled = true
+        let key = "com.vreader.featureFlags.aiAssistant"
+        #expect(defaults.bool(forKey: key) == true)
+
+        // Tamper-detect: write a sentinel under the same key, then assign
+        // the same value to `isAIEnabled` again. If the didSet guard works
+        // the write-through should be skipped, and our sentinel survives.
+        // If the guard is removed/broken, setOverride re-writes true and
+        // overwrites the sentinel.
+        defaults.set(0xDEAD as Int, forKey: key)
+        vm.isAIEnabled = true // Same value
+        #expect(defaults.integer(forKey: key) == 0xDEAD, "Idempotent set must not write through to FeatureFlags; sentinel was overwritten which means setOverride ran on a same-value assignment.")
+    }
+
     // MARK: - API Key
 
     @Test @MainActor func apiKeySavedToKeychain() {
