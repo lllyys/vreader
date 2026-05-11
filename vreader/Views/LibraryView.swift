@@ -693,18 +693,18 @@ struct LibraryView: View {
     }
 
     /// Creates an AIChatViewModel for general (non-book) chat.
+    ///
+    /// Feature #50 WI-5: AIService now dispatches on the active
+    /// `ProviderProfile` via `ProviderProfileStore.shared`. The shared
+    /// store is mandatory in production (Gate-2 round-2 finding [2]) —
+    /// constructing a separate store would re-introduce lost-update races
+    /// across the Settings VM, AIService actor, and the in-reader picker.
     private func makeGeneralChatViewModel() -> AIChatViewModel {
         let service = AIService(
             featureFlags: FeatureFlags.shared,
             consentManager: AIConsentManager(),
             keychainService: KeychainService(),
-            providerFactory: { apiKey, config in
-                OpenAICompatibleProvider(
-                    baseURL: config.endpoint,
-                    apiKey: apiKey,
-                    model: config.model
-                )
-            }
+            profileStore: ProviderProfileStore.shared
         )
         return AIChatViewModel(aiService: service, bookFingerprint: nil)
     }

@@ -51,17 +51,42 @@ struct AIServiceTests {
 
     // MARK: - Gate 3: API Key
 
+    /// Feature #50 WI-5 retuning: an active profile must exist in the
+    /// (non-`.shared`) profile store before this gate is exercised —
+    /// otherwise resolveProvider() now bails earlier with
+    /// `.providerError("Configure a provider in Settings.")`. The
+    /// "missing key" semantic still applies once a profile is present
+    /// but its per-profile keychain entry is absent.
     @Test func noApiKeyReturnsApiKeyMissing() async throws {
         let flags = FeatureFlags(environment: .prod)
         flags.setOverride(true, for: .aiAssistant)
 
         let keychain = WI11TestHelpers.makeKeychainService()
-        // No API key stored
+        // Pre-seed an active profile but no API key.
+        let prefs = MockPreferenceStore()
+        prefs.set("true", forKey: DefaultProviderProfileMigrator.migrationFlagKey)
+        let store = ProviderProfileStore(
+            preferences: prefs,
+            migrator: DefaultProviderProfileMigrator(),
+            keychain: keychain
+        )
+        let profile = ProviderProfile(
+            id: UUID(),
+            name: "Test",
+            kind: .openAICompatible,
+            baseURL: URL(string: "https://api.openai.example.com/v1")!,
+            model: "gpt-test",
+            temperature: 0.5,
+            maxTokens: 1024
+        )
+        await store.upsert(profile)
+        await store.setActiveProfileID(profile.id)
 
         let service = AIService(
             featureFlags: flags,
             consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
-            keychainService: keychain
+            keychainService: keychain,
+            profileStore: store
         )
 
         do {

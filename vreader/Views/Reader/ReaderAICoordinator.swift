@@ -73,17 +73,14 @@ final class ReaderAICoordinator {
         guard aiViewModel == nil, isAIAvailable else { return }
         let flags = FeatureFlags.shared
         let keychain = KeychainService()
+        // Feature #50 WI-5: AIService now dispatches on the active
+        // ProviderProfile via ProviderProfileStore.shared. The shared
+        // store is mandatory in production (Gate-2 round-2 finding [2]).
         let service = AIService(
             featureFlags: flags,
             consentManager: AIConsentManager(),
             keychainService: keychain,
-            providerFactory: { apiKey, config in
-                OpenAICompatibleProvider(
-                    baseURL: config.endpoint,
-                    apiKey: apiKey,
-                    model: config.model
-                )
-            }
+            profileStore: ProviderProfileStore.shared
         )
         aiViewModel = AIAssistantViewModel(aiService: service)
         translationViewModel = AITranslationViewModel(aiService: service)
