@@ -183,6 +183,35 @@ If a verification target falls into the ❌ row, mark the slice as
 **verification-blocked** with the tooling-gap reason — it's not a code
 regression, and CU coming back online is the resolution path.
 
+## Concurrency with other sessions
+
+Unlike CU MCP (which serializes desktop access — second session gets
+denied at `request_access` time), this toolkit has no lock. Every
+tool goes straight to a macOS-native subsystem, so multiple Claude
+Code sessions can use it at the same time. The catch: writes share
+global state, so concurrent writers race.
+
+| Operation | Subsystem | Concurrent sessions |
+|---|---|---|
+| `simctl io … screenshot` | CoreSimulator IPC | ✅ each gets own snapshot |
+| `osascript` AX query | Accessibility API | ✅ read-only |
+| `clickat.swift` / `dragat.swift` | HID event tap (global) | ⚠️ events go to the frontmost window NOW — concurrent sessions race |
+| `set the clipboard` + `cmd+V` | NSPasteboard + global keystroke | ⚠️ last writer wins on the clipboard |
+
+Two practical implications:
+- **CGEventPost targets the frontmost window.** If another app comes
+  forward between your AX-query (which fixes coords against the
+  Simulator) and your `clickat.swift`, the click lands in that other
+  app. Bring Simulator forward (`open -a Simulator`) right before any
+  CGEventPost sequence if you suspect drift.
+- **For overlapping cron iterations** (vreader has 4 — verify, bugfix,
+  watchdog, feature), if two ever both drive the sim at the same time,
+  clicks and clipboard state will interleave. The OS won't error;
+  you'll just get non-deterministic output. If this becomes routine
+  (it hasn't yet), serialize sim driving with a `flock /tmp/sim-drive.lock`
+  wrapper around each CGEventPost sequence — cheap fix, preserves the
+  read paths' concurrency.
+
 ## Origin + reference verifications
 
 - `dev-docs/verification/feature-38-20260510-round3.md` — first round
