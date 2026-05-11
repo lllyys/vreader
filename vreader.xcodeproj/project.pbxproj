@@ -626,6 +626,7 @@
 		C941DFD16C7CE7CF5ACC770D /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BD36F5CC483659F962BFB3A /* TTSService.swift */; };
 		C9CBB4436EA4DDE7757EA3F4 /* TOCProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C65E5FD23C2800C87ADD82A /* TOCProvider.swift */; };
 		C9D2AE1A81222E67A05CA05C /* BackgroundIndexingCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0CDD04120BFF39B61E8418 /* BackgroundIndexingCoordinatorTests.swift */; };
+		CAF37A53ACA1334F8A0AD2A4 /* AnthropicProviderStreamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1836AA0E3E80CADFB1B46834 /* AnthropicProviderStreamingTests.swift */; };
 		CB432F27C324A4EBC3D1F327 /* ReaderThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9081F5E7C359D5FB2661E7AC /* ReaderThemeTests.swift */; };
 		CBF9C34C3E23A55FD82B726D /* PDFAnnotationBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B3A240BB6031B14144741FE /* PDFAnnotationBridgeTests.swift */; };
 		CC46DEE722313420D6F150ED /* TXTAttributedStringBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77119C3681DB428BD5F1207C /* TXTAttributedStringBuilderTests.swift */; };
@@ -777,6 +778,7 @@
 		FEA105C28C0D03B8EDF2D6EF /* MOBICoverExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10962D7E47EA2C6714E704CA /* MOBICoverExtractorTests.swift */; };
 		FF8D6FA65D0840E3F87E5701 /* TXTChunkedHighlightHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6639753CB33EAECD6CF3010 /* TXTChunkedHighlightHelper.swift */; };
 		FFA194178E9956EF14C4B8DD /* overlayer.js in Resources */ = {isa = PBXBuildFile; fileRef = 1ABFAC14455C6F7DE43C1ABC /* overlayer.js */; };
+		FFC1BF2B3E0963AAD120E93E /* AnthropicProvider+Streaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = C682F2AF644C10CEC95208AE /* AnthropicProvider+Streaming.swift */; };
 		FFCACE71EA64842074302A98 /* DebugBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F1348B555C6A2C90B03ED65 /* DebugBridge.swift */; };
 /* End PBXBuildFile section */
 
@@ -860,6 +862,7 @@
 		16C77872C4F869769F4C83F7 /* ReaderContainerView+Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReaderContainerView+Sheets.swift"; sourceTree = "<group>"; };
 		16E293CFD61A19BB48B38963 /* HighlightableTextViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightableTextViewTests.swift; sourceTree = "<group>"; };
 		17E7FD8CD67F19A2213DB6F5 /* PDFViewBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFViewBridge.swift; sourceTree = "<group>"; };
+		1836AA0E3E80CADFB1B46834 /* AnthropicProviderStreamingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicProviderStreamingTests.swift; sourceTree = "<group>"; };
 		1889243163114A51950527F6 /* BookFileMaterializer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFileMaterializer.swift; sourceTree = "<group>"; };
 		1920480AF349823757484C2D /* EPUBWebViewBridgeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBWebViewBridgeCoordinator.swift; sourceTree = "<group>"; };
 		19522F65C0947EFDCF9E4D2B /* TypographySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypographySettings.swift; sourceTree = "<group>"; };
@@ -1387,6 +1390,7 @@
 		C5C46A3D7400CC956FA8D46D /* ProviderKindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderKindTests.swift; sourceTree = "<group>"; };
 		C5CB5C659CC573EF448F0992 /* AIResponseCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIResponseCacheTests.swift; sourceTree = "<group>"; };
 		C6639753CB33EAECD6CF3010 /* TXTChunkedHighlightHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChunkedHighlightHelper.swift; sourceTree = "<group>"; };
+		C682F2AF644C10CEC95208AE /* AnthropicProvider+Streaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AnthropicProvider+Streaming.swift"; sourceTree = "<group>"; };
 		C68E9908FEE2CDE00C6EB279 /* AISettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsViewModelTests.swift; sourceTree = "<group>"; };
 		C6E58A8977DC02FDA7235A9E /* ProviderProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderProfileStore.swift; sourceTree = "<group>"; };
 		C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVBlobStoreTests.swift; sourceTree = "<group>"; };
@@ -2791,6 +2795,7 @@
 				15C1B40888B5C8213559B111 /* AIRequestCacheKeyTests.swift */,
 				C5CB5C659CC573EF448F0992 /* AIResponseCacheTests.swift */,
 				EFB9DBE73613A6499D43B18C /* AIServiceTests.swift */,
+				1836AA0E3E80CADFB1B46834 /* AnthropicProviderStreamingTests.swift */,
 				E5892DBA34520F6BB7B8E5A3 /* AnthropicProviderTests.swift */,
 				EA0CD7509429C4B75ACB98F2 /* KeychainProviderProfileExtensionTests.swift */,
 				C5C46A3D7400CC956FA8D46D /* ProviderKindTests.swift */,
@@ -3019,6 +3024,7 @@
 				334D6D06A294323E149970E4 /* AIService.swift */,
 				46C22F30DF9F05C20CF8DDBC /* AITypes.swift */,
 				B8C6D6A8EC00DFFAC294DD87 /* AnthropicProvider.swift */,
+				C682F2AF644C10CEC95208AE /* AnthropicProvider+Streaming.swift */,
 				AE50C2E67CBF0EB4747276C1 /* KeychainService+ProviderProfile.swift */,
 				2652A8EB81DF49609A3EDAC8 /* ProviderKind.swift */,
 				9893809AE39B5DF0233FEE42 /* ProviderProfile.swift */,
@@ -3320,6 +3326,7 @@
 				CC774F69EFD8E1BD204DD515 /* AnnotationListViewModelTests.swift in Sources */,
 				762B3F65978080FE7D26BF4C /* AnnotationModelTests.swift in Sources */,
 				66EF1425722B3E84E4902AEC /* AnnotationsPanelViewTests.swift in Sources */,
+				CAF37A53ACA1334F8A0AD2A4 /* AnthropicProviderStreamingTests.swift in Sources */,
 				B8C609FE1F6F51E950F4B96A /* AnthropicProviderTests.swift in Sources */,
 				A2B7E3D8BAEC3C9A9375D3E4 /* AppConfigurationTests.swift in Sources */,
 				5BCD69B7FFD787F33D6E0C8D /* AutoPageTurnerTests.swift in Sources */,
@@ -3641,6 +3648,7 @@
 				6C56C40C260D289E023BCEE9 /* AnnotationPersisting.swift in Sources */,
 				8F002C822102F0A088F31A06 /* AnnotationRecord.swift in Sources */,
 				25B106D034C16291C104D69E /* AnnotationsPanelView.swift in Sources */,
+				FFC1BF2B3E0963AAD120E93E /* AnthropicProvider+Streaming.swift in Sources */,
 				57E1462E66FEAA422A970FA5 /* AnthropicProvider.swift in Sources */,
 				8E7482D250AFDBEF1803780A /* AppConfiguration.swift in Sources */,
 				0CDCF9DAE4BA56A30FA71097 /* AppLogger.swift in Sources */,
@@ -4126,13 +4134,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 253;
+				CURRENT_PROJECT_VERSION = 254;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.14.144;
+				MARKETING_VERSION = 3.14.145;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4276,13 +4284,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 253;
+				CURRENT_PROJECT_VERSION = 254;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.14.144;
+				MARKETING_VERSION = 3.14.145;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
