@@ -1,10 +1,14 @@
-// Purpose: ViewModel for the AI Settings section. Manages global AI toggle,
-// consent state, and the saved-provider-profile list with one active selection.
+// Purpose: ViewModel for the AI Settings section. Owns global AI toggle,
+// consent state, and the saved-provider-profile list with one active
+// selection. Editor operations (add / update / save-key / delete-key /
+// test-connection) live in `AISettingsViewModel+Editor.swift` to keep
+// this file under the ~300-line guideline (mirrors
+// AnthropicProvider+Streaming.swift's split rationale).
 //
-// Feature #50 WI-6a: previously a single-profile VM (model/baseURL/apiKey
-// fields here, single AIConfigurationStore). Now a multi-profile VM backed
-// by the shared `ProviderProfileStore` actor. The editor sheet (add/edit
-// profile + API key + test-connection) lands in WI-6b.
+// Feature #50 WI-6a: rewrote from single-profile to multi-profile list,
+// added list operations (loadProfiles, setActive, deleteProfile).
+// Feature #50 WI-6b: added editor operations in the +Editor extension
+// plus a URLSession injection point so tests can stub testConnection.
 //
 // Key decisions:
 // - @Observable + @MainActor for SwiftUI binding (iOS 17+).
@@ -22,7 +26,8 @@
 //
 // @coordinates-with: FeatureFlags.swift, AIConsentManager.swift,
 //   KeychainService+ProviderProfile.swift, ProviderProfileStore.swift,
-//   AIProviderListView.swift
+//   AIProviderListView.swift, AIProviderEditSheet.swift,
+//   AISettingsViewModel+Editor.swift
 
 import Foundation
 import Observation
@@ -35,12 +40,13 @@ final class AISettingsViewModel {
 
     // MARK: - Dependencies
 
-    private let featureFlags: FeatureFlags
-    private let consentManager: AIConsentManager
-    private let keychainService: KeychainService
-    private let profileStore: ProviderProfileStore
+    let featureFlags: FeatureFlags
+    let consentManager: AIConsentManager
+    let keychainService: KeychainService
+    let profileStore: ProviderProfileStore
+    let urlSession: URLSession
 
-    private static let log = Logger(subsystem: "com.vreader.app", category: "AISettings")
+    static let log = Logger(subsystem: "com.vreader.app", category: "AISettings")
 
     // MARK: - Global Toggles
 
@@ -82,18 +88,25 @@ final class AISettingsViewModel {
     /// Last error from a list operation. nil after a successful op.
     var listError: String?
 
+    /// Last error from an editor (add / update / save-key) operation. nil
+    /// after a successful op. Kept separate from `listError` so the
+    /// editor sheet's alert binding doesn't compete with the list view's.
+    var editorError: String?
+
     // MARK: - Initialization
 
     init(
         featureFlags: FeatureFlags = .shared,
         consentManager: AIConsentManager = AIConsentManager(),
         keychainService: KeychainService = KeychainService(),
-        profileStore: ProviderProfileStore = .shared
+        profileStore: ProviderProfileStore = .shared,
+        urlSession: URLSession = .shared
     ) {
         self.featureFlags = featureFlags
         self.consentManager = consentManager
         self.keychainService = keychainService
         self.profileStore = profileStore
+        self.urlSession = urlSession
         self.isAIEnabled = featureFlags.isEnabled(.aiAssistant)
     }
 
@@ -103,17 +116,13 @@ final class AISettingsViewModel {
     /// store transparently runs the legacy → multi-profile migration on
     /// its first read; callers don't need to invoke migration themselves.
     ///
-    /// Round-1 audit finding [1]: uses `loadSnapshot()` (single actor
-    /// hop) instead of pairing `loadAll()` + `activeProfile()`, so a
-    /// concurrent mutation between two awaits can't publish a list that
-    /// disagrees with the active id.
+    /// WI-6a round-1 audit finding [1]: uses `loadSnapshot()` (single
+    /// actor hop) instead of pairing `loadAll()` + `activeProfile()`, so
+    /// a concurrent mutation between two awaits can't publish a list
+    /// that disagrees with the active id.
     func loadProfiles() async {
         let snapshot = await profileStore.loadSnapshot()
         profiles = snapshot.profiles
-        // Defensive: if the persisted active id no longer resolves to a
-        // present profile (the store permits this so unknown ids round-
-        // trip through `setActiveProfileID`), surface it to the UI as
-        // "no active selection" rather than dangling.
         if let id = snapshot.activeID,
            snapshot.profiles.contains(where: { $0.id == id }) {
             activeID = id
@@ -124,20 +133,16 @@ final class AISettingsViewModel {
     }
 
     /// Sets the currently-active profile by id. Passing nil clears active.
-    /// Round-1 audit finding [2]: rejects ids not in the current profile
-    /// list rather than writing them and leaving the VM with a dangling
-    /// active id. The UI only renders rows from `profiles`, so an
-    /// unknown id always indicates a stale view or a programmer error.
+    /// WI-6a round-1 audit finding [2]: rejects ids not in the current
+    /// profile list rather than writing them and leaving the VM with a
+    /// dangling active id. The UI only renders rows from `profiles`, so
+    /// an unknown id always indicates a stale view or a programmer
+    /// error.
     func setActive(_ id: UUID?) async {
         if let id, !profiles.contains(where: { $0.id == id }) {
-            // Don't write a dangling id to the store. The store would
-            // accept it, but `activeProfile()` would later resolve to nil
-            // and the VM's `activeID` would diverge from a meaningful row.
             return
         }
         await profileStore.setActiveProfileID(id)
-        // Read back authoritatively from the store, not from the local id,
-        // so a concurrent delete that cleared active is reflected here.
         let active = await profileStore.activeProfile()
         activeID = active?.id
         listError = nil
@@ -153,13 +158,27 @@ final class AISettingsViewModel {
         do {
             try keychainService.deleteAPIKey(forProfile: id)
         } catch {
-            // Keychain delete failures are surfaced but don't unwind the
-            // store remove — leaving the profile listed with no key is
-            // worse than an orphaned keychain row that costs ~32 bytes.
             Self.log.error("deleteAPIKey(forProfile:) failed: \(String(describing: error), privacy: .public)")
             listError = "Profile removed but its saved API key could not be cleared. You may need to delete it manually."
         }
         profiles.removeAll(where: { $0.id == id })
         if activeID == id { activeID = nil }
+    }
+
+    // MARK: - Internal state mutation hooks (for +Editor extension)
+
+    /// Replaces `profiles` and `activeID` from an authoritative snapshot.
+    /// Used by the editor extension after upserts to converge VM state
+    /// with the store. The setter is `internal` so the extension in the
+    /// same module can mutate via member writes; SwiftUI observation
+    /// fires automatically because the macro instruments the stored
+    /// properties.
+    func _setProfiles(_ list: [ProviderProfile], activeID: UUID?) {
+        self.profiles = list
+        if let id = activeID, list.contains(where: { $0.id == id }) {
+            self.activeID = id
+        } else {
+            self.activeID = nil
+        }
     }
 }

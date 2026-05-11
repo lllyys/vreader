@@ -34,6 +34,8 @@ struct AIProviderListView: View {
     @Bindable var viewModel: AISettingsViewModel
 
     @State private var showEditor: Bool = false
+    /// Non-nil when an existing profile is being edited; nil = add-new.
+    @State private var editingProfile: ProviderProfile? = nil
 
     var body: some View {
         Group {
@@ -48,6 +50,7 @@ struct AIProviderListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    editingProfile = nil
                     showEditor = true
                 } label: {
                     Image(systemName: "plus")
@@ -59,7 +62,7 @@ struct AIProviderListView: View {
             await viewModel.loadProfiles()
         }
         .sheet(isPresented: $showEditor) {
-            editorPlaceholder
+            AIProviderEditSheet(viewModel: viewModel, existing: editingProfile)
         }
         .alert(
             "Profile Error",
@@ -92,6 +95,11 @@ struct AIProviderListView: View {
                 .padding(.horizontal, 32)
 
             Button {
+                // Round-1 audit finding [5]: the empty-state Add path
+                // didn't clear editingProfile, so after deleting the
+                // last row a stale "edit" sheet could re-present. Mirror
+                // the toolbar Add button's behavior.
+                editingProfile = nil
                 showEditor = true
             } label: {
                 Label("Add Provider", systemImage: "plus.circle.fill")
@@ -162,32 +170,17 @@ struct AIProviderListView: View {
             }
             .accessibilityIdentifier("deleteProviderProfile_\(profile.id.uuidString)")
         }
-    }
-
-    // MARK: - Editor Placeholder (WI-6b will replace)
-
-    private var editorPlaceholder: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                Image(systemName: "wrench.adjustable")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.secondary)
-                Text("Coming soon")
-                    .font(.headline)
-                Text("The profile editor lands in feature #50 WI-6b. For now you can see existing profiles (migrated from your previous AI settings) and choose which one is active.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+        // Leading-edge swipe reveals Edit (WI-6b). Mirrors Mail.app's
+        // common Edit + Delete row gesture pair.
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button {
+                editingProfile = profile
+                showEditor = true
+            } label: {
+                Label("Edit", systemImage: "pencil")
             }
-            .navigationTitle("Add Provider")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close") { showEditor = false }
-                        .accessibilityIdentifier("addProviderCloseButton")
-                }
-            }
+            .tint(.blue)
+            .accessibilityIdentifier("editProviderProfile_\(profile.id.uuidString)")
         }
     }
 }
