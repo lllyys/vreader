@@ -44,10 +44,70 @@ struct EPUBPaginationCSSTests {
         #expect(css.contains("40px"))
     }
 
-    @Test("CSS sets column-fill to auto")
+    @Test("CSS sets column-fill to auto !important")
     func paginationCSS_columnFillAuto() {
         let css = EPUBPaginationHelper.paginationCSS(viewportWidth: 375, viewportHeight: 667)
-        #expect(css.contains("column-fill: auto"))
+        // Round-2 audit finding [1]: all pagination params reader-owned
+        // via !important to keep paging math authoritative.
+        #expect(css.contains("column-fill: auto !important"))
+    }
+
+    @Test("CSS pagination params declared !important — bug #171 round-2")
+    func paginationCSS_paginationParamsImportant_bug171Round2() {
+        let css = EPUBPaginationHelper.paginationCSS(viewportWidth: 375, viewportHeight: 667)
+        // The full pagination parameter set must be reader-owned so a
+        // book stylesheet's !important overrides can't misalign
+        // scrollWidth / viewportWidth and break paging math.
+        #expect(css.contains("column-width: 335px !important"))
+        #expect(css.contains("column-gap: 40px !important"))
+        #expect(css.contains("height: 667px !important"))
+        // body overflow + html overflow both reader-owned so book CSS
+        // can't introduce vertical or horizontal scrollbars.
+        let bodyOverflowImportant = css.contains("overflow: hidden !important")
+        #expect(bodyOverflowImportant,
+                "body overflow must be `hidden !important` to keep reader paging in horizontal-overflow mode")
+    }
+
+    // Bug #171: CSS `column-width` is a HINT, not a hard cap on column
+    // count. Browsers will fit as many columns as the available width
+    // permits, which produced an unwanted two-column layout on EPUBs
+    // whose own stylesheets pushed the body width beyond the viewport.
+    // The fix is to pin `column-count: 1 !important` so the browser is
+    // forced to use exactly one column regardless of width interactions
+    // AND so book stylesheets cannot override it via higher specificity.
+    @Test("CSS sets column-count to 1 !important — bug #171 regression guard")
+    func paginationCSS_columnCountOne_bug171() {
+        let css = EPUBPaginationHelper.paginationCSS(viewportWidth: 375, viewportHeight: 667)
+        #expect(css.contains("column-count: 1 !important"),
+                "Bug #171: body must declare `column-count: 1 !important` to force single-page layout regardless of viewport / book-CSS interactions (round-1 audit finding [1])")
+    }
+
+    @Test("CSS column-count: 1 !important still present at larger viewport widths")
+    func paginationCSS_columnCountOne_atLargerWidth() {
+        // iPhone 17 Pro landscape ≈ 852pt wide. The pre-fix code would
+        // happily fit 2 × (812 + 40) columns at that width. Pin the
+        // single-column declaration at the larger viewport too so a
+        // future refactor can't accidentally make column-count depend
+        // on viewport size.
+        let css = EPUBPaginationHelper.paginationCSS(viewportWidth: 852, viewportHeight: 393)
+        #expect(css.contains("column-count: 1 !important"))
+    }
+
+    // Round-1 audit finding [3]: pre-existing low-severity gap, fixed
+    // in this PR. The helper used to emit negative column-width values
+    // for sub-40pt viewports (transient state during Stage Manager
+    // resize, multitasking, very narrow split-screen). Clamp to >= 1px.
+    @Test("CSS clamps column-width to a positive value at tiny viewports")
+    func paginationCSS_clampsColumnWidthAtTinyViewport() {
+        let css = EPUBPaginationHelper.paginationCSS(viewportWidth: 20, viewportHeight: 100)
+        // Expect "column-width: 1px" not "column-width: -20px". The
+        // bare-hyphen check would false-positive on `page-break-inside`
+        // and `-webkit-column-break-inside`, so look for the specific
+        // negative-px pattern.
+        #expect(css.contains("column-width: 1px"),
+                "Tiny viewports must clamp column-width to >= 1px, not emit a negative value")
+        #expect(!css.contains("-20px") && !css.contains("column-width: -"),
+                "No negative px values should appear in pagination CSS")
     }
 
     @Test("CSS uses integer pixel values for width and height")

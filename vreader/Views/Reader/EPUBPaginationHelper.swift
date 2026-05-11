@@ -29,18 +29,46 @@ enum EPUBPaginationHelper {
     static let columnGap: Int = 40
 
     static func paginationCSS(viewportWidth: CGFloat, viewportHeight: CGFloat) -> String {
-        let colWidth = Int(viewportWidth) - columnGap
-        let h = Int(viewportHeight)
+        // Bug #171 fix: clamp the computed column-width to a positive
+        // value. The pre-fix expression `Int(viewportWidth) - columnGap`
+        // emits negative px values for very small viewports (e.g.
+        // viewportWidth < 40 during Stage Manager resize storms). The
+        // round-1 audit flagged this as a pre-existing low-severity
+        // gap; tightening it here while we're in the file.
+        let colWidth = max(Int(viewportWidth) - columnGap, 1)
+        let h = max(Int(viewportHeight), 0)
+        // Bug #171: `column-width` alone is a HINT (minimum desired
+        // width). The browser will fit as many columns as the available
+        // body width permits — which produced a two-column "newspaper"
+        // layout on EPUBs whose stylesheets pushed the body width
+        // beyond the viewport. Pin `column-count: 1` to force the
+        // browser to use exactly one column. With both declarations
+        // present, `column-count` is the hard cap and `column-width`
+        // is the minimum (always satisfied). Pagination math via
+        // scrollWidth / viewportWidth is unchanged because the single
+        // column still overflows horizontally into virtual columns.
+        //
+        // Round-2 audit finding [1]: the WHOLE pagination parameter
+        // set is reader-owned while paged mode is active, not just
+        // column-count. A book's `column-width: 600px !important` or
+        // `height: 100vh !important` could leave one visible column but
+        // misalign `scrollWidth / viewportWidth` so `totalPagesJS` and
+        // `navigateToPageJS` miscount. Mark every pagination directive
+        // `!important` (column-count, column-width, column-gap,
+        // column-fill, height, overflow). margin and break-inside
+        // remain at normal specificity — they're rendering hints, not
+        // paging invariants.
         return """
         html {
-            overflow: hidden;
+            overflow: hidden !important;
         }
         body {
-            column-width: \(colWidth)px;
-            column-gap: \(columnGap)px;
-            column-fill: auto;
-            height: \(h)px;
-            overflow: hidden;
+            column-count: 1 !important;
+            column-width: \(colWidth)px !important;
+            column-gap: \(columnGap)px !important;
+            column-fill: auto !important;
+            height: \(h)px !important;
+            overflow: hidden !important;
             margin: 0;
             -webkit-column-break-inside: avoid;
         }
