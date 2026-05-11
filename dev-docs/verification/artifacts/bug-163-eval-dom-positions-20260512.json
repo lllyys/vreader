@@ -1,0 +1,7 @@
+{
+  "bridge" : "epub",
+  "fingerprintKey" : "epub:f284fd074ccd1d3c1a78985464d9e1be27975f4029f3c2ddef8428ca10684af4:2198",
+  "format" : "epub",
+  "result" : "[{\"tag\":\"h1\",\"top\":24,\"left\":16,\"text\":\"Chapter One\"},{\"tag\":\"p\",\"top\":94,\"left\":16,\"text\":\"This is the first paragraph of the first chapter of a small \"},{\"tag\":\"p\",\"top\":212,\"left\":16,\"text\":\"Second paragraph. Lorem ipsum dolor sit amet, consectetur ad\"},{\"tag\":\"p\",\"top\":280,\"left\":16,\"text\":\"Third paragraph with some emphasized and strong markup to ex\"}]",
+  "ts" : "2026-05-11T19:56:10Z"
+}
