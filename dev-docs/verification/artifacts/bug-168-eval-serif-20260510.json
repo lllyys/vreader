@@ -1,0 +1,7 @@
+{
+  "bridge" : "fontprobe-serif2",
+  "fingerprintKey" : "epub:f284fd074ccd1d3c1a78985464d9e1be27975f4029f3c2ddef8428ca10684af4:2198",
+  "format" : "epub",
+  "result" : "{\"styleSnippet\":\"html, body {   background-color: rgb(28,28,30) !important;   color: rgb(234,234,237) !important;   font-size: 18.0px !important;   font-family: Georgia, 'Times New Roman', serif !important;   line-height: 1.40 !important;   letter-spacing: normal !important;   -webkit-text-size-adjust: 100%;   text-rendering: optimizeLegibility;   word-break: break\",\"bodyFamily\":\"Georgia, \\\"Times New Roman\\\", serif\",\"paragraphFamily\":\"Georgia, \\\"Times New Roman\\\", serif\",\"headingFamily\":\"Georgia, \\\"Times New Roman\\\", serif\"}",
+  "ts" : "2026-05-10T12:03:32Z"
+}

@@ -1,0 +1,7 @@
+{
+  "bridge" : "fontprobe-system",
+  "fingerprintKey" : "epub:f284fd074ccd1d3c1a78985464d9e1be27975f4029f3c2ddef8428ca10684af4:2198",
+  "format" : "epub",
+  "result" : "{\"styleSnippet\":\"html, body {   background-color: rgb(28,28,30) !important;   color: rgb(234,234,237) !important;   font-size: 18.0px !important;   font-family: -apple-system, system-ui, sans-serif !important;   line-height: 1.40 !important;   letter-spacing: normal !important;   -webkit-text-size-adjust: 100%;   text-rendering: optimizeLegibility;   word-break: break-word;   overflow-wrap: break-word; }body {   padding: 0 16px !important;   margin: 0 !important; }p, div, span, li, td, th, dd, dt, blockquote, fi\",\"bodyFamily\":\"-apple-system, system-ui, sans-serif\",\"paragraphFamily\":\"-apple-system, system-ui, sans-serif\",\"headingFamily\":\"-apple-system, system-ui, sans-serif\",\"preFamily\":\"<no-pre>\",\"paragraphCount\":3,\"headingCount\":1}",
+  "ts" : "2026-05-10T12:01:43Z"
+}
