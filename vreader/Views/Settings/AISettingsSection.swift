@@ -1,150 +1,68 @@
-// Purpose: SwiftUI Form section for AI assistant configuration.
-// Provides toggles, text fields, and sliders for all AI settings.
+// Purpose: SwiftUI Form section for AI assistant configuration. Wraps the
+// AI Assistant toggle, a navigation link to the provider list, and the
+// data-sharing consent toggle.
+//
+// Feature #50 WI-6a: previously held the single-profile UI (API key
+// SecureField, model/baseURL/temperature/maxTokens fields). Those move
+// to `AIProviderEditSheet.swift` in WI-6b. WI-6a keeps the section thin
+// and delegates the list management to `AIProviderListView`.
 //
 // Key decisions:
-// - Observes AISettingsViewModel for all state.
-// - SecureField for API key input (masked entry).
-// - Slider for temperature with 0.1 step granularity.
-// - Stepper for maxTokens with 256-step increments.
-// - Save button triggers explicit configuration persistence.
-// - Validation errors displayed inline below fields.
+// - The section is just a wrapper now (~80 lines). Heavy lifting lives in
+//   the new list view and (WI-6b) the editor sheet.
+// - The provider list is reachable via a `NavigationLink` from the
+//   Settings form. We don't auto-load the list here — `AIProviderListView`
+//   calls `viewModel.loadProfiles()` on its own `.task`.
+// - The AI toggle and the consent toggle remain sibling rows on the
+//   Settings form root; they're global, not per-profile.
 //
-// @coordinates-with: AISettingsViewModel.swift, SettingsView.swift
+// @coordinates-with: AISettingsViewModel.swift, AIProviderListView.swift,
+//   SettingsView.swift
 
 import SwiftUI
 
-/// Form section containing all AI assistant settings.
+/// Form section containing AI assistant settings.
 struct AISettingsSection: View {
     @Bindable var viewModel: AISettingsViewModel
 
     var body: some View {
         Section("AI Assistant") {
-            aiToggle
+            Toggle("Enable AI Assistant", isOn: $viewModel.isAIEnabled)
+                .accessibilityIdentifier("aiToggle")
         }
 
         if viewModel.isAIEnabled {
-            Section("API Key") {
-                apiKeyField
-            }
-
-            Section("Provider Configuration") {
-                providerFields
+            Section("Providers") {
+                NavigationLink {
+                    AIProviderListView(viewModel: viewModel)
+                } label: {
+                    HStack {
+                        Text("AI Providers")
+                        Spacer()
+                        Text(activeProfileSummary)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .accessibilityIdentifier("aiProvidersNavLink")
             }
 
             Section("Data & Privacy") {
-                consentToggle
+                Toggle("Allow AI data sharing", isOn: $viewModel.hasConsent)
+                    .accessibilityIdentifier("consentToggle")
             }
         }
     }
 
-    // MARK: - Subviews
-
-    private var aiToggle: some View {
-        Toggle("Enable AI Assistant", isOn: $viewModel.isAIEnabled)
-            .accessibilityIdentifier("aiToggle")
-    }
-
-    @ViewBuilder
-    private var apiKeyField: some View {
-        HStack {
-            SecureField("Enter API Key", text: $viewModel.apiKeyInput)
-                .textContentType(.password)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("apiKeyField")
-
-            if viewModel.isAPIKeySaved {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .accessibilityLabel("API key saved")
-            }
+    /// Summary text shown to the right of the "AI Providers" row.
+    /// Reflects the most recently loaded list state — empty before any
+    /// load, "None" if loaded but no profile is active, otherwise the
+    /// active profile's name.
+    private var activeProfileSummary: String {
+        guard !viewModel.profiles.isEmpty else { return "" }
+        if let active = viewModel.profiles.first(where: { $0.id == viewModel.activeID }) {
+            return active.name
         }
-
-        if let error = viewModel.apiKeyError {
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .accessibilityIdentifier("apiKeyError")
-        }
-
-        HStack {
-            Button("Save Key") {
-                viewModel.saveAPIKey()
-            }
-            .disabled(viewModel.apiKeyInput.isEmpty)
-            .accessibilityIdentifier("saveApiKeyButton")
-
-            if viewModel.isAPIKeySaved {
-                Button("Delete Key", role: .destructive) {
-                    viewModel.deleteAPIKey()
-                }
-                .accessibilityIdentifier("deleteApiKeyButton")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var providerFields: some View {
-        HStack {
-            Text("Model")
-                .foregroundStyle(.secondary)
-            Spacer()
-            TextField("Model name", text: $viewModel.model)
-                .multilineTextAlignment(.trailing)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("modelField")
-        }
-
-        HStack {
-            Text("Base URL")
-                .foregroundStyle(.secondary)
-            Spacer()
-            TextField("https://api.openai.com/v1", text: $viewModel.baseURL)
-                .multilineTextAlignment(.trailing)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                .accessibilityIdentifier("baseURLField")
-        }
-
-        if let error = viewModel.baseURLError {
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .accessibilityIdentifier("baseURLError")
-        }
-
-        VStack(alignment: .leading) {
-            HStack {
-                Text("Temperature")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(String(format: "%.1f", viewModel.temperature))
-                    .monospacedDigit()
-            }
-            Slider(
-                value: $viewModel.temperature,
-                in: 0.0...2.0,
-                step: 0.1
-            )
-            .accessibilityIdentifier("temperatureSlider")
-        }
-
-        Stepper(
-            "Max Tokens: \(viewModel.maxTokens)",
-            value: $viewModel.maxTokens,
-            in: 1...128_000,
-            step: 256
-        )
-        .accessibilityIdentifier("maxTokensStepper")
-
-        Button("Save Configuration") {
-            viewModel.saveConfiguration()
-        }
-        .accessibilityIdentifier("saveConfigButton")
-    }
-
-    private var consentToggle: some View {
-        Toggle("Allow AI data sharing", isOn: $viewModel.hasConsent)
-            .accessibilityIdentifier("consentToggle")
+        return "None"
     }
 }

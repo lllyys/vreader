@@ -85,6 +85,19 @@ actor ProviderProfileStore {
         await activeProfile()
     }
 
+    /// Atomic snapshot of the full list + active id, taken in a single
+    /// actor hop. Callers that read list state for UI rendering (e.g.
+    /// AISettingsViewModel.loadProfiles) MUST use this instead of pairing
+    /// `loadAll()` + `activeProfile()`, otherwise a concurrent mutation
+    /// between the two awaits can publish a list that doesn't agree with
+    /// the active id (Gate-4 WI-6a round-1 audit finding [1]).
+    func loadSnapshot() async -> (profiles: [ProviderProfile], activeID: UUID?) {
+        await ensureMigrated()
+        let profiles = DefaultProviderProfileMigrator.readProfiles(preferences: preferences)
+        let activeID = DefaultProviderProfileMigrator.readActiveID(preferences: preferences)
+        return (profiles, activeID)
+    }
+
     /// Inserts a new profile or replaces an existing one with the same id.
     func upsert(_ profile: ProviderProfile) async {
         await ensureMigrated()

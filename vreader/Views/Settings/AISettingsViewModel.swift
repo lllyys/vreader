@@ -1,20 +1,32 @@
-// Purpose: ViewModel for the AI Settings section.
-// Manages feature flag toggle, API key validation/persistence, consent state,
-// and AI configuration (model, temperature, base URL, max tokens).
+// Purpose: ViewModel for the AI Settings section. Manages global AI toggle,
+// consent state, and the saved-provider-profile list with one active selection.
+//
+// Feature #50 WI-6a: previously a single-profile VM (model/baseURL/apiKey
+// fields here, single AIConfigurationStore). Now a multi-profile VM backed
+// by the shared `ProviderProfileStore` actor. The editor sheet (add/edit
+// profile + API key + test-connection) lands in WI-6b.
 //
 // Key decisions:
-// - @Observable for SwiftUI binding (iOS 17+).
-// - Dependencies injected for testability (FeatureFlags, KeychainService, etc.).
-// - API key trimmed before validation and storage.
-// - Temperature clamped to 0.0–2.0, maxTokens clamped to 1–128_000.
-// - Base URL validated as parseable URL before saving.
-// - Saves configuration to AIConfigurationStore on explicit saveConfiguration() call.
+// - @Observable + @MainActor for SwiftUI binding (iOS 17+).
+// - Uses `ProviderProfileStore.shared` by default; tests inject a separate
+//   store via the init parameter (shared-instance contract from
+//   `ProviderProfileStore.swift` header).
+// - `loadProfiles()` triggers the lazy migration inside the store; the VM
+//   doesn't run migration itself.
+// - `deleteProfile(_:)` clears the per-profile keychain entry as well as
+//   the store entry — orphaned keychain rows would otherwise outlive the UI.
+// - Feature flag (`isAIEnabled`) and consent state remain stored locally
+//   on this VM; they're global, not per-profile. The stored-property +
+//   didSet write-through for `isAIEnabled` is bug #167's fix and must
+//   stay (see test `toggleNotifiesObservationTracker`).
 //
-// @coordinates-with: FeatureFlags.swift, KeychainService.swift,
-//   AIConsentManager.swift, AIConfigurationStore.swift
+// @coordinates-with: FeatureFlags.swift, AIConsentManager.swift,
+//   KeychainService+ProviderProfile.swift, ProviderProfileStore.swift,
+//   AIProviderListView.swift
 
 import Foundation
 import Observation
+import OSLog
 
 /// ViewModel for the AI settings screen.
 @Observable
@@ -26,34 +38,18 @@ final class AISettingsViewModel {
     private let featureFlags: FeatureFlags
     private let consentManager: AIConsentManager
     private let keychainService: KeychainService
-    private let configurationStore: AIConfigurationStore
+    private let profileStore: ProviderProfileStore
 
-    // MARK: - Published State
+    private static let log = Logger(subsystem: "com.vreader.app", category: "AISettings")
 
-    /// Whether the AI assistant feature flag is enabled.
-    ///
-    /// Bug #167: previously a pure get/set computed property delegating to
-    /// `FeatureFlags.isEnabled` / `setOverride`. The `@Observable` macro
-    /// only instruments stored properties — a computed property whose body
-    /// reads/writes a non-Observable class (FeatureFlags is a plain
-    /// `Sendable` class with `OSAllocatedUnfairLock` for cross-actor
-    /// safety) bypasses the observation registrar entirely. As a result,
-    /// toggling the AI Settings switch persisted the flag correctly but
-    /// did NOT notify SwiftUI to re-render, so the conditional
-    /// `if viewModel.isAIEnabled` block in `AISettingsSection` (API Key,
-    /// Provider Configuration, Data & Privacy) stayed hidden until the
-    /// app was killed and relaunched. Switching to a stored property with
-    /// a `didSet` write-through to FeatureFlags makes the property
-    /// observable while keeping FeatureFlags' Sendable concurrency
-    /// contract intact.
-    ///
-    /// The `oldValue != isAIEnabled` guard dedupes the *write-through* to
-    /// FeatureFlags (and the resulting UserDefaults write) on same-value
-    /// assignments — e.g. `@Bindable` re-binding the toggle to its own
-    /// state on view rebuild. Whether the `@Observable` runtime also
-    /// skips the observation notification for same-value stored-property
-    /// writes is an implementation detail and not a contract this code
-    /// relies on.
+    // MARK: - Global Toggles
+
+    /// Whether the AI assistant feature flag is enabled. Bug #167 fix:
+    /// stored property + didSet write-through (not a pure computed
+    /// property) so the @Observable macro instruments the storage and
+    /// SwiftUI re-renders dependent sections without an app relaunch.
+    /// The oldValue != isAIEnabled guard dedupes UserDefaults writes on
+    /// same-value reassignments from @Bindable view rebuilds.
     var isAIEnabled: Bool {
         didSet {
             guard oldValue != isAIEnabled else { return }
@@ -61,16 +57,8 @@ final class AISettingsViewModel {
         }
     }
 
-    /// The current API key input (not persisted until saveAPIKey() is called).
-    var apiKeyInput: String = ""
-
-    /// Error message for API key validation.
-    var apiKeyError: String?
-
-    /// Whether an API key is currently saved in the Keychain.
-    var isAPIKeySaved: Bool
-
-    /// Whether the user has granted AI data consent.
+    /// Whether the user has granted AI data consent. Pure pass-through to
+    /// AIConsentManager; the manager handles UserDefaults persistence.
     var hasConsent: Bool {
         get { consentManager.hasConsent }
         set {
@@ -82,143 +70,96 @@ final class AISettingsViewModel {
         }
     }
 
-    /// The AI model identifier.
-    var model: String
+    // MARK: - Profile List State
 
-    /// Sampling temperature (clamped to 0.0–2.0).
-    var temperature: Double
+    /// Current saved profiles, loaded on the most recent `loadProfiles()`.
+    /// Empty list before first load.
+    private(set) var profiles: [ProviderProfile] = []
 
-    /// Maximum response tokens (clamped to 1–128_000).
-    var maxTokens: Int
+    /// The id of the currently-active profile, or nil if none active.
+    private(set) var activeID: UUID?
 
-    /// The provider API base URL string.
-    var baseURL: String
-
-    /// Error message for base URL validation.
-    var baseURLError: String?
-
-    // MARK: - Constants
-
-    private static let temperatureRange: ClosedRange<Double> = 0.0...2.0
-    private static let maxTokensRange: ClosedRange<Int> = 1...128_000
+    /// Last error from a list operation. nil after a successful op.
+    var listError: String?
 
     // MARK: - Initialization
 
-    /// Creates an AI settings ViewModel with injected dependencies.
-    ///
-    /// - Parameters:
-    ///   - featureFlags: Feature flags instance (defaults to .shared).
-    ///   - consentManager: AI consent manager.
-    ///   - keychainService: Keychain storage for API key.
-    ///   - configurationStore: AI configuration persistence.
     init(
         featureFlags: FeatureFlags = .shared,
         consentManager: AIConsentManager = AIConsentManager(),
         keychainService: KeychainService = KeychainService(),
-        configurationStore: AIConfigurationStore = AIConfigurationStore()
+        profileStore: ProviderProfileStore = .shared
     ) {
         self.featureFlags = featureFlags
         self.consentManager = consentManager
         self.keychainService = keychainService
-        self.configurationStore = configurationStore
-
-        // Bug #167: seed `isAIEnabled` from FeatureFlags at init time so
-        // the storage starts in sync with the persisted flag. Reads after
-        // this point go through the @Observable-instrumented storage, not
-        // through FeatureFlags directly — the Settings sheet is the only
-        // writer to `aiAssistant`, so local mirror staleness isn't a
-        // concern in practice.
+        self.profileStore = profileStore
         self.isAIEnabled = featureFlags.isEnabled(.aiAssistant)
-
-        // Load existing API key state
-        let existingKey = try? keychainService.readString(
-            forAccount: AIService.apiKeyAccount
-        )
-        self.isAPIKeySaved = existingKey != nil && !(existingKey?.isEmpty ?? true)
-
-        // Load existing configuration
-        let config = configurationStore.load()
-        self.model = config.model
-        self.temperature = config.temperature
-        self.maxTokens = config.maxTokens
-        self.baseURL = config.endpoint.absoluteString
     }
 
-    // MARK: - API Key Management
+    // MARK: - Profile List Operations (WI-6a)
 
-    /// Validates and saves the API key to the Keychain.
-    /// Sets `apiKeyError` on validation failure.
-    func saveAPIKey() {
-        let trimmed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Loads the current profile list and active id from the store. The
+    /// store transparently runs the legacy → multi-profile migration on
+    /// its first read; callers don't need to invoke migration themselves.
+    ///
+    /// Round-1 audit finding [1]: uses `loadSnapshot()` (single actor
+    /// hop) instead of pairing `loadAll()` + `activeProfile()`, so a
+    /// concurrent mutation between two awaits can't publish a list that
+    /// disagrees with the active id.
+    func loadProfiles() async {
+        let snapshot = await profileStore.loadSnapshot()
+        profiles = snapshot.profiles
+        // Defensive: if the persisted active id no longer resolves to a
+        // present profile (the store permits this so unknown ids round-
+        // trip through `setActiveProfileID`), surface it to the UI as
+        // "no active selection" rather than dangling.
+        if let id = snapshot.activeID,
+           snapshot.profiles.contains(where: { $0.id == id }) {
+            activeID = id
+        } else {
+            activeID = nil
+        }
+        listError = nil
+    }
 
-        guard !trimmed.isEmpty else {
-            apiKeyError = "API key cannot be empty."
-            isAPIKeySaved = false
+    /// Sets the currently-active profile by id. Passing nil clears active.
+    /// Round-1 audit finding [2]: rejects ids not in the current profile
+    /// list rather than writing them and leaving the VM with a dangling
+    /// active id. The UI only renders rows from `profiles`, so an
+    /// unknown id always indicates a stale view or a programmer error.
+    func setActive(_ id: UUID?) async {
+        if let id, !profiles.contains(where: { $0.id == id }) {
+            // Don't write a dangling id to the store. The store would
+            // accept it, but `activeProfile()` would later resolve to nil
+            // and the VM's `activeID` would diverge from a meaningful row.
             return
         }
+        await profileStore.setActiveProfileID(id)
+        // Read back authoritatively from the store, not from the local id,
+        // so a concurrent delete that cleared active is reflected here.
+        let active = await profileStore.activeProfile()
+        activeID = active?.id
+        listError = nil
+    }
 
+    /// Removes the profile with the given id from the store AND deletes
+    /// its per-profile API key from the Keychain. Idempotent — removing
+    /// an unknown id is a no-op against both stores. If the removed
+    /// profile was active, the store clears the active id; this VM
+    /// reflects that by setting `activeID = nil` to match.
+    func deleteProfile(_ id: UUID) async {
+        await profileStore.remove(id: id)
         do {
-            try keychainService.saveString(trimmed, forAccount: AIService.apiKeyAccount)
-            apiKeyError = nil
-            isAPIKeySaved = true
+            try keychainService.deleteAPIKey(forProfile: id)
         } catch {
-            apiKeyError = "Failed to save API key: \(error.localizedDescription)"
-            isAPIKeySaved = false
+            // Keychain delete failures are surfaced but don't unwind the
+            // store remove — leaving the profile listed with no key is
+            // worse than an orphaned keychain row that costs ~32 bytes.
+            Self.log.error("deleteAPIKey(forProfile:) failed: \(String(describing: error), privacy: .public)")
+            listError = "Profile removed but its saved API key could not be cleared. You may need to delete it manually."
         }
-    }
-
-    /// Deletes the API key from the Keychain.
-    func deleteAPIKey() {
-        try? keychainService.delete(forAccount: AIService.apiKeyAccount)
-        isAPIKeySaved = false
-        apiKeyInput = ""
-        apiKeyError = nil
-    }
-
-    // MARK: - Configuration Management
-
-    /// Validates and saves the current configuration to the store.
-    /// Clamps temperature and maxTokens to valid ranges.
-    func saveConfiguration() {
-        // Clamp values
-        temperature = min(max(temperature, Self.temperatureRange.lowerBound),
-                          Self.temperatureRange.upperBound)
-        maxTokens = min(max(maxTokens, Self.maxTokensRange.lowerBound),
-                        Self.maxTokensRange.upperBound)
-
-        // Validate base URL
-        guard let url = URL(string: baseURL), !baseURL.isEmpty else {
-            baseURLError = "Please enter a valid URL."
-            return
-        }
-
-        // Check URL has a scheme
-        guard let scheme = url.scheme?.lowercased() else {
-            baseURLError = "URL must include a scheme (e.g., https://)."
-            return
-        }
-
-        // Require HTTPS; allow HTTP only for localhost/127.0.0.1/[::1]
-        if scheme == "http" {
-            let host = url.host?.lowercased() ?? ""
-            let isLocalhost = host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
-            if !isLocalhost {
-                baseURLError = "Only HTTPS URLs are allowed. HTTP is permitted only for localhost."
-                return
-            }
-        } else if scheme != "https" {
-            baseURLError = "URL must use HTTPS (or HTTP for localhost only)."
-            return
-        }
-
-        baseURLError = nil
-
-        let config = AIConfiguration(
-            model: model,
-            temperature: temperature,
-            endpoint: url,
-            maxTokens: maxTokens
-        )
-        configurationStore.save(config)
+        profiles.removeAll(where: { $0.id == id })
+        if activeID == id { activeID = nil }
     }
 }
