@@ -1,7 +1,6 @@
 // Purpose: AnthropicProvider — concrete `AIProvider` for the Anthropic
-// Messages API (feature #50 WI-3, non-streaming `sendRequest` only).
-// Streaming (`streamRequest`) ships in WI-4; this file ships a stub that
-// throws so accidental use surfaces clearly until WI-4 lands.
+// Messages API. `sendRequest` (non-streaming) shipped in feature #50
+// WI-3; `streamRequest` (SSE) shipped in WI-4.
 //
 // On-the-wire shape (from plan `dev-docs/plans/20260510-feature-50-...`):
 // - POST <baseURL>/v1/messages
@@ -42,7 +41,7 @@ struct AnthropicProvider: AIProvider, Sendable {
     let apiKey: String
     let model: String
     let maxTokens: Int
-    private let session: URLSession
+    let session: URLSession   // exposed for `AnthropicProvider+Streaming.swift`
 
     /// Anthropic Messages API version pin. Documented in the feature #50
     /// plan: the API requires a non-empty `anthropic-version` header and
@@ -104,21 +103,13 @@ struct AnthropicProvider: AIProvider, Sendable {
         )
     }
 
-    func streamRequest(_ request: AIRequest) -> AsyncThrowingStream<AIStreamChunk, Error> {
-        // WI-3 ships sendRequest only. Streaming (SSE `content_block_delta`
-        // parsing, `message_stop` sentinel, UTF-8 mid-byte buffering)
-        // lands in WI-4. Until then, throwing here surfaces accidental
-        // use clearly instead of silently no-op'ing.
-        AsyncThrowingStream { continuation in
-            continuation.finish(throwing: AIError.providerError(
-                "AnthropicProvider streaming is not yet implemented — comes in WI-4 of feature #50."
-            ))
-        }
-    }
+    // `streamRequest` lives in `AnthropicProvider+Streaming.swift` —
+    // SSE parsing + per-stream HTTP error-body buffering are isolated
+    // there to keep this file under the ~300-line convention.
 
     // MARK: - Request construction
 
-    private func buildURLRequest(for request: AIRequest, stream: Bool) throws -> URLRequest {
+    func buildURLRequest(for request: AIRequest, stream: Bool) throws -> URLRequest {
         // Anthropic requires `max_tokens >= 1` (per Messages API docs). We
         // validate here rather than at init so misconfigured profiles
         // surface as a clean `AIError` to UI instead of a precondition
@@ -200,7 +191,10 @@ struct AnthropicProvider: AIProvider, Sendable {
 
     // MARK: - Response validation
 
-    private func validateHTTPResponse(_ response: URLResponse, data: Data?) throws {
+    // `validateStreamingHTTPResponse` (with error-body buffering for
+    // non-2xx streaming responses) lives in `AnthropicProvider+Streaming.swift`.
+
+    func validateHTTPResponse(_ response: URLResponse, data: Data?) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AIError.networkError("Invalid response type")
         }

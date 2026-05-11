@@ -613,25 +613,7 @@ struct AnthropicProviderTests {
         #expect(AnthropicStubURLProtocol.capturedRequests.isEmpty, "Provider must not issue a request when maxTokens is invalid")
     }
 
-    // MARK: - streamRequest stub (WI-3 reserves WI-4 territory)
-
-    @Test func streamRequest_inWI3_returnsNotImplementedError() async throws {
-        let provider = makeProvider()
-        do {
-            for try await _ in provider.streamRequest(makeRequest()) {
-                Issue.record("WI-3 should NOT yield any stream chunks; streaming is WI-4")
-            }
-            Issue.record("Expected streamRequest to throw not-yet-implemented in WI-3")
-        } catch let error as AIError {
-            switch error {
-            case .providerError(let msg):
-                let lower = msg.lowercased()
-                #expect(lower.contains("wi-4") || lower.contains("not") || lower.contains("stream"), "Stub error must signal that streaming arrives in WI-4; got: \(msg)")
-            default:
-                Issue.record("Expected .providerError stub from WI-3 streamRequest, got \(error)")
-            }
-        } catch {
-            Issue.record("Expected AIError, got \(error)")
-        }
-    }
+    // Note: streamRequest behavior is covered by AnthropicProviderStreamingTests
+    // (WI-4 shipped the real SSE parser; the WI-3 "not-yet-implemented" stub
+    // assertion has been retired).
 }
