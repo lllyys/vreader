@@ -2,7 +2,9 @@
 // Provides clamped setters to enforce valid ranges and Codable for @AppStorage persistence.
 //
 // Key decisions:
-// - Font size range 12...32 (readable on phone to tablet).
+// - Font size range 12...64 (readable on phone to tablet; upper bound
+//   raised from 32 to 64 per bug #166 partial fix to give EPUB users
+//   headroom against book-stylesheet base-size compounding).
 // - Line spacing multiplier 1.0...2.0 (tight to very loose).
 // - Font family uses system fonts only (no custom font files).
 // - CJK spacing flag adds inter-character spacing for CJK text.
@@ -25,7 +27,18 @@ struct TypographySettings: Codable, Sendable, Equatable {
     // MARK: - Valid Ranges
 
     /// Allowed font size range (points).
-    static let fontSizeRange: ClosedRange<CGFloat> = 12...32
+    ///
+    /// Bug #166 (partial fix): the upper bound was 32pt, which users
+    /// reported as too small on EPUB — CSS `font-size` injection in
+    /// `EPUBReaderContainerView` compounds with the book's own stylesheet
+    /// base sizes, so 32pt often still renders smaller than the user
+    /// wants. Raised to 64pt so users have headroom to dial in a
+    /// comfortable size on EPUB without app-side per-renderer perceptual
+    /// calibration. The cross-format-consistency half of bug #166
+    /// (same numeric value rendering at different perceived sizes across
+    /// TXT/EPUB/PDF/AZW3/MD) remains feature-class scope and is NOT
+    /// addressed by this raise.
+    static let fontSizeRange: ClosedRange<CGFloat> = 12...64
 
     /// Allowed line spacing multiplier range.
     static let lineSpacingRange: ClosedRange<CGFloat> = 1.0...2.0

@@ -22,7 +22,20 @@ struct FoliateStyleMapperTests {
             fontSize: 32, lineHeight: 1.6,
             fontFamily: nil, textColor: nil, backgroundColor: nil
         )
-        #expect(css.contains("font-size: 32px"), "Must handle max font size")
+        #expect(css.contains("font-size: 32px"), "Must handle large font size")
+    }
+
+    /// Bug #166 (partial fix): app-side `TypographySettings.fontSizeRange`
+    /// upper bound raised from 32 to 64, and Foliate's own style mapper
+    /// sanitizes input to `8...72` (verified by Codex audit), so 64
+    /// passes through unchanged. Pin this so a future Foliate sanitizer
+    /// regression that drops the upper bound below 64 surfaces here.
+    @Test func themeCSSAcceptsAppMaxFontSize64() {
+        let css = FoliateStyleMapper.themeCSS(
+            fontSize: 64, lineHeight: 1.6,
+            fontFamily: nil, textColor: nil, backgroundColor: nil
+        )
+        #expect(css.contains("font-size: 64px"), "App's max font size (64pt per TypographySettings.fontSizeRange) must pass through Foliate's style mapper unchanged.")
     }
 
     @Test func themeCSSIncludesSmallFontSize() {
