@@ -31,6 +31,15 @@ private func makeLocator(
     )
 }
 
+/// Mock haptic provider that records triggerLightImpact calls.
+@MainActor
+private final class MockHapticFeedbackProvider: HapticFeedbackProviding {
+    private(set) var triggerCount = 0
+    func triggerLightImpact() { triggerCount += 1 }
+}
+
+private enum HandlerTestError: Error { case persistence }
+
 /// Concrete state carrier for tests.
 @MainActor
 private final class TestHandlerState: ReaderNotificationHandlerStateProtocol {
@@ -52,7 +61,8 @@ private func makeDeps(
     },
     sourceText: @MainActor @escaping () -> String? = { "Hello World" },
     makeCurrentLocator: @MainActor @escaping () -> Locator = { makeLocator() },
-    onNavigate: @MainActor @escaping (Int) -> Void = { _ in }
+    onNavigate: @MainActor @escaping (Int) -> Void = { _ in },
+    hapticFeedback: (any HapticFeedbackProviding)? = nil
 ) -> ReaderNotificationDeps {
     ReaderNotificationDeps(
         bookFingerprintKey: "test-key",
@@ -63,7 +73,8 @@ private func makeDeps(
         locatorFactory: locatorFactory,
         sourceText: sourceText,
         makeCurrentLocator: makeCurrentLocator,
-        onNavigate: onNavigate
+        onNavigate: onNavigate,
+        hapticFeedback: hapticFeedback
     )
 }
 
@@ -82,6 +93,22 @@ struct ReaderNotificationHandlerTests {
 
         let count = await bookmarks.addCallCount
         #expect(count == 1)
+    }
+
+    @Test @MainActor func handleBookmarkRequest_firesHaptic_onSuccess() async {
+        let haptic = MockHapticFeedbackProvider()
+        let deps = makeDeps(hapticFeedback: haptic)
+        await ReaderNotificationHandlers.handleBookmarkRequest(deps: deps)
+        #expect(haptic.triggerCount == 1, "haptic must fire once on successful bookmark add")
+    }
+
+    @Test @MainActor func handleBookmarkRequest_suppressesHaptic_onPersistenceFailure() async {
+        let haptic = MockHapticFeedbackProvider()
+        let bookmarks = MockBookmarkStore()
+        await bookmarks.setAddError(HandlerTestError.persistence)
+        let deps = makeDeps(bookmarks: bookmarks, hapticFeedback: haptic)
+        await ReaderNotificationHandlers.handleBookmarkRequest(deps: deps)
+        #expect(haptic.triggerCount == 0, "haptic must not fire when bookmark persistence throws")
     }
 
     // MARK: - Navigate

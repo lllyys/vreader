@@ -429,7 +429,8 @@ struct TXTReaderContainerView: View {
                 } else {
                     viewModel.updateScrollPosition(charOffsetUTF16: offset)
                 }
-            }
+            },
+            hapticFeedback: HapticFeedbackProvider()
         )
     }
 

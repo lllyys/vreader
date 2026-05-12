@@ -170,11 +170,14 @@ struct PDFReaderContainerView: View {
             let persistence = PersistenceActor(modelContainer: container)
             let locator = viewModel.makeCurrentLocator()
             Task {
-                try? await persistence.addBookmark(
-                    locator: locator,
-                    title: nil,
-                    toBookWithKey: viewModel.bookFingerprintKey
-                )
+                do {
+                    try await persistence.addBookmark(
+                        locator: locator,
+                        title: nil,
+                        toBookWithKey: viewModel.bookFingerprintKey
+                    )
+                    HapticFeedbackProvider().triggerLightImpact()
+                } catch {}
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerContentTapped)) { _ in

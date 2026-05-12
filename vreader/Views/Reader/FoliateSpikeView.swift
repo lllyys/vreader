@@ -3,6 +3,7 @@
 // This is the PROVEN approach that worked on device.
 
 import SwiftUI
+import SwiftData
 import WebKit
 
 struct FoliateSpikeView: View {
@@ -19,6 +20,7 @@ struct FoliateSpikeView: View {
     @State private var isBookReady = false
     @State private var bookTitle = ""
     @State private var errorMessage: String?
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         ZStack {
@@ -47,6 +49,26 @@ struct FoliateSpikeView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerBookmarkRequested)) { _ in
+            guard let key = fingerprintKey,
+                  let fp = DocumentFingerprint(canonicalKey: key) else { return }
+            let locator = Locator(bookFingerprint: fp,
+                                  href: nil, progression: nil, totalProgression: nil,
+                                  cfi: nil, page: nil, charOffsetUTF16: nil,
+                                  charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+                                  textQuote: nil, textContextBefore: nil, textContextAfter: nil)
+            let persistence = PersistenceActor(modelContainer: modelContext.container)
+            Task {
+                do {
+                    try await persistence.addBookmark(
+                        locator: locator,
+                        title: nil,
+                        toBookWithKey: key
+                    )
+                    HapticFeedbackProvider().triggerLightImpact()
+                } catch {}
             }
         }
     }
