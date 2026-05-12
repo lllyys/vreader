@@ -36,7 +36,7 @@ struct ReaderNotificationDeps {
     let bookmarkPersistence: any BookmarkPersisting
     let highlightPersistence: any HighlightPersisting
     let annotationPersistence: any AnnotationPersisting
-    let locatorFactory: @Sendable (DocumentFingerprint, Int, Int, String?) -> Locator?
+    let locatorFactory: @MainActor (DocumentFingerprint, Int, Int, String?) -> Locator?
     let sourceText: @MainActor () -> String?
     let makeCurrentLocator: @MainActor () -> Locator
     let onNavigate: @MainActor (Int) -> Void
@@ -49,7 +49,7 @@ struct ReaderNotificationDeps {
         bookmarkPersistence: any BookmarkPersisting,
         highlightPersistence: any HighlightPersisting,
         annotationPersistence: any AnnotationPersisting,
-        locatorFactory: @Sendable @escaping (DocumentFingerprint, Int, Int, String?) -> Locator?,
+        locatorFactory: @MainActor @escaping (DocumentFingerprint, Int, Int, String?) -> Locator?,
         sourceText: @MainActor @escaping () -> String?,
         makeCurrentLocator: @MainActor @escaping () -> Locator,
         onNavigate: @MainActor @escaping (Int) -> Void,

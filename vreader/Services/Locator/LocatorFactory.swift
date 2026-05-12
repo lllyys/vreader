@@ -149,6 +149,43 @@ enum LocatorFactory {
         )
     }
 
+    // MARK: - TXT Chapter Range
+
+    /// Creates a locator for a selection within a specific TXT chapter.
+    /// Translates chapter-local UTF-16 offsets to global offsets via `chapterGlobalStart`.
+    /// Extracts quote/context from chapter text at the chapter-local offsets.
+    ///
+    /// Returns `nil` when: range is inverted, `chapterLocalStart < 0`, `chapterGlobalStart < 0`,
+    /// or `chapterLocalEnd > chapterText.utf16.count`.
+    static func txtChapterRange(
+        fingerprint: DocumentFingerprint,
+        chapterLocalStart: Int,
+        chapterLocalEnd: Int,
+        chapterText: String,
+        chapterGlobalStart: Int
+    ) -> Locator? {
+        guard chapterLocalStart >= 0,
+              chapterGlobalStart >= 0,
+              chapterLocalEnd >= chapterLocalStart,
+              chapterLocalEnd <= chapterText.utf16.count else { return nil }
+
+        let globalStart = chapterGlobalStart + chapterLocalStart
+        let globalEnd = chapterGlobalStart + chapterLocalEnd
+        let length = chapterLocalEnd - chapterLocalStart
+
+        let ctx = extractContext(from: chapterText, at: chapterLocalStart, length: length)
+
+        return Locator.validated(
+            bookFingerprint: fingerprint,
+            charOffsetUTF16: globalStart,
+            charRangeStartUTF16: globalStart,
+            charRangeEndUTF16: globalEnd,
+            textQuote: nonEmpty(ctx.quote),
+            textContextBefore: nonEmpty(ctx.contextBefore),
+            textContextAfter: nonEmpty(ctx.contextAfter)
+        )
+    }
+
     // MARK: - MD Position (alias for TXT offset logic on rendered text)
 
     /// Creates a locator for an MD cursor position in rendered text.

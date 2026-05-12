@@ -410,8 +410,18 @@ struct TXTReaderContainerView: View {
             bookmarkPersistence: container.map { PersistenceActor(modelContainer: $0) } ?? NoOpBookmarkStore(),
             highlightPersistence: container.map { PersistenceActor(modelContainer: $0) } ?? NoOpHighlightStore(),
             annotationPersistence: container.map { PersistenceActor(modelContainer: $0) } ?? NoOpAnnotationStore(),
-            locatorFactory: { fp, start, end, text in
-                LocatorFactory.txtRange(fingerprint: fp, charRangeStartUTF16: start, charRangeEndUTF16: end, sourceText: text)
+            locatorFactory: { [viewModel] fp, start, end, _ in
+                let chapters = viewModel.chapterIndex?.chapters ?? []
+                let idx = viewModel.currentChapterIdx
+                let chapter = idx >= 0 && idx < chapters.count ? chapters[idx] : nil
+                return Self.makeLocatorForTXT(
+                    fingerprint: fp,
+                    localStart: start,
+                    localEnd: end,
+                    chapterText: viewModel.currentChapterText,
+                    chapterGlobalStart: chapter?.globalStartUTF16 ?? 0,
+                    isChapterMode: viewModel.isChapterMode
+                )
             },
             sourceText: { [viewModel] in viewModel.textContent },
             makeCurrentLocator: { [viewModel] in viewModel.makeLocator() },
@@ -604,6 +614,36 @@ struct TXTReaderContainerView: View {
             chapterIndex: chapterIndex,
             chapters: chapters
         )
+    }
+
+    /// WI-3: Builds a Locator from a selection notification.
+    /// In chapter mode, translates chapter-local offsets to global via txtChapterRange.
+    /// In continuous mode, delegates directly to txtRange.
+    /// Extracted as a static seam for unit testability (mirrors WI-2's chapterScrubberGlobalOffset pattern).
+    static func makeLocatorForTXT(
+        fingerprint: DocumentFingerprint,
+        localStart: Int,
+        localEnd: Int,
+        chapterText: String?,
+        chapterGlobalStart: Int,
+        isChapterMode: Bool
+    ) -> Locator? {
+        if isChapterMode {
+            guard let text = chapterText else { return nil }
+            return LocatorFactory.txtChapterRange(
+                fingerprint: fingerprint,
+                chapterLocalStart: localStart,
+                chapterLocalEnd: localEnd,
+                chapterText: text,
+                chapterGlobalStart: chapterGlobalStart
+            )
+        } else {
+            return LocatorFactory.txtRange(
+                fingerprint: fingerprint,
+                charRangeStartUTF16: localStart,
+                charRangeEndUTF16: localEnd
+            )
+        }
     }
 
     /// Finds the chunk index containing the given character offset.
