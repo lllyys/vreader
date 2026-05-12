@@ -3,14 +3,21 @@
 // the Contents tab in the annotations panel renders TOC entries (not the
 // empty-state placeholder).
 //
-// Seed: .books (bundled fixtures — war-and-peace.txt has chapter markers).
+// Seed: .warAndPeace — seeds the real war-and-peace.txt fixture with
+// actual chapter markers, so TOC generation can run against real content.
+// The .books seed used in WI-2's initial pass only inserts metadata-only
+// BookRecord stubs (no backing file content), so tapping a book there
+// can't trigger TOC generation. See feature-cron 2026-05-13 follow-up
+// patch.
 //
 // Notes:
-// - The detection rule for "Chapter N" English numerals may or may not be
-//   among the 14/25 enabled Legado rules. When the rule is disabled, the
-//   panel renders `tocEmptyState`. We treat that as XCTSkip (fixture/rule
-//   mismatch) rather than fail — the contract under test is the rendering
-//   path, not whether English rules are enabled.
+// - The detection rule for "Chapter N" English numerals is `TXTTocRuleEngine`
+//   rule #3 ("英文Chapter/Section/Part"), enabled=true. The regex
+//   `^[ \t]{0,4}(?:[Cc]hapter|[Ss]ection|[Pp]art|[Ee]pisode)\s{0,4}\d{1,4}.{0,30}$`
+//   matches the "Chapter 1", "Chapter 2", "Chapter 3" lines in the fixture.
+// - If the rule is later disabled, the populated test XCTSkips rather
+//   than fails — the contract under test is the rendering path, not the
+//   rule policy.
 // - The navigation test taps the first TOC row and confirms the reader
 //   stays loaded; we don't assert a specific scroll offset because the
 //   fixture is short and may be on a single page.
@@ -26,7 +33,7 @@ final class Feature23TXTTocVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .books, resetPreferences: true)
+        app = launchApp(seed: .warAndPeace, resetPreferences: true)
     }
 
     override func tearDownWithError() throws {
