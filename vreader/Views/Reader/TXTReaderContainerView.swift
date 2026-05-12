@@ -487,15 +487,21 @@ struct TXTReaderContainerView: View {
         text: String,
         attributedText: NSAttributedString
     ) -> some View {
+        let highlights = Self.chapterLocalHighlightRanges(
+            persistedGlobalRanges: uiState.persistedHighlightRanges,
+            tempGlobalRange: uiState.highlightRange,
+            chapterIndex: viewModel.currentChapterIdx,
+            chapters: viewModel.chapterIndex?.chapters ?? []
+        )
         TXTTextViewBridge(
             text: text,
             attributedText: attributedText,
             config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
-            restoreOffset: initialRestoreOffset, // GH #30: chapter-local offset for scroll restore
-            scrollToOffset: uiState.scrollToOffset, // Scrubber seek within chapter
-            highlightRange: nil, // Highlight offset translation is WI-7
-            highlightIsTemporary: true,
-            persistedHighlights: [], // Highlight mapping is WI-7
+            restoreOffset: initialRestoreOffset,
+            scrollToOffset: uiState.scrollToOffset,
+            highlightRange: highlights.temp,
+            highlightIsTemporary: uiState.highlightIsTemporary,
+            persistedHighlights: highlights.persisted,
             delegate: viewModel
         )
         .ignoresSafeArea(edges: .bottom)
@@ -530,6 +536,32 @@ struct TXTReaderContainerView: View {
         )
         .ignoresSafeArea(edges: .bottom)
         .accessibilityIdentifier("txtReaderChunkedContent")
+    }
+
+    /// WI-1: Translates global highlight ranges to chapter-local for TXTTextViewBridge rendering.
+    /// Persisted ranges are filtered and clipped to the chapter; the temp range is treated the
+    /// same way (wrapped + clipped, unwrapped to a single NSRange or nil).
+    /// Returns ([], nil) when chapterIndex is out of bounds — acts as the nil-chapterIndex guard
+    /// (chapterReaderContent is only called when chapterIndex != nil, but defensively handled).
+    static func chapterLocalHighlightRanges(
+        persistedGlobalRanges: [NSRange],
+        tempGlobalRange: NSRange?,
+        chapterIndex: Int,
+        chapters: [TXTChapter]
+    ) -> (persisted: [NSRange], temp: NSRange?) {
+        let persisted = TXTChapterHighlightHelper.highlightsForChapter(
+            chapterIndex: chapterIndex,
+            chapters: chapters,
+            persistedGlobalRanges: persistedGlobalRanges
+        )
+        let temp: NSRange? = tempGlobalRange.flatMap {
+            TXTChapterHighlightHelper.highlightsForChapter(
+                chapterIndex: chapterIndex,
+                chapters: chapters,
+                persistedGlobalRanges: [$0]
+            ).first
+        }
+        return (persisted, temp)
     }
 
     /// Finds the chunk index containing the given character offset.
