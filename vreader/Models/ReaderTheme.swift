@@ -119,7 +119,7 @@ enum ReaderTheme: String, Codable, CaseIterable, Sendable {
           overflow-wrap: break-word; \
         }\
         body { \
-          padding: 0 16px !important; \
+          padding: 2em 16px !important; \
           margin: 0 !important; \
         }\
         p, div, span, li, td, th, dd, dt, blockquote, figcaption { \

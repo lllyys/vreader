@@ -243,6 +243,81 @@ struct ReaderThemeTests {
                 "body * sweep must force font-family inheritance to beat any per-element book CSS")
     }
 
+    // Feature #49: EPUB chapter top/bottom padding.
+    //
+    // The body rule injects `padding: 2em 16px !important`. Theme CSS is
+    // generated per-theme call in `EPUBWebViewBridgeCoordinator`, so all
+    // three themes must produce the same padding declaration.
+    //
+    // Tests follow the block-extraction pattern (find `body {`, brace-match
+    // to `}`, search within) instead of a brittle whole-string `contains()`,
+    // so a future reformat of the CSS literal doesn't break the assertions.
+
+    /// Extract the declarations inside the standalone `body { ... }` rule
+    /// block from a CSS string (NOT the `html, body { ... }` block before
+    /// it, and NOT the `body * { ... }` sweep after it). Returns nil if
+    /// the rule isn't present or the braces don't match.
+    ///
+    /// The matcher walks past the `html, body { ... }` block first, then
+    /// anchors on the next `body {` occurrence. This is robust against
+    /// CSS reformatting that adds whitespace or newlines between rule
+    /// blocks (the original `}body {` anchor depended on exact adjacency).
+    private func extractBodyRuleBlock(_ css: String) -> Substring? {
+        // Find the end of the `html, body { ... }` block — skip it so we
+        // don't accidentally match `body` inside that selector.
+        guard let htmlBody = css.range(of: "html, body {") else { return nil }
+        guard let htmlBodyClose = css[htmlBody.upperBound...].range(of: "}") else { return nil }
+        // From there, find the next `body {` — that's the standalone rule.
+        // `body * {` doesn't match because `body {` requires the space
+        // immediately before the brace.
+        let afterHtmlBody = htmlBodyClose.upperBound
+        guard let bodyRule = css[afterHtmlBody...].range(of: "body {") else { return nil }
+        // Return everything between the body rule's `{` and its matching `}`
+        // (CSS literal has no nested braces inside this rule).
+        guard let bodyClose = css[bodyRule.upperBound...].range(of: "}") else { return nil }
+        return css[bodyRule.upperBound..<bodyClose.lowerBound]
+    }
+
+    @Test func epubCSSAppliesVerticalBodyPadding_allThemes() {
+        // Feature #49 acceptance criterion (d): all three themes render
+        // consistently. Verified by asserting each theme's body rule has
+        // the new vertical padding.
+        for theme in ReaderTheme.allCases {
+            let css = theme.epubOverrideCSS(fontSize: 18)
+            guard let body = extractBodyRuleBlock(css) else {
+                Issue.record("\(theme.rawValue) CSS missing 'body {' rule")
+                continue
+            }
+            #expect(body.contains("2em"),
+                    "\(theme.rawValue) body rule must include 2em (vertical padding)")
+            #expect(body.contains("16px"),
+                    "\(theme.rawValue) body rule must preserve 16px horizontal padding")
+            #expect(body.contains("!important"),
+                    "\(theme.rawValue) body padding must be !important to beat normal author CSS")
+        }
+    }
+
+    @Test func epubCSSDoesNotRetainOldZeroVerticalPadding() {
+        // Regression guard: a sloppy partial edit could leave the old
+        // `padding: 0 16px` declaration somewhere in the CSS string.
+        for theme in ReaderTheme.allCases {
+            let css = theme.epubOverrideCSS(fontSize: 18)
+            #expect(!css.contains("padding: 0 16px"),
+                    "\(theme.rawValue) CSS must NOT contain the old 'padding: 0 16px' declaration")
+        }
+    }
+
+    @Test func epubCSSPreservesHorizontal16pxInBodyPadding() {
+        // Axis-of-change guard: feature #49 changes the vertical axis only.
+        // The 16px horizontal margin existed pre-fix and must remain.
+        let css = ReaderTheme.light.epubOverrideCSS(fontSize: 18)
+        guard let body = extractBodyRuleBlock(css) else {
+            Issue.record("light CSS missing 'body {' rule"); return
+        }
+        #expect(body.contains("16px"),
+                "Body padding must retain the 16px horizontal value (only the vertical axis changes from 0 → 2em)")
+    }
+
     @Test func epubCSSPinsPreCodeToMonospaceStack() {
         // Semantic monospace for code/pre/samp/kbd must stay legible
         // regardless of the user's body-font choice. Verify the rule
