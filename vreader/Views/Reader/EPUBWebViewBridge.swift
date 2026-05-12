@@ -259,11 +259,23 @@ struct EPUBWebViewBridge: UIViewRepresentable {
             }
         } else if let fraction = scrollFraction,
                   fraction != context.coordinator.pendingScrollFraction {
-            // Same URL but scroll fraction changed — scroll immediately via JS
+            // Same URL but scroll fraction changed — scroll immediately via JS.
+            // Bug #163 (reopen): fraction ≤ 0 means "chapter top" — use native
+            // contentOffset instead of JS scrollTo(0,0) so the safe-area inset
+            // is respected. JS window.scrollTo(0,0) sets document scrollTop=0,
+            // which maps to UIScrollView contentOffset.y=0 (not -safeAreaTopInset),
+            // undoing the chapter-top safe-area positioning.
             context.coordinator.pendingScrollFraction = fraction
-            let js = Self.scrollToFractionJS(fraction)
-            webView.evaluateJavaScript(js) { _, error in
-                if let error { AppLogger.epub.error("scroll error: \(error)") }
+            if fraction <= 0 {
+                Self.applyInitialContentOffset(
+                    to: webView.scrollView,
+                    topInset: context.coordinator.safeAreaTopInset
+                )
+            } else {
+                let js = Self.scrollToFractionJS(fraction)
+                webView.evaluateJavaScript(js) { _, error in
+                    if let error { AppLogger.epub.error("scroll error: \(error)") }
+                }
             }
         } else if context.coordinator.themeCSS != themeCSS {
             // Theme changed without URL change — inject or remove CSS live

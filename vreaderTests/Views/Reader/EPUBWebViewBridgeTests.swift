@@ -284,4 +284,71 @@ struct EPUBPaginationHelperSafeAreaTests {
         #expect(effective == 0)
     }
 }
+
+// MARK: - Bug #163 (reopen) — Initial content offset after page load
+
+/// Bug #163 was REOPENED because `applySafeAreaTopInset` correctly sets
+/// `contentInset.top` but WKWebView resets `contentOffset` to `.zero` after
+/// every `loadFileURL` call. With contentInset.top = 59 and contentOffset.y = 0,
+/// the content's first line sits at screen y=0 — behind the Dynamic Island.
+/// Fix: `applyInitialContentOffset(to:topInset:)` resets contentOffset.y to
+/// -topInset so document y=0 lands just below the DI.
+@Suite("EPUBWebViewBridge - applyInitialContentOffset (bug #163 reopen)")
+struct EPUBWebViewBridgeInitialContentOffsetTests {
+
+    @MainActor
+    @Test("applyInitialContentOffset sets contentOffset.y to -topInset")
+    func applyWritesNegativeInsetAsOffset() {
+        let scrollView = UIScrollView()
+        scrollView.contentOffset = .zero
+
+        EPUBWebViewBridge.applyInitialContentOffset(to: scrollView, topInset: 59)
+        #expect(scrollView.contentOffset.y == -59,
+                "contentOffset.y must be -59 so document y=0 appears at screen y=59 (just below the Dynamic Island)")
+    }
+
+    @MainActor
+    @Test("applyInitialContentOffset resets x to 0 for chapter-top position")
+    func applyResetsHorizontalOffsetToZero() {
+        let scrollView = UIScrollView()
+        scrollView.contentOffset = CGPoint(x: 100, y: 0)
+
+        EPUBWebViewBridge.applyInitialContentOffset(to: scrollView, topInset: 59)
+        #expect(scrollView.contentOffset.x == 0,
+                "x offset must be reset to 0 — chapter top means no horizontal scroll")
+    }
+
+    @MainActor
+    @Test("applyInitialContentOffset with 0 topInset leaves offset at origin (no-notch device)")
+    func applyWithZeroInsetLeavesOffsetAtZero() {
+        let scrollView = UIScrollView()
+        scrollView.contentOffset = .zero
+
+        EPUBWebViewBridge.applyInitialContentOffset(to: scrollView, topInset: 0)
+        #expect(scrollView.contentOffset.y == 0,
+                "On no-notch devices (topInset=0), contentOffset.y must stay at 0 — no negative shift")
+    }
+
+    @MainActor
+    @Test("applyInitialContentOffset does not change contentInset")
+    func applyDoesNotModifyContentInset() {
+        let scrollView = UIScrollView()
+        scrollView.contentInset = UIEdgeInsets(top: 59, left: 0, bottom: 0, right: 0)
+
+        EPUBWebViewBridge.applyInitialContentOffset(to: scrollView, topInset: 59)
+        #expect(scrollView.contentInset.top == 59,
+                "contentInset must not be modified — that is applySafeAreaTopInset's job")
+    }
+
+    @MainActor
+    @Test("applyInitialContentOffset negative topInset clamps to offset 0")
+    func applyNegativeInsetClampsOffsetToZero() {
+        let scrollView = UIScrollView()
+        scrollView.contentOffset = .zero
+
+        EPUBWebViewBridge.applyInitialContentOffset(to: scrollView, topInset: -10)
+        #expect(scrollView.contentOffset.y == 0,
+                "Negative inset is invalid; offset must clamp to 0 so content doesn't overshoot above the top chrome")
+    }
+}
 #endif

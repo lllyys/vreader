@@ -201,10 +201,31 @@ extension EPUBWebViewBridge {
                 if let fraction = pendingScrollFraction, fraction > 0 {
                     pendingScrollFraction = nil
                     let scrollJS = EPUBWebViewBridge.scrollToFractionJS(fraction)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    // URL-guard: no-op if a new chapter loaded before the 0.15s
+                    // delay fires (same stale-load hazard as the chapter-top branch).
+                    let expectedURL = currentURL
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self, weak webView] in
+                        guard self != nil, let webView else { return }
+                        guard self?.currentURL == expectedURL else { return }
                         webView.evaluateJavaScript(scrollJS) { _, error in
                             if let error { AppLogger.epub.error("scroll error: \(error)") }
                         }
+                    }
+                } else {
+                    // Bug #163 (reopen): WKWebView resets contentOffset to .zero after
+                    // every loadFileURL. With contentInset.top = safeAreaTopInset, the
+                    // correct chapter-top offset is -safeAreaTopInset so document y=0
+                    // sits just below the Dynamic Island, not clipped behind it.
+                    // URL-guard: capture the URL at didFinish time and no-op if a
+                    // subsequent load has already changed currentURL before the 0.05s
+                    // delay fires (prevents stale resets on rapid chapter navigation).
+                    pendingScrollFraction = nil
+                    let inset = safeAreaTopInset
+                    let expectedURL = currentURL
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak webView] in
+                        guard let self, let scrollView = webView?.scrollView else { return }
+                        guard self.currentURL == expectedURL else { return }
+                        EPUBWebViewBridge.applyInitialContentOffset(to: scrollView, topInset: inset)
                     }
                 }
             }

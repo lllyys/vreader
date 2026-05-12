@@ -51,6 +51,20 @@ extension EPUBWebViewBridge {
         scrollView.verticalScrollIndicatorInsets.top = clamped
     }
 
+    // MARK: - Initial Content Offset (bug #163 reopen)
+
+    /// Bug #163 (reopen): `applySafeAreaTopInset` sets `contentInset.top` once,
+    /// but WKWebView resets `contentOffset` to `.zero` after every `loadFileURL`.
+    /// With contentInset.top = safeAreaTopInset and contentOffset.y = 0, content
+    /// y=0 is positioned at screen y=0 — behind the Dynamic Island.
+    /// Calling this seam after page load resets contentOffset.y to -topInset so
+    /// document y=0 appears at screen y=topInset, just below the DI.
+    /// Negative topInset clamps to 0 (no overshoot on zero-inset devices).
+    static func applyInitialContentOffset(to scrollView: UIScrollView, topInset: CGFloat) {
+        let clamped = max(topInset, 0)
+        scrollView.contentOffset = CGPoint(x: 0, y: -clamped)
+    }
+
     // MARK: - Scroll to Fraction
 
     /// Generates JavaScript that scrolls the page to a vertical fraction (0.0-1.0).
