@@ -184,8 +184,10 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // + `scrollRangeToVisible` safety net) so search-result navigation lands
         // the matched text comfortably inside the viewport — distinct from the
         // saved-position restore path, which is purposely top-edge.
+        // Reset dedupe on text/attr identity change only; config-only changes (font/theme)
+        // must not re-arm scroll — that would jump the user back to a stale search target.
         if Self.shouldScroll(to: scrollToOffset, lastTarget: context.coordinator.lastScrollToTarget,
-                             sourceChanged: sourceChanged),
+                             sourceChanged: textChanged || attrChanged),
            let target = scrollToOffset {
             context.coordinator.lastScrollToTarget = target
             let textLength = (textView.text as NSString?)?.length ?? 0

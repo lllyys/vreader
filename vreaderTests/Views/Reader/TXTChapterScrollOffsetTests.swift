@@ -89,6 +89,52 @@ struct TXTChapterScrollOffsetTests {
                 "ch0 globalStart=0: translation must be identity — local equals global")
     }
 
+    @Test("chapterScrubberGlobalOffset: seekValue=1.0 clamps to last valid index (chapterEnd-1)")
+    func chapterScrubberSeekValue1ClampsToBound() {
+        let chapter = TXTChapter(index: 0, title: "Ch0", startByte: 0, endByte: 1000,
+                                 globalStartUTF16: 0, textLengthUTF16: 1000)
+        let result = TXTReaderContainerView.chapterScrubberGlobalOffset(seekValue: 1.0, chapter: chapter)
+        #expect(result == 999, "seekValue=1.0 must clamp to length-1 (999) to stay inside half-open interval")
+    }
+
+    @Test("chapterScrubberGlobalOffset: seekValue=0.0 returns globalStart")
+    func chapterScrubberSeekValue0ReturnsStart() {
+        let chapter = TXTChapter(index: 0, title: "Ch0", startByte: 0, endByte: 1000,
+                                 globalStartUTF16: 500, textLengthUTF16: 1000)
+        let result = TXTReaderContainerView.chapterScrubberGlobalOffset(seekValue: 0.0, chapter: chapter)
+        #expect(result == 500, "seekValue=0.0 must return globalStart")
+    }
+
+    @Test("chapterScrubberGlobalOffset: zero-length chapter returns globalStart")
+    func chapterScrubberZeroLengthReturnsStart() {
+        let chapter = TXTChapter(index: 0, title: "Ch0", startByte: 0, endByte: 0,
+                                 globalStartUTF16: 200, textLengthUTF16: 0)
+        let result = TXTReaderContainerView.chapterScrubberGlobalOffset(seekValue: 0.5, chapter: chapter)
+        #expect(result == 200, "zero-length chapter must return globalStart to avoid underflow")
+    }
+
+    @Test("chapterLocalScrollOffset: globalOffset == chapterEnd is nil (boundary is exclusive)")
+    func chapterModeDropsOffsetAtExactChapterEnd() {
+        // ch1 end = 1000 + 1500 = 2500; offset 2500 is ch2 start — not in ch1
+        let result = TXTReaderContainerView.chapterLocalScrollOffset(
+            globalOffset: 2500,
+            chapterIndex: 1,
+            chapters: Self.chapters3
+        )
+        #expect(result == nil, "globalOffset == chapterEnd must be nil (half-open interval)")
+    }
+
+    @Test("chapterLocalScrollOffset: globalOffset == chapterEnd-1 is valid (last unit in chapter)")
+    func chapterModeAcceptsLastOffsetInChapter() {
+        // ch1 end = 2500; offset 2499 is the last valid unit in ch1 → local 2499-1000 = 1499
+        let result = TXTReaderContainerView.chapterLocalScrollOffset(
+            globalOffset: 2499,
+            chapterIndex: 1,
+            chapters: Self.chapters3
+        )
+        #expect(result == 1499, "globalOffset == chapterEnd-1 must be accepted as local 1499")
+    }
+
     // MARK: - Part 2c: bridge scroll-dedupe reset on source text change
 
     @Test("TXTTextViewBridge.shouldScroll: source change resets dedupe — same target scrolls again")
@@ -112,6 +158,12 @@ struct TXTChapterScrollOffsetTests {
         #expect(
             TXTTextViewBridge.shouldScroll(to: nil, lastTarget: 50, sourceChanged: true) == false,
             "nil scroll target must never scroll"
+        )
+        // Config-only change (font/theme): callers should pass sourceChanged=false for configChanged-only;
+        // same target must be deduped so font-size changes don't jump user back to stale search target.
+        #expect(
+            TXTTextViewBridge.shouldScroll(to: 50, lastTarget: 50, sourceChanged: false) == false,
+            "config-only change (sourceChanged=false) must not re-arm scroll for same target"
         )
     }
 }

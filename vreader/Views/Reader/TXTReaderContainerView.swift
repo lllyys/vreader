@@ -576,8 +576,12 @@ struct TXTReaderContainerView: View {
 
     /// WI-2 Part 2a: Computes the global scroll target for the chapter-mode scrubber.
     /// Extracted as a static seam so the pure arithmetic is unit-testable.
+    /// Clamped to [globalStart, globalStart + length - 1] so seekValue=1.0 stays inside
+    /// the half-open chapter interval used by chapterLocalScrollOffset.
     static func chapterScrubberGlobalOffset(seekValue: Double, chapter: TXTChapter) -> Int {
-        chapter.globalStartUTF16 + Int(seekValue * Double(chapter.textLengthUTF16))
+        let length = chapter.textLengthUTF16
+        guard length > 0 else { return chapter.globalStartUTF16 }
+        return chapter.globalStartUTF16 + min(Int(seekValue * Double(length)), length - 1)
     }
 
     /// WI-2 Part 2b: Translates a global scroll offset to chapter-local for bridge delivery.
