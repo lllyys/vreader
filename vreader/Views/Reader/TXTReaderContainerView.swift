@@ -156,9 +156,12 @@ struct TXTReaderContainerView: View {
                         ReadingProgressBar(
                             progress: $chapterScrollFraction,
                             onSeek: { seekValue in
-                                let chLen = viewModel.currentChapterText?.utf16.count ?? 0
-                                let charOffset = Int(seekValue * Double(chLen))
-                                uiState.scrollToOffset = charOffset
+                                guard let chapters = viewModel.chapterIndex?.chapters,
+                                      viewModel.currentChapterIdx < chapters.count else { return }
+                                let chapter = chapters[viewModel.currentChapterIdx]
+                                uiState.scrollToOffset = Self.chapterScrubberGlobalOffset(
+                                    seekValue: seekValue, chapter: chapter
+                                )
                             },
                             isVisible: (viewModel.currentChapterText?.utf16.count ?? 0) > 0,
                             label: ScrollProgressHelper.percentageLabel(chapterScrollFraction),
@@ -494,12 +497,18 @@ struct TXTReaderContainerView: View {
             chapterIndex: viewModel.currentChapterIdx,
             chapters: viewModel.chapterIndex?.chapters ?? []
         )
+        let chapters = viewModel.chapterIndex?.chapters ?? []
+        let localScrollOffset = Self.chapterLocalScrollOffset(
+            globalOffset: uiState.scrollToOffset,
+            chapterIndex: viewModel.currentChapterIdx,
+            chapters: chapters
+        )
         TXTTextViewBridge(
             text: text,
             attributedText: attributedText,
             config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
             restoreOffset: initialRestoreOffset,
-            scrollToOffset: uiState.scrollToOffset,
+            scrollToOffset: localScrollOffset,
             highlightRange: highlights.temp,
             highlightIsTemporary: uiState.highlightIsTemporary,
             persistedHighlights: highlights.persisted,
@@ -563,6 +572,34 @@ struct TXTReaderContainerView: View {
             ).first
         }
         return (persisted, temp)
+    }
+
+    /// WI-2 Part 2a: Computes the global scroll target for the chapter-mode scrubber.
+    /// Extracted as a static seam so the pure arithmetic is unit-testable.
+    static func chapterScrubberGlobalOffset(seekValue: Double, chapter: TXTChapter) -> Int {
+        chapter.globalStartUTF16 + Int(seekValue * Double(chapter.textLengthUTF16))
+    }
+
+    /// WI-2 Part 2b: Translates a global scroll offset to chapter-local for bridge delivery.
+    /// Returns nil when globalOffset is nil, when chapters is empty, or when the global
+    /// offset falls outside the current chapter's range (cross-chapter targets are handled
+    /// by the navigation path; the new render cycle handles the post-swap scroll).
+    static func chapterLocalScrollOffset(
+        globalOffset: Int?,
+        chapterIndex: Int,
+        chapters: [TXTChapter]
+    ) -> Int? {
+        guard let global = globalOffset,
+              chapterIndex >= 0, chapterIndex < chapters.count else { return nil }
+        let chapter = chapters[chapterIndex]
+        guard chapter.globalStartUTF16 >= 0, chapter.textLengthUTF16 >= 0 else { return nil }
+        let chapterEnd = chapter.globalStartUTF16 + chapter.textLengthUTF16
+        guard global >= chapter.globalStartUTF16, global < chapterEnd else { return nil }
+        return TXTChapterHighlightHelper.toChapterLocalOffset(
+            globalUTF16: global,
+            chapterIndex: chapterIndex,
+            chapters: chapters
+        )
     }
 
     /// Finds the chunk index containing the given character offset.

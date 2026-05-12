@@ -184,8 +184,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // + `scrollRangeToVisible` safety net) so search-result navigation lands
         // the matched text comfortably inside the viewport — distinct from the
         // saved-position restore path, which is purposely top-edge.
-        if let target = scrollToOffset,
-           target != context.coordinator.lastScrollToTarget {
+        if Self.shouldScroll(to: scrollToOffset, lastTarget: context.coordinator.lastScrollToTarget,
+                             sourceChanged: sourceChanged),
+           let target = scrollToOffset {
             context.coordinator.lastScrollToTarget = target
             let textLength = (textView.text as NSString?)?.length ?? 0
             if textLength > 0 {
@@ -207,6 +208,17 @@ struct TXTTextViewBridge: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(delegate: delegate, config: config)
+    }
+
+    // MARK: - Static seams (testable)
+
+    /// WI-2 Part 2c: determines whether a scroll should fire given the current dedupe state.
+    /// When `sourceChanged` is true the coordinator's last target is treated as nil so that
+    /// two different chapters sharing the same chapter-local Int both trigger a scroll.
+    static func shouldScroll(to target: Int?, lastTarget: Int?, sourceChanged: Bool) -> Bool {
+        guard let target else { return false }
+        let effectiveLast: Int? = sourceChanged ? nil : lastTarget
+        return target != effectiveLast
     }
 
     // MARK: - Private
