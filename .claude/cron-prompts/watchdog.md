@@ -9,10 +9,10 @@ WATCHDOG: keep every session-only cron alive past the 7-day auto-expire AND swee
 2. For each of the 4 expected crons (verify, bugfix, watchdog, feature), check whether it's still scheduled. If yes and its next-fire is < 24h away from the 7-day expiry, treat as needing renewal. If you cannot tell the expiry, renew anyway — recreate is idempotent in effect.
 
 3. To renew: `CronDelete` the existing job, then `CronCreate` with the prompt read from the corresponding file:
-   - verify cron — `23 * * * *` — `.claude/cron-prompts/verify.md`
-   - bugfix cron — `47 */2 * * *` — `.claude/cron-prompts/bugfix.md`
-   - watchdog cron — `49 4 * * *` — `.claude/cron-prompts/watchdog.md`
-   - feature cron — `31 */3 * * *` — `.claude/cron-prompts/feature.md`
+   - verify cron — `9 * * * *` — `.claude/cron-prompts/verify.md`
+   - bugfix cron — `39 * * * *` — `.claude/cron-prompts/bugfix.md`
+   - watchdog cron — `54 4 * * *` — `.claude/cron-prompts/watchdog.md`
+   - feature cron — `24 */2 * * *` — `.claude/cron-prompts/feature.md`
    For each, use the `Read` tool to load the prompt file, then pass that exact text as the `prompt` parameter to `CronCreate`.
 
 4. If a cron is missing from `CronList` entirely (not just near-expiry), recreate it with the same prompt and schedule.
