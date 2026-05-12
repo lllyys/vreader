@@ -474,30 +474,57 @@ struct ReaderSettingsPanel: View {
     /// for EPUBs to avoid a false-disable for the simple-EPUB-in-unified path
     /// where the conversion does work.
     private var chineseConversionSupported: Bool {
-        guard store.readingMode == .unified else { return false }
-        // If the caller didn't supply capabilities (e.g. older tests, previews),
-        // fall back to "trust user preference" so the picker stays enabled —
-        // matches the pre-fix behavior for unsupplied callers.
-        guard let caps = formatCapabilities else { return true }
-        return caps.contains(.unifiedReflow)
+        chineseConversionDisableReason == nil
     }
 
     /// Why the picker is disabled, used to pick the right footer/hint copy.
     /// Returns nil when the picker is enabled.
-    private enum ChineseConversionDisableReason {
-        case nativeMode       // user is in Native; Unified mode would enable it
-        case formatUnsupported // format never supports unified reflow (PDF)
+    /// Internal (not private) so `ReaderSettingsPanelChineseConversionGateTests` can test directly.
+    enum ChineseConversionDisableReason: Equatable {
+        case nativeMode       // EPUB/AZW3 in Native; Unified would enable it
+        case formatUnsupported // format never supports conversion (PDF)
     }
     private var chineseConversionDisableReason: ChineseConversionDisableReason? {
-        if let caps = formatCapabilities, !caps.contains(.unifiedReflow) {
-            // Format-level disqualifier wins regardless of readingMode —
-            // PDF can't convert even if user picks Unified.
+        Self.chineseConversionDisableReason(
+            for: bookFormat,
+            readingMode: store.readingMode,
+            capabilities: formatCapabilities
+        )
+    }
+
+    /// Testable static helper (mirrors `shouldShowReadingModeSection(for:)` pattern).
+    ///
+    /// TXT and MD support character-level conversion in Native mode via
+    /// `SimpTradTransform` applied before `TXTAttributedStringBuilder` /
+    /// `MDAttributedStringRenderer`. All other formats still require Unified mode
+    /// (EPUB/AZW3 are JS-rendered; PDF has no text transform path).
+    ///
+    /// - Important: `SimpTradTransform` (Hans-Hant ICU) produces 1:1 UTF-16 mappings
+    ///   for BMP CJK characters, so reading-position and highlight offsets saved in
+    ///   source-text coordinates remain valid in the transformed display text.
+    static func chineseConversionDisableReason(
+        for format: BookFormat?,
+        readingMode: ReadingMode,
+        capabilities: FormatCapabilities?
+    ) -> ChineseConversionDisableReason? {
+        // TXT and MD support native-mode character transforms (feature #28 WI-A).
+        if let fmt = format, fmt == .txt || fmt == .md {
+            return nil
+        }
+
+        // PDF has no text-transform path regardless of reading mode.
+        if let fmt = format, fmt == .pdf {
             return .formatUnsupported
         }
-        if store.readingMode != .unified {
-            return .nativeMode
+
+        // EPUB/AZW3 and unknown formats: Unified mode + unifiedReflow → enabled.
+        if readingMode == .unified {
+            guard let caps = capabilities else { return nil } // nil caps: trust unified mode
+            return caps.contains(.unifiedReflow) ? nil : .nativeMode
         }
-        return nil
+
+        // Native mode for all remaining formats (EPUB/AZW3 don't have a native transform path).
+        return .nativeMode
     }
 
     @ViewBuilder
@@ -535,7 +562,7 @@ struct ReaderSettingsPanel: View {
             Text("Convert Chinese text between Simplified and Traditional scripts.")
                 .font(.caption)
         case .nativeMode:
-            Text("Available in Unified reading mode only. Native mode does not yet convert Chinese text.")
+            Text("Switch to Unified reading mode to enable Chinese text conversion.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .formatUnsupported:

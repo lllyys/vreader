@@ -93,16 +93,34 @@ struct TXTReaderContainerView: View {
     /// Uses totalTextLengthUTF16 + totalWordCount (O(1)) instead of text.hashValue (O(n)).
     /// Includes theme colors so theme changes trigger rebuild (bug #29).
     /// Includes currentChapterIdx so chapter navigation triggers rebuild (WI-6).
+    /// Includes chineseConversion so conversion changes trigger rebuild (feature #28 WI-A).
     private var attrStringKey: String {
-        let hasText = viewModel.textContent != nil
-        let len = viewModel.totalTextLengthUTF16
-        let words = viewModel.totalWordCount
-        let chIdx = viewModel.currentChapterIdx
-        let chCount = viewModel.totalChapterCount
         let cfg = settingsStore?.txtViewConfig ?? TXTViewConfig()
-        let textColorHash = cfg.textColor.hash
-        let bgColorHash = cfg.backgroundColor.hash
-        return "\(hasText)-\(len)-\(words)-ch\(chIdx)/\(chCount)-\(cfg.fontSize)-\(cfg.fontName ?? "sys")-\(cfg.lineSpacing)-\(cfg.letterSpacing)-\(textColorHash)-\(bgColorHash)"
+        return Self.makeAttrStringKey(
+            hasText: viewModel.textContent != nil,
+            textLen: viewModel.totalTextLengthUTF16,
+            wordCount: viewModel.totalWordCount,
+            chIdx: viewModel.currentChapterIdx,
+            chCount: viewModel.totalChapterCount,
+            config: cfg,
+            chineseConversion: settingsStore?.chineseConversion ?? .none
+        )
+    }
+
+    /// Extracted for testability (feature #28 WI-A). Internal so
+    /// `TXTReaderContainerViewChineseConversionTests` can call directly.
+    internal static func makeAttrStringKey(
+        hasText: Bool,
+        textLen: Int,
+        wordCount: Int,
+        chIdx: Int,
+        chCount: Int,
+        config: TXTViewConfig,
+        chineseConversion: ChineseConversionDirection
+    ) -> String {
+        let textColorHash = config.textColor.hash
+        let bgColorHash = config.backgroundColor.hash
+        return "\(hasText)-\(textLen)-\(wordCount)-ch\(chIdx)/\(chCount)-\(config.fontSize)-\(config.fontName ?? "sys")-\(config.lineSpacing)-\(config.letterSpacing)-\(textColorHash)-\(bgColorHash)-\(chineseConversion.rawValue)"
     }
 
     var body: some View {
@@ -241,6 +259,7 @@ struct TXTReaderContainerView: View {
         }
         .task(id: attrStringKey) {
             let config = settingsStore?.txtViewConfig ?? TXTViewConfig()
+            let conversion = settingsStore?.chineseConversion ?? .none
 
             // Chapter-based path (WI-6): build attributed string for current chapter only.
             // Much smaller text → typically <50ms, often synchronous for small chapters.
@@ -250,14 +269,22 @@ struct TXTReaderContainerView: View {
                 defer { if isInitial { isBuildingInitialAttrString = false } }
 
                 if chapterText.utf16.count < 10_000 {
-                    // Small chapter (<10KB UTF-16): build synchronously
+                    // Small chapter (<10KB UTF-16): build synchronously.
+                    // SimpTradTransform is 1:1 UTF-16 for BMP CJK chars; offsetMap discarded —
+                    // reading positions and highlights in source-text coordinates remain valid.
+                    let displayText = conversion != .none
+                        ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
+                        : chapterText
                     chapterAttrString = TXTAttributedStringBuilder.build(
-                        text: chapterText, config: config
+                        text: displayText, config: config
                     )
                 } else {
                     let wrapped = await Task.detached(priority: .userInitiated) {
-                        TXTAttributedStringBuilder.buildSendable(
-                            text: chapterText, config: config
+                        let displayText = conversion != .none
+                            ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
+                            : chapterText
+                        return TXTAttributedStringBuilder.buildSendable(
+                            text: displayText, config: config
                         )
                     }.value
                     guard !Task.isCancelled else { return }
@@ -267,15 +294,18 @@ struct TXTReaderContainerView: View {
             }
 
             // Legacy full-text path (no chapter index)
-            guard let text = viewModel.textContent else { return }
+            guard let rawText = viewModel.textContent else { return }
 
-            if text.utf16.count > Self.largeFileThreshold {
+            if rawText.utf16.count > Self.largeFileThreshold {
                 // Large file: split into chunks (fast, no attributed string needed here)
                 let isInitial = textChunks == nil
                 if isInitial { isBuildingInitialAttrString = true }
                 defer { if isInitial { isBuildingInitialAttrString = false } }
 
                 let splitResult = await Task.detached(priority: .userInitiated) {
+                    let text = conversion != .none
+                        ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: rawText).text
+                        : rawText
                     let chunks = TXTTextChunker.split(text: text, targetChunkSize: 16384)
                     var offsets: [Int] = []
                     offsets.reserveCapacity(chunks.count)
@@ -296,7 +326,10 @@ struct TXTReaderContainerView: View {
                 defer { if isInitial { isBuildingInitialAttrString = false } }
 
                 let wrapped = await Task.detached(priority: .userInitiated) {
-                    TXTAttributedStringBuilder.buildSendable(text: text, config: config)
+                    let text = conversion != .none
+                        ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: rawText).text
+                        : rawText
+                    return TXTAttributedStringBuilder.buildSendable(text: text, config: config)
                 }.value
                 guard !Task.isCancelled else { return }
                 preparedAttrString = wrapped.value
