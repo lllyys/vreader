@@ -132,6 +132,20 @@ struct VReaderApp: App {
                     TestSeeder.clearKnownPreferences()
                 }
 
+                // Feature #45 WI-4c: seed EPUB layout preference into
+                // UserDefaults BEFORE any ReaderSettingsStore inits read
+                // from it. Tests that need paged-mode reader use this
+                // instead of driving the SwiftUI segmented Picker, which
+                // doesn't transition state under XCUITest (iOS 26.5).
+                // Done AFTER --reset-preferences so the layout override
+                // isn't immediately wiped.
+                if let layout = config.defaultEPUBLayout {
+                    UserDefaults.standard.set(
+                        layout.rawValue,
+                        forKey: ReaderSettingsStore.epubLayoutKey
+                    )
+                }
+
                 let persistence = PersistenceActor(modelContainer: container)
                 let seedConfig = config
                 let semaphore = DispatchSemaphore(value: 0)
@@ -334,6 +348,14 @@ struct TestLaunchConfig: Sendable {
     /// state from prior simulator sessions. Opt-in so tests that
     /// WANT to inherit prior preferences (rare) keep working.
     let seedResetPreferences: Bool
+    /// `--reader-default-layout=<paged|scroll>` — pre-seed the EPUB layout
+    /// preference into `UserDefaults` before any reader view inits its
+    /// `ReaderSettingsStore`. Feature #45 WI-4c: SwiftUI segmented
+    /// `Picker(.segmented)` doesn't dispatch tap-to-segment under XCUITest
+    /// (gh #576), so verification tests that need paged mode pass this
+    /// flag instead of driving the picker. Invalid raw values fall through
+    /// to nil (no UserDefaults write; production default applies).
+    let defaultEPUBLayout: EPUBLayoutPreference?
     let colorSchemeOverride: ColorScheme?
     let dynamicTypeOverride: DynamicTypeSize?
     let enableAI: Bool
@@ -365,6 +387,18 @@ struct TestLaunchConfig: Sendable {
             dynamicType = nil
         }
 
+        // Parse --reader-default-layout=<value>. Last occurrence wins.
+        // Invalid raw values fall through to nil (no override).
+        var defaultEPUBLayout: EPUBLayoutPreference? = nil
+        for arg in arguments where arg.hasPrefix("--reader-default-layout=") {
+            let value = String(arg.dropFirst("--reader-default-layout=".count))
+            if let layout = EPUBLayoutPreference(rawValue: value) {
+                defaultEPUBLayout = layout
+            } else {
+                defaultEPUBLayout = nil
+            }
+        }
+
         return TestLaunchConfig(
             isUITesting: args.contains("--uitesting"),
             seedEmpty: args.contains("--seed-empty"),
@@ -375,6 +409,7 @@ struct TestLaunchConfig: Sendable {
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
+            defaultEPUBLayout: defaultEPUBLayout,
             colorSchemeOverride: colorScheme,
             dynamicTypeOverride: dynamicType,
             enableAI: args.contains("--enable-ai"),
@@ -394,6 +429,7 @@ struct TestLaunchConfig: Sendable {
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,
+        defaultEPUBLayout: nil,
         colorSchemeOverride: nil,
         dynamicTypeOverride: nil,
         enableAI: false,

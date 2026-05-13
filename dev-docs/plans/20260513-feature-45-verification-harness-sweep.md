@@ -516,6 +516,157 @@ Gate: `xcodebuild test -only-testing:vreaderUITests/Verification` exits 0 in und
 
 ---
 
+### WI-4c — Production-code launch args to unblock #31 and #40/#41 XCUITest verification
+
+**Type**: Foundational (production code launch args + DebugBridge endpoint) + Behavioral (test refactors that consume them)
+**PR size estimate**: ~200 LOC (production + tests + 1 unit test file)
+
+**Why this WI exists** — WI-4 + WI-4b discovered two blockers that prevent the last 2 of the 13 verification tests from flipping to `pass` (logged in commit 6615c8b's body, "Findings (deferred to WI-4c)"):
+
+1. **Feature #31 (auto page turn)**: SwiftUI `Picker(.segmented)` tap dispatch under XCUITest does not transition `ReaderSettingsStore.epubLayout` from `.scroll` to `.paged`. The picker IS rendered (architecture grep confirms), but the tap-on-segment gesture is swallowed by XCUITest's segmented-control routing. WI-4b shipped a 3-way fallback lookup (`panel.buttons["Paged"]` → `segmentedControls.buttons["Paged"]` → `descendants[label == "Paged"]`); none of the three transition the store under XCUITest. Symptom: `verify_feature_31_auto_page_turn_advances_page` XCTSkips because `autoPageTurn` toggle (gated on `epubLayout == .paged`) never appears.
+2. **Feature #40/#41 (TTS sentence highlight + auto-scroll)**: `AVSpeechSynthesizer` does not begin speech under XCUITest context on iPhone 17 Pro Sim, even with 30 s timeouts. The synthesizer is constructed but `speak(_:)` never advances the speech delegate to `didStart`. CU verified TTS works end-to-end (2026-05-09 feature #26 round-2), so this is XCUITest-context specific — likely the audio-session activation requirement that XCUITest's runner-test split breaks. Symptom: `verify_feature_40_*` and `verify_feature_41_*` XCTSkip with "ttsControlBar did not appear in 30s".
+
+Both blockers cost roughly the same to work around with **production-code launch args** (lowest blast radius — no behavior change for end users, additive only): the test bypasses the gesture/audio-session activation by setting a DEBUG-only flag that the production code reads at known points in the lifecycle.
+
+**Surface area** — file-by-file with concrete signatures:
+
+1. `vreader/App/VReaderApp.swift`:
+   - `parseLaunchConfig(from:)` (around line 340-384): add two `args.contains(...)` checks and a `String?` parse for `--reader-default-layout=<value>`.
+   - `TestLaunchConfig` struct (around line 317): add `defaultEPUBLayout: EPUBLayoutPreference?` and `ttsAutostart: Bool` fields.
+   - In the existing `#if DEBUG` early-setup block (around line 90-156, where preferences are reset): if `config.defaultEPUBLayout != nil`, write its `rawValue` to `UserDefaults.standard` under `ReaderSettingsStore.epubLayoutKey` BEFORE `ReaderSettingsStore.init` runs anywhere (this is the cleanest injection point because the store reads `defaults.string(forKey: epubLayoutKey)` lazily at init time per `ReaderSettingsStore.swift:58, 83`).
+2. `vreader/Services/DebugBridge/DebugCommand.swift` + `DebugBridgeHandler.swift`:
+   - Add new case `tts(action: String)` parsed from `vreader-debug://tts?action=start` (and optionally `stop`).
+   - Handler delegates to a new `Notification.Name.debugTTSCommand` posted to whoever owns `ReaderContainerView.ttsService` (the active reader observes for `.debugTTSCommand` and calls `ttsService.startSpeaking(text:fromOffset:)` with the current book's text via `ReflowableTextSource`).
+3. `vreader/Views/Reader/ReaderContainerView.swift`:
+   - Add observer for `.debugTTSCommand` notification when DEBUG is set, that resolves the current book's `ReflowableTextSource` and invokes `ttsService.startSpeaking`. This mirrors the production path of the TTS play button without requiring the audio-session-blocking gesture.
+4. `vreaderUITests/Verification/Feature31AutoPageTurnVerificationTests.swift`:
+   - Replace the WI-4b 3-way Paged lookup with `launchApp(seed: .mdTOC, resetPreferences: true, launchArguments: ["--reader-default-layout=paged"])`. Drop the XCTSkip path. Assert `autoPageTurnToggle.waitForExistence(timeout: 5)` succeeds.
+5. `vreaderUITests/Verification/Feature40TTSSentenceHighlightVerificationTests.swift`:
+   - After `launchApp(seed: .warAndPeace)` and opening the book, fire `vreader-debug://tts?action=start` via `VerificationDebugBridgeHelper`. Assert `ttsControlBar.waitForExistence(timeout: 5)` succeeds and `ttsState.isSpeaking == true` in `DebugSnapshot`.
+6. `vreaderUITests/Verification/Feature41TTSAutoScrollVerificationTests.swift`:
+   - Same pattern as #40. The scroll-offset assertion stays the same.
+7. `vreaderUITests/Helpers/TestConstants.swift`:
+   - Add `static let readerDefaultLayoutPaged = "--reader-default-layout=paged"` and `static let ttsAutostartURL = URL(string: "vreader-debug://tts?action=start")!`.
+8. `vreaderTests/App/LaunchArgParsingTests.swift` (new):
+   - Unit tests asserting `parseLaunchConfig` correctly extracts `--reader-default-layout=paged` → `.paged`, `--reader-default-layout=scrolled` → `.scroll`, `--reader-default-layout=garbage` → `nil` (falls through), and `--tts-autostart` → `true`. ~8 cases covering all enum values + invalid inputs.
+
+**Prior art / project precedent / rejected alternatives**:
+
+- **Precedent**: the codebase already uses production-code launch args for test purposes — `--uitesting`, `--seed-position-test`, `--reset-preferences`, `--dynamic-type-XS`, `--enable-ai`, `--reduce-motion`. All gated by `#if DEBUG` at the App level. WI-4c follows the same pattern.
+- **Rejected**: replace `Picker(.segmented)` with `Picker(.menu)` for EPUB layout. Lowest cost code-wise but changes user-visible behavior (segmented control is the deliberate design choice). Rejected to preserve UX.
+- **Rejected**: pure XCUITest workaround (e.g., coordinate-based tap on segment). WI-4b tried 3 variants of accessibility lookups; none transitioned the store. Coordinate-based tap is brittle (resolution-dependent + scrolls off in tests that scroll the panel) and worth avoiding when a production-code arg is cheap.
+- **Rejected**: launch the TTS service with a mock `SpeechSynthesizing` adapter under XCUITest. Higher complexity (test-only DI path) than the DebugBridge URL approach, AND it would test a mock rather than the real synthesizer, weakening the test's signal.
+- **Rejected**: schedule TTS via `Timer.scheduledTimer` after a fixed delay. Race-prone, doesn't match the production play-button path.
+
+**Files OUT of scope**:
+
+- All other `Feature*VerificationTests.swift` (untouched — they pass).
+- `xctestplan` + project.yml scheme entry (originally listed in WI-4; deferred to a follow-up WI-4d if the user wants CI gating; not blocking VERIFIED status flips).
+- `docs/manual-test-checklist.md` (separate WI-4d).
+- `ReaderSettingsStore` internals — we use the existing UserDefaults injection point, not a new init parameter.
+
+**Test catalogue for WI-4c**:
+
+| File | What It Covers |
+|---|---|
+| `vreaderTests/App/LaunchArgParsingTests.swift` (new) | `parseLaunchConfig` parses `--reader-default-layout=<value>` correctly for all valid enum strings + falls through on invalid. Same for `--tts-autostart`. |
+| `vreaderTests/Services/DebugBridge/DebugCommandTests.swift` (extend) | `DebugCommand.parse(URL("vreader-debug://tts?action=start"))` returns `.tts(action: "start")`; `tts?action=stop` returns `.tts(action: "stop")`; missing action falls through. |
+| `Feature31AutoPageTurnVerificationTests` (refactor) | RED: pre-WI-4c, test XCTSkips. GREEN: post-WI-4c, test asserts `autoPageTurnToggle.exists == true`. |
+| `Feature40TTSSentenceHighlightVerificationTests` (refactor) | RED: pre-WI-4c, XCTSkip on `ttsControlBar` timeout. GREEN: post-WI-4c, `ttsControlBar` appears within 5 s of `tts?action=start` URL fire. |
+| `Feature41TTSAutoScrollVerificationTests` (refactor) | Same shape as #40. |
+
+**Risks + mitigations**:
+
+- **Risk**: writing to UserDefaults before `ReaderSettingsStore.init` runs may race with another path that reads the same key. **Mitigation**: do it inside the synchronous `parseLaunchConfig` + immediate UserDefaults write path that runs in `VReaderApp.init`'s App body builder, before any view body is evaluated. Add a unit test asserting that after the launch-arg write, `ReaderSettingsStore(defaults: testDefaults).epubLayout == .paged`.
+- **Risk**: the `tts?action=start` URL fires before the book is loaded → `startSpeaking` no-ops. **Mitigation**: in the test, `launchApp` then `tapFirstBook(in:)` (existing helper) and wait for the book's reader to load before firing the URL. The notification observer in `ReaderContainerView` only attaches AFTER `task` runs, so it can't fire too early.
+- **Risk**: the `Notification.Name.debugTTSCommand` listener is wired to the wrong reader instance when multiple readers are loaded (shouldn't happen in tests, but worth verifying). **Mitigation**: include the `fingerprintKey` in the URL `?action=start&key=<fp>` and have the observer filter by key, returning no-op for mismatch. Tests use single-book seeds.
+- **Risk**: TTS audio-session activation may still fail under XCUITest even when called from the notification handler (this is the cause we're trying to bypass, but it may be uniform). **Mitigation**: WI-4c includes a small spike — write the DebugBridge URL handler and try it locally before committing the test refactors. If it doesn't unblock TTS, fall back to mocking `SpeechSynthesizing` with a test-only adapter that synchronously fires the speech-progress delegate callbacks. The audit (Gate 2) should call this out.
+
+**Backward compat**: all launch args are additive and `#if DEBUG`-gated. Release builds ignore them. Production EPUB layout default is unchanged (UserDefaults absent → `.scroll` per existing `loadEPUBLayout` fallback).
+
+**Edge cases**:
+
+- `--reader-default-layout=foo` (invalid value): falls through; no UserDefaults write; store reads existing/default.
+- `--tts-autostart` and `tts?action=start` URL both fired: idempotent — `startSpeaking` no-ops if already speaking.
+- `tts?action=stop` before any start: no-op (existing `TTSService` behavior).
+- Two consecutive `--reader-default-layout=paged` launches without `--reset-preferences`: idempotent UserDefaults write.
+
+**Gate**: 
+- All 5 acceptance tests for WI-4c pass (LaunchArgParsing unit + DebugCommand unit + 3 refactored Feature tests).
+- `Feature31AutoPageTurnVerificationTests` passes without `XCTSkip`.
+- `Feature40TTSSentenceHighlightVerificationTests` passes without `XCTSkip`.
+- `Feature41TTSAutoScrollVerificationTests` passes without `XCTSkip`.
+- 13-feature VERIFIED gate reaches 13/13. Update Feature #31, #40, #41 rows to `VERIFIED` with evidence files. Update Feature #45 row's notes.
+
+#### WI-4c — Gate 2 audit (manual fallback, Codex MCP unavailable)
+
+Date: 2026-05-13. Codex MCP (`mcp__plugin_codex-toolkit_codex__codex`) returned `stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)` twice in a row — auditor genuinely unavailable, not just inconvenient. Per rule 47 manual-fallback evidence is required below.
+
+**Files read** (paths):
+
+- `vreader/App/VReaderApp.swift` (lines 85-160 + 317-403) — confirmed `TestLaunchConfig` struct + `parseLaunchConfig` injection points.
+- `vreader/Services/ReaderSettingsStore.swift` (lines 14, 21, 53, 58, 83, 122) — confirmed `epubLayoutKey = "readerEPUBLayout"` UserDefaults key, `init(defaults:)` reads `loadEPUBLayout` lazily, store rereads on every `init`.
+- `vreader/Models/EPUBLayoutPreference.swift` (lines 15-19) — confirmed enum cases `scroll` (rawValue "scroll") and `paged` (rawValue "paged"). The plan originally said `--reader-default-layout=scrolled`; correction below makes it `scroll` to match the rawValue.
+- `vreader/Services/Foliate/FoliateTTSAdapter.swift`, `vreader/Services/TTS/TTSService.swift` (line 70, 179) — confirmed `startSpeaking(text:fromOffset:)` entry point and `extractText(from:startOffset:)` static helper.
+- `vreader/Views/Reader/ReaderContainerView.swift` (line 57) — confirmed `@State var ttsService = TTSService()`.
+- `vreader/Services/DebugBridge/DebugCommand.swift` + `DebugBridgeNotifications.swift` — confirmed existing pattern: `extension Notification.Name { static let debugBridgeOpenBook = Notification.Name("vreader.debugBridge.openBook") }`. Naming correction below: the plan's `.debugTTSCommand` should be `.debugBridgeTTSCommand` to match the established convention.
+- `vreader/Services/ReflowableTextSource.swift` — confirmed protocol exists with `TXTReflowableTextSource` / `MDReflowableTextSource` concrete types.
+- `vreaderUITests/Helpers/LaunchHelper.swift` (lines 99-178) — confirmed `launchApp(seed:colorScheme:dynamicType:enableAI:enableSync:reduceMotion:resetPreferences:)` signature. **Critical finding**: there is NO `launchArguments:` parameter on `launchApp` or `vreaderUITests_launchApp`. The plan must add `extraLaunchArguments: [String] = []` to BOTH signatures, threaded through to `args.append(contentsOf: extraLaunchArguments)` after the existing args (line 171, before `app.launchArguments = args`).
+- `vreaderUITests/Helpers/LaunchHelper.swift` (line 230) — confirmed `tapFirstBook(in:)` exists.
+
+**Symbols / signatures verified** (which fields/types/enums I confirmed exist):
+
+- `EPUBLayoutPreference.scroll` ✓, `EPUBLayoutPreference.paged` ✓ (raw strings "scroll" / "paged").
+- `ReaderSettingsStore.epubLayoutKey` ✓ static constant.
+- `ReaderSettingsStore.loadEPUBLayout(defaults:)` ✓ pure lookup.
+- `TTSService.startSpeaking(text:fromOffset:)` ✓ MainActor.
+- `TestLaunchConfig` ✓ has `seedBooks`, `seedPositionTest`, etc. fields. Adding `defaultEPUBLayout: EPUBLayoutPreference?` and `ttsAutostart: Bool` follows the same pattern.
+- `Notification.Name` extension pattern ✓ (existing prefix `vreader.debugBridge.*`).
+- `XCUIApplication.launchArguments` ✓ array set via `app.launchArguments = args` at line 173.
+- `tapFirstBook(in:)` ✓ exists.
+
+**Edge cases checked** (the list — none missed in the plan, but explicit confirmation):
+
+- `--reader-default-layout=foo` → falls through to no UserDefaults write → store reads existing/default (`.scroll`). ✓ covered in plan.
+- `--reader-default-layout=scroll` and `--reader-default-layout=paged` → writes rawValue → store reads correctly. ✓ covered.
+- `--tts-autostart` without book open → observer attached but no source until book loads → idempotent. ✓ covered.
+- `tts?action=start` URL fires before observer attaches → notification posted to empty observer set → no-op. ✓ acceptable.
+- `tts?action=stop` before any start → existing `TTSService` no-op. ✓ verified by reading TTSService:70 (defensive guard inside `startSpeaking`).
+- Two consecutive `--reader-default-layout=paged` launches → idempotent UserDefaults write. ✓ implicit.
+- Release build receives a `--reader-default-layout=paged` arg → `#if DEBUG` gate prevents parsing → arg silently ignored. ✓ matches existing pattern for `--seed-position-test`.
+
+**Findings — fixes incorporated into plan**:
+
+| # | Severity | Finding | Plan fix |
+|---|---|---|---|
+| 1 | High | The `--reader-default-layout=scrolled` rawValue is wrong; the actual enum rawValue is `scroll`. Tests would fail. | Change all references in the plan from `scrolled` to `scroll`. Done in revision 2 below. |
+| 2 | High | `launchApp` has no `launchArguments:` parameter — plan claimed otherwise. Without this, the test refactors are impossible. | Add `extraLaunchArguments: [String] = []` to both `launchApp` and `vreaderUITests_launchApp` in WI-4c's surface area. Plan revision 2 includes this. |
+| 3 | Medium | Plan said `Notification.Name.debugTTSCommand` but the established convention is `debugBridgeTTSCommand` (prefix `vreader.debugBridge.*`). | Rename in plan revision 2. |
+| 4 | Medium | The TTS autostart hypothesis (audio-session activation breaking in XCUITest) is unverified. If the DebugBridge URL path also fails for the same reason, WI-4c's TTS work won't unblock #40/#41. | Plan revision 2: WI-4c starts with a 30-minute spike — implement the DebugBridge URL handler skeleton + `startSpeaking` call + manual `simctl openurl` test BEFORE writing any test refactors. If TTS still doesn't start, the audit hypothesis is wrong; fall back option: ship a test-only `SpeechSynthesizing` adapter (`MockSpeechSynthesizer` that synchronously invokes the delegate callbacks for "willSpeakRange" / "didStart" / "didFinish") wired by a `--tts-test-mode` launch arg. The Mock approach weakens the test (tests a mock, not real synth) but is acceptable given CU has already verified TTS works end-to-end at the production layer (feature #26 round-2 evidence).
+| 5 | Low | The plan lacks an explicit `WI-4c.spike` deliverable distinct from the eventual TTS work. | Plan revision 2 adds a "Spike-0 (~30 min)" first sub-step in WI-4c. |
+
+**Risks accepted** (with rationale):
+
+- The Spike-0 + fallback to Mock SpeechSynthesizing is acceptable because (a) feature #40/#41 are device-verified-orthogonal — CU already proved TTS works in production; what's being tested in XCUITest is the *wiring* (notification → highlight coordinator → UI state), which the mock exercises identically; (b) the existing `SpeechSynthesizing` protocol is already injected (see `vreader/Services/TTS/SpeechSynthesizing.swift` "Delegate forwarding: TTSService sets this to receive callbacks") so the test-only adapter is a clean swap, not a code-surgery.
+- The `Notification.Name.debugBridge*` prefix rename has a knock-on cost of touching ~3 lines, accepted as cosmetic compliance with the established convention.
+
+**Tests added or intentionally deferred**:
+
+- `vreaderTests/App/LaunchArgParsingTests.swift` (new, ~8 cases) — added.
+- `vreaderTests/Services/DebugBridge/DebugCommandTests.swift` (extend) — added.
+- Spike-0 has no automated tests (it's a manual `simctl openurl` smoke check). Acceptable for a 30-min spike whose outcome dictates the rest of the WI's shape.
+
+**Plan revision 2 (audit fixes applied)**:
+
+1. Change all `--reader-default-layout=scrolled` → `--reader-default-layout=scroll` throughout the surface-area section.
+2. Change all references to `Notification.Name.debugTTSCommand` → `Notification.Name.debugBridgeTTSCommand`.
+3. Add to surface area item 4 (Feature31 test refactor): a sub-bullet "Requires `extraLaunchArguments:` parameter added to `launchApp` and `vreaderUITests_launchApp` in `vreaderUITests/Helpers/LaunchHelper.swift` (LaunchHelper change ships with this WI; do not depend on it being there)."
+4. Add Spike-0 as the first sub-step of WI-4c: "Implement the `vreader-debug://tts?action=start` URL handler and the `ReaderContainerView` notification observer. Manually `simctl openurl` after opening a book in the running Sim. If `ttsService.state` transitions to `.speaking` within 5 s of the URL fire, proceed with the test refactors as planned. If TTS doesn't start, branch to the Mock fallback: implement `MockSpeechSynthesizer: SpeechSynthesizing` in `vreader/Services/TTS/` gated `#if DEBUG`, wired by a `--tts-test-mode` launch arg that swaps the production `AVSpeechSynthesizer` for the mock in `TTSService.init`. The mock's `speak(_:)` synchronously fires the delegate's `didStart` + a synthesized `willSpeakRange` for each NSRange in the utterance to keep the test signal honest."
+
+The revision-2 corrections are accepted as the binding plan. Implementation in the next cron iteration's WI-4c starts at Spike-0.
+
+---
+
 ## 6. Test Catalogue
 
 ### Unit Tests (run in `vreaderTests/`)

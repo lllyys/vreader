@@ -7,6 +7,13 @@
 // — TXT lacks end-to-end AutoPageTurner wiring per bug #157). WI-4b
 // switched from .warAndPeace to .mdTOC for this reason.
 //
+// WI-4c: launch with `LaunchArgs.readerLayoutPaged` so the EPUB layout
+// preference is pre-seeded to `.paged` before any ReaderSettingsStore
+// reads UserDefaults. This bypasses the SwiftUI segmented Picker which
+// doesn't dispatch tap-to-segment under XCUITest (iOS 26.5). WI-4b had
+// to fall through 3 picker-lookup variants and still XCTSkip; with the
+// launch arg the layout gate is already satisfied at app-init time.
+//
 // Notes:
 // - Live multi-page advancement requires a fixture that paginates to
 //   multiple pages at the test viewport. The MD test seed paginates
@@ -26,7 +33,11 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .mdTOC, resetPreferences: true)
+        app = launchApp(
+            seed: .mdTOC,
+            resetPreferences: true,
+            extraLaunchArguments: [LaunchArgs.readerLayoutPaged]
+        )
         settingsHelper = VerificationSettingsHelper(app: app)
     }
 
@@ -56,30 +67,14 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
         let panel = settingsHelper.openReaderSettings()
         XCTAssertTrue(panel.exists)
 
-        // The auto-page-turn section is double-gated:
-        //   1. format has .autoPageTurn capability (MD-only per bug #157)
-        //   2. AND store.epubLayout == .paged
-        // The MD seed defaults to scroll layout, so flip EPUB Layout to
-        // Paged. The segmented picker exposes "Paged" as a button under
-        // either app.buttons or app.segmentedControls.buttons.
-        let pagedByButton = panel.buttons["Paged"]
-        let pagedBySegmented = panel.segmentedControls.buttons["Paged"]
+        // WI-4c: EPUB layout is pre-seeded to .paged via
+        // LaunchArgs.readerLayoutPaged at app launch (see setUp). The
+        // auto-page-turn section's layout gate (store.epubLayout == .paged)
+        // is already satisfied — no picker interaction needed. The
+        // capability gate (.autoPageTurn granted only to MD per bug #157)
+        // is satisfied by the .mdTOC seed.
 
-        if pagedByButton.waitForExistence(timeout: 3), pagedByButton.isHittable {
-            pagedByButton.tap()
-        } else if pagedBySegmented.exists, pagedBySegmented.isHittable {
-            pagedBySegmented.tap()
-        } else {
-            // Try descendant scan as last resort
-            let any = panel.descendants(matching: .any)
-                .matching(NSPredicate(format: "label == 'Paged'"))
-                .firstMatch
-            if any.exists, any.isHittable {
-                any.tap()
-            }
-        }
-
-        // Now look for the Auto Page Turn section.
+        // Look for the Auto Page Turn section.
         let section = panel.staticTexts["Auto Page Turn"]
         if !section.waitForExistence(timeout: 2) {
             for _ in 0..<6 {

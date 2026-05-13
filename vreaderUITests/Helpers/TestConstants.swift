@@ -183,3 +183,22 @@ enum AccessibilityID {
         "annotationRow-\(id)"
     }
 }
+
+// MARK: - Launch Argument Constants
+// Feature #45 WI-4c — additional launch args for verification tests that
+// can't drive the production UI gesture (e.g. SwiftUI segmented Picker
+// doesn't dispatch tap-to-segment under XCUITest). Pass via
+// `launchApp(extraLaunchArguments:)`.
+
+enum LaunchArgs {
+    /// `--reader-default-layout=paged` — pre-seeds EPUB layout preference
+    /// to `.paged` before any `ReaderSettingsStore` reads it. Bypasses the
+    /// segmented Picker in Reader Settings. Used by the auto-page-turn
+    /// verification test (feature #31).
+    static let readerLayoutPaged = "--reader-default-layout=paged"
+
+    /// `--reader-default-layout=scroll` — explicit scroll-layout override.
+    /// Same mechanism as the paged variant; rarely needed because scroll
+    /// is the production default.
+    static let readerLayoutScroll = "--reader-default-layout=scroll"
+}

@@ -103,7 +103,8 @@ enum LaunchHelper {
         enableAI: Bool = false,
         enableSync: Bool = false,
         reduceMotion: Bool = false,
-        resetPreferences: Bool = false
+        resetPreferences: Bool = false,
+        extraLaunchArguments: [String] = []
     ) -> XCUIApplication {
         vreaderUITests_launchApp(
             seed: seed,
@@ -112,7 +113,8 @@ enum LaunchHelper {
             enableAI: enableAI,
             enableSync: enableSync,
             reduceMotion: reduceMotion,
-            resetPreferences: resetPreferences
+            resetPreferences: resetPreferences,
+            extraLaunchArguments: extraLaunchArguments
         )
     }
 }
@@ -130,6 +132,13 @@ enum LaunchHelper {
 ///     (default: `false`). Bug #152 / GH #426 — opt in for tests
 ///     that depend on empty-state UI assertions (OPDS catalogs,
 ///     theme, AI consent, etc.).
+///   - extraLaunchArguments: Additional launch args appended verbatim
+///     after the helper-controlled flags. Feature #45 WI-4c — gives
+///     verification tests an escape hatch for arg combinations the
+///     standard helper doesn't model (e.g.
+///     `--reader-default-layout=paged` for the auto-page-turn test
+///     that needs to bypass the SwiftUI segmented Picker which doesn't
+///     dispatch tap-to-segment under XCUITest).
 /// - Returns: The launched `XCUIApplication` instance.
 @discardableResult
 func vreaderUITests_launchApp(
@@ -139,7 +148,8 @@ func vreaderUITests_launchApp(
     enableAI: Bool = false,
     enableSync: Bool = false,
     reduceMotion: Bool = false,
-    resetPreferences: Bool = false
+    resetPreferences: Bool = false,
+    extraLaunchArguments: [String] = []
 ) -> XCUIApplication {
     let app = XCUIApplication()
 
@@ -170,6 +180,8 @@ func vreaderUITests_launchApp(
         args.append("--reset-preferences")
     }
 
+    args.append(contentsOf: extraLaunchArguments)
+
     app.launchArguments = args
     app.launch()
 
@@ -185,7 +197,8 @@ func launchApp(
     enableAI: Bool = false,
     enableSync: Bool = false,
     reduceMotion: Bool = false,
-    resetPreferences: Bool = false
+    resetPreferences: Bool = false,
+    extraLaunchArguments: [String] = []
 ) -> XCUIApplication {
     vreaderUITests_launchApp(
         seed: seed,
@@ -194,7 +207,8 @@ func launchApp(
         enableAI: enableAI,
         enableSync: enableSync,
         reduceMotion: reduceMotion,
-        resetPreferences: resetPreferences
+        resetPreferences: resetPreferences,
+        extraLaunchArguments: extraLaunchArguments
     )
 }
 
