@@ -220,6 +220,27 @@ struct ReaderContainerView: View {
                 }
             }
         }
+        // Feature #45 WI-4c-b: drive TTS from outside the play-button tap.
+        // XCUITest's gesture path cannot reliably activate AVSpeechSynthesizer's
+        // audio session under iOS 26.5, so verification tests fire
+        // `vreader-debug://tts?action=start` after opening a book.
+        // Reuses startTTS() so the audio-session activation path is identical
+        // to a real user tap — that's the property we need spike-0 to verify.
+        .onReceive(NotificationCenter.default.publisher(for: .debugBridgeTTSCommand)) { notification in
+            guard let action = notification.userInfo?["action"] as? String else { return }
+            switch action {
+            case "start":
+                if ttsService.state == .idle {
+                    startTTS()
+                }
+            case "stop":
+                if ttsService.state != .idle {
+                    ttsService.stop()
+                }
+            default:
+                break
+            }
+        }
         #endif
         // PERF: Single deferred .task for all non-critical setup.
         // Per-book settings, search prep, and replacement rules all deferred

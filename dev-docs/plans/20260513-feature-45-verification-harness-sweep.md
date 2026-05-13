@@ -867,3 +867,41 @@ Codex MCP stream disconnected on first ping attempt (2026-05-13). Manual audit p
 - CJK fixture absence for feature #28 content test — accepted with `XCTSkip` + fixture-request follow-up.
 
 *End of Gate 1 Plan — v2 (manual audit complete)*
+
+---
+
+## WI-4c-b Spike-0 verdict (2026-05-13)
+
+**PASS.** The `vreader-debug://tts?action=start` URL drove `AVSpeechSynthesizer` to active speech under the same iOS Simulator (iPhone 17 Pro, iOS 26.5) configuration that XCUITest would run against.
+
+**What was exercised:**
+- Built app installed to booted sim via `xcrun simctl install`.
+- Launched with `--seed-md-toc --reset-preferences` → MD book ("Test Markdown TOC") present in library.
+- Tapped book → reader opened (MD paged renderer, light theme).
+- Fired `xcrun simctl openurl booted "vreader-debug://tts?action=start"`.
+
+**Observed (3 s after URL fire):**
+- Yellow word-highlight band painted at the current TTS offset → `willSpeakRangeOfSpeechString` delegate callback fired → synthesizer is actively speaking.
+- `TTSControlBar` appeared at the bottom of the reader → `ttsService.state != .idle`.
+- Page advanced from 0% to ~27% by the time the stop URL was fired → real audio session activated and read through.
+
+**Stop URL also works:**
+- Fired `vreader-debug://tts?action=stop`.
+- TTSControlBar disappeared, highlight band cleared → `ttsService.state == .idle` again.
+
+**Evidence:**
+- `dev-docs/verification/artifacts/feature-45-wi-4c-b-tts-start-spike0-20260513.png`
+- `dev-docs/verification/artifacts/feature-45-wi-4c-b-tts-stop-spike0-20260513.png`
+
+**Implications for WI-4c-b:**
+- The Mock `SpeechSynthesizing` fallback (revision-2 fallback) is NOT needed for Feature #40 / #41 verification — production audio path is XCUITest-reachable via this URL after all.
+- Feature #40 test refactor: open book → `vreader-debug://tts?action=start` → wait for control bar → snapshot. The remaining gap is wiring `ttsState` / `ttsOffsetUTF16` into `RealDebugBridgeContext+Snapshot.swift` (currently hardcoded nil; Feature #40 risk #5 in the plan). That's a follow-up WI in this same plan, not a spike outcome.
+- Feature #41 test refactor: open book → start TTS → assert TTSControlBar XCUI element exists.
+
+**Branch:** `feat/45-wi-4c-b-tts-debugbridge`. RED→GREEN complete:
+- 4 new parser tests in `DebugCommandTests` (start, stop, missing, invalid) — all passing.
+- `RealDebugBridgeContext.tts(action:)` posts `.debugBridgeTTSCommand`.
+- `ReaderContainerView` observer calls `startTTS()` / `ttsService.stop()` based on action.
+- Mock `DebugBridgeContext` conformers (Slow, Recording) updated with `tts` stub for compile.
+- Total diff: 117 lines added across 7 files. No deletions. File-size budget intact (all files <300 lines).
+

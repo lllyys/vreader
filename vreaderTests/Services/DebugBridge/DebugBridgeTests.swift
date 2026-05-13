@@ -182,6 +182,7 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func settle(token: String) async throws { await record("settle:\(token)") }
     func snapshot(dest: String, lastErrorMessage: String?) async throws { await record("snapshot:\(dest)") }
     func eval(bridge: String, js: String) async throws { await record("eval:\(bridge)") }
+    func tts(action: String) async throws { await record("tts:\(action)") }
 }
 
 // MARK: - Recorder
@@ -199,6 +200,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case settle(token: String)
         case snapshot(dest: String, lastErrorMessage: String?)
         case eval(bridge: String, js: String)
+        case tts(action: String)
     }
 
     private(set) var calls: [Call] = []
@@ -218,6 +220,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     func eval(bridge: String, js: String) async throws {
         calls.append(.eval(bridge: bridge, js: js))
     }
+    func tts(action: String) async throws { calls.append(.tts(action: action)) }
 }
 
 #endif

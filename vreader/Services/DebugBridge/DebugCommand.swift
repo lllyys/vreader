@@ -21,6 +21,10 @@ import Foundation
 /// - `settle?token=<id>` — write `Caches/ready-<id>.json` after layout settles.
 /// - `snapshot?dest=<file>` — write semantic state JSON to the app container.
 /// - `eval?bridge=<name>&js=<base64>` — evaluate JS in the named webview bridge.
+/// - `tts?action=<start|stop>` — drive TTS from outside the reader (Feature #45
+///   WI-4c-b). XCUITest's gesture path cannot reliably activate
+///   `AVSpeechSynthesizer`'s audio session, so verification tests fire this URL
+///   after opening a book to bypass the play-button tap.
 enum DebugCommand: Equatable {
     case reset
     case seed(fixture: String)
@@ -29,6 +33,7 @@ enum DebugCommand: Equatable {
     case settle(token: String)
     case snapshot(dest: String)
     case eval(bridge: String, js: String)
+    case tts(action: String)
 
     enum ThemeMode: String, Equatable {
         case dark
@@ -128,6 +133,18 @@ extension DebugCommand {
                 throw DebugCommandError.invalidParam("js", reason: "not valid base64-encoded UTF-8")
             }
             return .eval(bridge: bridge, js: js)
+
+        case "tts":
+            let action = try requireParam("action", in: params)
+            // Restrict to the documented action set so typos surface as
+            // invalidParam (not as silent no-ops in the dispatcher).
+            guard action == "start" || action == "stop" else {
+                throw DebugCommandError.invalidParam(
+                    "action",
+                    reason: "expected start|stop, got \(action)"
+                )
+            }
+            return .tts(action: action)
 
         default:
             throw DebugCommandError.unknownCommand(host)

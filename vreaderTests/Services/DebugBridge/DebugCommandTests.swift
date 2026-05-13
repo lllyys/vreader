@@ -386,6 +386,42 @@ final class DebugCommandTests: XCTestCase {
         let cmd = try DebugCommand.parse(url)
         XCTAssertEqual(cmd, .snapshot(dest: "state-1_v2.json"))
     }
+
+    // MARK: - tts (WI-4c-b — Feature #45 verification harness)
+
+    func test_parse_ttsStartAction_returnsTtsStart() throws {
+        let url = URL(string: "vreader-debug://tts?action=start")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .tts(action: "start"))
+    }
+
+    func test_parse_ttsStopAction_returnsTtsStop() throws {
+        let url = URL(string: "vreader-debug://tts?action=stop")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .tts(action: "stop"))
+    }
+
+    func test_parse_ttsMissingAction_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://tts")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
+
+    func test_parse_ttsInvalidAction_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://tts?action=garbage")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
 }
 
 #endif

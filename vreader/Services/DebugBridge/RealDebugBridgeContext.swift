@@ -248,6 +248,24 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     // settle/settleWithTimeout/settleTimeoutSeconds → +Settle.swift
     // snapshot/snapshotsDirectory → +Snapshot.swift
     // eval → +Eval.swift
+
+    /// Feature #45 WI-4c-b — drive TTS from outside the active reader.
+    ///
+    /// Posts `.debugBridgeTTSCommand` with `action` ∈ {"start","stop"} (the
+    /// parser has already validated the alphabet). `ReaderContainerView`
+    /// observes the notification when a book is open; if no reader is
+    /// loaded, the URL is silently a no-op — matching the same posture as
+    /// `theme` (the URL succeeds; the live view applies it if present).
+    /// Errors from the synthesizer's audio session don't surface here —
+    /// they show up in `snapshot.tts.state` (.idle if start failed).
+    func tts(action: String) async throws {
+        NotificationCenter.default.post(
+            name: .debugBridgeTTSCommand,
+            object: nil,
+            userInfo: ["action": action]
+        )
+        log.info("tts: posted notification action=\(action, privacy: .public)")
+    }
 }
 
 #endif

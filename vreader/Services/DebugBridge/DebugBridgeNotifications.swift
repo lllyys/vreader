@@ -35,6 +35,20 @@ extension Notification.Name {
     /// - `"fontSize"`: Int? — optional new font size, present only when
     ///   the bridge command included a fontSize parameter.
     static let debugBridgeThemeChanged = Notification.Name("vreader.debugBridge.themeChanged")
+
+    /// Posted by RealDebugBridgeContext.tts to drive the active reader's
+    /// `TTSService` from outside (Feature #45 WI-4c-b). XCUITest's gesture
+    /// path cannot reliably activate `AVSpeechSynthesizer`'s audio session,
+    /// so verification tests fire `vreader-debug://tts?action=start` after
+    /// opening a book to bypass the play-button tap.
+    ///
+    /// If no reader is loaded, observers don't fire — the URL is a no-op.
+    /// The bridge layer doesn't enforce active-reader presence; that's a
+    /// presentation concern owned by `ReaderContainerView`.
+    ///
+    /// userInfo:
+    /// - `"action"`: String — "start" or "stop" (validated by parser).
+    static let debugBridgeTTSCommand = Notification.Name("vreader.debugBridge.ttsCommand")
 }
 
 #endif

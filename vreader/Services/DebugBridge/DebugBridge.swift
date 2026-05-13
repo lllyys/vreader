@@ -27,6 +27,12 @@ protocol DebugBridgeContext {
     /// nil if the previous command succeeded.
     func snapshot(dest: String, lastErrorMessage: String?) async throws
     func eval(bridge: String, js: String) async throws
+    /// Feature #45 WI-4c-b — drive TTS from outside the reader.
+    /// `action` is one of `"start"` / `"stop"`. The handler posts a
+    /// notification observed by the active reader; if no reader is
+    /// loaded, the action is a no-op (matches the parser's grammar
+    /// guarantee but lets tests fire the URL without preconditions).
+    func tts(action: String) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -140,6 +146,8 @@ final class DebugBridge {
             try await context.snapshot(dest: dest, lastErrorMessage: msg)
         case .eval(let bridge, let js):
             try await context.eval(bridge: bridge, js: js)
+        case .tts(let action):
+            try await context.tts(action: action)
         }
     }
 }
