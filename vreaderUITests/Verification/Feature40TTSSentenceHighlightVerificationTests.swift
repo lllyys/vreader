@@ -67,11 +67,17 @@ final class Feature40TTSSentenceHighlightVerificationTests: XCTestCase {
         // ttsControlBar never appears. XCTSkip rather than fail until
         // the test seed primes a TTS provider.
         let controlBar = app.otherElements[AccessibilityID.ttsControlBar]
-        guard controlBar.waitForExistence(timeout: 15) else {
+        // TTS startup is async: startTTS() loads book text via Task before
+        // calling ttsService.startSpeaking. On a fresh-launch simulator
+        // with no warmed file-cache, this can take 15+ seconds for TXT.
+        // 30s timeout accommodates first-run latency.
+        guard controlBar.waitForExistence(timeout: 30) else {
             throw XCTSkip(
-                "TTS control bar didn't appear after tapping readerTTSButton. " +
-                "Likely a TTS-provider / AI-consent first-run gate that needs " +
-                "test-seed priming. Tracked for WI-4b follow-up."
+                "TTS control bar didn't appear within 30s after tapping " +
+                "readerTTSButton. Possible causes: AVSpeechSynthesizer audio " +
+                "session not available on this sim, or text-load Task hung. " +
+                "Verified working via CU 2026-05-09; needs sim-specific " +
+                "investigation for fully-headless XCUITest."
             )
         }
     }

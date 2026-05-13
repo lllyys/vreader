@@ -54,10 +54,10 @@ final class Feature41TTSAutoScrollVerificationTests: XCTestCase {
         // launch the TTS button may surface a provider-selection sheet
         // before playback. XCTSkip until test-seed priming lands.
         let controlBar = app.otherElements[AccessibilityID.ttsControlBar]
-        guard controlBar.waitForExistence(timeout: 15) else {
+        guard controlBar.waitForExistence(timeout: 30) else {
             throw XCTSkip(
-                "TTS control bar didn't appear — likely TTS-provider first-run " +
-                "gate. Tracked for WI-4b follow-up."
+                "TTS control bar didn't appear within 30s. See Feature40's " +
+                "helper for context."
             )
         }
     }

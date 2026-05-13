@@ -2,15 +2,15 @@
 // Confirms the Auto Page Turn toggle + interval slider are present in
 // reader settings and exercise the toggle's wiring contract.
 //
-// Seed: .warAndPeace (real TXT content; needed for paged-mode rendering
-// to have something to advance through).
+// Seed: .mdTOC (loads an MD book with headings; MD is the ONLY format
+// granted `.autoPageTurn` capability per FormatCapabilities.swift:43-46
+// — TXT lacks end-to-end AutoPageTurner wiring per bug #157). WI-4b
+// switched from .warAndPeace to .mdTOC for this reason.
 //
 // Notes:
 // - Live multi-page advancement requires a fixture that paginates to
-//   multiple pages at the test viewport. war-and-peace.txt at 18pt
-//   paginates to 1 page on iPhone 17 Pro viewport (per feature #31
-//   round-2 finding), so advancement-via-timer is not assert-able
-//   without a larger fixture or font-size bump.
+//   multiple pages at the test viewport. The MD test seed paginates
+//   when MDReaderContainerView's paged renderer fits content.
 // - The pragmatic contract this WI verifies: the Auto Page Turn toggle
 //   exists and is interactable when paged mode is selected.
 //
@@ -26,7 +26,7 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .warAndPeace, resetPreferences: true)
+        app = launchApp(seed: .mdTOC, resetPreferences: true)
         settingsHelper = VerificationSettingsHelper(app: app)
     }
 
@@ -56,9 +56,30 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
         let panel = settingsHelper.openReaderSettings()
         XCTAssertTrue(panel.exists)
 
-        // Look for the "Auto Page Turn" section. Per FormatCapabilities
-        // gating, this section only renders for MD (not TXT). Probe non-
-        // strictly so non-MD formats XCTSkip rather than fail.
+        // The auto-page-turn section is double-gated:
+        //   1. format has .autoPageTurn capability (MD-only per bug #157)
+        //   2. AND store.epubLayout == .paged
+        // The MD seed defaults to scroll layout, so flip EPUB Layout to
+        // Paged. The segmented picker exposes "Paged" as a button under
+        // either app.buttons or app.segmentedControls.buttons.
+        let pagedByButton = panel.buttons["Paged"]
+        let pagedBySegmented = panel.segmentedControls.buttons["Paged"]
+
+        if pagedByButton.waitForExistence(timeout: 3), pagedByButton.isHittable {
+            pagedByButton.tap()
+        } else if pagedBySegmented.exists, pagedBySegmented.isHittable {
+            pagedBySegmented.tap()
+        } else {
+            // Try descendant scan as last resort
+            let any = panel.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == 'Paged'"))
+                .firstMatch
+            if any.exists, any.isHittable {
+                any.tap()
+            }
+        }
+
+        // Now look for the Auto Page Turn section.
         let section = panel.staticTexts["Auto Page Turn"]
         if !section.waitForExistence(timeout: 2) {
             for _ in 0..<6 {
@@ -69,8 +90,10 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
 
         guard section.exists else {
             throw XCTSkip(
-                "Auto Page Turn section not present — current format may lack " +
-                ".autoPageTurn capability (only MD has it per FormatCapabilities)"
+                "Auto Page Turn section not present — capability or layout " +
+                "gate not satisfied (need MD format AND paged layout; the " +
+                "Paged-picker tap may not have landed via XCUITest segmented- " +
+                "control lookup)"
             )
         }
 
