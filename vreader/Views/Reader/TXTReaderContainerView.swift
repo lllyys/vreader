@@ -596,6 +596,12 @@ struct TXTReaderContainerView: View {
     /// same way (wrapped + clipped, unwrapped to a single NSRange or nil).
     /// Returns ([], nil) when chapterIndex is out of bounds — acts as the nil-chapterIndex guard
     /// (chapterReaderContent is only called when chapterIndex != nil, but defensively handled).
+    ///
+    /// Bug #175: the temp-range path used `tempGlobalRange.flatMap { ... .first }` which
+    /// triggered a Swift Testing test-harness hang when this @MainActor-isolated static func
+    /// was invoked from a `@Suite struct` test with non-nil `tempGlobalRange`. Rewritten as
+    /// an explicit `if let` to bypass the introspection path that triggered the hang.
+    /// Behavior is identical (see `TXTChapterHighlightRenderingTests` for the proof).
     static func chapterLocalHighlightRanges(
         persistedGlobalRanges: [NSRange],
         tempGlobalRange: NSRange?,
@@ -607,12 +613,15 @@ struct TXTReaderContainerView: View {
             chapters: chapters,
             persistedGlobalRanges: persistedGlobalRanges
         )
-        let temp: NSRange? = tempGlobalRange.flatMap {
-            TXTChapterHighlightHelper.highlightsForChapter(
+        let temp: NSRange?
+        if let tempRange = tempGlobalRange {
+            temp = TXTChapterHighlightHelper.highlightsForChapter(
                 chapterIndex: chapterIndex,
                 chapters: chapters,
-                persistedGlobalRanges: [$0]
+                persistedGlobalRanges: [tempRange]
             ).first
+        } else {
+            temp = nil
         }
         return (persisted, temp)
     }
