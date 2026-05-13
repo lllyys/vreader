@@ -97,6 +97,13 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
             toggle.waitForExistence(timeout: 3),
             "autoPageTurnToggle should be visible once the section is on-screen"
         )
+        // The section header may have just scrolled into view at the bottom
+        // edge of the panel — the toggle (below the header) might still be
+        // clipped. Swipe up a couple more times to bring the full row into
+        // a hittable position.
+        for _ in 0..<3 where !toggle.isHittable {
+            panel.swipeUp()
+        }
         XCTAssertTrue(toggle.isHittable, "Auto Page Turn toggle should be hittable")
     }
 
