@@ -39,6 +39,12 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
 
     /// Verifies the Auto Page Turn toggle is reachable in reader settings
     /// when paged mode is the active reading mode.
+    ///
+    /// NOTE: Per `FormatCapabilities.swift:43-46`, `.autoPageTurn` is
+    /// granted ONLY to MD (TXT lacks end-to-end AutoPageTurner wiring per
+    /// bug #157). On `.warAndPeace` seed (TXT), the section is gated out
+    /// → test XCTSkips. To exercise the toggle, seed with `.mdTOC` (which
+    /// loads an MD book where the capability IS granted).
     func verify_feature_31_auto_page_turn_toggle_present() throws {
         tapFirstBook(in: app)
 
@@ -50,28 +56,36 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
         let panel = settingsHelper.openReaderSettings()
         XCTAssertTrue(panel.exists)
 
-        // Auto Page Turn toggle may be gated by paged mode being active.
-        // First check if the toggle is already visible.
-        var toggle = app.switches[AccessibilityID.autoPageTurnToggle]
-        if !toggle.waitForExistence(timeout: 3) {
-            // Try scrolling to find it. The toggle lives in the auto-page-turn section.
-            settingsHelper.scrollToSection("Auto Page Turn", in: panel, maxSwipes: 6)
-            toggle = app.switches[AccessibilityID.autoPageTurnToggle]
+        // Look for the "Auto Page Turn" section. Per FormatCapabilities
+        // gating, this section only renders for MD (not TXT). Probe non-
+        // strictly so non-MD formats XCTSkip rather than fail.
+        let section = panel.staticTexts["Auto Page Turn"]
+        if !section.waitForExistence(timeout: 2) {
+            for _ in 0..<6 {
+                if section.exists { break }
+                panel.swipeUp()
+            }
         }
 
-        guard toggle.waitForExistence(timeout: 3) else {
-            // Toggle may be capability-gated (per bug #156 fix). Skip rather
-            // than fail — the gate logic is unit-tested at the helper level.
+        guard section.exists else {
             throw XCTSkip(
-                "autoPageTurnToggle not visible in current reader settings — " +
-                "may be capability-gated by paged-mode availability on this fixture/format"
+                "Auto Page Turn section not present — current format may lack " +
+                ".autoPageTurn capability (only MD has it per FormatCapabilities)"
             )
         }
 
+        let toggle = app.switches[AccessibilityID.autoPageTurnToggle]
+        XCTAssertTrue(
+            toggle.waitForExistence(timeout: 3),
+            "autoPageTurnToggle should be visible once the section is on-screen"
+        )
         XCTAssertTrue(toggle.isHittable, "Auto Page Turn toggle should be hittable")
     }
 
     /// Verifies that toggling Auto Page Turn ON reveals the interval slider.
+    ///
+    /// Same capability gate as `verify_feature_31_auto_page_turn_toggle_present`:
+    /// XCTSkip on formats without `.autoPageTurn`.
     func verify_feature_31_auto_page_turn_interval_slider_appears_on_enable() throws {
         tapFirstBook(in: app)
 
@@ -83,12 +97,22 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
         let panel = settingsHelper.openReaderSettings()
         XCTAssertTrue(panel.exists)
 
-        var toggle = app.switches[AccessibilityID.autoPageTurnToggle]
-        if !toggle.waitForExistence(timeout: 3) {
-            settingsHelper.scrollToSection("Auto Page Turn", in: panel, maxSwipes: 6)
-            toggle = app.switches[AccessibilityID.autoPageTurnToggle]
+        // Non-strict section probe (same pattern as toggle_present test).
+        let section = panel.staticTexts["Auto Page Turn"]
+        if !section.waitForExistence(timeout: 2) {
+            for _ in 0..<6 {
+                if section.exists { break }
+                panel.swipeUp()
+            }
+        }
+        guard section.exists else {
+            throw XCTSkip(
+                "Auto Page Turn section not present — current format may lack " +
+                ".autoPageTurn capability"
+            )
         }
 
+        let toggle = app.switches[AccessibilityID.autoPageTurnToggle]
         guard toggle.waitForExistence(timeout: 3) else {
             throw XCTSkip("Auto Page Turn toggle gate not satisfied on this fixture")
         }

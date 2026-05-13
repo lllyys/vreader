@@ -279,3 +279,59 @@ vreader/
 └── (no Plugins/ directory — BookSource views are in Views/BookSource/)
 ```
 
+## Verification Harness (`vreaderUITests/Verification/`)
+
+DEBUG-only XCUITest harness that exercises 13 features' UI surfaces end-to-end
+on iPhone 17 Pro Simulator for autonomous device verification. Shipped as
+feature #45 in WI-1 (PR #581) → WI-2 (PR #584) → WI-3 (PR #587) → WI-4
+(this WI).
+
+```
+vreaderUITests/Verification/
+├── Helpers/
+│   ├── VerificationDebugBridgeHelper.swift    # Wraps vreader-debug:// commands
+│   └── VerificationSettingsHelper.swift       # Reader settings panel navigation
+├── Feature11EPUBHighlightVerificationTests.swift
+├── Feature21PaginatedModeVerificationTests.swift
+├── Feature23TXTTocVerificationTests.swift
+├── Feature27ReplacementRulesVerificationTests.swift
+├── Feature28ChineseConversionVerificationTests.swift
+├── Feature29WebDAVVerificationTests.swift
+├── Feature31AutoPageTurnVerificationTests.swift
+├── Feature34CollectionsVerificationTests.swift
+├── Feature35AnnotationsExportVerificationTests.swift
+├── Feature36OPDSVerificationTests.swift
+├── Feature37PerBookSettingsVerificationTests.swift
+├── Feature40TTSSentenceHighlightVerificationTests.swift
+└── Feature41TTSAutoScrollVerificationTests.swift
+```
+
+### Conventions
+
+- **`verify_` method prefix** — intentionally NOT auto-discovered by
+  `xcodebuild test` against the default scheme. Invoke via explicit
+  `-only-testing:<class>/<method>` flags or a dedicated test plan.
+  This keeps the unit-test gate fast while the verification harness
+  runs on its own cadence.
+- **`@MainActor final class XCTestCase`** — verification tests touch
+  the SwiftUI element tree which is main-actor-isolated.
+- **Seed via `launchApp(seed:)`** — `.warAndPeace` / `.mdTOC` for tests
+  that need real content; `.books` for UI-surface-only tests.
+- **`XCTSkip` for capability gates** — features gated by
+  `FormatCapabilities` (e.g., autoPageTurn on TXT) skip gracefully
+  rather than fail.
+- **`XCTSkip` for env-var-gated live tests** — WebDAV/OPDS live-server
+  tests skip unless `CI_WEBDAV_URL` / `CI_OPDS_URL` are set.
+- **RED-proof catalog** at `dev-docs/verification-red-checks.md`
+  records evidence that each `verify_` method correctly fails when its
+  production seam is broken.
+
+### Why no auto-discovery
+
+vreader's default `xcodebuild test` gate runs `vreaderTests/` only
+(skipping UITests via `-only-testing:vreaderTests`). The verification
+harness is heavier (each test launches the app + drives gestures) and
+runs on its own cadence via the verify cron. Auto-discovery from the
+default scheme would slow every dev unit-test run by minutes for no
+incremental signal.
+
