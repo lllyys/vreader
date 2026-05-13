@@ -9,9 +9,13 @@
 //   ttsState/ttsOffsetUTF16 as the assertion surface (per feature #45
 //   plan v2). The DebugSnapshot v2 schema (feature #49 WI-1) added these
 //   fields.
-// - Audio playback is not observable on the simulator, but
-//   AVSpeechSynthesizerDelegate callbacks still fire — ttsOffsetUTF16
-//   advances as utterances progress.
+// - Feature #45 WI-4e: launches with `--tts-test-mode` so TTSService is
+//   constructed with `XCUITestMockSpeechSynthesizer` instead of the
+//   real `AVSpeechSynthesizer`. The real synth doesn't transition to
+//   .speaking under XCUITest headless mode on iPhone 17 Pro Simulator;
+//   the mock fires synthetic delegate callbacks (didStart, repeated
+//   willSpeakRange, didFinish) so ttsState reliably reports "speaking"
+//   and ttsOffsetUTF16 advances during the test's polling window.
 // - Falls back to a weaker smoke check (ttsControlBar visibility) if
 //   the snapshot's ttsState field is nil (e.g., format/path doesn't
 //   broadcast TTS state to the snapshot yet).
@@ -28,7 +32,16 @@ final class Feature40TTSSentenceHighlightVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .warAndPeace, resetPreferences: true)
+        // Feature #45 WI-4e: --tts-test-mode swaps AVSpeechSynthesizer
+        // for XCUITestMockSpeechSynthesizer at TTSService construction
+        // so ttsState transitions and ttsOffsetUTF16 advances under
+        // XCUITest headless mode (real synth's audio session does not
+        // activate here).
+        app = launchApp(
+            seed: .warAndPeace,
+            resetPreferences: true,
+            extraLaunchArguments: ["--tts-test-mode"]
+        )
         bridgeHelper = VerificationDebugBridgeHelper(app: app)
     }
 
@@ -58,26 +71,17 @@ final class Feature40TTSSentenceHighlightVerificationTests: XCTestCase {
         ttsButton.tap()
 
         // The TTS control bar should appear once TTS has started.
-        // NOTE (WI-4 finding): on a fresh launch, tapping readerTTSButton
-        // may surface a TTS-provider selection sheet or AI consent flow
-        // before playback begins, depending on profile state. The
-        // verify-cron 2026-05-13 device run via CU exercised TTS
-        // successfully on a pre-provisioned simulator; XCUITest from a
-        // clean `resetPreferences: true` start hits the gate and
-        // ttsControlBar never appears. XCTSkip rather than fail until
-        // the test seed primes a TTS provider.
+        // With --tts-test-mode active (WI-4e), the mock synthesizer fires
+        // didStart immediately so the control bar mounts within ~1s of
+        // tapping. Allow 15s window for text-load Task on cold cache.
         let controlBar = app.otherElements[AccessibilityID.ttsControlBar]
-        // TTS startup is async: startTTS() loads book text via Task before
-        // calling ttsService.startSpeaking. On a fresh-launch simulator
-        // with no warmed file-cache, this can take 15+ seconds for TXT.
-        // 30s timeout accommodates first-run latency.
-        guard controlBar.waitForExistence(timeout: 30) else {
+        guard controlBar.waitForExistence(timeout: 15) else {
             throw XCTSkip(
-                "TTS control bar didn't appear within 30s after tapping " +
-                "readerTTSButton. Possible causes: AVSpeechSynthesizer audio " +
-                "session not available on this sim, or text-load Task hung. " +
-                "Verified working via CU 2026-05-09; needs sim-specific " +
-                "investigation for fully-headless XCUITest."
+                "TTS control bar didn't appear within 15s after tapping " +
+                "readerTTSButton even with --tts-test-mode. Possible " +
+                "causes: text-load Task hung, AI provider gate, or mock " +
+                "wiring regression. Check that TTSTestOverride." +
+                "useMockSynthesizer is being set in VReaderApp.init."
             )
         }
     }

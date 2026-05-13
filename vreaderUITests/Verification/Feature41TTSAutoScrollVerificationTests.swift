@@ -28,7 +28,15 @@ final class Feature41TTSAutoScrollVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .warAndPeace, resetPreferences: true)
+        // Feature #45 WI-4e: --tts-test-mode swaps AVSpeechSynthesizer
+        // for XCUITestMockSpeechSynthesizer at TTSService construction
+        // so position / ttsOffsetUTF16 advance under XCUITest headless
+        // mode (real synth's audio session does not activate here).
+        app = launchApp(
+            seed: .warAndPeace,
+            resetPreferences: true,
+            extraLaunchArguments: ["--tts-test-mode"]
+        )
         bridgeHelper = VerificationDebugBridgeHelper(app: app)
     }
 
@@ -50,14 +58,14 @@ final class Feature41TTSAutoScrollVerificationTests: XCTestCase {
         }
         ttsButton.tap()
 
-        // See Feature40's helper for the WI-4 finding context: on a fresh
-        // launch the TTS button may surface a provider-selection sheet
-        // before playback. XCTSkip until test-seed priming lands.
+        // With --tts-test-mode (WI-4e), the mock fires didStart immediately
+        // so the control bar mounts within ~1s. 15s window covers cold
+        // text-load on simulator.
         let controlBar = app.otherElements[AccessibilityID.ttsControlBar]
-        guard controlBar.waitForExistence(timeout: 30) else {
+        guard controlBar.waitForExistence(timeout: 15) else {
             throw XCTSkip(
-                "TTS control bar didn't appear within 30s. See Feature40's " +
-                "helper for context."
+                "TTS control bar didn't appear within 15s even with " +
+                "--tts-test-mode. See Feature40's helper for diagnostics."
             )
         }
     }

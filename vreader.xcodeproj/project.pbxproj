@@ -24,6 +24,7 @@
 		054050637EFD8ACE415BCF2E /* ReplacementRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B9584B44764B8D11C7CC9F6 /* ReplacementRulesView.swift */; };
 		058C2F104DE6D10D81F907D9 /* AnnotationExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB9773A4631BEDEDD187F08 /* AnnotationExporterTests.swift */; };
 		05BE70789318FA085B9A735E /* AIChatViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E861A379A620B769CEA36300 /* AIChatViewModelTests.swift */; };
+		066A3021DFE04C15ECFEBF55 /* XCUITestMockSpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC35FBA0B1E2CA1BAF72C8C9 /* XCUITestMockSpeechSynthesizer.swift */; };
 		066EB86763E7D6B0068732DB /* TXTChapterHighlightCreationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4559FD0011E0F990013EAE48 /* TXTChapterHighlightCreationTests.swift */; };
 		0681EC94635E9BBB798AAB77 /* SearchHighlightDismissTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62569DC663E2BDD2DC0155C3 /* SearchHighlightDismissTests.swift */; };
 		069B04BFCB5D0D4FA8EA5972 /* WebDAVNetworkPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D408C9CE57D4C437A72C0D18 /* WebDAVNetworkPolicy.swift */; };
@@ -629,6 +630,7 @@
 		C205A1413A59C630A10ECEB7 /* BookContentCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF50D372D73575F047EF0991 /* BookContentCacheTests.swift */; };
 		C229986578226ECF2297D01A /* BookSourceSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E358C3A06D7CC0958A40876 /* BookSourceSearchView.swift */; };
 		C243AD36AE83E921EA70EEDD /* MDTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9D9F31A3F96B73C8E3653E6 /* MDTextExtractor.swift */; };
+		C28C9220D25AECBA8CAF8EB7 /* XCUITestMockSpeechSynthesizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87772C29A5D590FB8679B7E7 /* XCUITestMockSpeechSynthesizerTests.swift */; };
 		C2CB65A50C711B49AAB672AE /* PDFTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 428A4370B8DB59563F9EE768 /* PDFTextExtractor.swift */; };
 		C3129F763BDCF3AB47BC7098 /* BackupDataCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAAF285B1D1B4F09E3AAD56 /* BackupDataCollector.swift */; };
 		C320E44AF92161F0A556FDA7 /* EPUBReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DAD9A773D4AA9098981720D /* EPUBReaderViewModelTests.swift */; };
@@ -1274,6 +1276,7 @@
 		8719A34DB441AF9DC6379DC9 /* PDFHighlightRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFHighlightRenderer.swift; sourceTree = "<group>"; };
 		874E517A41CB3B9C7C5C8D3A /* NavigationFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationFlowTests.swift; sourceTree = "<group>"; };
 		8770E9DB2008B2B8B4B0A475 /* foliate-host.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "foliate-host.js"; sourceTree = "<group>"; };
+		87772C29A5D590FB8679B7E7 /* XCUITestMockSpeechSynthesizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCUITestMockSpeechSynthesizerTests.swift; sourceTree = "<group>"; };
 		8781075EA7AF25572A741C40 /* BilingualView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualView.swift; sourceTree = "<group>"; };
 		87B8A6B78229BC6C7E4ADF0F /* foliate-bundle.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "foliate-bundle.js"; sourceTree = "<group>"; };
 		87DA305663C991FC6F15F80E /* ImportJobQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportJobQueueTests.swift; sourceTree = "<group>"; };
@@ -1487,6 +1490,7 @@
 		CB65B98019C814421DDB0668 /* ZIPReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZIPReaderTests.swift; sourceTree = "<group>"; };
 		CB6F33EB7EFB0D7C9001E3A2 /* LibraryEdgeCaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryEdgeCaseTests.swift; sourceTree = "<group>"; };
 		CB7EBD49DAE8D5F5BC4C7207 /* PageTurnAnimatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageTurnAnimatorTests.swift; sourceTree = "<group>"; };
+		CC35FBA0B1E2CA1BAF72C8C9 /* XCUITestMockSpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCUITestMockSpeechSynthesizer.swift; sourceTree = "<group>"; };
 		CC4425D7764DA53AD595FF93 /* ReduceMotionHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReduceMotionHelper.swift; sourceTree = "<group>"; };
 		CC7163F03E397567941D174D /* DebugBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBridgeTests.swift; sourceTree = "<group>"; };
 		CCBA2A70DA3EE6E28FAB3FFE /* foliate-bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "foliate-bridge.js"; sourceTree = "<group>"; };
@@ -1928,6 +1932,7 @@
 				0CDE700F3AC42B0D8AD377E1 /* HTTPTTSProviderTests.swift */,
 				13D1E2EE401D4C3053FB687A /* MockURLSession.swift */,
 				F7968DAA000D9F45677960BA /* TTSHighlightCoordinatorTests.swift */,
+				87772C29A5D590FB8679B7E7 /* XCUITestMockSpeechSynthesizerTests.swift */,
 			);
 			path = TTS;
 			sourceTree = "<group>";
@@ -2863,6 +2868,7 @@
 				D721FA5AC22C4EBD49791B48 /* TTSHighlightCoordinator.swift */,
 				E97DAB513E717D83CD9ED3F7 /* TTSProviderProtocol.swift */,
 				7BD36F5CC483659F962BFB3A /* TTSService.swift */,
+				CC35FBA0B1E2CA1BAF72C8C9 /* XCUITestMockSpeechSynthesizer.swift */,
 			);
 			path = TTS;
 			sourceTree = "<group>";
@@ -3773,6 +3779,7 @@
 				371BDEC687E965D30E539A94 /* WebDAVProviderSelectiveRestoreTests.swift in Sources */,
 				77D706EE2E466C650B00C381 /* WebDAVProviderTests.swift in Sources */,
 				88B73AB500D0DFD555AC9363 /* WebPageEncodingDetectorTests.swift in Sources */,
+				C28C9220D25AECBA8CAF8EB7 /* XCUITestMockSpeechSynthesizerTests.swift in Sources */,
 				E153024C836519993C468665 /* ZIPReaderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -4178,6 +4185,7 @@
 				F2C53E71EFF6601811CE4003 /* WebDAVProviderFactory.swift in Sources */,
 				671D7F1B0A003041831E308E /* WebDAVSettingsView.swift in Sources */,
 				8E93B4DCB415EC16CEE9F01E /* WebPageEncodingDetector.swift in Sources */,
+				066A3021DFE04C15ECFEBF55 /* XCUITestMockSpeechSynthesizer.swift in Sources */,
 				AEFC819574E845429DFC9D78 /* ZIPReader.swift in Sources */,
 				48515116AAAA6DD5DFAA4ADE /* ZIPWriter.swift in Sources */,
 			);
@@ -4326,13 +4334,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 317;
+				CURRENT_PROJECT_VERSION = 318;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.21.40;
+				MARKETING_VERSION = 3.21.41;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4476,13 +4484,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 317;
+				CURRENT_PROJECT_VERSION = 318;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.21.40;
+				MARKETING_VERSION = 3.21.41;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

@@ -35,6 +35,21 @@ protocol SpeechSynthesizing: AnyObject {
 /// This extension just declares conformance — no new implementations needed.
 extension AVSpeechUtterance: SpeechUtteranceProtocol {}
 
+// MARK: - XCUITest override flag
+
+#if DEBUG
+/// Feature #45 WI-4e. Set to `true` by `VReaderApp.init` when the
+/// `--tts-test-mode` launch arg is present. Read by `TTSService` at
+/// construction time to choose between `SystemSpeechSynthesizer` and
+/// `XCUITestMockSpeechSynthesizer`. The flag is written exactly once per
+/// process at App.init (defensively, both branches) and read on the
+/// same MainActor in TTSService.init — no cross-actor write contention.
+@MainActor
+enum TTSTestOverride {
+    static var useMockSynthesizer: Bool = false
+}
+#endif
+
 /// Wrapper that adapts AVSpeechSynthesizer to SpeechSynthesizing protocol.
 /// AVSpeechSynthesizer's speak() takes AVSpeechUtterance, not our protocol,
 /// so we wrap it.

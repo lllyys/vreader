@@ -1242,3 +1242,212 @@ only) and unblocks future work once the routing question is resolved.
 3. `VerificationDebugBridgeHelper.ttsAction(_:)` method exists, compiles, follows the established fire-and-observe helper pattern — DONE
 4. `DebugCommand.ttsURL(action:)` static helper constructs the URL — DONE
 5. `xcodebuild build-for-testing` succeeds — DONE
+
+---
+
+## WI-4e — Mock SpeechSynthesizer for XCUITest TTS verification (2026-05-14)
+
+**Type**: Foundational (production-target DEBUG-only test adapter + launch arg) + Behavioral (Feature40/41 XCUITest unskip).
+**PR size estimate**: ~150 LOC.
+
+**Why this WI exists** — WI-4d shipped the helper (`bridgeHelper.ttsAction(_:)` + `DebugCommand.ttsURL(action:)`) but couldn't ship the actual Feature40/41 unskip because of two stacked blockers:
+
+1. **Real `AVSpeechSynthesizer` doesn't transition to speaking under XCUITest headless** on iPhone 17 Pro Sim, even when the production code path is exercised via real button tap. CU device-verified TTS at the production layer (Feature #26 round-2, 2026-05-09); the synth-stuck behavior is XCUITest-specific.
+2. **`simctl openurl` from inside the XCUITest runner sandbox is unreliable** for URL delivery to the host app: `/usr/bin/xcrun` is on the host Mac filesystem, not the iOS sim sandbox where the runner app's posix_spawn executes. So firing `vreader-debug://tts?action=start` from `VerificationDebugBridgeHelper.send()` inside the runner does not reliably reach the running app's URL handler.
+
+WI-4e adopts the WI-4c plan v2's documented FALLBACK (Finding #4 mitigation, plan line 645): swap the production `AVSpeechSynthesizer` for a deterministic DEBUG-only mock under a `--tts-test-mode` launch arg. The mock fires `AVSpeechSynthesizerDelegate` callbacks on a synthetic timeline so that `ttsState` transitions to `.speaking` and `ttsOffsetUTF16` advances without real audio. This bypasses BOTH blockers above:
+
+- Blocker (1) is bypassed: the mock doesn't depend on AVSpeechSynthesizer's audio session.
+- Blocker (2) is bypassed: tests tap the real `readerTTSButton` (a normal SwiftUI Button that dispatches taps fine under XCUITest, unlike segmented Pickers) — no URL fire needed for the start action.
+
+**Surface area** — file-by-file with concrete signatures:
+
+1. `vreader/Services/TTS/XCUITestMockSpeechSynthesizer.swift` (new, `#if DEBUG`-wrapped):
+   - `final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing`.
+   - `weak var delegateTarget: AVSpeechSynthesizerDelegate?` and `let probeSynth = AVSpeechSynthesizer()` (used only as the `_ synthesizer:` parameter passed to delegate callbacks — never has `speak()` called on it).
+   - `private var currentTask: Task<Void, Never>?` so `stopSpeaking()` cancels in-flight callbacks.
+   - `var isSpeaking` / `var isPaused` mutable Bools updated by speak/pause/continue/stop.
+   - `speak(_ utterance:)`:
+     - Set `isSpeaking = true`.
+     - Spawn `currentTask = Task { @MainActor [weak self] in ... }`.
+     - The task: extracts text length from `utterance.speechString`, fires N synthetic `willSpeakRangeOfSpeechString` callbacks spaced ~250ms apart (N ≤ 10, sliced evenly across the text length), then fires `didFinish` and sets `isSpeaking = false`.
+     - All callbacks invoke `delegateTarget?.speechSynthesizer(probeSynth, willSpeakRangeOfSpeechString:utterance:)` etc.
+     - If cancelled (via `stopSpeaking`), the task fires `didCancel` instead of `didFinish` and exits early.
+   - `pauseSpeaking()` → just flip `isPaused`/`isSpeaking`; no delegate callback (matches real synth behavior: pause doesn't fire didCancel).
+   - `continueSpeaking()` → flip flags back; the task continues unaffected (acceptable simplification — the real synth has gaps, the mock just keeps ticking).
+   - `stopSpeaking()` → cancel `currentTask`, set flags, fire `didCancel` on a fresh `Task @MainActor`.
+
+2. `vreader/Services/TTS/SpeechSynthesizing.swift`:
+   - Add `#if DEBUG`-wrapped `enum TTSTestOverride { @MainActor static var useMockSynthesizer: Bool = false }`.
+   - The flag is the single source of truth for whether `TTSService` should pick the mock at construction time. It is NOT exposed outside DEBUG.
+
+3. `vreader/Services/TTS/TTSService.swift`:
+   - Change the `init(synthesizerFactory:)` DEFAULT factory from `{ SystemSpeechSynthesizer() }` to `{ Self.defaultSynthesizer() }` where:
+     ```swift
+     @MainActor
+     private static func defaultSynthesizer() -> SpeechSynthesizing {
+         #if DEBUG
+         if TTSTestOverride.useMockSynthesizer {
+             return XCUITestMockSpeechSynthesizer()
+         }
+         #endif
+         return SystemSpeechSynthesizer()
+     }
+     ```
+   - Update the delegate-wiring branch at line 58-60 to also handle the mock:
+     ```swift
+     if let system = synthesizer as? SystemSpeechSynthesizer {
+         system.delegateTarget = self
+     }
+     #if DEBUG
+     else if let mock = synthesizer as? XCUITestMockSpeechSynthesizer {
+         mock.delegateTarget = self
+     }
+     #endif
+     ```
+   - No change to the existing `AVSpeechSynthesizerDelegate` extension; it already operates on the synthesizer-agnostic state writes.
+
+4. `vreader/App/VReaderApp.swift`:
+   - `TestLaunchConfig` struct: add `let ttsTestMode: Bool`.
+   - `TestLaunchConfig.parse`: add `args.contains("--tts-test-mode")` → `ttsTestMode`.
+   - `TestLaunchConfig.none`: add `ttsTestMode: false`.
+   - In the existing `#if DEBUG` early-setup block (around line 90-156): if `config.ttsTestMode`, set `TTSTestOverride.useMockSynthesizer = true` BEFORE any view body is evaluated (so the first `TTSService()` call inside `ReaderContainerView`'s `@State` initializer picks up the override).
+
+5. `vreaderUITests/Verification/Feature40TTSSentenceHighlightVerificationTests.swift`:
+   - `setUpWithError`: replace `launchApp(seed: .warAndPeace, resetPreferences: true)` with `launchApp(seed: .warAndPeace, resetPreferences: true, extraLaunchArguments: ["--tts-test-mode"])`.
+   - `openReaderAndStartTTS()`: tighten timeout from 30s to 8s on `controlBar.waitForExistence` (mock fires `didStart` immediately). Drop the XCTSkip rationale that cites audio session unavailability.
+   - Both `verify_*` test methods: drop their XCTSkip fallback paths; the snapshot's `ttsState` should now reliably read non-idle.
+
+6. `vreaderUITests/Verification/Feature41TTSAutoScrollVerificationTests.swift`:
+   - Same as #5.
+
+7. `vreaderTests/Services/TTS/XCUITestMockSpeechSynthesizerTests.swift` (new):
+   - `@Suite("XCUITestMockSpeechSynthesizer")`.
+   - Test: `speak fires didStart immediately` — assert `delegateTarget.didStartCount == 1` within 100ms.
+   - Test: `speak fires willSpeakRange multiple times across utterance` — assert at least 2 callbacks within 1.5s.
+   - Test: `speak ends with didFinish when allowed to complete` — assert didFinish fires within 3s, isSpeaking flips to false.
+   - Test: `stopSpeaking fires didCancel and cancels remaining willSpeakRange` — assert didCancel fires, no more willSpeakRange after stop.
+   - Test: `speak twice cancels first utterance` — assert first task fires didCancel.
+
+8. `vreaderTests/App/TestLaunchConfigTests.swift` (extend or create):
+   - Test: `parse(arguments: ["--tts-test-mode"]) returns config with ttsTestMode == true`.
+   - Test: `parse(arguments: []) returns config with ttsTestMode == false`.
+
+**Prior art / project precedent / rejected alternatives**:
+
+- **Precedent**: `SpeechSynthesizing` protocol already exists in `vreader/Services/TTS/SpeechSynthesizing.swift` (lines 22-30) with `SystemSpeechSynthesizer` as the production adapter (lines 41-72). `TTSService.init(synthesizerFactory:)` already accepts an injected factory (line 53). Unit tests in `vreaderTests/Services/TTSServiceTests.swift` already construct with `MockSpeechSynthesizer` (a different, simpler mock that lives in the test target). WI-4e extends this DI plumbing into the production target, gated `#if DEBUG`, for XCUITest scenarios.
+- **Precedent**: `TestLaunchConfig` already wires `--reader-default-layout=`, `--seed-*`, `--reset-preferences`, `--enable-ai`, etc. — all DEBUG-only launch args that flip behavior at `VReaderApp.init`. WI-4e adds one more flag following the same shape.
+- **Rejected — option (a) host-side simctl bridge**: move URL delivery to a pre-test script + IPC mechanism (XCTAttachment, shared file watcher) so the runner-app sandbox never has to spawn xcrun. Significant infrastructure work (new bridge + xctestplan hooks). Out of proportion for one feature's worth of test refactor.
+- **Rejected — option (b) in-app HTTP endpoint**: a test-only HTTP server inside the app that the runner POSTs to, bridging back to the DebugBridge URL handler. Adds attack surface (even if DEBUG-only), more moving parts, doesn't address the AVSpeechSynthesizer-stuck-headless problem (still need the mock for that).
+- **Rejected — extend the test-target `MockSpeechSynthesizer`** to live in the production target as-is: it doesn't fire delegate callbacks (line 398-443 of TTSServiceTests). XCUITest needs callbacks to drive `ttsState`. A new adapter with synthetic delegate scheduling is the minimum-viable fix.
+
+**Files OUT of scope**:
+
+- `verify-release-no-debugbridge.sh` — the new symbols `XCUITestMockSpeechSynthesizer` and `TTSTestOverride` are `#if DEBUG`-wrapped at file scope, which the existing release-symbol check already covers. No script change needed; spot-check during Gate 4 audit.
+- Feature #31 auto page turn picker — different blocker class (SwiftUI segmented picker tap dispatch under XCUITest). Separate WI.
+- `bridgeHelper.ttsAction(_:)` (WI-4d shipped) — keep as future-use helper; not exercised by WI-4e because tests use real button tap instead of URL fire.
+
+**Test catalogue for WI-4e**:
+
+| File | RED (pre-WI-4e) | GREEN (post-WI-4e) |
+|---|---|---|
+| `vreaderTests/Services/TTS/XCUITestMockSpeechSynthesizerTests.swift` (new) | Tests fail — type doesn't exist | 5 tests pass: didStart immediate, willSpeakRange ≥2, didFinish at end, stopSpeaking → didCancel, speak-twice cancels first |
+| `vreaderTests/App/TestLaunchConfigTests.swift` (extend or create) | Test fails — `ttsTestMode` field doesn't exist on config | 2 tests pass: flag parsed + default false |
+| `Feature40TTSSentenceHighlightVerificationTests` (refactor) | XCTSkips on ttsControlBar 30s timeout | `verify_feature_40_tts_state_reported_after_start` + `verify_feature_40_tts_offset_advances_during_playback` both pass; ttsState reports "speaking" within 8s of TTS button tap |
+| `Feature41TTSAutoScrollVerificationTests` (refactor) | XCTSkips on same path | Both `verify_feature_41_*` methods pass; ttsOffsetUTF16 advances during the 3s sample window |
+
+**Risks + mitigations**:
+
+- **Risk — Mock weakens test signal**: tests exercise mock delegate callbacks rather than real synth. **Mitigation**: real synth is device-verified via CU 2026-05-09 (Feature #26 round-2 evidence). WI-4e tests the wiring (TTSService state machine, `TTSHighlightCoordinator`, snapshot's `ttsState` field, `ReaderContainerView` auto-scroll behavior) — only the audio engine is mocked. The signal lost is "real AVSpeechSynthesizer activates audio session correctly," which is not what the verification tests claim to cover anyway.
+- **Risk — Mock timing flakiness**: synthetic callbacks fired with `Task.sleep` could be slower than test polling. **Mitigation**: mock fires `didStart` synchronously (no sleep), then first `willSpeakRange` within 250ms. Test polling intervals are 1s / 3s — well above this. Unit tests assert `≤ 100ms` for didStart and `≤ 1.5s` for the second willSpeakRange to catch regressions.
+- **Risk — `TTSTestOverride.useMockSynthesizer` flag leaks state across launches**: it's a static, so a second `VReaderApp.init` in the same process could pick up the prior launch's value. **Mitigation**: `VReaderApp.init` writes the flag unconditionally from `TestLaunchConfig` (true if `--tts-test-mode` present, false otherwise). XCUITest tears down between tests via `XCUIApplication.terminate` + relaunch, which creates a new process — flag is reset at process start anyway. Add a defensive write in the `else` branch.
+- **Risk — DEBUG-only symbol accidentally ships in Release**: `verify-release-no-debugbridge.sh` already enforces this for all `#if DEBUG` blocks. **Mitigation**: file-scope `#if DEBUG` wraps the entire `XCUITestMockSpeechSynthesizer.swift` body and the `TTSTestOverride` enum.
+- **Risk — `defaultSynthesizer()` evaluated before `VReaderApp.init` writes the flag**: `@State var ttsService = TTSService()` in `ReaderContainerView` is initialized on first view body evaluation, which happens AFTER `VReaderApp.body` runs (which is after `VReaderApp.init` returns). **Mitigation**: confirmed in Gate 2 audit by reading the SwiftUI lifecycle — `View.body` doesn't evaluate during `App.init`. Tests will catch a regression here as the existing Feature 40/41 would XCTSkip again.
+
+**Backward compat**: fully additive `#if DEBUG`. Release builds do not contain the mock symbol or the launch arg parsing branch. No SwiftData migration. `--tts-test-mode` absent from launch args → identical to current behavior.
+
+**Edge cases**:
+
+- `--tts-test-mode` set + book seed has empty TXT → `startTTS()` early-returns (whitespace-trim guard at TTSService line 71) → no mock callbacks → test XCTSkip path retained for the no-text scenario (acceptable; the relevant test seeds include `.warAndPeace` which is non-empty).
+- User taps TTS button twice in quick succession with mock active → second `speak()` cancels first; first task fires `didCancel`; `TTSService.handleCancelledUtterance(generation:)` ignores the stale cancel because `currentGeneration` already incremented (existing generation-counter logic at TTSService line 92). No assertion change needed.
+- Mock `stopSpeaking()` called when nothing is speaking → `currentTask` is nil; no callback fires; `isSpeaking` already false. Matches real synth no-op.
+- `pauseSpeaking()` / `continueSpeaking()` on the mock → don't suspend the inner Task. Acceptable simplification for verification tests; Feature40/41 don't exercise pause/resume.
+
+**Gate** (WI-4e acceptance):
+
+- `vreaderTests` suite passes (existing tests + 5 new unit tests + 2 new launch-config tests).
+- Feature40 + Feature41 XCUITest verification tests pass without XCTSkip on a clean simulator boot.
+- `xcodebuild build -configuration Release` succeeds; new DEBUG-only symbols compile out (file-scope `#if DEBUG` wrap is the primary defense — see Gate 2 audit finding #1 below for release-guard script scope clarification).
+- Feature #45 row Notes updated to reflect WI-4e DONE + Feature 40/41 unskipped.
+- Evidence file `dev-docs/verification/feature-40-<YYYYMMDD>.md` (and feature-41 same date) for the post-merge VERIFIED flip on those rows. WI-4e itself is a tooling/infra change inside Feature #45; the verification-evidence files belong to Features 40 and 41 once their rows flip.
+
+#### WI-4e — Gate 2 audit (manual fallback, Codex MCP unavailable)
+
+Date: 2026-05-14. Codex MCP returned `stream disconnected before completion` continuously across this session (matching the 2026-05-13 outage noted in WI-4c's audit). Manual fallback per rule 47 + rule 48.
+
+**Files read** (paths):
+
+- `vreader/Services/TTS/SpeechSynthesizing.swift` (full) — confirmed `SpeechSynthesizing: AnyObject` protocol shape (`speak(_:)`, `pauseSpeaking()`, `continueSpeaking()`, `stopSpeaking()`, `isSpeaking`, `isPaused`), `SpeechUtteranceProtocol` (read-only `speechString`, mutable `rate`/`pitchMultiplier`/`volume`), and the existing `SystemSpeechSynthesizer` delegate-forwarding pattern via `delegateTarget`.
+- `vreader/Services/TTS/TTSService.swift` (full) — confirmed `@MainActor @Observable final class TTSService: NSObject`, `init(synthesizerFactory:)` with default `{ SystemSpeechSynthesizer() }`, the `if let system = synthesizer as? SystemSpeechSynthesizer { system.delegateTarget = self }` wiring, `currentGeneration` + `handleCancelledUtterance(generation:)` stale-cancel filter, the `AVSpeechSynthesizerDelegate` extension at lines 200-245 (nonisolated methods that hop to MainActor via `Task @MainActor in`).
+- `vreaderTests/Services/TTSServiceTests.swift` (lines 395-443) — confirmed test-target `MockSpeechSynthesizer: SpeechSynthesizing` exists but does NOT fire delegate callbacks (just records call flags). New production-target mock cannot reuse it.
+- `vreader/Views/Reader/ReaderContainerView.swift` (line 57 + lines 220-243) — confirmed `@State var ttsService = TTSService()` and the existing `.onReceive(.debugBridgeTTSCommand)` observer wiring `startTTS()` on `action == "start"`.
+- `vreader/App/VReaderApp.swift` (lines 40-150 + 325-440) — confirmed `TestLaunchConfig` shape, `parse(_:)` adds Bool fields via `args.contains("--flag")`, and the existing DEBUG early-setup block at lines 121-148 that writes UserDefaults for `--reader-default-layout=` BEFORE any view body evaluates. This is the exact precedent for the new `TTSTestOverride.useMockSynthesizer = config.ttsTestMode` write.
+- `vreaderUITests/Helpers/LaunchHelper.swift` (lines 95-220) — confirmed `extraLaunchArguments: [String] = []` parameter already exists on all three `launchApp` variants (`LaunchHelper.launchApp`, free `launchApp`, `vreaderUITests_launchApp`); WI-4c's audit finding #2 was already addressed.
+- `vreaderUITests/Verification/Feature40TTSSentenceHighlightVerificationTests.swift` (full) — confirmed structure: `setUpWithError` calls `launchApp(seed: .warAndPeace, resetPreferences: true)`; `openReaderAndStartTTS()` taps `readerTTSButton` (real button, no URL fire), then `XCTSkip`s on 30s `controlBar.waitForExistence` timeout. Two `verify_*` methods both follow the open-then-snapshot pattern.
+- `scripts/verify-release-no-debugbridge.sh` (lines 1-100) — confirmed the symbol pattern is DebugBridge-scoped (`'vreader-debug|DebugBridge|DebugCommand|DebugFixture|DebugSnapshot|LoggingDebugBridgeContext|DebugBridgeProvider|RealDebugBridgeContext|DebugBridgeContextError'`). It is NOT a generic DEBUG-symbol leak check; precedent symbols like `TestSeeder` and `TestLaunchConfig` rely solely on file-scope `#if DEBUG` for release exclusion.
+- `.claude/rules/50-codebase-conventions.md` "11. DEBUG Gating" — confirmed the codebase convention: `#if DEBUG` at file scope is the standard primary defense; the release-guard script is a belt-and-suspenders DebugBridge-specific check, not a general DEBUG-symbol scanner.
+
+**Symbols / signatures verified**:
+
+- `SpeechSynthesizing: AnyObject` ✓ — class-bound, satisfied by `NSObject` subclass.
+- `AVSpeechSynthesizerDelegate` methods (`willSpeakRangeOfSpeechString`, `didFinish`, `didCancel`) ✓ — all take `AVSpeechSynthesizer` as the first arg, requiring the mock to own an `AVSpeechSynthesizer` instance solely as a typing tag (never speak'd on).
+- `AVSpeechUtterance` ✓ — `Foundation`-based, `init(string:)`, mutable `rate`/`pitchMultiplier`/`volume`. The protocol's `SpeechUtteranceProtocol` cast back to `AVSpeechUtterance` in `XCUITestMockSpeechSynthesizer.speak(_:)` is safe because the production callers (`TTSService.startSpeaking` line 121) construct `AVSpeechUtterance` directly.
+- `TestLaunchConfig` ✓ — struct with `Sendable`, all fields immutable `let`. Adding `let ttsTestMode: Bool` follows the same shape as `enableAI`, `enableSync`, etc.
+- `TestLaunchConfig.parse(_:)` ✓ — pure function over `[String]`. Adding `args.contains("--tts-test-mode")` is one line.
+- `TestLaunchConfig.none` ✓ — must extend with `ttsTestMode: false` to keep the struct construction balanced.
+- `LaunchHelper.launchApp(...)` ✓ — `extraLaunchArguments` parameter present at lines 107, 152, 201, threaded through to `args.append(contentsOf:)` at line 183.
+- `TTSService.startSpeaking` ✓ — calls `synthesizer.speak(utterance)` at line 123 with the constructed `AVSpeechUtterance`, then sets `state = .speaking`. The mock's `speak(_:)` receives this utterance and uses it as the delegate-callback param.
+- `TTSService.handleCancelledUtterance(generation:)` filter ✓ — generation match required for `.idle` flip; stale cancels from in-flight Tasks are dropped. Mock's async `didCancel` is safe under restart.
+- `verify-release-no-debugbridge.sh` ✓ — pattern is DebugBridge-only; no extension needed for `XCUITestMockSpeechSynthesizer` / `TTSTestOverride`.
+
+**Edge cases checked**:
+
+- SwiftUI lifecycle: `VReaderApp.init` writes `TTSTestOverride.useMockSynthesizer` BEFORE any `View.body` evaluates. `ReaderContainerView.@State var ttsService = TTSService()` initializer doesn't run until the user navigates to a book (post-launch). Safe ordering — verified by reading the lines 121-148 precedent: the `--reader-default-layout` UserDefaults write happens at the same point and is consumed by `ReaderSettingsStore.init` which is also a downstream view init.
+- Mock didCancel race during restart: TTSService's `startSpeaking` increments `currentGeneration` BEFORE calling `synthesizer.stopSpeaking()`. The stale cancel Task that the mock spawns will reference the previous utterance, but `didCancel` (TTSService line 229-244) gates on `state == .speaking` — by the time the stale cancel reaches MainActor, the new utterance has already set state to `.speaking`, so the cancel returns early. Safe.
+- Mock `pauseSpeaking()` / `continueSpeaking()`: don't actually suspend the inner Task. **Accepted simplification** — Feature 40/41 verification tests don't exercise pause/resume; future tests that need it will trigger a follow-up WI to extend the mock. Code comment will flag this explicitly.
+- Mock `speak()` called on empty utterance text: TTSService line 71 guard (`!trimmed.isEmpty`) prevents this from ever calling `synthesizer.speak()`. Mock never sees empty text.
+- `--tts-test-mode` set but no book opened: `ReaderContainerView` never mounts → `TTSService` never constructed → no mock instantiated. No-op. Test path with empty seed XCTSkips at the "open book" step, before reaching TTS surface.
+- `TTSTestOverride.useMockSynthesizer` static state leaks across launches in the same process: XCUITest tears down via `XCUIApplication.terminate` (fresh process per test). Process boundary resets the static to its default `false`. Plus `VReaderApp.init` writes the flag unconditionally on each launch — defensive idempotency.
+- `XCUITestMockSpeechSynthesizer` instantiated outside `@MainActor` (e.g., a background test runner): the class can be instantiated anywhere (its init is not @MainActor), but `delegateTarget` write + `speak` callback Tasks are `@MainActor`. TTSService wiring at line 58-60 happens during TTSService.init, which IS @MainActor — safe.
+- `verify-release-no-debugbridge.sh` regression: the new symbols don't match the script's pattern, so the script will not detect a leak directly. **Mitigation**: file-scope `#if DEBUG` is the codebase's documented primary defense (rule 50 section 11). Belt-and-suspenders for our own symbols is unnecessary; the existing pattern intentionally scopes to DebugBridge to avoid scope creep on the script.
+
+**Findings**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | Low | Plan's "Gate" section said `verify-release-no-debugbridge.sh` "clean" for new symbols. Script's pattern is DebugBridge-scoped; new symbols are protected only by file-scope `#if DEBUG`. | Reworded Gate bullet to clarify: file-scope `#if DEBUG` is the primary defense; the script is DebugBridge-specific by design. No script extension needed. |
+| 2 | Low | Plan said the mock's `pauseSpeaking()` / `continueSpeaking()` are "Acceptable simplification" but didn't specify what happens if a test ever calls them. | Implementation note (will land in code comment of XCUITestMockSpeechSynthesizer): "Pause/resume flip `isPaused` / `isSpeaking` flags but DO NOT suspend the inner callback Task. Feature 40/41 verification tests do not exercise pause/resume; a future WI extending mock coverage to pause/resume tests must add Task suspension here." |
+| 3 | Info | Plan's surface area item 7 lists 5 unit test cases. Audit confirmed each is achievable with `await Task.sleep(nanoseconds:)` + `#expect` (Swift Testing). | No change. |
+
+**Risks accepted** (with rationale):
+
+- **Mock weakens the test signal**: real synth is CU-device-verified (Feature #26 round-2, 2026-05-09 evidence). What the verification tests claim — sentence-highlight callbacks fire + scroll advances — is a wiring property, not an audio-engine property. Mock exercises the same wiring.
+- **Pause/resume not actually paused in mock**: out of scope for Feature 40/41; future WI extends if needed (see finding #2).
+
+**Tests added or intentionally deferred**: per plan section 7 + 8 above (5 unit + 2 launch-config + 2 XCUITest refactors). None deferred.
+
+**Concurrency / Swift 6**:
+
+- `TTSTestOverride.useMockSynthesizer` is `@MainActor static var` — only read/written on MainActor (init flag in App.init's @MainActor body; read in TTSService's @MainActor init).
+- `XCUITestMockSpeechSynthesizer` is `NSObject` subclass (required by AVSpeechSynthesizerDelegate). All MainActor-touching code goes through explicit `Task { @MainActor in ... }`.
+- No new `Sendable` warnings expected; types involved (`AVSpeechSynthesizer`, `AVSpeechUtterance`, `NSRange`) have well-established cross-actor passability in iOS 17+ SDKs.
+
+**VReader compliance**:
+
+- Swift 6 strict concurrency: clean per the above.
+- `@MainActor` correctness: SwiftUI views and TTSService stay MainActor; mock's class itself is not MainActor (per protocol `SpeechSynthesizing: AnyObject` not being MainActor-bound, matching `SystemSpeechSynthesizer`).
+- File size: new `XCUITestMockSpeechSynthesizer.swift` ~80 LOC; well under 300. Updates to `TTSService.swift` (~10 LOC), `SpeechSynthesizing.swift` (~5 LOC), `VReaderApp.swift` (~5 LOC), `Feature40TTSSentenceHighlightVerificationTests.swift` (~5 LOC), `Feature41TTSAutoScrollVerificationTests.swift` (~5 LOC) all small and additive.
+- Bridge safety: not applicable (no WKWebView / JS surface).
+
+**Audit verdict**: ship-as-is with finding #1 wording fix + finding #2 code comment. Both fixes incorporated above. Plan revision 2 is the binding spec.
+

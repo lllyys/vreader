@@ -48,16 +48,39 @@ final class TTSService: NSObject {
     // MARK: - Init
 
     /// Creates a TTSService with a synthesizer factory for dependency injection.
-    /// In production, pass `{ SystemSpeechSynthesizer() }`.
+    /// In production, pass `{ SystemSpeechSynthesizer() }` (or accept the default).
     /// In tests, pass `{ MockSpeechSynthesizer() }`.
-    init(synthesizerFactory: () -> SpeechSynthesizing = { SystemSpeechSynthesizer() }) {
+    ///
+    /// The default factory routes through `Self.defaultSynthesizer()` which
+    /// returns `XCUITestMockSpeechSynthesizer()` when DEBUG-only
+    /// `TTSTestOverride.useMockSynthesizer` is true (feature #45 WI-4e),
+    /// otherwise the real `SystemSpeechSynthesizer`.
+    init(synthesizerFactory: () -> SpeechSynthesizing = { TTSService.defaultSynthesizer() }) {
         self.synthesizer = synthesizerFactory()
         super.init()
 
-        // Wire delegate if using SystemSpeechSynthesizer
+        // Wire delegate to whichever concrete synthesizer was constructed.
         if let system = synthesizer as? SystemSpeechSynthesizer {
             system.delegateTarget = self
+        } else {
+            #if DEBUG
+            if let mock = synthesizer as? XCUITestMockSpeechSynthesizer {
+                mock.delegateTarget = self
+            }
+            #endif
         }
+    }
+
+    /// Default synthesizer picker. Returns the XCUITest mock when the
+    /// DEBUG-only override is active, otherwise the real synthesizer.
+    @MainActor
+    private static func defaultSynthesizer() -> SpeechSynthesizing {
+        #if DEBUG
+        if TTSTestOverride.useMockSynthesizer {
+            return XCUITestMockSpeechSynthesizer()
+        }
+        #endif
+        return SystemSpeechSynthesizer()
     }
 
     // MARK: - Public API

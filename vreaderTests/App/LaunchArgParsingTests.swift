@@ -79,6 +79,33 @@ struct LaunchArgParsingTests {
         #expect(config.seedResetPreferences == true)
         #expect(config.defaultEPUBLayout == .paged)
     }
+
+    // MARK: - Feature #45 WI-4e: --tts-test-mode
+
+    @Test func ttsTestModeDefaultsFalseWithoutFlag() {
+        let config = TestLaunchConfig.parse(["--uitesting"])
+        #expect(config.ttsTestMode == false)
+    }
+
+    @Test func ttsTestModeParsedWhenFlagPresent() {
+        let config = TestLaunchConfig.parse([
+            "--uitesting", "--tts-test-mode"
+        ])
+        #expect(config.ttsTestMode == true)
+    }
+
+    @Test func ttsTestModeCoexistsWithOtherFlags() {
+        let config = TestLaunchConfig.parse([
+            "--uitesting",
+            "--seed-war-and-peace",
+            "--reset-preferences",
+            "--tts-test-mode"
+        ])
+        #expect(config.isUITesting == true)
+        #expect(config.seedWarAndPeace == true)
+        #expect(config.seedResetPreferences == true)
+        #expect(config.ttsTestMode == true)
+    }
 }
 
 #endif

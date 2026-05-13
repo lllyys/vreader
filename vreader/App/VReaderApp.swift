@@ -146,6 +146,14 @@ struct VReaderApp: App {
                     )
                 }
 
+                // Feature #45 WI-4e: swap AVSpeechSynthesizer for the
+                // XCUITest mock at TTSService construction time. Real
+                // AVSpeechSynthesizer doesn't transition to .speaking
+                // under XCUITest headless on iPhone 17 Pro Sim. Write
+                // unconditionally (both branches) so a prior launch's
+                // value in the same process doesn't leak.
+                TTSTestOverride.useMockSynthesizer = config.ttsTestMode
+
                 let persistence = PersistenceActor(modelContainer: container)
                 let seedConfig = config
                 let semaphore = DispatchSemaphore(value: 0)
@@ -361,6 +369,12 @@ struct TestLaunchConfig: Sendable {
     let enableAI: Bool
     let enableSync: Bool
     let reduceMotion: Bool
+    /// `--tts-test-mode` — feature #45 WI-4e. Swap `AVSpeechSynthesizer`
+    /// for `XCUITestMockSpeechSynthesizer` at `TTSService` construction
+    /// time so XCUITest verification can observe `ttsState` / `ttsOffsetUTF16`
+    /// without a real audio session (which fails to activate under
+    /// XCUITest headless mode on iPhone 17 Pro Simulator).
+    let ttsTestMode: Bool
 
     /// Parses launch arguments into a typed config.
     /// Unknown flags are silently ignored.
@@ -414,7 +428,8 @@ struct TestLaunchConfig: Sendable {
             dynamicTypeOverride: dynamicType,
             enableAI: args.contains("--enable-ai"),
             enableSync: args.contains("--enable-sync"),
-            reduceMotion: args.contains("--reduce-motion")
+            reduceMotion: args.contains("--reduce-motion"),
+            ttsTestMode: args.contains("--tts-test-mode")
         )
     }
 
@@ -434,7 +449,8 @@ struct TestLaunchConfig: Sendable {
         dynamicTypeOverride: nil,
         enableAI: false,
         enableSync: false,
-        reduceMotion: false
+        reduceMotion: false,
+        ttsTestMode: false
     )
 }
 
