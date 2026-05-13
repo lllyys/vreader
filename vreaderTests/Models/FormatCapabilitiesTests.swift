@@ -117,6 +117,22 @@ struct FormatCapabilitiesTests {
         #expect(!caps.contains(.autoPageTurn))
     }
 
+    @Test func azw3_doesNotSupportTTS() {
+        // Bug #176 / GH #602: AZW3 / MOBI go through Foliate-js, but
+        // `ReaderAICoordinator.loadBookTextContent` has no azw3/mobi
+        // case — falls through to `default: return nil`, so
+        // `startTTS()`'s guard skips `ttsService.startSpeaking` and the
+        // user sees silent failure. `FoliateTTSAdapter` exists (JS-side
+        // hooks shipped) but is unwired in production. Until the
+        // Foliate-webview TTS extraction (or in-webview TTS pipeline)
+        // lands as a proper feature, hide the speaker button by
+        // removing `.tts` from the AZW3 capability set — eliminates
+        // the silent-failure surface. Re-add this capability when the
+        // production wire-up ships.
+        let caps = FormatCapabilities.capabilities(for: .azw3)
+        #expect(!caps.contains(.tts))
+    }
+
     @Test func txt_doesNotSupportAutoPageTurn() {
         // Bug #157 / GH #461: TXT lost AutoPageTurner support after the
         // verify cron discovered the renderer is not wired —

@@ -109,9 +109,21 @@ struct FormatCapabilities: OptionSet, Sendable, Hashable {
             return caps
 
         case .azw3:
-            // Same as simple EPUB: Foliate-js provides full feature parity.
+            // AZW3 / MOBI route through Foliate-js. `.tts` is **not** in
+            // this set despite the aspirational "full feature parity"
+            // (bug #176 / GH #602): `ReaderAICoordinator.loadBookTextContent`
+            // has no azw3/mobi case (falls through to nil), so
+            // `startTTS()`'s guard skips the AVSpeechSynthesizer call —
+            // user sees silent failure. `FoliateTTSAdapter` exists with
+            // JS-side hooks but is unwired in production. Until the
+            // Foliate-webview TTS wiring lands as a proper feature,
+            // hiding the speaker button via this gate matches the
+            // bug #156 / #157 / #158 cheap-path pattern (capability-gate
+            // out the broken affordance rather than ship a silent
+            // failure). Re-add `.tts` here when the production wire-up
+            // ships.
             var caps: FormatCapabilities = [
-                .textSelection, .highlights, .tts,
+                .textSelection, .highlights,
                 .nativePagination, .toc, .annotations, .unifiedReflow,
             ]
             caps.formUnion(universal)
