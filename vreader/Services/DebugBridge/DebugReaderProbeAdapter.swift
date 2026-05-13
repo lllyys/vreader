@@ -39,6 +39,14 @@ final class DebugReaderProbeAdapter: DebugReaderProbe {
     /// Returns raw JSON bytes of the JS value (see DebugReaderProbe doc).
     var jsEvaluator: (@MainActor (String) async throws -> Data)?
 
+    /// Optional TTS state probe. When set, `currentTTSState` and
+    /// `currentTTSOffsetUTF16` delegate to the closure's tuple result.
+    /// When nil, both fall back to the protocol's default-nil values.
+    /// Wire pattern (feature #45 WI-4c-c): `ReaderContainerView` sets this
+    /// to a closure that captures its `TTSService` and reports
+    /// `(state.publicName, .idle ? nil : currentOffsetUTF16)`.
+    var ttsProbe: (@MainActor () -> (state: String, offsetUTF16: Int?))?
+
     init(
         fingerprintKey: String,
         format: String,
@@ -51,6 +59,14 @@ final class DebugReaderProbeAdapter: DebugReaderProbe {
 
     var currentPositionString: String? {
         positionProvider()
+    }
+
+    var currentTTSState: String? {
+        ttsProbe?().state
+    }
+
+    var currentTTSOffsetUTF16: Int? {
+        ttsProbe?().offsetUTF16
     }
 
     func awaitSettle(timeout: TimeInterval) async throws {

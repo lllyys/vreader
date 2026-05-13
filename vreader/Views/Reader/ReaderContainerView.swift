@@ -383,6 +383,19 @@ struct ReaderContainerView: View {
                     )
                 }
             }
+            // Feature #45 WI-4c-c: surface TTS state into DebugSnapshot.
+            // Closure captures the @MainActor @Observable TTSService owned
+            // by this view; runs @MainActor whenever the snapshot path
+            // reads `probe.currentTTSState` / `currentTTSOffsetUTF16`.
+            // Offset is meaningless while idle (TTSService resets it to
+            // 0 on stop), so we map idle → nil for offset to signal
+            // "no current reading position" to consumers.
+            let service = ttsService
+            probe.ttsProbe = { @MainActor in
+                let state = service.state
+                let offset: Int? = (state == .idle) ? nil : service.currentOffsetUTF16
+                return (state: state.publicName, offsetUTF16: offset)
+            }
             debugProbe = probe
             // Bug #142: tell the registry the expected token BEFORE
             // registering the probe — that way, if a coordinator's

@@ -905,3 +905,112 @@ Codex MCP stream disconnected on first ping attempt (2026-05-13). Manual audit p
 - Mock `DebugBridgeContext` conformers (Slow, Recording) updated with `tts` stub for compile.
 - Total diff: 117 lines added across 7 files. No deletions. File-size budget intact (all files <300 lines).
 
+---
+
+## WI-4c-c — TTS snapshot wiring (2026-05-13)
+
+### Problem
+
+WI-4c-b proved `vreader-debug://tts?action=start` drives the production AVSpeechSynthesizer. But the harness can't yet *assert* on TTS state from a snapshot: `RealDebugBridgeContext+Snapshot.swift` currently hardcodes `ttsState: nil` and `ttsOffsetUTF16: nil` (the DebugSnapshot init defaults them to nil; the call site doesn't pass them in). This blocks Feature #40's "TTS playback verified by snapshot" assertion path — the XCUITest run can fire `tts?action=start` and wait for the TTSControlBar element to appear, but a state-driven test (e.g., "snapshot 1.5s after start has ttsState=speaking and an offset that has moved past 0") needs the snapshot to actually carry those fields.
+
+### Scope (this WI)
+
+- `vreader/Services/DebugBridge/DebugReaderProbeAdapter.swift`: add optional `ttsProbe: (@MainActor () -> (state: String, offsetUTF16: Int?))?` closure; override the protocol's default `currentTTSState` / `currentTTSOffsetUTF16` to delegate to the closure when set.
+- `vreader/Views/Reader/ReaderContainerView.swift` (DEBUG `.onAppear`): wire `probe.ttsProbe = { (ttsService.state.publicName, ttsService.state == .idle ? nil : ttsService.currentOffsetUTF16) }`. Closure captures the SwiftUI-owned `ttsService` (which is `@MainActor @Observable`) — safe because the closure runs `@MainActor` on snapshot evaluation.
+- `vreader/Services/DebugBridge/RealDebugBridgeContext+Snapshot.swift`: pass `probe?.currentTTSState` and `probe?.currentTTSOffsetUTF16` into the `DebugSnapshot.init`; update the `partial` array to mark `ttsState` and `ttsOffsetUTF16` partial when the probe doesn't supply them (no probe at all, or the probe is from a host that never wires the closure).
+
+**OUT of scope:**
+- Wiring `settingsProvenance` (the third v2 field) — feature #50 owns the per-format settings provenance signal.
+- Wiring `currentRenderPhase` overrides per format — feature #50 territory.
+- Updating the Foliate/EPUB hosts to register their own `DebugReaderProbe` types — those still use the adapter via `ReaderContainerView`; per-format probe classes are feature #50.
+
+### Prior art / project precedent
+
+- `DebugReaderProbeAdapter.positionProvider` (existing closure pattern) — exact precedent for "view-owned state delivered via @MainActor closure to a DEBUG probe."
+- `TTSService.State.publicName` extension (already shipped in feature #49 WI-1, lives in `DebugReaderRegistry.swift` line 84-92) — the mapping from State enum to wire value already exists; this WI just calls into it.
+- `DebugSnapshot.TTSStateValue` constants (already shipped) — wire values already pinned at `idle`/`speaking`/`paused`.
+- `DebugReaderProbe` default impls returning nil (already shipped) — the protocol surface is already defined; this WI just provides a real implementation through the closure.
+
+### Work-item sequencing
+
+Single WI. Three files modified (adapter, ReaderContainerView, snapshot extension) + tests added to `RealDebugBridgeContextSnapshotTests` (or equivalent). Estimated PR size: ~80-120 lines added.
+
+### Test catalogue
+
+- `DebugReaderProbeAdapterTests` (new file or appended): `currentTTSState_isNilByDefault`, `currentTTSState_returnsClosureValue`, `currentTTSOffsetUTF16_isNilByDefault`, `currentTTSOffsetUTF16_returnsClosureValue` — pure unit tests, no app state.
+- `RealDebugBridgeContextSnapshotTests` (appended): one test that wires a `DebugReaderProbeAdapter` with a `ttsProbe` returning `("speaking", 42)`, registers it, runs `snapshot`, decodes the file, asserts `ttsState == "speaking"` && `ttsOffsetUTF16 == 42` && `partial` does NOT contain `ttsState` / `ttsOffsetUTF16`. Second test for the inverse: no `ttsProbe` set → `ttsState == nil` && `ttsOffsetUTF16 == nil` && `partial` DOES contain both.
+
+### Risks + mitigations
+
+- **Risk**: closure captures `ttsService` strongly via `[ttsService]` or implicit capture, holding the SwiftUI @State value past view dismiss. **Mitigation**: `ReaderContainerView`'s `.onDisappear` already calls `DebugReaderRegistry.shared.unregister(probe)` and clears `debugProbe = nil`. The probe is the closure's only retainer; when the probe drops, the closure drops, and `ttsService` releases naturally. No new lifecycle work needed.
+- **Risk**: closure runs after view dismissal if a `snapshot` URL fires concurrently. **Mitigation**: the probe is `weak` in the registry; once unregistered, `current` returns nil and the snapshot path skips the closure entirely.
+- **Risk**: `ttsService.currentOffsetUTF16` is `0` while idle (not nil), so unconditionally returning it would mislead consumers. **Mitigation**: condition on `state == .idle ? nil : ttsService.currentOffsetUTF16`. When state is `.idle`, offset is meaningless → wire as nil.
+
+### Backward compat
+
+- `DebugSnapshot` already accepts v1 archives (decoder defaults the v2 fields to nil per the existing `init(from:)`). No schema bump.
+- Existing consumers that don't read `ttsState` / `ttsOffsetUTF16` are unaffected.
+
+### Acceptance criteria
+
+1. `DebugReaderProbeAdapter` exposes a `ttsProbe` closure; default-nil leaves the protocol's default-nil behavior in place.
+2. `ReaderContainerView.onAppear` wires the closure when DEBUG.
+3. `RealDebugBridgeContext+Snapshot.swift` passes the probe's TTS fields into `DebugSnapshot.init`; `partial` reflects which fields are present.
+4. Unit tests cover both the with-closure and without-closure paths.
+5. `xcodebuild test -only-testing:vreaderTests` green.
+
+### Manual Audit Evidence (Gate 2, 2026-05-13)
+
+Codex MCP unavailable this session (`stream disconnected before completion` on every call all day). Manual fallback per rule 47.
+
+**Files read:**
+- `vreader/Services/DebugBridge/DebugReaderProbeAdapter.swift` (full)
+- `vreader/Services/DebugBridge/DebugReaderRegistry.swift` (full, incl. `TTSService.State.publicName` extension)
+- `vreader/Services/DebugBridge/DebugSnapshot.swift` (full, incl. v2 init + decoder)
+- `vreader/Services/DebugBridge/RealDebugBridgeContext+Snapshot.swift` (full)
+- `vreader/Views/Reader/ReaderContainerView.swift` lines 320-400 (onAppear/onDisappear probe wiring) + grep for ttsService access
+- `vreader/Services/TTS/TTSService.swift` lines 1-180 (state, currentOffsetUTF16, lifecycle)
+- `vreaderTests/Services/DebugBridge/RealDebugBridgeContextTests.swift` lines 373-490 (existing snapshot tests)
+
+**Symbols / signatures verified:**
+- `TTSService` is `@MainActor @Observable` with `private(set) var state: State`, `private(set) var currentOffsetUTF16: Int` (both @MainActor-isolated). ✓
+- `TTSService.State.publicName` extension exists at `DebugReaderRegistry.swift:84-92`, maps `.idle` → `"idle"`, `.speaking` → `"speaking"`, `.paused` → `"paused"`. ✓
+- `DebugSnapshot.init` accepts `ttsState: String? = nil, ttsOffsetUTF16: Int? = nil, settingsProvenance: String? = nil` as the last three params (defaulted). ✓
+- `DebugReaderProbe` declares `currentTTSState: String? { get }` and `currentTTSOffsetUTF16: Int? { get }` with default impls returning nil at `DebugReaderRegistry.swift:74-79`. ✓
+- `DebugReaderProbeAdapter` has `positionProvider` and `jsEvaluator` closures as exact prior art — same `@MainActor` capture pattern. ✓
+- `ReaderContainerView.onDisappear` already calls `DebugReaderRegistry.shared.unregister(probe); debugProbe = nil` — the lifecycle is sound. ✓
+
+**Edge cases checked:**
+- `ttsService.currentOffsetUTF16 = 0` on `.idle` (verified at `TTSService.swift:146`). My `state == .idle ? nil : currentOffsetUTF16` correctly maps this to nil. ✓
+- `.paused` state — offset is meaningful (mid-read). My condition correctly keeps offset for `.paused` (not equal to `.idle`). ✓
+- No probe registered → `probe == nil` branch in snapshot. Need to add `ttsState`/`ttsOffsetUTF16` to that branch's partial list. ✓ (added to TDD test catalog)
+- Probe registered but no `ttsProbe` closure → protocol defaults return nil → fields go to partial. ✓
+- Snapshot fires after view dismiss → registry returns nil → no closure invoked. ✓
+
+**Audit-driven additions (incorporated into plan):**
+
+1. **Critical — existing snapshot tests will break**: `test_snapshot_withoutActiveReader_listsReaderFieldsAsPartial` asserts `Set(["currentBookId", "format", "position", "selection"])` exactly; `test_snapshot_withActiveReader_populatesReaderFieldsAndShrinksPartial` asserts `Set(["selection", "position"])`; `test_snapshot_withActiveReaderAndPosition_propagatesPosition` (line 451) asserts similar. ALL THREE need updating when ttsState/ttsOffsetUTF16 join partial. Adding to acceptance criterion 4: "existing snapshot partial-set assertions updated to reflect ttsState/ttsOffsetUTF16 inclusion when not wired."
+
+2. **Medium — partial-array logic for no-probe branch**: when `probe == nil`, both new fields are nil and must join partial. Add to the `if probe == nil` branch at `RealDebugBridgeContext+Snapshot.swift:42`.
+
+3. **Medium — partial-array logic for probe-without-closure branch**: when `probe != nil` but `probe.currentTTSState == nil` (the adapter's `ttsProbe` is unset), the fields are still nil. Need new conditional branches: `if probe?.currentTTSState == nil { partial.append("ttsState") }` and same for offset.
+
+4. **Low — `settingsProvenance` triple**: the v2 schema has three new fields; this WI wires only two. The third (`settingsProvenance`) stays nil and must also be in `partial` (matching the documented intent). However, that's out of scope; per "files OUT of scope" the third field is feature #50 territory. Resolution: add `settingsProvenance` to partial unconditionally in this WI (since no probe path supplies it yet) — that's a cheap addition that keeps the partial array honest and avoids needing another WI to add a one-liner later.
+
+**Risks accepted:**
+- `settingsProvenance` always partial after this WI. Accepted: feature #50 will provide the real signal. Partial array correctly tells consumers "this field is not yet populated by any path."
+
+**Tests intentionally deferred:**
+- None.
+
+**Verdict:** ship-as-is (with the three audit-driven additions folded into the plan above). Acceptance criteria updated below.
+
+**Acceptance criteria (post-audit, revised):**
+
+1. `DebugReaderProbeAdapter` exposes a `ttsProbe: (@MainActor () -> (state: String, offsetUTF16: Int?))?` closure; default-nil leaves the protocol's default-nil behavior in place.
+2. `ReaderContainerView.onAppear` (DEBUG only) wires the closure to `ttsService`.
+3. `RealDebugBridgeContext+Snapshot.swift` passes `probe?.currentTTSState`, `probe?.currentTTSOffsetUTF16` into `DebugSnapshot.init`; `partial` array correctly reflects which v2 fields are unwired (no-probe, probe-without-closure, settingsProvenance always partial).
+4. New unit tests cover (a) `DebugReaderProbeAdapter.currentTTSState/Offset` with and without `ttsProbe` set; (b) snapshot with a probe whose `ttsProbe` returns `("speaking", 42)` populates the fields and removes them from partial; (c) snapshot with a probe but no `ttsProbe` keeps fields nil and lists them in partial.
+5. Existing snapshot tests (`test_snapshot_withoutActiveReader_*`, `test_snapshot_withActiveReader_*`, `test_snapshot_withActiveReaderAndPosition_*`) updated for the new partial-array members.
+6. `xcodebuild test -only-testing:vreaderTests` green.
+

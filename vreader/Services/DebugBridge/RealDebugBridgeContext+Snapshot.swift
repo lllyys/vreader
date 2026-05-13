@@ -31,18 +31,30 @@ extension RealDebugBridgeContext {
         let highlightCount = try await totalHighlightCount()
         let probe = DebugReaderRegistry.shared.current
 
+        // Schema v2 reader-derived fields (feature #49 WI-1 +
+        // feature #45 WI-4c-c). Resolve once so partial-array logic
+        // and snapshot init agree.
+        let ttsState = probe?.currentTTSState
+        let ttsOffsetUTF16 = probe?.currentTTSOffsetUTF16
+
         // Build `partial` dynamically. A reader-derived field stays
         // partial when the probe can't supply a value:
         // - currentBookId/format require a probe at all
         // - position additionally requires the probe to have wired a
         //   positionProvider (default adapter has none)
         // - selection is always partial in v0
-        var partial: [String] = ["selection"]
+        // - ttsState/ttsOffsetUTF16 are partial when the probe has no
+        //   ttsProbe closure wired (or when no probe is registered)
+        // - settingsProvenance is always partial until feature #50 wires
+        //   per-format hosts
+        var partial: [String] = ["selection", "settingsProvenance"]
         if probe == nil {
             partial.append(contentsOf: ["currentBookId", "format", "position"])
         } else if probe?.currentPositionString == nil {
             partial.append("position")
         }
+        if ttsState == nil { partial.append("ttsState") }
+        if ttsOffsetUTF16 == nil { partial.append("ttsOffsetUTF16") }
 
         let snap = DebugSnapshot(
             schemaVersion: DebugSnapshot.currentSchemaVersion,
@@ -56,7 +68,9 @@ extension RealDebugBridgeContext {
             highlightCount: highlightCount,
             renderPhase: "idle",
             lastError: lastErrorMessage,
-            partial: partial
+            partial: partial,
+            ttsState: ttsState,
+            ttsOffsetUTF16: ttsOffsetUTF16
         )
 
         let data = try DebugSnapshot.encoder.encode(snap)

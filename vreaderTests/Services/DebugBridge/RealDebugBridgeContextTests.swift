@@ -407,11 +407,19 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(snap.format)
         XCTAssertNil(snap.position)
         XCTAssertNil(snap.selection)
-        // No active reader → reader fields are partial
+        // No active reader → reader fields are partial. ttsState/
+        // ttsOffsetUTF16 also partial (no probe → no ttsProbe wired);
+        // settingsProvenance always partial until feature #50.
         XCTAssertEqual(
             Set(snap.partial ?? []),
-            Set(["currentBookId", "format", "position", "selection"])
+            Set([
+                "currentBookId", "format", "position", "selection",
+                "ttsState", "ttsOffsetUTF16", "settingsProvenance",
+            ])
         )
+        XCTAssertNil(snap.ttsState)
+        XCTAssertNil(snap.ttsOffsetUTF16)
+        XCTAssertNil(snap.settingsProvenance)
         try? FileManager.default.removeItem(at: url)
     }
 
@@ -442,8 +450,12 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(snap.position)
         XCTAssertEqual(
             Set(snap.partial ?? []),
-            Set(["selection", "position"]),
-            "without a positionProvider the position field stays partial"
+            Set([
+                "selection", "position",
+                "ttsState", "ttsOffsetUTF16", "settingsProvenance",
+            ]),
+            "without a positionProvider the position field stays partial; "
+            + "without a ttsProbe the TTS fields stay partial too"
         )
         try? FileManager.default.removeItem(at: url)
     }
@@ -471,7 +483,54 @@ final class RealDebugBridgeContextTests: XCTestCase {
 
         XCTAssertEqual(snap.format, "epub")
         XCTAssertEqual(snap.position, "epubcfi(/6/4!/4/1:0)")
-        XCTAssertEqual(snap.partial, ["selection"], "position drops from partial when probe supplies it")
+        // position drops from partial when probe supplies it; TTS fields
+        // and settingsProvenance remain partial until WI-4c-c's closure
+        // is wired (probe has no ttsProbe in this fixture) and feature
+        // #50 lands the per-format settings provenance.
+        XCTAssertEqual(
+            Set(snap.partial ?? []),
+            Set(["selection", "ttsState", "ttsOffsetUTF16", "settingsProvenance"]),
+            "position drops from partial when probe supplies it; "
+            + "TTS+provenance stay partial without their hosts"
+        )
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Feature #45 WI-4c-c: when the probe wires a `ttsProbe` closure,
+    /// the snapshot must surface `ttsState` + `ttsOffsetUTF16` and drop
+    /// them from `partial`. Mirrors the position-supplied test above —
+    /// same wiring pattern, different field.
+    @MainActor
+    func test_snapshot_withTTSProbeWired_populatesTTSFieldsAndShrinksPartial() async throws {
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "txt:tts:512",
+            format: "txt"
+        )
+        probe.ttsProbe = { (state: "speaking", offsetUTF16: 42) }
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        let dest = "snapshot-\(UUID().uuidString).json"
+        try await context.snapshot(dest: dest, lastErrorMessage: nil)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory().appendingPathComponent(dest)
+        let snap = try JSONDecoder().decode(DebugSnapshot.self, from: Data(contentsOf: url))
+
+        XCTAssertEqual(snap.ttsState, "speaking")
+        XCTAssertEqual(snap.ttsOffsetUTF16, 42)
+        // Wired probe → ttsState / ttsOffsetUTF16 drop from partial.
+        // Position stays partial (no positionProvider); selection +
+        // settingsProvenance remain partial as always.
+        XCTAssertEqual(
+            Set(snap.partial ?? []),
+            Set(["selection", "position", "settingsProvenance"]),
+            "TTS fields drop from partial when the probe wires its ttsProbe"
+        )
         try? FileManager.default.removeItem(at: url)
     }
 
