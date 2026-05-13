@@ -134,6 +134,15 @@ enum AccessibilityID {
     static let pdfPagesPerHour = "pdfPagesPerHour"
     static let pdfView = "pdfView"
 
+    // MARK: - WebDAV Settings (Feature #29)
+    static let webdavServerURL = "webdavServerURL"
+    static let webdavUsername = "webdavUsername"
+    static let webdavPassword = "webdavPassword"
+    static let webdavTestButton = "webdavTestButton"
+    static let webdavSaveButton = "webdavSaveButton"
+    static let webdavBackupNowButton = "webdavBackupNowButton"
+    static let webdavBackupErrorText = "webdavBackupErrorText"
+
     // MARK: - Search Result Row
     static let searchResultRow = "searchResultRow"
 
