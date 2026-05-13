@@ -57,6 +57,7 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 | `settle`   | `token=<basename>`                 | —                                     | Wait for the active reader to settle, then write `Caches/DebugBridge/ready-<token>.json`. Bridge enforces a 30s timeout — a hung probe still produces the sentinel. |
 | `snapshot` | `dest=<basename>`                  | —                                     | Build a `DebugSnapshot` and write it to `Caches/DebugBridge/<dest>`.                                                                                                |
 | `eval`     | `bridge=<basename>`, `js=<base64>` | —                                     | Run JS in the active reader's webview; write result/error to `Caches/DebugBridge/eval-<bridge>.json`.                                                               |
+| `tts`      | `action=start\|stop`               | —                                     | Drive `TTSService` from outside the play-button tap (Feature #45 WI-4c-b). XCUITest's gesture path cannot reliably activate `AVSpeechSynthesizer`'s audio session, so verification tests fire this URL after opening a book. No-op when no reader is presented. |
 
 ### Parameter validation
 
