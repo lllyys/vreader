@@ -32,6 +32,18 @@ extension EPUBWebViewBridge {
         var pendingScrollFraction: Double?
         /// Page index to navigate to after pagination setup (paged mode).
         var pendingPaginationPage: Int?
+        /// Bug #182: highlight JS deferred from a URL-change update so it
+        /// runs against the NEW chapter DOM, not the old/loading one. Set
+        /// in `EPUBWebViewBridge.updateUIView` when `pendingJS` arrives in
+        /// the same SwiftUI state update as a `contentURL` change;
+        /// consumed in `webView(_:didFinish:)`.
+        var pendingHighlightJS: String?
+        /// Bug #182: completion callback paired with `pendingHighlightJS`.
+        /// Stashed alongside the JS so the container's @State
+        /// `pendingHighlightJS = nil` clear-back fires once the deferred
+        /// eval actually completes (mirrors the synchronous flow's
+        /// `onPendingJSCompleted` semantics).
+        var onPendingHighlightJSCompleted: (@MainActor () -> Void)?
         /// Allowed root directory for file:// navigation (scoped to extracted EPUB).
         var allowedRoot: URL?
         /// Current chapter href for anchor construction.
@@ -227,6 +239,27 @@ extension EPUBWebViewBridge {
                         guard self.currentURL == expectedURL else { return }
                         EPUBWebViewBridge.applyInitialContentOffset(to: scrollView, topInset: inset)
                     }
+                }
+            }
+
+            // Bug #182: evaluate any highlight JS that was deferred from a
+            // URL-change update. Runs AFTER theme + pagination/scroll setup
+            // (so the DOM is laid out and CSS is applied) and BEFORE the
+            // persisted-highlights restore Task below (so search highlight
+            // is the first highlight painted on the new chapter — avoids
+            // a visual flash where persisted highlights appear, then
+            // search highlight overlays them). Synchronous eval — no
+            // delay — because `didFinish` already guarantees the DOM
+            // tree is ready for `window.find()` / CFI lookup.
+            if let highlightJS = pendingHighlightJS {
+                pendingHighlightJS = nil
+                let completion = onPendingHighlightJSCompleted
+                onPendingHighlightJSCompleted = nil
+                webView.evaluateJavaScript(highlightJS) { _, error in
+                    if let error { AppLogger.epub.error("deferred pendingHighlightJS error: \(error)") }
+                }
+                Task { @MainActor in
+                    completion?()
                 }
             }
 

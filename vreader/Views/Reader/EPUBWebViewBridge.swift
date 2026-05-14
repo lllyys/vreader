@@ -239,12 +239,26 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         }
 
         // Only reload if the URL changed
-        if context.coordinator.currentURL != contentURL {
+        let urlIsChanging = context.coordinator.currentURL != contentURL
+        if urlIsChanging {
             context.coordinator.currentURL = contentURL
             context.coordinator.themeCSS = themeCSS
             // Store scroll fraction to apply after the page finishes loading
             context.coordinator.pendingScrollFraction = scrollFraction
             context.coordinator.pendingPaginationPage = paginationPage
+            // Bug #182: when the container sets `pendingJS` in the SAME
+            // SwiftUI state update that flips contentURL (cross-chapter
+            // search-result tap), we must defer the JS eval until the
+            // NEW chapter DOM is ready. Running `window.find()` on the
+            // old/loading page silently fails, producing the
+            // "navigates but no yellow highlight" symptom. Stash the JS
+            // (and the completion callback that clears the container's
+            // `@State pendingHighlightJS`) onto the coordinator; the
+            // didFinish handler will eval and complete.
+            if let js = pendingJS {
+                context.coordinator.pendingHighlightJS = js
+                context.coordinator.onPendingHighlightJSCompleted = onPendingJSCompleted
+            }
             webView.loadFileURL(contentURL, allowingReadAccessTo: baseDirectory)
         } else if isPaged, let page = paginationPage,
                   page != context.coordinator.pendingPaginationPage {
@@ -330,8 +344,22 @@ struct EPUBWebViewBridge: UIViewRepresentable {
             }
         }
 
-        // Evaluate pending JS from container (e.g., highlight injection after persist)
-        if let js = pendingJS {
+        // Evaluate pending JS from container (e.g., highlight injection
+        // after persist on the CURRENTLY-loaded chapter). Two guards keep
+        // this from racing the URL-change path (bug #182):
+        //
+        //   1. `!urlIsChanging` — when this call also flips contentURL,
+        //      the JS has already been stashed onto the coordinator for
+        //      deferred eval in didFinish. Skip the immediate path.
+        //   2. `pendingHighlightJS == nil` on the coordinator — if a prior
+        //      URL-change update stashed JS that hasn't been evaluated
+        //      yet (page still loading), a subsequent unrelated
+        //      updateUIView (binding refresh, theme change, etc.) must
+        //      NOT also try to eval the same JS against the loading DOM.
+        //      The stashed value being non-nil is the in-flight sentinel.
+        if !urlIsChanging,
+           context.coordinator.pendingHighlightJS == nil,
+           let js = pendingJS {
             webView.evaluateJavaScript(js) { _, error in
                 if let error { AppLogger.epub.error("pendingJS error: \(error)") }
             }
