@@ -64,6 +64,36 @@ struct WebDAVSettingsView: View {
 
     var body: some View {
         Form {
+            // Feature #52 WI-4a: entry point to the multi-profile list.
+            // Lives at the TOP of the form so users discover it before
+            // the legacy single-server credentials section below. The
+            // legacy section stays put until WI-4b ships the full editor
+            // — otherwise WI-4a would break credential entry for any
+            // user who hasn't yet been migrated.
+            Section {
+                NavigationLink {
+                    WebDAVServerProfileListView(
+                        viewModel: WebDAVProfileListViewModel()
+                    )
+                } label: {
+                    HStack {
+                        Image(systemName: "externaldrive.connected.to.line.below")
+                            .foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Servers")
+                            Text("Manage saved WebDAV servers and switch the active one")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("webdavServersNavLink")
+            } header: {
+                Text("Multi-server (WI-4a)")
+            } footer: {
+                Text("Add multiple WebDAV servers and switch between them. The single-server form below remains the active configuration until you add a server here.")
+            }
+
             Section {
                 TextField("Server URL", text: $serverURL)
                     .textContentType(.URL)
