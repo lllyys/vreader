@@ -253,6 +253,31 @@ struct VReaderApp: App {
                 )
             )
             #endif
+
+            // Feature #52 WI-3: one-shot migration from legacy flat-keychain
+            // WebDAV credentials to the new `WebDAVServerProfileStore`.
+            // Fire-and-forget — the migrator is idempotent (marker key OR
+            // non-empty store both short-circuit). Production reads still
+            // go through the legacy `WebDAVProviderFactory.make(keychain:)`
+            // path until WI-5 migrates call sites; this migration just
+            // populates the store so WI-4a/4b's UI sees the "Default"
+            // profile when users first navigate to the profile list.
+            //
+            // Why fire-and-forget vs Task.detached + semaphore (the
+            // seeding pattern used above): the migration doesn't gate
+            // any view body — no consumer reads from the store yet.
+            // Production reads are all in the legacy flat-keychain path
+            // until WI-5. The migrator's idempotency means a re-run on
+            // the next launch is harmless if this fire-and-forget Task
+            // doesn't complete before the user opens settings.
+            Task.detached(priority: .background) {
+                do {
+                    try await WebDAVProfileMigrator.migrateIfNeeded()
+                } catch {
+                    // Logged via the migrator's internal Logger.
+                    // Next-launch retry handles transient failures.
+                }
+            }
         } catch {
             self.modelContainer = nil
             // Sanitize: don't expose raw file paths or internal details to the user.

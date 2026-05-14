@@ -102,6 +102,98 @@ enum WebDAVProviderFactory {
         return WebDAVDownloadRequestBuilder(client: client)
     }
 
+    // MARK: - Feature #52 WI-3 — profile-store variants
+    //
+    // The variants below read credentials from `WebDAVServerProfileStore`
+    // (the new multi-profile source of truth) instead of the flat-keychain
+    // triplet. They are async because store reads cross an actor boundary.
+    //
+    // Migration plan: WI-3 introduces these variants alongside the legacy
+    // sync variants. WI-4a/4b ship the UI that lets users add/edit profiles.
+    // WI-5 migrates the legacy call sites (`WebDAVSettingsView`,
+    // `LibraryView`) to these async variants and drops the legacy sync
+    // versions. Until then, both paths coexist; the migrator
+    // (`WebDAVProfileMigrator`) ensures the store contains a "Default"
+    // profile mirroring the legacy flat-keychain credentials, so reads
+    // from either source see the same data.
+
+    /// Constructs a fully-wired `WebDAVProvider` from the active profile in
+    /// `WebDAVServerProfileStore`. Throws `missingCredentials` when there
+    /// is no active profile or the resolved profile has empty fields /
+    /// missing password. Throws `invalidServerURL` when the profile's
+    /// `serverURL` doesn't parse to a `URL` with a scheme.
+    @MainActor
+    static func make(
+        persistence: PersistenceActor,
+        profileStore: WebDAVServerProfileStore,
+        defaults: UserDefaults = .standard,
+        perBookSettingsBaseURL: URL = standardPerBookSettingsBaseURL,
+        appVersion: String = currentAppVersion(),
+        deviceName: String = currentDeviceName(),
+        bookImporter: (any BookImporting)? = nil
+    ) async throws -> WebDAVProvider {
+        guard let profile = await profileStore.activeProfile() else {
+            throw WebDAVProviderFactoryError.missingCredentials
+        }
+        guard !profile.serverURL.isEmpty,
+              !profile.username.isEmpty else {
+            throw WebDAVProviderFactoryError.missingCredentials
+        }
+        let password = (try await profileStore.readPassword(for: profile.id)) ?? ""
+        guard !password.isEmpty else {
+            throw WebDAVProviderFactoryError.missingCredentials
+        }
+        guard let url = URL(string: profile.serverURL), url.scheme != nil else {
+            throw WebDAVProviderFactoryError.invalidServerURL(profile.serverURL)
+        }
+        let client = WebDAVClient(serverURL: url, username: profile.username, password: password)
+        let collector = BackupDataCollector(
+            persistence: persistence,
+            defaults: defaults,
+            perBookSettingsBaseURL: perBookSettingsBaseURL
+        )
+        let restorer = BackupDataRestorer(
+            persistence: persistence,
+            defaults: defaults,
+            perBookSettingsBaseURL: perBookSettingsBaseURL
+        )
+        return WebDAVProvider(
+            transport: client,
+            dataCollector: collector,
+            dataRestorer: restorer,
+            deviceName: deviceName,
+            appVersion: appVersion,
+            bookImporter: bookImporter
+        )
+    }
+
+    /// Profile-store-backed variant of `makeRequestBuilder(keychain:)`.
+    /// Same error contract as the legacy variant: throws
+    /// `missingCredentials` when there is no active profile or its
+    /// password slot is empty; throws `invalidServerURL` when the
+    /// profile's `serverURL` doesn't parse.
+    @MainActor
+    static func makeRequestBuilder(
+        profileStore: WebDAVServerProfileStore
+    ) async throws -> WebDAVDownloadRequestBuilder {
+        guard let profile = await profileStore.activeProfile() else {
+            throw WebDAVProviderFactoryError.missingCredentials
+        }
+        guard !profile.serverURL.isEmpty,
+              !profile.username.isEmpty else {
+            throw WebDAVProviderFactoryError.missingCredentials
+        }
+        let password = (try await profileStore.readPassword(for: profile.id)) ?? ""
+        guard !password.isEmpty else {
+            throw WebDAVProviderFactoryError.missingCredentials
+        }
+        guard let url = URL(string: profile.serverURL), url.scheme != nil else {
+            throw WebDAVProviderFactoryError.invalidServerURL(profile.serverURL)
+        }
+        let client = WebDAVClient(serverURL: url, username: profile.username, password: password)
+        return WebDAVDownloadRequestBuilder(client: client)
+    }
+
     /// Default per-book-settings storage location (mirrors ReaderContainerView).
     static let standardPerBookSettingsBaseURL: URL = {
         FileManager.default
