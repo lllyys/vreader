@@ -16,6 +16,10 @@ struct FoliateSpikeView: View {
     var fingerprintKey: String?
     /// Bug #142: per-reader instance token paired with fingerprintKey.
     var readerToken: UUID?
+    /// Bug #189: source of `epubLayout` for the AZW3/MOBI reading-mode
+    /// toggle (Scroll/Paged). Optional so legacy call sites (previews,
+    /// tests) compile; nil resolves to scrolled via `FoliateLayoutFlowMapper`.
+    var settingsStore: ReaderSettingsStore?
 
     @State private var isBookReady = false
     @State private var bookTitle = ""
@@ -28,6 +32,7 @@ struct FoliateSpikeView: View {
                 bookURL: bookURL,
                 fingerprintKey: fingerprintKey,
                 readerToken: readerToken,
+                layoutFlow: FoliateLayoutFlowMapper.layoutFlow(for: settingsStore?.epubLayout),
                 onBookReady: { title in
                     isBookReady = true
                     bookTitle = title
@@ -82,11 +87,20 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
     let fingerprintKey: String?
     /// Bug #142: per-reader instance token paired with fingerprintKey.
     let readerToken: UUID?
+    /// Bug #189: pre-mapped layoutFlow value ("paginated" or "scrolled").
+    /// SwiftUI re-evaluates `body` when `settingsStore.epubLayout` changes
+    /// (the store is `@Observable @MainActor`), so this value reaches
+    /// `updateUIView` as soon as the user toggles reading mode.
+    let layoutFlow: String
     let onBookReady: @MainActor (String) -> Void
     let onError: @MainActor (String) -> Void
 
     func makeCoordinator() -> FoliateSpikeView.Coordinator {
-        let coord = FoliateSpikeView.Coordinator(onBookReady: onBookReady, onError: onError)
+        let coord = FoliateSpikeView.Coordinator(
+            initialLayoutFlow: layoutFlow,
+            onBookReady: onBookReady,
+            onError: onError
+        )
         #if DEBUG
         coord.fingerprintKey = fingerprintKey
         coord.readerToken = readerToken
@@ -106,6 +120,13 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
             "tap", "annotation-show", "create-overlay", "section-load",
             "external-link", "tts-ssml", "search-result", "search-done",
             "search-progress", "error",
+            // Bug #189: posted by the book-ready iife after `await
+            // readerAPI.init({})` and the first `setLayout(...)` actually
+            // resolve. We can't use the `evaluateJavaScript` completion
+            // for this because it fires when the top-level expression
+            // evaluates (the iife's Promise creation), not when the
+            // awaited init resolves.
+            "layout-ready",
         ] {
             config.userContentController.add(WeakScriptMessageHandler(coordinator), name: name)
         }
@@ -113,7 +134,12 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isInspectable = true
         webView.navigationDelegate = coordinator
-        webView.scrollView.isScrollEnabled = false
+        // Bug #189: scrollView is the outer container the document renders into.
+        // In paginated mode foliate-js consumes touches and paginates internally
+        // (outer scroll must be off). In scrolled mode the document is one long
+        // page and the outer scrollView IS the scroller. Mirrors EPUBWebViewBridge
+        // line 226 (`webView.scrollView.isScrollEnabled = !isPaged`).
+        webView.scrollView.isScrollEnabled = (layoutFlow == "scrolled")
         coordinator.webView = webView
 
         // Read book as base64
@@ -157,7 +183,31 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        // Bug #189: live-toggle reading mode. SwiftUI re-evaluates body when
+        // `settingsStore.epubLayout` changes (@Observable). We compare against
+        // the coordinator's last-applied value to avoid redundant JS calls.
+        let coordinator = context.coordinator
+        let safeFlow = FoliateJSEscaper.sanitizeFlow(layoutFlow)
+        guard coordinator.currentLayoutFlow != safeFlow else { return }
+        coordinator.currentLayoutFlow = safeFlow
+        uiView.scrollView.isScrollEnabled = (safeFlow == "scrolled")
+        // Always stash the latest preference into the JS-side global. The
+        // book-ready iife reads this AFTER its `await readerAPI.init({})`
+        // resolves, so a toggle that lands while init is still in flight
+        // is captured (it queues behind init's outer call, runs at the
+        // await yield, and is picked up when init resumes). Once
+        // `isBookReady` is true we ALSO call setLayout directly so the
+        // user sees the change immediately rather than waiting for the
+        // next open.
+        let stash = "window.__vreaderTargetFlow = '\(safeFlow)';"
+        if coordinator.isBookReady {
+            let js = "\(stash) readerAPI.setLayout({flow: '\(safeFlow)'});"
+            uiView.evaluateJavaScript(js, completionHandler: nil)
+        } else {
+            uiView.evaluateJavaScript(stash, completionHandler: nil)
+        }
+    }
 }
 
 extension FoliateSpikeView {
@@ -167,6 +217,16 @@ extension FoliateSpikeView {
         var bookExt: String?
         let onBookReady: @MainActor (String) -> Void
         let onError: @MainActor (String) -> Void
+        /// Bug #189: layoutFlow string applied to readerAPI. Initialized from
+        /// the SwiftUI value at coordinator construction; updated by both the
+        /// `book-ready` handler (initial apply) and `updateUIView`
+        /// (live-toggle). Sanitized via `FoliateJSEscaper.sanitizeFlow` at
+        /// write time so JS interpolation is safe.
+        var currentLayoutFlow: String
+        /// True once `readerAPI.init({})` has been issued (book-ready handler).
+        /// `updateUIView` checks this before pushing `setLayout` because the
+        /// JS-side renderer isn't attached until after init.
+        var isBookReady: Bool = false
         #if DEBUG
         /// Bug #141: book identity for the DebugBridge eval registry
         /// binding. Set by FoliateSpikeWebView.makeCoordinator() from the
@@ -177,8 +237,10 @@ extension FoliateSpikeView {
         var readerToken: UUID?
         #endif
 
-        init(onBookReady: @escaping @MainActor (String) -> Void,
+        init(initialLayoutFlow: String,
+             onBookReady: @escaping @MainActor (String) -> Void,
              onError: @escaping @MainActor (String) -> Void) {
+            self.currentLayoutFlow = FoliateJSEscaper.sanitizeFlow(initialLayoutFlow)
             self.onBookReady = onBookReady
             self.onError = onError
         }
@@ -206,8 +268,45 @@ extension FoliateSpikeView {
                 if let dict = body as? [String: Any] {
                     let title = dict["title"] as? String ?? "Unknown"
                     onBookReady(title)
-                    webView?.evaluateJavaScript("readerAPI.init({})") { _, _ in }
+                    // Bug #189: init the renderer, then apply the freshest
+                    // reading-mode preference, then post `layout-ready` so
+                    // native flips `isBookReady` only AFTER the renderer
+                    // truly exists.
+                    //
+                    // Why a message post instead of the evaluateJavaScript
+                    // completion: WKWebView's completion fires when the
+                    // top-level expression evaluates — for an async iife,
+                    // that's when the Promise is created, NOT when its
+                    // awaited init resolves. Using the completion would
+                    // flip `isBookReady` early and let `updateUIView`
+                    // push `setLayout(...)` while `view.renderer` is still
+                    // nil (foliate-host.js:234 returns early).
+                    //
+                    // Why the JS-side global: any `updateUIView` that fires
+                    // during the awaited init yields at the `await`, queued
+                    // stash JS updates `window.__vreaderTargetFlow`, and
+                    // the iife reads the freshest value when init resumes.
+                    let initialFlow = currentLayoutFlow
+                    let js = """
+                    (async () => {
+                        if (typeof window.__vreaderTargetFlow !== 'string') {
+                            window.__vreaderTargetFlow = '\(initialFlow)';
+                        }
+                        await readerAPI.init({});
+                        readerAPI.setLayout({flow: window.__vreaderTargetFlow});
+                        post('layout-ready', {});
+                    })();
+                    """
+                    webView?.evaluateJavaScript(js, completionHandler: nil)
                 }
+
+            case "layout-ready":
+                // Bug #189: posted by the book-ready iife after init +
+                // initial setLayout actually resolve. Flipping here (and
+                // only here) closes the Codex round-3 race where
+                // `updateUIView` could push `setLayout` against a not-yet
+                // attached renderer.
+                isBookReady = true
 
             case "tap":
                 // Bug #108: forward center-tap to the chrome-toggle

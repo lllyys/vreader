@@ -148,3 +148,38 @@ struct FoliateNavigationHelperTests {
         #expect(FoliateNavigationHelper.isValidNavigationTarget(cfi: "   ") == false)
     }
 }
+
+// MARK: - FoliateLayoutFlowMapper
+
+/// Regression guard for Bug #189 — Foliate (AZW3/MOBI) must honor the user's
+/// `epubLayout` reading-mode preference, not hardcode "paginated".
+@Suite("FoliateLayoutFlowMapper")
+struct FoliateLayoutFlowMapperTests {
+
+    @Test("paged preference maps to paginated")
+    func pagedMapsToPaginated() {
+        #expect(FoliateLayoutFlowMapper.layoutFlow(for: .paged) == "paginated")
+    }
+
+    @Test("scroll preference maps to scrolled (Bug #189 regression)")
+    func scrollMapsToScrolled() {
+        #expect(FoliateLayoutFlowMapper.layoutFlow(for: .scroll) == "scrolled")
+    }
+
+    @Test("nil preference falls back to scrolled")
+    func nilMapsToScrolled() {
+        #expect(FoliateLayoutFlowMapper.layoutFlow(for: nil) == "scrolled")
+    }
+
+    /// Future-proof: every `EPUBLayoutPreference` case must map to one of
+    /// Foliate's two supported flow values. A new case added without updating
+    /// the mapper trips the exhaustive switch at compile time; this test
+    /// guards the value domain at runtime.
+    @Test("every case maps to a valid Foliate flow value")
+    func everyCaseMapsToValidFlow() {
+        let valid: Set<String> = ["paginated", "scrolled"]
+        for preference in EPUBLayoutPreference.allCases {
+            #expect(valid.contains(FoliateLayoutFlowMapper.layoutFlow(for: preference)))
+        }
+    }
+}

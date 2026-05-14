@@ -522,7 +522,8 @@ struct ReaderContainerView: View {
             FoliateSpikeView(
                 bookURL: resolvedFileURL,
                 fingerprintKey: book.fingerprintKey,
-                readerToken: readerToken
+                readerToken: readerToken,
+                settingsStore: settingsStore
             )
         default:
             unsupportedFormatView(format: book.format.uppercased())

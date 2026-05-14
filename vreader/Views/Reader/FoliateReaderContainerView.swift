@@ -186,7 +186,7 @@ struct FoliateReaderContainerView: View {
                     backgroundColor: Self.cssColor(store.theme.backgroundColor)
                 )
             },
-            layoutFlow: "paginated",
+            layoutFlow: FoliateLayoutFlowMapper.layoutFlow(for: settingsStore?.epubLayout),
             onRelocate: { event in
                 viewModel.handleRelocate(event)
                 notifyPositionChanged()
@@ -271,6 +271,21 @@ enum FoliateNavigationHelper {
             return false
         }
         return true
+    }
+}
+
+/// Maps the user's reading-mode preference to the layoutFlow string Foliate-js expects.
+/// `.paged` → "paginated", `.scroll` and nil → "scrolled". Exhaustive switch so a
+/// future enum case forces a compile-time update here (Bug #189 regression guard).
+/// Mirrors the EPUB host's `isPaged` derivation; bridges' `updateUIView` change
+/// detection handles live-toggle without extra wiring.
+enum FoliateLayoutFlowMapper {
+    static func layoutFlow(for preference: EPUBLayoutPreference?) -> String {
+        guard let preference else { return "scrolled" }
+        switch preference {
+        case .paged: return "paginated"
+        case .scroll: return "scrolled"
+        }
     }
 }
 

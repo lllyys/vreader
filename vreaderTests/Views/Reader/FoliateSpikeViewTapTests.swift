@@ -24,6 +24,7 @@ struct FoliateSpikeViewTapTests {
 
     @Test func tapMessage_postsReaderContentTappedNotification() async {
         let coordinator = FoliateSpikeView.Coordinator(
+            initialLayoutFlow: "paginated",
             onBookReady: { _ in },
             onError: { _ in }
         )
