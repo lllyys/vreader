@@ -12,7 +12,10 @@ import os
 @MainActor
 final class ReaderSearchCoordinator {
 
-    private static let logger = Logger(
+    // nonisolated so the nonisolated `enqueueBookIndexing` (bug #183 fix)
+    // can write log lines without crossing the MainActor boundary. `Logger`
+    // is Sendable.
+    nonisolated private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "vreader",
         category: "Search"
     )
@@ -129,7 +132,19 @@ final class ReaderSearchCoordinator {
     }
 
     /// Extracts text units and enqueues them for background indexing (WI-F05).
-    private static func enqueueBookIndexing(
+    ///
+    /// Bug #183 / GH #623: marked `nonisolated` so the body runs on the
+    /// generic executor instead of inheriting `@MainActor` from the
+    /// enclosing class. `TXTTextExtractor.extractWithOffsets` and the
+    /// other format extractors do synchronous file I/O (`Data(contentsOf:)`)
+    /// + encoding detection (`TXTService.decodeForDisplayAndSearch`)
+    /// internally. Before this fix, the whole chain ran on MainActor
+    /// until the first natural suspension point inside the extractor —
+    /// which for the synchronous `decodeFile` path is "never" — freezing
+    /// the UI on first search-panel open of a large CJK TXT (5MB+).
+    /// `BackgroundIndexingCoordinator` is an actor and `SearchIndexStore`
+    /// is `@unchecked Sendable`, so the inner awaits hop correctly.
+    nonisolated private static func enqueueBookIndexing(
         coordinator: BackgroundIndexingCoordinator,
         store: SearchIndexStore,
         fileURL: URL,
