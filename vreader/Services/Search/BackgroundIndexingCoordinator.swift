@@ -69,8 +69,23 @@ actor BackgroundIndexingCoordinator: IndexingCoordinating {
 
         if !isProcessing {
             isProcessing = true
-            Task.detached(priority: .background) { [weak self] in
-                await self?.processQueue()
+            // Bug #187 (GH #653): strong `self` capture so the actor stays
+            // alive until `processQueue()` drains all enqueued jobs. The
+            // previous `[weak self]` capture deallocated the actor when
+            // the caller's local reference went out of scope (which it
+            // does in `ReaderSearchCoordinator.setup`, where the
+            // coordinator is created as a local, awaited, then dropped).
+            // With weak capture, the detached task could be scheduled
+            // BEFORE the caller returns but START running AFTER the
+            // actor was deallocated — `self?` becomes nil and
+            // `processQueue` never runs, so indexing silently fails.
+            // Strong capture is correct here because `pendingJobs` is
+            // non-empty (we just appended) — the actor *must* live to
+            // drain them. Once `processQueue` returns (queue empty,
+            // `isProcessing = false`), the Task's strong reference drops
+            // and the actor can be deallocated normally.
+            Task.detached(priority: .background) {
+                await self.processQueue()
             }
         }
     }

@@ -279,6 +279,61 @@ struct BackgroundIndexingCoordinatorTests {
         let status = await coordinator.indexingStatus(fingerprint: Self.fp1)
         #expect(status == .indexed) // Empty units should still succeed
     }
+
+    // MARK: - Bug #187 (GH #653) — actor retention through detached task
+
+    /// Reproduces bug #187: prior to the fix, `enqueueIndexing` scheduled
+    /// its `processQueue()` work via `Task.detached(priority: .background)
+    /// { [weak self] in ... }`. If the caller's strong reference to the
+    /// coordinator went out of scope before the detached task started
+    /// running, `self` would be nil and `processQueue` never ran —
+    /// indexing silently failed. This is exactly what happened in
+    /// `ReaderSearchCoordinator.setup`, which created the coordinator as
+    /// a local, awaited `enqueueIndexing`, then returned (dropping the
+    /// local). Symptom: EPUB search returns "No Results" because the
+    /// FTS5 store was never written.
+    ///
+    /// Fix: capture `self` strongly in the detached task so the actor
+    /// stays alive until processing drains. Verified here by creating
+    /// the coordinator inside an `async let` block, awaiting it, then
+    /// dropping the strong reference. After a grace period, the mock
+    /// must have been called — proving the actor survived to process
+    /// the queue without an external retainer.
+    @Test func enqueueIndexing_processesEvenWhenCallerDropsCoordinator() async throws {
+        let mock = MockSearchService()
+        nonisolated(unsafe) weak var weakCoordinator: BackgroundIndexingCoordinator?
+
+        // Inner scope: create coordinator, enqueue, then exit scope so
+        // the local strong reference goes out of scope.
+        do {
+            let coordinator = BackgroundIndexingCoordinator(searchService: mock)
+            weakCoordinator = coordinator
+            let units = [TextUnit(sourceUnitId: "txt:segment:0", text: "Hello")]
+            await coordinator.enqueueIndexing(
+                fingerprint: Self.fp1,
+                textUnits: units,
+                segmentBaseOffsets: nil
+            )
+        } // `coordinator` strong reference released here
+
+        // Grace period for the detached background task to run.
+        try await Task.sleep(for: .milliseconds(300))
+
+        // The mock should have been called even though the caller's
+        // strong reference was dropped. If `processQueue` was scheduled
+        // with `[weak self]` (pre-fix), `self` would be nil at task
+        // start and `indexBook` would never run.
+        let callCount = await mock.indexCallCount
+        #expect(callCount == 1, "indexBook must run even after the caller drops its strong reference to the coordinator — strong self-capture in the detached task keeps the actor alive while pendingJobs has work.")
+
+        // Sanity: after processing completes and the test drops its
+        // weak reference, the actor can be deallocated normally.
+        // (Don't assert weakCoordinator == nil here — Swift's actor
+        // deallocation timing is not deterministic enough for that
+        // assertion to be reliable across CI runs; the load-bearing
+        // assertion is the callCount above.)
+        _ = weakCoordinator
+    }
 }
 
 // MARK: - MockSearchService helpers
