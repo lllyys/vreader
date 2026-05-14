@@ -510,11 +510,19 @@ struct TXTReaderContainerView: View {
 
     @ViewBuilder
     private func readerContent(text: String, attributedText: NSAttributedString) -> some View {
-        // Bug #179: GeometryReader exposes the SwiftUI safe-area top, which
-        // the bridge sums into textContainerInset.top so the first line clears
-        // the Dynamic Island / status bar. Container applies
-        // .ignoresSafeArea(edges: .top) for chrome-overlay layout, so without
-        // this hop UITextView would render content under the notch.
+        // Bug #179: the bridge sums a top safe-area inset into
+        // `textContainerInset.top` so the first line clears the Dynamic Island
+        // / status bar. The parent `ReaderContainerView` applies
+        // `.ignoresSafeArea(edges: .top)` for chrome-overlay layout, so
+        // `proxy.safeAreaInsets.top` from a GeometryReader nested here is
+        // unreliable — it returns 0 momentarily on first render before
+        // layout measures (REOPENED scenario A) and stays 0 across the
+        // chapter-nav rebuild (REOPENED scenario B) until SwiftUI has
+        // measured the new view identity. `ReaderSafeAreaResolver` reads
+        // the device-level truth from `UIWindow.safeAreaInsets.top` and
+        // takes the larger of the two — bridging the GeometryReader race
+        // without over-insetting when the device actually has a 0 top
+        // safe area (landscape, non-DI device).
         GeometryReader { proxy in
             TXTTextViewBridge(
                 text: text,
@@ -525,7 +533,7 @@ struct TXTReaderContainerView: View {
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 persistedHighlights: uiState.persistedHighlightRanges,
-                safeAreaTopInset: proxy.safeAreaInsets.top,
+                safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 delegate: viewModel
             )
         }
@@ -554,8 +562,13 @@ struct TXTReaderContainerView: View {
             chapterIndex: viewModel.currentChapterIdx,
             chapters: chapters
         )
-        // Bug #179: see readerContent above — GeometryReader wires DI inset
-        // into the bridge so chapter-mode TXT renders clear of the notch.
+        // Bug #179: see readerContent above. The chapter-nav rebuild path
+        // (REOPENED scenario B) was a primary repro for this — when
+        // `chapterAttrString = nil` swaps to `loadingView` then back to the
+        // bridge, SwiftUI creates a fresh `TXTTextViewBridge` whose first
+        // `makeUIView` call runs before the GeometryReader has measured.
+        // `ReaderSafeAreaResolver.topInsetWithFallback` keeps the inset
+        // correct across that race.
         GeometryReader { proxy in
             TXTTextViewBridge(
                 text: text,
@@ -566,7 +579,7 @@ struct TXTReaderContainerView: View {
                 highlightRange: highlights.temp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 persistedHighlights: highlights.persisted,
-                safeAreaTopInset: proxy.safeAreaInsets.top,
+                safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 delegate: viewModel
             )
         }
@@ -589,7 +602,8 @@ struct TXTReaderContainerView: View {
         }()
 
         // Bug #179: lift the first chunk below the Dynamic Island. See
-        // readerContent above for the same pattern on the non-chunked bridge.
+        // readerContent above — same fallback applies to the chunked bridge
+        // (large-file path) for the same GeometryReader-vs-makeUIView race.
         GeometryReader { proxy in
             TXTChunkedReaderBridge(
                 chunks: chunks,
@@ -602,7 +616,7 @@ struct TXTReaderContainerView: View {
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 persistedHighlights: uiState.persistedHighlightRanges,
-                safeAreaTopInset: proxy.safeAreaInsets.top
+                safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top)
             )
         }
         .ignoresSafeArea(edges: .bottom)

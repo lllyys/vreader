@@ -311,9 +311,12 @@ struct MDReaderContainerView: View {
 
     @ViewBuilder
     private func readerContent(attributedString: NSAttributedString) -> some View {
-        // Bug #179: GeometryReader wires the safe-area top into the bridge so
-        // MD scroll-mode renders below the Dynamic Island. Same pattern as
-        // the TXT reader (this bridge is shared) and the EPUB fix for #163.
+        // Bug #179: wire the safe-area top into the bridge so MD scroll-mode
+        // renders below the Dynamic Island. Same pattern as the TXT reader
+        // (this bridge is shared) and the EPUB fix for #163. The
+        // `ReaderSafeAreaResolver.topInsetWithFallback` hop survives the
+        // GeometryReader-vs-makeUIView race that left chapter-nav and
+        // saved-position restore behind the notch (REOPENED scenarios A/B).
         GeometryReader { proxy in
             TXTTextViewBridge(
                 text: attributedString.string,
@@ -324,7 +327,7 @@ struct MDReaderContainerView: View {
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 persistedHighlights: uiState.persistedHighlightRanges,
-                safeAreaTopInset: proxy.safeAreaInsets.top,
+                safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 delegate: viewModel
             )
         }
