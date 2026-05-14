@@ -87,6 +87,7 @@
 		18B415B48942ADDF3FDE479A /* MDReflowableTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9773A45B1D89408E85D126BA /* MDReflowableTextSource.swift */; };
 		18F17DCE91707A996AFA35F1 /* ReaderSearchSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7D1FCE2E15F04329AB1978 /* ReaderSearchSheetTests.swift */; };
 		19A48F5C5BC46818F3CC10BB /* AddNoteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A49E33ACBED018932A38F0C /* AddNoteSheet.swift */; };
+		1A1A49D11D3506DEA6EA695F /* WebDAVProfileMigrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FC5D3DF85816AC1F7B42E3D /* WebDAVProfileMigrator.swift */; };
 		1A7E58193D247BB8900BA5B3 /* NSUKVSBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFFFEDEA99460D1154D19EE5 /* NSUKVSBridge.swift */; };
 		1AC5FD48311C93B5CEB3702E /* BookImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FBDC41C60328ED4FB8A197 /* BookImporterTests.swift */; };
 		1B78DA4330A421FE2206B70C /* FoliateSearchAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8C36563D7885AD214F885A /* FoliateSearchAdapter.swift */; };
@@ -501,6 +502,7 @@
 		9591198F5D4E6AFAA7662871 /* chapter_list_page2.html in Resources */ = {isa = PBXBuildFile; fileRef = C1455BB273A606F96B755C69 /* chapter_list_page2.html */; };
 		95D2D252390D26AFDBBAF43C /* SPIKE_RESULTS.md in Resources */ = {isa = PBXBuildFile; fileRef = 3D70FBE6B4F5F9DDBA035D25 /* SPIKE_RESULTS.md */; };
 		96B17941DBC83D6B8BB41FEF /* TXTChapterOverlayViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46230855AD50583047E521C5 /* TXTChapterOverlayViews.swift */; };
+		96E68BBC9517676AAAE003FF /* WebDAVProfileMigratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 410014C25D3480276D1E5F00 /* WebDAVProfileMigratorTests.swift */; };
 		96F610A12CED33CA6B82C142 /* Book.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECD12F6574178C9287A93CA6 /* Book.swift */; };
 		973F98FC8939CBE3B085A9E7 /* LibraryTouchTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96E6FA59B833AC785C70A7A8 /* LibraryTouchTargetTests.swift */; };
 		9760CE8C8811986D6EEECF61 /* SearchIndexStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7031C26EB38B7B1D2A0BEF /* SearchIndexStoreTests.swift */; };
@@ -1030,6 +1032,7 @@
 		400D03ADE39639337E9993C5 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
 		4078AAB96560B1BC1794472E /* DeleteConfirmationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteConfirmationTests.swift; sourceTree = "<group>"; };
 		40A2CD5F8AD4DEC1A14A255A /* SearchHitToLocatorResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchHitToLocatorResolver.swift; sourceTree = "<group>"; };
+		410014C25D3480276D1E5F00 /* WebDAVProfileMigratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProfileMigratorTests.swift; sourceTree = "<group>"; };
 		410BA6F21267316487DF58FC /* PersistenceBookmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceBookmarkTests.swift; sourceTree = "<group>"; };
 		4184F6CBC1069C92654BCB19 /* DebugReaderProbeAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugReaderProbeAdapterTests.swift; sourceTree = "<group>"; };
 		41C3ECA5E8F6419DB347F2E4 /* BookFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFormat.swift; sourceTree = "<group>"; };
@@ -1211,6 +1214,7 @@
 		6ED83105BFA1AA160A12D158 /* BookFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFormatTests.swift; sourceTree = "<group>"; };
 		6EDE356D5C7D77EC05E82520 /* BookSourceHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookSourceHTTPClient.swift; sourceTree = "<group>"; };
 		6F117A908F9B8098182FF9DB /* LazyDownloadFinalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LazyDownloadFinalizerTests.swift; sourceTree = "<group>"; };
+		6FC5D3DF85816AC1F7B42E3D /* WebDAVProfileMigrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProfileMigrator.swift; sourceTree = "<group>"; };
 		7008A22A4FBE1574E8B9C8A4 /* TXTStreamingOpenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTStreamingOpenTests.swift; sourceTree = "<group>"; };
 		7024E7AEAC9AEAA028952C46 /* ScrollProgressHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollProgressHelper.swift; sourceTree = "<group>"; };
 		7056486BA460E0BE06235F54 /* UnifiedTextRendererViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedTextRendererViewModel.swift; sourceTree = "<group>"; };
@@ -1865,6 +1869,7 @@
 				4946129FECC6C9BA7A7F16A1 /* WebDAVClient.swift */,
 				3EBDB2B2562F5761C8D52153 /* WebDAVDownloadRequestBuilder.swift */,
 				D408C9CE57D4C437A72C0D18 /* WebDAVNetworkPolicy.swift */,
+				6FC5D3DF85816AC1F7B42E3D /* WebDAVProfileMigrator.swift */,
 				C3EF8CE8D52815CF5156953C /* WebDAVProvider.swift */,
 				CEBBF9A79AEFC8CDEE7B3302 /* WebDAVProviderFactory.swift */,
 				9E4A364E7AFF2DD96244D639 /* WebDAVServerProfile.swift */,
@@ -2866,6 +2871,7 @@
 				C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */,
 				BE8121B86DA337766FD55AEF /* WebDAVClientTests.swift */,
 				B2B73649BCBDBE8A99B210A9 /* WebDAVNetworkPolicyTests.swift */,
+				410014C25D3480276D1E5F00 /* WebDAVProfileMigratorTests.swift */,
 				777477DCF173A1397609EC1F /* WebDAVProviderSelectiveRestoreTests.swift */,
 				B294CBB624E1CE03FEFA40E6 /* WebDAVProviderTests.swift */,
 				25AAFF8F130DCEC64427D073 /* WebDAVServerProfileStoreTests.swift */,
@@ -3792,6 +3798,7 @@
 				7F17555C4DA7C6845661BBB5 /* WebDAVBlobStoreTests.swift in Sources */,
 				6B19F49F1DECB5EF45BACC88 /* WebDAVClientTests.swift in Sources */,
 				1C44F27B696718DDCDCD8942 /* WebDAVNetworkPolicyTests.swift in Sources */,
+				96E68BBC9517676AAAE003FF /* WebDAVProfileMigratorTests.swift in Sources */,
 				371BDEC687E965D30E539A94 /* WebDAVProviderSelectiveRestoreTests.swift in Sources */,
 				77D706EE2E466C650B00C381 /* WebDAVProviderTests.swift in Sources */,
 				B6A6A8E340DF3D44604151EA /* WebDAVServerProfileStoreTests.swift in Sources */,
@@ -4199,6 +4206,7 @@
 				606A7D33F0DB5643859C0863 /* WebDAVDownloadRequestBuilder.swift in Sources */,
 				069B04BFCB5D0D4FA8EA5972 /* WebDAVNetworkPolicy.swift in Sources */,
 				9BF39FDF19F34D65452D4C79 /* WebDAVNetworkPolicyEnvironment.swift in Sources */,
+				1A1A49D11D3506DEA6EA695F /* WebDAVProfileMigrator.swift in Sources */,
 				C64AA5071C05D395445A735D /* WebDAVProvider.swift in Sources */,
 				F2C53E71EFF6601811CE4003 /* WebDAVProviderFactory.swift in Sources */,
 				132042BE0F63639D54E20CF6 /* WebDAVServerProfile.swift in Sources */,
@@ -4354,13 +4362,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 325;
+				CURRENT_PROJECT_VERSION = 326;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.21.48;
+				MARKETING_VERSION = 3.21.49;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4504,13 +4512,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 325;
+				CURRENT_PROJECT_VERSION = 326;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.21.48;
+				MARKETING_VERSION = 3.21.49;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
