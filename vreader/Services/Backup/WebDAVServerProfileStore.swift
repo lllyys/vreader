@@ -118,6 +118,24 @@ actor WebDAVServerProfileStore {
         Self.postDidChangeNotification()
     }
 
+    /// Replace an existing profile by id IF AND ONLY IF the profile is
+    /// currently in the store. Single-hop alternative to "loadAll →
+    /// upsert" which would race against concurrent deletes (Feature #52
+    /// WI-4b Codex round-2 Medium fix). Returns true if the replacement
+    /// happened, false if no matching id was found (caller surfaces a
+    /// stale-edit error to the user). No-op + no notification when the
+    /// id is unknown.
+    func updateIfExists(_ profile: WebDAVServerProfile) -> Bool {
+        var profiles = Self.readProfiles(defaults: defaults)
+        guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else {
+            return false
+        }
+        profiles[idx] = profile
+        Self.writeProfiles(profiles, defaults: defaults)
+        Self.postDidChangeNotification()
+        return true
+    }
+
     /// Removes the profile with the given id. Also deletes its keychain
     /// password entry. If the removed profile was the active one, clears
     /// active (UI surfaces the "no active" case explicitly).

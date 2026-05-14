@@ -1,129 +1,268 @@
-// Purpose: WebDAV server profile editor sheet — Feature #52 WI-4a STUB.
-// WI-4a ships the list UI + a placeholder editor body so the Add /
-// Edit flow is reachable end-to-end. WI-4b replaces this stub with the
-// full form (Name / Server URL / Username / Password + Save / Test
-// Connection, mirroring `AIProviderEditSheet`).
+// Purpose: WebDAV server profile editor sheet (Feature #52 WI-4b).
+// Replaces WI-4a's stub with the full add/edit form. Used in both
+// ADD-NEW and EDIT-EXISTING modes — receives an optional
+// `existing: WebDAVServerProfile?` and adapts title, primary button,
+// and pre-fill accordingly.
 //
-// Per WI-4a plan: "New profile add path lands in a stub editor that
-// just writes a name placeholder." The add-mode Save button creates a
-// `WebDAVServerProfile` with placeholder name and empty URL/username
-// so the list-view slice can show a new row + exercise the swipe-
-// delete path WITHOUT the full form. The empty URL/username naturally
-// fails validation if the user tries to back up — that's the WI-4a
-// tradeoff; WI-4b's full editor unblocks usable saves.
+// Fields exposed:
+// - Name TextField (free-form; empty falls back to serverURL host)
+// - Server URL TextField (URL keyboard, https/http accepted per bug #110)
+// - Username TextField
+// - Password SecureField + Save / Delete actions (edit-mode only)
+// - Test Connection button (edit-mode only; add-mode shows promoted note)
 //
-// Edit-mode is cancel-only in WI-4a (the full form lands in WI-4b).
+// Key decisions:
+// - Mirrors `AIProviderEditSheet` shape (Feature #50 WI-6b) — same form/
+//   sections split, same .alert binding, same add-mode-hides-keychain-
+//   buttons pattern (bug #184).
+// - Save is disabled until name is non-empty (after trim) AND server URL
+//   is parseable as `URL` with a scheme AND username is non-empty.
+//   Password is not gated at the Save level in add-mode because it's
+//   gated separately — empty password makes the password section show
+//   a "required" hint and disables Save. Edit-mode allows saving with
+//   an unchanged password.
+// - Test Connection uses live form state, not the stored profile, so
+//   unsaved edits are exercised (mirrors AI editor's runTest).
+// - Add-mode hides Save Key / Delete Key / Test Connection buttons; shows
+//   promoted footnote notes telling the user to Save the profile first
+//   (bug #184 pattern, edit-mode shows the real buttons).
+// - On Save: add-mode calls VM.addProfile (atomic profile + keychain
+//   write); edit-mode calls VM.updateProfile (metadata only — keychain
+//   is touched via explicit Save Key button).
+// - Re-entrancy guard (`saveInFlight`) prevents double-tap from creating
+//   two profiles in add-mode. Matches the AI editor + WI-4a stub pattern.
 //
 // @coordinates-with: WebDAVServerProfileListView.swift,
-//   WebDAVServerProfile.swift, WebDAVServerProfileStore.swift
+//   WebDAVServerProfile.swift, WebDAVServerProfileStore.swift,
+//   WebDAVProfileListViewModel.swift, WebDAVProfileListViewModel+Editor.swift
 
 import SwiftUI
 
-/// Stub editor for a `WebDAVServerProfile`. WI-4b replaces this body
-/// with the full add/edit form.
+/// Editor sheet for a `WebDAVServerProfile`. Presented modally from
+/// `WebDAVServerProfileListView` via the "+" toolbar button (add mode)
+/// or a leading-edge swipe Edit action on a row (edit mode).
 struct WebDAVServerProfileEditSheet: View {
-    /// Non-nil = edit-mode (existing profile passed in). Nil = add-new.
-    let existing: WebDAVServerProfile?
 
-    /// Store the add-mode Save button writes the placeholder profile to.
-    /// Defaults to the production singleton; tests override.
-    let profileStore: WebDAVServerProfileStore
+    /// VM that owns the editor operations + error surface. Bindable so
+    /// the editor's .alert binding triggers re-render when editorError
+    /// flips.
+    @Bindable var viewModel: WebDAVProfileListViewModel
+
+    /// Non-nil = edit-mode, pre-fill from this profile. Nil = add-new.
+    let existing: WebDAVServerProfile?
 
     @Environment(\.dismiss) private var dismiss
 
-    /// Re-entrancy guard for the add-mode Add button. Codex round-2
-    /// Medium: a rapid double-tap before dismissal could enqueue two
-    /// `Task`s, each with a fresh `UUID()`, producing duplicate
-    /// placeholder rows. Disabling the button after first tap is the
-    /// minimal idiomatic fix (the equivalent of an `isInFlight` flag).
-    @State private var isAdding = false
+    // MARK: - Form State
 
-    /// Placeholder name suggested in add-mode. Stored as the name on
-    /// the persisted profile so the list shows something recognisable
-    /// until WI-4b's full editor lets the user rename.
-    static let addPlaceholderName = "New WebDAV Server"
+    @State var profileID: UUID
+    @State var name: String
+    @State var serverURL: String
+    @State var username: String
+
+    /// Cleared after a successful Save Key in edit-mode (we don't read
+    /// keychain text back into the field — presence is signaled by
+    /// `isPasswordSaved`).
+    @State var password: String = ""
+
+    @State var isPasswordSaved: Bool
+    @State var serverURLError: String?
+    @State var testResultText: String?
+    @State var testInFlight: Bool = false
+
+    /// Re-entrancy guard so a rapid double-tap on Save in add-mode
+    /// can't enqueue two `addProfile` Tasks (each writing a different
+    /// keychain entry + producing two list rows). Mirrors WI-4a stub.
+    @State var saveInFlight: Bool = false
 
     init(
-        existing: WebDAVServerProfile?,
-        profileStore: WebDAVServerProfileStore = .shared
+        viewModel: WebDAVProfileListViewModel,
+        existing: WebDAVServerProfile?
     ) {
+        self.viewModel = viewModel
         self.existing = existing
-        self.profileStore = profileStore
+
+        if let existing {
+            _profileID = State(initialValue: existing.id)
+            _name = State(initialValue: existing.name)
+            _serverURL = State(initialValue: existing.serverURL)
+            _username = State(initialValue: existing.username)
+            // Codex round-1 Low fix [6]: defer the keychain probe to
+            // an async .task so it goes through the VM's injected
+            // KeychainService (via profileStore.readPassword) instead
+            // of constructing a fresh keychain in the view.
+            _isPasswordSaved = State(initialValue: false)
+        } else {
+            _profileID = State(initialValue: UUID())
+            _name = State(initialValue: "")
+            _serverURL = State(initialValue: "https://")
+            _username = State(initialValue: "")
+            _isPasswordSaved = State(initialValue: false)
+        }
     }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                Image(systemName: "wrench.adjustable")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.secondary)
-
-                Text(headlineCopy)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-
-                Text(bodyCopy)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-
-                Spacer()
+            Form {
+                nameSection
+                endpointSection
+                passwordSection
+                testConnectionSection
             }
-            .padding(.top, 32)
-            .navigationTitle(navigationTitle)
+            .navigationTitle(existing == nil ? "Add WebDAV Server" : "Edit WebDAV Server")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .accessibilityIdentifier("webdavProfileEditCancel")
                 }
-                // Add-mode only: write a placeholder profile so the list
-                // gains a row and downstream WIs (4b editor, swipe delete,
-                // active selection) are reachable from a fresh-install state.
-                if existing == nil {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Add") {
-                            guard !isAdding else { return }
-                            isAdding = true
-                            let placeholder = WebDAVServerProfile(
-                                id: UUID(),
-                                name: Self.addPlaceholderName,
-                                serverURL: "",
-                                username: ""
-                            )
-                            Task {
-                                await profileStore.upsert(placeholder)
-                                dismiss()
-                            }
-                        }
-                        .disabled(isAdding)
-                        .accessibilityIdentifier("webdavProfileEditAdd")
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(existing == nil ? "Add" : "Save") {
+                        Task { await save() }
                     }
+                    .disabled(!canSave || saveInFlight)
+                    .accessibilityIdentifier("webdavProfileEditSave")
                 }
             }
+            .alert(
+                "Profile Error",
+                isPresented: Binding(
+                    get: { viewModel.editorError != nil },
+                    set: { if !$0 { viewModel.editorError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.editorError ?? "")
+            }
             .accessibilityIdentifier("webdavProfileEditSheet")
+            .task {
+                // Codex round-1 Low fix [6]: probe keychain through the
+                // VM (which uses its injected profileStore + KeychainService)
+                // rather than constructing a fresh KeychainService in the
+                // view. Keeps test injection consistent.
+                if let existing {
+                    let stored = await viewModel.readStoredPassword(for: existing.id)
+                    isPasswordSaved = (stored?.isEmpty == false)
+                }
+            }
         }
     }
 
-    // MARK: - Copy
+    // MARK: - Save gating
 
-    private var navigationTitle: String {
-        existing == nil ? "Add WebDAV Server" : "Edit WebDAV Server"
-    }
-
-    private var headlineCopy: String {
-        existing == nil
-            ? "New server (placeholder)"
-            : "Edit \(existing?.displayName ?? "server") (placeholder)"
-    }
-
-    private var bodyCopy: String {
+    var canSave: Bool {
+        // Server URL must pass the shared validator (Codex round-1 High
+        // fix [1]: previously accepted `https://` with no host).
+        guard WebDAVProfileListViewModel.validatedServerURL(from: serverURL) != nil else {
+            return false
+        }
+        let trimmedUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUser.isEmpty else { return false }
+        // Name CAN be blank — we auto-fill from the URL hostname on save
+        // (Codex round-1 Medium fix [5], matches plan edge case (e)).
+        // Add-mode requires the user to type a password before Save —
+        // otherwise the keychain write below would store an empty string,
+        // and Test Connection would fail with "password missing". Edit-
+        // mode allows save without password changes (existing keychain
+        // entry is reused).
         if existing == nil {
-            return "Tap Add to create a placeholder row in the list. WI-4b ships the full editor (Name, Server URL, Username, Password, Test Connection) so you can configure the server. Until then, this row is non-functional for backup; the single-server form on the WebDAV Backup screen remains the working credentials path."
+            guard !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        }
+        return true
+    }
+
+    // MARK: - Actions
+
+    func save() async {
+        guard !saveInFlight else { return }
+        saveInFlight = true
+        defer { saveInFlight = false }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Codex round-1 High fix [1]: shared validator (require scheme +
+        // host + http/https). Save MUST agree with canSave gating.
+        guard let url = WebDAVProfileListViewModel.validatedServerURL(from: trimmedURL) else {
+            serverURLError = "URL must use http:// or https:// and include a host."
+            return
+        }
+        // Codex round-1 Medium fix [5]: when name is blank, auto-fill
+        // from the URL hostname before persistence. Matches plan edge
+        // case (e). `displayName` already has a hostname fallback for
+        // empty-name reads, but persisting the hostname makes the
+        // intent explicit + means the list view's row shows the
+        // hostname uniformly regardless of which read path renders it.
+        let resolvedName: String
+        if trimmedName.isEmpty, let host = url.host, !host.isEmpty {
+            resolvedName = host
         } else {
-            return "The full editor (Name, Server URL, Username, Password, Test Connection) lands in WI-4b. WI-4a ships the list + navigation; this stub keeps the Edit flow reachable from the list."
+            resolvedName = trimmedName
+        }
+        let profile = WebDAVServerProfile(
+            id: profileID,
+            name: resolvedName,
+            serverURL: trimmedURL,
+            username: trimmedUser
+        )
+        if existing == nil {
+            await viewModel.addProfile(profile, password: password)
+        } else {
+            await viewModel.updateProfile(profile)
+        }
+        if viewModel.editorError == nil {
+            dismiss()
+        }
+    }
+
+    func saveKey() async {
+        await viewModel.savePassword(password, forID: profileID)
+        if viewModel.editorError == nil {
+            isPasswordSaved = !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            password = ""
+        }
+    }
+
+    func deleteKey() async {
+        await viewModel.deletePassword(forID: profileID)
+        if viewModel.editorError == nil {
+            isPasswordSaved = false
+            password = ""
+        }
+    }
+
+    func runTest() async {
+        testInFlight = true
+        defer { testInFlight = false }
+
+        // Test Connection uses the form's current password in edit-mode
+        // ONLY if the user has typed a fresh password. Otherwise we read
+        // the stored keychain entry through the VM (Codex round-1 Low
+        // fix [6]: keep injection consistent — no direct KeychainService
+        // in the view).
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidatePassword: String
+        if !trimmedPassword.isEmpty {
+            candidatePassword = trimmedPassword
+        } else if existing != nil, isPasswordSaved {
+            candidatePassword = await viewModel.readStoredPassword(for: profileID) ?? ""
+        } else {
+            candidatePassword = ""
+        }
+
+        let result = await viewModel.testConnection(
+            serverURL: serverURL,
+            username: username,
+            password: candidatePassword
+        )
+        switch result {
+        case .success:
+            testResultText = "Connected — the WebDAV server responded successfully."
+        case .failure(let error):
+            testResultText = "Failed: \(error.localizedDescription)"
         }
     }
 }

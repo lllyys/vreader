@@ -311,47 +311,7 @@ struct WebDAVEditorContextTests {
     }
 }
 
-// MARK: - Stub editor placeholder-save contract
-
-@Suite("WebDAVServerProfileEditSheet — stub add-mode placeholder save (#52 WI-4a)")
-@MainActor
-struct WebDAVServerProfileEditSheetStubTests {
-
-    /// Fresh UserDefaults + KeychainService per test for isolation.
-    private func makeStore() -> WebDAVServerProfileStore {
-        let suite = "WebDAVStubEditSheetTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        let keychain = KeychainService(serviceIdentifier: "com.vreader.test.stub-sheet.\(UUID().uuidString)")
-        return WebDAVServerProfileStore(defaults: defaults, keychain: keychain)
-    }
-
-    /// WI-4a plan: "New profile add path lands in a stub editor that
-    /// just writes a name placeholder." The Add toolbar button in
-    /// add-mode must upsert a profile with the documented placeholder
-    /// name so the list view gains a row + the swipe-delete /
-    /// set-active paths can be exercised before WI-4b's full editor.
-    @Test func addPlaceholderName_isStable() {
-        #expect(!WebDAVServerProfileEditSheet.addPlaceholderName.isEmpty)
-        #expect(WebDAVServerProfileEditSheet.addPlaceholderName == "New WebDAV Server")
-    }
-
-    /// Smoke test the wire-up: when the stub editor calls `profileStore.upsert(...)`
-    /// with a placeholder profile, the store gains a row.
-    @Test func placeholderUpsert_addsRowToStore() async {
-        let store = makeStore()
-        #expect(await store.loadAll().isEmpty)
-
-        let placeholder = WebDAVServerProfile(
-            id: UUID(),
-            name: WebDAVServerProfileEditSheet.addPlaceholderName,
-            serverURL: "",
-            username: ""
-        )
-        await store.upsert(placeholder)
-
-        let all = await store.loadAll()
-        #expect(all.count == 1)
-        #expect(all.first?.name == WebDAVServerProfileEditSheet.addPlaceholderName)
-    }
-}
+// Note: WI-4a's stub-editor placeholder-save sub-suite was removed in
+// WI-4b along with the stub editor itself. The full add/edit form
+// (WebDAVServerProfileEditSheet) and the editor-side VM operations
+// are covered by WebDAVProfileListViewModelEditorTests.swift.

@@ -112,8 +112,8 @@ struct WebDAVServerProfileListView: View {
         }
         .sheet(item: $editorContext) { context in
             WebDAVServerProfileEditSheet(
-                existing: context.profile,
-                profileStore: viewModel.profileStore
+                viewModel: viewModel,
+                existing: context.profile
             )
         }
         // Codex round-2 Medium fix: single `.alert(...)` driven by an

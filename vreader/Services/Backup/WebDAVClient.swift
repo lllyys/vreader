@@ -16,7 +16,7 @@ import Foundation
 // MARK: - WebDAVError
 
 /// Errors from WebDAV operations.
-enum WebDAVError: Error, Sendable, Equatable {
+enum WebDAVError: LocalizedError, Sendable, Equatable {
     /// Server returned 401/403.
     case authenticationFailed
     /// Resource not found (404).
@@ -29,6 +29,31 @@ enum WebDAVError: Error, Sendable, Equatable {
     case quotaExceeded
     /// The PROPFIND response XML could not be parsed.
     case invalidResponse(String)
+
+    /// User-facing message used by `error.localizedDescription`. Mapping
+    /// each case to a specific string is required for the WebDAV editor's
+    /// Test Connection panel (Feature #52 WI-4b, Codex round-1 Medium [3]):
+    /// without `LocalizedError` conformance the runTest UI would collapse
+    /// every wire failure to Foundation's generic "operation couldn't be
+    /// completed" text.
+    var errorDescription: String? {
+        switch self {
+        case .authenticationFailed:
+            return "Authentication failed — check the username and password."
+        case .notFound(let path):
+            return "Server returned 404 Not Found for: \(path)"
+        case .connectionFailed(let detail):
+            return "Couldn't reach the WebDAV server. (\(detail))"
+        case .httpError(405):
+            return "Server doesn't support WebDAV PROPFIND (HTTP 405). Verify this URL points at a WebDAV endpoint, not a plain HTTP file server."
+        case .httpError(let code):
+            return "Server returned an unexpected HTTP status: \(code)."
+        case .quotaExceeded:
+            return "WebDAV server is out of storage space."
+        case .invalidResponse(let detail):
+            return "WebDAV server returned an unreadable response. (\(detail))"
+        }
+    }
 }
 
 // MARK: - WebDAVEntry

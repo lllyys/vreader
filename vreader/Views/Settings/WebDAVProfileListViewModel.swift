@@ -62,6 +62,12 @@ final class WebDAVProfileListViewModel {
     /// Surfaces via an `.alert(...)` binding in the list view.
     var listError: String?
 
+    /// Last error from an editor operation (add/update/save-key/delete-key
+    /// /test-connection). nil after success. The editor sheet surfaces this
+    /// via an `.alert(...)` binding mirroring the AI editor pattern.
+    /// Set by methods in `WebDAVProfileListViewModel+Editor.swift` (WI-4b).
+    var editorError: String?
+
     // MARK: - Initialization
 
     init(profileStore: WebDAVServerProfileStore = .shared) {
