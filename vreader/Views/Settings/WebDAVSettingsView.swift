@@ -50,6 +50,18 @@ struct WebDAVSettingsView: View {
     /// `backupVM` whenever the store changes (WI-5: replaced
     /// flat-keychain `hasSavedCredentials` with active-profile check).
     @State private var hasActiveCredentials = false
+    /// Bug #190 fix: the WebDAV profile list view's ViewModel lives in
+    /// `@State` here so SwiftUI keeps the same instance across parent
+    /// re-renders. Previously we constructed `WebDAVProfileListViewModel()`
+    /// inline in the NavigationLink's destination closure, which made
+    /// every parent re-render (e.g. after the editor sheet's `dismiss()`)
+    /// allocate a fresh VM with an empty `profiles` array — the list
+    /// view then rendered the empty state until `.task { loadProfiles }`
+    /// asynchronously repopulated it. Hoisting to `@State` mirrors the
+    /// AI sibling pattern: `SettingsView` owns its `AISettingsViewModel`
+    /// in `@State` and threads the same instance into `AISettingsSection`
+    /// + `AIProviderListView`, keeping the VM stable across re-renders.
+    @State private var profileListVM = WebDAVProfileListViewModel()
 
     @Environment(\.persistenceActor) private var persistenceActor
     @Environment(\.webDAVNetworkPolicy) private var webDAVNetworkPolicy
@@ -77,9 +89,7 @@ struct WebDAVSettingsView: View {
             // form on this screen has been removed.
             Section {
                 NavigationLink {
-                    WebDAVServerProfileListView(
-                        viewModel: WebDAVProfileListViewModel()
-                    )
+                    WebDAVServerProfileListView(viewModel: profileListVM)
                 } label: {
                     HStack {
                         Image(systemName: "externaldrive.connected.to.line.below")
