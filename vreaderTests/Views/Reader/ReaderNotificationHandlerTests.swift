@@ -206,7 +206,7 @@ struct ReaderNotificationHandlerTests {
         #expect(state.annotationNoteText == "")
     }
 
-    // MARK: - AddNoteSheet Save
+    // MARK: - AddNoteSheet Save (Bug #188 fix: explicit-arg handler)
 
     /// Helper: build a real `HighlightCoordinator` backed by a fresh
     /// `MockHighlightStore` + capturing renderer. Returns both so the
@@ -225,118 +225,203 @@ struct ReaderNotificationHandlerTests {
         return (coordinator, renderer, store)
     }
 
-    @Test @MainActor func handleAnnotationSaveTrimsAndPersists() async {
-        let annotations = MockAnnotationStore()
-        let deps = makeDeps(annotations: annotations)
-        let state = TestHandlerState()
-        state.pendingAnnotationInfo = TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5)
-        state.annotationNoteText = "  My note  "
-        let (coordinator, _, _) = makeCoordinatorWithCaptures()
-
-        await ReaderNotificationHandlers.handleAnnotationSave(
-            state: state, deps: deps, highlightCoordinator: coordinator
-        )
-
-        #expect(state.pendingAnnotationInfo == nil)
-        let count = await annotations.addCallCount
-        #expect(count == 1)
+    /// Helper: a valid locator for the in-range "Hello" selection in
+    /// the test source text "Hello World".
+    private func makeHelloLocator() -> Locator {
+        Locator.validated(bookFingerprint: testFP, charRangeStartUTF16: 0, charRangeEndUTF16: 5)!
     }
 
-    @Test @MainActor func handleAnnotationSaveEmptyTextNoPersistence() async {
-        let annotations = MockAnnotationStore()
-        let deps = makeDeps(annotations: annotations)
+    // MARK: - prepareAnnotationSave (Bug #188 fix: capture-before-dismiss contract)
+
+    /// `prepareAnnotationSave` is the synchronous half of the fix. It
+    /// validates state, captures `info` / `trimmed` / `locator` into a
+    /// returnable `AnnotationSaveRequest`, AND clears
+    /// `pendingAnnotationInfo` — all in one sync pass — so the
+    /// AddNoteSheet's `dismiss()` can't race the captured values.
+    @Test @MainActor func prepareAnnotationSave_validInput_returnsRequestAndClearsPending() {
+        let deps = makeDeps()
         let state = TestHandlerState()
         state.pendingAnnotationInfo = TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5)
-        state.annotationNoteText = "   "
-        let (coordinator, renderer, store) = makeCoordinatorWithCaptures()
+        state.annotationNoteText = "  remember  "
 
-        await ReaderNotificationHandlers.handleAnnotationSave(
-            state: state, deps: deps, highlightCoordinator: coordinator
-        )
+        let request = ReaderNotificationHandlers.prepareAnnotationSave(state: state, deps: deps)
 
+        #expect(request != nil)
+        #expect(request?.info.selectedText == "Hello")
+        #expect(request?.trimmed == "remember", "trimmed must strip surrounding whitespace")
+        #expect(request?.locator.charRangeStartUTF16 == 0)
+        #expect(request?.locator.charRangeEndUTF16 == 5)
+        // Crucial Bug #188 contract: the sync clear happens INSIDE
+        // prepare so a follow-up dismiss() can't re-clear-as-no-op a
+        // value that's already gone.
         #expect(state.pendingAnnotationInfo == nil)
-        let count = await annotations.addCallCount
-        #expect(count == 0)
-        // Empty note: no HighlightRecord created either.
-        let storeAddCount = await store.addCallCount
-        #expect(storeAddCount == 0)
-        #expect(renderer.appliedRecords.isEmpty)
     }
 
-    /// Regression test for bug #181: Add Note in TXT/MD must also create
-    /// a `HighlightRecord` so the annotated range becomes visible as a
-    /// yellow highlight. Pre-fix: only `addAnnotation` was called and the
-    /// text showed no visual indicator.
-    @Test @MainActor func handleAnnotationSave_alsoCreatesHighlightRecord_bug181() async {
+    @Test @MainActor func prepareAnnotationSave_nilPendingInfo_returnsNil() {
+        let deps = makeDeps()
+        let state = TestHandlerState()
+        // pendingAnnotationInfo intentionally nil
+        state.annotationNoteText = "some note"
+
+        let request = ReaderNotificationHandlers.prepareAnnotationSave(state: state, deps: deps)
+
+        #expect(request == nil)
+        #expect(state.pendingAnnotationInfo == nil)
+    }
+
+    @Test @MainActor func prepareAnnotationSave_emptyTrimmed_returnsNilAndClears() {
+        let deps = makeDeps()
+        let state = TestHandlerState()
+        state.pendingAnnotationInfo = TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5)
+        state.annotationNoteText = "   \n\t  "
+
+        let request = ReaderNotificationHandlers.prepareAnnotationSave(state: state, deps: deps)
+
+        #expect(request == nil, "whitespace-only note text must short-circuit prepare")
+        #expect(state.pendingAnnotationInfo == nil, "pending info must be cleared so the sheet dismisses")
+    }
+
+    @Test @MainActor func prepareAnnotationSave_locatorFactoryFailure_returnsNilAndClears() {
+        let deps = makeDeps(locatorFactory: { _, _, _, _ in nil })
+        let state = TestHandlerState()
+        state.pendingAnnotationInfo = TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5)
+        state.annotationNoteText = "note"
+
+        let request = ReaderNotificationHandlers.prepareAnnotationSave(state: state, deps: deps)
+
+        #expect(request == nil)
+        #expect(state.pendingAnnotationInfo == nil)
+    }
+
+    /// Bug #188 production-sequence regression test: simulates the
+    /// modifier-side flow that broke at v3.21.53. After
+    /// `prepareAnnotationSave` returns the captured `request`, the test
+    /// THEN clears `pendingAnnotationInfo` again (mirroring a hypothetical
+    /// future regression that moves state reads back into the Task) AND
+    /// also runs the handler — confirming the handler still persists
+    /// both records using only the captured request.
+    @Test @MainActor func prepareAndHandleAnnotationSave_isImmuneToPostPrepareStateMutation_bug188() async {
         let annotations = MockAnnotationStore()
         let deps = makeDeps(annotations: annotations)
         let state = TestHandlerState()
         state.pendingAnnotationInfo = TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5)
-        state.annotationNoteText = "remember this"
+        state.annotationNoteText = "captured note"
         let (coordinator, renderer, store) = makeCoordinatorWithCaptures()
 
+        // Modifier-side sync portion.
+        guard let request = ReaderNotificationHandlers.prepareAnnotationSave(state: state, deps: deps) else {
+            Issue.record("prepare returned nil unexpectedly")
+            return
+        }
+
+        // Simulate AddNoteSheet's dismiss() running between sync portion
+        // and Task body — for the bug #188 contract this MUST be a no-op
+        // on the production-path captured values.
+        state.pendingAnnotationInfo = nil
+        state.annotationNoteText = ""
+
+        // Task-spawn-equivalent: handler reads only the request, not state.
         await ReaderNotificationHandlers.handleAnnotationSave(
-            state: state, deps: deps, highlightCoordinator: coordinator
+            info: request.info,
+            trimmed: request.trimmed,
+            locator: request.locator,
+            deps: deps,
+            highlightCoordinator: coordinator
         )
 
-        // Pre-fix this assertion failed: addCallCount == 0 because only
-        // addAnnotation was called.
+        let annoCount = await annotations.addCallCount
+        #expect(annoCount == 1, "AnnotationRecord must persist even after a post-prepare state wipe (bug #188 contract)")
         let storeAddCount = await store.addCallCount
-        #expect(storeAddCount == 1, "HighlightRecord must be persisted alongside the AnnotationRecord")
-        #expect(renderer.appliedRecords.count == 1, "TextHighlightRenderer.apply must run so persistedHighlightRanges receives the new range")
+        #expect(storeAddCount == 1, "HighlightRecord must persist even after a post-prepare state wipe")
+        #expect(renderer.appliedRecords.count == 1)
+        #expect(renderer.appliedRecords.first?.selectedText == "Hello")
+        #expect(renderer.appliedRecords.first?.note == "captured note")
+    }
+
+    @Test @MainActor func handleAnnotationSave_persistsBoth_withCapturedArgs() async {
+        let annotations = MockAnnotationStore()
+        let deps = makeDeps(annotations: annotations)
+        let (coordinator, renderer, store) = makeCoordinatorWithCaptures()
+        let info = TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5)
+
+        await ReaderNotificationHandlers.handleAnnotationSave(
+            info: info,
+            trimmed: "My note",
+            locator: makeHelloLocator(),
+            deps: deps,
+            highlightCoordinator: coordinator
+        )
+
+        let annoCount = await annotations.addCallCount
+        #expect(annoCount == 1)
+        let storeAddCount = await store.addCallCount
+        #expect(storeAddCount == 1)
+        #expect(renderer.appliedRecords.count == 1)
         let applied = renderer.appliedRecords.first
         #expect(applied?.selectedText == "Hello")
         #expect(applied?.color == "yellow")
-        #expect(applied?.note == "remember this")
-        // Annotation persistence still runs — the Notes panel keeps its row.
-        let annoCount = await annotations.addCallCount
-        #expect(annoCount == 1)
+        #expect(applied?.note == "My note")
     }
 
-    /// Codex audit follow-up to bug #181: if `addAnnotation` throws, the
-    /// handler MUST NOT proceed to `highlightCoordinator.create(...)`.
-    /// Otherwise the user sees a yellow highlight without a matching row in
-    /// the Notes tab — silent divergence between the two panels.
-    @Test @MainActor func handleAnnotationSave_annotationPersistenceFails_skipsHighlight_bug181() async {
+    /// Bug #188 regression test: the production path captures values
+    /// by VALUE before spawning the Task. By the time the handler runs
+    /// the surrounding `pendingAnnotationInfo` may have been cleared by
+    /// AddNoteSheet's `dismiss()` — the handler must not depend on it.
+    /// This test pins the contract by mutating the state class AFTER
+    /// the captured args were taken and confirming the handler still
+    /// persists both records using only the args.
+    @Test @MainActor func handleAnnotationSave_immuneToPostCaptureStateMutation_bug188() async {
+        let annotations = MockAnnotationStore()
+        let deps = makeDeps(annotations: annotations)
+        let (coordinator, renderer, store) = makeCoordinatorWithCaptures()
+        // Mirror the production sequence: caller captures info / trimmed
+        // / locator into the Task closure, then SwiftUI's dismiss() clears
+        // the underlying state class (or in this test, we never wire one).
+        let info = TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5)
+        let trimmed = "remember this"
+        let locator = makeHelloLocator()
+        // Simulate "dismiss already ran" — state class is intentionally
+        // not threaded through the handler at all in the bug #188 fix.
+
+        await ReaderNotificationHandlers.handleAnnotationSave(
+            info: info,
+            trimmed: trimmed,
+            locator: locator,
+            deps: deps,
+            highlightCoordinator: coordinator
+        )
+
+        // Both writes must succeed even though the surrounding state
+        // class (TextReaderUIState in production) is irrelevant to the
+        // handler. Pre-bug-188 the handler would have read from `state`
+        // and bailed on nil pendingAnnotationInfo — neither write ran.
+        let annoCount = await annotations.addCallCount
+        #expect(annoCount == 1, "AnnotationRecord must persist regardless of view state — handler must use captured args only")
+        let storeAddCount = await store.addCallCount
+        #expect(storeAddCount == 1, "HighlightRecord must persist regardless of view state")
+        #expect(renderer.appliedRecords.count == 1)
+    }
+
+    /// Atomicity check (Bug #181's Codex round-1 High, preserved across
+    /// the Bug #188 refactor): if `addAnnotation` throws, the highlight
+    /// MUST NOT be created. Both writes succeed or neither — the Notes
+    /// and Highlights tabs never diverge.
+    @Test @MainActor func handleAnnotationSave_annotationPersistenceFails_skipsHighlight() async {
         let annotations = MockAnnotationStore()
         await annotations.setAddError(HandlerTestError.persistence)
         let deps = makeDeps(annotations: annotations)
-        let state = TestHandlerState()
-        state.pendingAnnotationInfo = TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5)
-        state.annotationNoteText = "remember"
         let (coordinator, renderer, store) = makeCoordinatorWithCaptures()
 
         await ReaderNotificationHandlers.handleAnnotationSave(
-            state: state, deps: deps, highlightCoordinator: coordinator
+            info: TextSelectionInfo(selectedText: "Hello", startUTF16: 0, endUTF16: 5),
+            trimmed: "note",
+            locator: makeHelloLocator(),
+            deps: deps,
+            highlightCoordinator: coordinator
         )
 
-        // pendingAnnotationInfo cleared before the awaits so the sheet
-        // still dismisses even when the persistence layer rejects the
-        // write.
-        #expect(state.pendingAnnotationInfo == nil)
-        // Highlight must NOT have run — both writes succeed or neither.
         let storeAddCount = await store.addCallCount
         #expect(storeAddCount == 0, "highlight create must be skipped when annotation persistence fails")
-        #expect(renderer.appliedRecords.isEmpty)
-    }
-
-    @Test @MainActor func handleAnnotationSave_locatorFactoryFailure_skipsBoth_bug181() async {
-        let annotations = MockAnnotationStore()
-        let deps = makeDeps(annotations: annotations, locatorFactory: { _, _, _, _ in nil })
-        let state = TestHandlerState()
-        state.pendingAnnotationInfo = TextSelectionInfo(selectedText: "x", startUTF16: 0, endUTF16: 1)
-        state.annotationNoteText = "note"
-        let (coordinator, renderer, store) = makeCoordinatorWithCaptures()
-
-        await ReaderNotificationHandlers.handleAnnotationSave(
-            state: state, deps: deps, highlightCoordinator: coordinator
-        )
-
-        #expect(state.pendingAnnotationInfo == nil)
-        let annoCount = await annotations.addCallCount
-        #expect(annoCount == 0)
-        let storeAddCount = await store.addCallCount
-        #expect(storeAddCount == 0)
         #expect(renderer.appliedRecords.isEmpty)
     }
 

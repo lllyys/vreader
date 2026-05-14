@@ -89,14 +89,22 @@ struct ReaderNotificationModifier: ViewModifier {
                     selectedText: uiState.pendingAnnotationInfo?.selectedText ?? "",
                     noteText: $bindableState.annotationNoteText,
                     onSave: {
-                        // Bug #181: delegate to the canonical handler so the
-                        // annotation persistence path AND the HighlightRecord
-                        // creation path stay in lockstep. Previously this was
-                        // inlined and only called addAnnotation, leaving the
-                        // text without a visible highlight indicator.
+                        // Bug #181 + Bug #188 fix: synchronously
+                        // validate + capture inputs + clear pending
+                        // info via `prepareAnnotationSave`, THEN spawn
+                        // the Task with the captured `AnnotationSaveRequest`.
+                        // AddNoteSheet's Save button runs `onSave();
+                        // dismiss()` synchronously; capturing values
+                        // before the Task makes us immune to the
+                        // dismiss race that broke v3.21.53 (bug #188).
+                        guard let request = ReaderNotificationHandlers
+                            .prepareAnnotationSave(state: uiState, deps: deps)
+                        else { return }
                         Task {
                             await ReaderNotificationHandlers.handleAnnotationSave(
-                                state: uiState,
+                                info: request.info,
+                                trimmed: request.trimmed,
+                                locator: request.locator,
                                 deps: deps,
                                 highlightCoordinator: highlightCoordinator
                             )

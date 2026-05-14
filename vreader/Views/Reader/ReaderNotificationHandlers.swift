@@ -150,27 +150,44 @@ enum ReaderNotificationHandlers {
         state.annotationNoteText = ""
     }
 
-    /// Save the annotation note (from AddNoteSheet).
+    /// Captured-value payload for `handleAnnotationSave`. Built
+    /// synchronously by `prepareAnnotationSave(state:deps:)` before the
+    /// surrounding `dismiss()` clears `pendingAnnotationInfo`.
+    struct AnnotationSaveRequest: Sendable {
+        let info: TextSelectionInfo
+        let trimmed: String
+        let locator: Locator
+    }
+
+    /// Synchronously validates the annotation save inputs and captures
+    /// them into an `AnnotationSaveRequest` for the async handler.
+    /// Clears `pendingAnnotationInfo` AS PART OF the same synchronous
+    /// pass — so the AddNoteSheet's `dismiss()` (which fires
+    /// immediately after `onSave()`) doesn't race the Task body.
     ///
-    /// Bug #181: also creates a `HighlightRecord` via `highlightCoordinator`
-    /// so the annotated text gets a yellow highlight. Mirrors EPUB's
-    /// `handleHighlightWithNote` (which only creates a HighlightRecord with
-    /// the note attached). The `AnnotationRecord` is still written for the
-    /// Notes panel; future cleanup may unify the two models.
+    /// Returns nil when any of the guards fail (no pending info,
+    /// trimmed note text empty, locator factory returns nil) — in
+    /// every nil-return case, `pendingAnnotationInfo` is still cleared
+    /// so the sheet dismisses.
+    ///
+    /// Bug #188 fix: extracting this function means the modifier-side
+    /// "capture-by-value before dismiss-race" pattern is now testable
+    /// without booting SwiftUI. The regression test simulates the
+    /// production sequence (prepare → mutate state → handler) and
+    /// pins the contract.
     @MainActor
-    static func handleAnnotationSave(
+    static func prepareAnnotationSave(
         state: some ReaderNotificationHandlerStateProtocol,
-        deps: ReaderNotificationDeps,
-        highlightCoordinator: HighlightCoordinator
-    ) async {
+        deps: ReaderNotificationDeps
+    ) -> AnnotationSaveRequest? {
         guard let info = state.pendingAnnotationInfo else {
             state.pendingAnnotationInfo = nil
-            return
+            return nil
         }
         let trimmed = state.annotationNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             state.pendingAnnotationInfo = nil
-            return
+            return nil
         }
         guard let locator = deps.locatorFactory(
             deps.bookFingerprint,
@@ -179,19 +196,48 @@ enum ReaderNotificationHandlers {
             deps.sourceText()
         ) else {
             state.pendingAnnotationInfo = nil
-            return
+            return nil
         }
-        // Clear pending info before the awaits so the AddNoteSheet
-        // dismisses immediately on Save; persistence + highlight creation
-        // continue in the background.
         state.pendingAnnotationInfo = nil
+        return AnnotationSaveRequest(info: info, trimmed: trimmed, locator: locator)
+    }
+
+    /// Persist an annotation note + matching HighlightRecord. Bug #181
+    /// + Bug #188 fix: the handler now takes the validated `info` /
+    /// `trimmed` / `locator` as pre-captured value arguments so it can
+    /// run inside a `Task` spawned from a SwiftUI button action without
+    /// reading view state that the surrounding `dismiss()` has already
+    /// cleared.
+    ///
+    /// Why this signature shape:
+    /// - The AddNoteSheet's Save button calls `onSave(); dismiss()`
+    ///   synchronously. `dismiss()` triggers the parent `.sheet(...)`
+    ///   binding's setter, which clears `uiState.pendingAnnotationInfo`
+    ///   synchronously, BEFORE the `Task { await ... }` body runs.
+    /// - If the handler reads `state.pendingAnnotationInfo` inside the
+    ///   Task (the pre-bug-188 shape), the first guard sees nil and the
+    ///   whole flow becomes a no-op — bug #188's signature failure mode.
+    /// - The modifier's `onSave` now does sync validation + capture
+    ///   BEFORE spawning the Task; this handler just does the dual-
+    ///   write. The handler never reads from `state` and never mutates
+    ///   `pendingAnnotationInfo` — the modifier owns dismissal.
+    ///
+    /// Bug #181 atomicity: only creates the HighlightRecord when the
+    /// AnnotationRecord write succeeded, so Notes ↔ Highlights stay in
+    /// lockstep.
+    @MainActor
+    static func handleAnnotationSave(
+        info: TextSelectionInfo,
+        trimmed: String,
+        locator: Locator,
+        deps: ReaderNotificationDeps,
+        highlightCoordinator: HighlightCoordinator
+    ) async {
         let persistence = deps.annotationPersistence
         let key = deps.bookFingerprintKey
-        // Codex audit finding: if `addAnnotation` throws but we still ran
-        // `coordinator.create`, the user gets a yellow highlight without a
-        // matching row in the Notes tab — silent divergence. Stay in
-        // lockstep: only create the highlight when the annotation
-        // persisted successfully.
+        // Stay in lockstep: only create the highlight when the annotation
+        // persisted successfully. If addAnnotation throws, both writes
+        // are skipped so the Notes and Highlights tabs don't diverge.
         do {
             _ = try await persistence.addAnnotation(locator: locator, content: trimmed, toBookWithKey: key)
         } catch {
