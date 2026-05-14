@@ -254,22 +254,21 @@ struct VReaderApp: App {
             )
             #endif
 
-            // Feature #52 WI-3: one-shot migration from legacy flat-keychain
-            // WebDAV credentials to the new `WebDAVServerProfileStore`.
-            // Fire-and-forget — the migrator is idempotent (marker key OR
-            // non-empty store both short-circuit). Production reads still
-            // go through the legacy `WebDAVProviderFactory.make(keychain:)`
-            // path until WI-5 migrates call sites; this migration just
-            // populates the store so WI-4a/4b's UI sees the "Default"
-            // profile when users first navigate to the profile list.
+            // Feature #52 WI-2: one-shot migration from pre-#52 flat-
+            // keychain WebDAV credentials to the new
+            // `WebDAVServerProfileStore`. After WI-5 the profile store
+            // is the sole production credentials source (the legacy
+            // `WebDAVProviderFactory.make(keychain:)` flat-keychain
+            // path was removed), so this migration is what bridges
+            // pre-#52 installs into the new world — without it,
+            // existing users would see an empty profile list and
+            // would need to re-enter credentials.
             //
-            // Why fire-and-forget vs Task.detached + semaphore (the
-            // seeding pattern used above): the migration doesn't gate
-            // any view body — no consumer reads from the store yet.
-            // Production reads are all in the legacy flat-keychain path
-            // until WI-5. The migrator's idempotency means a re-run on
-            // the next launch is harmless if this fire-and-forget Task
-            // doesn't complete before the user opens settings.
+            // Fire-and-forget — the migrator is idempotent on two
+            // axes (marker key `com.vreader.webdav.profilesMigrated.v1`
+            // OR non-empty store), so a re-run on the next launch is
+            // harmless if this background Task hasn't completed
+            // before the user opens settings.
             Task.detached(priority: .background) {
                 do {
                     try await WebDAVProfileMigrator.migrateIfNeeded()

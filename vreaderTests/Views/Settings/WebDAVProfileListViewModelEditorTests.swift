@@ -461,6 +461,60 @@ struct WebDAVProfileListViewModelEditorTests {
         let stored = try await store.readPassword(for: profile.id)
         #expect(stored == "fresh")
     }
+
+    // MARK: - WI-5 round-2 fix: password-mutation notification
+
+    @Test func writePassword_postsDidChangeNotification() async throws {
+        nonisolated(unsafe) let defaults = makeDefaults()
+        let store = WebDAVServerProfileStore(defaults: defaults, keychain: makeKeychain())
+        let posted = await awaitNotification(name: .webdavProfilesDidChange) {
+            try? await store.writePassword("secret", for: UUID())
+        }
+        #expect(posted)
+    }
+
+    @Test func deletePassword_postsDidChangeNotification() async throws {
+        nonisolated(unsafe) let defaults = makeDefaults()
+        let store = WebDAVServerProfileStore(defaults: defaults, keychain: makeKeychain())
+        let posted = await awaitNotification(name: .webdavProfilesDidChange) {
+            try? await store.deletePassword(for: UUID())
+        }
+        #expect(posted)
+    }
+
+    /// Helper that observes `name`, runs `body`, and returns whether
+    /// the notification was posted within 1 second. Uses a continuation
+    /// rather than XCTest's `expectation`/`fulfillment` so it stays
+    /// in the Swift Testing world.
+    private func awaitNotification(
+        name: Notification.Name,
+        body: @escaping @Sendable () async -> Void
+    ) async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            nonisolated(unsafe) var token: NSObjectProtocol?
+            nonisolated(unsafe) var didFire = false
+            token = NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { _ in
+                if !didFire {
+                    didFire = true
+                    if let t = token { NotificationCenter.default.removeObserver(t) }
+                    cont.resume(returning: true)
+                }
+            }
+            Task {
+                await body()
+                // Give the post a beat to reach the observer queue, then
+                // resolve with false if it didn't fire.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if !didFire {
+                    didFire = true
+                    if let t = token { NotificationCenter.default.removeObserver(t) }
+                    cont.resume(returning: false)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Mock WebDAVTransport

@@ -279,6 +279,17 @@ enum TestSeeder {
         "com.vreader.ai.consentDate",
         // WebDAV
         "com.vreader.webdav.wifiOnly",
+        // WebDAV multi-profile (#52 WI-1 / WI-2 / WI-5):
+        // - JSON-encoded `[WebDAVServerProfile]` written by
+        //   `WebDAVServerProfileStore`
+        // - The active profile's UUID (hyphenated string)
+        // - The WI-2 one-shot migration marker (kept in this list so
+        //   `--reset-preferences` re-arms the migrator for tests that
+        //   need to exercise the legacy-flat → "Default"-profile flow
+        //   again from a clean state)
+        "com.vreader.webdav.profiles",
+        "com.vreader.webdav.activeProfileID",
+        "com.vreader.webdav.profilesMigrated.v1",
     ]
 
     /// Removes every key in `knownPreferenceKeys` from the supplied

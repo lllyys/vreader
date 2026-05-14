@@ -166,12 +166,17 @@ actor WebDAVServerProfileStore {
     // MARK: - Keychain bridging
 
     /// Writes the password for a given profile id to Keychain at the
-    /// profile's account string.
+    /// profile's account string. Posts `webdavProfilesDidChange` on
+    /// success so observers (e.g., `WebDAVSettingsView`'s backup section)
+    /// refresh — WI-5 Codex round-2 fix: previously password-only
+    /// changes left the backup section stale until the next profile-
+    /// list mutation re-fired the notification.
     func writePassword(_ password: String, for id: UUID) throws {
         try keychain.saveString(
             password,
             forAccount: WebDAVServerProfile.keychainPasswordAccount(for: id)
         )
+        Self.postDidChangeNotification()
     }
 
     /// Reads the password for a given profile id from Keychain.
@@ -184,10 +189,13 @@ actor WebDAVServerProfileStore {
 
     /// Deletes the password keychain entry for a given profile id. No-op
     /// if the entry doesn't exist (KeychainService.delete tolerates miss).
+    /// Posts `webdavProfilesDidChange` on success — same rationale as
+    /// `writePassword` (WI-5 Codex round-2 fix).
     func deletePassword(for id: UUID) throws {
         try keychain.delete(
             forAccount: WebDAVServerProfile.keychainPasswordAccount(for: id)
         )
+        Self.postDidChangeNotification()
     }
 
     // MARK: - Notification

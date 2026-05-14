@@ -1,29 +1,40 @@
-// Purpose: WebDAV connection configuration UI for backup settings.
-// Allows users to enter server URL, username, and password.
-// Provides connection testing and credential persistence via Keychain.
+// Purpose: WebDAV backup settings screen — entry to the multi-profile
+// server list + backup operations (Back Up Now, Restore, Refresh List).
+//
+// Feature #52 WI-5 (foundational cleanup): the legacy single-server
+// credentials section + its flat-keychain reads/writes have been
+// removed. Credential entry now lives exclusively in the multi-profile
+// list view (WI-4a) + its editor sheet (WI-4b), reached via the
+// "Servers" NavigationLink at the top of this screen. Backup operations
+// (`Back Up Now`, `Restore`, `Refresh List`) construct their provider
+// through `WebDAVProviderFactory.make(persistence:profileStore:)` —
+// the async profile-aware variant from WI-3 — which reads the active
+// profile from `WebDAVServerProfileStore.shared`.
 //
 // Key decisions:
-// - Credentials stored in Keychain (not UserDefaults) for security.
-// - Connection test validates before saving credentials.
-// - Server URL validated for https:// prefix (security best practice).
-// - Form-based layout consistent with iOS Settings patterns.
+// - Single source of truth: the active profile (via the store).
+//   `refreshBackupVMIfNeeded` builds the provider from `profileStore`
+//   and gates the backup section on whether an active profile exists.
+//   No flat-keychain reads remain in this view.
+// - Empty state (no active profile yet): the Servers nav-link section
+//   stays visible at the top, the backup section is hidden, and the
+//   inline footer copy directs the user to add a server.
+// - `WebDAVProfileMigrator` (WI-2) handles the one-time migration of
+//   legacy flat-keychain credentials into a `"Default"` profile at app
+//   launch, so existing users hit this screen with their `Default`
+//   profile already active.
 //
-// @coordinates-with: WebDAVClient.swift, WebDAVProvider.swift, KeychainService.swift, SettingsView.swift
+// @coordinates-with: WebDAVProvider.swift, WebDAVProviderFactory.swift,
+//   WebDAVServerProfileStore.swift, WebDAVServerProfileListView.swift,
+//   SettingsView.swift, BackupViewModel.swift
 
 import SwiftUI
 
-/// WebDAV server configuration view for backup settings.
+/// WebDAV backup settings — Servers nav-link, Wi-Fi-only toggle, and
+/// backup operations (Back Up Now / Restore / list).
 struct WebDAVSettingsView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.persistenceActor) private var persistenceFromEnv
     @Environment(\.bookImporter) private var bookImporterFromEnv
-
-    @State private var serverURL = ""
-    @State private var username = ""
-    @State private var password = ""
-    @State private var isTesting = false
-    @State private var testResult: TestResult?
-    @State private var isSaving = false
 
     @State private var backupVM: BackupViewModel?
     @State private var showRestoreConfirm = false
@@ -33,11 +44,15 @@ struct WebDAVSettingsView: View {
     /// Bound to SelectiveRestorePicker — set when the user taps
     /// "Restore selectively…", cleared on dismiss. Feature #47 WI-6.
     @State private var pickerCandidate: BackupMetadata?
+    /// Whether the active WebDAV profile has all the fields (server URL,
+    /// username, non-empty password) needed to construct a provider.
+    /// Drives the backup section's visibility. Refreshed alongside
+    /// `backupVM` whenever the store changes (WI-5: replaced
+    /// flat-keychain `hasSavedCredentials` with active-profile check).
+    @State private var hasActiveCredentials = false
+
     @Environment(\.persistenceActor) private var persistenceActor
     @Environment(\.webDAVNetworkPolicy) private var webDAVNetworkPolicy
-
-    /// Keychain service for credential persistence.
-    private let keychain: KeychainService
 
     /// Optional explicit persistence override (preferred for tests / previews).
     /// When nil, we fall back to the SwiftUI environment value.
@@ -47,16 +62,9 @@ struct WebDAVSettingsView: View {
         injectedPersistence ?? persistenceFromEnv
     }
 
-    // MARK: - Keychain Accounts
-
-    private static let serverURLAccount = "com.vreader.webdav.serverURL"
-    private static let usernameAccount = "com.vreader.webdav.username"
-    private static let passwordAccount = "com.vreader.webdav.password"
-
     // MARK: - Init
 
-    init(keychain: KeychainService = KeychainService(), persistence: PersistenceActor? = nil) {
-        self.keychain = keychain
+    init(persistence: PersistenceActor? = nil) {
         self.injectedPersistence = persistence
     }
 
@@ -64,12 +72,9 @@ struct WebDAVSettingsView: View {
 
     var body: some View {
         Form {
-            // Feature #52 WI-4a: entry point to the multi-profile list.
-            // Lives at the TOP of the form so users discover it before
-            // the legacy single-server credentials section below. The
-            // legacy section stays put until WI-4b ships the full editor
-            // — otherwise WI-4a would break credential entry for any
-            // user who hasn't yet been migrated.
+            // Multi-profile entry point (WI-4a). After WI-5 this is the
+            // ONLY credential-entry path — the legacy single-server
+            // form on this screen has been removed.
             Section {
                 NavigationLink {
                     WebDAVServerProfileListView(
@@ -89,86 +94,13 @@ struct WebDAVSettingsView: View {
                 }
                 .accessibilityIdentifier("webdavServersNavLink")
             } header: {
-                Text("Multi-server (WI-4a)")
+                Text("Servers")
             } footer: {
-                Text("Add multiple WebDAV servers and switch between them. The single-server form below remains the active configuration until you add a server here.")
-            }
-
-            Section {
-                TextField("Server URL", text: $serverURL)
-                    .textContentType(.URL)
-                    .keyboardType(.URL)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .accessibilityIdentifier("webdavServerURL")
-
-                TextField("Username", text: $username)
-                    .textContentType(.username)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .accessibilityIdentifier("webdavUsername")
-
-                SecureField("Password", text: $password)
-                    .textContentType(.password)
-                    .accessibilityIdentifier("webdavPassword")
-            } header: {
-                Text("WebDAV Server")
-            } footer: {
-                Text("Enter your WebDAV server details. Supports Nutstore, NextCloud, Synology, and other WebDAV-compatible services.")
-            }
-
-            Section {
-                Button {
-                    Task { await testConnection() }
-                } label: {
-                    HStack {
-                        Text("Test Connection")
-                        Spacer()
-                        if isTesting {
-                            ProgressView()
-                        } else if let result = testResult {
-                            Image(systemName: result.isSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(result.isSuccess ? .green : .red)
-                        }
-                    }
+                if hasActiveCredentials {
+                    Text("Backup uses the currently-active server. Switch the active server in the list above.")
+                } else {
+                    Text("Add a WebDAV server above to enable backup.")
                 }
-                .disabled(isTesting || serverURL.isEmpty || username.isEmpty || password.isEmpty)
-                .accessibilityIdentifier("webdavTestButton")
-
-                if let result = testResult, !result.isSuccess {
-                    Text(result.message)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-
-            Section {
-                Button {
-                    Task { await saveCredentials() }
-                } label: {
-                    HStack {
-                        Spacer()
-                        if isSaving {
-                            ProgressView()
-                        } else {
-                            Text("Save")
-                        }
-                        Spacer()
-                    }
-                }
-                .disabled(isSaving || serverURL.isEmpty || username.isEmpty || password.isEmpty)
-                .accessibilityIdentifier("webdavSaveButton")
-
-                Button(role: .destructive) {
-                    clearCredentials()
-                } label: {
-                    HStack {
-                        Spacer()
-                        Text("Remove Credentials")
-                        Spacer()
-                    }
-                }
-                .accessibilityIdentifier("webdavClearButton")
             }
 
             // Feature #47 WI-6: Wi-Fi-only toggle for lazy book downloads.
@@ -198,8 +130,15 @@ struct WebDAVSettingsView: View {
         }
         .navigationTitle("WebDAV Backup")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { loadCredentials() }
-        .task { await refreshBackupVMIfNeeded() }
+        .task {
+            await refreshBackupVMIfNeeded()
+        }
+        // WI-5: refresh the backup VM + active-credentials state whenever
+        // the profile store mutates (e.g., the user added their first
+        // profile via the multi-server list, or switched the active one).
+        .onReceive(NotificationCenter.default.publisher(for: .webdavProfilesDidChange)) { _ in
+            Task { await refreshBackupVMIfNeeded() }
+        }
         .confirmationDialog(
             "Restore from this backup?",
             isPresented: $showRestoreConfirm,
@@ -258,7 +197,7 @@ struct WebDAVSettingsView: View {
 
     @ViewBuilder
     private var backupSection: some View {
-        if hasSavedCredentials, persistence != nil {
+        if hasActiveCredentials, persistence != nil {
             Section {
                 Button {
                     Task { await backupVM?.performBackup() }
@@ -379,10 +318,6 @@ struct WebDAVSettingsView: View {
         .padding(.vertical, 4)
     }
 
-    private var hasSavedCredentials: Bool {
-        !serverURL.isEmpty && !username.isEmpty && !password.isEmpty
-    }
-
     private var byteCountFormatter: ByteCountFormatter {
         let f = ByteCountFormatter()
         f.allowedUnits = [.useKB, .useMB]
@@ -390,100 +325,34 @@ struct WebDAVSettingsView: View {
         return f
     }
 
-    /// Constructs (or refreshes) the BackupViewModel when credentials become available.
+    /// Constructs (or refreshes) the BackupViewModel from the active
+    /// WebDAV profile. WI-5: replaced the legacy
+    /// `make(persistence:keychain:bookImporter:)` flat-keychain path
+    /// with the async profile-store-backed variant from WI-3.
+    ///
+    /// Sets `hasActiveCredentials` to true only when the factory
+    /// succeeds — the active profile exists, has all required fields,
+    /// and its password slot is non-empty. Failures (no active profile,
+    /// invalid URL, missing password) hide the backup section.
     private func refreshBackupVMIfNeeded() async {
-        guard let persistence else { return }
-        guard hasSavedCredentials else {
+        guard let persistence else {
             backupVM = nil
+            hasActiveCredentials = false
             return
         }
         do {
-            let provider = try WebDAVProviderFactory.make(
+            let provider = try await WebDAVProviderFactory.make(
                 persistence: persistence,
-                keychain: keychain,
+                profileStore: WebDAVServerProfileStore.shared,
                 bookImporter: bookImporterFromEnv
             )
             let vm = BackupViewModel(provider: provider)
             backupVM = vm
+            hasActiveCredentials = true
             await vm.loadBackups()
         } catch {
             backupVM = nil
+            hasActiveCredentials = false
         }
-    }
-
-    // MARK: - Actions
-
-    private func testConnection() async {
-        isTesting = true
-        testResult = nil
-        defer { isTesting = false }
-
-        guard let url = URL(string: serverURL), url.scheme != nil else {
-            testResult = TestResult(isSuccess: false, message: "Invalid server URL")
-            return
-        }
-
-        let client = WebDAVClient(
-            serverURL: url,
-            username: username,
-            password: password
-        )
-
-        do {
-            try await client.testConnection()
-            testResult = TestResult(isSuccess: true, message: "Connected successfully")
-        } catch let error as WebDAVError {
-            switch error {
-            case .authenticationFailed:
-                testResult = TestResult(isSuccess: false, message: "Authentication failed. Check username and password.")
-            case .connectionFailed(let msg):
-                testResult = TestResult(isSuccess: false, message: "Connection failed: \(msg)")
-            default:
-                testResult = TestResult(isSuccess: false, message: "Error: \(error)")
-            }
-        } catch {
-            testResult = TestResult(isSuccess: false, message: "Connection error: \(error.localizedDescription)")
-        }
-    }
-
-    private func saveCredentials() async {
-        isSaving = true
-        defer { isSaving = false }
-
-        do {
-            try keychain.saveString(serverURL, forAccount: Self.serverURLAccount)
-            try keychain.saveString(username, forAccount: Self.usernameAccount)
-            try keychain.saveString(password, forAccount: Self.passwordAccount)
-            testResult = TestResult(isSuccess: true, message: "Credentials saved")
-            await refreshBackupVMIfNeeded()
-        } catch {
-            testResult = TestResult(
-                isSuccess: false,
-                message: "Failed to save credentials: \(error.localizedDescription)"
-            )
-        }
-    }
-
-    private func loadCredentials() {
-        serverURL = (try? keychain.readString(forAccount: Self.serverURLAccount)) ?? ""
-        username = (try? keychain.readString(forAccount: Self.usernameAccount)) ?? ""
-        password = (try? keychain.readString(forAccount: Self.passwordAccount)) ?? ""
-    }
-
-    private func clearCredentials() {
-        try? keychain.delete(forAccount: Self.serverURLAccount)
-        try? keychain.delete(forAccount: Self.usernameAccount)
-        try? keychain.delete(forAccount: Self.passwordAccount)
-        serverURL = ""
-        username = ""
-        password = ""
-        testResult = nil
-    }
-
-    // MARK: - Types
-
-    private struct TestResult {
-        let isSuccess: Bool
-        let message: String
     }
 }

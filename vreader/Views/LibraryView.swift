@@ -142,32 +142,42 @@ struct LibraryView: View {
                       let bytes = Int64(parts[2]) else { return }
                 let sha = String(parts[1])
                 let ext = (BookFormat(rawValue: book.format)?.fileExtensions.first) ?? book.format
-                let builder: WebDAVDownloadRequestBuilder
-                do {
-                    builder = try WebDAVProviderFactory.makeRequestBuilder()
-                } catch {
-                    viewModel.setError("Cannot start download: \(error.localizedDescription)")
-                    return
-                }
-                let result = coordinator.enqueue(
-                    fingerprintKey: book.fingerprintKey,
-                    blobPath: blobPath,
-                    expectedSHA256: sha,
-                    expectedByteCount: bytes,
-                    originalExtension: ext,
-                    requestBuilder: builder,
-                    policy: policy
-                )
-                switch result {
-                case .deferredWiFi:
-                    viewModel.setError("Wi-Fi only — turn on the toggle in Backup settings to allow cellular.")
-                case .notReady:
-                    viewModel.setError("Lazy-download coordinator unavailable.")
-                case .taskDescriptionEncodeFailed:
-                    viewModel.setError("Internal error encoding download task.")
-                case .started:
-                    // Surface the sheet so the user sees progress.
-                    bookForDownloadSheet = book
+                // WI-5: route through the profile-store-backed factory
+                // variant from WI-3. The async hop spawns into a Task —
+                // notification observers are sync but the factory hop is
+                // cheap (one actor read of the active profile +
+                // password). `coordinator.enqueue` is also called from
+                // inside the Task for the same reason.
+                Task {
+                    let builder: WebDAVDownloadRequestBuilder
+                    do {
+                        builder = try await WebDAVProviderFactory.makeRequestBuilder(
+                            profileStore: WebDAVServerProfileStore.shared
+                        )
+                    } catch {
+                        viewModel.setError("Cannot start download: \(error.localizedDescription)")
+                        return
+                    }
+                    let result = coordinator.enqueue(
+                        fingerprintKey: book.fingerprintKey,
+                        blobPath: blobPath,
+                        expectedSHA256: sha,
+                        expectedByteCount: bytes,
+                        originalExtension: ext,
+                        requestBuilder: builder,
+                        policy: policy
+                    )
+                    switch result {
+                    case .deferredWiFi:
+                        viewModel.setError("Wi-Fi only — turn on the toggle in Backup settings to allow cellular.")
+                    case .notReady:
+                        viewModel.setError("Lazy-download coordinator unavailable.")
+                    case .taskDescriptionEncodeFailed:
+                        viewModel.setError("Internal error encoding download task.")
+                    case .started:
+                        // Surface the sheet so the user sees progress.
+                        bookForDownloadSheet = book
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { notification in
