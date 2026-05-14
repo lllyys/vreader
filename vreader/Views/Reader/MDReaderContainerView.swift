@@ -99,7 +99,15 @@ struct MDReaderContainerView: View {
         .task {
             // PERF: open already called by MDReaderHost
             if viewModel.renderedText == nil {
-                await viewModel.open(url: fileURL)
+                // Bug #178 / GH #606: forward chineseConversion so the
+                // MD render pipeline applies SimpTradTransform to the
+                // source text before parsing. Live re-apply on toggle
+                // requires close+reopen (out of scope for the silent-
+                // noop fix; documented limitation).
+                await viewModel.open(
+                    url: fileURL,
+                    chineseConversion: settingsStore?.chineseConversion ?? .none
+                )
             }
             initialRestoreOffset = viewModel.currentOffsetUTF16
             if isPagedMode {

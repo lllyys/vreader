@@ -184,6 +184,85 @@ struct MDFileLoaderTests {
         }
     }
 
+    // MARK: - Bug #178 / GH #606: chineseConversion
+
+    @Test("load with chineseConversion .none preserves source text passed to parser")
+    func loadWithoutConversionPreservesText() async throws {
+        let parser = MockMDParser()
+        let store = MockPositionStore()
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loader_test_\(UUID().uuidString).md")
+        try testMDSource.data(using: .utf8)!.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        _ = try await MDFileLoader.load(
+            url: url,
+            parser: parser,
+            positionStore: store,
+            bookFingerprintKey: testFP.canonicalKey,
+            chineseConversion: .none
+        )
+
+        #expect(parser.lastParsedText == testMDSource)
+    }
+
+    @Test("load with chineseConversion .simpToTrad transforms source text before parse")
+    func loadAppliesSimpToTradConversion() async throws {
+        let parser = MockMDParser()
+        let store = MockPositionStore()
+        let simpSource = "# 简体标题\n\n这是简体中文内容。\n"
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loader_test_simp_\(UUID().uuidString).md")
+        try simpSource.data(using: .utf8)!.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        _ = try await MDFileLoader.load(
+            url: url,
+            parser: parser,
+            positionStore: store,
+            bookFingerprintKey: testFP.canonicalKey,
+            chineseConversion: .simpToTrad
+        )
+
+        let parsedText = parser.lastParsedText ?? ""
+        #expect(parsedText != simpSource,
+                "Source text should be transformed before parsing")
+        // ICU Hans-Hant mappings: 简→簡, 这→這, 体→體, 内→內, 容→容 (容 already same)
+        #expect(parsedText.contains("簡") || parsedText.contains("這") || parsedText.contains("體"),
+                "Should contain at least one Traditional CJK character. Got: \(parsedText)")
+        // Markdown structure characters must be preserved
+        #expect(parsedText.contains("# "), "Markdown heading marker must be preserved")
+    }
+
+    @Test("load with chineseConversion .tradToSimp transforms source text before parse")
+    func loadAppliesTradToSimpConversion() async throws {
+        let parser = MockMDParser()
+        let store = MockPositionStore()
+        let tradSource = "# 繁體標題\n\n這是繁體中文內容。\n"
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loader_test_trad_\(UUID().uuidString).md")
+        try tradSource.data(using: .utf8)!.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        _ = try await MDFileLoader.load(
+            url: url,
+            parser: parser,
+            positionStore: store,
+            bookFingerprintKey: testFP.canonicalKey,
+            chineseConversion: .tradToSimp
+        )
+
+        let parsedText = parser.lastParsedText ?? ""
+        #expect(parsedText != tradSource,
+                "Source text should be transformed before parsing")
+        // ICU Hans-Hant reverse mappings: 繁→繁 (same), 體→体, 標→标, 題→题, 這→这, 內→内
+        #expect(parsedText.contains("体") || parsedText.contains("这") || parsedText.contains("标"),
+                "Should contain at least one Simplified CJK character. Got: \(parsedText)")
+    }
+
     @Test("load handles empty document")
     func loadEmptyDocument() async throws {
         let emptyInfo = MDDocumentInfo(

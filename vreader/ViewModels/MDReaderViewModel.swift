@@ -104,7 +104,14 @@ final class MDReaderViewModel {
     // MARK: - Lifecycle
 
     /// Opens the Markdown file, parses it, and restores the saved reading position.
-    func open(url: URL) async {
+    ///
+    /// Bug #178 / GH #606: `chineseConversion` (default `.none`) is forwarded
+    /// to `MDFileLoader.load` which applies `SimpTradTransform` to the source
+    /// text before Markdown parsing. Pass `settingsStore?.chineseConversion`
+    /// from the call site. Live re-apply on conversion-toggle is deferred
+    /// (would require a close + reopen cycle); for now the conversion is
+    /// applied at open time only.
+    func open(url: URL, chineseConversion: ChineseConversionDirection = .none) async {
         guard !isLoading else { return }
 
         // Guard against re-open
@@ -126,7 +133,8 @@ final class MDReaderViewModel {
                 url: url,
                 parser: parser,
                 positionStore: positionStore,
-                bookFingerprintKey: bookFingerprintKey
+                bookFingerprintKey: bookFingerprintKey,
+                chineseConversion: chineseConversion
             )
         } catch is CancellationError {
             resetState()

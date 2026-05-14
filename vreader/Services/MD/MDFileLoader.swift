@@ -25,18 +25,39 @@ enum MDFileLoader {
 
     /// Reads the file, detects encoding, parses via the given parser, and restores
     /// the saved reading position. Throws on file read or encoding errors.
+    ///
+    /// Bug #178 / GH #606: `chineseConversion` (default `.none`) applies
+    /// `SimpTradTransform` to the decoded source text BEFORE Markdown
+    /// parsing. Mirrors `TXTReaderContainerView`'s pattern at the source-
+    /// text seam (which is the only point the transform is meaningful for
+    /// MD — applying after parse would break the offset alignment between
+    /// `renderedText` and `renderedAttributedString`). The transform is
+    /// 1:1 UTF-16 for BMP CJK characters, so reading positions and
+    /// highlights in source-text coordinates remain valid across a
+    /// conversion change.
     static func load(
         url: URL,
         parser: any MDParserProtocol,
         positionStore: any ReadingPositionPersisting,
-        bookFingerprintKey: String
+        bookFingerprintKey: String,
+        chineseConversion: ChineseConversionDirection = .none
     ) async throws -> MDLoadResult {
-        // Stage 1: Read file, detect encoding, and parse on background thread
+        // Stage 1: Read file, detect encoding, optionally apply Chinese
+        // conversion, and parse on background thread.
         let config = MDRenderConfig.default
         let docInfo: MDDocumentInfo = try await Task.detached {
             let data = try Data(contentsOf: url)
             let result = try EncodingDetector.detect(data: data)
-            return await parser.parse(text: result.text, config: config)
+            let sourceText: String
+            if chineseConversion != .none {
+                sourceText = TextMapper.apply(
+                    transforms: [SimpTradTransform(direction: chineseConversion)],
+                    to: result.text
+                ).text
+            } else {
+                sourceText = result.text
+            }
+            return await parser.parse(text: sourceText, config: config)
         }.value
 
         // Early exit if cancelled between parse and position restore
