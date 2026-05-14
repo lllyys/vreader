@@ -89,27 +89,16 @@ struct ReaderNotificationModifier: ViewModifier {
                     selectedText: uiState.pendingAnnotationInfo?.selectedText ?? "",
                     noteText: $bindableState.annotationNoteText,
                     onSave: {
-                        guard let info = uiState.pendingAnnotationInfo else {
-                            uiState.pendingAnnotationInfo = nil
-                            return
-                        }
-                        let trimmed = uiState.annotationNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else {
-                            uiState.pendingAnnotationInfo = nil
-                            return
-                        }
-                        guard let locator = deps.locatorFactory(
-                            deps.bookFingerprint, info.startUTF16, info.endUTF16, deps.sourceText()
-                        ) else {
-                            uiState.pendingAnnotationInfo = nil
-                            return
-                        }
-                        uiState.pendingAnnotationInfo = nil
+                        // Bug #181: delegate to the canonical handler so the
+                        // annotation persistence path AND the HighlightRecord
+                        // creation path stay in lockstep. Previously this was
+                        // inlined and only called addAnnotation, leaving the
+                        // text without a visible highlight indicator.
                         Task {
-                            try? await deps.annotationPersistence.addAnnotation(
-                                locator: locator,
-                                content: trimmed,
-                                toBookWithKey: deps.bookFingerprintKey
+                            await ReaderNotificationHandlers.handleAnnotationSave(
+                                state: uiState,
+                                deps: deps,
+                                highlightCoordinator: highlightCoordinator
                             )
                         }
                     },

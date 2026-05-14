@@ -151,10 +151,17 @@ enum ReaderNotificationHandlers {
     }
 
     /// Save the annotation note (from AddNoteSheet).
+    ///
+    /// Bug #181: also creates a `HighlightRecord` via `highlightCoordinator`
+    /// so the annotated text gets a yellow highlight. Mirrors EPUB's
+    /// `handleHighlightWithNote` (which only creates a HighlightRecord with
+    /// the note attached). The `AnnotationRecord` is still written for the
+    /// Notes panel; future cleanup may unify the two models.
     @MainActor
     static func handleAnnotationSave(
         state: some ReaderNotificationHandlerStateProtocol,
-        deps: ReaderNotificationDeps
+        deps: ReaderNotificationDeps,
+        highlightCoordinator: HighlightCoordinator
     ) async {
         guard let info = state.pendingAnnotationInfo else {
             state.pendingAnnotationInfo = nil
@@ -174,10 +181,28 @@ enum ReaderNotificationHandlers {
             state.pendingAnnotationInfo = nil
             return
         }
+        // Clear pending info before the awaits so the AddNoteSheet
+        // dismisses immediately on Save; persistence + highlight creation
+        // continue in the background.
+        state.pendingAnnotationInfo = nil
         let persistence = deps.annotationPersistence
         let key = deps.bookFingerprintKey
-        try? await persistence.addAnnotation(locator: locator, content: trimmed, toBookWithKey: key)
-        state.pendingAnnotationInfo = nil
+        // Codex audit finding: if `addAnnotation` throws but we still ran
+        // `coordinator.create`, the user gets a yellow highlight without a
+        // matching row in the Notes tab — silent divergence. Stay in
+        // lockstep: only create the highlight when the annotation
+        // persisted successfully.
+        do {
+            _ = try await persistence.addAnnotation(locator: locator, content: trimmed, toBookWithKey: key)
+        } catch {
+            return
+        }
+        await highlightCoordinator.create(
+            locator: locator,
+            selectedText: info.selectedText,
+            color: "yellow",
+            note: trimmed
+        )
     }
 
     /// Cancel the "Add Note" flow — clears pending info without persistence.
