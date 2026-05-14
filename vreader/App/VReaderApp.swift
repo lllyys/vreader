@@ -95,6 +95,7 @@ struct VReaderApp: App {
                 let needsDiskBackedStore = config.seedPositionTest
                     || config.seedWarAndPeace
                     || config.seedMDTOC
+                    || config.seedMDMultiPage
                     || config.seedKeepExisting
                 modelConfig = needsDiskBackedStore
                     ? ModelConfiguration()
@@ -166,6 +167,8 @@ struct VReaderApp: App {
                         await TestSeeder.seedWarAndPeace(persistence: persistence)
                     } else if seedConfig.seedMDTOC {
                         await TestSeeder.seedMDWithTOC(persistence: persistence)
+                    } else if seedConfig.seedMDMultiPage {
+                        await TestSeeder.seedMDMultiPage(persistence: persistence)
                     } else if seedConfig.seedBooks {
                         await TestSeeder.seedBooks(persistence: persistence)
                     }
@@ -364,6 +367,14 @@ struct TestLaunchConfig: Sendable {
     let seedPositionTest: Bool
     let seedWarAndPeace: Bool
     let seedMDTOC: Bool
+    /// `--seed-md-multi-page` — seed a larger MD doc sized to span multiple
+    /// pages at 18pt on iPhone 17 Pro Sim's reader viewport. Feature #45
+    /// WI-5 fixture for Feature #31 (Auto page turning) live-advancement
+    /// verification. Distinct from `seedMDTOC` (smaller, single-page size
+    /// class). The "spans ≥2 pages at 18pt" contract is unit-tested via the
+    /// real MD render + paginate pipeline; exact byte counts drift with
+    /// fixture text edits and are not contractual.
+    let seedMDMultiPage: Bool
     let seedCorruptDB: Bool
     /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
     /// SwiftData store to remain. Used for terminate-then-relaunch tests
@@ -444,6 +455,7 @@ struct TestLaunchConfig: Sendable {
             seedPositionTest: args.contains("--seed-position-test"),
             seedWarAndPeace: args.contains("--seed-war-and-peace"),
             seedMDTOC: args.contains("--seed-md-toc"),
+            seedMDMultiPage: args.contains("--seed-md-multi-page"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
@@ -465,6 +477,7 @@ struct TestLaunchConfig: Sendable {
         seedPositionTest: false,
         seedWarAndPeace: false,
         seedMDTOC: false,
+        seedMDMultiPage: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,

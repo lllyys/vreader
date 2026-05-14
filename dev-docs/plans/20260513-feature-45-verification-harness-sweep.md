@@ -1451,3 +1451,214 @@ Date: 2026-05-14. Codex MCP returned `stream disconnected before completion` con
 
 **Audit verdict**: ship-as-is with finding #1 wording fix + finding #2 code comment. Both fixes incorporated above. Plan revision 2 is the binding spec.
 
+
+---
+
+## WI-5 — MD multi-page fixture for live-advancement verification (2026-05-15)
+
+**Type**: Foundational (new DEBUG-only seed; no production behavior change).
+**PR size estimate**: ~120 LOC (TestSeeder + VReaderApp dispatch + LaunchHelper enum case + 1 short unit-test file + the MD content itself).
+
+**Why this WI exists** — Feature #31 (Auto page turning) is the last of the 13 features the plan promised to flip to `VERIFIED` whose UI-surface XCUITest passes (toggle present + interval slider appears on enable, `Feature31AutoPageTurnVerificationTests.swift`) but whose **live multi-page advancement slice** has been DEFERRED across three verification rounds (`feature-31-20260508.md`, `feature-31-20260514-round3.md`). Root cause documented in round-3: the existing `seedMDWithTOC` generator emits a 678-byte MD doc that paginates to a single page at 18pt, so `AutoPageTurner` short-circuits with "already at last page" and no observable advancement is possible.
+
+Round-3's evidence file names three unblock paths:
+- (a) larger MD seed fixture (~5KB+) — minimum-risk
+- (b) new DebugBridge URL for MD `readerReadingMode=paged`
+- (c) further capability-gating per bug #157 option-b
+
+WI-5 ships path (a). Once available, a follow-on WI can add a live-advancement XCUITest method or close the slice via a manual device-verify pass.
+
+**Surface area** — file-by-file with concrete signatures:
+
+1. `vreader/App/TestSeeder.swift`:
+   - **Add** `static func seedMDMultiPage(persistence: PersistenceActor) async` — mirrors `seedMDWithTOC` exactly except:
+     - Uses `generateMDMultiPage()` content (below) → ~6-8 KB byte size, well above the 5KB pre-check threshold; expected to paginate ≥2 pages at 18pt on iPhone 17 Pro Sim's reader viewport (the load-bearing assertion)
+     - Uses a distinct fingerprint hash suffix (`...c0c002`) so it doesn't collide with `seedMDWithTOC`'s `...c0c001`
+     - Title `"Test Markdown Multi-Page"` / author `"MD Author"` (consistent naming with sibling seeds)
+   - **Add** `internal static func generateMDMultiPage() -> String` — emits a structured MD doc: 5 chapters × 4 paragraphs of ~60 words each (filler "Lorem-ipsum-ish" but unique per chapter to make TOC navigation observable). Heading hierarchy: `# Title` then `## Chapter N: <title>` × 5 with `### Section N.M` subsections to mirror the TOC pattern users would see in real books. Target file size: ~6 KB. Concrete heading layout in §"Test catalogue" below. **`internal` (not `private`)** so `TestSeederMDMultiPageTests` and `TestSeederMDMultiPagePaginationTests` can call it directly without exposing seeding side effects. `TestSeeder` is an uninstantiable enum, so the effective surface stays module-private.
+
+2. `vreader/App/VReaderApp.swift`:
+   - `TestLaunchConfig` struct (around line 366): add `let seedMDMultiPage: Bool` after `seedMDTOC: Bool`.
+   - `TestLaunchConfig.none` static (around line 467): add `seedMDMultiPage: false`.
+   - `TestLaunchConfig.parse(_:)` (around line 405): add `seedMDMultiPage: args.contains("--seed-md-multi-page")`. **Audit fix (round-1 Medium #3)**: `parse(_:)` converts `arguments` to a `Set<String>` at the top of the function (line 406), so launch-arg order is **discarded**. Dispatch is **first-match-wins** via the `else if` chain in the seed handler, not "last-flag-wins" as the round-1 plan claimed.
+   - `--uitesting` seed dispatch handler (around line 160-171): add an `else if seedConfig.seedMDMultiPage` branch that calls `await TestSeeder.seedMDMultiPage(persistence: persistence)`. Insert AFTER the `seedMDTOC` branch. This is the actual seed entry — the gate is `if config.isUITesting` at line 121, NOT line 97.
+   - Disk-backed-store whitelist (line 94-101): add `|| config.seedMDMultiPage` to the `needsDiskBackedStore` ||-chain. Rationale is parity with `seedMDTOC` and `seedWarAndPeace`, which are already whitelisted — same shape of seed (writes a `BookRecord` + an `ImportedBooks/*.md` file), same expected storage behaviour. **Audit fix (round-1 Medium #5)**: round-1 plan mislabeled this as the "boot-detection / seed-block-entry gate" — it is the **disk-backed-store whitelist**, a separate concern. **Audit fix (round-2 Low)**: round-1 rationale invoked `Task.detached` persistence semantics that aren't load-bearing here; corrected to a simple parity statement.
+
+3. `vreaderUITests/Helpers/LaunchHelper.swift`:
+   - **Audit fix (round-1 Low #6)**: the enum is `TestSeedState`, not `BookSeed`. (The round-1 plan named it `BookSeed`, which doesn't exist.)
+   - `TestSeedState` enum (around line 17): add `case mdMultiPage` after `case mdTOC`.
+   - `TestSeedState.launchArgument`: add `case .mdMultiPage: return "--seed-md-multi-page"`.
+
+4. `vreaderTests/App/TestSeederMDMultiPageTests.swift` (new, ~50 LOC):
+   - Swift Testing `@Suite("TestSeeder.seedMDMultiPage")`.
+   - **Test (size floor)**: `generated content exceeds 5KB threshold` — asserts `generateMDMultiPage().utf8.count > 5_000`. Catches regression where someone trims the filler text below the threshold.
+   - **Test (chapter shape)**: `generated content has >= 5 H2 chapter headings` — asserts the heading count by counting `## Chapter` occurrences. Catches regression that collapses chapter structure.
+   - **Test (canonical-key distinctness)**: `seedMDMultiPage and seedMDWithTOC produce distinct fingerprint canonical keys` — constructs both seed records' `DocumentFingerprint` and asserts `canonicalKey` differs. **Audit fix (round-1 Medium #4)**: round-1 plan claimed "No collision possible" based on title/content differences, but `DocumentFingerprint.canonicalKey` is `format + contentSHA256 + fileByteCount` (per `Models/DocumentFingerprint.swift:23`). Title differences are irrelevant. This test pins the actual contract — distinct hashes + distinct byte counts produce distinct canonical keys.
+   - **Audit fix (round-1 High #1)**: round-1 plan included a test comparing string outputs of `generateMDMultiPage()` and `generateMDWithHeadings()`, but `generateMDWithHeadings()` is `private` and the WI didn't widen it. Two options were on the table:
+     - (a) widen both helpers to `internal`
+     - (b) drop the comparison test in favor of the canonical-key test (above), which gets the same regression-protection signal without needing both helpers' bodies to be reachable from tests
+     - **Gate 2 decision**: option (b) — keep `generateMDWithHeadings()` `private`, only widen `generateMDMultiPage()` to `internal`.
+     - **Final state (Gate 4 round-1 update)**: BOTH helpers are now `internal`. The Gate 4 round-1 audit found that the round-2 canonical-key test still hardcoded `fileByteCount: 678` for the TOC fixture, which is fragile across content edits. Fix: widen `generateMDWithHeadings()` to `internal` so the test can derive byte counts dynamically (the round-2 test was later replaced again in round-2 of Gate 4 with a live-seeding approach, but the `internal` widening stayed because it has no API-surface cost — `TestSeeder` is an uninstantiable enum). See "Audit fixes applied (Gate 4 round-1)" table below.
+   - `generateMDMultiPage()` is `internal` (not `private`) for testability. Documented inline: `// internal so TestSeederMDMultiPageTests can call directly. TestSeeder is an uninstantiable enum so this stays effectively module-private.`
+
+5. `vreaderTests/App/TestSeederMDMultiPagePaginationTests.swift` (new, ~60 LOC):
+   - **Audit fix (round-1 High #2 + round-2 High + round-3 High)**: pagination is driven by **rendered Markdown** (NSAttributedString output of `MDAttributedStringRenderer.render(_:config:)`) against `UIScreen.main.bounds.size` in `TextReaderUIState.swift:91` (`nav.paginateAttributed(attributedText: attrStr, viewportSize: UIScreen.main.bounds.size)`). The raw Markdown source has heading-marker characters (`# Foo`, `## Bar`) that the renderer strips/restyles, so byte count of the raw text is not what production paginates against. Round-2's fix that called `NativeTextPaginator.paginate(text:font:viewportSize:)` with the raw source skipped the render step and could over- or under-count pages.
+   - This test file runs the **full production render pipeline**: `let doc = MDAttributedStringRenderer.render(text: TestSeeder.generateMDMultiPage(), config: MDRenderConfig())` to get `doc.renderedAttributedString`, then `let paginator = NativeTextPaginator(); paginator.paginateAttributed(attributedText: doc.renderedAttributedString, viewportSize: UIScreen.main.bounds.size); #expect(paginator.totalPages >= 2)`. This mirrors the exact code path in `TextReaderUIState.updatePagination(...)`.
+   - Two `@Test @MainActor` methods (`@MainActor` because `UIScreen.main` is MainActor-isolated in Swift 6 + `NativeTextPaginator` instance methods are MainActor):
+     - `generatedFixture_renders_to_attributed_text_at_default_config()` — asserts `doc.renderedAttributedString.length > 0` and `doc.headings.count >= 5` (sanity that the renderer doesn't collapse the structure).
+     - `renderedFixture_paginates_to_at_least_two_pages_on_main_screen_at_18pt()` — the load-bearing assertion against the full render + paginate pipeline.
+   - Test runs on iPhone 17 Pro Simulator as part of the `xcodebuild test` flow — `UIScreen.main.bounds.size` resolves to the simulator's logical size (393×852 on iPhone 17 Pro). If a future contributor runs the test on a smaller simulator and the page count drops below 2, the test fails RED with a clear actionable signal: bump the generated content size.
+
+6. `vreaderTests/App/LaunchArgParsingTests.swift` (extend if exists, else create):
+   - **Test**: `parse(arguments: ["--uitesting", "--seed-md-multi-page"]) returns config with seedMDMultiPage == true && isUITesting == true`.
+   - **Test**: `parse(arguments: ["--uitesting"]) returns config with seedMDMultiPage == false`.
+   - Same shape as the existing `seedMDTOC` parsing test pattern. Falls back to a new `@Suite` if no prior file exists.
+
+**Files OUT of scope**:
+
+- `Feature31AutoPageTurnVerificationTests.swift` — does NOT add the live-advancement XCUITest method this WI. Adding it requires deciding the assertion strategy (DebugSnapshot for current page index vs. SwiftUI element-state polling) and the timeout for `AutoPageTurner`'s 5-second default interval. Tracked as a follow-up note in the plan's Acceptance Criteria mapping.
+- `ReaderSettingsStore.swift` — no new launch arg for auto-page-turn enable / interval. The follow-on WI may add `--reader-default-auto-page-turn=true` and `--reader-default-auto-page-turn-interval=<seconds>` if the XCUITest path needs them; this WI's scope is the fixture only.
+- `DebugFixtureCatalog.swift` — the existing MD seeds are not catalog-driven (they're generated in-code in `TestSeeder`), so this WI follows the same pattern. The catalog stays focused on file-backed fixtures (TXT/EPUB/AZW3).
+
+**Prior art / project precedent / rejected alternatives**:
+
+- **Precedent**: `TestSeeder.seedMDWithTOC` (lines 84-131) is the canonical pattern for in-code generated MD fixtures. WI-5 mirrors its shape exactly — same fingerprint construction, same file write, same record insertion. No invention.
+- **Precedent**: `TestLaunchConfig.parse` already adds `args.contains("--seed-*")` flags one by one (`--seed-empty`, `--seed-books`, `--seed-position-test`, `--seed-war-and-peace`, `--seed-md-toc`, `--seed-corrupt-db`). WI-5 adds one more in the same style.
+- **Rejected — extend `seedMDWithTOC` instead of adding a new seed**: existing test fixtures (mdTOC XCUITest + the corresponding unit tests) rely on the current 678-byte content. Lengthening the existing fixture changes the byte count, hash, and TOC structure that downstream tests assert on. Cheap risk of breaking unrelated TOC tests. New seed = zero blast radius on existing callers.
+- **Rejected — file-backed fixture in `DebugFixtures/`**: catalog-driven file fixtures need an Xcode resource phase entry (per `project.yml`'s `Resources/DebugFixtures/**` block) AND a `DebugFixture` catalog entry AND a hash recomputation. The in-code generator avoids all three for what is fundamentally a deterministic synthetic string. The existing TXT / EPUB / AZW3 fixtures are file-backed because they need real format-conformance bytes; an MD doc is plain UTF-8 text generated at run time.
+
+**Test catalogue for WI-5**:
+
+| File | RED (pre-WI-5) | GREEN (post-WI-5) |
+|---|---|---|
+| `vreaderTests/App/TestSeederMDMultiPageTests.swift` (new) | All 3 tests fail — `generateMDMultiPage()` doesn't exist | 3 tests pass: byte count > 5_000, ≥5 H2 chapters, distinct canonical key from `seedMDWithTOC`'s fingerprint |
+| `vreaderTests/App/TestSeederMDMultiPagePaginationTests.swift` (new) | Both tests fail — `generateMDMultiPage()` doesn't exist | 2 tests pass: (a) `MDAttributedStringRenderer.render(_:config:)` produces a non-empty `renderedAttributedString` with ≥5 detected headings; (b) `NativeTextPaginator.paginateAttributed(..., viewportSize: UIScreen.main.bounds.size)` against the **rendered** attributed string returns `totalPages >= 2` — mirrors the production render + paginate pipeline exactly per `TextReaderUIState.swift:91`. |
+| `vreaderTests/App/LaunchArgParsingTests.swift` (extended) | Test fails — `seedMDMultiPage` field doesn't exist on `TestLaunchConfig` | 2 tests pass: flag parsed, default false |
+| Manual integration (Gate 5a slice) | n/a — seed flag not parseable | `xcrun simctl launch booted com.vreader.app --console-pty --uitesting --seed-md-multi-page` puts a multi-page MD book in the library. Manual verify of MD paged-mode + auto-advance is the follow-on iteration's scope; this WI's slice closes once the seed lands a book in the library with `format == .md` and the unit-level pagination test passes. |
+
+**Generated content layout** (concrete for `generateMDMultiPage()`):
+
+```
+# Multi-Page Test Document
+
+A test fixture for verifying live multi-page advancement under
+Auto Page Turn. Content sized to span multiple pages at 18pt on
+iPhone 17 Pro Simulator's MD paged-mode reader viewport.
+
+## Chapter 1: Opening
+
+<paragraph 1 - ~60 words of unique filler about beginnings>
+
+<paragraph 2 - ~60 words about setting>
+
+### Section 1.1: A first subsection
+
+<paragraph 3 - ~60 words>
+
+<paragraph 4 - ~60 words>
+
+## Chapter 2: Development
+
+<4 paragraphs of ~60 words each, unique per chapter>
+
+### Section 2.1: ...
+
+## Chapter 3: Complication
+
+<4 paragraphs ...>
+
+## Chapter 4: Climax
+
+<4 paragraphs ...>
+
+## Chapter 5: Resolution
+
+<4 paragraphs ...>
+```
+
+Total target: ~6 KB after UTF-8 encoding. 5 chapters × 4 paragraphs = 20 body paragraphs + 5 chapter headings + 3 subsection headings + 1 title + 1 intro = enough structure to make page transitions observable and TOC validation possible in a future test.
+
+**Risks + mitigations**:
+
+- **Risk — content too short to paginate** (Codex round-1 High #2 + round-2 High + round-3 High): byte count alone doesn't prove pagination because production paginates the **rendered** Markdown (NSAttributedString output of `MDAttributedStringRenderer.render(_:config:)`) against `UIScreen.main.bounds.size` (per `TextReaderUIState.swift:91`), not raw source bytes. Heading markers like `## Chapter 1` are stripped/restyled by the renderer, so raw-source pagination drifts from production behaviour. **Mitigation**: the dedicated `TestSeederMDMultiPagePaginationTests` runs the full production pipeline — `MDAttributedStringRenderer.render(_:config:)` → `NativeTextPaginator.paginateAttributed(..., viewportSize: UIScreen.main.bounds.size)` — and asserts `totalPages >= 2` on the rendered output. This is the load-bearing assertion; if 6 KB falls short on the test simulator's screen size after rendering, the test fails RED and we bump content size before the WI ships.
+- **Risk — `generateMDMultiPage` and `generateMDWithHeadings` made `internal` widens public surface**: both are `static` on `TestSeeder` which is itself wrapped in `enum TestSeeder { ... }` (uninstantiable). API surface impact is zero — only test targets in the same module can reach them. The Gate 2 round-1 decision was to keep `generateMDWithHeadings()` `private`; this was later overturned in Gate 4 round-1 to enable dynamic byte-count derivation in the canonical-key test (which was itself subsequently replaced with live-seeding in Gate 4 round-2 — see audit-history tables for the trail). The `internal` widening on `generateMDWithHeadings()` has no API cost so it stayed.
+- **Risk — UserDefaults seed flag leaks to non-test launches**: the existing precedent (`seedMDTOC`, `seedWarAndPeace`) handles this by gating the seed branch on `config.isUITesting`. WI-5 follows the same gate — the seed only fires when `--uitesting` is also present in launch args.
+- **Risk — fingerprint canonical-key collision** (Codex round-1 Medium #4): round-1 plan claimed "No collision possible" based on title differences, but `DocumentFingerprint.canonicalKey` is `format:contentSHA256:fileByteCount` (per `Models/DocumentFingerprint.swift:23`) — title is irrelevant. **Mitigation**: distinct contentSHA256 (`...c0c002` vs `...c0c001`) AND distinct fileByteCount (the two fixtures sit in different size classes; exact byte counts drift as fixture text edits and are not contractual). The new live-seeding `seedMDMultiPage and seedMDWithTOC produce distinct canonical keys when live-seeded` unit test (Gate 4 round-2 fix — see audit-history table) pins this contract against the actual seed implementations rather than reconstructed fingerprints.
+- **Risk — XCUITest accidentally seeds both `--seed-md-toc` and `--seed-md-multi-page`** (Codex round-1 Medium #3): `TestLaunchConfig.parse` does `let args = Set(arguments)` so launch-arg order is **discarded**. Dispatch is **first-match-wins** via the `else if` chain in the seed handler, not "last-flag-wins". **Mitigation**: `TestSeedState` is an enum so an XCUITest can only pass ONE seed; `LaunchArgParsingTests` covers the single-flag cases. Multi-seed flag mixing is not a documented or supported scenario; documenting the first-match semantics so future seeds added between the existing branches don't surprise their authors.
+
+**Backward compat**:
+
+- Pure additive `#if DEBUG`. Release builds (`TestSeeder` already excluded from release builds per file-scope `#if DEBUG`) contain neither the seed function nor the launch-arg parsing branch. No SwiftData migration. Existing `--seed-md-toc` callers continue unaffected.
+
+**Acceptance criteria** (WI-5):
+
+1. `xcrun simctl launch booted com.vreader.app --console-pty --uitesting --seed-md-multi-page` succeeds; library contains exactly one MD book titled "Test Markdown Multi-Page" after launch.
+2. `TestSeedState.mdMultiPage` enum case usable from XCUITest helpers without compile-error.
+3. `generateMDMultiPage()` produces a string > 5_000 UTF-8 bytes with ≥5 `## Chapter` headings.
+4. `xcodebuild test -only-testing:vreaderTests/TestSeederMDMultiPageTests` passes 3/3.
+5. `xcodebuild test -only-testing:vreaderTests/TestSeederMDMultiPagePaginationTests` passes 2/2 — full production render + paginate pipeline (`MDAttributedStringRenderer.render(_:config:)` → `NativeTextPaginator.paginateAttributed(...)`) on the generated fixture produces `totalPages >= 2` against `UIScreen.main.bounds.size` on iPhone 17 Pro Simulator (393×852).
+6. `xcodebuild test -only-testing:vreaderTests/LaunchArgParsingTests` (or its replacement) passes the 2 new cases.
+7. **Gate 5a slice**: pre-merge simulator launch confirms the seeded book appears in the library with format `.md`. (Live-advancement device-verify is the follow-on iteration's scope; the load-bearing pagination assertion is the unit test above.)
+8. Feature #31 row note updated: pre-WI-5 deferred slice is now SEEDABLE (live-advancement device verify with this fixture is a follow-on iteration, not part of WI-5).
+
+**Audit fixes applied** (Gate 2 round-1 — Codex thread `019e28b1`):
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | High | Test 3 (string comparison `generateMDMultiPage` vs `generateMDWithHeadings`) doesn't compile — `generateMDWithHeadings()` is `private`. | Replaced with canonical-key distinctness test that pins the actual `DocumentFingerprint` contract without needing both helpers to be reachable. `generateMDWithHeadings()` stays `private`. |
+| 2 | High | 5KB byte-count threshold doesn't prove pagination — `NativeTextPaginator` paginates rendered attributed text against viewport size. | Added a separate `TestSeederMDMultiPagePaginationTests` for the pagination assertion (later refined in finding #11 to use the full `MDAttributedStringRenderer.render(_:config:)` → `NativeTextPaginator.paginateAttributed(...)` production pipeline rather than the raw-source `paginate(text:font:viewportSize:)` shortcut this row originally described). Byte threshold demoted to a cheap pre-check. |
+| 3 | Medium | "Last-flag-wins" mitigation is factually wrong — `parse(_:)` does `let args = Set(arguments)` so order is discarded. | Reworded to first-match-wins via the `else if` chain, documented in the surface area section. |
+| 4 | Medium | "No fingerprint collision possible" is overstated — title differences don't matter; `canonicalKey` is `format:SHA256:byteCount`. | Reworded to "distinct contentSHA256 + distinct fileByteCount"; added the canonical-key distinctness unit test to pin the contract. |
+| 5 | Medium | Line 97 reference mislabels the disk-backed-store whitelist as the seed-block-entry gate. The actual gate is `if config.isUITesting` at line 121. | Reworded — line 94-101 is the disk-backed-store whitelist (add `seedMDMultiPage` there for parity with `seedMDTOC`); the seed dispatch is at line 121's `if config.isUITesting` block. |
+| 6 | Low | `BookSeed` enum doesn't exist — it's `TestSeedState`. There's no `LaunchHelper.BookSeed` namespace. | Renamed all references to `TestSeedState.mdMultiPage`. |
+
+**Audit fixes applied (Gate 2 round-2 — Codex thread `019e28b1`)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 7 | High | Pagination test viewport was hardcoded to `CGSize(width: 393, height: 750)`, smaller than production's `UIScreen.main.bounds.size` (which is ~393×852 on iPhone 17 Pro). Smaller viewport over-paginates → false pass. | Test now uses `UIScreen.main.bounds.size` directly. Test method marked `@MainActor` (`UIScreen.main` is MainActor-isolated in Swift 6). |
+| 8 | Medium | Surface area item 1 signature still said `private static func generateMDMultiPage()` while items 4-5 said `internal`. | Item 1 signature now reads `internal static func generateMDMultiPage()`. Sibling `generateMDWithHeadings()` stays `private`. |
+| 9 | Low | Surface area listed two items numbered "5" and "6" (LaunchArgParsingTests appeared twice). | Removed the duplicate. Items now numbered 1-6 cleanly. |
+| 10 | Low | Disk-backed-store whitelist rationale claimed `Task.detached` persistence semantics, which aren't load-bearing here. | Reworded as parity with `seedMDTOC` / `seedWarAndPeace` (same shape of seed, same expected storage behaviour). |
+
+**Audit fixes applied (Gate 2 round-3 — Codex thread `019e28b1`)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 11 | High | Pagination test still used `NativeTextPaginator.paginate(text:font:viewportSize:)` with the **raw Markdown source string**, skipping the MD render pipeline. Production paginates the **rendered NSAttributedString** (`MDAttributedStringRenderer.render(_:config:).renderedAttributedString`), which strips heading markers and restyles text — so raw-source pagination drifts from production. | Test now runs the full production pipeline: `MDAttributedStringRenderer.render(text: TestSeeder.generateMDMultiPage(), config: MDRenderConfig())` → `NativeTextPaginator.paginateAttributed(attributedText: doc.renderedAttributedString, viewportSize: UIScreen.main.bounds.size)`. Two test methods now: (a) render produces non-empty attributed string with ≥5 detected headings; (b) rendered output paginates to ≥2 pages. |
+| 12 | Low | Surface area item 1 said "high enough at 18pt to paginate ≥3 pages" but the acceptance gate only asserts `>= 2 pages`. | Lowered prose claim to "expected to paginate ≥2 pages at 18pt" matching the test assertion. |
+
+Gate 2 round-1 verdict: **Reject as-is** → fixes applied (findings 1-6).
+Gate 2 round-2 verdict: **Reject as-is** → fixes applied (findings 7-10).
+Gate 2 round-3 verdict: **Reject as-is** → fixes applied (findings 11-12).
+
+Round 3 is the max audit cap per rule 47. Plan accepted into Gate 3 (TDD).
+
+**Audit fixes applied (Gate 4 round-1 — Codex thread `019e28be`, prefix only — full UUID lost)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 13 | Medium | Canonical-key test hardcoded `fileByteCount: 678` for the TOC fixture — fragile across fixture content edits. | Widened `generateMDWithHeadings()` from `private` to `internal` so the test can derive both byte counts dynamically. (Overturns the Gate 2 round-1 "stays private" decision.) |
+| 14 | Low | Chapters 4-5 only had 2 paragraphs and no H3 subsection, breaking the documented "5 chapters × 4 paragraphs + ≥5 H3" shape contract. | Padded chapters 4-5 to 4 paragraphs each and added H3 sections 4.1 and 5.1. |
+| 15 | Low | TestSeeder.swift now ~605 lines, over the 300-line guideline. | Accepted with rationale — broader file-split cleanup is out of scope for WI-5 (which only appended one seed pair). Tracked as residual repo debt. |
+| 16 | Low | File-system orphan cleanup gap (TestSeeder-wide concern, not WI-5-specific). | Accepted — TestSeeder-wide concern beyond WI-5's surface. |
+
+**Audit fixes applied (Gate 4 round-2 — same thread)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 17 | Medium | Canonical-key test still reconstructed fingerprints from constants rather than exercising the live seed implementations. A future bug that gave both seeds the same hash literal + byte count would slip through. | Rewrote test to seed both fixtures into an in-memory `Schema(SchemaV6.models)` + `PersistenceActor`, fetch back via `fetchAllLibraryBooks()`, and compare the persisted `fingerprintKey`. Test method renamed `seedMDMultiPageAndSeedMDWithTOCProduceDistinctCanonicalKeysWhenLiveSeeded()`. Added `import SwiftData`. |
+| 18 | Low | Doc-comment drift in `TestSeeder.swift` and `LaunchHelper.swift` claiming "~6 KB" — drifted as fixture content evolved. | Replaced with load-bearing-contract phrasing: paginates to ≥2 pages at 18pt on iPhone 17 Pro's screen; byte count drifts and is not contractual. |
+
+**Audit fixes applied (Gate 4 round-3 — fresh thread `019e28c7-02bb-78f2-95ee-ffaffa899c45` because the original prefix-only thread ID couldn't be continued)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 19 | Medium | Pagination test called `MDRenderConfig()` without explicitly pinning `fontSize: 18`. Works today because the default is 18, but a future default change would silently make the test false-green. | Test now constructs `MDRenderConfig(fontSize: 18)` explicitly, so the documented "≥2 pages at 18pt" contract is self-evident in the test source. |
+| 20 | Low | `VReaderApp.swift` `seedMDMultiPage` doc comment reintroduced exact-size drift ("~6 KB", "~678 B"). | Rewrote with invariant phrasing: paginates to ≥2 pages at 18pt; sibling seed is the smaller single-page size class; byte counts non-contractual. |
+| 21 | Low | This plan doc still said "Decision: keep `generateMDWithHeadings()` private" while the final code widens it to `internal`. | Updated surface-area item 4 + Risk note to reflect final state; added this Gate 4 round-1/2/3 audit-history table so the decision trail is preserved. |
+
+Gate 4 round-1 verdict: **Reject as-is** → fixes applied.
+Gate 4 round-2 verdict: **Reject as-is** → fixes applied.
+Gate 4 round-3 verdict (Codex thread `019e28c7`): **follow-up-recommended** → all 3 findings (19, 20, 21) fixed inline before merge. Round 3 is the audit cap per rule 47; remaining items 15 + 16 are accepted-with-rationale (broader TestSeeder cleanup beyond WI-5).
+

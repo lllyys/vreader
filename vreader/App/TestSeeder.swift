@@ -130,8 +130,80 @@ enum TestSeeder {
         }
     }
 
+    /// Seeds a Markdown file large enough to span multiple pages at 18pt
+    /// on iPhone 17 Pro Simulator, for live multi-page-advancement
+    /// verification of Feature #31 (Auto page turning).
+    ///
+    /// Feature #45 WI-5: the existing `seedMDWithTOC` fixture paginates to a
+    /// single page on the reader viewport, short-circuiting
+    /// `AutoPageTurner`'s timer. This larger seed is the foundational
+    /// fixture that unblocks live-advancement verification in a follow-on
+    /// iteration. The load-bearing size contract is "paginates to >=2 pages
+    /// at 18pt on iPhone 17 Pro's screen", enforced by
+    /// `TestSeederMDMultiPagePaginationTests`; the actual byte count drifts
+    /// as the fixture text is edited and is not a documented invariant.
+    ///
+    /// Distinct from `seedMDWithTOC` on every dimension that contributes to
+    /// `DocumentFingerprint.canonicalKey` (`format:contentSHA256:byteCount`):
+    /// distinct hash suffix (`...c0c002` vs `...c0c001`) AND distinct byte
+    /// count. Distinctness is pinned by the live-seed test in
+    /// `TestSeederMDMultiPageTests`.
+    static func seedMDMultiPage(persistence: PersistenceActor) async {
+        await clearAllBooks(persistence: persistence)
+
+        let text = generateMDMultiPage()
+        let data = Data(text.utf8)
+        let hash = "0000000000000000000000000000000000000000000000000000000000c0c002"
+        let byteCount = Int64(data.count)
+
+        let fingerprint = DocumentFingerprint(
+            contentSHA256: hash,
+            fileByteCount: byteCount,
+            format: .md
+        )
+
+        let booksDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedBooks", isDirectory: true)
+        try? FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+
+        let safeName = fingerprint.canonicalKey.replacingOccurrences(of: ":", with: "_")
+        let filePath = booksDir.appendingPathComponent(safeName).appendingPathExtension("md")
+        try? data.write(to: filePath)
+
+        let provenance = ImportProvenance(
+            source: .localCopy,
+            importedAt: Date(),
+            originalURLBookmarkData: nil
+        )
+
+        let record = BookRecord(
+            fingerprintKey: fingerprint.canonicalKey,
+            title: "Test Markdown Multi-Page",
+            author: "MD Author",
+            coverImagePath: nil,
+            fingerprint: fingerprint,
+            provenance: provenance,
+            detectedEncoding: "utf-8",
+            addedAt: Date()
+        )
+
+        do {
+            _ = try await persistence.insertBook(record)
+        } catch {
+            AppLogger.general.warning("failed to seed MD multi-page book: \(error)")
+        }
+    }
+
     /// Generates Markdown content with multiple headings for TOC testing.
-    private static func generateMDWithHeadings() -> String {
+    ///
+    /// `internal` (not `private`) so the `TestSeederMDMultiPageTests` suite
+    /// can derive `seedMDWithTOC`'s fingerprint inputs dynamically rather
+    /// than hardcoding a stale byte count literal that would silently drift
+    /// out of sync if this helper's text changes. (Gate 4 round-1 Medium
+    /// finding.) `TestSeeder` is an uninstantiable enum so the effective
+    /// surface stays module-private.
+    static func generateMDWithHeadings() -> String {
         """
         # Introduction
 
@@ -156,6 +228,90 @@ enum TestSeeder {
 
         The final chapter. Tapping any TOC row should dismiss the panel and
         scroll to the corresponding heading position.
+        """
+    }
+
+    /// Generates a multi-page Markdown fixture for Feature #31 verification.
+    ///
+    /// Sized at ~6 KB UTF-8 — well above the 5 KB pre-check threshold and
+    /// validated by `TestSeederMDMultiPagePaginationTests` to paginate to
+    /// ≥2 pages at 18pt against `UIScreen.main.bounds.size` on iPhone 17 Pro
+    /// Simulator (393×852).
+    ///
+    /// Structure: 1 H1 title + 1 intro paragraph + 5 H2 chapters × 4 body
+    /// paragraphs each + 3 H3 subsections sprinkled across the chapters. The
+    /// shape mirrors a real chaptered book so future TOC + chapter-navigation
+    /// verification tests can also use this fixture.
+    ///
+    /// `internal` (not `private`) so the two `TestSeederMDMultiPage*Tests`
+    /// suites can call it directly without exposing seeding side effects.
+    /// `TestSeeder` is an uninstantiable enum so the effective surface stays
+    /// module-private.
+    static func generateMDMultiPage() -> String {
+        """
+        # Multi-Page Test Document
+
+        A deterministic test fixture for verifying live multi-page advancement under Auto Page Turn in the Markdown reader. The content below is structured to span multiple pages at 18-point system font on the iPhone 17 Pro Simulator's reader viewport. The unique per-chapter prose makes individual page transitions and table-of-contents navigation observable in screenshots.
+
+        ## Chapter 1: Opening
+
+        The story begins on a cold autumn morning at the edge of the harbor town where Adelaide first stepped off the steamer. The cobbled quay carried the smell of brine and pine tar, and the gulls wheeled overhead with sharp white wings. She paused at the customs gate, set down her single battered trunk, and looked up at the cathedral clock tower whose hands had stopped working three years before her arrival.
+
+        Her brother had written that the post would meet her, and meet her it did, in the shape of an old grey horse hitched to a small black cart driven by a man who said almost nothing and seemed to know exactly where to take a stranger. The road wound inland through low yellow fields and clumps of stunted oaks, and the harbor town receded behind them like a tide drawing back from a bright stone shore.
+
+        ### Section 1.1: A first observation
+
+        Adelaide noticed, as she rode, that no two milestones along this road were carved from the same kind of stone. Some were sandstone, soft and faintly orange in the slanting light, and others were a hard dark granite flecked with mica that caught the morning sun in tiny silver sparks. Each carried a number and an arrow, but the numbering pattern did not match anything she had ever seen on a map.
+
+        She filed the observation away in the back of her mind as something to ask her brother about later, if there was a later that involved comfortable evenings by the fire with port and conversation rather than the careful, measured politeness she suspected she would meet at the house. The horse plodded on. The light shifted from gold to a clean cool white as the cart climbed a long shallow ridge toward the inland valley.
+
+        ## Chapter 2: Development
+
+        The inland valley opened below them as the cart crested the ridge, and Adelaide saw for the first time the country she had only known from her brother's careful pen-and-ink sketches. A wide river ran a slow curve through the middle of it. On the eastern bank stood a cluster of stone barns and a single grey farmhouse with a steeply pitched slate roof and three crooked chimneys. The driver pointed at the farmhouse with his whip and grunted once.
+
+        Smoke rose from the leftmost chimney, thin and almost vertical in the still air. The road descended in long lazy switchbacks. As they came down into the valley the air grew warmer and carried a faint sweet smell of cut hay and apples just past their peak. A flock of geese on the river lifted off the water together when the cart's wheels rattled across the bridge planks above them.
+
+        ### Section 2.1: The arrival
+
+        Her brother was waiting at the gate, much thinner than she remembered, with grey starting at his temples and a fixed careful expression that did not quite reach his eyes. He took her trunk with both hands and led her up the path between the rose-canes without speaking. The driver of the cart had already turned the old grey horse around and was clopping back up the switchback road toward the ridge.
+
+        Inside the farmhouse the air was warm and smelled of woodsmoke and lavender. Two long-haired cats slept curled together on the wide stone hearth, and a kettle on the iron stove was just beginning to sing. Her brother set her trunk at the foot of the staircase and turned to her with that same careful expression, as if he were about to say something difficult and was carefully choosing the order of the words.
+
+        ## Chapter 3: Complication
+
+        Three days into her stay, Adelaide woke before dawn and found the house already moving around her. Her brother and two men she had not yet met were carrying long wooden crates down from the upstairs loft, in a chain along the steep narrow stairs and out through the kitchen door into the morning fog. They moved without speaking and with the easy coordinated rhythm of people who had done this exact work many times before.
+
+        She stood at the upstairs landing in her dressing gown and watched. None of them looked up. The crates were unmarked and heavy enough that the men handled them in pairs. After the last one had gone out the kitchen door, her brother came back up the stairs and met her on the landing. He looked at her for a long moment and then sat down on the top step and put his head in his hands.
+
+        ### Section 3.1: The first explanation
+
+        He had not wanted to write any of this in letters, he said, because letters were read at the post offices and read again at the customs gates and read a third time by people whose names he did not want to write down even now. He had brought her here because there was a thing he needed her help with, a thing that was not strictly speaking illegal and was not strictly speaking dangerous, but was a thing that nobody in the valley could know was happening.
+
+        Adelaide sat down on the step beside him. The fog was beginning to lift outside the small landing window. She could see the river through the bare branches of the apple trees, slow and dark and silver under the early light, and the far ridge where the road came down from the harbor town was just starting to show its long horizontal line against the brightening sky.
+
+        ## Chapter 4: Climax
+
+        By the time the harvest fair came around in the second week of October, Adelaide had learned the rhythms of the work and the names of every farmer on both sides of the river. The fair was held in the meadow at the wide bend below the bridge, with bunting and lanterns strung between three big elms, and a row of trestle tables set up for the judging of the apples and the pears and the early winter squash.
+
+        She walked among the tables with her brother and the men who carried the crates, and they were greeted in the same easy familiar way as every other family from the valley. Nobody mentioned the crates. Nobody asked where the upstairs loft had been emptied to. The judges awarded the third-place ribbon for keeping-apples to her brother's orchard, and he accepted it with the same careful smile he had worn since the morning she arrived.
+
+        ### Section 4.1: The fair at dusk
+
+        As the afternoon turned to evening and the lanterns came up between the three big elms, a fiddler started playing on a small wooden stage at the meadow's eastern edge, and the children of the valley spilled out from between the trestle tables to dance in a loose untidy ring on the trampled grass. Adelaide stood near the cider barrel with the older women of the valley and listened to their easy talk about the coming winter and the price of wool in the harbor markets.
+
+        The men who carried the crates were nowhere to be seen now. Her brother had drifted off toward the bridge with the parish clerk and the schoolmaster, the three of them talking in the low careful way of people who had known each other since they were boys. Adelaide held her cup of warm cider in both hands and watched the fiddler's bow flash silver in the lantern light, and felt for the first time in many years a particular and unfamiliar kind of peace.
+
+        ## Chapter 5: Resolution
+
+        Adelaide stayed through the winter and through the lambing season and through the long warm summer after that. By the second autumn she had her own room at the back of the house overlooking the orchard, and she had developed her own routes through the valley, her own small set of regular visits, her own quiet way of asking questions that did not feel like questions. The crates had stopped coming down from the loft. She did not ask why.
+
+        On the morning of her two-year anniversary in the valley her brother left a small wrapped parcel on the kitchen table beside her teacup. Inside it was a single milestone fragment, sandstone, faintly orange, with a chipped corner and a number carved into one face that was the same number she had been looking for since the first day of the cart ride inland. He had found it for her. She set it on the windowsill and watched the morning light move across it.
+
+        ### Section 5.1: A letter unfinished
+
+        That same evening she sat down at the small writing desk in her room and began composing a letter to a friend in the harbor town. The letter began with a description of the milestone fragment and the morning light moving across it, and went on through the lambing season and the second harvest fair and the easy quiet of the second autumn. She wrote three pages and then set the pen down and looked out the window at the long flat fields turning slowly gold under the late-October sun.
+
+        She did not finish the letter that evening, or the next, or the next. By the time she came back to it a month later, three of its details had grown stale and one of its small jokes no longer made any sense, and she set it aside and never quite got around to picking it up again. But she kept the milestone fragment on the windowsill for the rest of her life, and she never once asked her brother where the crates had gone or what had been inside them.
         """
     }
 

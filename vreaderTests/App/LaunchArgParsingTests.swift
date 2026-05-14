@@ -106,6 +106,21 @@ struct LaunchArgParsingTests {
         #expect(config.seedResetPreferences == true)
         #expect(config.ttsTestMode == true)
     }
+
+    // MARK: - Feature #45 WI-5: --seed-md-multi-page
+
+    @Test func seedMDMultiPageDefaultsFalse() {
+        let config = TestLaunchConfig.parse(["--uitesting"])
+        #expect(config.seedMDMultiPage == false)
+    }
+
+    @Test func seedMDMultiPageParsedWhenFlagPresent() {
+        let config = TestLaunchConfig.parse([
+            "--uitesting", "--seed-md-multi-page"
+        ])
+        #expect(config.seedMDMultiPage == true)
+        #expect(config.isUITesting == true)
+    }
 }
 
 #endif

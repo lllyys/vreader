@@ -25,6 +25,12 @@ enum TestSeedState {
     case warAndPeace
     /// Markdown file with multiple ATX headings for TOC verification testing.
     case mdTOC
+    /// Larger Markdown file sized to span multiple pages at 18pt on iPhone
+    /// 17 Pro Sim's reader viewport. Feature #45 WI-5 fixture for Feature
+    /// #31 (Auto page turning) live-advancement verification. The "spans
+    /// multiple pages" contract is unit-tested via the production MD render
+    /// + paginate pipeline; the exact byte size drifts with content edits.
+    case mdMultiPage
     /// Keep existing database state (no seeding). For relaunch tests.
     case keepExisting
     /// Corrupted database (triggers init error screen).
@@ -38,6 +44,7 @@ enum TestSeedState {
         case .positionTest: return "--seed-position-test"
         case .warAndPeace: return "--seed-war-and-peace"
         case .mdTOC: return "--seed-md-toc"
+        case .mdMultiPage: return "--seed-md-multi-page"
         case .keepExisting: return "--uitesting-no-seed"
         case .corruptDB: return "--seed-corrupt-db"
         }
