@@ -162,6 +162,14 @@ extension EPUBHighlightBridge {
         // overlayer as a fallback for older WebKit (pre-iOS 17.2) where the
         // CSS Highlight API isn't available.
 
+        // Feature #53 WI-4: registry of {id → Range} for tap-on-highlight
+        // hit-testing. Populated by `__vreader_createHighlight`, cleared by
+        // `__vreader_removeHighlight` / `__vreader_clearAllHighlights`.
+        // The click listener below uses it to map a tap point to a
+        // highlight UUID without going through CSS.highlights (which
+        // doesn't expose Range membership in a tap-time-cheap way).
+        window.__vreader_highlightRanges = window.__vreader_highlightRanges || {};
+
         window.__vreader_createHighlight = function(id, startPath, startOffset, endPath, endOffset, color) {
             var range = buildRange(startPath, startOffset, endPath, endOffset);
             if (!range) return;
@@ -179,6 +187,9 @@ extension EPUBHighlightBridge {
                         style.textContent = '::highlight(vreader-' + id + ') { background-color: ' + cssColor + '; }';
                         document.head.appendChild(style);
                     }
+                    // WI-4: remember the live Range so the click handler
+                    // can hit-test against it.
+                    window.__vreader_highlightRanges[id] = range;
                     return;
                 } catch (e) { /* fall through to SVG Overlayer */ }
             }
@@ -191,6 +202,9 @@ extension EPUBHighlightBridge {
                         window.__foliate.Overlayer.highlight,
                         { color: cssColor }
                     );
+                    // WI-4: registry tracks fallback ranges too so the
+                    // click hit-test works on older WebKit.
+                    window.__vreader_highlightRanges[id] = range;
                 } catch (e) {}
             }
         };
@@ -206,6 +220,9 @@ extension EPUBHighlightBridge {
                 var styleEl = document.getElementById('vreader-hl-style-' + id);
                 if (styleEl) styleEl.remove();
             }
+            // WI-4: drop the registry entry so a deleted highlight stops
+            // being tap-targetable.
+            delete window.__vreader_highlightRanges[id];
         };
 
         window.__vreader_clearAllHighlights = function() {
@@ -222,7 +239,78 @@ extension EPUBHighlightBridge {
                 document.querySelectorAll('style[id^="vreader-hl-style-"]')
                     .forEach(function(s) { s.remove(); });
             }
+            // WI-4: drop ALL registry entries on chapter swap / book swap.
+            window.__vreader_highlightRanges = {};
         };
+
+        // Feature #53 WI-4: tap-on-highlight click listener.
+        // Uses capture-phase + caretPositionFromPoint to identify the
+        // tapped position, then walks the registry in reverse insert
+        // order (most-recent paint wins on overlap). On hit, posts a
+        // {id, rect} payload to Swift and stops propagation so the
+        // outer chrome-toggle listener does NOT also fire. Footnote
+        // links are checked first via `e.target.closest('a[href]')` —
+        // tapping a highlighted link still navigates the anchor.
+        document.addEventListener('click', function(e) {
+            // Don't intercept link clicks — those go to the existing
+            // footnote handler / default-anchor navigation.
+            if (e.target.closest('a[href]')) return;
+            var ids = Object.keys(window.__vreader_highlightRanges);
+            if (ids.length === 0) return;
+            // Locate caret at tap point. Use caretPositionFromPoint
+            // (standard) with caretRangeFromPoint (WebKit legacy) as a
+            // fallback.
+            var hitNode = null;
+            var hitOffset = 0;
+            try {
+                if (document.caretPositionFromPoint) {
+                    var cp = document.caretPositionFromPoint(e.clientX, e.clientY);
+                    if (cp) { hitNode = cp.offsetNode; hitOffset = cp.offset; }
+                } else if (document.caretRangeFromPoint) {
+                    var cr = document.caretRangeFromPoint(e.clientX, e.clientY);
+                    if (cr) { hitNode = cr.startContainer; hitOffset = cr.startOffset; }
+                }
+            } catch (err) { return; }
+            if (!hitNode) return;
+            // Build a degenerate range at the tap point so we can use
+            // Range.compareBoundaryPoints for membership testing.
+            var probe;
+            try {
+                probe = document.createRange();
+                probe.setStart(hitNode, hitOffset);
+                probe.setEnd(hitNode, hitOffset);
+            } catch (err) { return; }
+            for (var i = ids.length - 1; i >= 0; i--) {
+                var id = ids[i];
+                var range = window.__vreader_highlightRanges[id];
+                if (!range) continue;
+                try {
+                    // probe ∈ [range.start, range.end] iff:
+                    //   range.start <= probe.start  AND  range.end >= probe.start
+                    var startVsProbe = range.compareBoundaryPoints(Range.START_TO_START, probe);
+                    var endVsProbe = range.compareBoundaryPoints(Range.END_TO_START, probe);
+                    if (startVsProbe <= 0 && endVsProbe >= 0) {
+                        var rect;
+                        try { rect = range.getBoundingClientRect(); } catch (err2) {}
+                        var payload = { id: id };
+                        if (rect) {
+                            payload.rectX = rect.x;
+                            payload.rectY = rect.y;
+                            payload.rectWidth = rect.width;
+                            payload.rectHeight = rect.height;
+                        }
+                        try {
+                            window.webkit.messageHandlers.highlightTapHandler
+                                .postMessage(payload);
+                        } catch (err2) {}
+                        // Stop the chrome-toggle handler from also firing.
+                        e.stopImmediatePropagation();
+                        e.preventDefault();
+                        return;
+                    }
+                } catch (err) { /* skip stale Range entries */ }
+            }
+        }, true);
 
         // === Footnote Detection: intercept link clicks ===
 

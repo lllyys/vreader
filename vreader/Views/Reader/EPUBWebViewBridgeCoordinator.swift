@@ -60,6 +60,15 @@ extension EPUBWebViewBridge {
         #endif
         /// Callback for text selection events.
         var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
+        /// Feature #53 WI-4: presenter that shows the inline tap-on-
+        /// highlight menu when the user taps an existing highlight in the
+        /// EPUB WKWebView. When nil, only the `.readerHighlightTapped`
+        /// notification fires.
+        var highlightActionPresenter: (any HighlightActionPresenting)?
+        /// Feature #53 WI-4: callback that routes the user's chosen action
+        /// through the coordinator. When nil, the presenter's result has
+        /// nowhere to go and the menu acts as a discoverability cue only.
+        var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
         /// Callback to restore highlights after page loads.
         /// Provides a JS evaluator so the container can inject restore scripts.
         var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?
@@ -96,10 +105,39 @@ extension EPUBWebViewBridge {
                 handleFootnoteMessage(message.body)
                 return
             }
+            if message.name == "highlightTapHandler" {
+                handleHighlightTapMessage(message.body, webView: message.webView)
+                return
+            }
             guard message.name == "progressHandler",
                   let progress = message.body as? Double else { return }
             Task { @MainActor in
                 onProgressChange(progress)
+            }
+        }
+
+        /// Feature #53 WI-4: parse a `{id, rect}` payload from the
+        /// JS `highlightTapHandler` channel, post the cross-format
+        /// `.readerHighlightTapped` notification, and (when wired)
+        /// show the inline action menu + route the chosen action
+        /// through the coordinator's `onHighlightTapAction` callback.
+        private func handleHighlightTapMessage(_ body: Any, webView: WKWebView?) {
+            guard let event = EPUBHighlightBridge.parseHighlightTapMessage(body)
+            else { return }
+            Task { @MainActor in
+                NotificationCenter.default.post(
+                    name: .readerHighlightTapped, object: event
+                )
+                if let presenter = highlightActionPresenter,
+                   let onAction = onHighlightTapAction,
+                   let webView {
+                    presenter.present(for: event, in: webView) { action in
+                        guard let action else { return }
+                        Task { @MainActor in
+                            await onAction(action, event.highlightID)
+                        }
+                    }
+                }
             }
         }
 

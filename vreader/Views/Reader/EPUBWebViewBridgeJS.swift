@@ -142,6 +142,12 @@ extension EPUBWebViewBridge {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: "footnoteHandler"
         )
+        // Feature #53 WI-4: matching teardown for the highlight-tap handler
+        // added at makeUIView. Skipping this leaks the WKScriptMessageHandler
+        // proxy retainment per Bug #109's investigation.
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: "highlightTapHandler"
+        )
     }
 
     // MARK: - JavaScript

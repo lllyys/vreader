@@ -365,6 +365,10 @@ struct EPUBReaderContainerView: View {
                 pendingSelectionEvent = event
                 showHighlightSheet = true
             },
+            highlightActionPresenter: UIKitHighlightActionPresenter(),
+            onHighlightTapAction: { [highlightCoordinator] action, id in
+                await highlightCoordinator?.handleTapAction(action, highlightID: id)
+            },
             onPageDidFinishLoad: { evaluateJS in
                 restoreHighlightsOnLoad(evaluateJS: evaluateJS)
             },

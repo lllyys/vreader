@@ -66,6 +66,25 @@ enum EPUBHighlightBridge {
         )
     }
 
+    // MARK: - Tap-on-Highlight Message Parsing (Feature #53 WI-4)
+
+    /// Parses a WKScriptMessage body from the `highlightTapHandler` channel
+    /// into a `ReaderHighlightTapEvent`. Returns nil when the payload is
+    /// not a dictionary or the `id` field isn't a valid UUID string.
+    /// Missing rect fields default to a `.zero` source rect — the caller
+    /// then falls back to tap-location anchoring for the presenter.
+    static func parseHighlightTapMessage(_ body: Any) -> ReaderHighlightTapEvent? {
+        guard let dict = body as? [String: Any] else { return nil }
+        guard let idString = dict["id"] as? String,
+              let id = UUID(uuidString: idString) else { return nil }
+        let rectX = doubleValue(dict["rectX"]) ?? 0
+        let rectY = doubleValue(dict["rectY"]) ?? 0
+        let rectWidth = doubleValue(dict["rectWidth"]) ?? 0
+        let rectHeight = doubleValue(dict["rectHeight"]) ?? 0
+        let rect = CGRect(x: rectX, y: rectY, width: rectWidth, height: rectHeight)
+        return ReaderHighlightTapEvent(highlightID: id, sourceRect: rect)
+    }
+
     // MARK: - Anchor Construction
 
     /// Creates an EPUB AnnotationAnchor from href, CFI, and serialized range.
