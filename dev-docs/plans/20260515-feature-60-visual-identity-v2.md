@@ -50,6 +50,20 @@ persistence, search, WebDAV, or AI is in scope.
   `case highlight(NamedHighlightColor) | note | translate | askAI | read`.
   `NamedHighlightColor` is one of yellow/pink/green/blue (the row
   contract specifies four).
+- **`vreader/Models/NamedHighlightColor.swift`** (new) —
+  `enum NamedHighlightColor: String, Codable, CaseIterable, Sendable`
+  with `rawValue` = semantic name (`"yellow"|"pink"|"green"|"blue"`).
+  Derived `hex` property (computed, not the rawValue) returns the
+  design bundle's exact hex values per `vreader-reader.jsx:SelectionPopover`
+  (`#f0d25a` / `#e88ca0` / `#8cc88c` / `#8cb4e8`). **Additive only**: this is
+  a UI-domain enum. It does NOT replace the existing `String color`
+  schema in `Highlight.color` / `HighlightRecord.color` / backup DTOs
+  / export-import payloads — those continue to store raw strings.
+  Conversion helpers: `init?(rawValue:)` (the Codable default) and
+  `static func from(storageString:) -> Self?` (best-effort decode of
+  the existing yellow-default + future named colors). Codex Gate 2
+  finding (round 1, High): keep additive, do not narrow the existing
+  String boundary.
 - **`vreader/Views/Reader/SelectionPopoverView.swift`** (new) —
   SwiftUI view that REPLACES the current `HighlightableTextView`
   4-item UIMenu for the **new-selection-from-long-press** flow only.
@@ -200,7 +214,7 @@ audit log + version bump per rule 40.
 |----|------|-----------|---------|
 | WI-1 | Foundational | Bundle Source Serif 4 + Inter fonts in `vreader/Resources/Fonts/`. Add `ReaderTypography` registry. Extend `ReaderFontFamily` with `.sourceSerif4` and `.inter`. **No view change** — dormant infra. Tests: registry load, fontDescriptor availability, fallback chain. | ~6 files, ~250 LOC (font binary excluded) |
 | WI-2 | Foundational | Add `ReaderThemeV2` enum + 9-token surface. Migration alias on `ReaderTheme` so existing persisted choices still decode. **No view change** — dormant infra. Tests: token round-trip, isDark predicate, migration alias, accent contrast against ink (WCAG AA per theme). | ~4 files, ~300 LOC |
-| WI-3 | Foundational | Add `AccentColor`, `NamedHighlightColor`, `SelectionPopoverAction` types. **No view change** — dormant infra. Tests: enum exhaustiveness, Codable round-trip. | ~3 files, ~120 LOC |
+| WI-3 | Foundational | Add `AccentColor`, `NamedHighlightColor`, `SelectionPopoverAction` types as UI-domain enums. **Additive only** (Codex Gate 2 finding): does NOT change the existing `Highlight.color` / `HighlightRecord.color` / backup DTO / export-import `String` schema. `NamedHighlightColor` raw values are semantic names; hex is a derived computed property. `SelectionPopoverAction` is `Equatable + Sendable` (NOT Codable — it's local-dispatch only, not persisted). `AccentColor` is a token-only struct with three named stops (light/warm-dark/photo). **No view change** — dormant infra. Tests: exhaustive switch, raw-value-is-semantic-name, derived-hex round-trip, compatibility (existing color strings remain storable + decodable to nil for unknown values), `from(storageString:)` round-trip. | ~3 files (4 if `NamedHighlightColor.swift` split out), ~150 LOC |
 | WI-4 | Behavioral | EPUB theme injection switches to `ReaderThemeV2`. `epubOverrideCSS` emits five-theme CSS + new token names. Existing EPUB books re-render with new visual tokens. Migration path: existing `epubTheme: .light/.sepia/.dark` continues to decode and maps to `.paper/.sepia/.dark`. Photo theme injects a `body { background-image: url(...) }` rule. Tests: CSS string assertions per theme + per-theme accent contrast. Device verify (Gate 5a): open mini-epub3 fixture per theme, confirm visually. | ~3 files, ~250 LOC |
 | WI-5 | Behavioral | TXT + MD theme injection switches to `ReaderThemeV2`. `TXTViewConfig` reads `ReaderTypography.body(for:)` instead of hard-coded Georgia. Tests: config round-trip, attributed-string font resolution. Device verify (Gate 5a): open seeded MD multi-page fixture per theme. | ~4 files, ~220 LOC |
 | WI-6 | Behavioral | Reader chrome re-skin (top bar + bottom bar + page indicator + scrubber) shared across TXT/MD/EPUB containers. Edges-tap-flip / middle-tap-toggle-chrome convention. **Cross-ref**: aligns with feature #25 tap zones; verify whether bug #165 closes as a side effect (file follow-up if not). Tests: chrome-toggle gesture routing; tap-zone hit-test boundaries (33% / 33% / 33% split per design). Device verify: tap each zone, confirm advance / toggle / advance behavior. | ~6 files, ~400 LOC |
@@ -237,10 +251,21 @@ not counted; ~5MB asset).
 
 ### WI-3 (foundational popover types)
 
-- `NamedHighlightColorTests` — exhaustive switch (compile-time
-  guarantee), Codable round-trip, hex value round-trip.
-- `SelectionPopoverActionTests` — Sendable + Equatable, exhaustive
-  switch for the WI-7 handler.
+- `NamedHighlightColorTests`:
+  - **exhaustive switch** (compile-time guarantee via CaseIterable count).
+  - **raw value is semantic name** — `NamedHighlightColor.yellow.rawValue == "yellow"`, etc. Pinned because the rawValue IS the storage contract for the UI domain.
+  - **derived hex** — `NamedHighlightColor.yellow.hex == "#f0d25a"` and the other three colors pinned to the exact design bundle values (`pink #e88ca0`, `green #8cc88c`, `blue #8cb4e8`).
+  - **Codable round-trip** through the semantic-name rawValue.
+  - **`from(storageString:)` happy path** — passing `"yellow"` returns `.yellow`; passing `"pink"`/`"green"`/`"blue"` returns the matching case.
+  - **`from(storageString:)` unknown input** — passing `"red"`, `""`, `"#ff0000"`, `nil`-equivalent returns nil (does NOT coerce or default to `.yellow`; that's the caller's policy decision).
+  - **Decode-contract pin** (Codex Gate 2 finding, Medium): `from(storageString:)` classifies historical and future raw `Highlight.color` strings correctly — `"yellow"`/`"pink"`/`"green"`/`"blue"` decode to the matching case; legacy hex (e.g. `"#fff3a3"`), empty string, and future custom names decode to `nil` (no silent coercion). Note: this is a decode-contract pin only; storage-type narrowing of `Highlight.color` / `HighlightRecord.color` / `BackupHighlight.color` / `ExportedAnnotation.color` is caught by Codex Gate 2 plan audit, not by the unit test.
+- `SelectionPopoverActionTests`:
+  - **Sendable + Equatable** (compile-time + behavior).
+  - **exhaustive switch** for the WI-7 handler.
+  - `SelectionPopoverAction` is intentionally NOT `Codable` (per Codex Gate 2 round 1: local dispatch only, not serialized).
+- `AccentColorTests`:
+  - Three named stops produce three distinct hex values matching the design (`#8c2f2f` / `#d6885a` / `#e8b465`).
+  - Sendable conformance (compile-time).
 
 ### WI-4 (EPUB theme injection)
 
@@ -496,3 +521,17 @@ category 2 (PLANNED feature with plan doc → Gate 3).
 
 - 2026-05-15 v1: initial draft + manual-fallback Gate 2 audit
   recorded inline.
+- 2026-05-16 v2: WI-3 section revised after Codex Gate 2 round 1
+  found 1 High (additive vs schema-narrowing risk over existing
+  `String`-typed `Highlight.color` boundary) + 1 Medium (test
+  catalogue should emphasize semantic-name rawValue + compatibility
+  with existing strings, not hex round-trip). Codex thread
+  `019e2d67-9219-71f1-9bda-ffaf13cb4e75`. Plan now specifies
+  `NamedHighlightColor` as a UI-domain additive enum with
+  `from(storageString:)` decoder and a derived `hex` property,
+  leaving `Highlight.color` / `HighlightRecord.color` / backup
+  DTOs / export-import payloads on the existing raw-`String`
+  schema. `SelectionPopoverAction` confirmed as
+  `Equatable + Sendable` only (not `Codable`). Test catalogue
+  expanded to 8 NamedHighlightColor tests + 3 SelectionPopoverAction
+  tests + 2 AccentColor tests.
