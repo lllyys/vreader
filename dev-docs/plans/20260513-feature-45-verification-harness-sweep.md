@@ -1667,7 +1667,7 @@ Gate 4 round-3 verdict (Codex thread `019e28c7`): **follow-up-recommended** → 
 
 ---
 
-## WI-6 — Named test-plan selector for the Verification subset (BLOCKED on Bug #192 / GH #686) (revision 2 — 2026-05-15)
+## WI-6 — Named test-plan selector for the Verification subset (revision 3 — 2026-05-15, UNBLOCKED post-Bug-#192 + #193 fixes)
 
 **Type**: Foundational (build-system artifact; no production behavior change, no test-content change).
 **PR size estimate**: ~80 LOC across `TestPlans/Verification.xctestplan` (new, ~50 LOC JSON), `TestPlans/All.xctestplan` (new sibling all-tests plan to preserve the current default `Cmd+U` behavior, ~20 LOC JSON), `project.yml` (~8 LOC additions under `targets.vreader.scheme.testPlans`), `docs/architecture.md` (~3 LOC cross-ref).
@@ -1691,18 +1691,31 @@ Gate 4 round-3 verdict (Codex thread `019e28c7`): **follow-up-recommended** → 
      "testTargets" : [
        {
          "selectedTests" : [
-           "Feature11EPUBHighlightVerificationTests",
-           "Feature17PDFHighlightVerificationTests",
-           "Feature21TXTReaderVerificationTests",
-           "Feature23EPUBChapterNavVerificationTests",
-           "Feature27SearchVerificationTests",
-           "Feature28SearchHighlightDismissVerificationTests",
-           "Feature29SearchTOCVerificationTests",
-           "Feature31AutoPageTurnVerificationTests",
-           "Feature35BookmarkVerificationTests",
-           "Feature36SearchPanelVerificationTests",
-           "Feature40TTSSentenceHighlightVerificationTests",
-           "Feature41TTSAutoScrollVerificationTests"
+           "Feature11EPUBHighlightVerificationTests/test_verify_feature_11_epub_highlight_happy_path()",
+           "Feature11EPUBHighlightVerificationTests/test_verify_feature_11_epub_highlight_regression_bug77_buffering_race()",
+           "Feature21PaginatedModeVerificationTests/test_verify_feature_21_paged_mode_shows_paged_view()",
+           "Feature21PaginatedModeVerificationTests/test_verify_feature_21_paged_mode_page_navigation()",
+           "Feature23TXTTocVerificationTests/test_verify_feature_23_txt_toc_populated_for_chapters()",
+           "Feature23TXTTocVerificationTests/test_verify_feature_23_txt_toc_navigation_jumps_to_chapter()",
+           "Feature27ReplacementRulesVerificationTests/test_verify_feature_27_replacement_rule_ui_surface()",
+           "Feature28ChineseConversionVerificationTests/test_verify_feature_28_chinese_text_picker_present()",
+           "Feature28ChineseConversionVerificationTests/test_verify_feature_28_conversion_applies_to_reader_content()",
+           "Feature29WebDAVVerificationTests/test_verify_feature_29_webdav_backup_ui_available()",
+           "Feature29WebDAVVerificationTests/test_verify_feature_29_webdav_backup_executes_when_configured()",
+           "Feature31AutoPageTurnVerificationTests/test_verify_feature_31_auto_page_turn_toggle_present()",
+           "Feature31AutoPageTurnVerificationTests/test_verify_feature_31_auto_page_turn_interval_slider_appears_on_enable()",
+           "Feature34CollectionsVerificationTests/test_verify_feature_34_create_collection_appears_in_sidebar()",
+           "Feature34CollectionsVerificationTests/test_verify_feature_34_add_book_to_collection_filters_library()",
+           "Feature35AnnotationsExportVerificationTests/test_verify_feature_35_export_button_is_visible()",
+           "Feature35AnnotationsExportVerificationTests/test_verify_feature_35_import_button_is_visible()",
+           "Feature36OPDSVerificationTests/test_verify_feature_36_opds_catalog_ui_surface()",
+           "Feature36OPDSVerificationTests/test_verify_feature_36_opds_browse_with_live_fixture()",
+           "Feature37PerBookSettingsVerificationTests/test_verify_feature_37_perbook_settings_toggle_isolated_to_book()",
+           "Feature37PerBookSettingsVerificationTests/test_verify_feature_37_perbook_settings_persists_across_reopen()",
+           "Feature40TTSSentenceHighlightVerificationTests/test_verify_feature_40_tts_state_reported_after_start()",
+           "Feature40TTSSentenceHighlightVerificationTests/test_verify_feature_40_tts_offset_advances_during_playback()",
+           "Feature41TTSAutoScrollVerificationTests/test_verify_feature_41_tts_control_bar_visible_during_playback()",
+           "Feature41TTSAutoScrollVerificationTests/test_verify_feature_41_tts_autoscroll_position_advances()"
          ],
          "target" : { "containerPath": "container:vreader.xcodeproj", "identifier": "<vreaderUITests-target-uuid>", "name": "vreaderUITests" }
        }
@@ -1711,7 +1724,7 @@ Gate 4 round-3 verdict (Codex thread `019e28c7`): **follow-up-recommended** → 
    }
    ```
 
-   **Membership is explicit** (Codex round-1 High #2). The exact 12 classes listed above are derived from `docs/architecture.md:284-315` — they are the simulator-automatable backlog items from Feature #45's contract. Plan-level note: the actual file count of `*VerificationTests` files under `vreaderUITests/Verification/` may be ≥12 (some classes contain multiple `@Test` methods); Gate 5 verifies inclusion-vs-actual by running the plan and grep'ing the `xcresult` for any unexpected entries. CU-driven tests (none today, but if any are ever added under `vreaderUITests/` outside `Verification/`) are automatically excluded by virtue of explicit-only inclusion.
+   **Membership is explicit and per-method, filesystem-derived** (Codex round-3 High #1). The 25 identifiers above were lifted from `vreaderUITests/Verification/Feature*VerificationTests.swift` via filesystem enumeration on 2026-05-15. Distribution: Feature11/21/23/28/29/31/34/35/36/37/40/41 contribute 2 methods each (12 × 2 = 24); Feature27 contributes 1 (its sole `test_verify_feature_27_replacement_rule_ui_surface`); total = 25. Each class is an `XCTestCase` subclass — these are XCTest, not Swift Testing `@Test` suites (round-2 Medium #9). Codex round-3 High #1 flagged that bare-class-name `selectedTests` entries are not consistently honored across Xcode versions and may produce an empty/under-selected plan; **per-method identifiers in the `ClassName/methodName()` form match Apple's documented Xcode 16 test-plan schema and are the durable form**. Trade-off: when a new `test_verify_*` method is added later, it must be appended to this list — Gate 5 verifies the run count via `xcrun xcresulttool` against this exact 25-method roster and fails-closed on drift, preventing a silent under-include regression. CU-driven tests (none today, but if any are ever added under `vreaderUITests/` outside `Verification/`) are automatically excluded by virtue of explicit-only inclusion.
 
 2. **New `TestPlans/All.xctestplan`** (Codex round-1 High #1: preserve the current `Cmd+U` default). Same JSON shape but with `"testTargets":[{"target":{...vreaderTests...}},{"target":{...vreaderUITests...}}]` and NO `selectedTests` key (= include all). Mark this as the scheme's default plan.
 
@@ -1754,17 +1767,27 @@ Gate 4 round-3 verdict (Codex thread `019e28c7`): **follow-up-recommended** → 
 **Gate 4 audit focus** (audit log when run):
 
 - Test plan JSON shape correctness — open the plan in Xcode after xcodegen regen; the scheme picker should show both plans.
-- Membership exactness: the Verification plan's `selectedTests` list contains exactly the 12 classes named in §1 above, no more, no less.
+- Membership exactness: the Verification plan's `selectedTests` list contains exactly the 25 per-method identifiers named in §1 above, no more, no less (Codex round-3 High #1).
 - xcodegen idempotency: `xcodegen generate` re-run produces zero noise in `pbxproj` (testPlans references should be stable).
 - All.xctestplan exists, is marked default, and `Cmd+U` / `xcodebuild test -scheme vreader` still runs the full suite.
 - Top-level `TestPlans/` directory created (Codex Low #6); no scheme artifacts mixed with test source files.
 
-**Gate 5 verification (slice acceptance criteria)** — Codex round-1 Medium #3 tightening:
+**Gate 5 verification (slice acceptance criteria)** — Codex round-1 Medium #3 + round-3 Medium #4 tightening. Split into transport-success vs suite-cleanliness:
 
-1. `xcodebuild test -project vreader.xcodeproj -scheme vreader -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` (no `-testPlan` flag) runs the FULL suite (all-tests-plan default) and exits 0 (subject to pre-existing Bug #176 AZW3 TTS failures being out of scope).
-2. `xcodebuild test -project vreader.xcodeproj -scheme vreader -testPlan Verification -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` exits 0 within an 8-minute budget on a clean DerivedData. The 8-minute figure is a planning estimate (not a checked-in measured constant); Gate 5 records the actual elapsed time for future reference.
-3. Inspecting the post-run `xcresult` (or the test-plan inclusion list via `xcodebuild -showTestPlans`) confirms exactly the 12 named Verification classes ran, no more, no less.
+**Transport-success (acceptance, BLOCKING for WI-6 ship)** — verifies the named test plan exists, is invocable, and selects the exact 25 documented methods:
+
+1. `xcodebuild test -project vreader.xcodeproj -scheme vreader -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` (no `-testPlan` flag) starts the FULL suite (all-tests-plan default). The build phase + plan dispatch must succeed; the run does not need to be green for transport-success — that's suite-cleanliness territory.
+2. `xcodebuild test -project vreader.xcodeproj -scheme vreader -testPlan Verification -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` starts and is recognized by the toolchain (no "test plan not found" error). The build phase + plan dispatch must succeed.
+3. **Membership check via parsing**, not `-showTestPlans` (Codex round-3 Medium #2). Two complementary signals:
+   - Parse `TestPlans/Verification.xctestplan` JSON directly with `python3 -c "import json; print(len(json.load(open('TestPlans/Verification.xctestplan'))['testTargets'][0]['selectedTests']))"` — must print exactly `25`. A shell-script helper at `scripts/verify-testplan-membership.sh` may wrap this for the WI's commit.
+   - Run `xcrun xcresulttool get test-results tests --path <xcresult>` after the Verification plan run completes; the summary must list 25 invocations (passes + fails + skips combined). This catches plan-vs-runner drift that JSON-parsing alone misses.
 4. Opening `vreader.xcodeproj` in Xcode and clicking the scheme picker shows both `All` and `Verification` test plans available; `All` is the default.
+
+**Suite-cleanliness (informational, NOT blocking)** — surfaces real test failures the named plan exposes:
+
+5. The Verification plan run's pass/fail/skip tally is recorded in the WI's Gate 5 evidence file. If any of the 25 invocations FAIL, the failures are filed as **separate bugs** (per the verify-cron scope guard) and WI-6 ships regardless. WI-6's contract is "make the subset runnable by a single named flag with documented membership" — not "make every test pass."
+6. Pre-existing known-failure classes at WI-6 ship time: the 9 still-unsampled Verification classes (#11, #21, #23, #28, #29, #31, #37, #40, #41) may surface element-class mismatches similar to Bug #193 when the Verification plan runs them. These are tracked under verify-cron's ongoing sampling work, not WI-6's gate.
+7. The 8-minute elapsed-time budget from WI-4's original acceptance criterion is a planning estimate, not a checked-in constant. Gate 5 records actual elapsed time for future reference but does not gate on it.
 
 **Gate 5 verification approach**: this is a build-system change so Gate 5 IS the functional `xcodebuild` invocation. No device-level UI test needed.
 
@@ -1790,4 +1813,25 @@ Gate 4 round-3 verdict (Codex thread `019e28c7`): **follow-up-recommended** → 
 | 9 | Medium | Round-1 note "file count of `*VerificationTests` files may be ≥12 (some classes contain multiple `@Test` methods)" was framework-confused. These are XCTestCase files, not Swift Testing `@Test` suites. | Will rewrite in XCTest terms once WI-6 unblocks. |
 
 Gate 2 round-2 verdict (Codex): **revise** → 2 of 3 findings escalated to a separate bug (Bug #192), which blocks WI-6 entirely. Round 3 is not run because the WI is now blocked on external work, not on plan revisions. WI-6 stays at BLOCKED status pending Bug #192 fix. Once Bug #192 lands, this plan needs one more revision (correct 13-class membership list from filesystem; clarify XCTest discovery semantics) and a round-3 audit before Gate 3 can start.
+
+**Status update 2026-05-15**: Bug #192 fixed in PR #688 (commit `acdb377`, v3.21.67); follow-on Bug #193 (Feature #36 OPDS XCUITest element-class mismatch surfaced by post-fix run) fixed in PR #691 (commit `85ac0a3`, v3.21.68). WI-6 is **UNBLOCKED**. Revision 3 (this section's heading) ships the filesystem-derived 13-class membership list + Gate-5 wording clarified to expect partial results while the 9 unsampled classes are still being progressively run. Gate 2 round-3 audit pending below.
+
+**Audit fixes applied (Gate 2 round-3a — pre-audit revision based on Bug #192/#193 unblock)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 10 | Critical | Round-2 #7: revised 12-class membership list was wrong (invented names, missed real classes). | **Fixed.** Membership now lifted from `ls vreaderUITests/Verification/Feature*VerificationTests.swift` (13 classes); each renamed to match its actual filename. Captured exact class names in `selectedTests`. |
+| 11 | Critical | Round-2 #8: `verify_*` methods invisible to XCTest. | **Fixed externally** by Bug #192 PR #688 (rename `verify_*` → `test_verify_*` across all 25 methods). Plan now references 25 `test_verify_*` methods + cites `grep -cE "func test_"` evidence. |
+| 12 | Medium | Round-2 #9: Plan called these `@Test` suites; they're XCTestCase classes. | **Fixed.** Surface-area §1 now explicitly names them as `XCTestCase` subclasses, references `func test_*` (XCTest discovery) not `@Test`. |
+
+**Audit fixes applied (Gate 2 round-3b — Codex thread `019e29f1`, second-opinion audit on revision-3a)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 13 | High | `selectedTests` was specified as bare class names; both Xcode's documented `.xctestplan` examples and XcodeGen's docs use test identifiers (`ClassName/methodName()`). As written, may produce an empty/under-selected plan. | **Fixed.** Surface-area §1 now lists all 25 methods explicitly in `ClassName/methodName()` form (Apple's documented Xcode 16 form). Added a "trade-off" paragraph noting future test_verify_* additions must be appended, with Gate 5 acting as fail-closed guard against silent under-include. |
+| 14 | Medium | `xcodebuild -showTestPlans` was used for membership verification but it only lists test plans associated with a scheme — not plan membership. | **Fixed.** Gate 5 §3 now uses two complementary methods: (a) parse `TestPlans/Verification.xctestplan` JSON directly via `python3` + `json` (must print `25`); (b) `xcrun xcresulttool get test-results tests` against the post-run xcresult. `-showTestPlans` no longer cited as a membership check. |
+| 15 | Medium | Gate 5 was self-contradictory: required `xcodebuild test -testPlan Verification` to "exit 0," then said WI-6 ships anyway on failure — ambiguous acceptance for a foundational WI. | **Fixed.** Gate 5 split into Transport-success (blocking: plan exists, is invocable, selects exactly 25 methods) vs Suite-cleanliness (informational: failures filed as separate bugs, do not block WI-6). |
+| 16 | Low | Stale "12 classes" remained in Gate 4 audit-focus line. | **Fixed.** Updated to "exactly the 25 per-method identifiers". |
+
+Gate 2 round-3 verdict (Codex round-3b, 2026-05-15): all 4 round-3b findings resolved in revision 3 of this plan. Gate 2 passes. Per rule 47, **maximum 3 audit rounds**; round 3 is the last permitted round before escalation, so any further-discovered findings must accept, defer, or redesign rather than re-audit. Gate 3 (TDD implementation) may begin.
 

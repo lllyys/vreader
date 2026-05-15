@@ -1,0 +1,35 @@
+{
+  "configurations" : [
+    {
+      "id" : "09959453-A29B-4D76-A279-5117F3D1451F",
+      "name" : "All",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:vreader.xcodeproj",
+      "identifier" : "EBA1124C87F46CD360E5071F",
+      "name" : "vreader"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:vreader.xcodeproj",
+        "identifier" : "4FB56454C67D08501FAA4E7A",
+        "name" : "vreaderTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:vreader.xcodeproj",
+        "identifier" : "35CF62F8DE93E01EBFCE3BA0",
+        "name" : "vreaderUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

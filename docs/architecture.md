@@ -314,8 +314,13 @@ vreaderUITests/Verification/
   with `test`; the `_verify_` infix preserves the descriptive feature
   slug for grep-friendly mapping (`test_verify_feature_<NN>_<scenario>`).
   The verification harness runs on its own cadence by `-only-testing:
-  vreaderUITests/<Class>` invocations or by a named test plan (Feature
-  #45 WI-6, pending). Bug #192 (GH #686, 2026-05-15) fixed an earlier
+  vreaderUITests/<Class>` invocations or by the named `Verification`
+  test plan: `xcodebuild test -scheme vreader -testPlan Verification`
+  (Feature #45 WI-6). The plan lives at `TestPlans/Verification.xctestplan`
+  and selects exactly 25 `test_verify_*` per-method identifiers across
+  the 13 classes listed below; the default plan
+  `TestPlans/All.xctestplan` runs the full `vreaderTests` + `vreaderUITests`
+  suites on no-flag `xcodebuild test` / `Cmd+U`. Bug #192 (GH #686, 2026-05-15) fixed an earlier
   shape where these methods used a plain `verify_` prefix — they were
   XCTest-invisible and the entire 13-class verification suite had
   been silently no-opping (`Executed 0 tests` + `TEST SUCCEEDED` =
