@@ -1,0 +1,10 @@
+{
+  "bridge" : "epub",
+  "fingerprintKey" : "epub:f284fd074ccd1d3c1a78985464d9e1be27975f4029f3c2ddef8428ca10684af4:2198",
+  "format" : "epub",
+  "result" : {
+    "count" : 0,
+    "html" : "\n  <h1 xmlns=\"http:\/\/www.w3.org\/1999\/xhtml\">Chapter Two<\/h1>\n  <p xmlns=\"http:\/\/www.w3.org\/1999\/xhtml\">The second chapter exists so navigation between chapters can be tested. It is shorter than the first by design.<\/p>\n  <p xmlns=\"http:\/\/www.w3.org\/1999\/xhtml\">End of fixture.<\/p>\n"
+  },
+  "ts" : "2026-05-15T16:10:29Z"
+}
