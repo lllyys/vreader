@@ -100,6 +100,12 @@ enum AccessibilityID {
     static let autoPageTurnToggle = "autoPageTurnToggle"
     static let autoPageTurnIntervalSlider = "autoPageTurnIntervalSlider"
 
+    // MARK: - Reader Settings — Chinese conversion (Feature #28)
+    /// Bug #194: the segmented Picker's "Chinese Text" label is hidden by
+    /// `.pickerStyle(.segmented)` — only segments render as static text.
+    /// Tests query this stable identifier on the Picker wrapper instead.
+    static let chineseTextPicker = "chineseTextPicker"
+
     // MARK: - EPUB reader
     static let epubReaderContainer = "epubReaderContainer"
     static let epubReaderContent = "epubReaderContent"

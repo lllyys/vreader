@@ -40,6 +40,16 @@ final class Feature28ChineseConversionVerificationTests: XCTestCase {
     /// Verifies the Chinese Text segmented picker is present in the
     /// reader settings panel. The picker may be disabled depending on the
     /// format/mode, but its presence is the contract under test.
+    ///
+    /// Bug #194 (GH #694): the prior shape of this test looked for a
+    /// `staticTexts["Chinese Text"]` section header. Production renders
+    /// the picker with `Picker("Chinese Text", ...).pickerStyle(.segmented)`
+    /// — the "Chinese Text" string is the picker's label, NOT a section
+    /// header, and `.pickerStyle(.segmented)` hides the label so it never
+    /// appears as a static text. The test now queries the stable
+    /// `chineseTextPicker` accessibility identifier wired in production
+    /// via `app.descendants(matching:.any).matching(identifier:).firstMatch`
+    /// — same pattern as Bug #193's OPDS fix.
     func test_verify_feature_28_chinese_text_picker_present() throws {
         tapFirstBook(in: app)
 
@@ -51,14 +61,20 @@ final class Feature28ChineseConversionVerificationTests: XCTestCase {
         let panel = settingsHelper.openReaderSettings()
         XCTAssertTrue(panel.exists, "Reader settings panel should be present")
 
-        // Scroll until the Chinese Text section header appears.
-        // The section may be below the fold; helper swipes up to find it.
-        settingsHelper.scrollToSection("Chinese Text", in: panel, maxSwipes: 6)
+        // Scroll up to bring the Chinese conversion section into view if needed.
+        // The picker is below the fold for some formats; up to 6 swipes is
+        // sufficient for the current panel layout.
+        let picker = app.descendants(matching: .any)
+            .matching(identifier: AccessibilityID.chineseTextPicker)
+            .firstMatch
+        for _ in 0..<6 {
+            if picker.exists { break }
+            panel.swipeUp()
+        }
 
-        let header = panel.staticTexts["Chinese Text"]
         XCTAssertTrue(
-            header.exists,
-            "Chinese Text section header should be present in the reader settings panel"
+            picker.waitForExistence(timeout: 3),
+            "Chinese Text picker (id=\(AccessibilityID.chineseTextPicker)) should be present in the reader settings panel"
         )
 
         settingsHelper.closeReaderSettings()

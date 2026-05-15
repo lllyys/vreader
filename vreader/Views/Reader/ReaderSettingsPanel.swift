@@ -539,6 +539,7 @@ struct ReaderSettingsPanel: View {
             }
             .pickerStyle(.segmented)
             .disabled(chineseConversionDisableReason != nil)
+            .accessibilityIdentifier("chineseTextPicker")
             .accessibilityLabel("Chinese text conversion")
             .accessibilityHint(chineseConversionAccessibilityHint)
         } footer: {
