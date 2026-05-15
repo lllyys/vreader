@@ -561,6 +561,16 @@ struct TXTReaderContainerView: View {
             chapterIndex: viewModel.currentChapterIdx,
             chapters: viewModel.chapterIndex?.chapters ?? []
         )
+        // Bug #202: chapter mode also needs the UUID-keyed lookup, translated
+        // to chapter-local offsets. Without this the bridge's
+        // `handleContentTap` hit-test always returns nil and the tap falls
+        // through to chrome-toggle instead of opening the inline edit/delete
+        // menu (Feature #53 acceptance criterion (a) for TXT).
+        let chapterLookup = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: viewModel.currentChapterIdx,
+            chapters: viewModel.chapterIndex?.chapters ?? [],
+            globalLookup: uiState.persistedHighlightLookup
+        )
         let chapters = viewModel.chapterIndex?.chapters ?? []
         let localScrollOffset = Self.chapterLocalScrollOffset(
             globalOffset: uiState.scrollToOffset,
@@ -584,6 +594,11 @@ struct TXTReaderContainerView: View {
                 highlightRange: highlights.temp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 persistedHighlights: highlights.persisted,
+                persistedHighlightLookup: chapterLookup,
+                highlightActionPresenter: UIKitHighlightActionPresenter(),
+                onHighlightTapAction: { [highlightCoordinator] action, id in
+                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
+                },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 delegate: viewModel
             )

@@ -66,6 +66,45 @@ enum TXTChapterHighlightHelper {
         )
     }
 
+    /// Filters and translates a UUID-keyed lookup of global highlight ranges
+    /// to chapter-local. Preserves the UUID; clips ranges spanning the chapter
+    /// boundary; drops entries entirely outside the chapter. Mirrors
+    /// `highlightsForChapter` but carries the highlight ID through so the
+    /// bridge's tap-on-highlight hit-test can resolve the right UUID for the
+    /// inline edit/delete menu in chapter mode (Bug #202).
+    static func lookupForChapter(
+        chapterIndex: Int,
+        chapters: [TXTChapter],
+        globalLookup: [PersistedHighlightLookupEntry]
+    ) -> [PersistedHighlightLookupEntry] {
+        guard chapterIndex >= 0, chapterIndex < chapters.count else { return [] }
+        let chapter = chapters[chapterIndex]
+        guard chapter.globalStartUTF16 >= 0, chapter.textLengthUTF16 > 0 else { return [] }
+
+        let chapterStart = chapter.globalStartUTF16
+        let chapterEnd = chapterStart + chapter.textLengthUTF16
+
+        return globalLookup.compactMap { entry in
+            let rangeStart = entry.range.location
+            let rangeEnd = entry.range.location + entry.range.length
+
+            // Skip if entirely outside this chapter
+            guard rangeEnd > chapterStart, rangeStart < chapterEnd else { return nil }
+
+            // Clip to chapter boundaries
+            let clippedStart = max(rangeStart, chapterStart)
+            let clippedEnd = min(rangeEnd, chapterEnd)
+
+            return PersistedHighlightLookupEntry(
+                id: entry.id,
+                range: NSRange(
+                    location: clippedStart - chapterStart,
+                    length: clippedEnd - clippedStart
+                )
+            )
+        }
+    }
+
     /// Translates a global scroll offset to chapter-local for bridge navigation.
     static func toChapterLocalOffset(
         globalUTF16: Int,

@@ -89,13 +89,63 @@ struct TXTReaderContainerHighlightCoordinatorWiringTests {
         let source = try Self.loadContainerSource()
         // Both small-file (readerContent) and chunked (chunkedReaderContent)
         // bridge instantiations must read `uiState.persistedHighlightRanges`.
-        // The chapter path (chapterReaderContent) intentionally hardcodes []
-        // because chapter-local offset translation is WI-7.
+        // Chapter path (chapterReaderContent) translates global ranges to
+        // chapter-local via `chapterLocalHighlightRanges` (returns
+        // `highlights.persisted`) — that translation path is exercised by
+        // `chapterPassesPersistedHighlightLookup` below.
         let required = "persistedHighlights: uiState.persistedHighlightRanges"
         let occurrences = source.components(separatedBy: required).count - 1
         #expect(
             occurrences >= 2,
             "TXTReaderContainerView must pass `uiState.persistedHighlightRanges` to TXTTextViewBridge in BOTH the small-file (readerContent) and chunked (chunkedReaderContent) paths. Found \(occurrences) occurrence(s); expected ≥ 2. See bug #160 / GH #476."
+        )
+    }
+
+    /// Bug #202 / GH #740: the chapter-mode TXT path (`chapterReaderContent`)
+    /// was missing three of the WI-2/WI-2b parameters that the small-file
+    /// path (`readerContent`) and chunked path (`chunkedReaderContent`) both
+    /// pass to the bridge. Without these, the bridge's `persistedHighlightLookup`
+    /// stays empty and `handleContentTap` falls through to chrome-toggle
+    /// instead of presenting the inline edit/delete menu. The fix passes the
+    /// chapter-local lookup + the same presenter and onAction the other two
+    /// paths use. These three source-check tests pin the wiring so a future
+    /// refactor cannot regress it.
+
+    @Test func chapterPassesHighlightActionPresenter() throws {
+        let source = try Self.loadContainerSource()
+        // Required in all three bridge call sites (small-file, chunked, chapter).
+        let required = "highlightActionPresenter: UIKitHighlightActionPresenter()"
+        let occurrences = source.components(separatedBy: required).count - 1
+        #expect(
+            occurrences >= 3,
+            "TXTReaderContainerView must pass `highlightActionPresenter: UIKitHighlightActionPresenter()` to TXTTextViewBridge in ALL THREE paths (readerContent, chunkedReaderContent, chapterReaderContent). Found \(occurrences) occurrence(s); expected ≥ 3. See bug #202 / GH #740."
+        )
+    }
+
+    @Test func chapterPassesOnHighlightTapAction() throws {
+        let source = try Self.loadContainerSource()
+        // The closure form `onHighlightTapAction: { [highlightCoordinator] action, id in ... }`
+        // is identical across the three call sites; pin the leading token.
+        let required = "onHighlightTapAction: { [highlightCoordinator] action, id in"
+        let occurrences = source.components(separatedBy: required).count - 1
+        #expect(
+            occurrences >= 3,
+            "TXTReaderContainerView must pass an `onHighlightTapAction` closure to TXTTextViewBridge in ALL THREE paths. Found \(occurrences) occurrence(s); expected ≥ 3. See bug #202 / GH #740."
+        )
+    }
+
+    @Test func chapterPassesPersistedHighlightLookup() throws {
+        let source = try Self.loadContainerSource()
+        // Small-file + chunked use `persistedHighlightLookup: uiState.persistedHighlightLookup`.
+        // Chapter mode uses the chapter-local translation `highlights.lookup` from the
+        // `chapterLocalHighlightRanges`-equivalent helper that returns the lookup too.
+        // So the parameter LABEL must appear in 3 places (one of which may use a
+        // different RHS).
+        let label = "persistedHighlightLookup:"
+        let occurrences = source.components(separatedBy: label).count - 1
+        #expect(
+            occurrences >= 3,
+            "TXTReaderContainerView must pass `persistedHighlightLookup:` to TXTTextViewBridge in ALL THREE paths. Found \(occurrences) occurrence(s); expected ≥ 3. See bug #202 / GH #740."
         )
     }
 }

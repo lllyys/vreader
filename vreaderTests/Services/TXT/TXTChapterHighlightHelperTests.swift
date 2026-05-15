@@ -275,4 +275,113 @@ struct TXTChapterHighlightHelperTests {
         )
         #expect(result == 0)
     }
+
+    // MARK: - lookupForChapter (Bug #202)
+
+    /// `lookupForChapter` is the UUID-preserving sibling of `highlightsForChapter`.
+    /// `chapterReaderContent` needs chapter-local lookup entries so the bridge's
+    /// tap-on-highlight hit-test resolves to the right UUID in chapter mode.
+    /// Previously, only `highlightsForChapter` (range-only) was passed through,
+    /// leaving the bridge's lookup empty and causing chrome-toggle to win the tap.
+
+    @Test("lookupForChapter — empty lookup returns empty")
+    func testLookupForChapterEmpty() {
+        let result = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: 1,
+            chapters: Self.chapters,
+            globalLookup: []
+        )
+        #expect(result.isEmpty)
+    }
+
+    @Test("lookupForChapter — entry within chapter — preserves UUID and translates range")
+    func testLookupForChapterWithinChapter() {
+        let id = UUID()
+        let global = [
+            PersistedHighlightLookupEntry(id: id, range: NSRange(location: 110, length: 30))
+        ]
+        let result = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: 1,
+            chapters: Self.chapters,
+            globalLookup: global
+        )
+        #expect(result.count == 1)
+        #expect(result[0].id == id)
+        #expect(result[0].range == NSRange(location: 10, length: 30))
+    }
+
+    @Test("lookupForChapter — entries outside chapter are filtered out")
+    func testLookupForChapterFiltersOutsideEntries() {
+        let inside = PersistedHighlightLookupEntry(id: UUID(), range: NSRange(location: 110, length: 20))
+        let before = PersistedHighlightLookupEntry(id: UUID(), range: NSRange(location: 0, length: 50))
+        let after = PersistedHighlightLookupEntry(id: UUID(), range: NSRange(location: 260, length: 30))
+        let result = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: 1,
+            chapters: Self.chapters,
+            globalLookup: [before, inside, after]
+        )
+        #expect(result.count == 1)
+        #expect(result[0].id == inside.id)
+    }
+
+    @Test("lookupForChapter — entry spanning chapter boundary is clipped to chapter")
+    func testLookupForChapterClipsSpanningEntry() {
+        let id = UUID()
+        // Global [80, 130) spans chapter 1 [0..100) and chapter 2 [100..250).
+        let global = [
+            PersistedHighlightLookupEntry(id: id, range: NSRange(location: 80, length: 50))
+        ]
+        // For chapter 1: clipped to [80, 100) → local [80, 20len)
+        let ch1 = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: 0,
+            chapters: Self.chapters,
+            globalLookup: global
+        )
+        #expect(ch1.count == 1)
+        #expect(ch1[0].id == id)
+        #expect(ch1[0].range == NSRange(location: 80, length: 20))
+        // For chapter 2: clipped to [100, 130) → local [0, 30len)
+        let ch2 = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: 1,
+            chapters: Self.chapters,
+            globalLookup: global
+        )
+        #expect(ch2.count == 1)
+        #expect(ch2[0].id == id)
+        #expect(ch2[0].range == NSRange(location: 0, length: 30))
+    }
+
+    @Test("lookupForChapter — chapter index out of bounds returns empty")
+    func testLookupForChapterOutOfBounds() {
+        let global = [
+            PersistedHighlightLookupEntry(id: UUID(), range: NSRange(location: 10, length: 20))
+        ]
+        let result = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: 99,
+            chapters: Self.chapters,
+            globalLookup: global
+        )
+        #expect(result.isEmpty)
+    }
+
+    @Test("lookupForChapter — multiple entries inside same chapter preserve order and UUIDs")
+    func testLookupForChapterMultipleEntriesPreserveOrder() {
+        let id1 = UUID()
+        let id2 = UUID()
+        // Both in chapter 2 [100..250)
+        let global = [
+            PersistedHighlightLookupEntry(id: id1, range: NSRange(location: 110, length: 20)),
+            PersistedHighlightLookupEntry(id: id2, range: NSRange(location: 200, length: 30)),
+        ]
+        let result = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: 1,
+            chapters: Self.chapters,
+            globalLookup: global
+        )
+        #expect(result.count == 2)
+        #expect(result[0].id == id1)
+        #expect(result[0].range == NSRange(location: 10, length: 20))
+        #expect(result[1].id == id2)
+        #expect(result[1].range == NSRange(location: 100, length: 30))
+    }
 }
