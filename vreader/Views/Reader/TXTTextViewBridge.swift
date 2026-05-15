@@ -39,6 +39,12 @@ struct TXTTextViewBridge: UIViewRepresentable {
     /// Persisted highlight ranges loaded from DB on file open (bug #55).
     /// Applied as yellow background attributes that survive text rebuilds.
     var persistedHighlights: [NSRange] = []
+    /// Parallel lookup mapping each persisted range to its highlight UUID
+    /// (Feature #53 WI-2). Used by the bridge coordinator's tap handler
+    /// to resolve a tap → highlight ID for the inline edit/delete menu.
+    /// Defaults to empty so existing callers stay source-compatible until
+    /// they wire the lookup; in that case the chrome-toggle path remains.
+    var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
     /// Top safe-area inset added on top of `config.textInset.top` so the first
     /// line of text clears the Dynamic Island / status bar. Bug #179 (mirrors
     /// bug #163 for EPUB). Default `0` preserves prior behaviour for callers
@@ -81,6 +87,7 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // Store base text in coordinator, set source text + highlight ranges separately.
         context.coordinator.baseAttributedText = buildBaseAttributedText()
         context.coordinator.persistedHighlights = persistedHighlights
+        context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         context.coordinator.lastAppliedText = text
         context.coordinator.lastAppliedAttrText = attributedText
         // Set highlights first so drawBackground has correct ranges during initial layout.
@@ -146,6 +153,12 @@ struct TXTTextViewBridge: UIViewRepresentable {
         }
         if persistedChanged {
             context.coordinator.persistedHighlights = persistedHighlights
+        }
+        // Keep the WI-2 lookup in sync regardless of `persistedChanged`'s
+        // NSRange-only diff: a record's UUID can change (e.g., delete then
+        // re-create at the same range) without the range array changing.
+        if context.coordinator.persistedHighlightLookup != persistedHighlightLookup {
+            context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         }
         if highlightChanged {
             context.coordinator.currentHighlightRange = highlightRange

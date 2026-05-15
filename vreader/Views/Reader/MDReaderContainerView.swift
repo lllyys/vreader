@@ -327,6 +327,7 @@ struct MDReaderContainerView: View {
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 persistedHighlights: uiState.persistedHighlightRanges,
+                persistedHighlightLookup: uiState.persistedHighlightLookup,
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 delegate: viewModel
             )

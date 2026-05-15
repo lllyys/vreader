@@ -33,6 +33,11 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
     var highlightIsTemporary: Bool = true
     /// Persisted highlight ranges loaded from DB on file open.
     var persistedHighlightRanges: [NSRange] = []
+    /// Parallel lookup mapping each persisted range to its highlight UUID,
+    /// used by tap-on-highlight hit-test (Feature #53 WI-2).
+    /// `persistedHighlightRanges` is kept separate so the layout-manager
+    /// painter contract is unchanged.
+    var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
     /// Pending annotation info for the "Add Note" flow.
     var pendingAnnotationInfo: TextSelectionInfo?
     /// Text input for the annotation note.
@@ -125,13 +130,27 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
     // MARK: - Highlight Persistence
 
     /// Loads persisted highlight ranges from fetched DB records.
+    /// WI-2: also populates `persistedHighlightLookup` so the bridge
+    /// coordinator can resolve a tapped range back to its highlight UUID
+    /// for the inline edit/delete menu.
     func refreshPersistedHighlights(from records: [HighlightRecord]) {
-        persistedHighlightRanges = records.compactMap { record in
+        var ranges: [NSRange] = []
+        var lookup: [PersistedHighlightLookupEntry] = []
+        ranges.reserveCapacity(records.count)
+        lookup.reserveCapacity(records.count)
+        for record in records {
             guard let start = record.locator.charRangeStartUTF16,
                   let end = record.locator.charRangeEndUTF16,
-                  end > start else { return nil }
-            return NSRange(location: start, length: end - start)
+                  end > start else { continue }
+            let range = NSRange(location: start, length: end - start)
+            ranges.append(range)
+            lookup.append(PersistedHighlightLookupEntry(
+                id: record.highlightId,
+                range: range
+            ))
         }
+        persistedHighlightRanges = ranges
+        persistedHighlightLookup = lookup
     }
 }
 #endif

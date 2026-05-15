@@ -18,6 +18,11 @@ extension TXTTextViewBridge {
         var baseAttributedText: NSAttributedString?
         /// Persisted highlight ranges from DB (bug #55). Stored for timer rebuild.
         var persistedHighlights: [NSRange] = []
+        /// Parallel lookup mapping ranges to their highlight UUIDs. Used by
+        /// `handleContentTap` to resolve a tap on a painted range back to
+        /// the original `HighlightRecord.highlightId` for the inline-menu
+        /// dispatcher. Feature #53 WI-2 / GH #596.
+        var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
         /// Active search/navigation highlight range (bug #43).
         var currentHighlightRange: NSRange?
         /// Timer to auto-clear temporary highlight after 3s (bug #54).
@@ -173,11 +178,90 @@ extension TXTTextViewBridge {
         // MARK: - Content Tap (Toolbar Toggle)
 
         @objc func handleContentTap(_ gesture: UITapGestureRecognizer) {
+            // Feature #53 WI-2: hit-test against persisted highlight ranges
+            // first. On hit, post `.readerHighlightTapped` and SKIP the
+            // chrome-toggle path so a tap on a highlight reliably opens the
+            // inline edit/delete menu (acceptance criterion d: "tapping
+            // non-highlighted text preserves existing scroll/chrome-toggle
+            // behavior" — symmetric: tapping a highlight overrides it).
+            if let tv = gesture.view as? UITextView,
+               !persistedHighlightLookup.isEmpty,
+               let event = Self.resolveHighlightTap(
+                   gesture: gesture,
+                   in: tv,
+                   lookup: persistedHighlightLookup
+               ) {
+                NotificationCenter.default.post(
+                    name: .readerHighlightTapped,
+                    object: event
+                )
+                return
+            }
             clearSearchHighlightIfTemporary()
             if let tv = gesture.view as? UITextView {
                 rebuildHighlights(in: tv)
             }
             TXTBridgeShared.postContentTappedNotification()
+        }
+
+        /// Resolves a tap into a `ReaderHighlightTapEvent` if the location
+        /// lands inside a persisted highlight range. Returns nil when the
+        /// tap misses every range (caller falls back to chrome-toggle).
+        ///
+        /// Extracted as static + internal so unit tests can drive it
+        /// against a real UITextView fixture without going through a live
+        /// UITapGestureRecognizer (UIKit's gesture system is hard to fake).
+        @MainActor
+        static func resolveHighlightTap(
+            gesture: UITapGestureRecognizer,
+            in textView: UITextView,
+            lookup: [PersistedHighlightLookupEntry]
+        ) -> ReaderHighlightTapEvent? {
+            let tapPoint = gesture.location(in: textView)
+            return resolveHighlightTap(
+                tapPoint: tapPoint, in: textView, lookup: lookup
+            )
+        }
+
+        /// Pure-point overload. Tests construct a CGPoint directly.
+        @MainActor
+        static func resolveHighlightTap(
+            tapPoint: CGPoint,
+            in textView: UITextView,
+            lookup: [PersistedHighlightLookupEntry]
+        ) -> ReaderHighlightTapEvent? {
+            guard !lookup.isEmpty else { return nil }
+            let inset = textView.textContainerInset
+            let containerPoint = CGPoint(
+                x: tapPoint.x - inset.left,
+                y: tapPoint.y - inset.top
+            )
+            let lm = textView.layoutManager
+            let charIndex = lm.characterIndex(
+                for: containerPoint,
+                in: textView.textContainer,
+                fractionOfDistanceBetweenInsertionPoints: nil
+            )
+            guard let hit = TextHighlightHitTester.hitTest(
+                charIndex: charIndex, in: lookup
+            ) else { return nil }
+            let glyphRange = lm.glyphRange(
+                forCharacterRange: hit.range, actualCharacterRange: nil
+            )
+            let containerRect = lm.boundingRect(
+                forGlyphRange: glyphRange,
+                in: textView.textContainer
+            )
+            // Re-apply the inset to convert container-rect → textView-rect,
+            // then convert to window/screen space for popover anchoring.
+            let viewRect = containerRect.offsetBy(
+                dx: inset.left, dy: inset.top
+            )
+            let windowRect = textView.convert(viewRect, to: nil)
+            return ReaderHighlightTapEvent(
+                highlightID: hit.id,
+                sourceRect: windowRect
+            )
         }
 
         func gestureRecognizer(
