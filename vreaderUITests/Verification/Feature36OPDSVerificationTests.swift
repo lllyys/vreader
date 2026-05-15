@@ -39,12 +39,18 @@ final class Feature36OPDSVerificationTests: XCTestCase {
         opdsButton.tap()
 
         // Either the catalog list exists (with prior catalogs) or the
-        // empty-state view exists — both are valid UI surfaces.
-        let listExists = app.collectionViews[AccessibilityID.opdsCatalogList].waitForExistence(timeout: 5)
-        let emptyStateExists = app.otherElements[AccessibilityID.opdsEmptyState].exists
-        let anyListExists = app.scrollViews[AccessibilityID.opdsCatalogList].exists
+        // empty-state view exists — both are valid UI surfaces. Bug #193
+        // (GH #689): SwiftUI `List` renders as `table` (not `collectionView`
+        // or `scrollView`) and `VStack` is transparent in the accessibility
+        // tree (not `otherElements`), so the original element-class lookups
+        // never matched. Use a broad descendant query keyed on the
+        // accessibility identifier, which works regardless of element type.
+        let opdsList = app.descendants(matching: .any).matching(identifier: AccessibilityID.opdsCatalogList).firstMatch
+        let opdsEmptyState = app.descendants(matching: .any).matching(identifier: AccessibilityID.opdsEmptyState).firstMatch
+        let surfaceExists = opdsList.waitForExistence(timeout: 5)
+            || opdsEmptyState.exists
         XCTAssertTrue(
-            listExists || emptyStateExists || anyListExists,
+            surfaceExists,
             "OPDS catalogs view should show either the catalog list or the empty state"
         )
 
