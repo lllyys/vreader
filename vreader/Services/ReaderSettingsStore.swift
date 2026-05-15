@@ -157,14 +157,34 @@ final class ReaderSettingsStore {
     var uiFont: UIFont {
         ReaderTypography.body(for: typography.fontFamily, size: typography.fontSize)
     }
-    var uiBackgroundColor: UIColor { theme.backgroundColor }
-    var uiTextColor: UIColor { theme.textColor }
-    var uiSecondaryTextColor: UIColor { theme.secondaryTextColor }
+    // Feature #60 WI-5: route TXT/MD reader colors through
+    // `ReaderThemeV2`'s token surface. `theme.asV2` projects the
+    // legacy 3-case enum (.light → .paper, .sepia → .sepia, .dark →
+    // .dark) so existing persisted settings keep working; the
+    // 5-token surface (`backgroundColor` / `inkColor` / `subColor`)
+    // replaces the legacy 3-color palette so TXT and MD pick up
+    // the new visual identity. EPUB went through the same
+    // projection in WI-4.
+    var uiBackgroundColor: UIColor { theme.asV2.backgroundColor }
+    var uiTextColor: UIColor { theme.asV2.inkColor }
+    var uiSecondaryTextColor: UIColor { theme.asV2.subColor }
     var lineSpacingPoints: CGFloat { typography.fontSize * (typography.lineSpacing - 1.0) }
     var cjkLetterSpacing: CGFloat { typography.cjkSpacing ? typography.fontSize * 0.05 : 0 }
     #endif
     #if canImport(UIKit)
-    var mdRenderConfig: MDRenderConfig { MDRenderConfig(fontSize: typography.fontSize, lineSpacing: lineSpacingPoints, textColor: uiTextColor) }
+    var mdRenderConfig: MDRenderConfig {
+        // Feature #60 WI-5: thread the V2 token surface through the
+        // Markdown renderer so blockquotes and code-block backgrounds
+        // pick up per-theme colors instead of platform defaults.
+        let v2 = theme.asV2
+        return MDRenderConfig(
+            fontSize: typography.fontSize,
+            lineSpacing: lineSpacingPoints,
+            textColor: uiTextColor,
+            secondaryColor: v2.subColor,
+            codeBackgroundColor: v2.paperColor
+        )
+    }
     var txtViewConfig: TXTViewConfig {
         var c = TXTViewConfig(); c.fontSize = typography.fontSize; c.lineSpacing = lineSpacingPoints
         c.textColor = uiTextColor; c.backgroundColor = uiBackgroundColor; c.letterSpacing = cjkLetterSpacing

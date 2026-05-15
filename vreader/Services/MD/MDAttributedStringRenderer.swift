@@ -204,13 +204,16 @@ enum MDAttributedStringRenderer {
         let codeText = codeLines.joined(separator: "\n") + "\n"
 
         #if canImport(UIKit)
+        // Feature #60 WI-5: code-block background follows the active
+        // theme via `config.codeBackgroundColor` (V2 `paperColor`)
+        // instead of the platform-default `.secondarySystemBackground`.
         let monoFont = UIFont.monospacedSystemFont(ofSize: config.fontSize * 0.9, weight: .regular)
         let attrStr = NSAttributedString(
             string: codeText,
             attributes: [
                 .font: monoFont,
                 .foregroundColor: config.textColor,
-                .backgroundColor: UIColor.secondarySystemBackground,
+                .backgroundColor: config.codeBackgroundColor,
             ]
         )
         #else
@@ -233,9 +236,12 @@ enum MDAttributedStringRenderer {
         paragraphStyle.firstLineHeadIndent = 20
 
         #if canImport(UIKit)
+        // Feature #60 WI-5: blockquote text color follows the active
+        // theme via `config.secondaryColor` (V2 `subColor`) instead
+        // of the platform-default `.secondaryLabel`.
         let attrs: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: config.fontSize),
-            .foregroundColor: UIColor.secondaryLabel,
+            .foregroundColor: config.secondaryColor,
             .paragraphStyle: paragraphStyle,
         ]
         #else

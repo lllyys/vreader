@@ -347,5 +347,38 @@ struct MDAttributedStringRendererFontTests {
         let color = attrs[.foregroundColor] as? UIColor
         #expect(color == UIColor.secondaryLabel)
     }
+
+    // MARK: - Feature #60 WI-5 (Codex Gate 4 round 1 residual gap)
+    //
+    // Prove the renderer consumes the new `MDRenderConfig.secondaryColor`
+    // and `.codeBackgroundColor` fields when they differ from the
+    // platform defaults — a regression that ignored the config and
+    // re-hard-coded `secondaryLabel` / `secondarySystemBackground`
+    // would still pass the default-config tests above.
+
+    @Test("blockquote consumes injected secondaryColor")
+    func blockquoteUsesConfigSecondaryColor() {
+        var cfg = MDRenderConfig.default
+        cfg.secondaryColor = UIColor.red
+        let result = MDAttributedStringRenderer.render(text: "> quote", config: cfg)
+        let attrStr = result.renderedAttributedString
+        var range = NSRange()
+        let attrs = attrStr.attributes(at: 0, effectiveRange: &range)
+        #expect((attrs[.foregroundColor] as? UIColor) == UIColor.red,
+                "Renderer must apply MDRenderConfig.secondaryColor to blockquote text — proves WI-5 plumbing reaches the renderer")
+    }
+
+    @Test("fenced code block consumes injected codeBackgroundColor")
+    func fencedCodeBlockUsesConfigCodeBackground() {
+        var cfg = MDRenderConfig.default
+        cfg.codeBackgroundColor = UIColor.green
+        let md = "```\ncode\n```"
+        let result = MDAttributedStringRenderer.render(text: md, config: cfg)
+        let attrStr = result.renderedAttributedString
+        var range = NSRange()
+        let attrs = attrStr.attributes(at: 0, effectiveRange: &range)
+        #expect((attrs[.backgroundColor] as? UIColor) == UIColor.green,
+                "Renderer must apply MDRenderConfig.codeBackgroundColor to fenced code blocks — proves WI-5 plumbing reaches the renderer")
+    }
 }
 #endif

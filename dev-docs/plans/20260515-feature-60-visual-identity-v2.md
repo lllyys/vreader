@@ -535,6 +535,20 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   `Equatable + Sendable` only (not `Codable`). Test catalogue
   expanded to 8 NamedHighlightColor tests + 3 SelectionPopoverAction
   tests + 2 AccentColor tests.
+- 2026-05-16 v4: WI-5 shipped (Gate 3 + Gate 4). Codex thread
+  `019e2e0a-cce5-76f0-97d8-f2d794d71b6e`, 2 rounds, final verdict
+  `ship-as-is`. Round 1 caught: (a) WI-5 was incomplete for MD —
+  blockquote bodies and fenced-code backgrounds still hard-coded
+  `UIColor.secondaryLabel` / `.secondarySystemBackground` (Medium —
+  fixed by extending `MDRenderConfig` with `secondaryColor` +
+  `codeBackgroundColor` fields plumbed from
+  `theme.asV2.subColor` / `.paperColor`); (b) alpha-only assertions
+  for `uiSecondaryTextColor` (Low — fixed by full RGB+alpha
+  pinning). Round 2: clean. Residual renderer-level test gap
+  (Codex flagged as "not a finding") closed inline by adding two
+  injection tests proving the new MDRenderConfig fields propagate.
+  20+ V2/renderer tests pass; 34 existing MD renderer tests
+  continue passing.
 - 2026-05-16 v3: WI-4 shipped (Gate 3 + Gate 4). Codex thread
   `019e2de0-9d1a-72d2-860d-f371205cd7bb`, 3 rounds, final verdict
   `ship-as-is`. Round 1 caught: (a) CSS url(...) escape gap +

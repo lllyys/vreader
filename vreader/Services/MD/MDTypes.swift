@@ -55,6 +55,22 @@ struct MDRenderConfig: @unchecked Sendable, Equatable {
     #if canImport(UIKit)
     /// Text color for body text.
     var textColor: UIColor = .label
+
+    /// Text color for secondary content (blockquote bodies). Feature
+    /// #60 WI-5: this carries `ReaderThemeV2.subColor` so blockquotes
+    /// pick up the per-theme alpha-blended dimmer-than-ink tint
+    /// instead of the platform-default `.secondaryLabel`.
+    /// Defaults to `.secondaryLabel` for backward compat with the
+    /// platform-default render path.
+    var secondaryColor: UIColor = .secondaryLabel
+
+    /// Surface color for code-block backgrounds. Feature #60 WI-5:
+    /// this carries `ReaderThemeV2.paperColor` so fenced code blocks
+    /// pick up the per-theme paper-stack surface instead of the
+    /// platform-default `.secondarySystemBackground`. The result is
+    /// a subtle elevated-surface tint that follows the active theme.
+    /// Defaults to `.secondarySystemBackground` for backward compat.
+    var codeBackgroundColor: UIColor = .secondarySystemBackground
     #endif
 
     /// Creates a default render config.
@@ -65,6 +81,8 @@ struct MDRenderConfig: @unchecked Sendable, Equatable {
         return lhs.fontSize == rhs.fontSize
             && lhs.lineSpacing == rhs.lineSpacing
             && lhs.textColor == rhs.textColor
+            && lhs.secondaryColor == rhs.secondaryColor
+            && lhs.codeBackgroundColor == rhs.codeBackgroundColor
         #else
         return lhs.fontSize == rhs.fontSize && lhs.lineSpacing == rhs.lineSpacing
         #endif

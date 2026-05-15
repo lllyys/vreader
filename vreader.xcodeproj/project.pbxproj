@@ -287,6 +287,7 @@
 		4D66B6E16F96E24A0B01F7A9 /* WebDAVBackupIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F1695C0E7481CB3EA2B8A3 /* WebDAVBackupIntegrationTests.swift */; };
 		4D82E64F299F0EEBA0FD2851 /* WebDAVServerProfileListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CABA711375AB3BAEB2F42CFE /* WebDAVServerProfileListView.swift */; };
 		4E2207CD7F48BCE945A0971C /* AIReaderIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E706779E64026004319957F /* AIReaderIntegrationTests.swift */; };
+		4E41A2349D76D4F0814C3FF1 /* TXTViewConfigThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F3E6C42E1711EF70E585526 /* TXTViewConfigThemeTests.swift */; };
 		4F2FEC62B6D23F67263EDF34 /* BackupProviderContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED150D276C082FEC194F2F31 /* BackupProviderContractTests.swift */; };
 		4FC1839FA29FE323CF45B3B2 /* BookmarkListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6CE6EA4B82CC966077E656F /* BookmarkListView.swift */; };
 		4FDDEB10D3E2014D806618AD /* SyncConflictResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8188B21271D103070EE8CDE6 /* SyncConflictResolver.swift */; };
@@ -995,6 +996,7 @@
 		1D579834E6924BB521873C38 /* FormatCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatCapabilitiesTests.swift; sourceTree = "<group>"; };
 		1EC15AFBBED7042657A406C9 /* OffsetMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffsetMap.swift; sourceTree = "<group>"; };
 		1F0072BB2EF5A87447A6101A /* ReaderSettingsThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsThemeTests.swift; sourceTree = "<group>"; };
+		1F3E6C42E1711EF70E585526 /* TXTViewConfigThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTViewConfigThemeTests.swift; sourceTree = "<group>"; };
 		1F9542255A6791C9BCB034DB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1FD65C0547DF264510657CA2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		20237121BB4ACF22C0818BA4 /* AIContextExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIContextExtractorTests.swift; sourceTree = "<group>"; };
@@ -2951,6 +2953,7 @@
 				B56E5394E251AA0C42AE3557 /* TOCChapterProgressTests.swift */,
 				D83492717235FB856C8A06ED /* TOCProviderTests.swift */,
 				96A2FE9743AF484093A21969 /* TTSServiceTests.swift */,
+				1F3E6C42E1711EF70E585526 /* TXTViewConfigThemeTests.swift */,
 				0A2A16647F198641F11AC9C1 /* WCAGContrastTests.swift */,
 				D90CA6776A077CBDC255F35C /* AI */,
 				43B645E5727AC8AABC7D49B1 /* AZW3 */,
@@ -3948,6 +3951,7 @@
 				01F374A01862EABBFB60CD7F /* TXTTextViewBridgeSafeAreaInsetTests.swift in Sources */,
 				E276113ABA6A03C93EE62848 /* TXTTextViewBridgeTests.swift in Sources */,
 				E9FB5CFE42A28D671A7DE83A /* TXTTocRuleEngineTests.swift in Sources */,
+				4E41A2349D76D4F0814C3FF1 /* TXTViewConfigThemeTests.swift in Sources */,
 				AA366A9AF508E95B64F9A5E0 /* TapZoneTests.swift in Sources */,
 				86A548B15E20C496319D524B /* TestSeederMDMultiPagePaginationTests.swift in Sources */,
 				BA1A8C44D94E4D7AB66AF0D7 /* TestSeederMDMultiPageTests.swift in Sources */,
@@ -4566,13 +4570,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 388;
+				CURRENT_PROJECT_VERSION = 389;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.23.11;
+				MARKETING_VERSION = 3.23.12;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4716,13 +4720,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 388;
+				CURRENT_PROJECT_VERSION = 389;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.23.11;
+				MARKETING_VERSION = 3.23.12;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
