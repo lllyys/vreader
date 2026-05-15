@@ -35,6 +35,12 @@ final class Feature29WebDAVVerificationTests: XCTestCase {
 
     /// Verifies the WebDAV settings UI surface is reachable and that the
     /// credentials form + Test button render correctly.
+    ///
+    /// Bug #195 (GH #695): pre-Feature-#52, the URL/username/password
+    /// fields lived directly on `WebDAVSettingsView`. Feature #52
+    /// (VERIFIED 2026-05-09) moved them into a per-profile edit sheet
+    /// reached via NavigationLink → profile list → Add. The test now
+    /// traverses that path.
     func test_verify_feature_29_webdav_backup_ui_available() throws {
         let settingsButton = app.buttons[AccessibilityID.settingsToolbarButton]
         guard settingsButton.waitForHittable(timeout: 8) else {
@@ -47,36 +53,65 @@ final class Feature29WebDAVVerificationTests: XCTestCase {
             "Settings view should appear after tapping settings toolbar button"
         )
 
-        // The WebDAV settings live in their own row in SettingsView. Scroll
-        // to find the WebDAV section / button.
-        let webdavURLField = app.textFields[AccessibilityID.webdavServerURL]
-
-        // The WebDAV section may need to be entered via a navigation row.
-        // Try direct presence first; if not, scroll and look for a row.
-        if !webdavURLField.waitForExistence(timeout: 3) {
-            // Look for a navigation row with "WebDAV" or "Backup" — common patterns.
-            let webdavRow = app.buttons.matching(
-                NSPredicate(format: "label CONTAINS[c] 'WebDAV' OR label CONTAINS[c] 'Backup'")
-            ).firstMatch
-            guard webdavRow.waitForExistence(timeout: 5) else {
-                throw XCTSkip("Cannot reach WebDAV settings section from Settings sheet")
-            }
-            webdavRow.tap()
+        // Enter the WebDAV settings panel via the "Backup" / "WebDAV"
+        // navigation row in Settings. The heuristic predicate handles
+        // both label wordings without depending on a brittle exact match.
+        let webdavSettingsRow = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] 'WebDAV' OR label CONTAINS[c] 'Backup'")
+        ).firstMatch
+        guard webdavSettingsRow.waitForExistence(timeout: 5) else {
+            throw XCTSkip("Cannot reach WebDAV settings section from Settings sheet")
         }
+        webdavSettingsRow.tap()
 
+        // Tap the "Servers" NavigationLink (`webdavServersNavLink`,
+        // Feature #52) to reach the profile list. Search element-type-
+        // agnostically — NavigationLink rendering varies by iOS version
+        // (button on iOS 17, may differ on future versions).
+        let serversNavLink = app.descendants(matching: .any)
+            .matching(identifier: AccessibilityID.webdavServersNavLink)
+            .firstMatch
         XCTAssertTrue(
-            webdavURLField.waitForExistence(timeout: 5),
-            "WebDAV Server URL field should be visible in WebDAV settings"
+            serversNavLink.waitForExistence(timeout: 5),
+            "WebDAVSettingsView should expose `webdavServersNavLink` to enter the profile list (Feature #52)"
+        )
+        serversNavLink.tap()
+
+        // Profile list is empty for a fresh seed; tap the toolbar "+"
+        // to open the edit sheet in add-mode.
+        let addProfileButton = app.buttons[AccessibilityID.addWebDAVProfileButton]
+        XCTAssertTrue(
+            addProfileButton.waitForExistence(timeout: 5),
+            "WebDAVServerProfileListView should expose `addWebDAVProfileButton`"
+        )
+        addProfileButton.tap()
+
+        // The edit sheet shows the URL + username TextFields and the
+        // Test Connection button — credentials form surface verified.
+        let urlField = app.textFields[AccessibilityID.webdavProfileEditServerURL]
+        XCTAssertTrue(
+            urlField.waitForExistence(timeout: 5),
+            "WebDAV Server URL field should be visible in the profile edit sheet"
         )
 
         XCTAssertTrue(
-            app.buttons[AccessibilityID.webdavTestButton].exists,
-            "WebDAV Test Connection button should be present"
+            app.textFields[AccessibilityID.webdavProfileEditUsername].exists,
+            "WebDAV Username field should be present in the profile edit sheet"
         )
 
+        // Connection section is present in the edit sheet. Bug #184's
+        // design hides the Test Connection BUTTON in add-mode (no
+        // existing keychain entry yet) and shows a footer note instead.
+        // Accept either surface — the Connection section exists.
+        let testButton = app.descendants(matching: .any)
+            .matching(identifier: AccessibilityID.webdavProfileEditTestConnection)
+            .firstMatch
+        let testNote = app.descendants(matching: .any)
+            .matching(identifier: AccessibilityID.webdavProfileEditTestConnectionNote)
+            .firstMatch
         XCTAssertTrue(
-            app.buttons[AccessibilityID.webdavSaveButton].exists,
-            "WebDAV Save button should be present"
+            testButton.exists || testNote.exists,
+            "WebDAV profile edit sheet should expose the Connection section either as the Test Connection button (edit-mode) or the add-mode footer note (per Bug #184 design)"
         )
     }
 

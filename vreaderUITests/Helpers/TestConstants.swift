@@ -141,11 +141,42 @@ enum AccessibilityID {
     static let pdfView = "pdfView"
 
     // MARK: - WebDAV Settings (Feature #29)
-    static let webdavServerURL = "webdavServerURL"
-    static let webdavUsername = "webdavUsername"
-    static let webdavPassword = "webdavPassword"
-    static let webdavTestButton = "webdavTestButton"
-    static let webdavSaveButton = "webdavSaveButton"
+    // Bug #195: Feature #52 (multi-WebDAV-server profiles, VERIFIED 2026-05-09)
+    // moved these fields out of a top-level WebDAV form into a profile-edit
+    // sheet reached via:
+    //   WebDAVSettingsView -> `webdavServersNavLink` (NavigationLink)
+    //                      -> WebDAVServerProfileListView
+    //                      -> `addWebDAVProfileButton` (toolbar +)
+    //                      -> WebDAVServerProfileEditSheet
+    // The pre-#52 identifiers below are NOT wired to any production view
+    // anymore but are kept in TestConstants to document the old surface
+    // and to fail a `grep` if a test still references them. New tests
+    // should use the `webdavProfileEdit*` identifiers under the
+    // "WebDAV Server Profile Edit Sheet" section below.
+    static let webdavServerURL = "webdavServerURL"               // STALE — no production wire
+    static let webdavUsername = "webdavUsername"                 // STALE — no production wire
+    static let webdavPassword = "webdavPassword"                 // STALE — no production wire
+    static let webdavTestButton = "webdavTestButton"             // STALE — no production wire
+    static let webdavSaveButton = "webdavSaveButton"             // STALE — no production wire
+
+    // MARK: - WebDAV Settings — top-level entry points (Feature #52)
+    /// NavigationLink from WebDAVSettingsView into the profile list.
+    static let webdavServersNavLink = "webdavServersNavLink"
+    /// Toolbar "+" on WebDAVServerProfileListView that opens the edit sheet
+    /// in add-mode.
+    static let addWebDAVProfileButton = "addWebDAVProfileButton"
+
+    // MARK: - WebDAV Server Profile Edit Sheet (Feature #52)
+    /// TextField for the server URL (https://...) inside the profile edit sheet.
+    static let webdavProfileEditServerURL = "webdavProfileEditServerURL"
+    /// TextField for the username inside the profile edit sheet.
+    static let webdavProfileEditUsername = "webdavProfileEditUsername"
+    /// Button row that runs a connection test from inside the edit sheet
+    /// (shown only in edit-mode — see Bug #184 design).
+    static let webdavProfileEditTestConnection = "webdavProfileEditTestConnection"
+    /// Add-mode footer note that replaces the Test Connection button until
+    /// the profile is saved (Bug #184 design).
+    static let webdavProfileEditTestConnectionNote = "webdavProfileEditTestConnectionNote"
     static let webdavBackupNowButton = "webdavBackupNowButton"
     static let webdavBackupErrorText = "webdavBackupErrorText"
 
