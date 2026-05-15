@@ -71,7 +71,7 @@ enum SearchHitToLocatorResolver {
             fingerprint: fingerprint,
             href: href,
             progression: 0, // Search doesn't know within-chapter position
-            textQuote: hit.snippet
+            textQuote: cleanSnippetForTextQuote(hit.snippet)
         )
     }
 
@@ -87,8 +87,59 @@ enum SearchHitToLocatorResolver {
         return LocatorFactory.pdf(
             fingerprint: fingerprint,
             page: page,
-            textQuote: hit.snippet
+            textQuote: cleanSnippetForTextQuote(hit.snippet)
         )
+    }
+
+    /// Strips display chrome from a search snippet so the resulting string is
+    /// safe to feed into plain-text matchers (`window.find()` for EPUB, PDFKit
+    /// `findString(_:withOptions:)` for PDF).
+    ///
+    /// `SearchQueryExecutor.extractSnippet` returns
+    /// `"...prefix<b>match</b>suffix..."` for display in the search results
+    /// list. Plain-text matchers cannot find literal `<b>` tags or leading
+    /// `...` ellipses in rendered DOM/page text, so the yellow search
+    /// highlight silently never paints when the raw snippet is stashed as
+    /// `textQuote` (Bug #182 / GH #594).
+    ///
+    /// Strategy: when the snippet contains a `<b>…</b>` pair, return just the
+    /// bolded text — that's the actual matched portion of the source. When the
+    /// bold pair is missing (defensive fallback for future snippet format
+    /// changes), strip leading/trailing `...` markers and any literal `<b>` /
+    /// `</b>` markers (the only HTML emitted by `extractSnippet` today). Other
+    /// angle-bracket text — math notation like `1 < 2 > 1`, generics — is
+    /// preserved verbatim. Returns `nil` for `nil` input or for snippets that
+    /// collapse to empty after cleaning.
+    static func cleanSnippetForTextQuote(_ snippet: String?) -> String? {
+        guard let snippet, !snippet.isEmpty else { return nil }
+
+        // Prefer the <b>…</b> matched portion: it's the exact substring of the
+        // chapter / page text that the matcher needs to find. Trim defensively
+        // — an empty or whitespace-only match (e.g. `<b></b>` from a corrupt
+        // snippet) would behave as "match everything" / "no-op" downstream
+        // depending on which matcher consumes it. Returning nil here lets the
+        // reader skip the highlight pass entirely instead of silently no-oping.
+        if let openRange = snippet.range(of: "<b>"),
+           let closeRange = snippet.range(
+               of: "</b>", range: openRange.upperBound..<snippet.endIndex
+           ) {
+            let match = String(snippet[openRange.upperBound..<closeRange.lowerBound])
+            let trimmed = match.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : match
+        }
+
+        // Fallback: strip the display chrome (leading/trailing ellipses and
+        // ONLY the specific `<b>` / `</b>` markers that extractSnippet emits).
+        // Deliberately narrow — a permissive `<...>` strip would mangle math
+        // notation like "1 < 2 > 1" or future snippet formats containing
+        // literal angle brackets.
+        var cleaned = snippet
+        while cleaned.hasPrefix("...") { cleaned.removeFirst(3) }
+        while cleaned.hasSuffix("...") { cleaned.removeLast(3) }
+        cleaned = cleaned.replacingOccurrences(of: "<b>", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "</b>", with: "")
+        let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func resolveTXT(

@@ -227,4 +227,175 @@ struct SearchHitToLocatorResolverTests {
         let locator = SearchHitToLocatorResolver.resolve(hit: hit, fingerprint: Self.txtFP)
         #expect(locator == nil)
     }
+
+    // MARK: - Snippet sanitization — Bug #182 / GH #594
+    //
+    // SearchQueryExecutor.extractSnippet returns "...prefix<b>match</b>suffix..."
+    // for display in the search results list. The EPUB reader feeds the locator's
+    // `textQuote` to `window.find()` (plain-text matcher); the PDF reader feeds it
+    // to PDFKit's `findString(_:withOptions:)` (also plain-text). Neither matcher
+    // can find a string with literal `<b>` tags or leading `...` ellipses, so the
+    // yellow search highlight silently never paints. Fix: the resolver must strip
+    // the snippet's display markers before stashing it as `textQuote`, preferring
+    // the bolded match (the actual found text) when present.
+
+    @Test func resolveEPUBHit_stripsBoldAndEllipsisFromTextQuote() {
+        let hit = SearchHit(
+            fingerprintKey: Self.epubFP.canonicalKey,
+            sourceUnitId: "epub:chapter1.xhtml",
+            snippet: "...The quick brown <b>fox</b> jumps over the lazy dog...",
+            matchStartOffsetUTF16: 16,
+            matchEndOffsetUTF16: 19
+        )
+
+        let locator = SearchHitToLocatorResolver.resolve(hit: hit, fingerprint: Self.epubFP)
+        #expect(locator != nil)
+        // The bolded match is the actual found text; that's the term that needs
+        // to land in window.find().
+        #expect(locator?.textQuote == "fox")
+    }
+
+    @Test func resolvePDFHit_stripsBoldAndEllipsisFromTextQuote() {
+        let hit = SearchHit(
+            fingerprintKey: Self.pdfFP.canonicalKey,
+            sourceUnitId: "pdf:page:5",
+            snippet: "...begin <b>middle</b> end...",
+            matchStartOffsetUTF16: 9,
+            matchEndOffsetUTF16: 15
+        )
+
+        let locator = SearchHitToLocatorResolver.resolve(hit: hit, fingerprint: Self.pdfFP)
+        #expect(locator != nil)
+        #expect(locator?.textQuote == "middle")
+    }
+
+    @Test func resolveEPUBHit_snippetWithoutBoldTags_fallsBackToStrippedText() {
+        // Defensive: if the snippet ever loses its <b> markers (FTS5 mode change,
+        // upstream refactor), the resolver should still strip leading/trailing
+        // ellipses and any straggling tags so the textQuote is plain-text.
+        let hit = SearchHit(
+            fingerprintKey: Self.epubFP.canonicalKey,
+            sourceUnitId: "epub:chapter1.xhtml",
+            snippet: "...some plain context fox jumps...",
+            matchStartOffsetUTF16: 22,
+            matchEndOffsetUTF16: 25
+        )
+
+        let locator = SearchHitToLocatorResolver.resolve(hit: hit, fingerprint: Self.epubFP)
+        #expect(locator != nil)
+        // Without <b> tags we can't recover just the match, but at minimum the
+        // ellipsis sentinels must be gone — they will always break plain-text
+        // matchers if left in.
+        let textQuote = locator?.textQuote ?? ""
+        #expect(!textQuote.hasPrefix("..."))
+        #expect(!textQuote.hasSuffix("..."))
+        #expect(!textQuote.contains("<b>"))
+        #expect(!textQuote.contains("</b>"))
+    }
+
+    @Test func resolveEPUBHit_snippetAtBoundary_handlesAbsentEllipsis() {
+        // Boundary case: when the match is at the very start or end of the
+        // chapter, extractSnippet omits one or both `...` markers. The bold
+        // match must still be extracted correctly.
+        let hit = SearchHit(
+            fingerprintKey: Self.epubFP.canonicalKey,
+            sourceUnitId: "epub:chapter1.xhtml",
+            snippet: "<b>Beginning</b> of the chapter goes here...",
+            matchStartOffsetUTF16: 0,
+            matchEndOffsetUTF16: 9
+        )
+
+        let locator = SearchHitToLocatorResolver.resolve(hit: hit, fingerprint: Self.epubFP)
+        #expect(locator != nil)
+        #expect(locator?.textQuote == "Beginning")
+    }
+
+    @Test func resolveEPUBHit_snippetWithUnicodeAndCJK_preservedInsideBold() {
+        // The match itself can contain Unicode, CJK, combining marks. The
+        // extractor must preserve them byte-for-byte — only the surrounding
+        // display chrome (ellipsis, <b>, </b>) is removed.
+        let hit = SearchHit(
+            fingerprintKey: Self.epubFP.canonicalKey,
+            sourceUnitId: "epub:chapter1.xhtml",
+            snippet: "...prelude <b>café résumé 北京</b> postlude...",
+            matchStartOffsetUTF16: 11,
+            matchEndOffsetUTF16: 22
+        )
+
+        let locator = SearchHitToLocatorResolver.resolve(hit: hit, fingerprint: Self.epubFP)
+        #expect(locator != nil)
+        #expect(locator?.textQuote == "café résumé 北京")
+    }
+
+    // MARK: - cleanSnippetForTextQuote — direct pure-function coverage
+    //
+    // The resolver tests above exercise the cleaning indirectly via the EPUB
+    // and PDF paths. These tests target `cleanSnippetForTextQuote` directly
+    // to lock down the contract for the branches Codex flagged as
+    // most-likely-to-silently-regress: nil, empty, whitespace-only, lone
+    // tag halves, empty bold, and the math-notation case that motivated
+    // narrowing the fallback strip from "any `<...>`" to "literal `<b>` /
+    // `</b>` only".
+
+    @Test func cleanSnippetForTextQuote_nilInput_returnsNil() {
+        #expect(SearchHitToLocatorResolver.cleanSnippetForTextQuote(nil) == nil)
+    }
+
+    @Test func cleanSnippetForTextQuote_emptyInput_returnsNil() {
+        #expect(SearchHitToLocatorResolver.cleanSnippetForTextQuote("") == nil)
+    }
+
+    @Test func cleanSnippetForTextQuote_whitespaceOnly_returnsNil() {
+        #expect(SearchHitToLocatorResolver.cleanSnippetForTextQuote("   \n\t  ") == nil)
+    }
+
+    @Test func cleanSnippetForTextQuote_emptyBoldPair_returnsNil() {
+        // The reader cannot highlight an empty match. Collapse `<b></b>` to nil
+        // rather than handing window.find() / PDFKit findString an empty string
+        // (which behaves as "match everything" / "no-op" depending on the API).
+        #expect(SearchHitToLocatorResolver.cleanSnippetForTextQuote("...prefix <b></b> suffix...") == nil)
+    }
+
+    @Test func cleanSnippetForTextQuote_whitespaceOnlyBoldPair_returnsNil() {
+        // Same defense for `<b>   </b>` — whitespace-only matches would have
+        // the same downstream effect as an empty match.
+        let cleaned = SearchHitToLocatorResolver.cleanSnippetForTextQuote("...prefix <b>   </b> suffix...")
+        // Either nil (best) or trimmed-then-empty-rejected — both are acceptable
+        // contracts for the caller. The contract that's NOT acceptable is
+        // returning whitespace, since that would silently fail downstream.
+        if let cleaned {
+            #expect(cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+                    "if non-nil, must be non-empty after trim")
+        }
+    }
+
+    @Test func cleanSnippetForTextQuote_loneOpenTag_fallsBackAndStripsTag() {
+        // `<b>` with no closing `</b>` — corrupt snippet. The bold-extraction
+        // branch returns no range; the fallback path runs and strips the lone
+        // `<b>`. Should NOT crash, should NOT contain the literal `<b>`.
+        let cleaned = SearchHitToLocatorResolver.cleanSnippetForTextQuote("...some <b>partial text without close...")
+        #expect(cleaned != nil)
+        #expect(cleaned?.contains("<b>") == false)
+        #expect(cleaned?.hasPrefix("...") == false)
+        #expect(cleaned?.hasSuffix("...") == false)
+    }
+
+    @Test func cleanSnippetForTextQuote_loneCloseTag_fallsBackAndStripsTag() {
+        // `</b>` with no opening `<b>`. Same expectation as the lone open.
+        let cleaned = SearchHitToLocatorResolver.cleanSnippetForTextQuote("...some partial text without open</b> tail...")
+        #expect(cleaned != nil)
+        #expect(cleaned?.contains("</b>") == false)
+    }
+
+    @Test func cleanSnippetForTextQuote_mathNotation_preservedNotMangled() {
+        // Regression guard for Codex audit finding: literal angle brackets in
+        // math notation must NOT be stripped (they're not HTML tags). The
+        // previous over-broad implementation would have mangled "1 < 2 > 1"
+        // into "1 1" because anything between `<` and `>` got removed. The
+        // narrower fallback only strips literal `<b>` / `</b>`.
+        let cleaned = SearchHitToLocatorResolver.cleanSnippetForTextQuote("if 1 < 2 > 1 then …")
+        #expect(cleaned != nil)
+        #expect(cleaned?.contains("1 < 2 > 1") == true,
+                "math notation must not be eaten by the fallback strip")
+    }
 }
