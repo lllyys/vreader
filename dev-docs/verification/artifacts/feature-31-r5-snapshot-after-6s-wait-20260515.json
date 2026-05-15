@@ -1,0 +1,22 @@
+{
+  "currentBookId" : "md:0000000000000000000000000000000000000000000000000000000000c0c002:9231",
+  "fontSize" : 18,
+  "format" : "md",
+  "highlightCount" : 0,
+  "lastError" : null,
+  "partial" : [
+    "selection",
+    "settingsProvenance",
+    "position",
+    "ttsOffsetUTF16"
+  ],
+  "position" : null,
+  "renderPhase" : "idle",
+  "schemaVersion" : 2,
+  "selection" : null,
+  "settingsProvenance" : null,
+  "theme" : "dark",
+  "ts" : "2026-05-15T14:34:40Z",
+  "ttsOffsetUTF16" : null,
+  "ttsState" : "idle"
+}
