@@ -1451,6 +1451,8 @@ Date: 2026-05-14. Codex MCP returned `stream disconnected before completion` con
 
 **Audit verdict**: ship-as-is with finding #1 wording fix + finding #2 code comment. Both fixes incorporated above. Plan revision 2 is the binding spec.
 
+**SHIPPED 2026-05-14** at commit `ac04679` (PR #643). `XCUITestMockSpeechSynthesizer.swift`, `SpeechSynthesizing.swift` (with `TTSTestOverride`), `TTSService.swift` factory rewire, `VReaderApp.swift` `--tts-test-mode` launch arg + parser, Feature40/41 verification-test refactors all landed. Note: a 2026-05-15 Gate 2 post-hoc audit (Codex thread `019e2964`) of THIS plan section (before the SHIPPED marker was added) flagged that (a) the original Task-based mock design would have needed to move to main-queue scheduled callbacks + monotonic generation tokens in practice — re-audit the LANDED `XCUITestMockSpeechSynthesizer.swift` if you're inspecting the mock's correctness; and (b) the Feature40/41 Gate-5 acceptance bar should require non-idle `ttsState` + increasing `ttsOffsetUTF16` + increasing `position.charOffsetUTF16` rather than just `ttsControlBar` visibility. Both items are post-ship code-review concerns, not plan blockers.
+
 
 ---
 
@@ -1661,4 +1663,34 @@ Round 3 is the max audit cap per rule 47. Plan accepted into Gate 3 (TDD).
 Gate 4 round-1 verdict: **Reject as-is** → fixes applied.
 Gate 4 round-2 verdict: **Reject as-is** → fixes applied.
 Gate 4 round-3 verdict (Codex thread `019e28c7`): **follow-up-recommended** → all 3 findings (19, 20, 21) fixed inline before merge. Round 3 is the audit cap per rule 47; remaining items 15 + 16 are accepted-with-rationale (broader TestSeeder cleanup beyond WI-5).
+
+
+---
+
+## WI-6 — CI test-plan integration (PENDING)
+
+**Type**: Foundational (CI infrastructure; no production behavior change).
+**PR size estimate**: ~50 LOC (1 new `.xctestplan` file + project.yml `testPlans` entry + 1 README/architecture-doc cross-ref).
+
+**Why this WI exists** — the only WI-4 deliverable that didn't ship as part of the WI-4 sub-series. The WI-4 acceptance gate is: "`xcodebuild test -only-testing:vreaderUITests/Verification` exits 0 in under 8 minutes on the CI runner. All 13 features reach `VERIFIED` status in `docs/features.md`." The `-only-testing:vreaderUITests/Verification` invocation works today, but no `.xctestplan` exists for it, so CI cannot run the Verification-only subset as a named scheme. Filed as WI-6 so the work is tracked.
+
+**Surface area**:
+
+1. New `vreaderUITests/Verification/Verification.xctestplan` — `testPlans` entry that includes only `vreaderUITests/Verification/*VerificationTests` test classes; explicitly excludes any test that needs CU-driven verification.
+2. `project.yml` — add a `testPlans` entry under the `vreader` scheme that references the new `.xctestplan`. xcodegen regen + commit both `project.yml` and `vreader.xcodeproj/project.pbxproj` in one commit.
+3. `docs/architecture.md` — add a one-line cross-ref under the "Verification Harness" section pointing at the new test plan.
+4. (Optional, deferred) GitHub Actions workflow that runs `xcodebuild test -testPlan Verification` on a macOS runner. Not strictly required to flip features to VERIFIED — the test plan alone is the Gate 4 acceptance criterion for WI-4.
+
+**Gate 4 audit focus**:
+
+- `.xctestplan` schema correctness — Xcode 16's testplan JSON schema can be brittle; verify by opening the testplan in Xcode after xcodegen regenerates the project.
+- Confirm `Verification/` test discovery isn't accidentally widened to include CU-driven tests.
+- xcodegen idempotency: re-running `xcodegen generate` should not produce a noisy diff in `pbxproj`.
+
+**Gate 5 verification (slice)**:
+
+- `xcodebuild test -project vreader.xcodeproj -scheme vreader -testPlan Verification -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` exits 0 within the 8-minute budget on a clean DerivedData.
+- Open the project in Xcode and confirm the "Verification" test plan appears in the scheme picker.
+
+**Status**: PENDING. Deferred from this session per Codex's recommendation (thread `019e2963`) — feature-class infrastructure work should land in a session with clean context, not as the 5th major change of a heavily-loaded session.
 
