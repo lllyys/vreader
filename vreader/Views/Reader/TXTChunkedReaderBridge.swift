@@ -39,6 +39,19 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     var highlightIsTemporary: Bool = true
     /// Persisted highlight ranges (document-global UTF-16) loaded from DB (bug #55).
     var persistedHighlights: [NSRange] = []
+    /// Persisted highlight lookup keyed by UUID — global UTF-16 ranges plus
+    /// their highlight IDs, used by the tap-on-highlight hit-tester.
+    /// Feature #53 WI-3. When empty, tap-on-highlight is dormant (the gesture
+    /// falls through to the existing chrome-toggle behavior).
+    var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
+    /// Presenter that shows the inline edit-menu when a tap resolves to a
+    /// highlight. Feature #53 WI-3. When nil, only the
+    /// `.readerHighlightTapped` notification fires.
+    var highlightActionPresenter: (any HighlightActionPresenting)?
+    /// Callback that routes the user's chosen action through the coordinator.
+    /// Feature #53 WI-3. When nil, presenter results have nowhere to go and
+    /// the menu only acts as a discoverability cue (no persistence change).
+    var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
     /// Top safe-area inset applied to the UITableView's `contentInset.top` so
     /// the first chunk renders below the Dynamic Island. Bug #179 (mirrors
     /// the non-chunked path's same-named param). Default `0` preserves prior
@@ -71,6 +84,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         context.coordinator.config = config
         context.coordinator.chunkStartOffsets = chunkStartOffsets
         context.coordinator.persistedHighlights = persistedHighlights
+        context.coordinator.persistedHighlightLookup = persistedHighlightLookup
+        context.coordinator.highlightActionPresenter = highlightActionPresenter
+        context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.delegate = delegate
 
         // Tap gesture for toolbar toggle
@@ -102,6 +118,12 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
     func updateUIView(_ tableView: UITableView, context: Context) {
         context.coordinator.delegate = delegate
+        // Feature #53 WI-3: refresh tap-on-highlight inputs every update so
+        // late-arriving highlights (created after the bridge was first
+        // installed) become tap-targetable as soon as the lookup grows.
+        context.coordinator.persistedHighlightLookup = persistedHighlightLookup
+        context.coordinator.highlightActionPresenter = highlightActionPresenter
+        context.coordinator.onHighlightTapAction = onHighlightTapAction
 
         // Bug #179: re-apply safe-area top inset on every update (rotation,
         // split-screen resize, etc. can change `proxy.safeAreaInsets.top`).
@@ -197,6 +219,13 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         var chunkStartOffsets: [Int] = []
         /// Persisted highlight ranges (document-global UTF-16) from DB (bug #55).
         var persistedHighlights: [NSRange] = []
+        /// Lookup table (UUID, global UTF-16 range) used by the tap-on-
+        /// highlight hit-tester. Feature #53 WI-3.
+        var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
+        /// Presenter for the inline tap-on-highlight menu. Feature #53 WI-3.
+        var highlightActionPresenter: (any HighlightActionPresenting)?
+        /// Tap-action routing callback. Feature #53 WI-3.
+        var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
         weak var delegate: TXTTextViewBridgeDelegate?
 
         /// LRU cache for attributed strings keyed by chunk index.
@@ -326,10 +355,131 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             if !decelerate { reportScrollPosition(scrollView) }
         }
 
-        // MARK: - Content Tap (Toolbar Toggle)
+        // MARK: - Content Tap (Toolbar Toggle / Tap-on-Highlight)
 
         @objc func handleContentTap(_ gesture: UITapGestureRecognizer) {
+            // Feature #53 WI-3: if the tap lands inside a persisted highlight
+            // range, fire `.readerHighlightTapped` (and present the inline
+            // menu when wired) instead of toggling chrome. The chunked path
+            // mirrors the non-chunked TXTTextViewBridge.Coordinator behavior
+            // — see `resolveHighlightTap` there. Lookup-empty short-circuit
+            // keeps non-WI-3 callers cost-free.
+            if let tableView = gesture.view as? UITableView,
+               !persistedHighlightLookup.isEmpty,
+               let event = Self.resolveChunkedHighlightTap(
+                   gesture: gesture,
+                   in: tableView,
+                   chunkStartOffsets: chunkStartOffsets,
+                   lookup: persistedHighlightLookup
+               ) {
+                NotificationCenter.default.post(
+                    name: .readerHighlightTapped, object: event
+                )
+                if let presenter = highlightActionPresenter,
+                   let onAction = onHighlightTapAction {
+                    presenter.present(for: event, in: tableView) { action in
+                        guard let action else { return }
+                        Task { @MainActor in
+                            await onAction(action, event.highlightID)
+                        }
+                    }
+                }
+                return
+            }
             TXTBridgeShared.postContentTappedNotification()
+        }
+
+        // MARK: - Tap-on-Highlight Resolution (Feature #53 WI-3)
+
+        /// Resolves a gesture-driven tap into a `ReaderHighlightTapEvent`
+        /// by walking from `UITableView` → containing cell → embedded
+        /// `UITextView` → chunk-local char index → global char index →
+        /// `TextHighlightHitTester`. Returns nil when the tap misses every
+        /// persisted range (caller falls back to chrome-toggle).
+        ///
+        /// Extracted as static + internal so unit tests can drive it without
+        /// going through a live `UITapGestureRecognizer`.
+        @MainActor
+        static func resolveChunkedHighlightTap(
+            gesture: UITapGestureRecognizer,
+            in tableView: UITableView,
+            chunkStartOffsets: [Int],
+            lookup: [PersistedHighlightLookupEntry]
+        ) -> ReaderHighlightTapEvent? {
+            guard !lookup.isEmpty else { return nil }
+            let tapPointInTable = gesture.location(in: tableView)
+            guard let indexPath = tableView.indexPathForRow(at: tapPointInTable),
+                  let cell = tableView.cellForRow(at: indexPath) as? ChunkedTextCell
+            else { return nil }
+            let textView = cell.textContentView
+            let tapPointInCell = tableView.convert(tapPointInTable, to: textView)
+            return resolveChunkedHighlightTap(
+                tapPointInCell: tapPointInCell,
+                in: textView,
+                chunkIndex: indexPath.row,
+                chunkStartOffsets: chunkStartOffsets,
+                lookup: lookup
+            )
+        }
+
+        /// Pure-point overload. Tests construct a CGPoint + textView fixture
+        /// directly without driving through a UITableView. The chunk-offset
+        /// math is what's actually under test here — converting a
+        /// chunk-local character index into a document-global one before
+        /// hitting `TextHighlightHitTester`.
+        @MainActor
+        static func resolveChunkedHighlightTap(
+            tapPointInCell: CGPoint,
+            in textView: UITextView,
+            chunkIndex: Int,
+            chunkStartOffsets: [Int],
+            lookup: [PersistedHighlightLookupEntry]
+        ) -> ReaderHighlightTapEvent? {
+            guard !lookup.isEmpty else { return nil }
+            guard chunkIndex >= 0, chunkIndex < chunkStartOffsets.count else {
+                return nil
+            }
+            let chunkOffset = chunkStartOffsets[chunkIndex]
+            let inset = textView.textContainerInset
+            let containerPoint = CGPoint(
+                x: tapPointInCell.x - inset.left,
+                y: tapPointInCell.y - inset.top
+            )
+            let lm = textView.layoutManager
+            let chunkLocalCharIndex = lm.characterIndex(
+                for: containerPoint,
+                in: textView.textContainer,
+                fractionOfDistanceBetweenInsertionPoints: nil
+            )
+            let globalCharIndex = chunkOffset + chunkLocalCharIndex
+            guard let hit = TextHighlightHitTester.hitTest(
+                charIndex: globalCharIndex, in: lookup
+            ) else { return nil }
+            // The global range may straddle chunk boundaries; clip to this
+            // chunk's local extent so the source rect anchors above the
+            // visible slice in THIS cell, not above content the user can't
+            // see (which would put the menu off-screen).
+            let chunkLength = textView.textStorage.length
+            let localStart = max(0, hit.range.location - chunkOffset)
+            let localEnd = min(
+                chunkLength, hit.range.location + hit.range.length - chunkOffset
+            )
+            let localLen = localEnd - localStart
+            guard localLen > 0 else { return nil }
+            let localRange = NSRange(location: localStart, length: localLen)
+            let glyphRange = lm.glyphRange(
+                forCharacterRange: localRange, actualCharacterRange: nil
+            )
+            let containerRect = lm.boundingRect(
+                forGlyphRange: glyphRange, in: textView.textContainer
+            )
+            let viewRect = containerRect.offsetBy(
+                dx: inset.left, dy: inset.top
+            )
+            let windowRect = textView.convert(viewRect, to: nil)
+            return ReaderHighlightTapEvent(
+                highlightID: hit.id, sourceRect: windowRect
+            )
         }
 
         func gestureRecognizer(

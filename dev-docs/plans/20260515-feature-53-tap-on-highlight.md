@@ -291,3 +291,25 @@ Gate 3.
 ## Revision history
 
 - 2026-05-15 v1: initial draft + manual-fallback Gate 2 audit recorded inline.
+- 2026-05-15 v2: WI-3 scope clarification before Gate 3 starts. v1's text
+  for WI-3 was "MD — same pattern, via the chunked + non-chunked text
+  path". Reality discovered during WI-3 prep:
+  - `MDReaderContainerView.swift` uses `TXTTextViewBridge` directly
+    (line 321), so the non-chunked MD path already inherits WI-2's
+    tap-on-highlight wiring + WI-2b's `apply()`-path lookup-sync fix.
+    No new MD work needed for the non-chunked path.
+  - The **chunked** path uses a separate `TXTChunkedReaderBridge` for
+    TXT files > `largeFileThreshold` UTF-16 code units. This bridge
+    has no tap-on-highlight wiring as of WI-2b — its
+    `handleContentTap(_:)` only fires the toolbar-toggle
+    notification. Large TXT books therefore have **no** tap-on-
+    highlight support; this was always within WI-3's letter ("chunked
+    + non-chunked") but the row's "MD" label obscured it.
+  - MD does not use the chunked path (no `Chunked` references in
+    `MDReaderContainerView.swift`).
+  - Net: WI-3's real deliverable is the **chunked TXT tap-on-highlight
+    path** (TXTChunkedReaderBridge), plus an explicit MD audit
+    confirming the non-chunked MD path inherits WI-2/WI-2b. The row's
+    "MD" mention stays accurate for the non-chunked path; the chunked
+    work is the new code. WI-4 (EPUB), WI-5 (Foliate), WI-6 (PDF)
+    unchanged.
