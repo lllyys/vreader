@@ -687,14 +687,22 @@ struct ReaderSettingsPanel: View {
         return "The quick brown fox jumps over the lazy dog. Typography matters for comfortable reading."
     }
 
+    /// SwiftUI Font preview for the settings panel's typography preview.
+    /// Per Feature #60 WI-1, resolves via `ReaderTypography.body(...)` for
+    /// non-system cases so the dormant `.sourceSerif4` and `.inter`
+    /// families show the correct fallback face (Georgia / system sans)
+    /// until WI-1b bundles the binaries.
     private var previewFont: Font {
+        let size = store.typography.fontSize
         switch store.typography.fontFamily {
         case .system:
-            return .system(size: store.typography.fontSize)
-        case .serif:
-            return .custom("Georgia", size: store.typography.fontSize)
+            return .system(size: size)
         case .monospace:
-            return .system(size: store.typography.fontSize, design: .monospaced)
+            return .system(size: size, design: .monospaced)
+        case .serif, .sourceSerif4, .inter:
+            return Font(ReaderTypography.body(
+                for: store.typography.fontFamily, size: size
+            ))
         }
     }
 }

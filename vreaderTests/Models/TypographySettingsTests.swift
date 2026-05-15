@@ -148,11 +148,17 @@ struct TypographySettingsTests {
 
     // MARK: - Font Family
 
+    /// Per Feature #60 WI-1: `ReaderFontFamily` extended additively from
+    /// 3 to 5 cases. Historical `.system` / `.serif` / `.monospace` kept
+    /// for per-book-persistence compat; added `.sourceSerif4` and
+    /// `.inter` as the visual-identity-v2 body + chrome faces.
     @Test func fontFamilyAllCases() {
-        #expect(ReaderFontFamily.allCases.count == 3)
+        #expect(ReaderFontFamily.allCases.count == 5)
         #expect(ReaderFontFamily.allCases.contains(.system))
         #expect(ReaderFontFamily.allCases.contains(.serif))
         #expect(ReaderFontFamily.allCases.contains(.monospace))
+        #expect(ReaderFontFamily.allCases.contains(.sourceSerif4))
+        #expect(ReaderFontFamily.allCases.contains(.inter))
     }
 
     @Test func fontFamilyCodableRoundTrip() throws {

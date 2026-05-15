@@ -149,13 +149,13 @@ final class ReaderSettingsStore {
     }
 
     #if canImport(UIKit)
+    /// Resolved UIFont for the reader body. Per Feature #60 WI-1, the
+    /// 5-case `ReaderFontFamily` is handled uniformly by
+    /// `ReaderTypography.body(for:size:)` which encodes the fallback
+    /// chain for cases whose binary isn't bundled (`.sourceSerif4`
+    /// falls back to Georgia; `.inter` falls back to the system font).
     var uiFont: UIFont {
-        let size = typography.fontSize
-        switch typography.fontFamily {
-        case .system: return .systemFont(ofSize: size)
-        case .serif: return UIFont(name: "Georgia", size: size) ?? .systemFont(ofSize: size)
-        case .monospace: return .monospacedSystemFont(ofSize: size, weight: .regular)
-        }
+        ReaderTypography.body(for: typography.fontFamily, size: typography.fontSize)
     }
     var uiBackgroundColor: UIColor { theme.backgroundColor }
     var uiTextColor: UIColor { theme.textColor }
@@ -168,8 +168,20 @@ final class ReaderSettingsStore {
     var txtViewConfig: TXTViewConfig {
         var c = TXTViewConfig(); c.fontSize = typography.fontSize; c.lineSpacing = lineSpacingPoints
         c.textColor = uiTextColor; c.backgroundColor = uiBackgroundColor; c.letterSpacing = cjkLetterSpacing
-        switch typography.fontFamily { case .system: c.fontName = nil; case .serif: c.fontName = "Georgia"
-        case .monospace: c.fontName = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular).fontName }
+        // Resolve the TXT bridge's `fontName` via `ReaderTypography` so the
+        // 5-case ReaderFontFamily (Feature #60 WI-1) is handled uniformly.
+        // `.system` → nil (TextKit picks the system font); everything else
+        // → the registry's resolved face. WI-5 will plumb the registry
+        // through the TXT bridge directly so the body face flows through
+        // instead of round-tripping through fontName-string.
+        switch typography.fontFamily {
+        case .system:
+            c.fontName = nil
+        case .serif, .monospace, .sourceSerif4, .inter:
+            c.fontName = ReaderTypography.body(
+                for: typography.fontFamily, size: typography.fontSize
+            ).fontName
+        }
         return c
     }
     #endif

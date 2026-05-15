@@ -15,10 +15,26 @@
 import Foundation
 
 /// Font family options for the reader.
+///
+/// Historical (preserved verbatim for per-book persistence compat):
+///   - `.system` — platform default (`.systemFont`)
+///   - `.serif` — Georgia
+///   - `.monospace` — Menlo
+///
+/// Feature #60 WI-1 additions (extension; the existing three cases
+/// are unchanged and existing persisted rawValues continue to decode):
+///   - `.sourceSerif4` — bundled body face for the new visual identity
+///     (resolves to Georgia when the binary isn't registered with the
+///     system; WI-1b ships the `.otf` files via a separate asset PR)
+///   - `.inter` — bundled chrome face for the new visual identity
+///     (resolves to the platform system font when the binary isn't
+///     registered; WI-1b ships the `.otf` files)
 enum ReaderFontFamily: String, Codable, CaseIterable, Sendable {
     case system
     case serif
     case monospace
+    case sourceSerif4
+    case inter
 }
 
 /// Typography settings for reader display.

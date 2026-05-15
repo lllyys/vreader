@@ -174,19 +174,15 @@ enum ReaderTheme: String, Codable, CaseIterable, Sendable {
 
     /// CSS `font-family` stack for a given `ReaderFontFamily`.
     ///
-    /// Each stack ends with the appropriate generic family so the platform can
-    /// fall back gracefully. CJK glyphs naturally fall through to the system
-    /// CJK font (PingFang SC / Hiragino) because Georgia / Menlo / etc. carry
-    /// only Latin coverage.
+    /// Per Feature #60 WI-1: delegates to `ReaderTypography.cssFontStack`
+    /// so the canonical stack definitions live in one place (and the new
+    /// `.sourceSerif4` + `.inter` cases — added in WI-1 — are handled
+    /// uniformly). WI-4 will migrate the existing EPUB injection
+    /// callers to `ReaderTypography.cssFontStack` directly; this
+    /// fileprivate shim is retained until then to avoid touching the
+    /// historical `epubOverrideCSS` call site in this WI.
     fileprivate static func cssFontStack(for family: ReaderFontFamily) -> String {
-        switch family {
-        case .system:
-            return "-apple-system, system-ui, sans-serif"
-        case .serif:
-            return "Georgia, 'Times New Roman', serif"
-        case .monospace:
-            return "'SF Mono', Menlo, 'Courier New', monospace"
-        }
+        ReaderTypography.cssFontStack(for: family)
     }
 
     /// Converts a UIColor to a CSS rgb() string.
