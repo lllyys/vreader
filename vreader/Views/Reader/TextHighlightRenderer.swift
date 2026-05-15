@@ -33,6 +33,16 @@ final class TextHighlightRenderer: HighlightRenderer {
         uiState.highlightIsTemporary = false
         uiState.highlightRange = range
         uiState.persistedHighlightRanges.append(range)
+        // Feature #53 WI-2/WI-2b: keep the UUID-keyed lookup in sync with
+        // newly-created highlights so the tap-on-highlight hit-test can
+        // resolve a fresh paint. Pre-WI-2b, only the range array was
+        // appended here; the lookup was only refreshed on full re-fetch
+        // (e.g., after delete), leaving the just-created highlight
+        // invisible to the hit-tester until the next reopen.
+        uiState.persistedHighlightLookup.append(PersistedHighlightLookupEntry(
+            id: record.highlightId,
+            range: range
+        ))
     }
 
     func remove(id: UUID) {

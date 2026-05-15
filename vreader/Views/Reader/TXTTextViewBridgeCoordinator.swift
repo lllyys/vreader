@@ -23,6 +23,13 @@ extension TXTTextViewBridge {
         /// the original `HighlightRecord.highlightId` for the inline-menu
         /// dispatcher. Feature #53 WI-2 / GH #596.
         var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
+        /// WI-2b: Presenter for the inline edit/delete menu shown on
+        /// tap-of-highlight. nil → coordinator only posts the notification
+        /// and skips chrome-toggle (matches WI-2's dormant-subscriber path).
+        var highlightActionPresenter: (any HighlightActionPresenting)?
+        /// WI-2b: Action callback fired after the presenter dismisses with
+        /// a non-nil action. Typically wraps `HighlightCoordinator.handleTapAction`.
+        var onHighlightTapAction: (@MainActor (HighlightTapAction, UUID) async -> Void)?
         /// Active search/navigation highlight range (bug #43).
         var currentHighlightRange: NSRange?
         /// Timer to auto-clear temporary highlight after 3s (bug #54).
@@ -195,6 +202,19 @@ extension TXTTextViewBridge {
                     name: .readerHighlightTapped,
                     object: event
                 )
+                // WI-2b: present the inline edit/delete menu if wired.
+                // The presenter is fired on the active text view, which
+                // is in the responder chain and has a valid window for
+                // UIEditMenuInteraction.addInteraction.
+                if let presenter = highlightActionPresenter,
+                   let onAction = onHighlightTapAction {
+                    presenter.present(for: event, in: tv) { action in
+                        guard let action else { return }
+                        Task { @MainActor in
+                            await onAction(action, event.highlightID)
+                        }
+                    }
+                }
                 return
             }
             clearSearchHighlightIfTemporary()

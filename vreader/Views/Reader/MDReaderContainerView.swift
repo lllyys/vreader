@@ -328,6 +328,10 @@ struct MDReaderContainerView: View {
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 persistedHighlights: uiState.persistedHighlightRanges,
                 persistedHighlightLookup: uiState.persistedHighlightLookup,
+                highlightActionPresenter: UIKitHighlightActionPresenter(),
+                onHighlightTapAction: { [highlightCoordinator] action, id in
+                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
+                },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 delegate: viewModel
             )

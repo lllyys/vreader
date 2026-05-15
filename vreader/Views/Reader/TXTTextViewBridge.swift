@@ -45,6 +45,17 @@ struct TXTTextViewBridge: UIViewRepresentable {
     /// Defaults to empty so existing callers stay source-compatible until
     /// they wire the lookup; in that case the chrome-toggle path remains.
     var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
+    /// Presenter that shows the inline edit/delete menu for a tapped
+    /// highlight (Feature #53 WI-2b). When nil, the coordinator only
+    /// posts `.readerHighlightTapped` for observers and does not present
+    /// a menu — keeps WI-2 dormancy as a fallback for callers that
+    /// haven't wired the presenter yet.
+    var highlightActionPresenter: (any HighlightActionPresenting)?
+    /// Callback invoked with the user's selected `HighlightTapAction`
+    /// after the presenter dismisses. Typically routes to
+    /// `HighlightCoordinator.handleTapAction(_:highlightID:)`. nil when
+    /// `highlightActionPresenter` is also nil.
+    var onHighlightTapAction: (@MainActor (HighlightTapAction, UUID) async -> Void)?
     /// Top safe-area inset added on top of `config.textInset.top` so the first
     /// line of text clears the Dynamic Island / status bar. Bug #179 (mirrors
     /// bug #163 for EPUB). Default `0` preserves prior behaviour for callers
@@ -88,6 +99,8 @@ struct TXTTextViewBridge: UIViewRepresentable {
         context.coordinator.baseAttributedText = buildBaseAttributedText()
         context.coordinator.persistedHighlights = persistedHighlights
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
+        context.coordinator.highlightActionPresenter = highlightActionPresenter
+        context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.lastAppliedText = text
         context.coordinator.lastAppliedAttrText = attributedText
         // Set highlights first so drawBackground has correct ranges during initial layout.
@@ -160,6 +173,11 @@ struct TXTTextViewBridge: UIViewRepresentable {
         if context.coordinator.persistedHighlightLookup != persistedHighlightLookup {
             context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         }
+        // WI-2b: presenter + action callback are re-bound on every update
+        // — the container may swap them when the HighlightCoordinator's
+        // bookFingerprintKey changes (open a different book).
+        context.coordinator.highlightActionPresenter = highlightActionPresenter
+        context.coordinator.onHighlightTapAction = onHighlightTapAction
         if highlightChanged {
             context.coordinator.currentHighlightRange = highlightRange
             // Manage auto-clear timer for temporary highlights
