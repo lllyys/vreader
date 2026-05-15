@@ -53,6 +53,12 @@ extension Notification.Name {
     /// The notification's `object` is the highlight UUID string. (bug #78)
     /// Reader containers observe this to remove the visual highlight immediately.
     static let readerHighlightRemoved = Notification.Name("vreader.readerHighlightRemoved")
+    /// Posted by reader bridges (TXT/MD/EPUB/Foliate/PDF) when the user
+    /// taps an existing highlight in the content area.
+    /// The notification's `object` is a `ReaderHighlightTapEvent` carrying
+    /// the highlight's UUID and screen-space rect for popover anchoring.
+    /// Feature #53 / GH #596.
+    static let readerHighlightTapped = Notification.Name("vreader.readerHighlightTapped")
     /// Posted after annotation import completes (bug #88).
     /// Reader containers observe this to re-render persisted highlights.
     static let readerHighlightsDidImport = Notification.Name("vreader.readerHighlightsDidImport")
@@ -85,4 +91,13 @@ struct ReaderSelectionEvent: Sendable {
 struct PDFHighlightNotificationPayload {
     let anchor: AnnotationAnchor
     let color: String
+}
+
+/// Carries the tap event for an existing highlight (Feature #53).
+/// Posted via `.readerHighlightTapped` from any reader format's bridge.
+/// `sourceRect` is in screen-space coordinates of the host UIView/UIWindow,
+/// used by `HighlightActionPresenting` to anchor the inline menu popover.
+struct ReaderHighlightTapEvent: Sendable, Equatable {
+    let highlightID: UUID
+    let sourceRect: CGRect
 }

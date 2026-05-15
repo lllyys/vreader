@@ -97,5 +97,30 @@ final class HighlightCoordinator {
         ) else { return }
         renderer.restore(records: records, forHref: href, using: evaluator)
     }
+
+    /// Feature #53 / GH #596 — handles an action selected from the inline
+    /// menu shown on a highlight tap. WI-1 dispatches `.delete` only; new
+    /// cases trigger a compile error here so wiring stays exhaustive.
+    ///
+    /// `.delete` removes from persistence, then posts `.readerHighlightRemoved`
+    /// so the existing bug-#78 visual-clear pipeline updates the rendered
+    /// highlight without duplicating the renderer.remove() call here. This
+    /// mirrors `HighlightListViewModel.removeHighlight(highlightId:)`.
+    func handleTapAction(_ action: HighlightTapAction, highlightID: UUID) async {
+        switch action {
+        case .delete:
+            do {
+                try await persistence.removeHighlight(highlightId: highlightID)
+                NotificationCenter.default.post(
+                    name: .readerHighlightRemoved,
+                    object: highlightID.uuidString
+                )
+            } catch {
+                // Persistence failure: keep visual state intact (do not post
+                // the removed notification). The user can retry; no UI alert
+                // here because the inline menu has already dismissed.
+            }
+        }
+    }
 }
 #endif
