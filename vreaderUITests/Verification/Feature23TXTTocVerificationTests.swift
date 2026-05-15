@@ -71,7 +71,7 @@ final class Feature23TXTTocVerificationTests: XCTestCase {
     /// Verifies that the TXT TOC is populated when chapter markers are present.
     /// war-and-peace.txt has "Chapter 1/2/3" — the detection rule must yield
     /// at least one entry, which means tocEmptyState must NOT be present.
-    func verify_feature_23_txt_toc_populated_for_chapters() throws {
+    func test_verify_feature_23_txt_toc_populated_for_chapters() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(
@@ -109,7 +109,7 @@ final class Feature23TXTTocVerificationTests: XCTestCase {
     /// the reader. We do not assert a specific scroll position — the fixture
     /// may fit on one page; the contract here is the navigation closure
     /// firing + panel dismissal.
-    func verify_feature_23_txt_toc_navigation_jumps_to_chapter() throws {
+    func test_verify_feature_23_txt_toc_navigation_jumps_to_chapter() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(
@@ -124,7 +124,7 @@ final class Feature23TXTTocVerificationTests: XCTestCase {
             NSPredicate(format: "identifier BEGINSWITH 'tocRow-'")
         ).firstMatch
         guard firstRow.waitForExistence(timeout: 5) else {
-            throw XCTSkip("No tocRow- entries — see verify_feature_23_txt_toc_populated_for_chapters notes")
+            throw XCTSkip("No tocRow- entries — see test_verify_feature_23_txt_toc_populated_for_chapters notes")
         }
 
         firstRow.tap()

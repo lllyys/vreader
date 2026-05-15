@@ -74,7 +74,7 @@ final class Feature41TTSAutoScrollVerificationTests: XCTestCase {
 
     /// Verifies that the TTS control bar appears and stays visible while
     /// TTS is playing — the surface from which auto-scroll is driven.
-    func verify_feature_41_tts_control_bar_visible_during_playback() throws {
+    func test_verify_feature_41_tts_control_bar_visible_during_playback() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(
@@ -98,7 +98,7 @@ final class Feature41TTSAutoScrollVerificationTests: XCTestCase {
     /// playback — the observable signal that auto-scroll is firing.
     /// Falls back to ttsOffsetUTF16 advancement if position isn't broadcast
     /// for this format, and to control-bar visibility if neither is reported.
-    func verify_feature_41_tts_autoscroll_position_advances() throws {
+    func test_verify_feature_41_tts_autoscroll_position_advances() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(

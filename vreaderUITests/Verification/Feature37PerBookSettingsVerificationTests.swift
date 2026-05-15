@@ -54,7 +54,7 @@ final class Feature37PerBookSettingsVerificationTests: XCTestCase {
     /// Verifies that enabling per-book settings for book A does not affect book B:
     /// open book A → enable per-book → change font → back → open second book
     /// → settings panel → per-book toggle OFF (default).
-    func verify_feature_37_perbook_settings_toggle_isolated_to_book() throws {
+    func test_verify_feature_37_perbook_settings_toggle_isolated_to_book() throws {
         // 1. Open first book from library
         openFirstBook()
 
@@ -119,7 +119,7 @@ final class Feature37PerBookSettingsVerificationTests: XCTestCase {
     /// Verifies that per-book settings persist when the same book is reopened:
     /// open book A → enable per-book → back → reopen book A
     /// → settings panel → per-book toggle still ON.
-    func verify_feature_37_perbook_settings_persists_across_reopen() throws {
+    func test_verify_feature_37_perbook_settings_persists_across_reopen() throws {
         // 1. Open first book
         openFirstBook()
 

@@ -8,7 +8,7 @@
 // - The "Paged" surface for TXT is the native paginated view; the Reading
 //   Mode picker chooses between Native (UITextView paged) and Unified (TextKit
 //   reflow). This test asserts Native-mode visibility of the paged container.
-// - `verify_feature_21_paged_mode_page_navigation` exercises pager-label
+// - `test_verify_feature_21_paged_mode_page_navigation` exercises pager-label
 //   updates after a right-zone tap (cross-feature #25 dispatch). When the
 //   fixture is short enough to fit on one page, the pager remains "1/1" —
 //   we accept either an increment OR a stable single-page state as a pass
@@ -40,7 +40,7 @@ final class Feature21PaginatedModeVerificationTests: XCTestCase {
     /// Verifies that the paged reading mode surface is reachable for a TXT book:
     /// open book → settings → Reading Mode picker exists → paged container
     /// is present in the reader.
-    func verify_feature_21_paged_mode_shows_paged_view() throws {
+    func test_verify_feature_21_paged_mode_shows_paged_view() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(
@@ -79,7 +79,7 @@ final class Feature21PaginatedModeVerificationTests: XCTestCase {
     /// pager increment behavior). Page navigation via right-zone tap is
     /// fixture-dependent for short fixtures; the label's presence is the
     /// stable contract.
-    func verify_feature_21_paged_mode_page_navigation() throws {
+    func test_verify_feature_21_paged_mode_page_navigation() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(

@@ -58,7 +58,7 @@ final class Feature35AnnotationsExportVerificationTests: XCTestCase {
     // MARK: - Feature #35 Verification
 
     /// Verifies the Export button exists in the annotations panel toolbar.
-    func verify_feature_35_export_button_is_visible() throws {
+    func test_verify_feature_35_export_button_is_visible() throws {
         let panel = try openAnnotationsPanel()
 
         let exportButton = panel.buttons[AccessibilityID.annotationsExportButton]
@@ -76,7 +76,7 @@ final class Feature35AnnotationsExportVerificationTests: XCTestCase {
     }
 
     /// Verifies the Import button exists in the annotations panel toolbar.
-    func verify_feature_35_import_button_is_visible() throws {
+    func test_verify_feature_35_import_button_is_visible() throws {
         let panel = try openAnnotationsPanel()
 
         let importButton = panel.buttons[AccessibilityID.annotationsImportButton]

@@ -31,7 +31,7 @@ final class Feature36OPDSVerificationTests: XCTestCase {
 
     /// Verifies the OPDS catalog list UI surface is reachable from the
     /// library toolbar and that the Add Catalog form fields render.
-    func verify_feature_36_opds_catalog_ui_surface() throws {
+    func test_verify_feature_36_opds_catalog_ui_surface() throws {
         let opdsButton = app.buttons[AccessibilityID.opdsCatalogsToolbarButton]
         guard opdsButton.waitForHittable(timeout: 8) else {
             throw XCTSkip("OPDS catalogs toolbar button not present in library view")
@@ -76,7 +76,7 @@ final class Feature36OPDSVerificationTests: XCTestCase {
     }
 
     /// Conditional: live-browse an OPDS feed. Skipped unless CI_OPDS_URL is set.
-    func verify_feature_36_opds_browse_with_live_fixture() throws {
+    func test_verify_feature_36_opds_browse_with_live_fixture() throws {
         let env = ProcessInfo.processInfo.environment
         guard let opdsURL = env["CI_OPDS_URL"], !opdsURL.isEmpty else {
             throw XCTSkip("CI_OPDS_URL env var not set")

@@ -37,7 +37,7 @@ final class Feature27ReplacementRulesVerificationTests: XCTestCase {
     /// library → settings toolbar button → Settings sheet →
     /// "Replacement Rules" row visible → tap → ReplacementRulesView
     /// presents with its Add button.
-    func verify_feature_27_replacement_rule_ui_surface() throws {
+    func test_verify_feature_27_replacement_rule_ui_surface() throws {
         let settingsButton = app.buttons[AccessibilityID.settingsToolbarButton]
         guard settingsButton.waitForHittable(timeout: 8) else {
             throw XCTSkip("Settings toolbar button not present from library view")

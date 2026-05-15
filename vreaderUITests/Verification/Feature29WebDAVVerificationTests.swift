@@ -6,7 +6,7 @@
 // Seed: .books (UI is reached pre-reader; book content irrelevant).
 //
 // Notes:
-// - The behavioral test (`verify_feature_29_webdav_backup_executes_when_configured`)
+// - The behavioral test (`test_verify_feature_29_webdav_backup_executes_when_configured`)
 //   XCTSkips unless `CI_WEBDAV_URL`, `CI_WEBDAV_USERNAME`, `CI_WEBDAV_PASSWORD`
 //   env vars are set. This preserves the ability to gate WebDAV live
 //   tests on real server availability without blocking the suite when
@@ -35,7 +35,7 @@ final class Feature29WebDAVVerificationTests: XCTestCase {
 
     /// Verifies the WebDAV settings UI surface is reachable and that the
     /// credentials form + Test button render correctly.
-    func verify_feature_29_webdav_backup_ui_available() throws {
+    func test_verify_feature_29_webdav_backup_ui_available() throws {
         let settingsButton = app.buttons[AccessibilityID.settingsToolbarButton]
         guard settingsButton.waitForHittable(timeout: 8) else {
             throw XCTSkip("Settings toolbar button not present in library view")
@@ -83,7 +83,7 @@ final class Feature29WebDAVVerificationTests: XCTestCase {
     /// Conditional: verifies that a backup actually executes against a
     /// configured WebDAV server. Skipped unless CI_WEBDAV_URL + credentials
     /// are present in the env.
-    func verify_feature_29_webdav_backup_executes_when_configured() throws {
+    func test_verify_feature_29_webdav_backup_executes_when_configured() throws {
         let env = ProcessInfo.processInfo.environment
         guard
             let url = env["CI_WEBDAV_URL"],

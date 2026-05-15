@@ -83,7 +83,7 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
 
     /// Verifies the EPUB highlight happy path: long-press text → Highlight
     /// menu → entry persists in Highlights tab → re-open = still there.
-    func verify_feature_11_epub_highlight_happy_path() throws {
+    func test_verify_feature_11_epub_highlight_happy_path() throws {
         try openEPUBBook()
 
         guard waitForEPUBReaderReady() else {
@@ -165,7 +165,7 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
     /// Sends settle command before the long-press to ensure the reader
     /// has fully rendered before the gesture. The highlight must still
     /// be created when the gesture is gated on the settle signal.
-    func verify_feature_11_epub_highlight_regression_bug77_buffering_race() throws {
+    func test_verify_feature_11_epub_highlight_regression_bug77_buffering_race() throws {
         try openEPUBBook()
 
         guard waitForEPUBReaderReady() else {

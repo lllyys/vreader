@@ -310,11 +310,16 @@ vreaderUITests/Verification/
 
 ### Conventions
 
-- **`verify_` method prefix** — intentionally NOT auto-discovered by
-  `xcodebuild test` against the default scheme. Invoke via explicit
-  `-only-testing:<class>/<method>` flags or a dedicated test plan.
-  This keeps the unit-test gate fast while the verification harness
-  runs on its own cadence.
+- **`test_verify_` method prefix** — XCTest discovers methods starting
+  with `test`; the `_verify_` infix preserves the descriptive feature
+  slug for grep-friendly mapping (`test_verify_feature_<NN>_<scenario>`).
+  The verification harness runs on its own cadence by `-only-testing:
+  vreaderUITests/<Class>` invocations or by a named test plan (Feature
+  #45 WI-6, pending). Bug #192 (GH #686, 2026-05-15) fixed an earlier
+  shape where these methods used a plain `verify_` prefix — they were
+  XCTest-invisible and the entire 13-class verification suite had
+  been silently no-opping (`Executed 0 tests` + `TEST SUCCEEDED` =
+  vacuous pass). The rename to `test_verify_*` made them discoverable.
 - **`@MainActor final class XCTestCase`** — verification tests touch
   the SwiftUI element tree which is main-actor-isolated.
 - **Seed via `launchApp(seed:)`** — `.warAndPeace` / `.mdTOC` for tests
@@ -325,8 +330,8 @@ vreaderUITests/Verification/
 - **`XCTSkip` for env-var-gated live tests** — WebDAV/OPDS live-server
   tests skip unless `CI_WEBDAV_URL` / `CI_OPDS_URL` are set.
 - **RED-proof catalog** at `dev-docs/verification-red-checks.md`
-  records evidence that each `verify_` method correctly fails when its
-  production seam is broken.
+  records evidence that each `test_verify_` method correctly fails when
+  its production seam is broken.
 
 ### Why no auto-discovery
 

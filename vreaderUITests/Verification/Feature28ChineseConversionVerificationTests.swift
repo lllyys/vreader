@@ -40,7 +40,7 @@ final class Feature28ChineseConversionVerificationTests: XCTestCase {
     /// Verifies the Chinese Text segmented picker is present in the
     /// reader settings panel. The picker may be disabled depending on the
     /// format/mode, but its presence is the contract under test.
-    func verify_feature_28_chinese_text_picker_present() throws {
+    func test_verify_feature_28_chinese_text_picker_present() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(
@@ -66,7 +66,7 @@ final class Feature28ChineseConversionVerificationTests: XCTestCase {
 
     /// Verifies that Simp→Trad conversion is applied to reader content.
     /// Requires a CJK TXT fixture in DebugFixtureCatalog; skipped otherwise.
-    func verify_feature_28_conversion_applies_to_reader_content() throws {
+    func test_verify_feature_28_conversion_applies_to_reader_content() throws {
         // Conservative: skip unconditionally until a CJK fixture is bundled.
         // Tracked as a fixture-request follow-up against feature #45 / #28.
         throw XCTSkip(

@@ -90,7 +90,7 @@ final class Feature40TTSSentenceHighlightVerificationTests: XCTestCase {
 
     /// Verifies the TTS control surface is reachable and the snapshot
     /// reports a non-nil ttsState after starting TTS.
-    func verify_feature_40_tts_state_reported_after_start() throws {
+    func test_verify_feature_40_tts_state_reported_after_start() throws {
         try openReaderAndStartTTS()
 
         // Read snapshot to confirm ttsState reports a speaking-ish value.
@@ -126,7 +126,7 @@ final class Feature40TTSSentenceHighlightVerificationTests: XCTestCase {
     /// Verifies ttsOffsetUTF16 advances over time — confirms
     /// AVSpeechSynthesizerDelegate callbacks are firing, which is the
     /// signal that sentence-highlight updates would also be firing.
-    func verify_feature_40_tts_offset_advances_during_playback() throws {
+    func test_verify_feature_40_tts_offset_advances_during_playback() throws {
         try openReaderAndStartTTS()
 
         // Capture initial offset.

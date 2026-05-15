@@ -181,7 +181,7 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
   - **OPDS / WebDAV server flake**: harness uses local fixtures (a static OPDS XML feed served from the test bundle, a local WebDAV root in `/tmp`) to avoid external network dependence. CI never reaches the public internet.
   - **PhotosPicker (#32 theme backgrounds)**: simulator's photo library may be empty; the test seeds a known image into the simulator's Photos via `xcrun simctl addmedia` in setUp.
   - **DocumentPicker (import/export #35)**: handled via `vreader-debug://` import command that bypasses the OS picker (file path passed directly), since the picker is OS chrome and not vreader's responsibility. The test verifies *what happens after import succeeds*, not the picker UI.
-  - **Test-name collisions**: each verification is named `verify_feature_<NN>_<short_name>` so they're greppable and the failure → tracker mapping is mechanical.
+  - **Test-name collisions**: each verification is named `test_verify_feature_<NN>_<short_name>` (XCTest requires `test_` prefix for discovery — see Bug #192 / GH #686; the `_verify_feature_` infix keeps tests greppable and the failure → tracker mapping mechanical).
   - **Tracker drift**: when a verification passes, status moves to `VERIFIED`. When it later starts failing, it moves back to `DONE` and a bug is filed. CI prints a one-line status summary so the tracker can be updated mechanically.
 - **Test plan**:
   - The deliverable *is* tests. The plan is what they cover and how they're structured.
@@ -191,7 +191,7 @@ Before setting a feature to `PLANNED`, fill in these fields in a sub-section und
     - `SettleTokenWaiterTests` — timeout, success path, never returns false-positive.
     - `FixtureCatalogTests` — fixtures listed in catalog actually exist in the bundle.
   - **Verification tests** in `vreaderUITests/Verification/` — one file per feature in the 13-item list. Each file contains:
-    1. A happy-path `verify_feature_<NN>_<name>` test.
+    1. A happy-path `test_verify_feature_<NN>_<name>` test.
     2. One regression test per linked bug (e.g., feature #11 has a test specifically targeting the bug #77 race).
   - **CI integration**: `verification` test plan added to the Xcode scheme; new CI step runs it after the unit-test phase. Failure of any verification → red CI.
 - **Acceptance criteria**:

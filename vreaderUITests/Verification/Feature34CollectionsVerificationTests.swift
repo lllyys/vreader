@@ -69,7 +69,7 @@ final class Feature34CollectionsVerificationTests: XCTestCase {
 
     /// Verifies that creating a collection via the sidebar flow makes
     /// the collection row visible after reopening the sidebar.
-    func verify_feature_34_create_collection_appears_in_sidebar() {
+    func test_verify_feature_34_create_collection_appears_in_sidebar() {
         createCollection(named: "Verification Suite Collection")
 
         // Reopen sidebar and confirm the collection row is visible
@@ -99,7 +99,7 @@ final class Feature34CollectionsVerificationTests: XCTestCase {
 
     /// Verifies that tapping a collection filter shows only books tagged
     /// with that collection in the library grid.
-    func verify_feature_34_add_book_to_collection_filters_library() throws {
+    func test_verify_feature_34_add_book_to_collection_filters_library() throws {
         // 1. Create a collection
         createCollection(named: "Filter Test Collection")
 

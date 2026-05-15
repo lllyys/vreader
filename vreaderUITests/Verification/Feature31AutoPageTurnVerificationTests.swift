@@ -56,7 +56,7 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
     /// bug #157). On `.warAndPeace` seed (TXT), the section is gated out
     /// → test XCTSkips. To exercise the toggle, seed with `.mdTOC` (which
     /// loads an MD book where the capability IS granted).
-    func verify_feature_31_auto_page_turn_toggle_present() throws {
+    func test_verify_feature_31_auto_page_turn_toggle_present() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(
@@ -109,9 +109,9 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
 
     /// Verifies that toggling Auto Page Turn ON reveals the interval slider.
     ///
-    /// Same capability gate as `verify_feature_31_auto_page_turn_toggle_present`:
+    /// Same capability gate as `test_verify_feature_31_auto_page_turn_toggle_present`:
     /// XCTSkip on formats without `.autoPageTurn`.
-    func verify_feature_31_auto_page_turn_interval_slider_appears_on_enable() throws {
+    func test_verify_feature_31_auto_page_turn_interval_slider_appears_on_enable() throws {
         tapFirstBook(in: app)
 
         XCTAssertTrue(
