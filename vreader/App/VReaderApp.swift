@@ -40,6 +40,12 @@ struct VReaderApp: App {
     /// same policy state the user toggled.
     @MainActor private let webDAVNetworkPolicy: WebDAVNetworkPolicy?
 
+    /// Routes incoming `file://` URLs from iOS Share Sheet / "Open in vreader"
+    /// to the BookImporter (Feature #59 WI-2). Nil if the SwiftData container
+    /// failed to construct (the `bookImporterRef` we depend on is also nil in
+    /// that case). `.onOpenURL` is wired in `body` below.
+    @MainActor private let fileURLRouter: FileURLImportRouter?
+
     #if DEBUG
     /// Parsed launch argument overrides for UI testing.
     private let testConfig: TestLaunchConfig
@@ -68,6 +74,7 @@ struct VReaderApp: App {
             self.bookImporterRef = nil
             self.lazyDownloadCoordinator = nil
             self.webDAVNetworkPolicy = nil
+            self.fileURLRouter = nil
             self.debugBridge = nil
             return
         }
@@ -209,6 +216,11 @@ struct VReaderApp: App {
             )
             self.persistenceActor = persistence
             self.bookImporterRef = importer
+            // Feature #59 WI-2: route incoming file:// URLs from iOS Share
+            // Sheet / "Open in vreader" to the just-constructed importer.
+            // The unknown-extension reporter is a no-op for now — a future
+            // iteration can wire a toast or alert presenter here.
+            self.fileURLRouter = FileURLImportRouter(bookImporter: importer)
 
             // Feature #47: construct the policy + lazy-download
             // coordinator alongside the persistence actor so reattach
@@ -289,6 +301,7 @@ struct VReaderApp: App {
             self.bookImporterRef = nil
             self.lazyDownloadCoordinator = nil
             self.webDAVNetworkPolicy = nil
+            self.fileURLRouter = nil
             #if DEBUG
             self.debugBridge = nil
             #endif
@@ -306,12 +319,17 @@ struct VReaderApp: App {
                     .environment(\.lazyDownloadCoordinator, lazyDownloadCoordinator)
                     .environment(\.webDAVNetworkPolicy, webDAVNetworkPolicy)
                     .modifier(TestLaunchModifier(config: testConfig))
-                    .onOpenURL { [debugBridge] url in
-                        guard url.scheme == DebugCommand.scheme else { return }
-                        guard let debugBridge else { return }
-                        Task { @MainActor in
-                            await debugBridge.handle(url)
+                    .onOpenURL { [debugBridge, fileURLRouter] url in
+                        // Feature #59 WI-2: Debug-bridge scheme takes
+                        // priority; file URLs fall through to the router.
+                        if url.scheme == DebugCommand.scheme {
+                            guard let debugBridge else { return }
+                            Task { @MainActor in
+                                await debugBridge.handle(url)
+                            }
+                            return
                         }
+                        fileURLRouter?.dispatch(url)
                     }
                 #else
                 contentView
@@ -320,6 +338,13 @@ struct VReaderApp: App {
                     .environment(\.bookImporter, bookImporterRef)
                     .environment(\.lazyDownloadCoordinator, lazyDownloadCoordinator)
                     .environment(\.webDAVNetworkPolicy, webDAVNetworkPolicy)
+                    .onOpenURL { [fileURLRouter] url in
+                        // Feature #59 WI-2: Release builds only handle
+                        // file:// URLs. vreader-debug:// is not registered
+                        // in Release per the CFBundleURLTypes injection
+                        // guard in project.yml.
+                        fileURLRouter?.dispatch(url)
+                    }
                 #endif
             } else {
                 VStack(spacing: 16) {

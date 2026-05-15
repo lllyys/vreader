@@ -3,6 +3,8 @@
 //
 // @coordinates-with: FormatCapabilities.swift — `capabilities` convenience property
 
+import Foundation
+
 /// Supported document formats for the reader.
 enum BookFormat: String, Codable, Hashable, Sendable, CaseIterable {
     case epub
@@ -35,5 +37,23 @@ enum BookFormat: String, Codable, Hashable, Sendable, CaseIterable {
     /// Default capabilities for this format (assumes simple EPUB).
     var capabilities: FormatCapabilities {
         FormatCapabilities.capabilities(for: self)
+    }
+
+    /// Whether the given file extension belongs to any importable BookFormat.
+    /// Case-insensitive. Leading dots are stripped (so both "epub" and ".epub"
+    /// match). Returns false for empty input or any extension we don't handle.
+    ///
+    /// Used by `FileURLImportRouter` (Feature #59 WI-2) to decide whether an
+    /// incoming `file://` URL from the system Share Sheet / "Open in vreader"
+    /// flow corresponds to a format vreader can import.
+    static func isSupportedExtension(_ ext: String) -> Bool {
+        let normalized = ext.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !normalized.isEmpty else { return false }
+        for format in BookFormat.allCases {
+            if format.fileExtensions.contains(normalized) {
+                return true
+            }
+        }
+        return false
     }
 }
