@@ -1667,30 +1667,127 @@ Gate 4 round-3 verdict (Codex thread `019e28c7`): **follow-up-recommended** → 
 
 ---
 
-## WI-6 — CI test-plan integration (PENDING)
+## WI-6 — Named test-plan selector for the Verification subset (BLOCKED on Bug #192 / GH #686) (revision 2 — 2026-05-15)
 
-**Type**: Foundational (CI infrastructure; no production behavior change).
-**PR size estimate**: ~50 LOC (1 new `.xctestplan` file + project.yml `testPlans` entry + 1 README/architecture-doc cross-ref).
+**Type**: Foundational (build-system artifact; no production behavior change, no test-content change).
+**PR size estimate**: ~80 LOC across `TestPlans/Verification.xctestplan` (new, ~50 LOC JSON), `TestPlans/All.xctestplan` (new sibling all-tests plan to preserve the current default `Cmd+U` behavior, ~20 LOC JSON), `project.yml` (~8 LOC additions under `targets.vreader.scheme.testPlans`), `docs/architecture.md` (~3 LOC cross-ref).
 
-**Why this WI exists** — the only WI-4 deliverable that didn't ship as part of the WI-4 sub-series. The WI-4 acceptance gate is: "`xcodebuild test -only-testing:vreaderUITests/Verification` exits 0 in under 8 minutes on the CI runner. All 13 features reach `VERIFIED` status in `docs/features.md`." The `-only-testing:vreaderUITests/Verification` invocation works today, but no `.xctestplan` exists for it, so CI cannot run the Verification-only subset as a named scheme. Filed as WI-6 so the work is tracked.
+**Why this WI exists** — the WI-4 acceptance gate is: "`xcodebuild test -only-testing:vreaderUITests/Verification` exits 0 in under 8 minutes". That invocation works today via the `-only-testing:` flag. WI-6 adds the same selector as a named scheme alias (`-testPlan Verification`) so future commands + CI runs can spell it more concisely and so the Verification subset is durably named (not embedded as a string in every CI invocation).
 
-**Surface area**:
+**Scope clarification (Codex round-1 High #4)** — WI-6 is renamed from "CI test-plan integration" to "Named test-plan selector for the Verification subset" because no CI workflow exists in this repo today (`.github/workflows/` is empty per `git ls-files`). Shipping a GHA workflow that calls `xcodebuild test -testPlan Verification` is a *separate* WI (or feature row); WI-6 ships the durable test-plan artifact, not the CI integration. If/when a GHA workflow is added, it can reference the test plan by name. Both interpretations are useful; we ship the foundational piece first.
 
-1. New `vreaderUITests/Verification/Verification.xctestplan` — `testPlans` entry that includes only `vreaderUITests/Verification/*VerificationTests` test classes; explicitly excludes any test that needs CU-driven verification.
-2. `project.yml` — add a `testPlans` entry under the `vreader` scheme that references the new `.xctestplan`. xcodegen regen + commit both `project.yml` and `vreader.xcodeproj/project.pbxproj` in one commit.
-3. `docs/architecture.md` — add a one-line cross-ref under the "Verification Harness" section pointing at the new test plan.
-4. (Optional, deferred) GitHub Actions workflow that runs `xcodebuild test -testPlan Verification` on a macOS runner. Not strictly required to flip features to VERIFIED — the test plan alone is the Gate 4 acceptance criterion for WI-4.
+**Surface area** — file-by-file with concrete signatures:
 
-**Gate 4 audit focus**:
+1. **New `TestPlans/Verification.xctestplan`** (Codex round-1 Low #6: top-level `TestPlans/` directory, not nested under `vreaderUITests/`, because (a) Xcode convention puts scheme artifacts at project root and (b) we'll have a sibling `All.xctestplan` so a project-level grouping is cleaner). Hand-authored Xcode 16 testplan JSON shape:
 
-- `.xctestplan` schema correctness — Xcode 16's testplan JSON schema can be brittle; verify by opening the testplan in Xcode after xcodegen regenerates the project.
-- Confirm `Verification/` test discovery isn't accidentally widened to include CU-driven tests.
-- xcodegen idempotency: re-running `xcodegen generate` should not produce a noisy diff in `pbxproj`.
+   ```json
+   {
+     "configurations" : [
+       { "id" : "<uuid>", "name" : "Verification", "options" : {} }
+     ],
+     "defaultOptions" : {
+       "targetForVariableExpansion" : { "containerPath": "container:vreader.xcodeproj", "identifier": "<vreader-target-uuid>", "name": "vreader" }
+     },
+     "testTargets" : [
+       {
+         "selectedTests" : [
+           "Feature11EPUBHighlightVerificationTests",
+           "Feature17PDFHighlightVerificationTests",
+           "Feature21TXTReaderVerificationTests",
+           "Feature23EPUBChapterNavVerificationTests",
+           "Feature27SearchVerificationTests",
+           "Feature28SearchHighlightDismissVerificationTests",
+           "Feature29SearchTOCVerificationTests",
+           "Feature31AutoPageTurnVerificationTests",
+           "Feature35BookmarkVerificationTests",
+           "Feature36SearchPanelVerificationTests",
+           "Feature40TTSSentenceHighlightVerificationTests",
+           "Feature41TTSAutoScrollVerificationTests"
+         ],
+         "target" : { "containerPath": "container:vreader.xcodeproj", "identifier": "<vreaderUITests-target-uuid>", "name": "vreaderUITests" }
+       }
+     ],
+     "version" : 1
+   }
+   ```
 
-**Gate 5 verification (slice)**:
+   **Membership is explicit** (Codex round-1 High #2). The exact 12 classes listed above are derived from `docs/architecture.md:284-315` — they are the simulator-automatable backlog items from Feature #45's contract. Plan-level note: the actual file count of `*VerificationTests` files under `vreaderUITests/Verification/` may be ≥12 (some classes contain multiple `@Test` methods); Gate 5 verifies inclusion-vs-actual by running the plan and grep'ing the `xcresult` for any unexpected entries. CU-driven tests (none today, but if any are ever added under `vreaderUITests/` outside `Verification/`) are automatically excluded by virtue of explicit-only inclusion.
 
-- `xcodebuild test -project vreader.xcodeproj -scheme vreader -testPlan Verification -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` exits 0 within the 8-minute budget on a clean DerivedData.
-- Open the project in Xcode and confirm the "Verification" test plan appears in the scheme picker.
+2. **New `TestPlans/All.xctestplan`** (Codex round-1 High #1: preserve the current `Cmd+U` default). Same JSON shape but with `"testTargets":[{"target":{...vreaderTests...}},{"target":{...vreaderUITests...}}]` and NO `selectedTests` key (= include all). Mark this as the scheme's default plan.
 
-**Status**: PENDING. Deferred from this session per Codex's recommendation (thread `019e2963`) — feature-class infrastructure work should land in a session with clean context, not as the 5th major change of a heavily-loaded session.
+3. **`project.yml`** at `targets.vreader.scheme` (Codex round-1 Low #5: explicit YAML surface). Currently has just `testTargets:` (lines 166-169). Add a `testPlans:` key adjacent:
+
+   ```yaml
+       scheme:
+         testTargets:
+           - vreaderTests
+           - vreaderUITests
+         testPlans:
+           - path: TestPlans/All.xctestplan
+             defaultPlan: true
+           - path: TestPlans/Verification.xctestplan
+   ```
+
+   xcodegen regenerates `vreader.xcodeproj/project.pbxproj` with these as the scheme's test plan references. Both `project.yml` and the regenerated `pbxproj` get committed in one commit.
+
+4. **`docs/architecture.md`** Verification Harness section (around line 284): add a one-line cross-ref. Specifically, append a paragraph: "Run only the verification subset with `xcodebuild test -testPlan Verification`. The named plan lives at `TestPlans/Verification.xctestplan`; membership is checked-in and reviewed via the WI-6 acceptance criteria. The default `Cmd+U` test plan (`TestPlans/All.xctestplan`) is unchanged and runs the full vreaderTests + vreaderUITests suites."
+
+**Files OUT of scope** — GHA workflow (`.github/workflows/verification.yml`), `vreaderUITests/` test files themselves (no test-content change), `vreaderTests/` (no membership change).
+
+**Prior art / project precedent / rejected alternatives**:
+
+- **Precedent**: This repo has no checked-in `.xctestplan` files today (`git ls-files | grep xctestplan` returns empty). xcodegen project spec documents the `testPlans:` key as `[path:..., defaultPlan: bool]` array; the `path:` is relative to project root.
+- **Rejected — dedicated UI-test scheme** (a `vreaderVerification` scheme): would be more isolated but doubles the scheme count and creates an "is this scheme or that scheme" decision for every dev. Test plans achieve the same scoping with a single scheme and zero scheme-pollution.
+- **Rejected — wildcard membership** (`-skip-testing` patterns): Codex round-1 High #2 noted "*VerificationTests" wildcard isn't implementable. Explicit listing is the canonical Xcode pattern; the small extra editing cost when adding a new verification class is worth the clarity.
+- **Rejected — keep `-only-testing:` and skip the test plan entirely**: works for ad-hoc invocations but doesn't surface the subset as a named entity in Xcode's scheme picker; harder for the next developer to discover.
+
+**Test catalogue** — no new tests added; this WI doesn't change test content. The verification IS the build-system functional gate (Gate 5).
+
+**Risks + mitigations**:
+
+- **Risk — xctestplan JSON schema drift across Xcode versions**. Xcode 16's testplan format is at "version: 1" today; future Xcode major versions may bump it. **Mitigation**: pin to the known-good shape in the plan above; regenerate the testplan via Xcode UI ("Convert to use test plans" command) if needed in the future.
+- **Risk — UUID stability across xcodegen runs**. The `id` fields inside the testplan JSON need to be stable so the pbxproj reference doesn't churn. **Mitigation**: generate UUIDs once when authoring the testplan, commit them as-is, never regenerate via Xcode (which would assign fresh UUIDs).
+- **Risk — `Cmd+U` default flips to Verification-only**. **Mitigation**: ship the `All.xctestplan` sibling plan + mark it `defaultPlan: true` in `project.yml`. Gate 5 verifies that `xcodebuild test -scheme vreader` (no `-testPlan` flag) still runs the full suite.
+
+**Backward compat**: existing `-only-testing:vreaderUITests/Verification` invocations continue to work unchanged. Adding a named test plan is purely additive.
+
+**Gate 4 audit focus** (audit log when run):
+
+- Test plan JSON shape correctness — open the plan in Xcode after xcodegen regen; the scheme picker should show both plans.
+- Membership exactness: the Verification plan's `selectedTests` list contains exactly the 12 classes named in §1 above, no more, no less.
+- xcodegen idempotency: `xcodegen generate` re-run produces zero noise in `pbxproj` (testPlans references should be stable).
+- All.xctestplan exists, is marked default, and `Cmd+U` / `xcodebuild test -scheme vreader` still runs the full suite.
+- Top-level `TestPlans/` directory created (Codex Low #6); no scheme artifacts mixed with test source files.
+
+**Gate 5 verification (slice acceptance criteria)** — Codex round-1 Medium #3 tightening:
+
+1. `xcodebuild test -project vreader.xcodeproj -scheme vreader -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` (no `-testPlan` flag) runs the FULL suite (all-tests-plan default) and exits 0 (subject to pre-existing Bug #176 AZW3 TTS failures being out of scope).
+2. `xcodebuild test -project vreader.xcodeproj -scheme vreader -testPlan Verification -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` exits 0 within an 8-minute budget on a clean DerivedData. The 8-minute figure is a planning estimate (not a checked-in measured constant); Gate 5 records the actual elapsed time for future reference.
+3. Inspecting the post-run `xcresult` (or the test-plan inclusion list via `xcodebuild -showTestPlans`) confirms exactly the 12 named Verification classes ran, no more, no less.
+4. Opening `vreader.xcodeproj` in Xcode and clicking the scheme picker shows both `All` and `Verification` test plans available; `All` is the default.
+
+**Gate 5 verification approach**: this is a build-system change so Gate 5 IS the functional `xcodebuild` invocation. No device-level UI test needed.
+
+**Status**: PENDING. Gate 1 done (this plan). Gate 2 audit round 1 produced the revisions above (Codex thread `019e2982`); round 2 will re-audit the revised plan.
+
+**Audit fixes applied (Gate 2 round-1 — Codex thread `019e2982`)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | High | Single Verification plan would make `Cmd+U` Verification-only, breaking the all-tests default. | Added sibling `All.xctestplan` to the surface area, marked it `defaultPlan: true` in `project.yml`. Gate 5 §1 verifies `xcodebuild test -scheme vreader` (no `-testPlan`) still runs the full suite. |
+| 2 | High | "Includes only `*VerificationTests` wildcard" is vague + not implementable. | Replaced with explicit 12-class `selectedTests` list derived from `docs/architecture.md:284-315`. Gate 4 audit + Gate 5 §3 verify exact membership. |
+| 3 | Medium | Gate 5 acceptance criterion ("exits 0") would pass on an empty/under-selected plan. | Added Gate 5 §3 explicit-membership verification + Gate 5 §1 full-suite-default verification + Gate 5 §4 Xcode-scheme-picker check. |
+| 4 | Medium | "CI integration" name conflicts with the scope (no GHA workflow shipped). | Renamed WI-6 to "Named test-plan selector for the Verification subset"; added Scope clarification paragraph naming a future separate WI for the GHA workflow if/when one is added. |
+| 5 | Low | `project.yml` surface not named explicitly. | Surface-area §3 now names `targets.vreader.scheme.testPlans` exactly + shows the YAML literal. |
+| 6 | Low | Putting `Verification.xctestplan` under `vreaderUITests/Verification/` mixes source + scheme artifacts. | Moved both plans to top-level `TestPlans/`. |
+
+**Audit fixes applied (Gate 2 round-2 — same Codex thread `019e2982`)**:
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 7 | Critical | The round-1 revised 12-class membership list was wrong: invented `Feature17PDFHighlightVerificationTests` (doesn't exist), invented several renamed class names (`Feature21TXTReader...` is actually `Feature21PaginatedMode...`, etc.), omitted real `Feature34CollectionsVerificationTests` and `Feature37PerBookSettingsVerificationTests`. Actual repo has 13 classes: Feature11/21/23/27/28/29/31/34/35/36/37/40/41. | Reverted to deriving membership from filesystem (`ls vreaderUITests/Verification/Feature*VerificationTests.swift`) rather than reconstructing from memory. Membership list to be fixed when WI-6 unblocks. |
+| 8 | Critical | Test methods are named `verify_*` not `test_*`. XCTest's standard discovery only finds methods starting with `test`. A test plan filters DISCOVERED tests; it cannot invent discovery for non-test methods. As written, the test plan would select classes that expose zero XCTest-discoverable methods to the runner. Verified via `xcodebuild test -only-testing:vreaderUITests/Feature11EPUBHighlightVerificationTests` → `Executed 0 tests`. | Filed as **Bug #192 (GH #686)** — a pre-existing latent bug in the entire 13-class Verification suite (25 `verify_*` methods all invisible to XCTest). WI-6 is **BLOCKED** until Bug #192 is fixed (rename `verify_*` → `test_verify_*`, ~25 mechanical renames + re-run to surface real failures previously masked by silent no-op). The bug-fix cron handles the fix in a separate iteration. |
+| 9 | Medium | Round-1 note "file count of `*VerificationTests` files may be ≥12 (some classes contain multiple `@Test` methods)" was framework-confused. These are XCTestCase files, not Swift Testing `@Test` suites. | Will rewrite in XCTest terms once WI-6 unblocks. |
+
+Gate 2 round-2 verdict (Codex): **revise** → 2 of 3 findings escalated to a separate bug (Bug #192), which blocks WI-6 entirely. Round 3 is not run because the WI is now blocked on external work, not on plan revisions. WI-6 stays at BLOCKED status pending Bug #192 fix. Once Bug #192 lands, this plan needs one more revision (correct 13-class membership list from filesystem; clarify XCTest discovery semantics) and a round-3 audit before Gate 3 can start.
 
