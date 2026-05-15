@@ -318,15 +318,21 @@ struct EPUBReaderContainerView: View {
             EPUBWebViewBridge(
                 contentURL: contentURL,
                 baseDirectory: accessRoot,
+                // Feature #60 WI-4: route through ReaderThemeV2's 5-token
+                // surface. `ReaderSettingsStore.theme` is still the
+                // legacy 3-case enum at this point; `asV2` projects
+                // light → paper while preserving sepia/dark, so existing
+                // user settings keep their books rendering without an
+                // explicit migration write.
                 themeCSS: settingsStore.map {
-                    $0.theme.epubOverrideCSS(
+                    $0.theme.asV2.epubOverrideCSS(
                         fontSize: $0.typography.fontSize,
                         lineHeight: $0.typography.lineSpacing,
                         letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0,
                         fontFamily: $0.typography.fontFamily
                     )
                 },
-                themeBackgroundColor: settingsStore?.theme.backgroundColor,
+                themeBackgroundColor: settingsStore?.theme.asV2.backgroundColor,
                 safeAreaTopInset: proxy.safeAreaInsets.top,
                 scrollFraction: seekScrollFraction,
                 currentHref: viewModel.currentPosition?.href,

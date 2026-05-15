@@ -535,3 +535,20 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   `Equatable + Sendable` only (not `Codable`). Test catalogue
   expanded to 8 NamedHighlightColor tests + 3 SelectionPopoverAction
   tests + 2 AccentColor tests.
+- 2026-05-16 v3: WI-4 shipped (Gate 3 + Gate 4). Codex thread
+  `019e2de0-9d1a-72d2-860d-f371205cd7bb`, 3 rounds, final verdict
+  `ship-as-is`. Round 1 caught: (a) CSS url(...) escape gap +
+  bridge-scope risk for off-EPUB-root file:// URLs (Medium —
+  fixed via `cssEscapeURL` helper + dormant `nil` URL until later
+  WI widens WKWebView access); (b) substring-only test assertions
+  that would have passed a swapped-selector regression (Medium —
+  fixed via explicit selector→property contracts with whitespace
+  normalisation); (c) misleading `<style id="vreader-theme-v2">`
+  wrapper at odds with the bridge's fixed `vreader-theme` id (Low —
+  fixed by aligning to the bridge). Round 2 caught: (d) escape test
+  fooled by `URL.absoluteString`'s own percent-encoding (Low — fixed
+  by promoting `cssEscapeURL` to `internal` and adding 4 direct
+  unit tests); (e) stale `vreader-theme-v2` references in file
+  header + method doc (Low — fixed). Round 3: clean. 19 V2 CSS
+  tests pass; 2 pre-existing AZW3 TTS failures tracked at Bug #200
+  are out of WI-4 scope.

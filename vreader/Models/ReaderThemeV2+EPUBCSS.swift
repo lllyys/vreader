@@ -1,0 +1,234 @@
+// Purpose: Feature #60 WI-4 — EPUB CSS injection driven by the V2
+// token surface. Emits the `<style id="vreader-theme">` blob that
+// `EPUBReaderContainerView` threads into `EPUBWebViewBridge`.
+//
+// The style-element id deliberately matches the legacy injection
+// path's id (`vreader-theme`) because `EPUBWebViewBridgeJS.
+// injectThemeCSSJS` strips the wrapper and re-injects under a fixed
+// id — there is no runtime caller that needs to distinguish V2 from
+// legacy CSS, so introducing a second id would only confuse future
+// readers without buying anything.
+//
+// Replaces the legacy `ReaderTheme.epubOverrideCSS` call path for new
+// EPUB renders. The legacy helper is left in place for tests and any
+// surface still on the 3-theme enum until WI-5+ migrates them.
+//
+// Token mapping (per design bundle `dev-docs/designs/vreader-fidelity-v1/
+// project/vreader-themes.jsx`):
+//   - `html { background-color: bg }` — outer page-frame tint.
+//   - `body { background-color: paper }` — text-container surface,
+//     gives the paper-stack effect distinct from the outer frame.
+//     Photo theme's paper is alpha-blended so the photo shows through.
+//   - `color: ink` — primary text.
+//   - `a:link { color: accent }` — single restrained accent across
+//     chrome and links per the three-stop oxblood family.
+//   - `a:visited { color: sub }` — secondary token.
+//   - `hr, td, th { border: rule }` — hairline dividers, alpha-blended
+//     over ink so they render correctly across paper tints.
+//
+// Photo theme: when a `backgroundImageURL` is passed in, also emits
+// `html { background-image: url(...) }` plus cover/fixed sizing so the
+// photo fills the viewport and stays fixed across scroll. Without a
+// URL, falls back to the flat outer bg + alpha-blended paper overlay
+// so the theme is still legible.
+//
+// @coordinates-with: ReaderThemeV2.swift (token surface),
+//   ReaderTypography.swift (WI-1 font registry — single source for
+//   the CSS font-family stack), EPUBReaderContainerView.swift (the
+//   WI-4 call site that threads this CSS into the WKWebView).
+
+import Foundation
+#if canImport(UIKit)
+import UIKit
+
+extension ReaderThemeV2 {
+    /// Generates the `<style id="vreader-theme">` blob applied to
+    /// EPUB content via `EPUBWebViewBridge`. The id deliberately
+    /// matches the legacy injection path (see file header for why).
+    ///
+    /// - Parameters:
+    ///   - fontSize: caller-passed CSS pixel size for body text.
+    ///   - lineHeight: multiplier (1.6 by default; matches legacy).
+    ///   - letterSpacing: em offset; 0 means `letter-spacing: normal`.
+    ///   - fontFamily: drives the CSS font stack via
+    ///     `ReaderTypography.cssFontStack(for:)` so the stack
+    ///     definitions live in one place.
+    ///   - backgroundImageURL: Photo theme only. When non-nil and
+    ///     `usesBackgroundImage` is true, emits an additional
+    ///     `html { background-image: url(...) }` rule. For all other
+    ///     themes the URL is ignored; passing one does not change the
+    ///     output. Non-Photo themes never emit a background-image rule.
+    func epubOverrideCSS(
+        fontSize: CGFloat,
+        lineHeight: CGFloat = 1.6,
+        letterSpacing: CGFloat = 0,
+        fontFamily: ReaderFontFamily = .system,
+        backgroundImageURL: URL? = nil
+    ) -> String {
+        let outerBG = Self.cssColor(self.backgroundColor)
+        let paperBG = Self.cssColor(self.paperColor)
+        let ink = Self.cssColor(self.inkColor)
+        let sub = Self.cssColor(self.subColor)
+        let rule = Self.cssColor(self.ruleColor)
+        let accent = Self.cssColor(self.accentColor)
+
+        let size = String(format: "%.1f", fontSize)
+        let lh = String(format: "%.2f", lineHeight)
+        let ls = letterSpacing > 0
+            ? String(format: "%.2fem", letterSpacing)
+            : "normal"
+        let fontStack = ReaderTypography.cssFontStack(for: fontFamily)
+
+        let imageRule = Self.backgroundImageRule(
+            for: self, url: backgroundImageURL, outerBG: outerBG
+        )
+
+        // The style-id is "vreader-theme" (not "-v2") because
+        // `EPUBWebViewBridgeJS.injectThemeCSSJS` extracts the inner CSS
+        // and reinserts it under the fixed id "vreader-theme" so a
+        // theme switch can locate-and-replace the previous element.
+        // Emitting "-v2" here would be misleading documentation.
+        return """
+        <style id="vreader-theme">\
+        html { \
+          background-color: \(outerBG) !important; \
+        }\
+        \(imageRule)\
+        html, body { \
+          color: \(ink) !important; \
+          font-size: \(size)px !important; \
+          font-family: \(fontStack) !important; \
+          line-height: \(lh) !important; \
+          letter-spacing: \(ls) !important; \
+          -webkit-text-size-adjust: 100%; \
+          text-rendering: optimizeLegibility; \
+          word-break: break-word; \
+          overflow-wrap: break-word; \
+        }\
+        body { \
+          background-color: \(paperBG) !important; \
+          padding: 2em 16px !important; \
+          margin: 0 !important; \
+        }\
+        p, div, span, li, td, th, dd, dt, blockquote, figcaption { \
+          font-size: inherit !important; \
+          line-height: inherit !important; \
+          color: inherit !important; \
+        }\
+        h1,h2,h3,h4,h5,h6 { \
+          font-size: revert !important; \
+          line-height: 1.3 !important; \
+          color: \(ink) !important; \
+        }\
+        body * { \
+          font-family: inherit !important; \
+        }\
+        pre, code, samp, kbd, pre *, code *, samp *, kbd * { \
+          font-family: ui-monospace, 'SF Mono', Menlo, 'Courier New', monospace !important; \
+          font-size: 0.85em !important; \
+          line-height: 1.45 !important; \
+          white-space: pre-wrap !important; \
+          word-break: break-all !important; \
+        }\
+        a:link { color: \(accent) !important; text-decoration: underline; }\
+        a:visited { color: \(sub) !important; text-decoration: underline; }\
+        img, svg, video { \
+          max-width: 100% !important; \
+          height: auto !important; \
+          object-fit: contain; \
+        }\
+        table { \
+          max-width: 100% !important; \
+          border-collapse: collapse; \
+          font-size: 0.9em !important; \
+          overflow-x: auto; \
+          display: block; \
+        }\
+        td, th { \
+          padding: 4px 8px; \
+          border: 1px solid \(rule); \
+        }\
+        hr { \
+          border: none; \
+          border-top: 1px solid \(rule); \
+          margin: 1em 0; \
+        }\
+        ::selection { \
+          background-color: \(accent); \
+          color: \(paperBG); \
+        }\
+        </style>
+        """
+    }
+
+    // MARK: - Helpers
+
+    /// Photo-only: emits the `html { background-image: ... }` rule when
+    /// the caller supplied a URL. Returns an empty string for all other
+    /// theme/URL combinations so the parent CSS stays untouched.
+    ///
+    /// The URL is taken from `URL.absoluteString` (percent-encoded for
+    /// file:// URLs) and then run through `cssEscapeURL` to neutralise
+    /// the two characters that can still break out of the `url("…")`
+    /// context: `\` and `"`. `outerBG` is kept as a fallback so a
+    /// slow-loading or missing image still has a visible background.
+    ///
+    /// **Bridge scope**: `EPUBWebViewBridge` is configured with
+    /// `allowingReadAccessTo: extractedRoot` (the EPUB's extraction
+    /// directory). A `file://` URL pointing at `ThemeBackgroundStore`
+    /// (Application Support) is outside that scope and WKWebView will
+    /// refuse to load it. The plumbing that widens access — or copies
+    /// the photo under the EPUB root before injection — ships in a
+    /// later WI; until then callers pass `backgroundImageURL: nil` and
+    /// this branch stays dormant.
+    private static func backgroundImageRule(
+        for theme: ReaderThemeV2, url: URL?, outerBG: String
+    ) -> String {
+        guard theme.usesBackgroundImage, let url else { return "" }
+        let safeURL = cssEscapeURL(url.absoluteString)
+        return """
+        html { \
+          background-image: url("\(safeURL)") !important; \
+          background-color: \(outerBG) !important; \
+          background-size: cover !important; \
+          background-position: center !important; \
+          background-attachment: fixed !important; \
+          background-repeat: no-repeat !important; \
+        }
+        """
+    }
+
+    /// Escapes the two characters that can break out of CSS
+    /// `url("…")` quoting: backslash (`\`) and the double-quote (`"`).
+    /// Other unsafe characters are typically already percent-encoded
+    /// in `URL.absoluteString` for file:// URLs. Order matters:
+    /// escape the backslash first so a subsequently-inserted `\"` is
+    /// not itself escaped again.
+    ///
+    /// `internal` (not `private`) so unit tests in `vreaderTests` can
+    /// exercise the helper directly — a black-box test through the
+    /// CSS string is fooled by URL's own percent-encoding pass.
+    static func cssEscapeURL(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    /// Renders a UIColor as a CSS `rgb(...)` or `rgba(...)` string,
+    /// preserving the alpha channel that the design tokens encode on
+    /// `paperColor` / `subColor` / `ruleColor`. Opaque colors emit
+    /// `rgb(...)` for parity with legacy `ReaderTheme.cssColor` so
+    /// existing CSS-substring assertions in other tests don't break.
+    private static func cssColor(_ color: UIColor) -> String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let R = Int((r * 255).rounded())
+        let G = Int((g * 255).rounded())
+        let B = Int((b * 255).rounded())
+        if a >= 0.999 {
+            return "rgb(\(R),\(G),\(B))"
+        }
+        return String(format: "rgba(%d,%d,%d,%.2f)", R, G, B, Double(a))
+    }
+}
+
+#endif
