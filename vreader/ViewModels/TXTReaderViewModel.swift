@@ -115,6 +115,14 @@ final class TXTReaderViewModel {
     private(set) var currentChapterText: String?
     /// Content loader for on-demand chapter access.
     private var chapterContentLoader: TXTChapterContentLoader?
+
+    /// Bug #180 (Codex audit fix): single in-flight chapter load. Boundary-
+    /// fired scroll callbacks at chapter end can bounce repeatedly and each
+    /// bounce settles `scrollViewDidEndDecelerating`; without this guard
+    /// each settle would spawn a fresh `navigateToChapter` task, duplicating
+    /// `loadChapter` work and `broadcastPosition` emissions before the
+    /// previous load has finished. Same applies to rapid chrome-button taps.
+    private var isChapterNavInFlight: Bool = false
     /// Whether the VM is in chapter-based mode (vs legacy full-text mode).
     var isChapterMode: Bool { chapterIndex != nil }
 
@@ -349,9 +357,15 @@ final class TXTReaderViewModel {
     // MARK: - Chapter Navigation (WI-5)
 
     /// Navigates to a specific chapter by index. No-op if out of bounds or not in chapter mode.
+    /// Bug #180 (Codex audit fix): guarded by `isChapterNavInFlight` — a
+    /// second call while a `loadChapter` is awaiting drops the new request
+    /// rather than racing the in-flight one.
     func navigateToChapter(_ index: Int) async {
+        guard !isChapterNavInFlight else { return }
         guard let chIdx = chapterIndex, let loader = chapterContentLoader,
               index >= 0, index < chIdx.chapters.count else { return }
+        isChapterNavInFlight = true
+        defer { isChapterNavInFlight = false }
         let chapter = chIdx.chapters[index]
         AppLogger.txt.debug("navigateToChapter: idx=\(index) title=\(chapter.title)")
         do {
@@ -630,6 +644,18 @@ extension TXTReaderViewModel: TXTTextViewBridgeDelegate {
 
     func selectionDidChange(utf16Range: UTF16Range) {
         updateSelection(startUTF16: utf16Range.startUTF16, endUTF16: utf16Range.endUTF16)
+    }
+
+    /// Bug #180: user scrolled to the bottom of the loaded chapter. Advance
+    /// to the next chapter; `nextChapter` no-ops at the last chapter.
+    func didScrollPastBottomBoundary() {
+        goToNextChapter()
+    }
+
+    /// Bug #180: user scrolled to the top of the loaded chapter. Retreat to
+    /// the previous chapter; `previousChapter` no-ops at the first chapter.
+    func didScrollPastTopBoundary() {
+        goToPreviousChapter()
     }
 }
 #endif

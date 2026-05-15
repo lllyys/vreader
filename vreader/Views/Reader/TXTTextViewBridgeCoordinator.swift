@@ -270,6 +270,28 @@ extension TXTTextViewBridge {
         private func sendScrollPosition(_ scrollView: UIScrollView) {
             guard !suppressScrollCallbacks else { return }
             if let htv = scrollView as? HighlightableTextView, htv.isReplacingText { return }
+
+            // Bug #180: when scroll settles at a content boundary AND content
+            // overflows the viewport by more than the slack, ask the delegate
+            // to advance/retreat one chapter. The `maxOffset > 2 * slack`
+            // guard prevents overlapping top/bottom zones on near-fit
+            // chapters where contentSize barely exceeds bounds; without it,
+            // a settle at offset=0 on a near-fit chapter would satisfy BOTH
+            // the bottom and top predicates and bottom (checked first) would
+            // win, advancing instead of no-op-ing. The viewport-overflow
+            // guard `contentSize > bounds` then independently rules out
+            // short chapters (contentSize <= bounds).
+            let boundarySlack: CGFloat = 0.5
+            let maxOffset = scrollView.contentSize.height - scrollView.bounds.height
+            if maxOffset > 2 * boundarySlack {
+                let offset = scrollView.contentOffset.y
+                if offset >= maxOffset - boundarySlack {
+                    delegate?.didScrollPastBottomBoundary()
+                } else if offset <= boundarySlack {
+                    delegate?.didScrollPastTopBoundary()
+                }
+            }
+
             guard let textView = scrollView as? UITextView else { return }
             lastScrollCallbackTime = CACurrentMediaTime()
             let topOffset = TXTOffsetMapper.scrollOffsetToCharOffset(
