@@ -428,6 +428,7 @@
 		794FD606545B9368CD9CF18F /* legado_source_minimal.json in Resources */ = {isa = PBXBuildFile; fileRef = DE360E19106AAA7A1FCEEEB9 /* legado_source_minimal.json */; };
 		79ACFB3DD40281B2A3B9AE8B /* DebugSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94C32FCAEDE0062125F6A51E /* DebugSnapshot.swift */; };
 		7A2CAFE661BD03C0255C9DD7 /* Feature37PerBookSettingsVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB03A3F8DCE5FCBEC5458547 /* Feature37PerBookSettingsVerificationTests.swift */; };
+		7A3B9A992F12E5E187F0794E /* ReaderThemeMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A480E951C2CA72DB6A22C24 /* ReaderThemeMigrationTests.swift */; };
 		7A90F0D9EB7A4F82D33EE237 /* FoliateSearchAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6DB55181F2F55D99D879507 /* FoliateSearchAdapterTests.swift */; };
 		7B1619D0A3AF6B77D0D4C7B0 /* LazyDownloadTaskMetaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5753714B6AF8A111E400D35A /* LazyDownloadTaskMetaTests.swift */; };
 		7B25A40BC5CB3093E8010F0E /* TestSeederPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B65F0B3C56ED3BD89DB850 /* TestSeederPreferencesTests.swift */; };
@@ -601,7 +602,9 @@
 		AA2DEA001EC8B99BE3961D79 /* TOCChapterProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B56E5394E251AA0C42AE3557 /* TOCChapterProgressTests.swift */; };
 		AA366A9AF508E95B64F9A5E0 /* TapZoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC68C4B5F57B57A98D3C020 /* TapZoneTests.swift */; };
 		AA578B681E89F766F1902FAA /* ReaderSettingsTypographyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3354A74B809D0D3DB13A41F7 /* ReaderSettingsTypographyTests.swift */; };
+		AAE6B9BC238DD37272640F0E /* ReaderThemeV2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80381187837EB2DA41E98207 /* ReaderThemeV2Tests.swift */; };
 		AAEA9983AA0492366955FB9B /* PositionPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46BCC142F6FF2ABE9B5BA64B /* PositionPersistenceTests.swift */; };
+		ABE20173610A76DC711FBA55 /* ReaderThemeV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB26FE0A7766F5E461A6BC7 /* ReaderThemeV2.swift */; };
 		ACE4A8A746F082AEC08BB273 /* CustomCoverStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5955766DF21883C0C57B71E4 /* CustomCoverStoreTests.swift */; };
 		AD1910F64D226400933FDBA2 /* PDFHighlightRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8719A34DB441AF9DC6379DC9 /* PDFHighlightRenderer.swift */; };
 		AD27484127EA24D230616F48 /* TestConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59B2824739E67F567813198E /* TestConstants.swift */; };
@@ -1069,6 +1072,7 @@
 		38E51E6D76FE0DDF87E537AB /* NativeTextPaginator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTextPaginator.swift; sourceTree = "<group>"; };
 		3910DCA9C9F588B700679D76 /* TXTChapterIndexBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterIndexBuilder.swift; sourceTree = "<group>"; };
 		398F1BAF549E7AC80E9CE320 /* ReadingSessionTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionTrackerTests.swift; sourceTree = "<group>"; };
+		3A480E951C2CA72DB6A22C24 /* ReaderThemeMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderThemeMigrationTests.swift; sourceTree = "<group>"; };
 		3AA4BF056E74D056492E5858 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		3AEB955B6E5713C9AB4D701E /* Feature34CollectionsVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feature34CollectionsVerificationTests.swift; sourceTree = "<group>"; };
 		3B1563E77E28434568F45736 /* LibraryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModelTests.swift; sourceTree = "<group>"; };
@@ -1324,6 +1328,7 @@
 		7F71E759F980473A403CC70B /* TXTReaderContainerSearchHighlightWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderContainerSearchHighlightWiringTests.swift; sourceTree = "<group>"; };
 		7FC8555E3C352A0C95D6BFE9 /* LocatorFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorFactory.swift; sourceTree = "<group>"; };
 		800ED346D9C0E17741704040 /* WebDAVServerProfileEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVServerProfileEditSheet.swift; sourceTree = "<group>"; };
+		80381187837EB2DA41E98207 /* ReaderThemeV2Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderThemeV2Tests.swift; sourceTree = "<group>"; };
 		8045B5C97D76DA514B27B577 /* ReplacementTransformTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplacementTransformTests.swift; sourceTree = "<group>"; };
 		80CB6321B674BB16BF0DEC55 /* legacy-backup-no-manifest.vreader.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; path = "legacy-backup-no-manifest.vreader.zip"; sourceTree = "<group>"; };
 		80ED96E0CBD0FFF1335B41D0 /* LibraryViewModelImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModelImportTests.swift; sourceTree = "<group>"; };
@@ -1597,6 +1602,7 @@
 		CF50D372D73575F047EF0991 /* BookContentCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookContentCacheTests.swift; sourceTree = "<group>"; };
 		CF5C12635DFA6BEE42EBB1CE /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
 		CF65A328F9A79571A5164390 /* FoliateReaderContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateReaderContainerView.swift; sourceTree = "<group>"; };
+		CFB26FE0A7766F5E461A6BC7 /* ReaderThemeV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderThemeV2.swift; sourceTree = "<group>"; };
 		D02AA769AEDBC25CEA896348 /* TXTChunkedLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChunkedLoader.swift; sourceTree = "<group>"; };
 		D02B540992E1F3C96A00723F /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		D036492CF6A9DB2DAFE010BC /* VReaderAnnotationParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VReaderAnnotationParser.swift; sourceTree = "<group>"; };
@@ -1812,7 +1818,9 @@
 				4C87C165AFE78571456C14D1 /* LocatorValidationTests.swift */,
 				F8DEE3B767FC8F7457067C11 /* MutationDriftTests.swift */,
 				1456DD6C03CD51C24CA8CDCF /* NamedHighlightColorTests.swift */,
+				3A480E951C2CA72DB6A22C24 /* ReaderThemeMigrationTests.swift */,
 				9081F5E7C359D5FB2661E7AC /* ReaderThemeTests.swift */,
+				80381187837EB2DA41E98207 /* ReaderThemeV2Tests.swift */,
 				EC4FE169F0AC369FB30F888F /* ReadingModeTests.swift */,
 				EE41196788F697BB4ACD4B06 /* ReadingSessionTests.swift */,
 				03FA3AC72012ED6686293475 /* ReadingStatsTests.swift */,
@@ -3043,6 +3051,7 @@
 				3C567EE93DC61BBB63CEAC20 /* Locator.swift */,
 				DBAA3F90BD69DDACBE195884 /* NamedHighlightColor.swift */,
 				4581A94B5099D15743DC02F3 /* ReaderTheme.swift */,
+				CFB26FE0A7766F5E461A6BC7 /* ReaderThemeV2.swift */,
 				1B2B480AC630357CC08475F4 /* ReadingMode.swift */,
 				831F853E3D42A27170BB0F92 /* ReadingPosition.swift */,
 				38A104E5CBC93D0266E6C21E /* ReadingSession.swift */,
@@ -3844,7 +3853,9 @@
 				B5EED69421D1469D01B8C392 /* ReaderSettingsPanelTapZonesGateTests.swift in Sources */,
 				B5114E58420F95EFB408CA82 /* ReaderSettingsStoreTests.swift in Sources */,
 				6173290A06E9E4303D363AE8 /* ReaderThemeCSSTests.swift in Sources */,
+				7A3B9A992F12E5E187F0794E /* ReaderThemeMigrationTests.swift in Sources */,
 				CB432F27C324A4EBC3D1F327 /* ReaderThemeTests.swift in Sources */,
+				AAE6B9BC238DD37272640F0E /* ReaderThemeV2Tests.swift in Sources */,
 				41E1AE7987CC61A4C9B29FFE /* ReadingModeTests.swift in Sources */,
 				726DA1204DBFE8EBE5852764 /* ReadingProgressBarTests.swift in Sources */,
 				B1DFA851C827F5BB877DD2B8 /* ReadingSessionTests.swift in Sources */,
@@ -4249,6 +4260,7 @@
 				05007F5C2D7687A1173C48CB /* ReaderSettingsStore.swift in Sources */,
 				E6D1587B7798C34CCA0E37F6 /* ReaderTOCBuilder.swift in Sources */,
 				792681509B48600C93D01C39 /* ReaderTheme.swift in Sources */,
+				ABE20173610A76DC711FBA55 /* ReaderThemeV2.swift in Sources */,
 				6EA1E4475CD190B3E9F9D370 /* ReaderUnifiedCoordinator.swift in Sources */,
 				465A39FA962033092AA33F68 /* ReaderUnifiedDispatch.swift in Sources */,
 				69D8922795B7525A06038A49 /* ReadingMode.swift in Sources */,
@@ -4534,13 +4546,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 384;
+				CURRENT_PROJECT_VERSION = 385;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.23.7;
+				MARKETING_VERSION = 3.23.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -4684,13 +4696,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 384;
+				CURRENT_PROJECT_VERSION = 385;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.23.7;
+				MARKETING_VERSION = 3.23.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
