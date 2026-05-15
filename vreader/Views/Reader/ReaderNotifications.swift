@@ -74,6 +74,14 @@ extension Notification.Name {
     /// `.readerHighlightTapped` event. Filtered by `fingerprintKey` so
     /// concurrent Foliate readers don't cross-fire.
     static let foliateAnnotationTapRequested = Notification.Name("vreader.foliateAnnotationTapRequested")
+    /// Bug #199 / GH #733: posted by `FoliateSpikeView.body`'s Delete-
+    /// action handler after persisting a deletion. The Coordinator observes
+    /// it (its `webView` is in scope), filters by `fingerprintKey`, and
+    /// runs `readerAPI.deleteAnnotation({ value: cfi })` so the rendered
+    /// annotation disappears from the Foliate-js overlay immediately
+    /// instead of lingering until the next book reopen. `userInfo` carries
+    /// `["cfi": String, "fingerprintKey": String]`.
+    static let foliateRequestAnnotationJSDelete = Notification.Name("vreader.foliateRequestAnnotationJSDelete")
 }
 
 /// Carries text selection info from bridges to container views via NotificationCenter.

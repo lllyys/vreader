@@ -524,7 +524,8 @@ struct ReaderContainerView: View {
                 bookURL: resolvedFileURL,
                 fingerprintKey: book.fingerprintKey,
                 readerToken: readerToken,
-                settingsStore: settingsStore
+                settingsStore: settingsStore,
+                highlightActionPresenter: UIKitHighlightActionPresenter()
             )
         default:
             unsupportedFormatView(format: book.format.uppercased())

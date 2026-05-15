@@ -21,6 +21,11 @@ struct FoliateSpikeView: View {
     /// toggle (Scroll/Paged). Optional so legacy call sites (previews,
     /// tests) compile; nil resolves to scrolled via `FoliateLayoutFlowMapper`.
     var settingsStore: ReaderSettingsStore?
+    /// Bug #199 / GH #733: optional inline-menu presenter for tap-on-
+    /// highlight. When nil (preview / test harness), the menu skips —
+    /// `.readerHighlightTapped` still fires from WI-5 so other observers
+    /// (annotations panel, etc.) react.
+    var highlightActionPresenter: (any HighlightActionPresenting)?
 
     @State private var isBookReady = false
     @State private var bookTitle = ""
@@ -57,38 +62,10 @@ struct FoliateSpikeView: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .foliateAnnotationTapRequested)) { notification in
-            // Feature #53 WI-5: resolve the tapped CFI → highlight UUID and
-            // post `.readerHighlightTapped` so the cross-format inline-menu
-            // pipeline picks it up. `sourceRect` is `.zero` for now —
-            // foliate-host.js doesn't yet forward the annotation's screen
-            // rect; that's a follow-up. The notification firing is the
-            // important behavior change (regression fix from posting
-            // `.readerHighlightRequested`, which was silently no-op'd).
-            guard let info = notification.userInfo,
-                  let cfi = info["cfi"] as? String,
-                  let key = info["fingerprintKey"] as? String,
-                  key == fingerprintKey else { return }
-            let persistence = PersistenceActor(modelContainer: modelContext.container)
-            Task { @MainActor in
-                do {
-                    let records = try await persistence.fetchHighlights(forBookWithKey: key)
-                    guard let highlightID = FoliateHighlightTapResolver.resolveHighlightID(
-                        forCFI: cfi, in: records
-                    ) else { return }
-                    NotificationCenter.default.post(
-                        name: .readerHighlightTapped,
-                        object: ReaderHighlightTapEvent(highlightID: highlightID, sourceRect: .zero)
-                    )
-                } catch {
-                    // Surfacing this to the user would be noisy; the inline-
-                    // menu just won't appear for this tap. Logged for
-                    // diagnosis.
-                    let log = Logger(subsystem: "com.vreader.app", category: "FoliateSpikeView")
-                    log.error("annotation-tap resolver fetch failed: \(String(describing: error), privacy: .public)")
-                }
-            }
-        }
+        .foliateHighlightTapHandler(
+            fingerprintKey: fingerprintKey,
+            presenter: highlightActionPresenter
+        )
         .onReceive(NotificationCenter.default.publisher(for: .readerBookmarkRequested)) { _ in
             guard let key = fingerprintKey,
                   let fp = DocumentFingerprint(canonicalKey: key) else { return }
@@ -271,12 +248,53 @@ extension FoliateSpikeView {
         var readerToken: UUID?
         #endif
 
+        /// Bug #199 / GH #733: observer token for
+        /// `.foliateRequestAnnotationJSDelete`. The outer view posts this
+        /// after persistence delete fires; the Coordinator picks it up
+        /// (its `webView` is in scope) and evaluates
+        /// `readerAPI.deleteAnnotation` so the rendered annotation
+        /// disappears from the Foliate-js overlay without waiting for
+        /// the next book reopen. `nonisolated(unsafe)` mirrors the
+        /// TXT coordinator pattern — the Coordinator is effectively
+        /// `@MainActor`-isolated at use time but the deinit is
+        /// nonisolated, so the property cannot be MainActor-isolated.
+        nonisolated(unsafe) private var foliateJSDeleteToken: NSObjectProtocol?
+
         init(initialLayoutFlow: String,
              onBookReady: @escaping @MainActor (String) -> Void,
              onError: @escaping @MainActor (String) -> Void) {
             self.currentLayoutFlow = FoliateJSEscaper.sanitizeFlow(initialLayoutFlow)
             self.onBookReady = onBookReady
             self.onError = onError
+            super.init()
+            self.foliateJSDeleteToken = NotificationCenter.default.addObserver(
+                forName: .foliateRequestAnnotationJSDelete,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let info = notification.userInfo,
+                      let cfi = info["cfi"] as? String, !cfi.isEmpty,
+                      let key = info["fingerprintKey"] as? String,
+                      key == self.fingerprintKey else { return }
+                // Reuse the canonical Foliate JS builder so the escape
+                // semantics stay aligned with the renderer's
+                // `addAnnotationJS` / `restoreAllJS` paths.
+                let js = FoliateHighlightRenderer.removeAnnotationJS(cfi: cfi)
+                // The observer's queue is `.main`, so this closure runs on
+                // the main thread; the WKWebView API is safe to call from
+                // here. `assumeIsolated` documents the contract for the
+                // type-checker.
+                MainActor.assumeIsolated {
+                    self.webView?.evaluateJavaScript(js, completionHandler: nil)
+                }
+            }
+        }
+
+        deinit {
+            if let token = foliateJSDeleteToken {
+                NotificationCenter.default.removeObserver(token)
+            }
         }
 
         func userContentController(_ controller: WKUserContentController,
