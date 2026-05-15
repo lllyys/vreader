@@ -94,6 +94,51 @@ struct AutoPageTurnerTests {
         #expect(turner.interval == 1.0)
     }
 
+    /// Bug #191 Codex audit Medium: NaN propagates through
+    /// `max(1.0, min(60.0, .nan))` because NaN comparisons return false.
+    /// Without the `isFinite` guard, `Task.sleep(for: .seconds(.nan))` in
+    /// `scheduleTimer` would hit undefined behavior. Non-finite inputs
+    /// reset to the 5s default.
+    @Test @MainActor func intervalClamped_nan_resetsToDefault() {
+        let turner = AutoPageTurner()
+        turner.interval = .nan
+        #expect(turner.interval == 5.0)
+    }
+
+    @Test @MainActor func intervalClamped_positiveInfinity_resetsToDefault() {
+        let turner = AutoPageTurner()
+        turner.interval = .infinity
+        #expect(turner.interval == 5.0)
+    }
+
+    @Test @MainActor func intervalClamped_negativeInfinity_resetsToDefault() {
+        let turner = AutoPageTurner()
+        turner.interval = -.infinity
+        #expect(turner.interval == 5.0)
+    }
+
+    /// Bug #191 (GH #682) regression: setting `interval` repeatedly must
+    /// not recurse. Pre-fix, the original `var interval = 5.0 { didSet {
+    /// interval = clamp(interval) } }` under `@Observable` caused
+    /// `_interval.setter ↔ _interval.didset ↔ interval.setter` recursion
+    /// that hit the stack-guard fault at ~23k frames. This test asserts
+    /// repeated writes terminate normally — if the recursion regresses,
+    /// the test process aborts before the `#expect` line.
+    @Test @MainActor func intervalAssignment_doesNotRecurse_bug191() {
+        let turner = AutoPageTurner()
+        // Each assignment exercises the @Observable wrapper-vs-storage path
+        // that triggered the original recursion. Cover in-range, below-min,
+        // above-max, and a back-to-back-same-value pair so any didSet
+        // re-entrance would manifest as the test killing itself.
+        turner.interval = 3.0
+        turner.interval = 0.5
+        turner.interval = 100.0
+        turner.interval = 30.0
+        turner.interval = 30.0
+        #expect(turner.interval == 30.0,
+                "expected final clamped value 30.0; reaching this assertion is itself the load-bearing signal that no recursion occurred")
+    }
+
     // MARK: - State Transitions
 
     @Test @MainActor func start_transitionsToRunning() {

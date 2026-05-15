@@ -29,8 +29,41 @@ final class AutoPageTurner {
     private(set) var state: State = .idle
 
     /// Seconds between page turns, clamped to 1...60.
-    var interval: TimeInterval = 5.0 {
-        didSet { interval = Self.clampInterval(interval) }
+    ///
+    /// Bug #191: a previous shape — `var interval = 5.0 { didSet { interval =
+    /// Self.clampInterval(interval) } }` — recursed infinitely under
+    /// `@Observable`. The macro splits the property into a stored backing
+    /// (`_interval`, where the didSet attaches) and a computed wrapper
+    /// (`interval`, the public accessor). Writing to `interval` from inside
+    /// `_interval.didSet` re-entered the public setter, which wrote back to
+    /// `_interval`, refiring its didSet — ~23k-frame SIGSEGV stack-guard
+    /// fault. Swift's "didSet doesn't re-fire from within itself" invariant
+    /// only holds when the body writes to the same stored property whose
+    /// didSet is running; the macro's wrapper/storage split breaks it.
+    ///
+    /// Fix: route through `@ObservationIgnored` raw storage plus a computed
+    /// property that clamps on the way in. `access`/`withMutation` preserve
+    /// SwiftUI observation tracking; no didSet means no recursion. See
+    /// `docs/bugs.md` row #191 and GH #682.
+    @ObservationIgnored
+    private var _intervalRaw: TimeInterval = 5.0
+
+    var interval: TimeInterval {
+        get {
+            access(keyPath: \.interval)
+            return _intervalRaw
+        }
+        set {
+            let clamped = Self.clampInterval(newValue)
+            // Bug #191 Codex audit Low: skip `withMutation` when the clamped
+            // value didn't change. Manual `withMutation` always emits an
+            // observation transaction, unlike the macro-synthesized setter
+            // which can short-circuit identical writes.
+            guard clamped != _intervalRaw else { return }
+            withMutation(keyPath: \.interval) {
+                _intervalRaw = clamped
+            }
+        }
     }
 
     // MARK: - Private
@@ -100,6 +133,12 @@ final class AutoPageTurner {
     }
 
     private static func clampInterval(_ value: TimeInterval) -> TimeInterval {
-        max(1.0, min(60.0, value))
+        // Bug #191 Codex audit Medium: `max(1.0, min(60.0, .nan))` propagates
+        // `.nan` through (NaN comparisons return false, so neither min nor
+        // max replaces it). Without this guard, `Task.sleep(for: .seconds(
+        // .nan))` in `scheduleTimer` hits undefined behavior. Treat any
+        // non-finite input as "reset to default 5s".
+        guard value.isFinite else { return 5.0 }
+        return max(1.0, min(60.0, value))
     }
 }
