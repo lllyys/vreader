@@ -1,0 +1,15 @@
+{
+  "bridge" : "epub",
+  "fingerprintKey" : "epub:f284fd074ccd1d3c1a78985464d9e1be27975f4029f3c2ddef8428ca10684af4:2198",
+  "format" : "epub",
+  "result" : {
+    "bodyTextHead" : "\n  Chapter Two\n  The second chapter exists so navigation between chapters can be tested. It is shorter than the first by design.\n  End of fixture.\n",
+    "count" : 0,
+    "docTitle" : "Chapter Two",
+    "firstOuterHTMLHead" : null,
+    "texts" : [
+
+    ]
+  },
+  "ts" : "2026-05-15T13:32:10Z"
+}
