@@ -206,5 +206,43 @@ struct TXTChunkedBridgeHighlightTapTests {
         // Non-zero size proves clipping produced a valid local range.
         #expect((result?.sourceRect.width ?? 0) > 0)
     }
+
+    /// Per Bug #203 (GH #743): the pure-point overload must return the rect
+    /// in the textView's local coordinate space — NOT the textView's
+    /// window-space. The gesture-based wrapper converts to tableView-local
+    /// before calling the presenter; the pure-point helper's contract is
+    /// just "view-local relative to the passed textView." If this helper
+    /// re-introduces a `convert(_, to: nil)` call, the gesture wrapper's
+    /// subsequent `textView.convert(_, to: tableView)` would double-apply
+    /// the window→view delta and the menu would land off-screen.
+    @Test @MainActor
+    func resolveChunkedHighlightTap_pureOverload_returnsViewLocalRect_notWindowSpace() {
+        let tv = makeChunkFixture(text: "hello world")
+        // Embed in a window at non-zero origin so the two spaces differ.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        tv.frame = CGRect(x: 50, y: 100, width: 700, height: 200)
+        window.addSubview(tv)
+
+        let id = UUID()
+        let lookup = [PersistedHighlightLookupEntry(
+            id: id, range: NSRange(location: 0, length: 5)  // "hello"
+        )]
+        let tapPoint = CGPoint(x: 5, y: 5)
+        guard let event = TXTChunkedReaderBridge.Coordinator.resolveChunkedHighlightTap(
+            tapPointInCell: tapPoint,
+            in: tv,
+            chunkIndex: 0,
+            chunkStartOffsets: [0],
+            lookup: lookup
+        ) else {
+            Issue.record("Expected a hit for tap over 'hello'")
+            return
+        }
+
+        #expect(event.sourceRect.origin.x < 50,
+                "sourceRect.x should be textView-local; got \(event.sourceRect.origin.x) — likely still window-space (offset by 50)")
+        #expect(event.sourceRect.origin.y < 100,
+                "sourceRect.y should be textView-local; got \(event.sourceRect.origin.y) — likely still window-space (offset by 100)")
+    }
 }
 #endif

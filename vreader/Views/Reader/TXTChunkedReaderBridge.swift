@@ -413,12 +413,21 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             else { return nil }
             let textView = cell.textContentView
             let tapPointInCell = tableView.convert(tapPointInTable, to: textView)
-            return resolveChunkedHighlightTap(
+            guard let event = resolveChunkedHighlightTap(
                 tapPointInCell: tapPointInCell,
                 in: textView,
                 chunkIndex: indexPath.row,
                 chunkStartOffsets: chunkStartOffsets,
                 lookup: lookup
+            ) else { return nil }
+            // Per Bug #203 (GH #743): the pure-point overload returns rects
+            // in textView-local coords. Convert to tableView-local here
+            // because the presenter is `present(for:in: tableView)` and
+            // `UIEditMenuConfiguration.sourcePoint` expects coordinates in
+            // the interaction-view's (tableView's) space.
+            let tableViewRect = textView.convert(event.sourceRect, to: tableView)
+            return ReaderHighlightTapEvent(
+                highlightID: event.highlightID, sourceRect: tableViewRect
             )
         }
 
@@ -473,12 +482,15 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             let containerRect = lm.boundingRect(
                 forGlyphRange: glyphRange, in: textView.textContainer
             )
+            // Per Bug #203 (GH #743): return textView-local coords. The
+            // gesture-based wrapper above converts to tableView-local before
+            // handing to the presenter (which uses the rect as the source
+            // point for `UIEditMenuConfiguration` in the tableView's space).
             let viewRect = containerRect.offsetBy(
                 dx: inset.left, dy: inset.top
             )
-            let windowRect = textView.convert(viewRect, to: nil)
             return ReaderHighlightTapEvent(
-                highlightID: hit.id, sourceRect: windowRect
+                highlightID: hit.id, sourceRect: viewRect
             )
         }
 

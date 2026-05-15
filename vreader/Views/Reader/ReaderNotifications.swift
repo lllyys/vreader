@@ -56,7 +56,10 @@ extension Notification.Name {
     /// Posted by reader bridges (TXT/MD/EPUB/Foliate/PDF) when the user
     /// taps an existing highlight in the content area.
     /// The notification's `object` is a `ReaderHighlightTapEvent` carrying
-    /// the highlight's UUID and screen-space rect for popover anchoring.
+    /// the highlight's UUID and a `sourceRect` in the coordinate space of
+    /// the same `UIView` the bridge later passes to
+    /// `HighlightActionPresenting.present(for:in:)` — see the doc on
+    /// `ReaderHighlightTapEvent.sourceRect` for the cross-bridge contract.
     /// Feature #53 / GH #596.
     static let readerHighlightTapped = Notification.Name("vreader.readerHighlightTapped")
     /// Posted after annotation import completes (bug #88).
@@ -112,8 +115,23 @@ struct PDFHighlightNotificationPayload {
 
 /// Carries the tap event for an existing highlight (Feature #53).
 /// Posted via `.readerHighlightTapped` from any reader format's bridge.
-/// `sourceRect` is in screen-space coordinates of the host UIView/UIWindow,
-/// used by `HighlightActionPresenting` to anchor the inline menu popover.
+///
+/// **`sourceRect` coordinate-space contract (Bug #203 / GH #743)**: the rect
+/// must be in the coordinate space of the same `UIView` the bridge passes
+/// to `HighlightActionPresenting.present(for:in:)`. The presenter feeds it
+/// to `UIEditMenuConfiguration.sourcePoint`, which UIKit interprets in the
+/// interaction-view's coords. Per-bridge:
+///   - TXT (non-chunked): textView-local; presenter view is the textView.
+///   - TXT chunked: tableView-local; presenter view is the tableView. The
+///     chunked gesture wrapper converts textView-local rects from the
+///     pure-point overload via `textView.convert(_, to: tableView)`.
+///   - EPUB: webView-local from JS `getBoundingClientRect()`; presenter
+///     view is the webView.
+///   - PDF: pdfView-local via `pdfView.convert(hit.bounds, from: page)`.
+///   - Foliate (AZW3/MOBI): `.zero` (known follow-up — Foliate JS doesn't
+///     forward annotation rects yet); the menu anchors at view origin.
+/// Window-space rects (the pre-Bug-#203 contract) anchored the menu
+/// off-screen whenever the host UIView was offset within its window.
 struct ReaderHighlightTapEvent: Sendable, Equatable {
     let highlightID: UUID
     let sourceRect: CGRect

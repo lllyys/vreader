@@ -110,5 +110,46 @@ struct TXTBridgeHighlightTapTests {
         #expect(event.sourceRect.width > 0)
         #expect(event.sourceRect.height > 0)
     }
+
+    /// Per Bug #203 (GH #743): `resolveHighlightTap` must return the rect in
+    /// the textView's local coordinate space — NOT window-space. The presenter
+    /// passes this rect to `UIEditMenuConfiguration.sourcePoint`, which is
+    /// interpreted in the interaction-view's coords (the textView itself for
+    /// the non-chunked TXT path). Returning window-space would anchor the
+    /// menu off-screen when the textView is at a non-zero window origin
+    /// (which is always the case in a real reader chrome).
+    @Test @MainActor
+    func resolveHighlightTap_returnsViewLocalRect_notWindowSpace() {
+        let tv = makeFixture(text: "hello world")
+        // Embed the textView in a window at a non-zero origin so view-space
+        // and window-space differ by exactly (50, 100). If the bug were
+        // present (the old `textView.convert(_, to: nil)` path), every
+        // sourceRect.origin would be offset by these values.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        tv.frame = CGRect(x: 50, y: 100, width: 700, height: 200)
+        window.addSubview(tv)
+
+        let id = UUID()
+        let lookup = [PersistedHighlightLookupEntry(
+            id: id, range: NSRange(location: 0, length: 5)  // "hello"
+        )]
+        // Tap in textView-local coords near the start of "hello".
+        let tapPoint = CGPoint(x: 5, y: 5)
+        guard let event = TXTTextViewBridge.Coordinator.resolveHighlightTap(
+            tapPoint: tapPoint, in: tv, lookup: lookup
+        ) else {
+            Issue.record("Expected a hit")
+            return
+        }
+
+        // In textView-local space the "hello" rect starts near (0, 0) plus
+        // whatever inset. It must NOT have absorbed the window offset (50,
+        // 100). If x ≥ 50 or y ≥ 100, the bridge is still emitting
+        // window-space coords.
+        #expect(event.sourceRect.origin.x < 50,
+                "sourceRect.x should be textView-local; got \(event.sourceRect.origin.x) — likely still window-space (offset by 50)")
+        #expect(event.sourceRect.origin.y < 100,
+                "sourceRect.y should be textView-local; got \(event.sourceRect.origin.y) — likely still window-space (offset by 100)")
+    }
 }
 #endif

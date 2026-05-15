@@ -1,10 +1,16 @@
 // Purpose: Inline-menu presenter for a tapped highlight (Feature #53 / GH #596).
 //
 // Reader bridges post `.readerHighlightTapped` with a `ReaderHighlightTapEvent`
-// carrying the highlight UUID + screen-space rect. The container view (or its
-// notification modifier) asks an injected `HighlightActionPresenting` to show
-// a menu anchored at that rect and routes the resolved `HighlightTapAction`
-// back to `HighlightCoordinator.handleTapAction(_:highlightID:)`.
+// carrying the highlight UUID + a `sourceRect` in the same `UIView`'s
+// coordinate space as the view the bridge passes to `present(for:in:)` (per
+// the contract on `ReaderHighlightTapEvent.sourceRect` — Bug #203 / GH
+// #743). The container view (or its notification modifier) asks an injected
+// `HighlightActionPresenting` to show a menu anchored at that rect and
+// routes the resolved `HighlightTapAction` back to
+// `HighlightCoordinator.handleTapAction(_:highlightID:)`. The presenter
+// does NOT normalize coordinates — it trusts the bridge to emit
+// view-local rects so `UIEditMenuConfiguration.sourcePoint` lands where
+// the user tapped.
 //
 // Default impl is `UIKitHighlightActionPresenter` using `UIEditMenuInteraction`
 // on iOS 16+ for the anchored popover. For test isolation, presenters are

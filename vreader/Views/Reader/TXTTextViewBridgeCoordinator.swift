@@ -272,15 +272,19 @@ extension TXTTextViewBridge {
                 forGlyphRange: glyphRange,
                 in: textView.textContainer
             )
-            // Re-apply the inset to convert container-rect → textView-rect,
-            // then convert to window/screen space for popover anchoring.
+            // Re-apply the inset to convert container-rect → textView-rect.
+            // Per Bug #203 (GH #743): `UIEditMenuConfiguration.sourcePoint`
+            // expects the interaction-view's coordinate space — the regular
+            // TXT presenter is `present(for: event, in: tv)`, so the rect
+            // must stay in textView-local coords. The previous code
+            // converted to nil (window-space) which positioned the menu
+            // off-screen when the textView wasn't at window origin.
             let viewRect = containerRect.offsetBy(
                 dx: inset.left, dy: inset.top
             )
-            let windowRect = textView.convert(viewRect, to: nil)
             return ReaderHighlightTapEvent(
                 highlightID: hit.id,
-                sourceRect: windowRect
+                sourceRect: viewRect
             )
         }
 
