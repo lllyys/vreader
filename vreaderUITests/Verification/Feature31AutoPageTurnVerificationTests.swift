@@ -74,7 +74,11 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
         // capability gate (.autoPageTurn granted only to MD per bug #157)
         // is satisfied by the .mdTOC seed.
 
-        // Look for the Auto Page Turn section.
+        // Look for the Auto Page Turn section. The initial
+        // `waitForExistence(timeout: 2)` lets the panel populate before
+        // the swipe-up loop fires — empirically, `panel.swipeUp()` issued
+        // too early (before the panel's lazy section rendering completes)
+        // can desync with content loading and leave the section unfound.
         let section = panel.staticTexts["Auto Page Turn"]
         if !section.waitForExistence(timeout: 2) {
             for _ in 0..<6 {
@@ -97,14 +101,18 @@ final class Feature31AutoPageTurnVerificationTests: XCTestCase {
             toggle.waitForExistence(timeout: 3),
             "autoPageTurnToggle should be visible once the section is on-screen"
         )
-        // The section header may have just scrolled into view at the bottom
-        // edge of the panel — the toggle (below the header) might still be
-        // clipped. Swipe up a couple more times to bring the full row into
-        // a hittable position.
-        for _ in 0..<3 where !toggle.isHittable {
+        // Bug #196 (GH #702): the section-finder loop above breaks as soon
+        // as the section header enters the accessibility tree — which can
+        // happen when the header is just barely at the bottom edge with
+        // the toggle row below it still clipped. The previous fix budgeted
+        // only 3 extra swipes, which was insufficient for some panel
+        // layouts. Increasing to 10 retries removes the regression
+        // observed in the v3.22.1 verify-cron re-run while preserving
+        // the original section-finder behavior that's known to work.
+        for _ in 0..<10 where !toggle.isHittable {
             panel.swipeUp()
         }
-        XCTAssertTrue(toggle.isHittable, "Auto Page Turn toggle should be hittable")
+        XCTAssertTrue(toggle.isHittable, "Auto Page Turn toggle should be hittable after at most 10 swipe-up retries")
     }
 
     /// Verifies that toggling Auto Page Turn ON reveals the interval slider.
