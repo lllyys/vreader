@@ -163,6 +163,61 @@ targets:
         # app whose feature is "connect to whatever server the user names."
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        # Feature #59 WI-1: register vreader as an alternate document handler
+        # for the 5 supported formats so iOS Share Sheet / "Open in…" lists
+        # the app. `LSHandlerRank: Alternate` keeps us a polite alternative,
+        # not the default. `LSSupportsOpeningDocumentsInPlace: true` lets the
+        # incoming file URL be opened in-place rather than copied first.
+        # Tap-dispatch is wired by WI-2 (`FileURLImportRouter` + production
+        # `.onOpenURL`); pre-WI-2 the Share Sheet entry appears but tapping
+        # vreader does nothing (intentional partial delivery per the plan).
+        LSSupportsOpeningDocumentsInPlace: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: EPUB Book
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - org.idpf.epub-container
+          - CFBundleTypeName: PDF Document
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.adobe.pdf
+          - CFBundleTypeName: Plain Text
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.plain-text
+          - CFBundleTypeName: Markdown Document
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - net.daringfireball.markdown
+          - CFBundleTypeName: Kindle Book
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.amazon.azw3
+              - com.amazon.mobi-pocket
+        # Apple does not ship public UTIs for the Kindle file family, so we
+        # declare them as imported types. Conforming to `public.data` is the
+        # canonical pattern for opaque binary formats.
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.amazon.azw3
+            UTTypeConformsTo:
+              - public.data
+            UTTypeDescription: Amazon Kindle AZW3
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - azw3
+                - azw
+              public.mime-type:
+                - application/vnd.amazon.ebook
+          - UTTypeIdentifier: com.amazon.mobi-pocket
+            UTTypeConformsTo:
+              - public.data
+            UTTypeDescription: Mobipocket eBook
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - mobi
+                - prc
+              public.mime-type:
+                - application/x-mobipocket-ebook
     scheme:
       testTargets:
         - vreaderTests
