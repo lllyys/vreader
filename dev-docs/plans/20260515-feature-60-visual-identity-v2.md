@@ -308,17 +308,26 @@ not counted; ~5MB asset).
 
 ### WI-7 (SelectionPopover)
 
-- `SelectionPopoverViewTests` — view contains 4 named color buttons
-  + 4 action buttons (Note / Translate / Ask AI / Read); accent
-  applied to Ask AI (primary).
-- `HighlightableTextViewSelectionRouteTests` — long-press +
-  selection-finalised invokes the new presenter, not the legacy
-  UIMenu. **Regression guard**: tap-on-existing-highlight path
-  (feature #53) still routes through `HighlightActionPresenting`,
-  unchanged.
-- Device verify (Gate 5a): long-press TXT and MD fixtures, confirm
-  popover; tap a color, confirm HighlightRecord persisted with the
-  chosen color.
+- **WI-7a (foundational, ships independently):**
+  `SelectionPopoverActionRowTests` — 8 contract tests pinning case
+  count + order matching design (Note / Translate / Ask AI / Read),
+  mapping to `SelectionPopoverAction` dispatch cases, accent slot
+  (Ask AI), stable accessibility identifiers, well-formed SF Symbol
+  names. `SelectionPopoverView` SwiftUI overlay built and
+  compile-validated; no production wiring (long-press still routes
+  through the legacy UIMenu via `TXTBridgeShared.buildReaderEditMenu`).
+- **WI-7b (behavioral, separate PR):**
+  `SelectionPopoverViewTests` — view rendering smoke checks (where
+  feasible without snapshot tooling). `HighlightableTextViewSelectionRouteTests`
+  — long-press + selection-finalised invokes the new presenter,
+  not the legacy UIMenu. **Regression guard**: tap-on-existing-
+  highlight path (feature #53) still routes through
+  `HighlightActionPresenting`, unchanged.
+- Device verify (Gate 5a) — **WI-7b only**: long-press TXT and MD
+  fixtures, confirm popover; tap a color, confirm HighlightRecord
+  persisted with the chosen color. WI-7a is foundational (no UI
+  delta) so unit + integration tests + audit are sufficient per the
+  rule 47 Gate 5 matrix.
 
 ### WI-8 (Library card/row tokens)
 
@@ -591,3 +600,19 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   bundle commits Search placement (and optional More-menu content).
   TTS is not blocked because WI-7's SelectionPopover "Read" action
   is the design's TTS entry point and ships independently.
+- 2026-05-16 v5: **WI-7 split into WI-7a + WI-7b**. WI-7a
+  (foundational SelectionPopover view + action-row contract;
+  `SelectionPopoverActionRow` enum with Note/Translate/AskAI/Read
+  visible-action contract, `SelectionPopoverView` SwiftUI overlay
+  rendering the design's 4-color row + 4-action toolbar with Ask
+  AI as the accent slot, file-private hex → Color helper) ships
+  immediately as a no-UI-regression slice. The view is built and
+  exercised in unit tests but the legacy long-press path
+  (`TXTBridgeShared.buildReaderEditMenu`) is untouched — production
+  long-press still surfaces the existing UIMenu. WI-7b will replace
+  the UIMenu with a presenter that mounts `SelectionPopoverView`
+  and wires the action callbacks through to the highlight / note /
+  translate / AI / TTS pipelines. Splitting like this preserves
+  the no-regression slice + isolates the bigger UIMenu-replacement
+  diff (which spans TXT non-chunked, TXT chunked, MD, EPUB
+  long-press handlers) into its own audited PR.
