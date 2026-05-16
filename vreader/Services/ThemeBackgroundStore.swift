@@ -28,6 +28,24 @@ enum ThemeBackgroundStore {
         guard FileManager.default.fileExists(atPath: path.path) else { return }
         try FileManager.default.removeItem(at: path)
     }
+    /// Photo-theme EPUB support (feature #60 WI-12 / GH #795). Returns the
+    /// stored background image as an inline `data:image/jpeg;base64,…` URL.
+    ///
+    /// EPUB rendering injects the Photo theme's background image through
+    /// `ReaderThemeV2.epubOverrideCSS(backgroundImageURL:)`. A `file://`
+    /// URL can't be used there: `EPUBWebViewBridge` scopes the WKWebView's
+    /// `allowingReadAccessTo` to the EPUB extraction directory, so a URL
+    /// into Application Support is refused. A `data:` URL carries the
+    /// bytes inline and needs no read-access grant. The stored file is
+    /// already capped at `maxDimension`px / `jpegQuality`, so the encoded
+    /// string stays bounded. Returns nil when no background is stored.
+    static func backgroundImageDataURL(for themeName: String, baseDirectory: URL? = nil) -> URL? {
+        let path = backgroundPath(for: themeName, baseDirectory: baseDirectory)
+        guard FileManager.default.fileExists(atPath: path.path),
+              let data = try? Data(contentsOf: path),
+              !data.isEmpty else { return nil }
+        return URL(string: "data:image/jpeg;base64,\(data.base64EncodedString())")
+    }
     #if canImport(UIKit)
     private static func resizeIfNeeded(_ image: UIImage, maxDimension maxDim: CGFloat) -> UIImage {
         // Use pixel dimensions to avoid scale mismatch.

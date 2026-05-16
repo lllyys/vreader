@@ -173,14 +173,15 @@ extension ReaderThemeV2 {
     /// context: `\` and `"`. `outerBG` is kept as a fallback so a
     /// slow-loading or missing image still has a visible background.
     ///
-    /// **Bridge scope**: `EPUBWebViewBridge` is configured with
-    /// `allowingReadAccessTo: extractedRoot` (the EPUB's extraction
-    /// directory). A `file://` URL pointing at `ThemeBackgroundStore`
-    /// (Application Support) is outside that scope and WKWebView will
-    /// refuse to load it. The plumbing that widens access — or copies
-    /// the photo under the EPUB root before injection — ships in a
-    /// later WI; until then callers pass `backgroundImageURL: nil` and
-    /// this branch stays dormant.
+    /// **Caller note**: `EPUBReaderContainerView` (feature #60 WI-12,
+    /// GH #795) supplies a base64 `data:` URL from
+    /// `ThemeBackgroundStore.backgroundImageDataURL`, not a `file://`
+    /// URL. A `data:` URL carries the image bytes inline, so it needs no
+    /// WKWebView `allowingReadAccessTo` grant — a `file://` URL into
+    /// `ThemeBackgroundStore` (Application Support) would sit outside the
+    /// EPUB extraction directory the bridge scopes access to, and
+    /// WKWebView would refuse it. This rule is URL-shape agnostic: any
+    /// non-nil URL on the Photo theme emits the background-image rule.
     private static func backgroundImageRule(
         for theme: ReaderThemeV2, url: URL?, outerBG: String
     ) -> String {

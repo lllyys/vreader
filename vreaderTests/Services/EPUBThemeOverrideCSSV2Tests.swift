@@ -198,6 +198,23 @@ struct EPUBThemeOverrideCSSV2Tests {
                 "Photo CSS embeds the cssEscapeURL output verbatim inside url(\"…\")")
     }
 
+    @Test func photoCSSAcceptsBase64DataURLBackground() {
+        // WI-12 / #795: EPUB Photo backgrounds are injected as base64
+        // `data:` URLs — no file:// URL, so no dependency on the
+        // WKWebView `allowingReadAccessTo` scope. A data URL's payload
+        // characters (`;` `,` `/` `+` `=`) are none of the `\` / `"`
+        // that cssEscapeURL neutralises, so it lands verbatim in url("…").
+        let dataURL = URL(string: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==")!
+        let css = ReaderThemeV2.photo.epubOverrideCSS(
+            fontSize: 18, backgroundImageURL: dataURL
+        )
+        #expect(
+            css.contains(#"background-image: url("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==")"#),
+            "Photo EPUB CSS embeds a base64 data URL verbatim"
+        )
+        #expect(css.contains("background-attachment: fixed"), "Fixed across scroll")
+    }
+
     // MARK: - Font integration (delegates to WI-1's ReaderTypography)
 
     @Test func epubCSSRoutesFontStackThroughTypographyRegistry() {

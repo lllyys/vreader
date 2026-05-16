@@ -91,6 +91,49 @@ import UIKit
         #expect(loaded != nil); #expect(loaded!.size.width == 200)
         try? FileManager.default.removeItem(at: d)
     }
+
+    // MARK: - backgroundImageDataURL (feature #60 WI-12 / GH #795)
+    //
+    // The EPUB reader can't load the Photo theme's background image via a
+    // `file://` URL — the WKWebView's `allowingReadAccessTo` scope covers
+    // only the EPUB extraction directory, not Application Support. So the
+    // image is injected into the EPUB CSS as an inline base64 `data:` URL.
+
+    @Test func backgroundImageDataURL_returnsNil_whenNoBackground() throws {
+        let d = try makeTempDir()
+        #expect(ThemeBackgroundStore.backgroundImageDataURL(for: "photo", baseDirectory: d) == nil)
+        try? FileManager.default.removeItem(at: d)
+    }
+
+    @Test func backgroundImageDataURL_returnsBase64JPEGDataURL_whenSet() throws {
+        let d = try makeTempDir()
+        try ThemeBackgroundStore.saveBackground(makeTestImage(), for: "photo", baseDirectory: d)
+        let url = try #require(ThemeBackgroundStore.backgroundImageDataURL(for: "photo", baseDirectory: d))
+        #expect(url.absoluteString.hasPrefix("data:image/jpeg;base64,"),
+                "EPUB Photo background is injected as an inline base64 data URL")
+        try? FileManager.default.removeItem(at: d)
+    }
+
+    @Test func backgroundImageDataURL_payloadRoundTripsStoredJPEG() throws {
+        let d = try makeTempDir()
+        try ThemeBackgroundStore.saveBackground(makeTestImage(), for: "photo", baseDirectory: d)
+        let stored = try Data(contentsOf: ThemeBackgroundStore.backgroundPath(for: "photo", baseDirectory: d))
+        let url = try #require(ThemeBackgroundStore.backgroundImageDataURL(for: "photo", baseDirectory: d))
+        let base64 = String(url.absoluteString.dropFirst("data:image/jpeg;base64,".count))
+        let decoded = try #require(Data(base64Encoded: base64))
+        #expect(decoded == stored, "data URL payload must be the exact stored JPEG bytes")
+        #expect(UIImage(data: decoded) != nil, "decoded payload is a valid image")
+        try? FileManager.default.removeItem(at: d)
+    }
+
+    @Test func backgroundImageDataURL_isThemeScoped() throws {
+        // A background saved for one theme key must not leak into another.
+        let d = try makeTempDir()
+        try ThemeBackgroundStore.saveBackground(makeTestImage(), for: "photo", baseDirectory: d)
+        #expect(ThemeBackgroundStore.backgroundImageDataURL(for: "photo", baseDirectory: d) != nil)
+        #expect(ThemeBackgroundStore.backgroundImageDataURL(for: "sepia", baseDirectory: d) == nil)
+        try? FileManager.default.removeItem(at: d)
+    }
     #endif
     @Test func backgroundPath_uniquePerTheme() throws {
         let d = try makeTempDir()

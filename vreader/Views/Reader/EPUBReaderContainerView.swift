@@ -64,6 +64,13 @@ struct EPUBReaderContainerView: View {
     /// Phase R4: highlight renderer and coordinator.
     @State var highlightRenderer = EPUBHighlightRenderer()
     @State var highlightCoordinator: HighlightCoordinator?
+    /// Feature #60 WI-12 (#795): the Photo theme's user-picked background
+    /// image, encoded as an inline `data:` URL for injection into the EPUB
+    /// theme CSS. Recomputed by `refreshPhotoBackgroundImage()` on theme /
+    /// custom-background changes — kept off the body hot path because it
+    /// reads + base64-encodes a file. Nil for every theme but Photo (and
+    /// for Photo with "Custom Background" off).
+    @State private var photoBackgroundDataURL: URL?
 
     /// Whether paged layout is active.
     private var isPaged: Bool {
@@ -292,6 +299,13 @@ struct EPUBReaderContainerView: View {
             noteInputSheet
         }
         .accessibilityIdentifier("epubReaderContainer")
+        // Feature #60 WI-12 (#795): keep the Photo background-image data
+        // URL fresh. Driven by theme + custom-background changes — never
+        // by scroll — so the file read + base64 encode stays off the
+        // body hot path.
+        .onAppear { refreshPhotoBackgroundImage() }
+        .onChange(of: settingsStore?.theme) { _, _ in refreshPhotoBackgroundImage() }
+        .onChange(of: settingsStore?.useCustomBackground) { _, _ in refreshPhotoBackgroundImage() }
     }
 
     // MARK: - Subviews
@@ -328,6 +342,26 @@ struct EPUBReaderContainerView: View {
         _ = try? await parser.contentForSpineItem(href: href)
     }
 
+    /// Feature #60 WI-12 (#795): recomputes `photoBackgroundDataURL`, the
+    /// data URL injected into the EPUB theme CSS for the Photo theme's
+    /// background image. Only the Photo theme with "Custom Background"
+    /// enabled carries an image; every other theme / toggle state resolves
+    /// to nil so the EPUB CSS emits no `background-image` rule. Called from
+    /// `.onAppear` and `.onChange` of theme + `useCustomBackground` so the
+    /// file read + base64 encode never runs on a scroll-triggered body
+    /// re-evaluation.
+    private func refreshPhotoBackgroundImage() {
+        guard let store = settingsStore,
+              store.theme.usesBackgroundImage,
+              store.useCustomBackground else {
+            photoBackgroundDataURL = nil
+            return
+        }
+        photoBackgroundDataURL = ThemeBackgroundStore.backgroundImageDataURL(
+            for: store.theme.rawValue
+        )
+    }
+
     @ViewBuilder
     private func readerContent(contentURL: URL, accessRoot: URL) -> some View {
         // Bug #163: GeometryReader gives us the SwiftUI safe-area top
@@ -348,7 +382,13 @@ struct EPUBReaderContainerView: View {
                         fontSize: $0.typography.fontSize,
                         lineHeight: $0.typography.lineSpacing,
                         letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0,
-                        fontFamily: $0.typography.fontFamily
+                        fontFamily: $0.typography.fontFamily,
+                        // Feature #60 WI-12 (#795): the Photo theme's
+                        // background image. Cached in `@State` (see
+                        // `refreshPhotoBackgroundImage`) — nil for every
+                        // other theme, so `epubOverrideCSS` emits no
+                        // background-image rule.
+                        backgroundImageURL: photoBackgroundDataURL
                     )
                 },
                 themeBackgroundColor: settingsStore?.theme.backgroundColor,
