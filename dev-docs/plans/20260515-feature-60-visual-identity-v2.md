@@ -308,7 +308,7 @@ not counted; ~5MB asset).
 
 ### WI-7 (SelectionPopover)
 
-- **WI-7a (foundational, ships independently):**
+- **WI-7a (foundational, shipped):**
   `SelectionPopoverActionRowTests` — 8 contract tests pinning case
   count + order matching design (Note / Translate / Ask AI / Read),
   mapping to `SelectionPopoverAction` dispatch cases, accent slot
@@ -316,18 +316,37 @@ not counted; ~5MB asset).
   names. `SelectionPopoverView` SwiftUI overlay built and
   compile-validated; no production wiring (long-press still routes
   through the legacy UIMenu via `TXTBridgeShared.buildReaderEditMenu`).
-- **WI-7b (behavioral, separate PR):**
-  `SelectionPopoverViewTests` — view rendering smoke checks (where
-  feasible without snapshot tooling). `HighlightableTextViewSelectionRouteTests`
-  — long-press + selection-finalised invokes the new presenter,
-  not the legacy UIMenu. **Regression guard**: tap-on-existing-
-  highlight path (feature #53) still routes through
-  `HighlightActionPresenting`, unchanged.
-- Device verify (Gate 5a) — **WI-7b only**: long-press TXT and MD
+- **WI-7b (foundational, shipping):**
+  `SelectionPopoverActionRouter` pure-logic glue mapping a
+  `SelectionPopoverAction` to the existing reader-bridge notification
+  surface (`.readerHighlightRequested`, `.readerAnnotationRequested`,
+  `.readerTranslateRequested`). Returns a `Result` enum
+  (`.dispatched(name)` | `.deferredNotYetWired(action)`) so the
+  deferred `.askAI` / `.read` cases are explicit rather than silent
+  no-ops. `userInfo["color"]` carries the chosen
+  `NamedHighlightColor.rawValue` as an additive payload — existing
+  observers that ignore `userInfo` continue to fall back to the
+  pipeline's default "yellow" color. 10 router tests pin the
+  contract enum-case-exhaustively. **No production wiring yet** —
+  the router exists; WI-7c will call it from the production
+  long-press path.
+- **WI-7c (behavioral, separate PR):**
+  Replace the legacy UIMenu in TXT non-chunked / TXT chunked / MD /
+  EPUB long-press handlers with a presenter that mounts
+  `SelectionPopoverView` and routes each tap through
+  `SelectionPopoverActionRouter`. **Regression guard**: tap-on-
+  existing-highlight path (feature #53) still routes through
+  `HighlightActionPresenting`, unchanged. Tests:
+  `HighlightableTextViewSelectionRouteTests` — long-press +
+  selection-finalised invokes the new presenter, not the legacy
+  UIMenu; color → HighlightRecord round-trip honors the chosen
+  color (downstream observer for `userInfo["color"]` lands in WI-7c
+  too, since the router is pure dispatch).
+- Device verify (Gate 5a) — **WI-7c only**: long-press TXT and MD
   fixtures, confirm popover; tap a color, confirm HighlightRecord
-  persisted with the chosen color. WI-7a is foundational (no UI
-  delta) so unit + integration tests + audit are sufficient per the
-  rule 47 Gate 5 matrix.
+  persisted with the chosen color. WI-7a and WI-7b are foundational
+  (no UI delta) so unit + integration tests + audit are sufficient
+  per the rule 47 Gate 5 matrix.
 
 ### WI-8 (Library card/row tokens)
 
@@ -616,3 +635,26 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   the no-regression slice + isolates the bigger UIMenu-replacement
   diff (which spans TXT non-chunked, TXT chunked, MD, EPUB
   long-press handlers) into its own audited PR.
+- 2026-05-16 v6: **WI-7b further split into WI-7b (foundational router)
+  + WI-7c (behavioral wiring)**. WI-7b now ships
+  `SelectionPopoverActionRouter` — the pure-logic enum-glue mapping a
+  `SelectionPopoverAction` to the existing
+  `.readerHighlightRequested` / `.readerAnnotationRequested` /
+  `.readerTranslateRequested` notification surface. The router
+  returns a discriminated `Result` (`.dispatched(name)` |
+  `.deferredNotYetWired(action)`) so the deferred `.askAI` / `.read`
+  cases are explicit rather than silent no-ops; `userInfo["color"]`
+  carries `NamedHighlightColor.rawValue` as an additive payload
+  (existing observers fall back to "yellow"). 10 router tests pin
+  the contract enum-case-exhaustively. Codex Gate 4 audit thread
+  `019e2e83-0999-70f1-bb9c-f965bb6e8909`, 1 round, final verdict
+  `ship-as-is` — no findings on dimensions 1-8. **What was previously
+  scoped as WI-7b** (production view-wiring across TXT non-chunked /
+  TXT chunked / MD / EPUB long-press handlers) is renamed to **WI-7c
+  (behavioral, separate PR)**. The split keeps the foundational
+  pure-logic dispatch contract independently audited and merge-able
+  before the larger UIMenu-replacement diff lands. WI-7c carries the
+  Gate 5a device-verify obligation (4-color HighlightRecord
+  round-trip on TXT and MD fixtures); WI-7b is foundational so
+  unit + integration tests + audit are sufficient per rule 47 Gate
+  5.
