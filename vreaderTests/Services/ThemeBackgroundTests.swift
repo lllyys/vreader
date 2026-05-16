@@ -134,6 +134,19 @@ import UIKit
         #expect(ThemeBackgroundStore.backgroundImageDataURL(for: "sepia", baseDirectory: d) == nil)
         try? FileManager.default.removeItem(at: d)
     }
+
+    @Test func backgroundImageDataURL_reflectsLatestFileAfterOverwrite() throws {
+        // The WI-12 `customBackgroundRevision` invalidation relies on
+        // `backgroundImageDataURL` always reading the CURRENT file — it
+        // must never cache internally, so a re-pick produces a new URL.
+        let d = try makeTempDir()
+        try ThemeBackgroundStore.saveBackground(makeTestImage(width: 60, height: 60), for: "photo", baseDirectory: d)
+        let first = try #require(ThemeBackgroundStore.backgroundImageDataURL(for: "photo", baseDirectory: d))
+        try ThemeBackgroundStore.saveBackground(makeTestImage(width: 240, height: 240), for: "photo", baseDirectory: d)
+        let second = try #require(ThemeBackgroundStore.backgroundImageDataURL(for: "photo", baseDirectory: d))
+        #expect(first != second, "data URL must reflect the overwritten file, not a stale read")
+        try? FileManager.default.removeItem(at: d)
+    }
     #endif
     @Test func backgroundPath_uniquePerTheme() throws {
         let d = try makeTempDir()
