@@ -51,12 +51,23 @@ struct ReaderNotificationModifier: ViewModifier {
                 guard let locator = deps.locatorFactory(
                     deps.bookFingerprint, info.startUTF16, info.endUTF16, deps.sourceText()
                 ) else { return }
+                // Feature #60 WI-7c2 / Codex Gate 4 round 1 (High):
+                // honor the chosen highlight color from the
+                // SelectionPopover. `SelectionPopoverActionRouter`
+                // posts `userInfo["color"]` carrying the chosen
+                // `NamedHighlightColor.rawValue` ("yellow" / "pink"
+                // / "green" / "blue"). Legacy posters (the old
+                // UIMenu in chunked TXT / MD bridges pre-swap) omit
+                // userInfo; `resolveHighlightColor` falls back to
+                // "yellow" so existing behavior is preserved until
+                // WI-7c3..7c5 land.
+                let color = resolveHighlightColor(from: notification)
                 // Phase R4b: delegate to coordinator (persists + applies via renderer)
                 Task {
                     await highlightCoordinator.create(
                         locator: locator,
                         selectedText: info.selectedText,
-                        color: "yellow"
+                        color: color
                     )
                 }
             }

@@ -315,14 +315,44 @@ extension TXTTextViewBridge {
             editMenuForTextIn range: NSRange,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
-            TXTBridgeShared.buildReaderEditMenu(
-                range: range, textView: textView, suggestedActions: suggestedActions,
-                isAITranslateAvailable: AIReaderAvailability.isAvailable(
-                    featureFlags: FeatureFlags.shared,
-                    keychainService: KeychainService(),
-                    consentManager: AIConsentManager()
+            // Feature #60 WI-7c2: TXT non-chunked bridge swap. The
+            // legacy `TXTBridgeShared.buildReaderEditMenu` UIMenu
+            // (Highlight / Add Note / Define / Translate) is
+            // replaced by `SelectionPopoverView` (WI-7a), presented
+            // by `SelectionPopoverPresenterModifier` (WI-7c1) on
+            // `TXTReaderContainerView`. We post the selection on
+            // `.readerSelectionPopoverRequested` (the presenter's
+            // observed name) and return an empty UIMenu to suppress
+            // iOS's default menu surface — the SwiftUI sheet takes
+            // over as the visual presentation.
+            //
+            // Why the `range.length > 0` guard: iOS calls
+            // `editMenuForTextIn` for cursor placement (zero-length
+            // range) too; we don't want a popover for that — only
+            // for actual text selection. Returning an empty UIMenu
+            // unconditionally still suppresses iOS's default in the
+            // zero-length case (which is fine — there's no useful
+            // menu for an empty selection here anyway).
+            //
+            // Why we route through TXTBridgeShared.postSelectionNotification
+            // rather than SelectionPopoverRequest.post (Codex Gate 4
+            // round 1 Low): the shared helper already implements the
+            // range→TextSelectionInfo extraction with UTF-16 + bounds
+            // validation matching UITextView delegate semantics —
+            // duplicating that contract on the producer side would
+            // drift. The presenter still parses via
+            // SelectionPopoverRequest.selection(from:) which reads
+            // `notification.object as? TextSelectionInfo` — the same
+            // wire shape both helpers produce. (When WI-7c3..7c5
+            // land, all 4 bridges share this single producer path.)
+            if range.length > 0 {
+                TXTBridgeShared.postSelectionNotification(
+                    .readerSelectionPopoverRequested,
+                    from: textView,
+                    range: range
                 )
-            )
+            }
+            return UIMenu(children: [])
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {

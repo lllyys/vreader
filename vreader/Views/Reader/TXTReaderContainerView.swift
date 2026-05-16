@@ -223,6 +223,17 @@ struct TXTReaderContainerView: View {
                 }
             }
         }
+        // Feature #60 WI-7c2: present `SelectionPopoverView` (WI-7a)
+        // when a long-press selection finishes. The TXT non-chunked
+        // bridge (TXTTextViewBridgeCoordinator) posts
+        // `.readerSelectionPopoverRequested` from
+        // `editMenuForTextIn`; this modifier observes the
+        // notification and shows the sheet. Theme comes from the
+        // legacy `ReaderTheme` projected through `.asV2`; falls back
+        // to `.paper` when no settings store is wired (preview /
+        // tests). WI-7c3..7c5 attach the same modifier to the
+        // chunked TXT / MD / EPUB containers.
+        .selectionPopoverPresenter(theme: settingsStore?.theme.asV2 ?? .paper)
         .task {
             // PERF: open already called by TXTReaderHost — skip if content loaded
             if viewModel.textContent == nil && viewModel.currentChapterText == nil {

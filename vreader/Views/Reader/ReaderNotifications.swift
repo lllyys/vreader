@@ -141,6 +141,24 @@ struct TextSelectionInfo: Equatable, Sendable {
     let endUTF16: Int
 }
 
+// MARK: - Highlight color resolution (Feature #60 WI-7c2)
+
+/// Extract the highlight color from a `.readerHighlightRequested`
+/// notification's `userInfo`. Falls back to `"yellow"` when:
+/// - `userInfo` is missing entirely (legacy producers — the
+///   UIMenu callers from chunked TXT / MD bridges before
+///   WI-7c3..7c5 land — don't set it)
+/// - the `"color"` key holds a non-String value (drifted producer)
+///
+/// The post-popover producer (WI-7b `SelectionPopoverActionRouter`)
+/// sets `userInfo["color"]` to the chosen
+/// `NamedHighlightColor.rawValue` (`"yellow"` / `"pink"` /
+/// `"green"` / `"blue"`).
+@MainActor
+func resolveHighlightColor(from notification: Notification) -> String {
+    (notification.userInfo?["color"] as? String) ?? "yellow"
+}
+
 /// Cross-format selection event for the annotation pipeline.
 /// Posted via `.readerTextSelected` notification when the user selects text
 /// in any reader format (EPUB, PDF, TXT/MD).

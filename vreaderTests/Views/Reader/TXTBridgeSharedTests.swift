@@ -100,6 +100,46 @@ struct TXTBridgeSharedTests {
         #expect(received?.selectedText == "")
     }
 
+    // MARK: - postSelectionNotification on .readerSelectionPopoverRequested (WI-7c2)
+
+    /// Feature #60 WI-7c2: the TXT non-chunked bridge swaps its
+    /// `editMenuForTextIn` from `buildReaderEditMenu` to a single
+    /// `postSelectionNotification(.readerSelectionPopoverRequested, ...)`
+    /// + empty UIMenu return. Reuses the existing generic
+    /// post helper so no new method is needed — but pin that the
+    /// shape downstream presenter expects (`TextSelectionInfo` as
+    /// `notification.object`) actually arrives on this notification
+    /// name. The `SelectionPopoverPresenterModifier` from WI-7c1
+    /// reads via `notification.object as? TextSelectionInfo`.
+    @Test @MainActor func postSelectionNotificationOnPopoverRequestRoundTrips() async {
+        let tv = UITextView()
+        tv.text = "Hello World"
+        let range = NSRange(location: 6, length: 5)
+
+        nonisolated(unsafe) var received: TextSelectionInfo?
+        // queue: nil → synchronous in-thread delivery on the same
+        // thread that posts. The post is `@MainActor`, observer set
+        // up on MainActor, so the observer body runs synchronously
+        // inside the post call. No runloop drain, no cross-fire
+        // with other tests on the same notification name.
+        let observer = NotificationCenter.default.addObserver(
+            forName: .readerSelectionPopoverRequested, object: nil, queue: nil
+        ) { note in
+            received = note.object as? TextSelectionInfo
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        TXTBridgeShared.postSelectionNotification(
+            .readerSelectionPopoverRequested, from: tv, range: range
+        )
+
+        #expect(received != nil,
+                "WI-7c2: posting on .readerSelectionPopoverRequested must carry TextSelectionInfo so the WI-7c1 presenter can parse it.")
+        #expect(received?.selectedText == "World")
+        #expect(received?.startUTF16 == 6)
+        #expect(received?.endUTF16 == 11)
+    }
+
     // MARK: - buildReaderEditMenu
 
     @Test @MainActor func buildReaderEditMenuIncludesTranslateWhenAvailable() {
