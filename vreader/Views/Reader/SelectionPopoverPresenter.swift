@@ -15,11 +15,18 @@
 //
 // **Why parse + post helpers in a small enum**: mirrors the
 // `FoliateSelectionDispatcher` / `FoliateMessageParser` pattern so
-// bridges have a single typed entry point (`post(selection:on:)`)
-// and observers have a single typed read point
-// (`selection(from:)`). Keeps the wire format local to the
-// presenter and trivially unit-testable without SwiftUI / sheet
-// lifecycle integration.
+// bridges have a single typed entry point
+// (`post(selection:on:requestToken:)`) and observers have a single
+// typed read point (`payload(from:)`). Keeps the wire format local
+// to the presenter and trivially unit-testable without SwiftUI /
+// sheet lifecycle integration.
+//
+// **WI-7c5a**: the notification `object` is a typed
+// `SelectionPopoverRequestPayload` (selection + optional
+// `requestToken`), not a bare `TextSelectionInfo`. The token lets
+// EPUB (WI-7c5b) round-trip a non-UTF-16 selection identity.
+// `payload(from:)` still decodes a legacy bare `TextSelectionInfo`
+// as a tokenless payload, so the change is not a flag-day break.
 //
 // @coordinates-with: SelectionPopoverView.swift,
 //   SelectionPopoverActionRouter.swift,
@@ -28,6 +35,28 @@
 
 #if canImport(UIKit)
 import SwiftUI
+
+// MARK: - Request payload (wire format — WI-7c5a)
+
+/// Typed payload carried as `notification.object` on
+/// `.readerSelectionPopoverRequested`. Bundles the long-press
+/// `selection` with an optional `requestToken`.
+///
+/// **Why the token**: TXT / MD / chunked all anchor a selection by
+/// UTF-16 offsets (`TextSelectionInfo.startUTF16` / `.endUTF16`), so
+/// the selection *is* its own identity. EPUB (WI-7c5b) anchors by a
+/// DOM-path `EPUBSerializedRange` that `TextSelectionInfo` cannot
+/// carry — so the EPUB container mints a `UUID` per selection,
+/// stashes the real `ReaderSelectionEvent` under it, and posts the
+/// token here. The token round-trips through
+/// `SelectionPopoverActionRouter` into the action notification's
+/// `userInfo`, letting the EPUB consumer resolve which cached
+/// selection an action belongs to. TXT / MD / chunked leave it
+/// `nil`; the token is dormant for them.
+struct SelectionPopoverRequestPayload: Equatable, Sendable {
+    let selection: TextSelectionInfo
+    let requestToken: UUID?
+}
 
 // MARK: - Request helper (wire format)
 
@@ -40,25 +69,48 @@ import SwiftUI
 enum SelectionPopoverRequest {
 
     /// Post a `.readerSelectionPopoverRequested` notification carrying
-    /// the long-press selection as `notification.object`. Bridges
-    /// call this immediately after their UIKit selection finalises
-    /// (and before they would have built the legacy `UIMenu`).
+    /// a `SelectionPopoverRequestPayload` as `notification.object`.
+    /// Bridges call this immediately after their UIKit selection
+    /// finalises (and before they would have built the legacy
+    /// `UIMenu`). `requestToken` defaults to `nil` — only EPUB
+    /// (WI-7c5b) supplies one.
     static func post(
         selection: TextSelectionInfo,
-        on notificationCenter: NotificationCenter = .default
+        on notificationCenter: NotificationCenter = .default,
+        requestToken: UUID? = nil
     ) {
+        let payload = SelectionPopoverRequestPayload(
+            selection: selection,
+            requestToken: requestToken
+        )
         notificationCenter.post(
             name: .readerSelectionPopoverRequested,
-            object: selection
+            object: payload
         )
     }
 
-    /// Extract the `TextSelectionInfo` payload from a notification.
-    /// Returns nil if `notification.object` isn't the expected
-    /// shape — defensive against a bridge mis-posting during
-    /// development, not a runtime error.
-    static func selection(from notification: Notification) -> TextSelectionInfo? {
-        notification.object as? TextSelectionInfo
+    /// Extract the `SelectionPopoverRequestPayload` from a
+    /// notification. Migration-safe: a producer that still posts a
+    /// bare `TextSelectionInfo` (the pre-WI-7c5a wire shape) decodes
+    /// as a tokenless payload. Returns nil if `notification.object`
+    /// is neither shape — defensive against a bridge mis-posting
+    /// during development, not a runtime error.
+    ///
+    /// `nonisolated`: a pure parse over `Sendable` inputs/outputs
+    /// (`SelectionPopoverRequestPayload` + `TextSelectionInfo` are
+    /// both `Sendable`). It must be callable from a synchronous
+    /// `NotificationCenter` observer closure — a non-isolated
+    /// `@Sendable` context — without "sending `note` risks data
+    /// races". The enclosing enum stays `@MainActor` for `post`,
+    /// whose callers are all main-actor bridges.
+    nonisolated static func payload(from notification: Notification) -> SelectionPopoverRequestPayload? {
+        if let payload = notification.object as? SelectionPopoverRequestPayload {
+            return payload
+        }
+        if let selection = notification.object as? TextSelectionInfo {
+            return SelectionPopoverRequestPayload(selection: selection, requestToken: nil)
+        }
+        return nil
     }
 }
 
@@ -72,19 +124,19 @@ enum SelectionPopoverDismissPolicy {
 
     /// What value `pending` should take after `router.route(...)`
     /// returns `result`. `nil` clears the sheet (dispatched);
-    /// returning the same `currentSelection` keeps it open
+    /// returning the same `currentPayload` keeps it open
     /// (deferred — see plan v8 / Codex Gate 4 round 1 Medium:
     /// `.askAI` / `.read` have no production pipeline yet, auto-
     /// dismissing would silently swallow the tap).
     static func nextPending(
         after result: SelectionPopoverActionRouter.Result,
-        currentSelection: TextSelectionInfo
-    ) -> TextSelectionInfo? {
+        currentPayload: SelectionPopoverRequestPayload
+    ) -> SelectionPopoverRequestPayload? {
         switch result {
         case .dispatched:
             return nil
         case .deferredNotYetWired:
-            return currentSelection
+            return currentPayload
         }
     }
 }
@@ -103,7 +155,7 @@ enum SelectionPopoverDismissPolicy {
 /// WI-7c2..7c5.
 private struct SelectionPopoverPresenterModifier: ViewModifier {
     let theme: ReaderThemeV2
-    @State private var pending: TextSelectionInfo?
+    @State private var pending: SelectionPopoverRequestPayload?
 
     /// Maps `pending != nil` to a `Bool` binding the sheet API
     /// requires. Setting to `false` clears the pending state —
@@ -123,10 +175,10 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
             .onReceive(
                 NotificationCenter.default.publisher(for: .readerSelectionPopoverRequested)
             ) { note in
-                guard let selection = SelectionPopoverRequest.selection(from: note) else {
+                guard let payload = SelectionPopoverRequest.payload(from: note) else {
                     return
                 }
-                pending = selection
+                pending = payload
             }
             .sheet(isPresented: isPresentedBinding) {
                 sheetContent
@@ -135,18 +187,18 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
 
     @ViewBuilder
     private var sheetContent: some View {
-        if let selection = pending {
+        if let payload = pending {
             SelectionPopoverView(
-                selectionText: selection.selectedText,
+                selectionText: payload.selection.selectedText,
                 theme: theme,
                 onAction: { action in
                     let result = SelectionPopoverActionRouter.route(
                         action: action,
-                        selection: selection
+                        payload: payload
                     )
                     pending = SelectionPopoverDismissPolicy.nextPending(
                         after: result,
-                        currentSelection: selection
+                        currentPayload: payload
                     )
                 },
                 onClose: { pending = nil }

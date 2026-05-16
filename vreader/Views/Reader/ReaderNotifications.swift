@@ -127,10 +127,15 @@ extension Notification.Name {
     /// finishes a long-press selection. The
     /// `SelectionPopoverPresenterModifier` observes this and presents
     /// `SelectionPopoverView` (WI-7a) as a SwiftUI sheet; actions
-    /// route through `SelectionPopoverActionRouter` (WI-7b). The
-    /// notification's `object` is the `TextSelectionInfo` payload.
-    /// Bridges should suppress their legacy `UIMenu` when they post
-    /// this (the swap lands per-bridge in WI-7c2..7c5).
+    /// route through `SelectionPopoverActionRouter` (WI-7b). Bridges
+    /// should suppress their legacy `UIMenu` when they post this
+    /// (the swap landed per-bridge across WI-7c2..7c5).
+    ///
+    /// WI-7c5a: the notification's `object` is a
+    /// `SelectionPopoverRequestPayload` (`selection` +
+    /// optional `requestToken`). A producer that still posts a bare
+    /// `TextSelectionInfo` decodes as a tokenless payload —
+    /// `SelectionPopoverRequest.payload(from:)` handles both shapes.
     static let readerSelectionPopoverRequested = Notification.Name("vreader.readerSelectionPopoverRequested")
 }
 

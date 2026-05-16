@@ -63,30 +63,43 @@ enum SelectionPopoverActionRouter {
     /// `userInfo` fall back to the default `"yellow"` color in the
     /// downstream pipeline; new observers (WI-7c forward) can
     /// honor the chosen color.
+    ///
+    /// **WI-7c5a**: takes a `SelectionPopoverRequestPayload` rather
+    /// than a bare `TextSelectionInfo`. When the payload carries a
+    /// `requestToken`, it rides the action notification's `userInfo`
+    /// under `"selectionRequestToken"` as a `UUID` — letting EPUB
+    /// (WI-7c5b) resolve which cached selection an action belongs
+    /// to. The posted `object` stays a bare `TextSelectionInfo` so
+    /// the TXT / MD `ReaderNotificationModifier` consumers are
+    /// unaffected. A tokenless payload (TXT / MD / chunked) attaches
+    /// no token key.
     @discardableResult
     static func route(
         action: SelectionPopoverAction,
-        selection: TextSelectionInfo,
+        payload: SelectionPopoverRequestPayload,
         notificationCenter: NotificationCenter = .default
     ) -> Result {
+        let selection = payload.selection
         switch action {
         case .highlight(let color):
             notificationCenter.post(
                 name: .readerHighlightRequested,
                 object: selection,
-                userInfo: ["color": color.rawValue]
+                userInfo: makeUserInfo(token: payload.requestToken, color: color.rawValue)
             )
             return .dispatched(.readerHighlightRequested)
         case .note:
             notificationCenter.post(
                 name: .readerAnnotationRequested,
-                object: selection
+                object: selection,
+                userInfo: makeUserInfo(token: payload.requestToken, color: nil)
             )
             return .dispatched(.readerAnnotationRequested)
         case .translate:
             notificationCenter.post(
                 name: .readerTranslateRequested,
-                object: selection
+                object: selection,
+                userInfo: makeUserInfo(token: payload.requestToken, color: nil)
             )
             return .dispatched(.readerTranslateRequested)
         case .askAI, .read:
@@ -97,5 +110,20 @@ enum SelectionPopoverActionRouter {
             // a later WI of feature #60.
             return .deferredNotYetWired(action)
         }
+    }
+
+    /// Build the action notification's `userInfo`, attaching the
+    /// request token and/or color only when present. Returns `nil`
+    /// when neither applies — preserving the pre-WI-7c5a contract
+    /// that a tokenless `.note` / `.translate` posts no `userInfo`
+    /// at all.
+    private static func makeUserInfo(
+        token: UUID?,
+        color: String?
+    ) -> [AnyHashable: Any]? {
+        var info: [AnyHashable: Any] = [:]
+        if let token { info["selectionRequestToken"] = token }
+        if let color { info["color"] = color }
+        return info.isEmpty ? nil : info
     }
 }

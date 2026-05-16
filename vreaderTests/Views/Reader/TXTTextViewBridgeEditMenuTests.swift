@@ -12,8 +12,11 @@
 // 1. Return value is a UIMenu with zero visible elements (iOS shows
 //    nothing in place of the old menu).
 // 2. Side-effect: `.readerSelectionPopoverRequested` fires with the
-//    correct `TextSelectionInfo` payload so the presenter sheet can
-//    appear.
+//    correct selection so the presenter sheet can appear.
+//
+// WI-7c5a note: the notification object is now a typed
+// `SelectionPopoverRequestPayload`; the test reads the selection
+// back via `SelectionPopoverRequest.payload(from:)`.
 
 #if canImport(UIKit)
 import Testing
@@ -71,7 +74,9 @@ struct TXTTextViewBridgeEditMenuTests {
         let observer = NotificationCenter.default.addObserver(
             forName: .readerSelectionPopoverRequested, object: nil, queue: nil
         ) { note in
-            received = note.object as? TextSelectionInfo
+            // WI-7c5a: object is a typed `SelectionPopoverRequestPayload`
+            // — unwrap to the selection.
+            received = SelectionPopoverRequest.payload(from: note)?.selection
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 

@@ -67,7 +67,8 @@ struct TXTChunkedReaderBridgeEditMenuTests {
         let observer = NotificationCenter.default.addObserver(
             forName: .readerSelectionPopoverRequested, object: nil, queue: nil
         ) { note in
-            received = note.object as? TextSelectionInfo
+            // WI-7c5a: object is a typed `SelectionPopoverRequestPayload`.
+            received = SelectionPopoverRequest.payload(from: note)?.selection
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
@@ -93,7 +94,8 @@ struct TXTChunkedReaderBridgeEditMenuTests {
         let observer = NotificationCenter.default.addObserver(
             forName: .readerSelectionPopoverRequested, object: nil, queue: nil
         ) { note in
-            received = note.object as? TextSelectionInfo
+            // WI-7c5a: object is a typed `SelectionPopoverRequestPayload`.
+            received = SelectionPopoverRequest.payload(from: note)?.selection
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
@@ -141,7 +143,8 @@ struct TXTChunkedReaderBridgeEditMenuTests {
         let observer = NotificationCenter.default.addObserver(
             forName: .readerSelectionPopoverRequested, object: nil, queue: nil
         ) { note in
-            received = note.object as? TextSelectionInfo
+            // WI-7c5a: object is a typed `SelectionPopoverRequestPayload`.
+            received = SelectionPopoverRequest.payload(from: note)?.selection
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
@@ -172,7 +175,8 @@ struct TXTChunkedReaderBridgeEditMenuTests {
         let observer = NotificationCenter.default.addObserver(
             forName: .readerSelectionPopoverRequested, object: nil, queue: nil
         ) { note in
-            received = note.object as? TextSelectionInfo
+            // WI-7c5a: object is a typed `SelectionPopoverRequestPayload`.
+            received = SelectionPopoverRequest.payload(from: note)?.selection
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 

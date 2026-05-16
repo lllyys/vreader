@@ -1,24 +1,30 @@
-// Purpose: Feature #60 WI-7b — pins the routing contract between
-// `SelectionPopoverAction` (the dispatch enum from WI-3) and the
-// existing reader-bridge notification surface
+// Purpose: Feature #60 WI-7b + WI-7c5a — pins the routing contract
+// between `SelectionPopoverAction` (the dispatch enum from WI-3) and
+// the existing reader-bridge notification surface
 // (`.readerHighlightRequested`, `.readerAnnotationRequested`,
 // `.readerTranslateRequested`).
 //
-// The router is the pure-logic glue that the future WI-7c production
-// view (which captures the long-press selection and presents
-// `SelectionPopoverView` from WI-7a) will call when the user taps a
-// row in the popover. Keeping the mapping in a static helper —
-// rather than inside a SwiftUI view body or coordinator — lets the
-// contract be tested without touching UIKit or NotificationCenter
-// globals.
+// The router is the pure-logic glue that the WI-7c production views
+// call when the user taps a row in the popover. Keeping the mapping
+// in a static helper — rather than inside a SwiftUI view body or
+// coordinator — lets the contract be tested without touching UIKit
+// or NotificationCenter globals.
+//
+// **WI-7c5a contract change**: `route` now takes a
+// `SelectionPopoverRequestPayload` (selection + optional
+// `requestToken`) instead of a bare `TextSelectionInfo`. When the
+// payload carries a token, the router attaches it to the action
+// notification's `userInfo["selectionRequestToken"]` as a `UUID` so
+// a format with a non-UTF-16 anchor model (EPUB — WI-7c5b) can
+// resolve which cached selection the action belongs to. The posted
+// `object` stays a bare `TextSelectionInfo` so the existing TXT/MD
+// `ReaderNotificationModifier` consumers are unaffected.
 //
 // **Deferred actions (`.askAI`, `.read`)**: feature #60's plan ships
 // the View + router + WI-7c wiring sequentially. `.askAI` and
-// `.read` have no production consumer yet (no `.readerAskAIRequested`
-// or `.readerReadAloudRequested` exists in `ReaderNotifications`).
-// The router returns `.deferredNotYetWired` rather than silently
-// no-opping, so test runs and future audits can prove a regression
-// would surface (instead of hiding behind a `default: break`).
+// `.read` have no production consumer yet. The router returns
+// `.deferredNotYetWired` rather than silently no-opping, so test
+// runs and future audits can prove a regression would surface.
 
 import Testing
 import Foundation
@@ -38,6 +44,16 @@ struct SelectionPopoverActionRouterTests {
         )
     }
 
+    /// Tokenless payload — the TXT/MD/chunked producer shape.
+    private func makePayload() -> SelectionPopoverRequestPayload {
+        SelectionPopoverRequestPayload(selection: makeSelection(), requestToken: nil)
+    }
+
+    /// Tokened payload — the EPUB producer shape (WI-7c5b).
+    private func makeTokenedPayload(_ token: UUID) -> SelectionPopoverRequestPayload {
+        SelectionPopoverRequestPayload(selection: makeSelection(), requestToken: token)
+    }
+
     /// Isolated NotificationCenter (not `.default`) so tests don't
     /// observe spurious traffic from concurrent app state.
     private func makeIsolatedCenter() -> NotificationCenter {
@@ -51,7 +67,7 @@ struct SelectionPopoverActionRouterTests {
         let center = makeIsolatedCenter()
         let result = SelectionPopoverActionRouter.route(
             action: .note,
-            selection: makeSelection(),
+            payload: makePayload(),
             notificationCenter: center
         )
         #expect(result == .dispatched(.readerAnnotationRequested))
@@ -62,14 +78,14 @@ struct SelectionPopoverActionRouterTests {
         let center = makeIsolatedCenter()
         let askResult = SelectionPopoverActionRouter.route(
             action: .askAI,
-            selection: makeSelection(),
+            payload: makePayload(),
             notificationCenter: center
         )
         #expect(askResult == .deferredNotYetWired(.askAI))
 
         let readResult = SelectionPopoverActionRouter.route(
             action: .read,
-            selection: makeSelection(),
+            payload: makePayload(),
             notificationCenter: center
         )
         #expect(readResult == .deferredNotYetWired(.read))
@@ -82,7 +98,7 @@ struct SelectionPopoverActionRouterTests {
         let received = try captureNotification(name: .readerHighlightRequested) { center in
             _ = SelectionPopoverActionRouter.route(
                 action: .highlight(.yellow),
-                selection: makeSelection(),
+                payload: makePayload(),
                 notificationCenter: center
             )
         }
@@ -98,7 +114,7 @@ struct SelectionPopoverActionRouterTests {
         let received = try captureNotification(name: .readerHighlightRequested) { center in
             _ = SelectionPopoverActionRouter.route(
                 action: .highlight(.pink),
-                selection: makeSelection(),
+                payload: makePayload(),
                 notificationCenter: center
             )
         }
@@ -110,7 +126,7 @@ struct SelectionPopoverActionRouterTests {
         let received = try captureNotification(name: .readerHighlightRequested) { center in
             _ = SelectionPopoverActionRouter.route(
                 action: .highlight(.green),
-                selection: makeSelection(),
+                payload: makePayload(),
                 notificationCenter: center
             )
         }
@@ -122,7 +138,7 @@ struct SelectionPopoverActionRouterTests {
         let received = try captureNotification(name: .readerHighlightRequested) { center in
             _ = SelectionPopoverActionRouter.route(
                 action: .highlight(.blue),
-                selection: makeSelection(),
+                payload: makePayload(),
                 notificationCenter: center
             )
         }
@@ -131,19 +147,19 @@ struct SelectionPopoverActionRouterTests {
 
     // MARK: - Note + Translate routing
 
-    @Test("note posts .readerAnnotationRequested with selection (no userInfo)")
+    @Test("note posts .readerAnnotationRequested with selection (no userInfo for a tokenless payload)")
     func noteRoutes() throws {
         let received = try captureNotification(name: .readerAnnotationRequested) { center in
             _ = SelectionPopoverActionRouter.route(
                 action: .note,
-                selection: makeSelection(),
+                payload: makePayload(),
                 notificationCenter: center
             )
         }
         let info = try #require(received.object as? TextSelectionInfo)
         #expect(info.selectedText == "the rapidity of the infection")
-        // Note has no color/userInfo — pure object payload.
-        #expect(received.userInfo == nil || received.userInfo?["color"] == nil)
+        // Tokenless payload + no color → no userInfo at all.
+        #expect(received.userInfo == nil)
     }
 
     @Test("translate posts .readerTranslateRequested with selection")
@@ -151,12 +167,73 @@ struct SelectionPopoverActionRouterTests {
         let received = try captureNotification(name: .readerTranslateRequested) { center in
             _ = SelectionPopoverActionRouter.route(
                 action: .translate,
-                selection: makeSelection(),
+                payload: makePayload(),
                 notificationCenter: center
             )
         }
         let info = try #require(received.object as? TextSelectionInfo)
         #expect(info.endUTF16 == 1053)
+    }
+
+    // MARK: - Request-token pass-through (WI-7c5a)
+
+    @Test("highlight with a tokened payload attaches selectionRequestToken (UUID) to userInfo")
+    func highlightCarriesRequestToken() throws {
+        let requestToken = UUID()
+        let received = try captureNotification(name: .readerHighlightRequested) { center in
+            _ = SelectionPopoverActionRouter.route(
+                action: .highlight(.yellow),
+                payload: makeTokenedPayload(requestToken),
+                notificationCenter: center
+            )
+        }
+        // The token rides as a `UUID` — not a String — because the
+        // notification is in-process; there is no Codable boundary.
+        #expect(received.userInfo?["selectionRequestToken"] as? UUID == requestToken)
+        // The color contract is unaffected by the token.
+        #expect(received.userInfo?["color"] as? String == "yellow")
+    }
+
+    @Test("note with a tokened payload attaches selectionRequestToken to userInfo")
+    func noteCarriesRequestToken() throws {
+        let requestToken = UUID()
+        let received = try captureNotification(name: .readerAnnotationRequested) { center in
+            _ = SelectionPopoverActionRouter.route(
+                action: .note,
+                payload: makeTokenedPayload(requestToken),
+                notificationCenter: center
+            )
+        }
+        #expect(received.userInfo?["selectionRequestToken"] as? UUID == requestToken)
+    }
+
+    @Test("translate with a tokened payload attaches selectionRequestToken to userInfo")
+    func translateCarriesRequestToken() throws {
+        let requestToken = UUID()
+        let received = try captureNotification(name: .readerTranslateRequested) { center in
+            _ = SelectionPopoverActionRouter.route(
+                action: .translate,
+                payload: makeTokenedPayload(requestToken),
+                notificationCenter: center
+            )
+        }
+        #expect(received.userInfo?["selectionRequestToken"] as? UUID == requestToken)
+    }
+
+    @Test("a tokenless payload attaches NO selectionRequestToken key")
+    func tokenlessPayloadOmitsTokenKey() throws {
+        // Negative pin: TXT/MD/chunked producers pass a nil token;
+        // the router must not invent a key. EPUB's WI-7c5b consumer
+        // distinguishes "this action belongs to my cached selection"
+        // by the presence of the key.
+        let received = try captureNotification(name: .readerHighlightRequested) { center in
+            _ = SelectionPopoverActionRouter.route(
+                action: .highlight(.yellow),
+                payload: makePayload(),
+                notificationCenter: center
+            )
+        }
+        #expect(received.userInfo?["selectionRequestToken"] == nil)
     }
 
     // MARK: - Deferred .askAI / .read do not post
@@ -167,7 +244,7 @@ struct SelectionPopoverActionRouterTests {
         let fired = noRoutedNotificationFires(on: center) {
             _ = SelectionPopoverActionRouter.route(
                 action: .askAI,
-                selection: makeSelection(),
+                payload: makePayload(),
                 notificationCenter: center
             )
         }
@@ -180,7 +257,7 @@ struct SelectionPopoverActionRouterTests {
         let fired = noRoutedNotificationFires(on: center) {
             _ = SelectionPopoverActionRouter.route(
                 action: .read,
-                selection: makeSelection(),
+                payload: makePayload(),
                 notificationCenter: center
             )
         }

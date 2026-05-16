@@ -340,11 +340,11 @@ extension TXTTextViewBridge {
             // range→TextSelectionInfo extraction with UTF-16 + bounds
             // validation matching UITextView delegate semantics —
             // duplicating that contract on the producer side would
-            // drift. The presenter still parses via
-            // SelectionPopoverRequest.selection(from:) which reads
-            // `notification.object as? TextSelectionInfo` — the same
-            // wire shape both helpers produce. (When WI-7c3..7c5
-            // land, all 4 bridges share this single producer path.)
+            // drift. WI-7c5a: that helper now delegates to
+            // SelectionPopoverRequest.post for the popover name, so
+            // the object is a typed SelectionPopoverRequestPayload
+            // (tokenless for TXT); the presenter parses it via
+            // SelectionPopoverRequest.payload(from:).
             if range.length > 0 {
                 TXTBridgeShared.postSelectionNotification(
                     .readerSelectionPopoverRequested,

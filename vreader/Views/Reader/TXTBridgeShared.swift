@@ -17,12 +17,22 @@ enum TXTBridgeShared {
 
     /// Posts a selection notification with text and UTF-16 range.
     /// For chunked readers, pass `chunkOffset` to convert chunk-local to document-global.
+    ///
+    /// WI-7c5a: for `.readerSelectionPopoverRequested`, the wire
+    /// format is a typed `SelectionPopoverRequestPayload` — this
+    /// helper delegates to `SelectionPopoverRequest.post(...)` so
+    /// that enum stays the single owner of the popover wire format.
+    /// `requestToken` defaults to `nil` (TXT / MD / chunked never
+    /// supply one — only EPUB's WI-7c5b producer does, and it does
+    /// not route through this helper). For every other notification
+    /// name the object remains a bare `TextSelectionInfo`.
     @MainActor
     static func postSelectionNotification(
         _ name: Notification.Name,
         from textView: UITextView,
         range: NSRange,
-        chunkOffset: Int = 0
+        chunkOffset: Int = 0,
+        requestToken: UUID? = nil
     ) {
         guard range.location != NSNotFound,
               range.location >= 0,
@@ -37,7 +47,11 @@ enum TXTBridgeShared {
             startUTF16: chunkOffset + range.location,
             endUTF16: chunkOffset + range.location + range.length
         )
-        NotificationCenter.default.post(name: name, object: info)
+        if name == .readerSelectionPopoverRequested {
+            SelectionPopoverRequest.post(selection: info, requestToken: requestToken)
+        } else {
+            NotificationCenter.default.post(name: name, object: info)
+        }
     }
 
     /// Builds the shared edit menu with Highlight, Add Note, Define, and
