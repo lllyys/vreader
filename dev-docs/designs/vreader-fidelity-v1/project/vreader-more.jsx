@@ -5,7 +5,7 @@ function MorePopover({ theme, state, onToggle, onAction, onClose }) {
   const t = theme;
   const s = state || {};
 
-  const Row = ({ icon, label, sub, value, toggle, active, danger, divider, on }) => {
+  const Row = ({ icon, label, sub, value, toggle, active, danger, divider, on, disabled }) => {
     if (divider) {
       return <div style={{
         height: 0.5, background: t.rule, margin: '4px 14px',
@@ -13,10 +13,11 @@ function MorePopover({ theme, state, onToggle, onAction, onClose }) {
     }
     const Ico = icon;
     return (
-      <button onClick={on} style={{
+      <button onClick={disabled ? undefined : on} style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '11px 14px', width: '100%', border: 'none',
-        background: 'transparent', cursor: 'pointer', textAlign: 'left',
+        background: 'transparent', cursor: disabled ? 'default' : 'pointer', textAlign: 'left',
+        opacity: disabled ? 0.55 : 1,
       }}>
         <div style={{
           width: 28, height: 28, borderRadius: 8,
@@ -35,17 +36,18 @@ function MorePopover({ theme, state, onToggle, onAction, onClose }) {
           }}>{label}</div>
           {sub && (
             <div style={{
-              fontSize: 11, color: t.sub, marginTop: 2, lineHeight: 1.2,
+              fontSize: 11, color: disabled ? t.accent : t.sub, marginTop: 2, lineHeight: 1.2,
+              fontWeight: disabled ? 600 : 400,
             }}>{sub}</div>
           )}
         </div>
-        {toggle !== undefined && (
+        {toggle !== undefined && !disabled && (
           <ToggleSwitch on={!!toggle} theme={t}/>
         )}
         {value && (
           <span style={{ fontSize: 12, color: t.sub, marginRight: 2 }}>{value}</span>
         )}
-        {!toggle && value === undefined && (
+        {(disabled || (toggle === undefined && value === undefined)) && (
           <Icons.Chevron size={13} color={t.sub} stroke={2}/>
         )}
       </button>
@@ -86,11 +88,18 @@ function MorePopover({ theme, state, onToggle, onAction, onClose }) {
              active={s.autoTurn}
              on={() => onToggle('autoTurn')}/>
 
-        <Row icon={Icons.Translate} label="Bilingual mode"
-             sub={s.bilingual ? `English ↔ ${s.bilingualLang || 'Chinese'}` : 'Translate inline'}
-             toggle={s.bilingual}
-             active={s.bilingual}
-             on={() => onToggle('bilingual')}/>
+        {s.aiUnavailable ? (
+          <Row icon={Icons.Translate} label="Bilingual mode"
+               sub="Configure AI provider first"
+               disabled
+               on={() => onAction('configure-ai')}/>
+        ) : (
+          <Row icon={Icons.Translate} label="Bilingual mode"
+               sub={s.bilingual ? `English ↔ ${s.bilingualLang || 'Chinese'}` : 'Translate inline'}
+               toggle={s.bilingual}
+               active={s.bilingual}
+               on={() => onToggle('bilingual')}/>
+        )}
 
         <Row divider/>
 

@@ -1069,3 +1069,33 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   `progress === 0 → "{n} pages"` branch is intentionally rendered as
   the format chip alone: `LibraryBookItem` carries no page count, and
   substituting a different metric would be self-designed UI.
+- 2026-05-16 v13: **Follow-up design landed — #789 / #790 / #793
+  `Design needed:` issues resolved.** A claude.ai/design handoff
+  (share token `vLAo1BzIR6AjvQHFvrmiUg`) delivered the three surfaces
+  WI-6c / WI-10 had filed `needs-design` issues for. Design note
+  `design-notes/feature-60-followups.md` committed to the bundle.
+  Decisions:
+  - **#789 Book Details** (§1): half-sheet, cover-on-top canonical
+    layout; pencil-overlay cover swap; 4 states (default / long-title
+    / missing-cover / remote-only). The More-menu "Book details" row
+    (shipped in WI-6c routed to a settings interim) gets its real
+    surface. → a new feature #60 WI (Book Details sheet) — not in the
+    original WI-1..10 table; schedule as WI-11.
+  - **#790 Bilingual** (§2): two parts. §2.1 the *backing feature*
+    (paragraph-interlinear bilingual reading + setup sheet) is **NOT
+    new to the tracker — it is feature #56** (`Bilingual reading
+    mode`, TODO, GH #629). The chat author proposed "likely its own
+    feature row" without knowing #56 existed; `feature-60-followups.md
+    §2.1` is now feature #56's design source. §2.3 the More-menu
+    *popover row* (off / on / AI-unavailable states) is a small
+    feature #60 WI gated on feature #56's backing capability —
+    schedule as WI-6d (the bilingual row WI-6c deferred per rule 51).
+  - **#793 Annotations split** (§3): split the unified 4-tab
+    `AnnotationsPanelView` into separate `TOCSheet` + `HighlightsSheet`.
+    Within WI-10's "Sheet re-skins" scope — WI-10 now has a committed
+    design for the split + the empty states.
+  All three `Design needed:` issues (#789/#790/#793) are resolved by
+  the committed design and closed. The Swift implementation is gated
+  WI work (WI-11 Book Details, WI-6d bilingual row, WI-10 annotations
+  split) — none implemented in this PR; this entry records the design
+  delivery only.

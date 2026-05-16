@@ -4,7 +4,9 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
                         onClose, onOpenAI, onOpenTOC, onOpenHighlights,
                         onOpenSettings, onOpenReaderSettings, onOpenSearch,
                         pageIdx, onPageChange, highlights, onAddHighlight,
-                        onUpdateHighlight, onDeleteHighlight, brightness }) {
+                        onUpdateHighlight, onDeleteHighlight, brightness,
+                        onMoreAction, onToggleBilingual,
+                        bilingualOn, bilingualLang, aiUnavailable }) {
   const [chromeVisible, setChromeVisible] = React.useState(true);
   const [selection, setSelection] = React.useState(null); // {text, paraIdx, range}
   const [activeHighlight, setActiveHighlight] = React.useState(null); // existing-highlight popover
@@ -14,9 +16,16 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [moreState, setMoreState] = React.useState({
     autoTurn: false, autoTurnInterval: 30,
-    bilingual: false, bilingualLang: 'Chinese',
+    bilingualLang: bilingualLang || 'Chinese',
     ttsPlaying: false,
   });
+  // Sync the popover's bilingual-active reflection with the parent-owned bilingual state.
+  const popoverState = {
+    ...moreState,
+    bilingual: !!bilingualOn,
+    bilingualLang: bilingualLang || moreState.bilingualLang || 'Chinese',
+    aiUnavailable: !!aiUnavailable,
+  };
 
   const pageRef = React.useRef(null);
   const t = theme;
@@ -130,14 +139,23 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
         </div>
 
         {/* Page text */}
-        <PageContent
-          page={pageData} theme={t} fontFamily={fontFamily}
-          fontSize={fontSize} lineHeight={lineHeight} margin={margin}
-          pageDir={pageDir} animating={animating} pageIdx={pageIdx}
-          highlights={highlights} selection={selection}
-          onLongPress={handleLongPress}
-          onTapHighlight={handleTapHighlight}
-        />
+        {bilingualOn && typeof BilingualPageContent !== 'undefined' ? (
+          <BilingualPageContent
+            page={pageData} theme={t} fontFamily={fontFamily}
+            fontSize={fontSize} lineHeight={lineHeight} margin={margin}
+            pageDir={pageDir} animating={animating} pageIdx={pageIdx}
+            lang={bilingualLang || 'Chinese'}
+          />
+        ) : (
+          <PageContent
+            page={pageData} theme={t} fontFamily={fontFamily}
+            fontSize={fontSize} lineHeight={lineHeight} margin={margin}
+            pageDir={pageDir} animating={animating} pageIdx={pageIdx}
+            highlights={highlights} selection={selection}
+            onLongPress={handleLongPress}
+            onTapHighlight={handleTapHighlight}
+          />
+        )}
 
         {/* Footer — page number + progress */}
         <div style={{
@@ -159,19 +177,28 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
           onClose={onClose} onToggleBookmark={() => setBookmarked(b => !b)}
           onSearch={onOpenSearch}
           onMore={() => setMoreOpen(true)}
-          moreActive={moreOpen}/>
+          moreActive={moreOpen}
+          bilingualOn={bilingualOn}
+          bilingualLang={bilingualLang}/>
       )}
 
       {/* More menu popover */}
       {moreOpen && (
         <MorePopover
           theme={t}
-          state={moreState}
-          onToggle={(k) => setMoreState(s => ({ ...s, [k]: !s[k] }))}
+          state={popoverState}
+          onToggle={(k) => {
+            if (k === 'bilingual') {
+              setMoreOpen(false);
+              onToggleBilingual?.();
+            } else {
+              setMoreState(s => ({ ...s, [k]: !s[k] }));
+            }
+          }}
           onAction={(a) => {
             setMoreOpen(false);
             if (a === 'tts') setMoreState(s => ({ ...s, ttsPlaying: !s.ttsPlaying }));
-            else if (a === 'details') onOpenSettings?.();
+            else onMoreAction?.(a);
           }}
           onClose={() => setMoreOpen(false)}
         />
@@ -371,7 +398,7 @@ function buildSegments(text, highlights, selection) {
 // ────────────────────────────────────────────────────
 // Top + bottom chrome
 // ────────────────────────────────────────────────────
-function ReaderTopChrome({ book, theme, bookmarked, onClose, onToggleBookmark, onSearch, onMore, moreActive }) {
+function ReaderTopChrome({ book, theme, bookmarked, onClose, onToggleBookmark, onSearch, onMore, moreActive, bilingualOn, bilingualLang }) {
   const t = theme;
   return (
     <div style={{
@@ -397,7 +424,10 @@ function ReaderTopChrome({ book, theme, bookmarked, onClose, onToggleBookmark, o
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           fontFamily: '"Source Serif 4", Georgia, serif',
           fontSize: 14, fontWeight: 600, color: t.ink, fontStyle: 'italic',
-        }}>{book.title}</div>
+        }}>
+          <span>{book.title}</span>
+          {bilingualOn && typeof BilingualPill !== 'undefined' && <BilingualPill theme={t} lang={bilingualLang}/>}
+        </div>
         <div style={{ display: 'flex', gap: 0 }}>
           <button onClick={() => onSearch?.()} style={iconBtnStyle(t)} aria-label="Search">
             <Icons.Search size={18} color={t.ink} stroke={1.7}/>
