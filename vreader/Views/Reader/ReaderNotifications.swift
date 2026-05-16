@@ -122,10 +122,20 @@ extension Notification.Name {
     /// SwiftData but never re-paint on book reopen — the data
     /// layer is correct, only the visual restore fails.
     static let foliateOverlayReadyForSection = Notification.Name("vreader.foliateOverlayReadyForSection")
+
+    /// Feature #60 WI-7c1: posted by a reader bridge when the user
+    /// finishes a long-press selection. The
+    /// `SelectionPopoverPresenterModifier` observes this and presents
+    /// `SelectionPopoverView` (WI-7a) as a SwiftUI sheet; actions
+    /// route through `SelectionPopoverActionRouter` (WI-7b). The
+    /// notification's `object` is the `TextSelectionInfo` payload.
+    /// Bridges should suppress their legacy `UIMenu` when they post
+    /// this (the swap lands per-bridge in WI-7c2..7c5).
+    static let readerSelectionPopoverRequested = Notification.Name("vreader.readerSelectionPopoverRequested")
 }
 
 /// Carries text selection info from bridges to container views via NotificationCenter.
-struct TextSelectionInfo {
+struct TextSelectionInfo: Equatable, Sendable {
     let selectedText: String
     let startUTF16: Int
     let endUTF16: Int
