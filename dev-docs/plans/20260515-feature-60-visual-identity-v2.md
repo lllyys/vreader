@@ -355,12 +355,171 @@ not counted; ~5MB asset).
   Slice verify on TXT war-and-peace fixture.
 - **WI-7c3 (behavioral, separate PR):** TXT chunked bridge. Mirror
   the WI-7c2 swap in `TXTChunkedReaderBridge`.
-- **WI-7c4 (behavioral, separate PR):** MD bridge. Mirror the swap
-  in `MDReaderContainerView`.
-- **WI-7c5 (behavioral, separate PR):** EPUB bridge. Replace the
-  EPUB long-press menu path (whichever shape it has — needs a
-  pre-swap read pass). Attach the presenter to
-  `EPUBReaderContainerView`.
+- **WI-7c4 (behavioral, shipped v3.24.8 / PR #783):** MD bridge.
+  Producer side was already shared via `TXTTextViewBridge` (MD
+  renders through it; WI-7c2's `editMenuForTextIn` swap covered MD
+  implicitly). This WI attached `.selectionPopoverPresenter(theme:)`
+  to `MDReaderContainerView`. 8-line diff. Codex `019e2ef0`, 1
+  round, ship-as-is.
+- **WI-7c5a (foundational, separate PR):** Typed payload + request-
+  token plumbing in the shared popover infrastructure. Per Codex
+  plan-v10 round 2 High: storing the token only in `userInfo` and
+  re-scraping at action time loses it across the
+  post→present→tap→route chain. Fix: introduce a typed payload that
+  carries the token through the in-memory state.
+  Changes:
+  1. **New type**: `SelectionPopoverRequestPayload { let selection:
+     TextSelectionInfo; let requestToken: UUID? }`, `Equatable +
+     Sendable`. Defined adjacent to `SelectionPopoverRequest` in
+     `SelectionPopoverPresenter.swift` (or a new file if size
+     warrants).
+  2. **`SelectionPopoverRequest.post(selection:on:requestToken:)`**:
+     builds the payload and sets it as the notification `object`
+     (not bare `TextSelectionInfo`). Default `requestToken: nil`
+     for back-compat against TXT/MD/chunked producers that don't
+     need identity.
+  3. **`SelectionPopoverRequest.payload(from:)`** (replaces
+     `selection(from:)`): returns the payload, accepting both the
+     new shape (`object as? SelectionPopoverRequestPayload`) and
+     the legacy bare-`TextSelectionInfo` shape (wraps with
+     `requestToken: nil`). Migration-safe.
+  4. **`TXTBridgeShared.postSelectionNotification(name:from:range:chunkOffset:requestToken:)`**:
+     adds an optional `requestToken` parameter (default `nil`).
+     Existing TXT/MD/chunked call sites (which all pass `nil`)
+     compile unchanged.
+  5. **`SelectionPopoverPresenterModifier`**: changes `@State
+     private var pending: TextSelectionInfo?` to `@State private
+     var pending: SelectionPopoverRequestPayload?`. The
+     `.onReceive` handler calls `payload(from:)` instead of
+     `selection(from:)`. The sheet's `selection.selectedText`
+     access becomes `pending.selection.selectedText`.
+  6. **`SelectionPopoverActionRouter.route(action:payload:notificationCenter:)`**:
+     signature change from `(action, selection)` to `(action,
+     payload)`. Reads `payload.requestToken` and, when non-nil,
+     attaches it to the resulting action notifications via
+     `userInfo["selectionRequestToken"] as UUID` (Codex round 2
+     Medium: UUID-not-String — notifications are in-process, no
+     `Codable` boundary, so storing as `UUID` preserves type
+     safety).
+  Token is **optional everywhere** — existing TXT/MD/chunked
+  posters that pass `nil` continue to work; consumers that don't
+  care (TXT/MD via `ReaderNotificationModifier`) ignore the
+  `userInfo` key; only EPUB looks it up.
+  **No production behavior change** — the token field is `nil`
+  for all current posters; the typed payload is a structural
+  refactor of the in-memory state. The shared popover continues
+  to present the same view for the same inputs.
+  Tests: round-trip token through post → parse → router → action
+  notification (`userInfo["selectionRequestToken"] as? UUID` ==
+  posted UUID); nil-token compatibility (legacy bare-
+  `TextSelectionInfo` object form decodes via `payload(from:)`
+  with `requestToken: nil`); router does NOT attach the userInfo
+  key when token is nil. ~150 LOC across
+  `SelectionPopoverPresenter.swift`, `SelectionPopoverActionRouter.swift`,
+  `TXTBridgeShared.swift`, and 3 test files (presenter +
+  action-router + TXT bridge tests).
+  Foundational tier — structural refactor of internal types; no
+  user-visible delta on any of the 4 already-swapped paths.
+- **WI-7c5b (behavioral, separate PR):** EPUB producer/consumer
+  swap using the WI-7c5a token. Four layered changes:
+  1. **Producer** (in `EPUBReaderContainerView.onSelectionEvent`
+     closure, **NOT** `EPUBWebViewBridgeCoordinator` per Codex
+     plan-v10 round 1 Medium finding — bridge stays presentation-
+     agnostic): cache the `ReaderSelectionEvent` keyed by a freshly
+     minted `UUID` request token in a single-entry token→event
+     cache `@State pendingEPUBSelection: (token: UUID, event:
+     ReaderSelectionEvent)?` (per Codex round 2 Low: not a
+     general map, a single pending entry that's replaced on each
+     new selection). Post `.readerSelectionPopoverRequested` via
+     `SelectionPopoverRequest.post(selection:on:requestToken:)`
+     with that token. The legacy `pendingSelectionEvent` +
+     `showHighlightSheet` flow is removed.
+  2. **Consumer attach**: `.selectionPopoverPresenter(theme:)` on
+     `EPUBReaderContainerView.body`.
+  3. **EPUB-side action handlers**: `.onReceive` on
+     `.readerHighlightRequested` + `.readerAnnotationRequested` —
+     each handler extracts `userInfo["selectionRequestToken"] as?
+     UUID` (UUID type per Codex round 2 Medium, not String), looks
+     up the cached event from `pendingEPUBSelection` (token must
+     match), and routes to existing helpers. Highlight: call
+     `handleHighlightAction(event:container:color:)` with the
+     chosen color from `resolveHighlightColor(from:)`. Note:
+     set `pendingSelectionEvent = event` (preserved as the
+     parameter that `noteInputSheet` consumes — that sheet's
+     internals don't change) + `showNoteSheet = true`. Cache entry
+     is removed after consumption + on sheet dismiss to bound
+     memory + prevent stale-action races.
+  4. **Color parameter on `handleHighlightAction`**:
+     `handleHighlightAction(event:container:color:)` gains a
+     `color: String` parameter (default `"yellow"` for the
+     feature-#53 WI-4 call site to preserve behavior). Internally
+     calls `coordinator.create(..., color:)` /
+     `persistence.addHighlight(..., color:)` — both already accept
+     color. The plan does **NOT** modify `EPUBHighlightActions.persistHighlight`
+     signature (per Codex plan-v10 round 1 Low — that's a fallback
+     helper, color flows through the locator-level call instead).
+  **Removed legacy surface**:
+  - `.confirmationDialog(...)` with Highlight / Add Note / Copy /
+    Cancel
+  - `@State var showHighlightSheet`
+  - `onSelectionEvent: { event in pendingSelectionEvent = event;
+    showHighlightSheet = true }` is replaced with the producer
+    described in (1)
+  **Copy regression — explicit acceptance**: the legacy EPUB
+  `confirmationDialog` had a `Copy` action that the new
+  `SelectionPopoverView` does NOT have. This regression is
+  **accepted as scope-of-WI-7** (Codex plan-v10 round 1 High
+  flagged it; product call recorded here). The TXT/MD legacy
+  surfaces also lost their iOS-default Copy when WI-7c2/c3/c4
+  returned an empty `UIMenu`; EPUB's swap is consistent. If user
+  feedback warrants, a follow-up may add `.copy` to
+  `SelectionPopoverAction` + a Copy button slot to the action row;
+  filed as a deferred-IDEA row, NOT a regression bug.
+  Tests:
+  - Producer post: container `onSelectionEvent` closure caches
+    event + posts notification with non-nil token; cache size
+    stays at 1.
+  - Token→event resolution: happy path (action notification with
+    matching token resolves to cached event); miss (action
+    notification with unknown token is a no-op, NOT a crash);
+    same-text duplicate selections at different DOM anchors
+    (each gets a distinct token, both resolve correctly when
+    actioned in sequence).
+  - Stale-action handling: cache cleared on sheet dismiss → action
+    notification with stale token is a safe no-op.
+  - Legacy absence (negative pin): `confirmationDialog` no longer
+    appears in the view body (search assertion).
+  - `color:` parameter propagation: explicit per-color persistence
+    smoke test.
+  Device verify (Gate 5a): long-press in mini-epub3 fixture,
+  popover appears, tap each of the 4 colors (one per run),
+  HighlightRecord persisted with chosen color, the CSS Highlight
+  API renders it. **Out of scope for verification this WI**:
+  EPUB content inside iframes (the existing JS bridge is
+  document-scoped; iframe support is a pre-existing limitation
+  documented in `EPUBHighlightJS.swift`; cross-frame selection has
+  never worked in EPUB and is not introduced or regressed by this
+  swap). Behavioral tier. ~250 LOC.
+- **Why WI-7c5 split** (per Codex Gate 2 plan-v10 round 1 audit +
+  pre-swap read pass): EPUB's selection model is fundamentally
+  different from TXT/MD's. TXT/MD use UTF-16 offsets in the source
+  string; EPUB uses a `EPUBSerializedRange` (DOM
+  `startContainerPath` + `startOffset` + `endContainerPath` +
+  `endOffset`). The WI-7c1 presenter infrastructure was designed
+  around `TextSelectionInfo` (UTF-16 offsets only) and can't carry
+  EPUB anchors directly. Two approaches were considered: (a)
+  extend `TextSelectionInfo` with optional EPUB anchors — rejected,
+  pollutes a TXT/MD-focused type; (b) **request-token plumbing** —
+  shared types stay simple (`TextSelectionInfo` unchanged), the
+  notification carries an optional opaque `UUID` token in
+  `userInfo`, and each format may stash an extra payload keyed by
+  that token in a local registry. Accepted. WI-7c5a foundationally
+  ships the token plumbing across `SelectionPopoverRequest` +
+  `SelectionPopoverActionRouter`; WI-7c5b ships the EPUB-side
+  producer/consumer with a registry keyed by the token. Identity-
+  by-token is robust against same-text reselection at different
+  DOM anchors and against dismiss/action timing races (each
+  selection mints a fresh UUID; stale actions become safe no-ops).
 - **Regression guard** (all of WI-7c2..7c5): tap-on-existing-
   highlight path (feature #53) still routes through
   `HighlightActionPresenting`, unchanged.
@@ -767,3 +926,81 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   device-verify, the Foliate font-bundling slice (Risk (c)), and the
   Gate 5b acceptance pass are no longer blocked on WI-1b. GH #774
   closed.
+- 2026-05-16 v10: **WI-7c5 split into WI-7c5a (foundational) + WI-7c5b
+  (behavioral).** Pre-swap read pass discharged the v8 hand-wave
+  ("EPUB bridge. Replace the long-press menu path — needs a
+  pre-swap read pass"). EPUB's selection model is
+  `EPUBSerializedRange` (DOM `startContainerPath` + `startOffset` +
+  `endContainerPath` + `endOffset`), incompatible with
+  `TextSelectionInfo`'s UTF-16 offsets. **Codex Gate 2 round 1**
+  (thread `019e2ef9-e2eb-7942-822c-708bbba50a07`) flagged 2 High +
+  3 Medium + 1 Low against an initial cache-by-`selectedText`
+  draft. Findings + resolutions:
+  - **High** — cache-by-`selectedText` is fragile (same-text
+    reselection at different DOM anchors, dismiss/action timing
+    races). **Fixed** by replacing with request-token plumbing:
+    `SelectionPopoverRequest.post(...)` gains an optional
+    `requestToken: UUID`; `SelectionPopoverActionRouter` passes it
+    through to action notifications' `userInfo`; EPUB stashes the
+    event keyed by token. Identity-by-token is stable.
+  - **High** — removing the legacy EPUB `confirmationDialog`
+    drops `Copy`, which the new `SelectionPopoverView` lacks.
+    **Resolution**: explicitly accept Copy removal as in-scope
+    (consistent with TXT/MD post-WI-7c2..c4 losing iOS-default
+    Copy when the empty `UIMenu` returned). Recorded as a product
+    decision in the WI-7c5b description; a follow-up may add
+    `.copy` to `SelectionPopoverAction` if feedback warrants
+    (deferred-IDEA, not a regression bug).
+  - **Medium** — WI-7c5a as initially drafted "rebranded existing
+    state" (`pendingSelectionEvent` already exists). **Fixed** by
+    redefining WI-7c5a as request-token plumbing in the shared
+    popover infrastructure (genuine foundational generalization),
+    not as adding duplicate EPUB cache state.
+  - **Medium** — producer swap was at the wrong layer
+    (`EPUBWebViewBridgeCoordinator.handleSelectionMessage`
+    couples bridge plumbing to popover presentation). **Fixed** by
+    moving the producer swap into `EPUBReaderContainerView`'s
+    `onSelectionEvent` closure, keeping the bridge coordinator
+    unchanged.
+  - **Medium** — test catalogue too thin; missing same-text
+    duplicate selections / stale-action / no-cache cases.
+    **Fixed** by expanding the WI-7c5b test list to include
+    distinct-DOM-anchor same-text selections, stale-action
+    after-dismiss handling, and explicit iframe-content out-of-
+    scope documentation.
+  - **Low** — `color:` parameter scope overstated (don't need to
+    touch `EPUBHighlightActions.persistHighlight` directly; the
+    color flows through `coordinator.create(..., color:)` and
+    `persistence.addHighlight(..., color:)` which both already
+    accept color). **Fixed** by narrowing WI-7c5b to only modify
+    `handleHighlightAction(event:container:color:)`.
+  **Codex Gate 2 round 2** (same thread): 1 High + 1 Medium + 1
+  Low. **High** — initial token plumbing was incomplete (token in
+  `userInfo` only; presenter held bare `TextSelectionInfo` in
+  state; router took `(action, selection)`; token lost across the
+  post→present→tap→route chain). **Fixed** by introducing typed
+  `SelectionPopoverRequestPayload { selection: TextSelectionInfo,
+  requestToken: UUID? }` carried as the notification's `object`,
+  threaded through `@State pending: SelectionPopoverRequestPayload?`
+  in the presenter modifier, and into
+  `SelectionPopoverActionRouter.route(action:payload:notificationCenter:)`.
+  Token rides the in-memory state, not re-scraped from `userInfo`
+  at action time. **Medium** — `userInfo["selectionRequestToken"]:
+  String` was the wrong tradeoff ("Codable-friendliness" is
+  irrelevant for in-process notifications). **Fixed** by using
+  `as? UUID` directly. **Low** — `[UUID: ReaderSelectionEvent]`
+  registry overstated single-entry behavior. **Fixed** by
+  tightening to `(token: UUID, event: ReaderSelectionEvent)?`
+  single pending entry, replaced on new selection. **Codex Gate 2
+  round 3** (same thread): **"no new findings."** Quoted verdict:
+  *"The revised WI-7c5 decomposition is coherent and ready to
+  move from Gate 2 to Gate 3 ... Token identity is preserved
+  across post → present → tap → route via a typed
+  `SelectionPopoverRequestPayload`, so EPUB no longer depends on
+  fragile text matching ... `UUID` in `userInfo` is the right
+  shape for these in-process notifications ... The EPUB cache is
+  now correctly scoped as a single pending `(token, event)` entry
+  ... Producer ownership is at the container, not the bridge
+  coordinator, which is the cleaner boundary."* Gate 2 closed
+  after 3 rounds — within the rule-47 limit. **WI-7c5a + WI-7c5b
+  may now enter Gate 3.**
