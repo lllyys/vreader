@@ -1,26 +1,32 @@
-// Purpose: Tests for `ReaderTypography` — Feature #60 WI-1 foundational
-// font registry. Resolves a `ReaderFontFamily` case to a UIFont for the
-// reader body + UI chrome.
+// Purpose: Tests for `ReaderTypography` — Feature #60 font registry.
+// Resolves a `ReaderFontFamily` case to a UIFont for the reader body
+// + UI chrome.
 //
-// Strictly dormant infra in this WI: no view consumes
-// `ReaderTypography` yet — that's WI-5 (TXT/MD theme) and WI-6 (chrome
-// re-skin). Font binaries (Source Serif 4 + Inter `.otf` files) are
-// NOT bundled in this WI; they require external asset fetching with
-// licence verification, deferred to a separate manual-ops WI-1b. The
-// registry's fallback chain (described below) handles the unregistered-
-// font case gracefully so the API surface is ready for WI-5/6 to
-// consume without compile errors.
+// WI-1a added the registry + `ReaderFontFamily` cases (the API
+// surface). **WI-1b (this branch) bundles the actual font binaries**:
+// Source Serif 4 + Inter `.otf` faces ship in `vreader/Resources/Fonts/`
+// and are registered with iOS via the `UIAppFonts` key in the
+// Info.plist. So `.sourceSerif4` / `.inter` now resolve to the REAL
+// faces, not the Georgia / system fallback.
 //
-// Fallback chain (per the plan's "Tests: fallback chain"):
-//   - `.sourceSerif4` → real Source Serif 4 if registered → Georgia →
-//     UIFont serif system font
-//   - `.inter`        → real Inter if registered → system font (`.systemFont`)
+// The registry's fallback chain is still real code and still worth
+// testing — it's the safety net for the case a face fails to load
+// (corrupt asset, wrong PostScript name). The two
+// `*_resolvesToASerifFace` / `*_resolvesToASansFace` tests below
+// assert the trait-level invariant that holds whether the bundled
+// face or the fallback resolves; the `*_resolvesToBundledFace`
+// tests assert the post-WI-1b reality that the bundled face IS
+// what resolves.
+//
+// Resolution order (per `ReaderTypography.body(for:)`):
+//   - `.sourceSerif4` → bundled Source Serif 4 → Georgia → system serif
+//   - `.inter`        → bundled Inter → system font (`.systemFont`)
 //   - `.serif`        → Georgia (existing; preserved)
 //   - `.monospace`    → Menlo (existing; preserved)
 //   - `.system`       → `.systemFont` (existing; preserved)
 //
 // @coordinates-with: TypographySettings.swift (ReaderFontFamily),
-//   ReaderTheme.swift (cssFontStack), the WI-5/WI-6 consumers.
+//   ReaderTheme.swift (cssFontStack), project.yml (UIAppFonts).
 
 #if canImport(UIKit)
 import Testing
@@ -53,19 +59,15 @@ struct ReaderTypographyTests {
         #expect(large.pointSize == 32)
     }
 
-    // MARK: - Fallback chain for the new families
+    // MARK: - Trait invariant (holds for bundled face OR fallback)
 
-    /// `.sourceSerif4` requested with no Source Serif 4 face registered
-    /// falls back to a serif face. The exact resolved name varies by
-    /// fallback (Georgia or system serif), but the trait must remain
-    /// `serif` so the EPUB CSS injection emits a serif stack and the
-    /// TXT bridge picks a serif glyph.
+    /// `.sourceSerif4` must resolve to a serif face — so EPUB CSS
+    /// injection emits a serif stack and the TXT bridge picks a serif
+    /// glyph. Post-WI-1b this resolves to the bundled Source Serif 4;
+    /// the trait assertion also covers the defensive fallback (Georgia
+    /// / system serif) if the bundled face ever fails to load.
     @Test
-    func body_sourceSerif4_fallsBack_toASerifFace_whenFontNotRegistered() {
-        // Source Serif 4 is NOT bundled in this WI (binaries deferred to
-        // WI-1b). The registry must return a UIFont that satisfies the
-        // serif trait — Georgia in this codebase's current state, or a
-        // future system-registered Source Serif 4 if bundled later.
+    func body_sourceSerif4_resolvesToASerifFace() {
         let font = ReaderTypography.body(for: .sourceSerif4, size: 18)
         let isGeorgia = font.fontName.contains("Georgia")
         let isSourceSerif = font.fontName.contains("SourceSerif")
@@ -73,15 +75,15 @@ struct ReaderTypographyTests {
         let isFallbackSerif = font.familyName.lowercased().contains("serif")
                             || isGeorgia
         #expect(isGeorgia || isSourceSerif || isFallbackSerif,
-                "Expected serif fallback for unregistered Source Serif 4, got \(font.fontName) (family: \(font.familyName))")
+                "Expected a serif face for .sourceSerif4, got \(font.fontName) (family: \(font.familyName))")
     }
 
-    /// `.inter` requested with no Inter face registered falls back to the
-    /// platform sans system font (matches the WI's "chrome uses Inter"
-    /// expectation — sans by default).
+    /// `.inter` must resolve to a sans face (chrome uses Inter — sans by
+    /// default). Post-WI-1b this resolves to the bundled Inter; the
+    /// not-serif assertion also covers the defensive system-sans
+    /// fallback if the bundled face ever fails to load.
     @Test
-    func body_inter_fallsBack_toSystemSans_whenFontNotRegistered() {
-        // Inter is NOT bundled in this WI. Fallback must be a sans face.
+    func body_inter_resolvesToASansFace() {
         let font = ReaderTypography.body(for: .inter, size: 18)
         let isInter = font.fontName.contains("Inter")
         // Apple's default system font names are version-dependent; checking
@@ -89,7 +91,44 @@ struct ReaderTypographyTests {
         let familyIsNotSerif = !font.familyName.lowercased().contains("serif")
                              && !font.familyName.lowercased().contains("georgia")
         #expect(isInter || familyIsNotSerif,
-                "Expected sans fallback for unregistered Inter, got \(font.fontName) (family: \(font.familyName))")
+                "Expected a sans face for .inter, got \(font.fontName) (family: \(font.familyName))")
+    }
+
+    // MARK: - WI-1b: bundled font binaries resolve
+
+    /// After WI-1b bundles the Source Serif 4 `.otf` faces + registers
+    /// them under `UIAppFonts`, `.sourceSerif4` resolves to the REAL
+    /// face — `familyName == "Source Serif 4"`, not the Georgia
+    /// fallback. RED before WI-1b (no binary → Georgia); GREEN after.
+    @Test
+    func body_sourceSerif4_resolvesToBundledFace() {
+        let font = ReaderTypography.body(for: .sourceSerif4, size: 17)
+        #expect(font.familyName == "Source Serif 4",
+                "Expected the bundled Source Serif 4 face, got family \(font.familyName) / \(font.fontName)")
+    }
+
+    /// After WI-1b, `.inter` resolves to the real Inter face —
+    /// `familyName == "Inter"`, not the system-sans fallback.
+    @Test
+    func body_inter_resolvesToBundledFace() {
+        let font = ReaderTypography.body(for: .inter, size: 17)
+        #expect(font.familyName == "Inter",
+                "Expected the bundled Inter face, got family \(font.familyName) / \(font.fontName)")
+    }
+
+    /// All 7 bundled faces must be registered with the system and
+    /// resolvable by their exact PostScript name — the form
+    /// `UIFont(name:size:)` (and `ReaderTypography`) looks them up by.
+    /// PostScript names verified against the shipped `.otf` `name`
+    /// tables (Source Serif 4.005 / Inter 4.1).
+    @Test(arguments: [
+        "SourceSerif4-Regular", "SourceSerif4-It",
+        "SourceSerif4-Bold", "SourceSerif4-BoldIt",
+        "Inter-Regular", "Inter-Medium", "Inter-SemiBold",
+    ])
+    func bundledFace_resolvesByPostScriptName(_ postScriptName: String) {
+        #expect(UIFont(name: postScriptName, size: 17) != nil,
+                "Bundled face '\(postScriptName)' is not registered — check UIAppFonts in project.yml and that the .otf shipped in Resources/Fonts/")
     }
 
     // MARK: - Existing-family preservation (regression guard)

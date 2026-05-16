@@ -81,6 +81,16 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>UIAppFonts</key>
+	<array>
+		<string>SourceSerif4-Regular.otf</string>
+		<string>SourceSerif4-It.otf</string>
+		<string>SourceSerif4-Bold.otf</string>
+		<string>SourceSerif4-BoldIt.otf</string>
+		<string>Inter-Regular.otf</string>
+		<string>Inter-Medium.otf</string>
+		<string>Inter-SemiBold.otf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
