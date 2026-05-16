@@ -50,7 +50,11 @@ struct ReaderBottomChrome: View {
                 toolbar
             }
             .padding(.top, 14)
-            .padding(.bottom, max(ReaderSafeAreaResolver.windowSafeAreaBottom, 12))
+            // Design baseline is 28pt (`vreader-reader.jsx` paddingBottom).
+            // On home-indicator devices the real inset (~34) is larger and
+            // wins; on zero-inset layouts we keep the 28pt design baseline
+            // rather than collapsing to a too-low value.
+            .padding(.bottom, max(ReaderSafeAreaResolver.windowSafeAreaBottom, 28))
             .background(chromeBackground)
             .overlay(alignment: .top) {
                 Color(theme.ruleColor).frame(height: 0.5)
@@ -103,18 +107,22 @@ struct ReaderBottomChrome: View {
     }
 
     private func toolbarButton(_ button: ReaderBottomChromeButton) -> some View {
-        Button {
+        // Per the design, a non-accent button draws its icon in `ink`
+        // but its label in the dimmer `sub` token; the accent button
+        // (AI) draws both in `accent`.
+        let iconColor = button.isAccent ? Color(theme.accentColor) : Color(theme.inkColor)
+        let labelColor = button.isAccent ? Color(theme.accentColor) : Color(theme.subColor)
+        return Button {
             NotificationCenter.default.post(name: Self.notification(for: button), object: nil)
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: Self.symbol(for: button))
                     .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(iconColor)
                 Text(Self.label(for: button))
                     .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(labelColor)
             }
-            .foregroundStyle(
-                button.isAccent ? Color(theme.accentColor) : Color(theme.inkColor)
-            )
             .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
