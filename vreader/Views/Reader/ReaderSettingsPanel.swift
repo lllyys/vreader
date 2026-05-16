@@ -3,20 +3,35 @@
 // font family picker, CJK spacing toggle, and live-preview text.
 // When paged layout is selected, shows page turn animation picker and auto page turn toggle.
 //
+// Re-skinned for feature #60 visual-identity v2 (WI-10): wrapped in the
+// shared `ReaderSheetChrome` ("Display" title bar + theme-tinted
+// surface) instead of a `NavigationStack`. The panel has no push
+// destinations — every control is inline — so the design's `Sheet`
+// title bar cleanly replaces the nav bar. Every existing section,
+// control, binding, gate, `.onChange`, and the background-picker alert
+// are preserved unchanged.
+//
 // Key decisions:
-// - Presented as a sheet from reader toolbar.
+// - Presented as a sheet from the reader bottom chrome's Display button.
 // - All changes apply immediately (no "save" button needed).
 // - Preview text updates live as settings change.
-// - Theme picker uses colored circles (light/sepia/dark).
+// - Theme picker (feature #60 WI-11) shows all 5 `ReaderThemeV2`
+//   themes (Paper / Sepia / Dark / OLED / Photo) as rounded-square
+//   swatches per `vreader-panels.jsx`'s `ReaderSettingsSheet`.
 // - Compact layout suitable for half-sheet presentation.
 //
-// @coordinates-with: ReaderSettingsStore.swift, ReaderContainerView.swift
+// @coordinates-with: ReaderSettingsStore.swift, ReaderContainerView.swift,
+//   ReaderSheetChrome.swift, SheetSectionContract.swift, ReaderThemeV2.swift
 
 import PhotosUI
 import SwiftUI
 
 /// Settings panel for reader appearance.
 struct ReaderSettingsPanel: View {
+    /// Sheet dismissal — drives the `ReaderSheetChrome` close button
+    /// (feature #60 WI-10). The system swipe-down dismiss still works
+    /// too; this is the design `Sheet`'s explicit close affordance.
+    @Environment(\.dismiss) private var dismiss
     @Bindable var store: ReaderSettingsStore
     /// Tap zone configuration store (feature #25).
     var tapZoneStore: TapZoneStore?
@@ -44,8 +59,24 @@ struct ReaderSettingsPanel: View {
     /// Bug #134: surface theme-background load/save/remove failures.
     @State private var backgroundErrorMessage: String?
 
+    /// The design theme for the sheet chrome — the reader's current
+    /// `ReaderThemeV2` so the Display sheet's surface tint follows the
+    /// book's theme. (Feature #60 WI-11: `store.theme` is now
+    /// `ReaderThemeV2`, so no `asV2` projection is needed.)
+    private var sheetTheme: ReaderThemeV2 { store.theme }
+
+    /// The re-skinned panel's `ReaderSheetChrome` title — exposed for
+    /// the WI-10 composition test.
+    var sheetChromeTitleForTesting: String? {
+        ReaderSheetKind.display.designTitle
+    }
+
     var body: some View {
-        NavigationStack {
+        ReaderSheetChrome(
+            theme: sheetTheme,
+            title: ReaderSheetKind.display.designTitle,
+            onClose: { dismiss() }
+        ) {
             List {
                 themeSection
                 themeBackgroundSection
@@ -100,8 +131,9 @@ struct ReaderSettingsPanel: View {
                 if bookFingerprintKey != nil { perBookSection }
                 previewSection
             }
-            .navigationTitle("Reading Settings")
-            .navigationBarTitleDisplayMode(.inline)
+            // Hide the grouped-List backdrop so the design's sheet
+            // surface tint (`ReaderSheetChrome`) shows through.
+            .scrollContentBackground(.hidden)
         }
         .onAppear { loadPerBookState() }
         .onChange(of: store.typography.fontSize) { _, _ in syncPerBookIfEnabled() }
@@ -158,44 +190,136 @@ struct ReaderSettingsPanel: View {
 
     // MARK: - Theme
 
+    /// The themes the picker offers — Feature #60 WI-11: all 5
+    /// `ReaderThemeV2` cases (Paper / Sepia / Dark / OLED / Photo), in
+    /// the design bundle's `THEMES` declaration order. Exposed
+    /// `static` for the WI-11 composition-contract test (same pattern
+    /// as `shouldShowReadingModeSection`).
+    static var themePickerThemes: [ReaderThemeV2] { ReaderThemeV2.allCases }
+
+    /// Human label for a theme swatch caption — matches the design
+    /// bundle's `name` field (`vreader-themes.jsx`).
+    static func themeDisplayName(_ theme: ReaderThemeV2) -> String {
+        switch theme {
+        case .paper: return "Paper"
+        case .sepia: return "Sepia"
+        case .dark:  return "Dark"
+        case .oled:  return "OLED"
+        case .photo: return "Photo"
+        }
+    }
+
     @ViewBuilder
     private var themeSection: some View {
         Section("Theme") {
-            HStack(spacing: 20) {
-                Spacer()
-                ForEach(ReaderTheme.allCases, id: \.self) { theme in
-                    themeCircle(theme)
+            HStack(spacing: 10) {
+                ForEach(Self.themePickerThemes, id: \.self) { theme in
+                    themeSwatch(theme)
                 }
-                Spacer()
             }
             .padding(.vertical, 8)
         }
     }
 
+    /// The Photo swatch's preview fill — the design renders the Photo
+    /// theme's chip as a 135° diagonal gradient (`vreader-panels.jsx`:
+    /// `linear-gradient(135deg, #3a2818, #1a1410)`) rather than a flat
+    /// color, since the real Photo theme shows a user image.
+    private static let photoSwatchGradient = LinearGradient(
+        colors: [
+            Color(red: 0x3a / 255, green: 0x28 / 255, blue: 0x18 / 255),
+            Color(red: 0x1a / 255, green: 0x14 / 255, blue: 0x10 / 255),
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    /// One theme swatch — the design's rounded-square chip
+    /// (`vreader-panels.jsx` `ReaderSettingsSheet` theme selector):
+    /// a 12pt-radius tile filled with the theme background (a diagonal
+    /// gradient for the Photo theme), an `Aa` glyph (or a photo glyph
+    /// for the Photo theme), the theme name below, and — on the
+    /// selected tile — the design's two-ring treatment: a 2.5pt accent
+    /// ring hugging the tile plus a 1.5pt outer band in the sheet's
+    /// surface color (the design's `0 0 0 2.5px accent, 0 0 0 4px
+    /// surface` box-shadow). Per the design the selected ring uses the
+    /// *sheet's* accent (`t.accent`) and the caption colour uses the
+    /// sheet's `sub` token — consistent across all swatches regardless
+    /// of which theme each depicts.
     @ViewBuilder
-    private func themeCircle(_ theme: ReaderTheme) -> some View {
+    private func themeSwatch(_ theme: ReaderThemeV2) -> some View {
+        let isSelected = store.theme == theme
         Button {
             store.theme = theme
         } label: {
             VStack(spacing: 6) {
-                Circle()
-                    .fill(Color(theme.backgroundColor))
-                    .overlay(
-                        Circle().stroke(
-                            store.theme == theme ? Color.accentColor : Color.gray.opacity(0.3),
-                            lineWidth: store.theme == theme ? 3 : 1
-                        )
-                    )
-                    .frame(width: 44, height: 44)
+                themeSwatchTile(theme)
+                    .aspectRatio(1, contentMode: .fit)
+                    // Outer band — the design's second box-shadow ring
+                    // in the sheet surface color (`0 0 0 4px surface`).
+                    // Only drawn when selected; the 1.5pt padding makes
+                    // room for it so the tile size stays constant.
+                    .padding(1.5)
+                    .overlay {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 13.5)
+                                .strokeBorder(
+                                    Color(sheetTheme.sheetSurfaceColor),
+                                    lineWidth: 1.5
+                                )
+                        }
+                    }
 
-                Text(theme.rawValue.capitalized)
+                Text(Self.themeDisplayName(theme))
                     .font(.caption2)
-                    .foregroundStyle(store.theme == theme ? .primary : .secondary)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(Color(sheetTheme.subColor))
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(theme.rawValue) theme")
-        .accessibilityAddTraits(store.theme == theme ? [.isSelected] : [])
+        .accessibilityLabel("\(Self.themeDisplayName(theme)) theme")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    /// The inner tile of a theme swatch — the 12pt-radius filled chip
+    /// with the `Aa`/photo glyph and the selected/unselected hairline
+    /// ring (the design's first box-shadow: `0 0 0 2.5px accent` when
+    /// selected, `inset 0 0 0 0.5px rule` otherwise).
+    @ViewBuilder
+    private func themeSwatchTile(_ theme: ReaderThemeV2) -> some View {
+        let isSelected = store.theme == theme
+        RoundedRectangle(cornerRadius: 12)
+            .fill(swatchTileShading(theme))
+            .overlay {
+                if theme.usesBackgroundImage {
+                    Image(systemName: "photo")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Color(theme.accentColor))
+                } else {
+                    Text("Aa")
+                        .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 20)))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color(theme.inkColor))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(
+                        isSelected
+                            ? Color(sheetTheme.accentColor)
+                            : Color(sheetTheme.ruleColor),
+                        lineWidth: isSelected ? 2.5 : 0.5
+                    )
+            }
+    }
+
+    /// Fill for a swatch tile — the theme background for the four flat
+    /// themes; the design's 135° diagonal gradient for the Photo theme.
+    private func swatchTileShading(_ theme: ReaderThemeV2) -> AnyShapeStyle {
+        if theme.usesBackgroundImage {
+            return AnyShapeStyle(Self.photoSwatchGradient)
+        }
+        return AnyShapeStyle(Color(theme.backgroundColor))
     }
 
     // MARK: - Theme Background (A04, feature #32)

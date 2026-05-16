@@ -1,8 +1,8 @@
 // Purpose: Shared cover-art view for the Library grid card + list row
 // (feature #60 visual identity v2). Renders a custom cover image when
-// one exists, otherwise a format-colored placeholder, and overlays the
-// design's physical-book treatment: spine shadow, page-edge highlight,
-// hairline border, drop shadow.
+// one exists, otherwise a generative typographic cover (feature #60
+// WI-10), and overlays the design's physical-book treatment: spine
+// shadow, page-edge highlight, hairline border, drop shadow.
 //
 // Key decisions:
 // - **Fixed 2:3 aspect ratio.** `Color.clear` drives layout so every
@@ -10,6 +10,11 @@
 //   underlying image dimensions. Image lives in `.overlay`, never in
 //   `.background`, so it never participates in sizing. `.clipped()`
 //   trims any scaledToFill overflow.
+// - **No-image fallback is a generative cover** (feature #60 WI-10).
+//   When `image` is nil, `GenerativeCoverView` renders a typographic
+//   cover whose style + palette are deterministically derived from the
+//   book's `fingerprintKey` — so a given book always shows the same
+//   cover. This replaces the old plain format-colored placeholder.
 // - **Spine + page-edge accents** are gradient strips per the design
 //   `BookCover` component — left spine darkens, right edge has a thin
 //   page highlight. They sit inside the clip so they curve with the
@@ -18,19 +23,39 @@
 //   list-row thumbnail uses 3pt (per design `vreader-library.jsx`).
 //
 // @coordinates-with: BookCardView.swift, BookRowView.swift,
-//   LibraryCardTokens.swift,
+//   LibraryContinueCard.swift, LibraryCardTokens.swift,
+//   GenerativeCoverView.swift, GenerativeCoverStyle.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-cover.jsx`
 
 import SwiftUI
 
-/// Cover-art view: custom image or format-colored placeholder, with the
-/// feature-#60 spine / page-edge / border / shadow treatment.
+/// Cover-art view: a custom image, or a generative typographic cover
+/// fallback, with the feature-#60 spine / page-edge / border / shadow
+/// treatment.
 struct BookCoverArtView: View {
     let image: UIImage?
-    let coverColor: Color
-    let formatIcon: String
-    let formatBadge: String
+    /// The book's stable identity — drives the deterministic generative
+    /// cover style + palette when no image exists (feature #60 WI-10).
+    let fingerprintKey: String
+    /// Book title shown on the generative cover.
+    let title: String
+    /// Book author shown on the generative cover (nil when unknown).
+    let author: String?
     var cornerRadius: CGFloat = LibraryCardTokens.cardCoverCornerRadius
+
+    /// Whether the cover renders the generative typographic fallback
+    /// rather than a custom image. `true` exactly when no image exists.
+    /// Static so the WI-10 contract tests can pin the decision policy
+    /// without a SwiftUI render.
+    static func usesGenerativeFallback(hasImage: Bool) -> Bool {
+        !hasImage
+    }
+
+    /// The generative cover style this book resolves to — exposed so
+    /// the WI-10 contract tests can pin the per-book derivation.
+    var generativeStyleForTesting: GenerativeCoverStyle {
+        GenerativeCoverStyle.style(forFingerprintKey: fingerprintKey)
+    }
 
     var body: some View {
         Color(white: 0.92)
@@ -44,13 +69,8 @@ struct BookCoverArtView: View {
                             .frame(width: geo.size.width, height: geo.size.height)
                             .clipped()
                     } else {
-                        coverColor
+                        generativeCover
                     }
-                }
-            }
-            .overlay {
-                if image == nil {
-                    placeholderGlyph
                 }
             }
             .overlay { spineShadow }
@@ -65,25 +85,29 @@ struct BookCoverArtView: View {
             .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
     }
 
-    // MARK: - Placeholder
+    // MARK: - Generative cover fallback (feature #60 WI-10)
 
-    /// Format glyph + uppercase badge shown when no custom cover exists.
-    private var placeholderGlyph: some View {
-        VStack(spacing: 4) {
-            Image(systemName: formatIcon)
-                .font(.system(size: 32))
-                .foregroundStyle(.white.opacity(0.8))
-            Text(formatBadge)
-                .font(.caption2)
-                .fontWeight(.bold)
-                .foregroundStyle(.white.opacity(0.9))
-        }
+    /// The generative typographic cover shown when no custom image
+    /// exists. Style + palette are deterministically derived from the
+    /// book's `fingerprintKey`, so a given book always renders the
+    /// same cover across launches.
+    private var generativeCover: some View {
+        let style = GenerativeCoverStyle.style(forFingerprintKey: fingerprintKey)
+        let palette = GenerativeCoverPalette.palette(
+            forFingerprintKey: fingerprintKey
+        )
+        return GenerativeCoverView(
+            title: title,
+            author: author,
+            style: style,
+            palette: palette
+        )
     }
 
     // MARK: - Physical-book accents (per design BookCover)
 
     /// Left-edge spine shadow — a gradient that darkens toward the
-    /// binding so a flat color placeholder reads as a book object.
+    /// binding so the cover reads as a physical book object.
     private var spineShadow: some View {
         HStack(spacing: 0) {
             LinearGradient(

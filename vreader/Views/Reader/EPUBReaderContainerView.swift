@@ -263,7 +263,7 @@ struct EPUBReaderContainerView: View {
         // consistent with TXT/MD losing the iOS-default Copy when
         // their empty `UIMenu` returned).
         .selectionPopoverPresenter(
-            theme: settingsStore?.theme.asV2 ?? .paper,
+            theme: settingsStore?.theme ?? .paper,
             // WI-7c5b: drop the cached selection when the popover
             // closes without an action — keeps the single-entry
             // cache from holding a stale `ReaderSelectionEvent`
@@ -339,21 +339,19 @@ struct EPUBReaderContainerView: View {
             EPUBWebViewBridge(
                 contentURL: contentURL,
                 baseDirectory: accessRoot,
-                // Feature #60 WI-4: route through ReaderThemeV2's 5-token
-                // surface. `ReaderSettingsStore.theme` is still the
-                // legacy 3-case enum at this point; `asV2` projects
-                // light → paper while preserving sepia/dark, so existing
-                // user settings keep their books rendering without an
-                // explicit migration write.
+                // Feature #60 WI-4/WI-11: route through ReaderThemeV2's
+                // 5-token surface. WI-11 migrated `ReaderSettingsStore.theme`
+                // to `ReaderThemeV2`, so `epubOverrideCSS` is read directly
+                // off the stored theme — Paper / Sepia / Dark / OLED / Photo.
                 themeCSS: settingsStore.map {
-                    $0.theme.asV2.epubOverrideCSS(
+                    $0.theme.epubOverrideCSS(
                         fontSize: $0.typography.fontSize,
                         lineHeight: $0.typography.lineSpacing,
                         letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0,
                         fontFamily: $0.typography.fontFamily
                     )
                 },
-                themeBackgroundColor: settingsStore?.theme.asV2.backgroundColor,
+                themeBackgroundColor: settingsStore?.theme.backgroundColor,
                 safeAreaTopInset: proxy.safeAreaInsets.top,
                 scrollFraction: seekScrollFraction,
                 currentHref: viewModel.currentPosition?.href,

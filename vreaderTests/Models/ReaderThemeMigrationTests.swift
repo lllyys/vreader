@@ -148,5 +148,70 @@ struct ReaderThemeMigrationTests {
             )
         }
     }
+
+    // MARK: - `init(legacyOrNew:)` — Feature #60 WI-11
+    //
+    // WI-11 migrates `ReaderSettingsStore.theme` to `ReaderThemeV2`.
+    // Settings persistence (UserDefaults `readerTheme` key) and the
+    // per-book `themeName` field both carry bare rawValue strings — not
+    // JSON-wrapped — so the `Codable` decoder (which works on a
+    // `singleValueContainer`) is awkward at those call sites. WI-11
+    // adds a non-throwing string mapper that is the single source of
+    // truth for "interpret a stored theme string": new names, the
+    // legacy `ReaderTheme` names, and `nil`/unknown → `.default`.
+
+    /// New rawValues map to themselves.
+    @Test
+    func legacyOrNew_newNames_mapToSelf() {
+        for theme in ReaderThemeV2.allCases {
+            #expect(ReaderThemeV2(legacyOrNew: theme.rawValue) == theme)
+        }
+    }
+
+    /// Legacy `ReaderTheme` rawValue `"light"` migrates to `.paper`.
+    @Test
+    func legacyOrNew_legacyLight_yieldsPaper() {
+        #expect(ReaderThemeV2(legacyOrNew: "light") == .paper)
+    }
+
+    /// Legacy `"sepia"` / `"dark"` keep their identity (same name in V2).
+    @Test
+    func legacyOrNew_legacySepiaDark_preserveIdentity() {
+        #expect(ReaderThemeV2(legacyOrNew: "sepia") == .sepia)
+        #expect(ReaderThemeV2(legacyOrNew: "dark") == .dark)
+    }
+
+    /// An unknown string falls back to `.default` (`.paper`) — the
+    /// non-throwing mapper is for call sites that already own a
+    /// fallback policy (UserDefaults / per-book themeName).
+    @Test
+    func legacyOrNew_unknown_fallsBackToDefault() {
+        #expect(ReaderThemeV2(legacyOrNew: "chartreuse") == .default)
+        #expect(ReaderThemeV2(legacyOrNew: "chartreuse") == .paper)
+    }
+
+    /// An empty string falls back to `.default`.
+    @Test
+    func legacyOrNew_emptyString_fallsBackToDefault() {
+        #expect(ReaderThemeV2(legacyOrNew: "") == .default)
+    }
+
+    /// `nil` (no persisted value at all) falls back to `.default`.
+    @Test
+    func legacyOrNew_nil_fallsBackToDefault() {
+        #expect(ReaderThemeV2(legacyOrNew: nil) == .default)
+    }
+
+    /// The legacy-OR-new mapper agrees with the `Codable` decoder for
+    /// every value the decoder accepts — they must not drift apart.
+    @Test
+    func legacyOrNew_agreesWithCodableDecoder() throws {
+        for raw in ["paper", "sepia", "dark", "oled", "photo", "light"] {
+            let viaCodable = try JSONDecoder().decode(
+                ReaderThemeV2.self, from: Data("\"\(raw)\"".utf8)
+            )
+            #expect(ReaderThemeV2(legacyOrNew: raw) == viaCodable)
+        }
+    }
 }
 #endif

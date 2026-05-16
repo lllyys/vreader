@@ -176,7 +176,7 @@ struct TXTReaderContainerView: View {
                 // chapter position is surfaced in the leading label.
                 if hasChapterDisplay {
                     ReaderBottomChrome(
-                        theme: settingsStore?.theme.asV2 ?? .paper,
+                        theme: settingsStore?.theme ?? .paper,
                         progress: $chapterScrollFraction,
                         onSeek: { seekValue in
                             guard let chapters = viewModel.chapterIndex?.chapters,
@@ -192,7 +192,7 @@ struct TXTReaderContainerView: View {
                     )
                 } else {
                     ReaderBottomChrome(
-                        theme: settingsStore?.theme.asV2 ?? .paper,
+                        theme: settingsStore?.theme ?? .paper,
                         progress: $chapterScrollFraction,
                         onSeek: { seekValue in
                             // If TOC entries exist, seek within current chapter
@@ -220,12 +220,12 @@ struct TXTReaderContainerView: View {
         // bridge (TXTTextViewBridgeCoordinator) posts
         // `.readerSelectionPopoverRequested` from
         // `editMenuForTextIn`; this modifier observes the
-        // notification and shows the sheet. Theme comes from the
-        // legacy `ReaderTheme` projected through `.asV2`; falls back
-        // to `.paper` when no settings store is wired (preview /
-        // tests). WI-7c3..7c5 attach the same modifier to the
-        // chunked TXT / MD / EPUB containers.
-        .selectionPopoverPresenter(theme: settingsStore?.theme.asV2 ?? .paper)
+        // notification and shows the sheet. Theme is the store's
+        // `ReaderThemeV2` (WI-11 migrated the type); falls back to
+        // `.paper` when no settings store is wired (preview / tests).
+        // WI-7c3..7c5 attach the same modifier to the chunked TXT /
+        // MD / EPUB containers.
+        .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
         .task {
             // PERF: open already called by TXTReaderHost — skip if content loaded
             if viewModel.textContent == nil && viewModel.currentChapterText == nil {

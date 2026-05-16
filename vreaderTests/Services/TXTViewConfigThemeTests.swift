@@ -2,9 +2,9 @@
 // `ReaderSettingsStore.txtViewConfig` and `mdRenderConfig` render
 // TXT and MD content with the WI-2 `ReaderThemeV2` token surface
 // (Paper / Sepia / Dark / OLED / Photo), not the legacy
-// `ReaderTheme`'s 3-color palette. Consumes `theme.asV2` so users
-// on the legacy 3-case enum still see the new visual identity until
-// a later WI migrates the settings type itself.
+// `ReaderTheme`'s 3-color palette. WI-11 migrated
+// `ReaderSettingsStore.theme` itself to `ReaderThemeV2`, so these
+// configs read its tokens directly.
 
 #if canImport(UIKit)
 import Testing
@@ -33,7 +33,7 @@ struct TXTViewConfigThemeTests {
     // MARK: - txtViewConfig.backgroundColor → V2 outer bg
 
     @Test @MainActor func txtViewConfig_lightTheme_usesV2PaperOuterBg() {
-        var s = makeStore(); s.theme = .light
+        var s = makeStore(); s.theme = .paper
         // Paper outer bg: 0xf4eee0 = (244, 238, 224)
         let bg = rgbInts(s.txtViewConfig.backgroundColor)
         #expect(bg == (244, 238, 224),
@@ -59,7 +59,7 @@ struct TXTViewConfigThemeTests {
     // MARK: - txtViewConfig.textColor → V2 ink
 
     @Test @MainActor func txtViewConfig_lightTheme_usesV2PaperInk() {
-        var s = makeStore(); s.theme = .light
+        var s = makeStore(); s.theme = .paper
         // Paper ink: 0x1d1a14 = (29, 26, 20)
         let ink = rgbInts(s.txtViewConfig.textColor)
         #expect(ink == (29, 26, 20),
@@ -83,7 +83,7 @@ struct TXTViewConfigThemeTests {
     // MARK: - mdRenderConfig parallels txtViewConfig
 
     @Test @MainActor func mdRenderConfig_lightTheme_usesV2PaperInk() {
-        var s = makeStore(); s.theme = .light
+        var s = makeStore(); s.theme = .paper
         let ink = rgbInts(s.mdRenderConfig.textColor)
         #expect(ink == (29, 26, 20),
                 "MDRenderConfig.textColor must mirror txtViewConfig (both go through ReaderThemeV2.inkColor)")
@@ -112,7 +112,7 @@ struct TXTViewConfigThemeTests {
     }
 
     @Test @MainActor func uiSecondaryTextColor_lightTheme_usesV2SubRGBA() {
-        var s = makeStore(); s.theme = .light
+        var s = makeStore(); s.theme = .paper
         let c = rgba(s.uiSecondaryTextColor)
         // Paper sub: ink-RGB (29,26,20) + alpha 0.55
         #expect(c.r == 29 && c.g == 26 && c.b == 20,
@@ -134,7 +134,7 @@ struct TXTViewConfigThemeTests {
     // MARK: - MDRenderConfig secondary + code-block colors (WI-5 round-1 fix)
 
     @Test @MainActor func mdRenderConfig_lightTheme_secondaryAndCodeBg() {
-        var s = makeStore(); s.theme = .light
+        var s = makeStore(); s.theme = .paper
         let cfg = s.mdRenderConfig
         // secondaryColor → V2 subColor (paper ink + alpha 0.55)
         let sec = rgba(cfg.secondaryColor)

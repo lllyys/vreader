@@ -42,6 +42,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 - Grid/list view with sort (persisted via `PreferenceStore`)
 - Context menu: Info, Share, Set Cover, Add to Collection, Delete
 - Collections sidebar, OPDS catalog, AI chat entry points
+- Cover art (`BookCoverArtView`) renders a custom image when one exists, otherwise a generative typographic cover (Feature #60 WI-10 — `GenerativeCoverView`). The cover's style family + colour palette are deterministically derived from the book's `fingerprintKey` (FNV-1a hash → one of 5 style families × 12 design palettes in `GenerativeCoverStyle.swift`), so a given book always shows the same generated cover.
 
 ### 3. Reader Layer (`vreader/Views/Reader/`)
 
@@ -61,6 +62,14 @@ Reader chrome (Feature #60 WI-6b — visual-identity-v2) is two custom overlays,
 - `ReaderMorePopover.swift` — anchored More-menu popover (Feature #60 WI-6c), composed in `ReaderContainerView`'s chrome overlay. Five rows (Read aloud / Auto-turn | Book details / Share / Export); each posts a `.readerMore*` notification that `ReaderContainerView` observes. The design's sixth row (Bilingual) is deferred — GH #790.
 
 Slot/button identity lives in `ReaderChromeButton.swift` (`ReaderTopChromeSlot` / `ReaderBottomChromeButton`); More-menu row identity lives in `ReaderMoreMenuRow.swift`.
+
+#### Sheets (Feature #60 WI-10 — visual-identity-v2)
+
+The five app sheets share `ReaderSheetChrome.swift` — a reusable wrapper matching the design's `Sheet` component: a theme-tinted surface (`ReaderThemeV2.sheetSurfaceColor`), an optional centred Source Serif 4 title bar with 50pt leading/trailing slots (a default circular close button fills the trailing slot when an `onClose` is given and no custom trailing view is), and a scrollable body. The slide-up animation + drag grabber come from SwiftUI's own `.sheet` + `.presentationDragIndicator(.visible)`; `ReaderSheetChrome` supplies only the title bar + surface tint. It wraps the Display sheet (`ReaderSettingsPanel`), the Annotations sheet (`AnnotationsPanelView`), and the AI sheet (`AIReaderPanel`, `title: nil` + a custom sparkle header). `SettingsView` (App Settings) keeps an inner `NavigationStack` for its `NavigationLink` push destinations, with `ReaderSheetChrome` above it. The per-sheet section contract is pinned in `SheetSectionContract.swift` (`ReaderSheetKind`). Reader sheets pass the book's `ReaderThemeV2`; the App Settings sheet uses `.paper` (the Library is not theme-switchable).
+
+`AnnotationsPanelView` is a pre-#60 unified 4-tab sheet (Contents / Bookmarks / Highlights / Notes); the design bundle depicts the TOC and highlights surfaces as two separate sheets, so WI-10 re-skinned the unified sheet's chrome only — splitting it to match the design's information architecture is tracked in GH #793 (`needs-design`).
+
+`ReaderContainerView` drives `preferredColorScheme(_:)` from `ReaderThemeV2.preferredColorScheme` (`ReaderThemeV2+ColorScheme.swift`) so the status bar tints to match the theme — `.dark` for the Dark / OLED / Photo families, `.light` for Paper / Sepia.
 
 #### Format Hosts (`ReaderFormatHosts.swift`)
 

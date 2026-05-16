@@ -33,7 +33,8 @@ struct ChapterTitleOverlay: View {
     }
 
     private var backgroundColor: Color {
-        Color(settingsStore?.theme.backgroundColor ?? ReaderTheme.default.backgroundColor)
+        // Feature #60 WI-11: `theme` is `ReaderThemeV2`.
+        Color(settingsStore?.theme.backgroundColor ?? ReaderThemeV2.default.backgroundColor)
     }
 }
 #endif

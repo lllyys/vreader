@@ -104,7 +104,7 @@ struct PerBookSettingsTests {
     @Test @MainActor func resolvedSettings_usesPerBook_whenSet() {
         let global = makeGlobalStore()
         global.typography.fontSize = 18
-        global.theme = .light
+        global.theme = .paper
         let perBook = PerBookSettingsOverride(fontSize: 26, themeName: "dark")
         let resolved = PerBookSettingsStore.resolve(perBook: perBook, global: global)
         #expect(resolved.fontSize == 26)
@@ -129,13 +129,15 @@ struct PerBookSettingsTests {
         global.typography.fontSize = 18
         global.typography.lineSpacing = 1.4
         global.typography.fontFamily = .system
-        global.theme = .light
+        global.theme = .paper
         let perBook = PerBookSettingsOverride(fontSize: 28)
         let resolved = PerBookSettingsStore.resolve(perBook: perBook, global: global)
         #expect(resolved.fontSize == 28)
         #expect(resolved.lineSpacing == 1.4)
         #expect(resolved.fontName == "system")
-        #expect(resolved.themeName == "light")
+        // Feature #60 WI-11: `global.theme` is `ReaderThemeV2`; its
+        // rawValue for `.paper` is "paper".
+        #expect(resolved.themeName == "paper")
     }
 
     @Test @MainActor func resolvedSettings_allFieldsOverridden() {
@@ -143,7 +145,7 @@ struct PerBookSettingsTests {
         global.typography.fontSize = 18
         global.typography.lineSpacing = 1.4
         global.typography.fontFamily = .system
-        global.theme = .light
+        global.theme = .paper
         global.readingMode = .native
         let perBook = PerBookSettingsOverride(
             fontSize: 30, fontName: "serif", lineSpacing: 2.0,
@@ -216,7 +218,7 @@ struct PerBookSettingsTests {
         store.typography.fontSize = 18
         store.typography.lineSpacing = 1.4
         store.typography.fontFamily = .system
-        store.theme = .light
+        store.theme = .paper
         store.readingMode = .native
 
         let resolved = ResolvedSettings(
@@ -237,7 +239,7 @@ struct PerBookSettingsTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         let store = ReaderSettingsStore(defaults: defaults)
         store.typography.fontSize = 18
-        store.theme = .light
+        store.theme = .paper
         // Explicit set: ReaderSettingsStore only writes a key to UserDefaults
         // when the property is explicitly assigned. The defaults assertion
         // below ("readingMode is 'native' after apply") only makes sense if
@@ -258,8 +260,10 @@ struct PerBookSettingsTests {
         #expect(store.typography.fontSize == 30)
         #expect(store.theme == .dark)
 
-        // But UserDefaults should still have the original global values
-        #expect(defaults.string(forKey: ReaderSettingsStore.themeKey) == "light")
+        // But UserDefaults should still have the original global values.
+        // Feature #60 WI-11: the global theme was set to `.paper`
+        // (ReaderThemeV2), so the persisted rawValue is "paper".
+        #expect(defaults.string(forKey: ReaderSettingsStore.themeKey) == "paper")
         #expect(defaults.string(forKey: ReaderSettingsStore.readingModeKey) == "native")
     }
 
@@ -277,6 +281,89 @@ struct PerBookSettingsTests {
 
         #expect(store.typography.fontSize == 20)
         #expect(store.theme == .sepia)
+    }
+
+    // MARK: - Feature #60 WI-11: per-book themeName round-trip
+
+    /// A per-book `themeName` carrying any of the 5 `ReaderThemeV2`
+    /// rawValues — including OLED and Photo — must apply onto the
+    /// store. WI-11 makes those themes user-selectable, so a per-book
+    /// override can legitimately carry them.
+    @Test @MainActor func applyResolvedSettings_allFiveV2Themes() {
+        for theme in ReaderThemeV2.allCases {
+            let store = makeGlobalStore()
+            store.theme = .paper
+            let resolved = ResolvedSettings(
+                fontSize: store.typography.fontSize,
+                fontName: store.typography.fontFamily.rawValue,
+                lineSpacing: store.typography.lineSpacing,
+                letterSpacing: 0,
+                themeName: theme.rawValue, readingMode: store.readingMode.rawValue
+            )
+            store.applyResolvedSettings(resolved)
+            #expect(store.theme == theme,
+                    "per-book themeName '\(theme.rawValue)' must apply onto the store")
+        }
+    }
+
+    /// A per-book override written before WI-11 carries a legacy
+    /// `ReaderTheme` rawValue ("light" / "sepia" / "dark"). Resolving
+    /// it must migrate "light" → `.paper` and preserve sepia / dark.
+    @Test @MainActor func applyResolvedSettings_legacyThemeNamesMigrate() {
+        let cases: [(legacy: String, expected: ReaderThemeV2)] = [
+            ("light", .paper), ("sepia", .sepia), ("dark", .dark),
+        ]
+        for c in cases {
+            let store = makeGlobalStore()
+            store.theme = .oled  // start somewhere distinct
+            let resolved = ResolvedSettings(
+                fontSize: store.typography.fontSize,
+                fontName: store.typography.fontFamily.rawValue,
+                lineSpacing: store.typography.lineSpacing,
+                letterSpacing: 0,
+                themeName: c.legacy, readingMode: store.readingMode.rawValue
+            )
+            store.applyResolvedSettings(resolved)
+            #expect(store.theme == c.expected,
+                    "legacy per-book themeName '\(c.legacy)' must migrate to \(c.expected.rawValue)")
+        }
+    }
+
+    /// An unknown / corrupt per-book `themeName` leaves the store's
+    /// current theme untouched — `applyResolvedSettings` only assigns
+    /// on a confident decode (no silent reset to default).
+    @Test @MainActor func applyResolvedSettings_unknownThemeName_leavesThemeUntouched() {
+        let store = makeGlobalStore()
+        store.theme = .dark
+        let resolved = ResolvedSettings(
+            fontSize: store.typography.fontSize,
+            fontName: store.typography.fontFamily.rawValue,
+            lineSpacing: store.typography.lineSpacing,
+            letterSpacing: 0,
+            themeName: "chartreuse", readingMode: store.readingMode.rawValue
+        )
+        store.applyResolvedSettings(resolved)
+        #expect(store.theme == .dark,
+                "an unknown per-book themeName must not clobber the live theme")
+    }
+
+    /// End-to-end: save a per-book override carrying a V2-only theme
+    /// (Photo), read it back, resolve it onto a global store.
+    @Test @MainActor func perBookSettings_photoTheme_savesResolvesEndToEnd() throws {
+        let dir = try makeTempDir()
+        defer { cleanUp(dir) }
+        let key = "epub:ffff000000000000000000000000000000000000000000000000000000000000:777"
+        let override = PerBookSettingsOverride(themeName: ReaderThemeV2.photo.rawValue)
+        try PerBookSettingsStore.save(override, for: key, baseURL: dir)
+        let restored = try #require(PerBookSettingsStore.settings(for: key, baseURL: dir))
+        #expect(restored.themeName == "photo")
+
+        let global = makeGlobalStore()
+        global.theme = .paper
+        let resolved = PerBookSettingsStore.resolve(perBook: restored, global: global)
+        #expect(resolved.themeName == "photo")
+        global.applyResolvedSettings(resolved)
+        #expect(global.theme == .photo)
     }
 
     // MARK: - Helpers

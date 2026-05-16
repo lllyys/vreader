@@ -247,7 +247,9 @@ final class RealDebugBridgeContextTests: XCTestCase {
 
     @MainActor
     func test_theme_lightModeSetsThemeInUserDefaults() async throws {
-        // Pre-set to dark so we can verify mode=light flips it back
+        // Pre-set to dark so we can verify mode=light flips it back.
+        // Feature #60 WI-11: `store.theme` is `ReaderThemeV2`; the
+        // bridge's `.light` mode maps to the `.paper` theme.
         let pre = ReaderSettingsStore(defaults: defaults)
         pre.theme = .dark
 
@@ -259,7 +261,7 @@ final class RealDebugBridgeContextTests: XCTestCase {
         try await context.theme(mode: .light, fontSize: nil)
 
         let store = ReaderSettingsStore(defaults: defaults)
-        XCTAssertEqual(store.theme, .light)
+        XCTAssertEqual(store.theme, .paper)
     }
 
     @MainActor
@@ -315,7 +317,9 @@ final class RealDebugBridgeContextTests: XCTestCase {
 
         try await context.theme(mode: .light, fontSize: nil)
         await fulfillment(of: [exp], timeout: 2.0)
-        XCTAssertEqual(receivedMode, "light")
+        // Feature #60 WI-11: the bridge posts the `ReaderThemeV2`
+        // rawValue; `.light` mode → the `.paper` theme.
+        XCTAssertEqual(receivedMode, "paper")
     }
 
     @MainActor

@@ -8,7 +8,10 @@ import UIKit
     private func makeStore() -> ReaderSettingsStore {
         ReaderSettingsStore(defaults: UserDefaults(suiteName: "RSS-\(UUID().uuidString)")!)
     }
-    @Test func defaultTheme() { #expect(makeStore().theme == .light) }
+    // Feature #60 WI-11: `ReaderSettingsStore.theme` is `ReaderThemeV2`.
+    // The default theme is `.paper` (was the legacy `ReaderTheme.light`,
+    // which the migration alias maps to `.paper`).
+    @Test func defaultTheme() { #expect(makeStore().theme == .paper) }
     @Test func defaultTypography() { let s = makeStore(); #expect(s.typography.fontSize == 18) }
     #if canImport(UIKit)
     @Test func uiFontForSystemFamily() { #expect(makeStore().uiFont.pointSize == 18) }
@@ -31,7 +34,7 @@ import UIKit
     @Test func cjkLetterSpacingWhenDisabled() { var s = makeStore(); s.typography.cjkSpacing = false; #expect(s.cjkLetterSpacing == 0) }
     #endif
     @Test func themeChangeUpdatesColors() {
-        var s = makeStore(); s.theme = .light
+        var s = makeStore(); s.theme = .paper
         #if canImport(UIKit)
         let l = s.uiBackgroundColor; s.theme = .dark; #expect(l != s.uiBackgroundColor)
         #endif
@@ -39,7 +42,37 @@ import UIKit
     @Test func invalidThemeRawValueFallsBackToDefault() {
         let n = "RSS-c-\(UUID().uuidString)"; let d = UserDefaults(suiteName: n)!
         d.set("neon", forKey: ReaderSettingsStore.themeKey)
-        #expect(ReaderSettingsStore(defaults: d).theme == .light); d.removePersistentDomain(forName: n)
+        #expect(ReaderSettingsStore(defaults: d).theme == .paper); d.removePersistentDomain(forName: n)
+    }
+    // Feature #60 WI-11: existing users have `readerTheme` persisted as
+    // a legacy `ReaderTheme` rawValue. The store must decode those.
+    @Test func legacyLightRawValueDecodesToPaper() {
+        let n = "RSS-leg-l-\(UUID().uuidString)"; let d = UserDefaults(suiteName: n)!
+        d.set("light", forKey: ReaderSettingsStore.themeKey)
+        #expect(ReaderSettingsStore(defaults: d).theme == .paper); d.removePersistentDomain(forName: n)
+    }
+    @Test func legacySepiaRawValueDecodesToSepia() {
+        let n = "RSS-leg-s-\(UUID().uuidString)"; let d = UserDefaults(suiteName: n)!
+        d.set("sepia", forKey: ReaderSettingsStore.themeKey)
+        #expect(ReaderSettingsStore(defaults: d).theme == .sepia); d.removePersistentDomain(forName: n)
+    }
+    @Test func legacyDarkRawValueDecodesToDark() {
+        let n = "RSS-leg-d-\(UUID().uuidString)"; let d = UserDefaults(suiteName: n)!
+        d.set("dark", forKey: ReaderSettingsStore.themeKey)
+        #expect(ReaderSettingsStore(defaults: d).theme == .dark); d.removePersistentDomain(forName: n)
+    }
+    // Feature #60 WI-11: all 5 ReaderThemeV2 cases round-trip through
+    // UserDefaults — OLED and Photo are now user-selectable.
+    @Test func allFiveThemesRoundTripThroughUserDefaults() {
+        for theme in ReaderThemeV2.allCases {
+            let n = "RSS-5-\(theme.rawValue)-\(UUID().uuidString)"
+            let d = UserDefaults(suiteName: n)!
+            var s1 = ReaderSettingsStore(defaults: d); s1.theme = theme
+            #expect(d.string(forKey: ReaderSettingsStore.themeKey) == theme.rawValue)
+            #expect(ReaderSettingsStore(defaults: d).theme == theme,
+                    "theme \(theme.rawValue) must survive a persistence round-trip")
+            d.removePersistentDomain(forName: n)
+        }
     }
     @Test func settingsStore_defaultsToDisabled() { #expect(makeStore().useCustomBackground == false) }
     @Test func settingsStore_defaultBackgroundOpacity() { #expect(abs(makeStore().backgroundOpacity - 0.15) < 0.001) }
@@ -82,6 +115,8 @@ import UIKit
 
         // Per-book-active session mutates live store via the resolver
         // (which suppresses persistence so defaults stays at "dark").
+        // Feature #60 WI-11: a per-book override carrying the LEGACY
+        // themeName "light" still resolves — it migrates to `.paper`.
         let resolvedAsLight = ResolvedSettings(
             fontSize: s.typography.fontSize, fontName: s.typography.fontFamily.rawValue,
             lineSpacing: s.typography.lineSpacing,
@@ -89,7 +124,7 @@ import UIKit
             themeName: "light", readingMode: s.readingMode.rawValue
         )
         s.applyResolvedSettings(resolvedAsLight)
-        #expect(s.theme == .light, "per-book override has been applied to live store")
+        #expect(s.theme == .paper, "legacy per-book themeName 'light' migrates to .paper")
 
         // Per-book disable: file deleted, then reconcile.
         s.reconcileFromDefaults()

@@ -32,9 +32,9 @@ struct BookRowView: View {
             // Cover thumbnail — shared spine/page-edge treatment.
             BookCoverArtView(
                 image: customCoverImage,
-                coverColor: formatColor,
-                formatIcon: formatIcon,
-                formatBadge: book.formatBadge,
+                fingerprintKey: book.fingerprintKey,
+                title: book.title,
+                author: book.author,
                 cornerRadius: LibraryCardTokens.rowCoverCornerRadius
             )
             .frame(
@@ -238,6 +238,8 @@ struct BookRowView: View {
         return CustomCoverStore.loadCover(for: book.fingerprintKey)
     }
 
+    /// Format colour — still used by the metadata chip's background /
+    /// foreground for non-`.local` file states (feature #47).
     private var formatColor: Color {
         switch book.format.lowercased() {
         case "epub": return .blue
@@ -247,8 +249,6 @@ struct BookRowView: View {
         default: return .secondary
         }
     }
-
-    private var formatIcon: String { book.formatIcon }
 
     private var accessibilityLabel: String {
         AccessibilityFormatters.accessibleBookDescription(

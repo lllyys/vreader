@@ -54,9 +54,9 @@ struct LibraryContinueCard: View {
     private var cover: some View {
         BookCoverArtView(
             image: customCoverImage,
-            coverColor: coverColor,
-            formatIcon: book.formatIcon,
-            formatBadge: book.formatBadge,
+            fingerprintKey: book.fingerprintKey,
+            title: book.title,
+            author: book.author,
             cornerRadius: LibraryCardTokens.continueCardCoverCornerRadius
         )
         .frame(
@@ -157,16 +157,6 @@ struct LibraryContinueCard: View {
     private var customCoverImage: UIImage? {
         _ = coverVersion
         return CustomCoverStore.loadCover(for: book.fingerprintKey)
-    }
-
-    private var coverColor: Color {
-        switch book.format.lowercased() {
-        case "epub": return .blue
-        case "pdf":  return .red
-        case "txt":  return .gray
-        case "md":   return .purple
-        default:     return .secondary
-        }
     }
 
     private var accessibilityLabel: String {

@@ -68,7 +68,7 @@ extension PDFReaderContainerView {
     @ViewBuilder
     var bottomOverlay: some View {
         ReaderBottomChrome(
-            theme: settingsStore?.theme.asV2 ?? .paper,
+            theme: settingsStore?.theme ?? .paper,
             progress: $readingProgress,
             onSeek: { seekValue in
                 let targetPage = PDFProgressHelper.pageForSeekValue(

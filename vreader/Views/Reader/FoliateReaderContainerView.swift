@@ -182,7 +182,7 @@ struct FoliateReaderContainerView: View {
                     fontSize: Int(store.typography.fontSize),
                     lineHeight: Double(store.typography.lineSpacing),
                     fontFamily: nil,
-                    textColor: Self.cssColor(store.theme.textColor),
+                    textColor: Self.cssColor(store.theme.inkColor),
                     backgroundColor: Self.cssColor(store.theme.backgroundColor)
                 )
             },

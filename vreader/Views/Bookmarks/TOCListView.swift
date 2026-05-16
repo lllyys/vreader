@@ -2,7 +2,12 @@
 // Shows absent state for formats without TOC (TXT).
 // Scrolls to and highlights the active chapter on appear.
 //
-// @coordinates-with: TOCProvider.swift, TOCEntry.swift
+// Rendered as the Contents tab inside `AnnotationsPanelView`'s
+// `ReaderSheetChrome` (feature #60 WI-10) — the `List` background is
+// hidden so the design's sheet surface tint shows through.
+//
+// @coordinates-with: TOCProvider.swift, TOCEntry.swift,
+//   AnnotationsPanelView.swift
 
 import SwiftUI
 
@@ -20,7 +25,6 @@ struct TOCListView: View {
                 tocList
             }
         }
-        .navigationTitle("Table of Contents")
     }
 
     @ViewBuilder
@@ -92,6 +96,9 @@ struct TOCListView: View {
                     .accessibilityIdentifier("tocRow-\(entry.id)")
                 }
             }
+            // Hide the grouped-List backdrop so the design's sheet
+            // surface tint (`ReaderSheetChrome`) shows through.
+            .scrollContentBackground(.hidden)
             .task(id: activeIndex) {
                 guard let activeIndex, entries.indices.contains(activeIndex) else { return }
                 let targetID = entries[activeIndex].id

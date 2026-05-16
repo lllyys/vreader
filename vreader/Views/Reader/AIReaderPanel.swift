@@ -2,6 +2,14 @@
 // Displays AI response text, loading state, and error messages.
 // Provides a tab picker to switch between Summarize, Translate, and Chat modes.
 //
+// Re-skinned for feature #60 visual-identity v2 (WI-10): wrapped in the
+// shared `ReaderSheetChrome` with `title: nil` (no standard title bar)
+// and the design `AISheet`'s custom header — a sparkle accent avatar,
+// the "AI Assistant" / "with this book's context" titles, and a close
+// button. The Summarize/Chat/Translate tab picker and every tab's
+// wiring (the real provider/streaming calls, the feature-#50 provider
+// picker, retry, consent) are preserved unchanged.
+//
 // Key decisions:
 // - Uses AIAssistantViewModel for summarization state management.
 // - Uses AITranslationViewModel for translation with bilingual display.
@@ -10,11 +18,16 @@
 // - States: idle (with action button), loading (ProgressView),
 //   complete (scrollable response), error (message + retry),
 //   featureDisabled, consentRequired.
-// - Dismiss button always available.
+// - Dismiss button always available (the header's close button).
+// - The feature-#50 in-reader provider picker is preserved — it sits in
+//   the custom header next to the close button so a user can still flip
+//   providers without leaving the reader.
 // - Locator and text content passed in from the reader container.
 //
 // @coordinates-with: AIAssistantViewModel.swift, AITranslationViewModel.swift,
-//   AIChatViewModel.swift, ReaderContainerView.swift
+//   AIChatViewModel.swift, ReaderContainerView.swift, ReaderSheetChrome.swift,
+//   ReaderThemeV2.swift,
+//   `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
 
 #if canImport(UIKit)
 import SwiftUI
@@ -52,6 +65,11 @@ struct AIReaderPanel: View {
     /// Dismiss action provided by the presenting sheet.
     let onDismiss: () -> Void
 
+    /// Visual-identity-v2 theme tokens for the sheet chrome (feature
+    /// #60 WI-10). Defaults to `.paper` so existing callers / previews
+    /// that omit it keep working.
+    var theme: ReaderThemeV2 = .paper
+
     /// Initial tab to show (e.g., .translate from readerTranslateRequested). (bug #95)
     var initialTab: AIReaderTab = .summarize
 
@@ -66,8 +84,14 @@ struct AIReaderPanel: View {
     @State private var providerPickerViewModel = AIProviderPickerViewModel()
 
     var body: some View {
-        NavigationStack {
+        ReaderSheetChrome(theme: theme, title: nil) {
             VStack(spacing: 0) {
+                AIReaderPanelHeader(
+                    theme: theme,
+                    providerPickerViewModel: providerPickerViewModel,
+                    onDismiss: onDismiss
+                )
+
                 Picker("Mode", selection: $selectedTab) {
                     ForEach(AIReaderTab.allCases) { tab in
                         Text(tab.rawValue).tag(tab)
@@ -78,7 +102,7 @@ struct AIReaderPanel: View {
                 .padding(.vertical, 8)
                 .accessibilityIdentifier("aiReaderTabPicker")
 
-                Divider()
+                Color(theme.ruleColor).frame(height: 0.5)
 
                 switch selectedTab {
                 case .summarize:
@@ -95,24 +119,6 @@ struct AIReaderPanel: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("AI Assistant")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") {
-                        onDismiss()
-                    }
-                    .accessibilityIdentifier("aiPanelDoneButton")
-                }
-                // Feature #50 WI-7: in-reader provider picker. Lives in
-                // the trailing slot so the user can flip the active
-                // provider without leaving the reader. Persists to the
-                // shared ProviderProfileStore; every in-flight AIService
-                // call picks the new provider up via resolveProvider.
-                ToolbarItem(placement: .topBarTrailing) {
-                    AIProviderPicker(viewModel: providerPickerViewModel)
-                }
-            }
         }
         .accessibilityIdentifier("aiReaderPanel")
         .onAppear { selectedTab = initialTab } // bug #95

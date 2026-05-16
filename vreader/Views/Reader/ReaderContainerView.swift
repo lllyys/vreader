@@ -204,6 +204,13 @@ struct ReaderContainerView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .statusBarHidden(!isChromeVisible)
+        // Feature #60 WI-10: tint the status bar to match the reader
+        // theme. `preferredColorScheme` resolves to `.dark` for the
+        // dark-family themes (Dark / OLED / Photo) so the status-bar
+        // text stays light-on-dark, and `.light` for Paper / Sepia so
+        // it stays dark-on-light. WI-11 migrated `theme` to
+        // `ReaderThemeV2`, so the token is read directly.
+        .preferredColorScheme(settingsStore.theme.preferredColorScheme)
         .ignoresSafeArea(edges: .top)
         .sheet(isPresented: $showAIPanel, onDismiss: { aiInitialTab = .summarize }) { aiSheet }
         .onReceive(NotificationCenter.default.publisher(for: .readerDefineRequested)) { notification in
@@ -265,9 +272,14 @@ struct ReaderContainerView: View {
                 baseURL: Self.perBookSettingsBaseURL
             )
             // Theme: skip when per-book themeName is explicitly set.
+            // Feature #60 WI-11: decode the bridge's `mode` string via
+            // `ReaderThemeV2(recognized:)` — it accepts both the new
+            // rawValues the bridge now posts (`paper` / `dark`) and a
+            // legacy `light` from any older notification, and yields
+            // nil for an unrecognized string (no clobber).
             if perBook?.themeName == nil,
                let modeRaw = userInfo["mode"] as? String,
-               let theme = ReaderTheme(rawValue: modeRaw),
+               let theme = ReaderThemeV2(recognized: modeRaw),
                settingsStore.theme != theme {
                 settingsStore.theme = theme
             }
@@ -362,6 +374,7 @@ struct ReaderContainerView: View {
                 modelContainer: modelContext.container,
                 tocEntries: tocEntries,
                 currentLocator: currentLocator,
+                theme: settingsStore.theme,
                 initialTab: annotationsPanelInitialTab,
                 onNavigate: { locator in
                     NotificationCenter.default.post(
