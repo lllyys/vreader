@@ -214,7 +214,7 @@ audit log + version bump per rule 40.
 | WI | Tier | What ships | Est PR size |
 |----|------|-----------|---------|
 | WI-1a | Foundational | `ReaderTypography` registry + extend `ReaderFontFamily` with `.sourceSerif4` / `.inter`. **No view change** — dormant infra. Tests: registry load, fontDescriptor availability, fallback chain. | ~6 files, ~250 LOC |
-| WI-1b | Foundational — **DEFERRED (manual-ops)** | Bundle the actual Source Serif 4 + Inter `.otf` binaries into `vreader/Resources/Fonts/` + `UIAppFonts` registration in the Info.plist. **Deferred 2026-05-16**: requires fetching external font assets + verifying their licenses (both are SIL OFL, but the OFL files must be vendored and the verification recorded) — out of cron-iteration scope (a cron session cannot safely fetch external binaries or make a licensing call). A human picks this up. Until WI-1b lands, `ReaderTypography.body(for:)` falls back to system fonts on device, so typography device-verification (WI-5 Gate 5a, Foliate font bundling, the final Gate 5b acceptance pass) cannot truly confirm "Source Serif 4 renders" — those verifications are gated on WI-1b. Tracked as GH #774. | font binaries (~180–320 KB) + Info.plist |
+| WI-1b | Behavioral — **SHIPPED v3.24.5** | Bundle the actual Source Serif 4 + Inter `.otf` binaries into `vreader/Resources/Fonts/` + `UIAppFonts` registration. **Shipped 2026-05-16** (PR #778): 7 faces — SourceSerif4 Regular/It/Bold/BoldIt (Source Serif 4.005) + Inter Regular/Medium/SemiBold (Inter 4.1); both SIL OFL 1.1, license texts vendored, fonts bundled unmodified (satisfies Source Serif 4's Reserved Font Name 'Source'). `ReaderTypography.body(for: .sourceSerif4 / .inter)` now resolves the real faces instead of the Georgia/system fallback. Reclassified Foundational → **Behavioral**: WI-4/5/7 (already merged) consume the registry + `cssFontStack`, so bundling the binaries flips real rendering for users who select Source Serif 4 / Inter. Gate 4: Codex 019e2ed0 + 019e2ed5, 2 rounds, ship-as-is. The deferral (external font fetch + OFL verification) was discharged in an interactive session — the user directed the fetch from official GitHub releases. **Unblocks** WI-5's typography Gate-5a device-verify, the Foliate font-bundling slice, and the Gate 5b acceptance pass. GH #774 closed. | font binaries (~2.9 MB) + Info.plist |
 | WI-2 | Foundational | Add `ReaderThemeV2` enum + 9-token surface. Migration alias on `ReaderTheme` so existing persisted choices still decode. **No view change** — dormant infra. Tests: token round-trip, isDark predicate, migration alias, accent contrast against ink (WCAG AA per theme). | ~4 files, ~300 LOC |
 | WI-3 | Foundational | Add `AccentColor`, `NamedHighlightColor`, `SelectionPopoverAction` types as UI-domain enums. **Additive only** (Codex Gate 2 finding): does NOT change the existing `Highlight.color` / `HighlightRecord.color` / backup DTO / export-import `String` schema. `NamedHighlightColor` raw values are semantic names; hex is a derived computed property. `SelectionPopoverAction` is `Equatable + Sendable` (NOT Codable — it's local-dispatch only, not persisted). `AccentColor` is a token-only struct with three named stops (light/warm-dark/photo). **No view change** — dormant infra. Tests: exhaustive switch, raw-value-is-semantic-name, derived-hex round-trip, compatibility (existing color strings remain storable + decodable to nil for unknown values), `from(storageString:)` round-trip. | ~3 files (4 if `NamedHighlightColor.swift` split out), ~150 LOC |
 | WI-4 | Behavioral | EPUB theme injection switches to `ReaderThemeV2`. `epubOverrideCSS` emits five-theme CSS + new token names. Existing EPUB books re-render with new visual tokens. Migration path: existing `epubTheme: .light/.sepia/.dark` continues to decode and maps to `.paper/.sepia/.dark`. Photo theme injects a `body { background-image: url(...) }` rule. Tests: CSS string assertions per theme + per-theme accent contrast. Device verify (Gate 5a): open mini-epub3 fixture per theme, confirm visually. | ~3 files, ~250 LOC |
@@ -746,3 +746,24 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   final Gate 5b acceptance pass cannot confirm "Source Serif 4
   renders". Those verifications are now explicitly gated on WI-1b.
   Tracked as GH #774.
+- 2026-05-16 v9: **WI-1b SHIPPED (v3.24.5, PR #778).** The deferred
+  manual-ops step was discharged in an interactive `/feature-workflow`
+  session — the user directed fetching the binaries from the official
+  GitHub releases (`adobe-fonts/source-serif` 4.005, `rsms/inter`
+  4.1). 7 `.otf` faces vendored in `vreader/Resources/Fonts/`; both
+  SIL OFL 1.1 license texts committed alongside; `UIAppFonts`
+  registers all 7. Source Serif 4's Reserved Font Name 'Source' is
+  satisfied — fonts bundled verbatim under their original names (the
+  RFN only restricts modified derivatives). WI-1b **reclassified
+  Foundational → Behavioral**: when the plan first deferred it the
+  registry was dormant, but WI-4/5/7 have since merged and consume
+  `ReaderTypography` + `cssFontStack`, so bundling the binaries flips
+  real rendering. Gate 4: Codex `019e2ed0` + `019e2ed5`, 2 rounds,
+  ship-as-is (round 1: 1 High untracked-assets + 1 Low stale-comments;
+  round 2: 1 Low stale-header-ref; all fixed). Gate 5a slice: the
+  `bundledFace_resolvesByPostScriptName` parameterized test proves all
+  7 faces register + resolve via `UIFont(name:)` in the app-bundle
+  test host. **Downstream gate lifted** — WI-5's typography Gate-5a
+  device-verify, the Foliate font-bundling slice (Risk (c)), and the
+  Gate 5b acceptance pass are no longer blocked on WI-1b. GH #774
+  closed.
