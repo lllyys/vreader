@@ -109,8 +109,9 @@ persistence, search, WebDAV, or AI is in scope.
   Margin sliders + font toggle (Serif Source Serif 4 ↔ Sans Inter).
 - **`vreader/Views/Reader/ReaderContainerView.swift`** — chrome
   re-skin per `vreader-reader.jsx`: new top bar (back / title / book-
-  mark / more) + bottom bar (TOC / Display / Highlights / AI) + page
-  indicator + scrubber. Edges-tap-flip / middle-tap-toggle-chrome
+  mark / more) + bottom bar (Contents / Notes / Display / AI — Notes
+  routes to the highlights/annotations panel, AI is the accent slot)
+  + page indicator + scrubber. Edges-tap-flip / middle-tap-toggle-chrome
   convention. Aligns with feature #25 tap zones; resolves bug #165
   as a side-effect.
 - **`vreader/Views/Reader/TXT*ReaderContainer*.swift`,
@@ -291,11 +292,19 @@ not counted; ~5MB asset).
   tap at x=50% → chrome-toggle event; tap at x=90% → next-page
   event. Hit-test boundary tests at 30%/70% (per design's edges-flip
   zones).
-- `ReaderChromeViewTests` — top bar contains the 4 expected buttons
+- `ReaderChromeViewTests` — top bar contains the 4 expected slots
   (back / title / bookmark / more); bottom bar contains the 4
-  expected buttons (TOC / Display / Highlights / AI).
+  expected buttons (Contents / Notes / Display / AI — Notes opens
+  the highlights/annotations panel; AI carries the accent color).
+- **WI-6a (foundational, shipped separately):** `ReaderChromeButton.swift`
+  declares `ReaderTopChromeSlot` + `ReaderBottomChromeButton` enums
+  consumed by both the view restructure (WI-6b) and the test
+  harnesses. `ReaderChromeButtonContractTests` (7 tests) pins case
+  order, accessibility identifiers, and the accent-slot predicate.
+  No UI change in WI-6a.
 - Device verify (Gate 5a): per format, tap each zone, screenshot
-  the transition.
+  the transition. **WI-6b only** — WI-6a has no user-visible delta
+  and is sufficient with unit + integration tests + audit.
 
 ### WI-7 (SelectionPopover)
 
@@ -566,3 +575,19 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   header + method doc (Low — fixed). Round 3: clean. 19 V2 CSS
   tests pass; 2 pre-existing AZW3 TTS failures tracked at Bug #200
   are out of WI-4 scope.
+- 2026-05-16 v4: **WI-6 split into WI-6a + WI-6b**. WI-6a (foundational
+  button-slot enum contract — `ReaderTopChromeSlot`, `ReaderBottomChromeButton`,
+  accessibility-identifier contracts, accent-slot predicate; 7
+  contract tests in `ReaderChromeButtonContractTests`) ships
+  immediately as a no-UI-change foundational slice. WI-6b (the
+  actual chrome view restructure that consumes those enums)
+  **BLOCKED: needs-design (#760)** because the committed design
+  bundle does not place in-Reader **Search** anywhere in the new
+  chrome — shipping the bundle as-designed would leave Search
+  unreachable from Reader (regression of an existing affordance).
+  Filed GH #760 (`Design needed: in-Reader Search placement for
+  Feature #60 WI-6 chrome re-skin`, labels `enhancement` +
+  `needs-design`) per rule 51. WI-6b resumes once a fresh design
+  bundle commits Search placement (and optional More-menu content).
+  TTS is not blocked because WI-7's SelectionPopover "Read" action
+  is the design's TTS entry point and ships independently.
