@@ -47,7 +47,18 @@ enum FoliateMessageParser {
 
     /// Parse a `selection` message body into a typed event.
     /// Expected keys: cfi, text, rect {x, y, width, height}, index
-    /// Returns nil if collapsed=true (no text selected).
+    /// Returns nil if collapsed=true (no text selected), if cfi is
+    /// empty / whitespace-only (downstream paint + tap-resolver both
+    /// reject empty CFIs — Bug #201 Codex round 1), or if cfi / text
+    /// / index are missing.
+    ///
+    /// The `rect` is best-effort: if the dict is missing or malformed,
+    /// the event is still returned with `rect = .zero`. The popover-
+    /// anchoring path is not yet wired (rects come from foliate-host.js
+    /// in a future iteration); the highlight-create path doesn't read
+    /// rect at all. Per Codex round 1: rejecting the entire event on
+    /// rect drift silently drops valid highlights when foliate-host.js
+    /// changes its rect shape.
     static func parseSelection(_ body: Any) -> FoliateSelectionEvent? {
         guard let dict = body as? [String: Any] else { return nil }
 
@@ -57,11 +68,23 @@ enum FoliateMessageParser {
         }
 
         guard let cfi = dict["cfi"] as? String else { return nil }
+        // Bug #201 Codex round 1: reject empty/whitespace-only CFIs at
+        // parse time. Downstream observers (`.foliateRequestAnnotationJSCreate`
+        // requires `!cfi.isEmpty`; `FoliateHighlightTapResolver` matches
+        // only on non-empty CFIs) would otherwise persist a highlight
+        // that can neither paint nor round-trip on tap.
+        guard !cfi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
         guard let text = dict["text"] as? String else { return nil }
-        guard let rectDict = dict["rect"] as? [String: Any] else { return nil }
         guard let index = dict["index"] as? Int else { return nil }
 
-        guard let rect = parseRect(rectDict) else { return nil }
+        // Bug #201 Codex round 1: rect is best-effort. Highlight-create
+        // path doesn't use it; popover-anchoring (future) can re-query
+        // when foliate-host.js ships rect-forwarding consistently.
+        let rect = (dict["rect"] as? [String: Any])
+            .flatMap { parseRect($0) }
+            ?? .zero
 
         return FoliateSelectionEvent(
             cfi: cfi,

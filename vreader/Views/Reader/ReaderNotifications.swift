@@ -85,6 +85,28 @@ extension Notification.Name {
     /// instead of lingering until the next book reopen. `userInfo` carries
     /// `["cfi": String, "fingerprintKey": String]`.
     static let foliateRequestAnnotationJSDelete = Notification.Name("vreader.foliateRequestAnnotationJSDelete")
+    /// Bug #201 / GH #739: posted by `FoliateSpikeView.Coordinator`'s
+    /// `case "selection":` handler after parsing the JS `selection`
+    /// message via `FoliateMessageParser.parseSelection`. The outer
+    /// `FoliateSpikeView.body` observes it (where `modelContext` is in
+    /// scope), filters by `fingerprintKey`, and presents an action
+    /// sheet ("Highlight" / "Cancel"). On Highlight: persist the
+    /// highlight via `PersistenceActor.addHighlight` and evaluate
+    /// `FoliateHighlightRenderer.addAnnotationJS(...)` on the live
+    /// WKWebView so the rendered annotation appears immediately.
+    /// `userInfo` carries `["cfi": String, "text": String,
+    /// "fingerprintKey": String, "sectionIndex": Int]`.
+    static let foliateSelectionDetected = Notification.Name("vreader.foliateSelectionDetected")
+    /// Bug #201 / GH #739: sibling of `.foliateRequestAnnotationJSDelete`
+    /// for the create path. Posted by `FoliateSpikeView+Selection`'s
+    /// `handleHighlight` after persistence add fires; the Coordinator
+    /// observes it (its `webView` is in scope), filters by
+    /// `fingerprintKey`, and runs
+    /// `FoliateHighlightRenderer.addAnnotationJS(cfi:color:)` so the
+    /// rendered annotation appears on the Foliate-js overlay without
+    /// waiting for the next book reopen. `userInfo` carries
+    /// `["cfi": String, "color": String, "fingerprintKey": String]`.
+    static let foliateRequestAnnotationJSCreate = Notification.Name("vreader.foliateRequestAnnotationJSCreate")
 }
 
 /// Carries text selection info from bridges to container views via NotificationCenter.

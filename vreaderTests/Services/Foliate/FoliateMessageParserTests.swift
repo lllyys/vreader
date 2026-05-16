@@ -205,12 +205,60 @@ struct ParseSelectionTests {
         #expect(event == nil)
     }
 
-    @Test("missing rect returns nil")
-    func missingRect() {
+    @Test("missing rect returns event with .zero rect (Bug #201 round 1)")
+    func missingRectIsBestEffort() {
+        // Bug #201 Codex round 1: rect was previously required, but the
+        // highlight-create path doesn't use it. Drop only the rect when
+        // missing — keep the rest of the event so highlight creation
+        // survives foliate-host.js rect-shape drift.
         let body: [String: Any] = [
             "cfi": "epubcfi(/6/4!/4/2/1:0,/6/4!/4/2/1:10)",
             "text": "hello",
             "index": 0,
+        ]
+        let event = FoliateMessageParser.parseSelection(body)
+        #expect(event != nil)
+        #expect(event?.rect == .zero)
+        #expect(event?.cfi == "epubcfi(/6/4!/4/2/1:0,/6/4!/4/2/1:10)")
+        #expect(event?.text == "hello")
+    }
+
+    @Test("malformed rect returns event with .zero rect")
+    func malformedRectIsBestEffort() {
+        // Malformed rect (missing width) — same best-effort handling.
+        let body: [String: Any] = [
+            "cfi": "epubcfi(/6/4!/4/2/1:0,/6/4!/4/2/1:10)",
+            "text": "hello",
+            "index": 0,
+            "rect": ["x": 0, "y": 0, "height": 20] as [String: Any],
+        ]
+        let event = FoliateMessageParser.parseSelection(body)
+        #expect(event != nil)
+        #expect(event?.rect == .zero)
+    }
+
+    @Test("empty cfi returns nil (Bug #201 round 1)")
+    func emptyCFIReturnsNil() {
+        // Downstream observers reject empty CFIs, so reject at parse
+        // time to avoid persisting a highlight that can't paint or
+        // resolve on tap.
+        let body: [String: Any] = [
+            "cfi": "",
+            "text": "hello",
+            "index": 0,
+            "rect": ["x": 0, "y": 0, "width": 100, "height": 20] as [String: Any],
+        ]
+        let event = FoliateMessageParser.parseSelection(body)
+        #expect(event == nil)
+    }
+
+    @Test("whitespace-only cfi returns nil (Bug #201 round 1)")
+    func whitespaceOnlyCFIReturnsNil() {
+        let body: [String: Any] = [
+            "cfi": "   \n\t  ",
+            "text": "hello",
+            "index": 0,
+            "rect": ["x": 0, "y": 0, "width": 100, "height": 20] as [String: Any],
         ]
         let event = FoliateMessageParser.parseSelection(body)
         #expect(event == nil)
@@ -246,8 +294,12 @@ struct ParseSelectionTests {
         #expect(event == nil)
     }
 
-    @Test("rect with missing width returns nil")
-    func rectMissingWidth() {
+    @Test("rect with missing width returns event with .zero rect (Bug #201 round 1)")
+    func rectMissingWidthIsBestEffort() {
+        // Updated semantics per Bug #201 Codex round 1: malformed rect
+        // is best-effort, not fatal. Same body as the new "malformed
+        // rect" test (above) but kept under the older test-name to
+        // preserve git-blame continuity.
         let body: [String: Any] = [
             "cfi": "epubcfi(/6/4!/4/2/1:0,/6/4!/4/2/1:10)",
             "text": "hello",
@@ -255,7 +307,8 @@ struct ParseSelectionTests {
             "index": 0,
         ]
         let event = FoliateMessageParser.parseSelection(body)
-        #expect(event == nil)
+        #expect(event != nil)
+        #expect(event?.rect == .zero)
     }
 
     @Test("CJK text in selection parses correctly")

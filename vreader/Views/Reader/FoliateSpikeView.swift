@@ -66,6 +66,7 @@ struct FoliateSpikeView: View {
             fingerprintKey: fingerprintKey,
             presenter: highlightActionPresenter
         )
+        .foliateSelectionHandler(fingerprintKey: fingerprintKey)
         .onReceive(NotificationCenter.default.publisher(for: .readerBookmarkRequested)) { _ in
             guard let key = fingerprintKey,
                   let fp = DocumentFingerprint(canonicalKey: key) else { return }
@@ -260,6 +261,14 @@ extension FoliateSpikeView {
         /// nonisolated, so the property cannot be MainActor-isolated.
         nonisolated(unsafe) private var foliateJSDeleteToken: NSObjectProtocol?
 
+        /// Bug #201 / GH #739: sibling of `foliateJSDeleteToken` for
+        /// the create path. The outer view posts
+        /// `.foliateRequestAnnotationJSCreate` after persistence add
+        /// fires; this observer evaluates
+        /// `FoliateHighlightRenderer.addAnnotationJS` on the live
+        /// WebView so the rendered annotation appears immediately.
+        nonisolated(unsafe) private var foliateJSCreateToken: NSObjectProtocol?
+
         init(initialLayoutFlow: String,
              onBookReady: @escaping @MainActor (String) -> Void,
              onError: @escaping @MainActor (String) -> Void) {
@@ -289,10 +298,29 @@ extension FoliateSpikeView {
                     self.webView?.evaluateJavaScript(js, completionHandler: nil)
                 }
             }
+            self.foliateJSCreateToken = NotificationCenter.default.addObserver(
+                forName: .foliateRequestAnnotationJSCreate,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let info = notification.userInfo,
+                      let cfi = info["cfi"] as? String, !cfi.isEmpty,
+                      let color = info["color"] as? String, !color.isEmpty,
+                      let key = info["fingerprintKey"] as? String,
+                      key == self.fingerprintKey else { return }
+                let js = FoliateHighlightRenderer.addAnnotationJS(cfi: cfi, color: color)
+                MainActor.assumeIsolated {
+                    self.webView?.evaluateJavaScript(js, completionHandler: nil)
+                }
+            }
         }
 
         deinit {
             if let token = foliateJSDeleteToken {
+                NotificationCenter.default.removeObserver(token)
+            }
+            if let token = foliateJSCreateToken {
                 NotificationCenter.default.removeObserver(token)
             }
         }
@@ -367,6 +395,29 @@ extension FoliateSpikeView {
                 // `tap` message hit the default branch and silently
                 // no-oped.
                 NotificationCenter.default.post(name: .readerContentTapped, object: nil)
+
+            case "selection":
+                // Bug #201 / GH #739: user finished a long-press selection
+                // in AZW3/MOBI. Parse via FoliateMessageParser (rejects
+                // collapsed selections, validates the rect dict), then
+                // hand the payload to the outer view via
+                // `.foliateSelectionDetected` so the action sheet
+                // (Highlight / Cancel) can present from `modelContext`
+                // scope. Without this case the registered "selection"
+                // handler at line 129 silently no-ops and the user gets
+                // iOS's default WKWebView menu (Copy / Look Up / …) with
+                // no Highlight option.
+                if let parsed = FoliateMessageParser.parseSelection(body),
+                   let info = FoliateSelectionDispatcher.notificationUserInfo(
+                    event: parsed,
+                    fingerprintKey: self.fingerprintKey
+                   ) {
+                    NotificationCenter.default.post(
+                        name: .foliateSelectionDetected,
+                        object: nil,
+                        userInfo: info
+                    )
+                }
 
             case "annotation-show":
                 // Feature #53 WI-5: user tapped an existing highlight in the
