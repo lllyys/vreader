@@ -330,23 +330,45 @@ not counted; ~5MB asset).
   contract enum-case-exhaustively. **No production wiring yet** —
   the router exists; WI-7c will call it from the production
   long-press path.
-- **WI-7c (behavioral, separate PR):**
-  Replace the legacy UIMenu in TXT non-chunked / TXT chunked / MD /
-  EPUB long-press handlers with a presenter that mounts
-  `SelectionPopoverView` and routes each tap through
-  `SelectionPopoverActionRouter`. **Regression guard**: tap-on-
-  existing-highlight path (feature #53) still routes through
-  `HighlightActionPresenting`, unchanged. Tests:
-  `HighlightableTextViewSelectionRouteTests` — long-press +
-  selection-finalised invokes the new presenter, not the legacy
-  UIMenu; color → HighlightRecord round-trip honors the chosen
-  color (downstream observer for `userInfo["color"]` lands in WI-7c
-  too, since the router is pure dispatch).
-- Device verify (Gate 5a) — **WI-7c only**: long-press TXT and MD
-  fixtures, confirm popover; tap a color, confirm HighlightRecord
-  persisted with the chosen color. WI-7a and WI-7b are foundational
-  (no UI delta) so unit + integration tests + audit are sufficient
-  per the rule 47 Gate 5 matrix.
+- **WI-7c1 (foundational, shipping):**
+  Presentation infrastructure for the long-press popover.
+  `SelectionPopoverPresenter.swift` adds (a) the
+  `.readerSelectionPopoverRequested` notification name, (b) a small
+  `SelectionPopoverRequest` enum with `post(selection:on:)` and
+  `selection(from:)` helpers (typed wire format), and (c) a
+  `SelectionPopoverPresenterModifier` SwiftUI ViewModifier that
+  observes the notification, stashes the latest selection in
+  `@State`, and presents `SelectionPopoverView` (WI-7a) as a sheet.
+  Tap callbacks route through `SelectionPopoverActionRouter`
+  (WI-7b). **No production bridge has been swapped yet** — legacy
+  `TXTBridgeShared.buildReaderEditMenu` still drives long-press in
+  every bridge. 6 contract tests pin the notification name + parse
+  / post round-trip + tolerance for invalid payloads.
+- **WI-7c2 (behavioral, separate PR):** TXT non-chunked bridge.
+  Replace the long-press `UIMenu` built by
+  `TXTBridgeShared.buildReaderEditMenu` with
+  `SelectionPopoverRequest.post(selection:on:)` from the bridge's
+  `editMenuInteraction` delegate (return an empty menu to suppress
+  the iOS surface) and attach
+  `.selectionPopoverPresenter(theme:)` to `TXTReaderContainerView`.
+  Slice verify on TXT war-and-peace fixture.
+- **WI-7c3 (behavioral, separate PR):** TXT chunked bridge. Mirror
+  the WI-7c2 swap in `TXTChunkedReaderBridge`.
+- **WI-7c4 (behavioral, separate PR):** MD bridge. Mirror the swap
+  in `MDReaderContainerView`.
+- **WI-7c5 (behavioral, separate PR):** EPUB bridge. Replace the
+  EPUB long-press menu path (whichever shape it has — needs a
+  pre-swap read pass). Attach the presenter to
+  `EPUBReaderContainerView`.
+- **Regression guard** (all of WI-7c2..7c5): tap-on-existing-
+  highlight path (feature #53) still routes through
+  `HighlightActionPresenting`, unchanged.
+- Device verify (Gate 5a) — **WI-7c2..7c5 only**: long-press in
+  each format's fixture, confirm popover; tap a color, confirm
+  HighlightRecord persisted with the chosen color. WI-7a, WI-7b,
+  and WI-7c1 are foundational (no UI delta in production) so unit
+  + integration tests + audit are sufficient per the rule 47 Gate 5
+  matrix.
 
 ### WI-8 (Library card/row tokens)
 
@@ -658,6 +680,32 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   round-trip on TXT and MD fixtures); WI-7b is foundational so
   unit + integration tests + audit are sufficient per rule 47 Gate
   5.
+- 2026-05-16 v8: **WI-7c split into WI-7c1 + WI-7c2..7c5.** WI-7c1
+  ships the foundational presentation infrastructure: the
+  `.readerSelectionPopoverRequested` notification name, a small
+  typed `SelectionPopoverRequest` enum (`post(selection:on:)` +
+  `selection(from:)`) for bridges to call and the modifier to read,
+  and the `SelectionPopoverPresenterModifier` SwiftUI ViewModifier
+  that observes the notification, holds the pending
+  `TextSelectionInfo` in `@State`, and presents
+  `SelectionPopoverView` (WI-7a) as a sheet. Tap callbacks route
+  through `SelectionPopoverActionRouter` (WI-7b). 6 contract tests
+  pin the notification name + parse / post round-trip + tolerance
+  for invalid payloads. No production bridge has been swapped — the
+  legacy `TXTBridgeShared.buildReaderEditMenu` still drives every
+  bridge's long-press. WI-7c2..7c5 land the per-bridge swap one PR
+  per bridge (TXT non-chunked, TXT chunked, MD, EPUB). Codex Gate
+  4 audit thread `019e2ea9`, 2 rounds, ship-as-is — round 1 raised
+  1 Medium (deferred-action sheet-dismiss would silently swallow
+  taps once bridges swap) + 1 Low (docs/architecture.md notification
+  bus drift). Medium fixed via new
+  `SelectionPopoverDismissPolicy.nextPending(after:currentSelection:)`
+  pure-logic helper (4 new dismiss-policy tests pin the contract;
+  `TextSelectionInfo` gained additive `Equatable + Sendable`
+  conformance so tests can compare). Low fixed via new arch.md
+  Notification Bus row. Round 2 clean. Splitting like this lets the
+  presenter contract be independently audited + the per-bridge
+  swaps stay reviewable as isolated diffs.
 - 2026-05-16 v7: **WI-6b UNBLOCKED — #760 design gap closed.** A
   fresh claude.ai/design handoff (share token
   `SEI7UfqurCl2Kuj6ctt__Q`) delivered the in-Reader Search placement

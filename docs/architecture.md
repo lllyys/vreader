@@ -172,6 +172,7 @@ All cross-component communication uses NotificationCenter:
 | `.readerBookmarkRequested`     | nil                  | Chrome → Format container                               |
 | `.readerTextSelected`          | `TextSelectionInfo`  | Bridge → Container (active selection state)            |
 | `.readerHighlightRequested`    | `TextSelectionInfo`  | Bridge → Container                                      |
+| `.readerSelectionPopoverRequested` | `TextSelectionInfo` (object) | Bridge → `SelectionPopoverPresenterModifier` (Feature #60 WI-7c1). Bridges that have swapped to the popover suppress their legacy `UIMenu` and post this instead; the presenter mounts `SelectionPopoverView` (WI-7a) as a sheet and routes taps through `SelectionPopoverActionRouter` (WI-7b). |
 | `.readerHighlightRemoved`      | UUID string          | HighlightListVM → Container                             |
 | `.readerHighlightsDidImport`   | fingerprintKey       | Importer → format containers (refresh persisted highlights) |
 | `.readerDidClose`              | fingerprintKey       | ViewModel → LibraryView                                 |
