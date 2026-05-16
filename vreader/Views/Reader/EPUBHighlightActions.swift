@@ -1,40 +1,19 @@
 // Purpose: Pure-logic handlers for EPUB highlight actions.
-// Persists highlights, generates JS for visual injection, and filters
-// highlights by chapter for page-load restoration.
+// Generates JS for visual injection and filters highlights by chapter
+// for page-load restoration.
 //
 // Key decisions:
 // - Pure logic — no WKWebView or SwiftUI dependency.
-// - Delegates to HighlightPersisting for storage.
 // - Delegates to EPUBHighlightBridge for JS generation.
 // - Anchor filtering by href ensures only matching-chapter highlights are restored.
 //
 // @coordinates-with: EPUBHighlightBridge.swift, EPUBReaderContainerView.swift,
-//   HighlightPersisting.swift, AnnotationAnchor.swift
+//   AnnotationAnchor.swift
 
 import Foundation
 
-/// Pure-logic handlers for EPUB highlight persistence and JS generation.
+/// Pure-logic handlers for EPUB highlight JS generation.
 enum EPUBHighlightActions {
-
-    // MARK: - Persist Highlight
-
-    /// Persists a highlight from a selection event. Returns the created record.
-    /// Throws if persistence fails.
-    static func persistHighlight(
-        event: ReaderSelectionEvent,
-        locator: Locator,
-        persistence: any HighlightPersisting,
-        bookKey: String
-    ) async throws -> HighlightRecord {
-        try await persistence.addHighlight(
-            locator: locator,
-            anchor: event.anchor,
-            selectedText: event.selectedText,
-            color: "yellow",
-            note: nil,
-            toBookWithKey: bookKey
-        )
-    }
 
     // MARK: - Create Highlight JS
 

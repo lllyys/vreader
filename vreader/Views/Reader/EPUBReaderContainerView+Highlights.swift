@@ -14,14 +14,19 @@ extension EPUBReaderContainerView {
 
     /// Persists a highlight and injects the CSS highlight into the WKWebView.
     /// Phase R4b: delegates to coordinator (which calls renderer for JS injection).
+    ///
+    /// WI-7c5b: `color` is the `NamedHighlightColor.rawValue` the user
+    /// picked in the SelectionPopover (`resolveHighlightColor(from:)`
+    /// supplies `"yellow"` when a producer omits it). It flows to
+    /// `HighlightCoordinator.create(color:)` and, on the coordinator-
+    /// not-ready fallback, to `PersistenceActor.addHighlight(color:)`
+    /// directly — both already accept a color.
     func handleHighlightAction(
         event: ReaderSelectionEvent,
-        container: ModelContainer
+        container: ModelContainer,
+        color: String
     ) {
-        guard let locator = viewModel.makeCurrentLocator() else {
-            pendingSelectionEvent = nil
-            return
-        }
+        guard let locator = viewModel.makeCurrentLocator() else { return }
 
         if let coordinator = highlightCoordinator {
             Task {
@@ -29,22 +34,27 @@ extension EPUBReaderContainerView {
                     locator: locator,
                     anchor: event.anchor,
                     selectedText: event.selectedText,
-                    color: "yellow"
+                    color: color
                 )
             }
         } else {
-            // Fallback: direct persistence if coordinator not ready
+            // Fallback: direct persistence if the coordinator is not
+            // ready (a rare appear-race). Routes through
+            // `addHighlight(color:)` directly so the chosen color is
+            // honored — the old `EPUBHighlightActions.persistHighlight`
+            // helper hardcoded "yellow" and is removed as the now-dead
+            // local cleanup (plan v10 / Codex plan-v10 round 1 Low).
             let persistence = PersistenceActor(modelContainer: container)
             Task {
-                if let record = try? await EPUBHighlightActions.persistHighlight(
-                    event: event, locator: locator,
-                    persistence: persistence, bookKey: viewModel.bookFingerprintKey
+                if let record = try? await persistence.addHighlight(
+                    locator: locator, anchor: event.anchor,
+                    selectedText: event.selectedText, color: color,
+                    note: nil, toBookWithKey: viewModel.bookFingerprintKey
                 ), let js = EPUBHighlightActions.createHighlightJS(for: record) {
                     pendingHighlightJS = js
                 }
             }
         }
-        pendingSelectionEvent = nil
     }
 
     // MARK: - Note Input Sheet

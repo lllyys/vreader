@@ -1,61 +1,14 @@
-// Purpose: Tests for EPUBHighlightActions — highlight persistence,
-// JS generation for inject/restore, and edge cases.
+// Purpose: Tests for EPUBHighlightActions — JS generation for
+// highlight inject/restore, and edge cases.
 //
 // @coordinates-with: EPUBHighlightActions.swift, EPUBHighlightBridge.swift,
-//   HighlightPersisting.swift, AnnotationAnchor.swift
+//   AnnotationAnchor.swift
 
 #if canImport(UIKit)
 import Testing
 import Foundation
 import CoreGraphics
 @testable import vreader
-
-// MARK: - Mock Highlight Store
-
-/// Captures calls to addHighlight for test assertions.
-private final class SpyHighlightStore: HighlightPersisting, @unchecked Sendable {
-    private(set) var addCalls: [(anchor: AnnotationAnchor?, selectedText: String, color: String, bookKey: String)] = []
-    private(set) var fetchCalls: [String] = []
-    var stubbedHighlights: [HighlightRecord] = []
-    var shouldThrow = false
-
-    func addHighlight(
-        locator: Locator, selectedText: String, color: String,
-        note: String?, toBookWithKey key: String
-    ) async throws -> HighlightRecord {
-        try await addHighlight(locator: locator, anchor: nil, selectedText: selectedText,
-                               color: color, note: note, toBookWithKey: key)
-    }
-
-    func addHighlight(
-        locator: Locator, anchor: AnnotationAnchor?, selectedText: String,
-        color: String, note: String?, toBookWithKey key: String
-    ) async throws -> HighlightRecord {
-        if shouldThrow { throw NSError(domain: "test", code: 1) }
-        addCalls.append((anchor: anchor, selectedText: selectedText, color: color, bookKey: key))
-        return HighlightRecord(
-            highlightId: UUID(),
-            locator: locator,
-            anchor: anchor,
-            profileKey: "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)",
-            selectedText: selectedText,
-            color: color,
-            note: note,
-            createdAt: Date(),
-            updatedAt: Date()
-        )
-    }
-
-    func removeHighlight(highlightId: UUID) async throws {}
-    func updateHighlightNote(highlightId: UUID, note: String?) async throws {}
-    func updateHighlightColor(highlightId: UUID, color: String) async throws {}
-
-    func fetchHighlights(forBookWithKey key: String) async throws -> [HighlightRecord] {
-        fetchCalls.append(key)
-        if shouldThrow { throw NSError(domain: "test", code: 2) }
-        return stubbedHighlights
-    }
-}
 
 // MARK: - Test Helpers
 
@@ -96,20 +49,6 @@ private func makeTestRange(
     )
 }
 
-private func makeTestEvent(
-    text: String = "Hello World",
-    href: String = "ch1.xhtml",
-    range: EPUBSerializedRange? = nil
-) -> ReaderSelectionEvent {
-    let r = range ?? makeTestRange()
-    let anchor = AnnotationAnchor.epub(href: href, cfi: "", serializedRange: r)
-    return ReaderSelectionEvent(
-        selectedText: text,
-        anchor: anchor,
-        sourceRect: CGRect(x: 100, y: 200, width: 150, height: 20)
-    )
-}
-
 private func makeHighlightRecord(
     href: String = "ch1.xhtml",
     range: EPUBSerializedRange? = nil,
@@ -132,90 +71,13 @@ private func makeHighlightRecord(
     )
 }
 
-// MARK: - Persist Highlight Tests
-
-@Suite("EPUBHighlightActions — persistHighlight")
-struct EPUBHighlightActionsPersistTests {
-
-    @Test("persist highlight calls addHighlight with correct fields")
-    func persistHighlightCallsStore() async throws {
-        let store = SpyHighlightStore()
-        let event = makeTestEvent()
-        let locator = makeTestLocator()
-
-        let result = try await EPUBHighlightActions.persistHighlight(
-            event: event,
-            locator: locator,
-            persistence: store,
-            bookKey: testFingerprint.canonicalKey
-        )
-
-        #expect(store.addCalls.count == 1)
-        #expect(store.addCalls[0].selectedText == "Hello World")
-        #expect(store.addCalls[0].color == "yellow")
-        #expect(store.addCalls[0].bookKey == testFingerprint.canonicalKey)
-        // Verify anchor is passed through
-        if case .epub(let href, _, _) = store.addCalls[0].anchor {
-            #expect(href == "ch1.xhtml")
-        } else {
-            Issue.record("Expected epub anchor")
-        }
-    }
-
-    @Test("persist highlight returns record with highlight ID")
-    func persistReturnsRecord() async throws {
-        let store = SpyHighlightStore()
-        let event = makeTestEvent()
-        let locator = makeTestLocator()
-
-        let result = try await EPUBHighlightActions.persistHighlight(
-            event: event,
-            locator: locator,
-            persistence: store,
-            bookKey: testFingerprint.canonicalKey
-        )
-
-        #expect(result.selectedText == "Hello World")
-        #expect(result.color == "yellow")
-    }
-
-    @Test("persist highlight with CJK text")
-    func persistWithCJKText() async throws {
-        let store = SpyHighlightStore()
-        let event = makeTestEvent(text: "你好世界")
-        let locator = makeTestLocator()
-
-        _ = try await EPUBHighlightActions.persistHighlight(
-            event: event,
-            locator: locator,
-            persistence: store,
-            bookKey: testFingerprint.canonicalKey
-        )
-
-        #expect(store.addCalls[0].selectedText == "你好世界")
-    }
-
-    @Test("persist highlight propagates error from store")
-    func persistPropagatesError() async {
-        let store = SpyHighlightStore()
-        store.shouldThrow = true
-        let event = makeTestEvent()
-        let locator = makeTestLocator()
-
-        do {
-            _ = try await EPUBHighlightActions.persistHighlight(
-                event: event,
-                locator: locator,
-                persistence: store,
-                bookKey: testFingerprint.canonicalKey
-            )
-            Issue.record("Expected error to be thrown")
-        } catch {
-            // Expected
-            #expect(store.addCalls.isEmpty)
-        }
-    }
-}
+// Feature #60 WI-7c5b: the `EPUBHighlightActions.persistHighlight`
+// suite was removed with the function. `handleHighlightAction`'s
+// coordinator-not-ready fallback now calls
+// `PersistenceActor.addHighlight(color:)` directly so the chosen
+// SelectionPopover color is honored; the old helper hardcoded
+// "yellow" and had no remaining caller. `addHighlight` is covered by
+// `PersistenceActor` tests.
 
 // MARK: - Create Highlight JS Tests
 

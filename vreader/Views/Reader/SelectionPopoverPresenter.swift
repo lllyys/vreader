@@ -150,17 +150,25 @@ enum SelectionPopoverDismissPolicy {
 /// notification surface); the close button + sheet dismiss clear
 /// the pending state.
 ///
-/// Attach with `.selectionPopoverPresenter(theme:)`. WI-7c1 commits
-/// the modifier; per-bridge attach + post calls land per
-/// WI-7c2..7c5.
+/// Attach with `.selectionPopoverPresenter(theme:onDismiss:)`. WI-7c1
+/// committed the modifier; per-bridge attach + post calls landed per
+/// WI-7c2..7c5. WI-7c5b added `onDismiss` so the EPUB container can
+/// drop its token-cache entry when a popover closes without an
+/// action (a tokenless TXT/MD attach simply omits the closure).
 private struct SelectionPopoverPresenterModifier: ViewModifier {
     let theme: ReaderThemeV2
+    /// Called when the sheet closes by any means (close button,
+    /// drag-down, tap-outside, or after a dispatched action). WI-7c5b:
+    /// the EPUB container uses this to `clear()` its
+    /// `EPUBSelectionTokenCache` so an abandoned selection doesn't
+    /// linger. Safe on the dispatch path too — by then the cache is
+    /// already consumed, so `clear()` is an idempotent no-op.
+    let onDismiss: (() -> Void)?
     @State private var pending: SelectionPopoverRequestPayload?
 
     /// Maps `pending != nil` to a `Bool` binding the sheet API
     /// requires. Setting to `false` clears the pending state —
-    /// covers iOS-driven dismissal (drag-down, tap-outside) without
-    /// a separate `onDismiss` callback.
+    /// covers iOS-driven dismissal (drag-down, tap-outside).
     private var isPresentedBinding: Binding<Bool> {
         Binding(
             get: { pending != nil },
@@ -180,7 +188,7 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
                 }
                 pending = payload
             }
-            .sheet(isPresented: isPresentedBinding) {
+            .sheet(isPresented: isPresentedBinding, onDismiss: { onDismiss?() }) {
                 sheetContent
             }
     }
@@ -216,10 +224,19 @@ extension View {
     /// a reader-container view. The presenter observes
     /// `.readerSelectionPopoverRequested` (any object), filters
     /// invalid payloads, and presents `SelectionPopoverView` as a
-    /// SwiftUI sheet. Production bridges start posting the
-    /// notification per WI-7c2..7c5.
-    func selectionPopoverPresenter(theme: ReaderThemeV2) -> some View {
-        modifier(SelectionPopoverPresenterModifier(theme: theme))
+    /// SwiftUI sheet. Production bridges post the notification per
+    /// WI-7c2..7c5.
+    ///
+    /// `onDismiss` (WI-7c5b) fires whenever the sheet closes — the
+    /// EPUB container passes `{ selectionTokenCache.clear() }` so an
+    /// abandoned long-press selection doesn't linger. TXT / MD /
+    /// chunked carry their selection identity in `TextSelectionInfo`
+    /// itself and omit the closure.
+    func selectionPopoverPresenter(
+        theme: ReaderThemeV2,
+        onDismiss: (() -> Void)? = nil
+    ) -> some View {
+        modifier(SelectionPopoverPresenterModifier(theme: theme, onDismiss: onDismiss))
     }
 }
 

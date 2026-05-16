@@ -41,10 +41,16 @@ struct EPUBReaderContainerView: View {
     @State var readingProgress: Double = 0
     /// Scroll fraction to pass to EPUBWebViewBridge for intra-chapter seeking.
     @State var seekScrollFraction: Double?
-    /// Pending text selection event for the highlight action dialog.
+    /// Pending selection event for the note-input sheet. WI-7c5b:
+    /// set when the SelectionPopover's Note action resolves; consumed
+    /// by `noteInputSheet`.
     @State var pendingSelectionEvent: ReaderSelectionEvent?
-    /// Whether the highlight action sheet is visible.
-    @State private var showHighlightSheet = false
+    /// Feature #60 WI-7c5b: single-entry token→event cache. A
+    /// long-press selection is stashed here under a `UUID`; the
+    /// SelectionPopover action notification carries the token back so
+    /// the DOM-path anchor (which `TextSelectionInfo` can't hold) is
+    /// recovered from this cache.
+    @State private var selectionTokenCache = EPUBSelectionTokenCache()
     /// JavaScript to inject into WKWebView (e.g., highlight CSS after persist).
     @State var pendingHighlightJS: String?
     /// Whether the note input sheet is visible.
@@ -244,28 +250,43 @@ struct EPUBReaderContainerView: View {
                 pendingHighlightJS = EPUBHighlightBridge.removeHighlightJS(id: idString)
             }
         }
-        .confirmationDialog(
-            "Text Selection",
-            isPresented: $showHighlightSheet,
-            titleVisibility: .visible
-        ) {
-            Button("Highlight") {
-                guard let event = pendingSelectionEvent,
-                      let container = modelContainer else { return }
-                handleHighlightAction(event: event, container: container)
-            }
-            Button("Add Note") {
-                noteText = ""
-                showNoteSheet = true
-            }
-            Button("Copy") {
-                guard let event = pendingSelectionEvent else { return }
-                UIPasteboard.general.string = event.selectedText
-                pendingSelectionEvent = nil
-            }
-            Button("Cancel", role: .cancel) {
-                pendingSelectionEvent = nil
-            }
+        // Feature #60 WI-7c5b: long-press selection now surfaces
+        // `SelectionPopoverView` (WI-7a) via the WI-7c1 presenter,
+        // replacing the legacy Highlight / Add Note / Copy / Cancel
+        // confirmationDialog. The producer (`onSelectionEvent`, in
+        // `readerContent`) posts `.readerSelectionPopoverRequested`
+        // with a `UUID` token; these handlers resolve the popover
+        // action back to the cached `ReaderSelectionEvent`. Translate
+        // routes through the parent `ReaderContainerView`'s
+        // `.readerTranslateRequested` observer — no EPUB-specific
+        // handler needed. Copy is intentionally dropped (plan v10:
+        // consistent with TXT/MD losing the iOS-default Copy when
+        // their empty `UIMenu` returned).
+        .selectionPopoverPresenter(
+            theme: settingsStore?.theme.asV2 ?? .paper,
+            // WI-7c5b: drop the cached selection when the popover
+            // closes without an action — keeps the single-entry
+            // cache from holding a stale `ReaderSelectionEvent`
+            // until the next long-press. Idempotent on the dispatch
+            // path (the action handler already consumed the entry).
+            onDismiss: { selectionTokenCache.clear() }
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .readerHighlightRequested)) { note in
+            let token = note.userInfo?["selectionRequestToken"] as? UUID
+            guard let event = selectionTokenCache.resolve(token: token),
+                  let container = modelContainer else { return }
+            handleHighlightAction(
+                event: event,
+                container: container,
+                color: resolveHighlightColor(from: note)
+            )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerAnnotationRequested)) { note in
+            let token = note.userInfo?["selectionRequestToken"] as? UUID
+            guard let event = selectionTokenCache.resolve(token: token) else { return }
+            pendingSelectionEvent = event
+            noteText = ""
+            showNoteSheet = true
         }
         .sheet(isPresented: $showNoteSheet) {
             noteInputSheet
@@ -368,8 +389,21 @@ struct EPUBReaderContainerView: View {
                 webViewError = error
             },
             onSelectionEvent: { event in
-                pendingSelectionEvent = event
-                showHighlightSheet = true
+                // Feature #60 WI-7c5b: cache the EPUB selection under
+                // a fresh token, then post `.readerSelectionPopoverRequested`.
+                // The popover's action notification carries the token
+                // back so the DOM-path anchor — which `TextSelectionInfo`
+                // can't represent — is recovered from `selectionTokenCache`.
+                // `startUTF16` / `endUTF16` are placeholder (the popover
+                // only displays `selectedText`); the real anchor lives
+                // in the cached `ReaderSelectionEvent`.
+                let token = selectionTokenCache.store(event)
+                let info = TextSelectionInfo(
+                    selectedText: event.selectedText,
+                    startUTF16: 0,
+                    endUTF16: event.selectedText.utf16.count
+                )
+                SelectionPopoverRequest.post(selection: info, requestToken: token)
             },
             highlightActionPresenter: UIKitHighlightActionPresenter(),
             onHighlightTapAction: { [highlightCoordinator] action, id in
