@@ -1,7 +1,7 @@
 // Purpose: Sheets, deferred setup, and chrome overlay for ReaderContainerView.
 // Pure code extraction — no logic changes.
 //
-// @coordinates-with: ReaderContainerView.swift, ReaderChromeBar.swift,
+// @coordinates-with: ReaderContainerView.swift, ReaderTopChrome.swift,
 //   SearchView.swift, AIReaderPanel.swift, ReaderAICoordinator.swift,
 //   ReaderSearchCoordinator.swift, BookContentCache.swift
 
@@ -161,22 +161,25 @@ extension ReaderContainerView {
         }
     }
 
-    // MARK: - Custom Chrome Overlay (bug #62 v3)
+    // MARK: - Custom Chrome Overlay (bug #62 v3, Feature #60 WI-6b)
 
+    /// Feature #60 WI-6b: the shared top reader chrome. The four shed
+    /// actions (Contents / Notes / Display / AI) now live in
+    /// `ReaderBottomChrome`, composed per-format inside each container.
+    /// `onMore` routes to the existing settings sheet as the interim
+    /// wiring — WI-6c swaps it for the anchored More popover.
     var readerChromeOverlay: some View {
-        ReaderChromeBar(
+        ReaderTopChrome(
+            theme: settingsStore.theme.asV2,
+            title: book.title,
+            bookmarked: false,
+            moreActive: false,
             onBack: { dismiss() },
             onSearch: { showSearch = true },
             onBookmark: {
                 NotificationCenter.default.post(name: .readerBookmarkRequested, object: nil)
             },
-            onAnnotations: { showAnnotationsPanel = true },
-            onAI: resolvedAICoordinator.isAIAvailable ? { showAIPanel = true } : nil,
-            onTTS: resolvedBookFormat.capabilities.contains(.tts) ? { startTTS() } : nil,
-            onSettings: { showSettings = true },
-            backgroundColor: Color(settingsStore.theme.backgroundColor),
-            foregroundColor: Color(settingsStore.theme.textColor),
-            ttsActive: ttsService.state != .idle
+            onMore: { showSettings = true }
         )
     }
 

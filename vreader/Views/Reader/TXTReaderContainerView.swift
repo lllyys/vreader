@@ -168,58 +168,50 @@ struct TXTReaderContainerView: View {
             if (viewModel.textContent != nil || viewModel.currentChapterText != nil)
                 && !viewModel.isLoading && isChromeVisible
                 && (ttsService?.state ?? .idle) == .idle {
-                VStack(spacing: 0) {
-                    Spacer()
-                    if hasChapterDisplay {
-                        ReadingProgressBar(
-                            progress: $chapterScrollFraction,
-                            onSeek: { seekValue in
-                                guard let chapters = viewModel.chapterIndex?.chapters,
-                                      viewModel.currentChapterIdx < chapters.count else { return }
-                                let chapter = chapters[viewModel.currentChapterIdx]
-                                uiState.scrollToOffset = Self.chapterScrubberGlobalOffset(
-                                    seekValue: seekValue, chapter: chapter
+                // Feature #60 WI-6b: shared bottom chrome (scrubber +
+                // labels + Contents/Notes/Display/AI toolbar) replaces
+                // the legacy ReadingProgressBar + ChapterBottomOverlay /
+                // ReaderBottomOverlay. Chapter prev/next relocates to
+                // the Contents (TOC) toolbar button per the v2 design;
+                // chapter position is surfaced in the leading label.
+                if hasChapterDisplay {
+                    ReaderBottomChrome(
+                        theme: settingsStore?.theme.asV2 ?? .paper,
+                        progress: $chapterScrollFraction,
+                        onSeek: { seekValue in
+                            guard let chapters = viewModel.chapterIndex?.chapters,
+                                  viewModel.currentChapterIdx < chapters.count else { return }
+                            let chapter = chapters[viewModel.currentChapterIdx]
+                            uiState.scrollToOffset = Self.chapterScrubberGlobalOffset(
+                                seekValue: seekValue, chapter: chapter
+                            )
+                        },
+                        leadingLabel: "Chapter \(viewModel.currentChapterIdx + 1)"
+                            + " of \(viewModel.totalChapterCount)",
+                        trailingLabel: viewModel.sessionTimeDisplay ?? ""
+                    )
+                } else {
+                    ReaderBottomChrome(
+                        theme: settingsStore?.theme.asV2 ?? .paper,
+                        progress: $chapterScrollFraction,
+                        onSeek: { seekValue in
+                            // If TOC entries exist, seek within current chapter
+                            if tocChapterProgress != nil {
+                                let chapterLen = tocChapterLength
+                                let localTarget = Int(seekValue * Double(chapterLen))
+                                let globalTarget = tocChapterStartOffset + localTarget
+                                uiState.scrollToOffset = globalTarget
+                            } else {
+                                let charOffset = ScrollProgressHelper.charOffsetFromProgress(
+                                    progress: seekValue,
+                                    totalLengthUTF16: viewModel.totalTextLengthUTF16
                                 )
-                            },
-                            isVisible: (viewModel.currentChapterText?.utf16.count ?? 0) > 0,
-                            label: ScrollProgressHelper.percentageLabel(chapterScrollFraction),
-                            settingsStore: settingsStore
-                        )
-                        ChapterBottomOverlay(
-                            viewModel: viewModel,
-                            bookProgress: chapterScrollFraction,
-                            settingsStore: settingsStore,
-                            onNavigate: { chapterAttrString = nil }
-                        )
-                    } else {
-                        ReadingProgressBar(
-                            progress: $chapterScrollFraction,
-                            onSeek: { seekValue in
-                                // If TOC entries exist, seek within current chapter
-                                if let cp = tocChapterProgress {
-                                    let chapterLen = tocChapterLength
-                                    let localTarget = Int(seekValue * Double(chapterLen))
-                                    let globalTarget = tocChapterStartOffset + localTarget
-                                    uiState.scrollToOffset = globalTarget
-                                } else {
-                                    let charOffset = ScrollProgressHelper.charOffsetFromProgress(
-                                        progress: seekValue,
-                                        totalLengthUTF16: viewModel.totalTextLengthUTF16
-                                    )
-                                    uiState.scrollToOffset = charOffset
-                                }
-                            },
-                            isVisible: viewModel.totalTextLengthUTF16 > 0,
-                            label: ScrollProgressHelper.percentageLabel(chapterScrollFraction),
-                            settingsStore: settingsStore
-                        )
-                        ReaderBottomOverlay(
-                            progress: chapterScrollFraction,
-                            sessionTime: viewModel.sessionTimeDisplay,
-                            settingsStore: settingsStore,
-                            accessibilityPrefix: "txt"
-                        )
-                    }
+                                uiState.scrollToOffset = charOffset
+                            }
+                        },
+                        leadingLabel: ScrollProgressHelper.percentageLabel(chapterScrollFraction),
+                        trailingLabel: viewModel.sessionTimeDisplay ?? ""
+                    )
                 }
             }
         }

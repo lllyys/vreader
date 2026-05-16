@@ -65,6 +65,16 @@ extension Notification.Name {
     /// Posted after annotation import completes (bug #88).
     /// Reader containers observe this to re-render persisted highlights.
     static let readerHighlightsDidImport = Notification.Name("vreader.readerHighlightsDidImport")
+    /// Feature #60 WI-6b: posted by the shared `ReaderBottomChrome`
+    /// toolbar when the user taps one of its four buttons.
+    /// `ReaderContainerView` observes these and presents the matching
+    /// sheet/panel. Posting (rather than threading handler closures
+    /// through the per-format host views) keeps `ReaderBottomChrome`
+    /// composable inside any container with no extra plumbing.
+    static let readerOpenContents = Notification.Name("vreader.readerOpenContents")
+    static let readerOpenNotes = Notification.Name("vreader.readerOpenNotes")
+    static let readerOpenDisplay = Notification.Name("vreader.readerOpenDisplay")
+    static let readerOpenAI = Notification.Name("vreader.readerOpenAI")
     /// Posted when a footnote link is detected in EPUB content (foliate-js).
     /// Object is [String: String] with "href" and "text" keys.
     static let epubFootnoteDetected = Notification.Name("vreader.epubFootnoteDetected")

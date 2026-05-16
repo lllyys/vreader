@@ -11,7 +11,7 @@
 // measured yet.
 //
 // @coordinates-with TXTReaderContainerView.swift, TXTTextViewBridge.swift,
-//   TXTChunkedReaderBridge.swift, ReaderChromeBar.swift
+//   TXTChunkedReaderBridge.swift, ReaderTopChrome.swift, ReaderBottomChrome.swift
 
 #if canImport(UIKit)
 import UIKit
@@ -75,6 +75,39 @@ enum ReaderSafeAreaResolver {
         for scene in scenes {
             for window in scene.windows {
                 best = max(best, window.safeAreaInsets.top)
+            }
+        }
+        return best
+    }
+
+    /// Best-effort bottom safe-area inset (home-indicator region) from any
+    /// foreground scene's windows. Feature #60 WI-6b: the new
+    /// `ReaderBottomChrome` floats as an overlay and must pad its content
+    /// clear of the home indicator. Unlike the top inset, the bottom
+    /// inset does not need the Dynamic-Island warmup cache — the home
+    /// indicator region is stable once a scene is foregrounded — so this
+    /// is a plain active-first / inactive-fallback walk with a `0` final
+    /// fallback (devices with no home indicator).
+    @MainActor
+    static var windowSafeAreaBottom: CGFloat {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let activeScenes = scenes.filter { $0.activationState == .foregroundActive }
+        if !activeScenes.isEmpty {
+            return maxBottomInset(across: activeScenes)
+        }
+        let inactiveScenes = scenes.filter { $0.activationState == .foregroundInactive }
+        if !inactiveScenes.isEmpty {
+            return maxBottomInset(across: inactiveScenes)
+        }
+        return 0
+    }
+
+    @MainActor
+    private static func maxBottomInset(across scenes: [UIWindowScene]) -> CGFloat {
+        var best: CGFloat = 0
+        for scene in scenes {
+            for window in scene.windows {
+                best = max(best, window.safeAreaInsets.bottom)
             }
         }
         return best

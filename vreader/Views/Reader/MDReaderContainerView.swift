@@ -72,28 +72,22 @@ struct MDReaderContainerView: View {
             // Hidden when TTS is active to avoid overlap (bug #97)
             if viewModel.renderedText != nil && !viewModel.isLoading && isChromeVisible
                 && (ttsService?.state ?? .idle) == .idle {
-                VStack(spacing: 0) {
-                    Spacer()
-                    ReadingProgressBar(
-                        progress: $uiState.readingProgress,
-                        onSeek: { seekValue in
-                            let charOffset = ScrollProgressHelper.charOffsetFromProgress(
-                                progress: seekValue,
-                                totalLengthUTF16: viewModel.renderedTextLengthUTF16
-                            )
-                            uiState.scrollToOffset = charOffset
-                        },
-                        isVisible: viewModel.renderedTextLengthUTF16 > 0,
-                        label: ScrollProgressHelper.percentageLabel(uiState.readingProgress),
-                        settingsStore: settingsStore
-                    )
-                    ReaderBottomOverlay(
-                        progress: viewModel.totalProgression,
-                        sessionTime: viewModel.sessionTimeDisplay,
-                        settingsStore: settingsStore,
-                        accessibilityPrefix: "md"
-                    )
-                }
+                // Feature #60 WI-6b: shared bottom chrome (scrubber +
+                // labels + Contents/Notes/Display/AI toolbar) replaces
+                // the legacy ReadingProgressBar + ReaderBottomOverlay.
+                ReaderBottomChrome(
+                    theme: settingsStore?.theme.asV2 ?? .paper,
+                    progress: $uiState.readingProgress,
+                    onSeek: { seekValue in
+                        let charOffset = ScrollProgressHelper.charOffsetFromProgress(
+                            progress: seekValue,
+                            totalLengthUTF16: viewModel.renderedTextLengthUTF16
+                        )
+                        uiState.scrollToOffset = charOffset
+                    },
+                    leadingLabel: ScrollProgressHelper.percentageLabel(uiState.readingProgress),
+                    trailingLabel: viewModel.sessionTimeDisplay ?? ""
+                )
             }
         }
         // Feature #60 WI-7c4: present `SelectionPopoverView` (WI-7a)

@@ -107,15 +107,12 @@ struct PDFReaderContainerView: View {
                 errorOverlay(message: errorMessage)
             }
 
-            // Bottom overlay for progress bar, page indicator, and session time
-            // Hidden when TTS is active to avoid overlap (bug #97)
+            // Feature #60 WI-6b: shared bottom chrome (scrubber +
+            // labels + toolbar). Hidden when TTS is active to avoid
+            // overlap (bug #97).
             if viewModel.isDocumentLoaded && isChromeVisible
                 && (ttsService?.state ?? .idle) == .idle {
-                VStack(spacing: 0) {
-                    Spacer()
-                    progressBar
-                    bottomOverlay
-                }
+                bottomOverlay
             }
         }
         .task {

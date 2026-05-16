@@ -1,74 +1,33 @@
-// Purpose: Bottom overlay, progress bar helpers, chapter navigation, and seek
-// handling for EPUBReaderContainerView. Pure code extraction — no logic changes.
+// Purpose: Bottom chrome, progress-bar helpers, and seek handling for
+// EPUBReaderContainerView. Feature #60 WI-6b swapped the legacy
+// ReadingProgressBar + chapter-nav row for the shared `ReaderBottomChrome`.
 //
 // @coordinates-with: EPUBReaderContainerView.swift, EPUBProgressCalculator.swift,
-//   ReadingProgressBar.swift, EPUBReaderViewModel.swift
+//   ReaderBottomChrome.swift, EPUBReaderViewModel.swift
 
 #if canImport(UIKit)
 import SwiftUI
 
 extension EPUBReaderContainerView {
 
+    /// Feature #60 WI-6b: shared bottom chrome (scrubber + labels +
+    /// Contents/Notes/Display/AI toolbar) replaces the legacy
+    /// ReadingProgressBar + chapter-navigation row. Chapter prev/next
+    /// relocates to the Contents (TOC) toolbar button per the v2
+    /// design; the "Chapter X of Y" position shows in the leading
+    /// label. The offset-based `navigateChapter` / `currentChapterTitle`
+    /// helpers were removed with the prev/next buttons — they had no
+    /// other caller (scrubber seeks go through `handleProgressSeek`).
     @ViewBuilder
     var bottomOverlay: some View {
-        VStack(spacing: 0) {
-            // Reading progress scrubber bar
-            ReadingProgressBar(
-                progress: $readingProgress,
-                onSeek: { handleProgressSeek($0) },
-                discreteSteps: epubDiscreteSteps,
-                isVisible: true,
-                label: epubProgressLabel,
-                settingsStore: settingsStore
-            )
-
-            // Navigation controls row
-            HStack {
-                Button {
-                    navigateChapter(offset: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .disabled(viewModel.currentSpineIndex <= 0)
-                .accessibilityLabel("Previous chapter")
-                .accessibilityIdentifier("epubPrevChapter")
-
-                Spacer()
-
-                if let title = currentChapterTitle {
-                    Text(title)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                if let sessionTime = viewModel.sessionTimeDisplay {
-                    Text(sessionTime)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("epubSessionTime")
-                }
-
-                Spacer()
-
-                Button {
-                    navigateChapter(offset: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .disabled(
-                    viewModel.currentSpineIndex >= (viewModel.metadata?.spineCount ?? 1) - 1
-                )
-                .accessibilityLabel("Next chapter")
-                .accessibilityIdentifier("epubNextChapter")
-            }
-            .foregroundColor(Color(settingsStore?.theme.secondaryTextColor ?? ReaderTheme.default.secondaryTextColor))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-        }
-        .background(Color(settingsStore?.theme.backgroundColor ?? ReaderTheme.default.backgroundColor).opacity(0.92))
+        ReaderBottomChrome(
+            theme: settingsStore?.theme.asV2 ?? .paper,
+            progress: $readingProgress,
+            onSeek: { handleProgressSeek($0) },
+            discreteSteps: epubDiscreteSteps,
+            leadingLabel: epubProgressLabel ?? "",
+            trailingLabel: viewModel.sessionTimeDisplay ?? ""
+        )
         .accessibilityIdentifier("epubBottomOverlay")
     }
 
@@ -89,43 +48,7 @@ extension EPUBReaderContainerView {
         )
     }
 
-    // MARK: - Navigation
-
-    var currentChapterTitle: String? {
-        guard let meta = viewModel.metadata else { return nil }
-        let index = viewModel.currentSpineIndex
-        guard index >= 0, index < meta.spineItems.count else { return nil }
-        return meta.spineItems[index].title
-    }
-
-    func navigateChapter(offset: Int) {
-        let newIndex = viewModel.currentSpineIndex + offset
-        viewModel.navigateToSpine(index: newIndex)
-
-        // Clear any previous web view error on navigation
-        webViewError = nil
-        // Chapter navigation always starts at the top
-        seekScrollFraction = nil
-        // Issue 6: Reset pagination state so stale page index from previous chapter
-        // is not applied to the newly loaded chapter.
-        pageNavigator.reset()
-        currentPaginationPage = nil
-
-        // Update the WKWebView content URL
-        if let meta = viewModel.metadata,
-           let base = resourceBase,
-           newIndex >= 0, newIndex < meta.spineItems.count {
-            let href = meta.spineItems[newIndex].href
-            Task { await ensureChapterExtracted(href: href) } // bug #102
-            contentURL = base.appendingPathComponent(href)
-            // Update progress bar to reflect new chapter position
-            readingProgress = EPUBProgressCalculator.progress(
-                spineIndex: newIndex,
-                scrollFraction: 0.0,
-                totalSpineItems: meta.spineCount
-            )
-        }
-    }
+    // MARK: - Seek
 
     /// Handles seeking from the progress bar scrubber.
     /// Maps the seek value to a spine index and scroll fraction, then navigates there.

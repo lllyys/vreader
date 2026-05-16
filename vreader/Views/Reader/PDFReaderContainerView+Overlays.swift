@@ -60,9 +60,15 @@ extension PDFReaderContainerView {
         }
     }
 
+    /// Feature #60 WI-6b: shared bottom chrome (scrubber + labels +
+    /// Contents/Notes/Display/AI toolbar) replaces the legacy PDF
+    /// progress bar + page-indicator overlay. Page-snap seek and the
+    /// "Page X of Y" label are preserved; the pages/hour stat is
+    /// dropped — the v2 design's two-label row has no slot for it.
     @ViewBuilder
-    var progressBar: some View {
-        ReadingProgressBar(
+    var bottomOverlay: some View {
+        ReaderBottomChrome(
+            theme: settingsStore?.theme.asV2 ?? .paper,
             progress: $readingProgress,
             onSeek: { seekValue in
                 let targetPage = PDFProgressHelper.pageForSeekValue(
@@ -72,46 +78,12 @@ extension PDFReaderContainerView {
                 viewModel.pageDidChange(to: targetPage)
             },
             discreteSteps: PDFProgressHelper.discreteSteps(totalPages: viewModel.totalPages),
-            isVisible: PDFProgressHelper.shouldShowProgressBar(
-                isDocumentLoaded: viewModel.isDocumentLoaded,
-                totalPages: viewModel.totalPages
-            ),
-            label: PDFProgressHelper.pageLabel(
+            leadingLabel: PDFProgressHelper.pageLabel(
                 currentPageIndex: viewModel.currentPageIndex,
                 totalPages: viewModel.totalPages
-            )
+            ),
+            trailingLabel: viewModel.sessionTimeDisplay ?? ""
         )
-        .accessibilityIdentifier("pdfReadingProgressBar")
-    }
-
-    @ViewBuilder
-    var bottomOverlay: some View {
-        HStack {
-            Text(viewModel.pageIndicator)
-                .font(.caption)
-                .monospacedDigit()
-                .accessibilityLabel("Page \(viewModel.currentPageIndex + 1) of \(viewModel.totalPages)")
-                .accessibilityIdentifier("pdfPageIndicator")
-
-            Spacer()
-
-            if let sessionTime = viewModel.sessionTimeDisplay {
-                Text(sessionTime)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("pdfSessionTime")
-            }
-
-            if let pph = viewModel.pagesPerHour {
-                Text("~\(Int(pph.rounded())) pages/hr")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("pdfPagesPerHour")
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(.regularMaterial)
         .accessibilityIdentifier("pdfBottomOverlay")
     }
 }

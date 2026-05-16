@@ -9,7 +9,7 @@
 // - DocumentFingerprint parsed from the canonical key string.
 // - Format host views (TXTReaderHost, etc.) extracted to ReaderFormatHosts.swift (WI-004).
 // - AnnotationsPanelView extracted to AnnotationsPanelView.swift (WI-004).
-// - Custom chrome overlay (ReaderChromeBar) replaces system nav bar for stable content layout.
+// - Custom chrome overlay (ReaderTopChrome) replaces system nav bar for stable content layout.
 // - TOC entries computed per format: EPUB from spine items, PDF from outline tree, TXT from Legado rules.
 // - Search sheet wired with SearchService, SearchViewModel, and SearchView.
 // - Book content is indexed for search on first open using format-specific extractors.
@@ -23,7 +23,7 @@
 //
 // - ThemeBackgroundView shown behind reader content when useCustomBackground is ON.
 //
-// @coordinates-with: ReaderChromeBar.swift, ReaderFormatHosts.swift,
+// @coordinates-with: ReaderTopChrome.swift, ReaderBottomChrome.swift, ReaderFormatHosts.swift,
 //   AnnotationsPanelView.swift, ReaderSettingsStore.swift, ReaderSettingsPanel.swift,
 //   DocumentFingerprint.swift, SearchView.swift, ThemeBackgroundView.swift,
 //   ReaderAICoordinator.swift, ReaderSearchCoordinator.swift,
@@ -44,6 +44,10 @@ struct ReaderContainerView: View {
     @State var tapZoneStore = TapZoneStore()
     @State var showSettings = false
     @State var showAnnotationsPanel = false
+    /// Feature #60 WI-6b: which tab the annotations panel opens on —
+    /// the bottom chrome's Contents button opens `.toc`, Notes opens
+    /// `.highlights`.
+    @State var annotationsPanelInitialTab: AnnotationsPanelTab = .toc
     @State var showSearch = false
     @State var showAIPanel = false
     @State var aiInitialTab: AIReaderTab = .summarize
@@ -134,6 +138,32 @@ struct ReaderContainerView: View {
         .onReceive(NotificationCenter.default.publisher(for: .readerContentTapped)) { _ in
             toggleChrome()
         }
+        // Feature #60 WI-6b: the shared `ReaderBottomChrome` toolbar
+        // posts these instead of threading handler closures through
+        // every per-format host view. Contents/Notes open the
+        // annotations panel on the matching tab; Display opens reader
+        // settings; AI opens the assistant when configured. Bundled
+        // into one modifier so `body` stays inside the type-checker's
+        // complexity budget.
+        .readerToolbarActionObservers(
+            onContents: {
+                annotationsPanelInitialTab = .toc
+                showAnnotationsPanel = true
+            },
+            onNotes: {
+                annotationsPanelInitialTab = .highlights
+                showAnnotationsPanel = true
+            },
+            onDisplay: { showSettings = true },
+            onAI: {
+                // Mirrors the legacy chrome's AI gate — a no-op when
+                // AI isn't configured rather than presenting an empty
+                // sheet.
+                if resolvedAICoordinator.isAIAvailable {
+                    showAIPanel = true
+                }
+            }
+        )
         // Page turn from tap zones — handled by unified renderer directly.
         // Native mode bridges handle taps internally (center=chrome toggle).
         // Left/right zones only functional in unified paged mode. (bug #81)
@@ -300,6 +330,7 @@ struct ReaderContainerView: View {
                 modelContainer: modelContext.container,
                 tocEntries: tocEntries,
                 currentLocator: currentLocator,
+                initialTab: annotationsPanelInitialTab,
                 onNavigate: { locator in
                     NotificationCenter.default.post(
                         name: .readerNavigateToLocator,
@@ -439,7 +470,7 @@ struct ReaderContainerView: View {
     // MARK: - Chrome Toggle (bug #62 v3)
 
     /// Toggles chrome overlay visibility. Content is pixel-stable because we use
-    /// a custom overlay (ReaderChromeBar) instead of the system nav bar.
+    /// a custom overlay (ReaderTopChrome) instead of the system nav bar.
     private func toggleChrome() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isChromeVisible.toggle()

@@ -3,7 +3,7 @@
 // enums declaratively so the order in which buttons appear matches
 // the design bundle's `vreader-reader.jsx` definitions:
 //
-//   - Top: back / title / bookmark / more
+//   - Top: back / title / search / bookmark / more
 //   - Bottom toolbar: Contents / Notes / Display / AI (AI gets the
 //     accent)
 //
@@ -18,17 +18,17 @@ struct ReaderChromeButtonContractTests {
 
     // MARK: - Top chrome slots
 
-    @Test("Top chrome has exactly 4 slots")
+    @Test("Top chrome has exactly 5 slots")
     func topChromeSlotCount() {
-        #expect(ReaderTopChromeSlot.allCases.count == 4)
+        #expect(ReaderTopChromeSlot.allCases.count == 5)
     }
 
     @Test("Top chrome slot order matches design bundle")
     func topChromeOrder() {
-        // Mirrors `vreader-reader.jsx:ReaderTopChrome` layout:
-        // left → leading back · title (center, flex) · trailing
-        // bookmark + more.
-        #expect(ReaderTopChromeSlot.allCases == [.back, .title, .bookmark, .more])
+        // Mirrors `vreader-reader.jsx:ReaderTopChrome` + the #760
+        // design supplement: left → leading back · title (center,
+        // flex) · trailing search + bookmark + more.
+        #expect(ReaderTopChromeSlot.allCases == [.back, .title, .search, .bookmark, .more])
     }
 
     // MARK: - Bottom chrome toolbar buttons
@@ -64,6 +64,7 @@ struct ReaderChromeButtonContractTests {
         // identifiers; pin them so renames surface here.
         #expect(ReaderTopChromeSlot.back.accessibilityIdentifier == "readerBackButton")
         #expect(ReaderTopChromeSlot.title.accessibilityIdentifier == "readerTitleLabel")
+        #expect(ReaderTopChromeSlot.search.accessibilityIdentifier == "readerSearchButton")
         #expect(ReaderTopChromeSlot.bookmark.accessibilityIdentifier == "readerBookmarkButton")
         #expect(ReaderTopChromeSlot.more.accessibilityIdentifier == "readerMoreButton")
     }

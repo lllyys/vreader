@@ -47,7 +47,7 @@ struct AnnotationsPanelView: View {
     let onNavigate: (Locator) -> Void
     let onDismiss: () -> Void
 
-    @State private var selectedTab: AnnotationsPanelTab = .toc
+    @State private var selectedTab: AnnotationsPanelTab
     @State private var bookmarkVM: BookmarkListViewModel?
     @State private var highlightVM: HighlightListViewModel?
     @State private var annotationVM: AnnotationListViewModel?
@@ -55,6 +55,29 @@ struct AnnotationsPanelView: View {
     @State private var exportedFileURL: URL?
     @State private var isShowingImporter = false
     @State private var importMessage: String?
+
+    /// `initialTab` (Feature #60 WI-6b) seeds which segment the panel
+    /// opens on — the reader bottom chrome's Contents button opens
+    /// `.toc`, Notes opens `.highlights`. Defaults to `.toc` so the
+    /// previous behavior is preserved for any future caller that omits
+    /// it.
+    init(
+        bookFingerprintKey: String,
+        modelContainer: ModelContainer,
+        tocEntries: [TOCEntry],
+        currentLocator: Locator?,
+        initialTab: AnnotationsPanelTab = .toc,
+        onNavigate: @escaping (Locator) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.bookFingerprintKey = bookFingerprintKey
+        self.modelContainer = modelContainer
+        self.tocEntries = tocEntries
+        self.currentLocator = currentLocator
+        self.onNavigate = onNavigate
+        self.onDismiss = onDismiss
+        self._selectedTab = State(initialValue: initialTab)
+    }
 
     var body: some View {
         NavigationStack {
