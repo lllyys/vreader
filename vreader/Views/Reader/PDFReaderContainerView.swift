@@ -34,9 +34,10 @@ struct PDFReaderContainerView: View {
     var modelContainer: ModelContainer?
     var ttsService: TTSService?
     /// Bug #198: settings store threaded so the PDFView gutter background can
-    /// flip to match the current ReaderTheme (Light / Sepia / Dark). Optional
-    /// to preserve source-compatibility for existing callers; nil means the
-    /// bridge falls back to PDFKit's default gutter color.
+    /// flip to match the current reader theme (Feature #60 WI-11: the
+    /// 5-theme `ReaderThemeV2` — Paper / Sepia / Dark / OLED / Photo).
+    /// Optional to preserve source-compatibility for existing callers; nil
+    /// means the bridge falls back to PDFKit's default gutter color.
     var settingsStore: ReaderSettingsStore?
 
     @State var password: String = ""

@@ -220,7 +220,10 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// reopen — out of scope for v0.)
     func theme(mode: DebugCommand.ThemeMode, fontSize: Int?) async throws {
         let store = ReaderSettingsStore(defaults: userDefaults)
-        let target: ReaderTheme = (mode == .dark) ? .dark : .light
+        // Feature #60 WI-11: `store.theme` is `ReaderThemeV2`. The
+        // bridge's two-valued `ThemeMode` maps `.dark` → `.dark` and
+        // `.light` → `.paper` (the V2 light-family theme).
+        let target: ReaderThemeV2 = (mode == .dark) ? .dark : .paper
         if store.theme != target {
             store.theme = target
         }

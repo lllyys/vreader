@@ -76,7 +76,7 @@ struct MDReaderContainerView: View {
                 // labels + Contents/Notes/Display/AI toolbar) replaces
                 // the legacy ReadingProgressBar + ReaderBottomOverlay.
                 ReaderBottomChrome(
-                    theme: settingsStore?.theme.asV2 ?? .paper,
+                    theme: settingsStore?.theme ?? .paper,
                     progress: $uiState.readingProgress,
                     onSeek: { seekValue in
                         let charOffset = ScrollProgressHelper.charOffsetFromProgress(
@@ -97,7 +97,7 @@ struct MDReaderContainerView: View {
         // `.readerSelectionPopoverRequested` in WI-7c2; this modifier
         // observes the notification and shows the sheet, mirroring
         // the TXT container's attachment from WI-7c2.
-        .selectionPopoverPresenter(theme: settingsStore?.theme.asV2 ?? .paper)
+        .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
         .task {
             // PERF: open already called by MDReaderHost
             if viewModel.renderedText == nil {

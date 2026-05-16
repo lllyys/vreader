@@ -21,7 +21,7 @@ extension EPUBReaderContainerView {
     @ViewBuilder
     var bottomOverlay: some View {
         ReaderBottomChrome(
-            theme: settingsStore?.theme.asV2 ?? .paper,
+            theme: settingsStore?.theme ?? .paper,
             progress: $readingProgress,
             onSeek: { handleProgressSeek($0) },
             discreteSteps: epubDiscreteSteps,

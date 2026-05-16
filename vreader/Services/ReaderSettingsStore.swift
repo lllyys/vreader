@@ -16,7 +16,13 @@ final class ReaderSettingsStore {
     static let autoPageTurnIntervalKey = "readerAutoPageTurnInterval"
     static let pageTurnAnimationKey = "readerPageTurnAnimation"
     static let chineseConversionKey = "readerChineseConversion"
-    var theme: ReaderTheme { didSet { guard !suppressPersistence else { return }; defaults.set(theme.rawValue, forKey: Self.themeKey) } }
+    /// The reader color theme. Feature #60 WI-11: migrated from the
+    /// legacy 3-case `ReaderTheme` to the 5-case `ReaderThemeV2`
+    /// (Paper / Sepia / Dark / OLED / Photo) so all 5 themes are
+    /// user-selectable. Persisted as the V2 rawValue; legacy values
+    /// (`light` / `sepia` / `dark`) still decode via
+    /// `ReaderThemeV2(legacyOrNew:)`.
+    var theme: ReaderThemeV2 { didSet { guard !suppressPersistence else { return }; defaults.set(theme.rawValue, forKey: Self.themeKey) } }
     var readingMode: ReadingMode { didSet { guard !suppressPersistence else { return }; defaults.set(readingMode.rawValue, forKey: Self.readingModeKey) } }
     var epubLayout: EPUBLayoutPreference { didSet { guard !suppressPersistence else { return }; defaults.set(epubLayout.rawValue, forKey: Self.epubLayoutKey) } }
     /// Whether auto page turning is enabled (Issue 9).
@@ -66,8 +72,13 @@ final class ReaderSettingsStore {
 
     // MARK: - Loaders (single source of truth for init + reconcile)
 
-    private static func loadTheme(_ defaults: UserDefaults) -> ReaderTheme {
-        ReaderTheme(rawValue: defaults.string(forKey: themeKey) ?? "") ?? .default
+    /// Feature #60 WI-11: decodes the persisted theme via
+    /// `ReaderThemeV2(legacyOrNew:)` so a `readerTheme` value written by
+    /// a pre-WI-11 build (legacy `ReaderTheme` rawValue) still resolves
+    /// — `light` → `.paper`, `sepia` / `dark` unchanged. A missing or
+    /// unknown value falls back to `.default` (`.paper`).
+    private static func loadTheme(_ defaults: UserDefaults) -> ReaderThemeV2 {
+        ReaderThemeV2(legacyOrNew: defaults.string(forKey: themeKey))
     }
     private static func loadReadingMode(_ defaults: UserDefaults) -> ReadingMode {
         ReadingMode(rawValue: defaults.string(forKey: readingModeKey) ?? "") ?? .native
@@ -139,7 +150,11 @@ final class ReaderSettingsStore {
     func applyResolvedSettings(_ resolved: ResolvedSettings) {
         suppressPersistence = true
         defer { suppressPersistence = false }
-        if let t = ReaderTheme(rawValue: resolved.themeName), t != theme { theme = t }
+        // Feature #60 WI-11: decode the per-book `themeName` via the
+        // strict `ReaderThemeV2(recognized:)` so a legacy value
+        // (`light` → `.paper`) still applies, while an unknown / corrupt
+        // value leaves the live theme untouched (no silent reset).
+        if let t = ReaderThemeV2(recognized: resolved.themeName), t != theme { theme = t }
         if let m = ReadingMode(rawValue: resolved.readingMode), m != readingMode { readingMode = m }
         if resolved.fontSize != typography.fontSize { typography.fontSize = resolved.fontSize }
         if resolved.lineSpacing != typography.lineSpacing { typography.lineSpacing = resolved.lineSpacing }
@@ -157,17 +172,14 @@ final class ReaderSettingsStore {
     var uiFont: UIFont {
         ReaderTypography.body(for: typography.fontFamily, size: typography.fontSize)
     }
-    // Feature #60 WI-5: route TXT/MD reader colors through
-    // `ReaderThemeV2`'s token surface. `theme.asV2` projects the
-    // legacy 3-case enum (.light → .paper, .sepia → .sepia, .dark →
-    // .dark) so existing persisted settings keep working; the
-    // 5-token surface (`backgroundColor` / `inkColor` / `subColor`)
-    // replaces the legacy 3-color palette so TXT and MD pick up
-    // the new visual identity. EPUB went through the same
-    // projection in WI-4.
-    var uiBackgroundColor: UIColor { theme.asV2.backgroundColor }
-    var uiTextColor: UIColor { theme.asV2.inkColor }
-    var uiSecondaryTextColor: UIColor { theme.asV2.subColor }
+    // Feature #60 WI-5/WI-11: TXT/MD reader colors come straight from
+    // `ReaderThemeV2`'s token surface. WI-11 migrated `theme` itself to
+    // `ReaderThemeV2`, so these accessors read its 5-token surface
+    // (`backgroundColor` / `inkColor` / `subColor`) directly — no
+    // `asV2` projection needed.
+    var uiBackgroundColor: UIColor { theme.backgroundColor }
+    var uiTextColor: UIColor { theme.inkColor }
+    var uiSecondaryTextColor: UIColor { theme.subColor }
     var lineSpacingPoints: CGFloat { typography.fontSize * (typography.lineSpacing - 1.0) }
     var cjkLetterSpacing: CGFloat { typography.cjkSpacing ? typography.fontSize * 0.05 : 0 }
     #endif
@@ -176,13 +188,12 @@ final class ReaderSettingsStore {
         // Feature #60 WI-5: thread the V2 token surface through the
         // Markdown renderer so blockquotes and code-block backgrounds
         // pick up per-theme colors instead of platform defaults.
-        let v2 = theme.asV2
-        return MDRenderConfig(
+        MDRenderConfig(
             fontSize: typography.fontSize,
             lineSpacing: lineSpacingPoints,
             textColor: uiTextColor,
-            secondaryColor: v2.subColor,
-            codeBackgroundColor: v2.paperColor
+            secondaryColor: theme.subColor,
+            codeBackgroundColor: theme.paperColor
         )
     }
     var txtViewConfig: TXTViewConfig {

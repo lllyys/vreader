@@ -71,12 +71,14 @@ struct TTSControlBar: View {
 
     // MARK: - Theme Colors
 
+    // Feature #60 WI-11: `theme` is `ReaderThemeV2`; `subColor` is the
+    // V2 token for secondary text. Fallback uses `ReaderThemeV2.default`.
     private var secondaryColor: Color {
-        Color(settingsStore?.theme.secondaryTextColor ?? ReaderTheme.default.secondaryTextColor)
+        Color(settingsStore?.theme.subColor ?? ReaderThemeV2.default.subColor)
     }
 
     private var backgroundColor: Color {
-        Color(settingsStore?.theme.backgroundColor ?? ReaderTheme.default.backgroundColor)
+        Color(settingsStore?.theme.backgroundColor ?? ReaderThemeV2.default.backgroundColor)
             .opacity(0.95)
     }
 

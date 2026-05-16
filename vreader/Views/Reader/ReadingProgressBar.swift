@@ -65,7 +65,9 @@ struct ReadingProgressBar: View {
 
     private var secondaryColor: Color {
         if let store = settingsStore {
-            return Color(store.theme.secondaryTextColor)
+            // Feature #60 WI-11: `theme` is `ReaderThemeV2`; `subColor`
+            // is the V2 token equivalent of the legacy `secondaryTextColor`.
+            return Color(store.theme.subColor)
         }
         return .secondary
     }

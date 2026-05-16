@@ -80,8 +80,12 @@ struct StatusBarTintingTests {
 
     @Test("Legacy ReaderTheme projects to a color scheme via asV2")
     func legacyThemeProjectsToColorScheme() {
-        // `ReaderSettingsStore.theme` is still the 3-case legacy enum;
-        // the reader container reads `theme.asV2.preferredColorScheme`.
+        // The legacy `ReaderTheme.asV2` projection is retained as the
+        // backward-compat decode bridge — `ReaderThemeV2(legacyOrNew:)`
+        // routes legacy persisted values through it. (Feature #60 WI-11
+        // migrated `ReaderSettingsStore.theme` itself to `ReaderThemeV2`,
+        // so the reader container now reads `theme.preferredColorScheme`
+        // directly; this test still pins the legacy projection.)
         #expect(ReaderTheme.light.asV2.preferredColorScheme == .light)
         #expect(ReaderTheme.sepia.asV2.preferredColorScheme == .light)
         #expect(ReaderTheme.dark.asV2.preferredColorScheme == .dark)

@@ -174,7 +174,7 @@ extension ReaderContainerView {
     /// draws the design's backdrop tint while the popover is open.
     var readerChromeOverlay: some View {
         ReaderTopChrome(
-            theme: settingsStore.theme.asV2,
+            theme: settingsStore.theme,
             title: book.title,
             bookmarked: false,
             moreActive: showMorePopover,
@@ -198,7 +198,7 @@ extension ReaderContainerView {
     /// `.readerMoreMenuActionObservers` modifier handles row taps.
     var readerMorePopoverOverlay: some View {
         ReaderMorePopover(
-            theme: settingsStore.theme.asV2,
+            theme: settingsStore.theme,
             ttsPlaying: ttsService.state != .idle,
             autoTurnOn: settingsStore.autoPageTurn,
             autoTurnInterval: settingsStore.autoPageTurnInterval,
@@ -269,7 +269,7 @@ extension ReaderContainerView {
                 textContent: ai.currentTextContent,
                 format: resolvedBookFormat,
                 onDismiss: { showAIPanel = false },
-                theme: settingsStore.theme.asV2,
+                theme: settingsStore.theme,
                 initialTab: aiInitialTab
             )
             .presentationDetents([.medium, .large])

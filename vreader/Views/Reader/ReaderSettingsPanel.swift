@@ -15,11 +15,13 @@
 // - Presented as a sheet from the reader bottom chrome's Display button.
 // - All changes apply immediately (no "save" button needed).
 // - Preview text updates live as settings change.
-// - Theme picker uses colored circles (light/sepia/dark).
+// - Theme picker (feature #60 WI-11) shows all 5 `ReaderThemeV2`
+//   themes (Paper / Sepia / Dark / OLED / Photo) as rounded-square
+//   swatches per `vreader-panels.jsx`'s `ReaderSettingsSheet`.
 // - Compact layout suitable for half-sheet presentation.
 //
 // @coordinates-with: ReaderSettingsStore.swift, ReaderContainerView.swift,
-//   ReaderSheetChrome.swift, SheetSectionContract.swift
+//   ReaderSheetChrome.swift, SheetSectionContract.swift, ReaderThemeV2.swift
 
 import PhotosUI
 import SwiftUI
@@ -57,10 +59,11 @@ struct ReaderSettingsPanel: View {
     /// Bug #134: surface theme-background load/save/remove failures.
     @State private var backgroundErrorMessage: String?
 
-    /// The design theme for the sheet chrome — projected from the
-    /// reader's current `ReaderTheme` so the Display sheet's surface
-    /// tint follows the book's theme.
-    private var sheetTheme: ReaderThemeV2 { store.theme.asV2 }
+    /// The design theme for the sheet chrome — the reader's current
+    /// `ReaderThemeV2` so the Display sheet's surface tint follows the
+    /// book's theme. (Feature #60 WI-11: `store.theme` is now
+    /// `ReaderThemeV2`, so no `asV2` projection is needed.)
+    private var sheetTheme: ReaderThemeV2 { store.theme }
 
     /// The re-skinned panel's `ReaderSheetChrome` title — exposed for
     /// the WI-10 composition test.
@@ -187,44 +190,86 @@ struct ReaderSettingsPanel: View {
 
     // MARK: - Theme
 
+    /// The themes the picker offers — Feature #60 WI-11: all 5
+    /// `ReaderThemeV2` cases (Paper / Sepia / Dark / OLED / Photo), in
+    /// the design bundle's `THEMES` declaration order. Exposed
+    /// `static` for the WI-11 composition-contract test (same pattern
+    /// as `shouldShowReadingModeSection`).
+    static var themePickerThemes: [ReaderThemeV2] { ReaderThemeV2.allCases }
+
+    /// Human label for a theme swatch caption — matches the design
+    /// bundle's `name` field (`vreader-themes.jsx`).
+    static func themeDisplayName(_ theme: ReaderThemeV2) -> String {
+        switch theme {
+        case .paper: return "Paper"
+        case .sepia: return "Sepia"
+        case .dark:  return "Dark"
+        case .oled:  return "OLED"
+        case .photo: return "Photo"
+        }
+    }
+
     @ViewBuilder
     private var themeSection: some View {
         Section("Theme") {
-            HStack(spacing: 20) {
-                Spacer()
-                ForEach(ReaderTheme.allCases, id: \.self) { theme in
-                    themeCircle(theme)
+            HStack(spacing: 10) {
+                ForEach(Self.themePickerThemes, id: \.self) { theme in
+                    themeSwatch(theme)
                 }
-                Spacer()
             }
             .padding(.vertical, 8)
         }
     }
 
+    /// One theme swatch — the design's rounded-square chip
+    /// (`vreader-panels.jsx` `ReaderSettingsSheet` theme selector):
+    /// a 12pt-radius tile filled with the theme background, an `Aa`
+    /// glyph (or a photo glyph for the Photo theme), the theme name
+    /// below, and a ring on the selected tile. Per the design, the
+    /// selected ring uses the *sheet's* accent (`t.accent`) and the
+    /// caption colour uses the sheet's `sub` token — consistent
+    /// across all swatches regardless of which theme each depicts.
     @ViewBuilder
-    private func themeCircle(_ theme: ReaderTheme) -> some View {
+    private func themeSwatch(_ theme: ReaderThemeV2) -> some View {
+        let isSelected = store.theme == theme
         Button {
             store.theme = theme
         } label: {
             VStack(spacing: 6) {
-                Circle()
+                RoundedRectangle(cornerRadius: 12)
                     .fill(Color(theme.backgroundColor))
-                    .overlay(
-                        Circle().stroke(
-                            store.theme == theme ? Color.accentColor : Color.gray.opacity(0.3),
-                            lineWidth: store.theme == theme ? 3 : 1
-                        )
-                    )
-                    .frame(width: 44, height: 44)
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay {
+                        if theme.usesBackgroundImage {
+                            Image(systemName: "photo")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(Color(theme.accentColor))
+                        } else {
+                            Text("Aa")
+                                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 20)))
+                                .fontWeight(.semibold)
+                                .foregroundStyle(Color(theme.inkColor))
+                        }
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(
+                                isSelected
+                                    ? Color(sheetTheme.accentColor)
+                                    : Color(sheetTheme.ruleColor),
+                                lineWidth: isSelected ? 2.5 : 0.5
+                            )
+                    }
 
-                Text(theme.rawValue.capitalized)
+                Text(Self.themeDisplayName(theme))
                     .font(.caption2)
-                    .foregroundStyle(store.theme == theme ? .primary : .secondary)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(Color(sheetTheme.subColor))
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(theme.rawValue) theme")
-        .accessibilityAddTraits(store.theme == theme ? [.isSelected] : [])
+        .accessibilityLabel("\(Self.themeDisplayName(theme)) theme")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     // MARK: - Theme Background (A04, feature #32)

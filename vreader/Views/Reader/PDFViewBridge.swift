@@ -46,7 +46,9 @@ struct PDFViewBridge: UIViewRepresentable {
     /// caller that hasn't been wired through. Page-interior pixels are still
     /// rendered by PDFKit from the source PDF (white for typical text PDFs);
     /// inverting page colors in dark mode is a separate feature.
-    var theme: ReaderTheme?
+    /// The reader color theme — drives the PDF gutter background tint.
+    /// Feature #60 WI-11: migrated from the legacy `ReaderTheme`.
+    var theme: ReaderThemeV2?
     /// Feature #53 WI-6: optional inline-menu presenter. When non-nil + a
     /// highlight tap resolves, `handleTap` presents the menu anchored to
     /// the tapped annotation's bounds. When nil, the bridge still posts
@@ -279,15 +281,16 @@ struct PDFViewBridge: UIViewRepresentable {
 
     // MARK: - Theme application (bug #198)
 
-    /// Sets `pdfView.backgroundColor` from the supplied `ReaderTheme`'s
-    /// `backgroundColor` palette so the gutter area surrounding the rendered
-    /// PDF page reflects Light / Sepia / Dark instead of staying on PDFKit's
-    /// default light gray. Pure helper — testable without a real
-    /// UIViewRepresentable construction. Does NOT invert the rendered page
-    /// pixels; PDFKit continues to draw the source PDF's own colors (typically
-    /// white pages with black text). Inverting the page interior in dark
-    /// theme is a separate feature.
-    static func applyThemeBackground(to pdfView: PDFView, theme: ReaderTheme) {
+    /// Sets `pdfView.backgroundColor` from the supplied `ReaderThemeV2`'s
+    /// `backgroundColor` token so the gutter area surrounding the rendered
+    /// PDF page reflects the reader theme (Paper / Sepia / Dark / OLED /
+    /// Photo) instead of staying on PDFKit's default light gray. Pure
+    /// helper — testable without a real UIViewRepresentable construction.
+    /// Does NOT invert the rendered page pixels; PDFKit continues to draw
+    /// the source PDF's own colors (typically white pages with black
+    /// text). Inverting the page interior in dark theme is a separate
+    /// feature. (Feature #60 WI-11: migrated from the legacy `ReaderTheme`.)
+    static func applyThemeBackground(to pdfView: PDFView, theme: ReaderThemeV2) {
         pdfView.backgroundColor = theme.backgroundColor
     }
 
@@ -300,9 +303,9 @@ struct PDFViewBridge: UIViewRepresentable {
     /// `pdfView.backgroundColor` directly.
     static func applyThemeIfChanged(
         pdfView: PDFView,
-        theme: ReaderTheme?,
-        lastAppliedTheme: ReaderTheme?
-    ) -> ReaderTheme? {
+        theme: ReaderThemeV2?,
+        lastAppliedTheme: ReaderThemeV2?
+    ) -> ReaderThemeV2? {
         guard let theme, lastAppliedTheme != theme else { return lastAppliedTheme }
         applyThemeBackground(to: pdfView, theme: theme)
         return theme
@@ -331,7 +334,8 @@ struct PDFViewBridge: UIViewRepresentable {
         var isSearchHighlighting: Bool = false
         /// Bug #198: tracks the last applied reader theme so updateUIView only
         /// re-applies `applyThemeBackground` when the user actually switched.
-        var lastAppliedTheme: ReaderTheme?
+        /// Feature #60 WI-11: migrated from the legacy `ReaderTheme`.
+        var lastAppliedTheme: ReaderThemeV2?
         /// Feature #53 WI-6: weak reference to the renderer that owns the
         /// `[UUID: [PDFAnnotation]]` map. handleTap consults this to detect
         /// taps on highlight annotations and post `.readerHighlightTapped`

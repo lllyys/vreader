@@ -89,12 +89,11 @@ extension RealDebugBridgeContext {
         return dir
     }
 
-    fileprivate func themeName(from theme: ReaderTheme) -> String {
-        switch theme {
-        case .light: return "light"
-        case .sepia: return "sepia"
-        case .dark: return "dark"
-        }
+    /// The snapshot's `theme` string. Feature #60 WI-11: `theme` is a
+    /// `ReaderThemeV2`; its rawValue is the canonical name
+    /// (`paper` / `sepia` / `dark` / `oled` / `photo`).
+    fileprivate func themeName(from theme: ReaderThemeV2) -> String {
+        theme.rawValue
     }
 
     fileprivate func totalHighlightCount() async throws -> Int {

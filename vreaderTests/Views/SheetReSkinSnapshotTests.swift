@@ -165,9 +165,10 @@ struct SheetReSkinSnapshotTests {
     @Test("Display sheet builds re-skinned for every reader theme")
     func displayPanelBuildsForEveryTheme() {
         // The Display sheet's chrome surface follows the book theme;
-        // it must build for all 5 (the legacy 3-case ReaderTheme
-        // projects onto a subset, but the chrome must not crash).
-        for theme in ReaderTheme.allCases {
+        // it must build for all 5 `ReaderThemeV2` themes (Feature #60
+        // WI-11 made `ReaderSettingsStore.theme` the 5-case enum and
+        // the picker offers all 5).
+        for theme in ReaderThemeV2.allCases {
             let store = ReaderSettingsStore()
             store.theme = theme
             let panel = ReaderSettingsPanel(store: store)
