@@ -58,7 +58,7 @@ Reader chrome (Feature #60 WI-6b — visual-identity-v2) is two custom overlays,
 
 - `ReaderTopChrome.swift` — top bar: `← Library | Title | Search Bookmark More`. Composed once in `ReaderContainerView`, format-agnostic. The `⋯` More button toggles `ReaderMorePopover`.
 - `ReaderBottomChrome.swift` — bottom bar: progress scrubber + position labels + a Contents/Notes/Display/AI toolbar. Composed per paginated format (TXT/MD/EPUB/PDF), each passing its own seek closure; the toolbar posts `.readerOpen*` notifications that `ReaderContainerView` observes. Foliate (AZW3/MOBI) keeps its own bottom overlay.
-- `ReaderMorePopover.swift` — anchored More-menu popover (Feature #60 WI-6c), composed in `ReaderContainerView`'s chrome overlay. Six rows (Read aloud / Auto-turn / Bilingual | Book details / Share / Export); each posts a `.readerMore*` notification that `ReaderContainerView` observes.
+- `ReaderMorePopover.swift` — anchored More-menu popover (Feature #60 WI-6c), composed in `ReaderContainerView`'s chrome overlay. Five rows (Read aloud / Auto-turn | Book details / Share / Export); each posts a `.readerMore*` notification that `ReaderContainerView` observes. The design's sixth row (Bilingual) is deferred — GH #790.
 
 Slot/button identity lives in `ReaderChromeButton.swift` (`ReaderTopChromeSlot` / `ReaderBottomChromeButton`); More-menu row identity lives in `ReaderMoreMenuRow.swift`.
 
@@ -194,7 +194,6 @@ All cross-component communication uses NotificationCenter:
 | `.readerOpenAI`                | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens the AI assistant when configured) |
 | `.readerMoreReadAloud`         | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — starts read-aloud / TTS) |
 | `.readerMoreToggleAutoTurn`    | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — flips `ReaderSettingsStore.autoPageTurn`) |
-| `.readerMoreBilingual`         | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — opens the AI assistant on its translate tab) |
 | `.readerMoreBookDetails`       | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — opens reader settings as the interim Book Details destination; real sheet undesigned, GH #789) |
 | `.readerMoreShareBook`         | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — presents the system share sheet for the book file) |
 | `.readerMoreExportAnnotations` | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — opens the annotations panel on the Highlights tab, which carries export) |

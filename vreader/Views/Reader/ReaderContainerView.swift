@@ -187,12 +187,12 @@ struct ReaderContainerView: View {
                 }
             }
         )
-        // Feature #60 WI-6c: the More-menu popover posts these six
-        // notifications; each maps 1:1 from a `ReaderMoreMenuRow`.
-        // Bundled into one modifier so `body` stays inside the
-        // type-checker's complexity budget (same reason as the WI-6b
-        // toolbar observers above). Action semantics live in
-        // `handleMoreMenuAction(_:)`.
+        // Feature #60 WI-6c: the More-menu popover posts the five
+        // `.readerMore*` notifications; each maps 1:1 from a
+        // `ReaderMoreMenuRow`. Bundled into one modifier so `body`
+        // stays inside the type-checker's complexity budget (same
+        // reason as the WI-6b toolbar observers above). Action
+        // semantics live in `handleMoreMenuAction(_:)`.
         .readerMoreMenuActionObservers { row in
             handleMoreMenuAction(row)
         }
@@ -509,9 +509,18 @@ struct ReaderContainerView: View {
 
     /// Toggles chrome overlay visibility. Content is pixel-stable because we use
     /// a custom overlay (ReaderTopChrome) instead of the system nav bar.
+    ///
+    /// Feature #60 WI-6c: hiding the chrome also clears `showMorePopover`.
+    /// The popover only renders while the chrome does, so without this
+    /// a chrome-hide that bypasses the content-tap path (e.g. the
+    /// "Hide toolbar" accessibility action) would leave `showMorePopover`
+    /// set and resurrect the popover when the chrome reappears.
     private func toggleChrome() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isChromeVisible.toggle()
+            if !isChromeVisible {
+                showMorePopover = false
+            }
         }
     }
 

@@ -220,11 +220,7 @@ extension ReaderContainerView {
     /// The popover already posted `row.notification` and dismissed
     /// itself; this is the host-side effect.
     ///
-    /// Two rows route to interim/adjacent destinations because their
-    /// designed destination is not a committed design:
-    ///   - `.bilingualMode` opens the AI assistant on its translate
-    ///     tab — the existing bilingual surface — gated on AI being
-    ///     configured (mirrors the bottom chrome's AI gate).
+    /// Interim/adjacent destinations:
     ///   - `.bookDetails` opens the reader settings panel as the
     ///     interim destination; the real Book Details sheet is
     ///     undesigned (design note §4) and tracked by GH #789.
@@ -240,12 +236,6 @@ extension ReaderContainerView {
             // `autoPageTurn` is live-applied by the paged TXT/MD
             // containers' `onChange` observers.
             settingsStore.autoPageTurn.toggle()
-        case .bilingualMode:
-            if resolvedAICoordinator.isAIAvailable {
-                ensureAIReady()
-                aiInitialTab = .translate
-                showAIPanel = true
-            }
         case .bookDetails:
             showSettings = true
         case .shareBook:

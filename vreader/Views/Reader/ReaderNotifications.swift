@@ -76,7 +76,7 @@ extension Notification.Name {
     static let readerOpenDisplay = Notification.Name("vreader.readerOpenDisplay")
     static let readerOpenAI = Notification.Name("vreader.readerOpenAI")
     /// Feature #60 WI-6c: posted by the reader More-menu popover
-    /// (`ReaderMorePopover`) when the user taps one of its six rows.
+    /// (`ReaderMorePopover`) when the user taps one of its five rows.
     /// `ReaderContainerView` observes these and runs the matching
     /// action. Posting (rather than threading closures through the
     /// shared `ReaderTopChrome` and per-format hosts) keeps the
@@ -85,14 +85,12 @@ extension Notification.Name {
     ///
     /// `.readerMoreToggleAutoTurn` flips `ReaderSettingsStore.autoPageTurn`
     /// (the only row with real backing state — the design draws it as
-    /// a toggle). `.readerMoreBilingual` opens the AI assistant on its
-    /// translate tab — the existing bilingual surface.
-    /// `.readerMoreBookDetails` opens the reader settings panel as the
-    /// interim destination (the real Book Details sheet is undesigned —
-    /// GH #789).
+    /// a toggle). `.readerMoreBookDetails` opens the reader settings
+    /// panel as the interim destination (the real Book Details sheet
+    /// is undesigned — GH #789). The design's Bilingual row is
+    /// deferred (GH #790) — no notification for it.
     static let readerMoreReadAloud = Notification.Name("vreader.readerMoreReadAloud")
     static let readerMoreToggleAutoTurn = Notification.Name("vreader.readerMoreToggleAutoTurn")
-    static let readerMoreBilingual = Notification.Name("vreader.readerMoreBilingual")
     static let readerMoreBookDetails = Notification.Name("vreader.readerMoreBookDetails")
     static let readerMoreShareBook = Notification.Name("vreader.readerMoreShareBook")
     static let readerMoreExportAnnotations = Notification.Name("vreader.readerMoreExportAnnotations")

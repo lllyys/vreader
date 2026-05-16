@@ -1,25 +1,27 @@
 // Purpose: Feature #60 WI-6c — the reader More-menu popover. An
 // anchored popover from the `⋯` button in `ReaderTopChrome`, replacing
-// the WI-6b interim wiring (`⋯` → settings sheet). Six rows split by a
-// hairline divider: Read aloud / Auto-turn pages / Bilingual mode |
-// Book details / Share book / Export annotations.
+// the WI-6b interim wiring (`⋯` → settings sheet). Five rows split by a
+// hairline divider: Read aloud / Auto-turn pages | Book details /
+// Share book / Export annotations. (The design's sixth row, Bilingual
+// mode, is deferred — GH #790 — see `ReaderMoreMenuRow`'s header.)
 //
 // Layout pinned to the committed design bundle:
 // `dev-docs/designs/vreader-fidelity-v1/project/vreader-more.jsx`
-// (`MorePopover` + `ToggleSwitch`) and `design-notes/
-// reader-search-and-more-menu.md` §2 (width 268, radius 16, notch
-// pointing to the trigger, per-theme rendering for all 5 themes).
+// (`MorePopover`) and `design-notes/reader-search-and-more-menu.md`
+// §2 (width 268, radius 16, notch pointing to the trigger, per-theme
+// rendering for all 5 themes).
 //
 // Row identity, ordering, divider placement, labels, icons, toggle vs
 // tap, sub-detail text, and notification routing all live in
 // `ReaderMoreMenuRow` so the design contract is unit-testable without
-// a SwiftUI render path. This file is purely presentational — taps
-// post `ReaderMoreMenuRow.notification`; `ReaderContainerView`
-// observes them.
+// a SwiftUI render path. The notch / toggle / observer-modifier
+// helpers live in `ReaderMorePopoverParts.swift`. This file is purely
+// presentational — taps post `ReaderMoreMenuRow.notification`;
+// `ReaderContainerView` observes them.
 //
-// @coordinates-with: ReaderMoreMenuRow.swift, ReaderTopChrome.swift,
-//   ReaderThemeV2.swift, ReaderContainerView+Sheets.swift,
-//   ReaderNotifications.swift
+// @coordinates-with: ReaderMoreMenuRow.swift, ReaderMorePopoverParts.swift,
+//   ReaderTopChrome.swift, ReaderThemeV2.swift,
+//   ReaderContainerView+Sheets.swift, ReaderNotifications.swift
 
 #if canImport(UIKit)
 import SwiftUI
@@ -53,12 +55,15 @@ struct ReaderMorePopover: View {
 
     /// Design popover width (`vreader-more.jsx`: `width: 268`).
     private let popoverWidth: CGFloat = 268
+    /// Edge length of the design's rotated-square notch
+    /// (`vreader-more.jsx`: `width: 12, height: 12`).
+    private let notchSize: CGFloat = 12
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // Dim backdrop — transparent fill, taps anywhere outside
-            // the card close the popover. Matches the design's
-            // `onClick={onClose}` full-bleed layer.
+            // Dim backdrop — near-transparent fill, taps anywhere
+            // outside the card close the popover. Matches the design's
+            // full-bleed `onClick={onClose}` layer.
             Color.black.opacity(0.001)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -93,26 +98,31 @@ struct ReaderMorePopover: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color(theme.ruleColor), lineWidth: 0.5)
         )
-        // Notch behind the card: it pokes above the top edge as the
-        // pointer; the card's own surface covers its base, so no
-        // clipping or selective border is needed.
-        .background(alignment: .top) { notch }
+        // Notch behind the card: a rotated square whose top half pokes
+        // above the card edge as the pointer; the card's own surface +
+        // border cover its bottom half, so the only visible notch
+        // edges are the two pointing up — matching the design's
+        // two-sided hairline (`box-shadow: -1px -1px`).
+        .background(alignment: .topTrailing) { notch }
         .shadow(color: .black.opacity(0.28), radius: 18, x: 0, y: 12)
     }
 
-    /// The small triangular beak that points up toward the `⋯`
-    /// trigger. `vreader-more.jsx` draws this as a rotated square
-    /// (`top: -6, right: 24`); a triangle is the equivalent SwiftUI
-    /// idiom and avoids clipping the base behind the card.
+    /// The rotated-square notch that points up toward the `⋯` trigger.
+    /// `vreader-more.jsx`: a 12×12 square, `transform: rotate(45deg)`,
+    /// `top: -6, right: 24`.
     private var notch: some View {
-        ReaderMorePopoverNotch()
+        Rectangle()
             .fill(popoverBackground)
-            .frame(width: 16, height: 8)
-            // Right-align under the `⋯` button: 24pt from the card's
-            // trailing edge per the design, minus half the notch width.
-            .frame(width: popoverWidth, alignment: .trailing)
-            .padding(.trailing, 16)
-            .offset(y: -7)
+            .overlay(
+                Rectangle().stroke(Color(theme.ruleColor), lineWidth: 0.5)
+            )
+            .frame(width: notchSize, height: notchSize)
+            .rotationEffect(.degrees(45))
+            // `right: 24` from the card's trailing edge to the notch
+            // center; the rotated square is `notchSize` wide, so its
+            // leading offset is 24 − notchSize/2 from the trailing
+            // inset. `top: -6` lifts it half-out of the card.
+            .offset(x: -(24 - notchSize / 2), y: -6)
             .allowsHitTesting(false)
     }
 
@@ -199,114 +209,21 @@ struct ReaderMorePopover: View {
     // MARK: - Theme-aware surface
 
     /// Popover surface fill. The design ships hardcoded `#2a2724`
-    /// (dark family) / `#fcf8f0` (light family), distinct from the
-    /// reader chrome tint so the popover reads as a floating element.
-    /// Mapped through `isDark` so all 5 themes pick the right surface
-    /// — the same projection `SelectionPopoverView` uses.
+    /// (dark / OLED family) / `#fcf8f0` (Paper / Sepia family) for the
+    /// popover surface, distinct from the reader chrome tint so the
+    /// popover reads as a floating element. The Photo theme uses a
+    /// translucent dark fill (`rgba(20,16,12,0.92)`, design note §2)
+    /// so the popover stays legible over an arbitrary background
+    /// image without depending on a backdrop blur.
     private var popoverBackground: Color {
-        theme.isDark
+        if theme.usesBackgroundImage {
+            // Photo theme — design-specified translucent surface.
+            return Color(red: 20 / 255, green: 16 / 255, blue: 12 / 255)
+                .opacity(0.92)
+        }
+        return theme.isDark
             ? Color(red: 0x2a / 255, green: 0x27 / 255, blue: 0x24 / 255)
             : Color(red: 0xfc / 255, green: 0xf8 / 255, blue: 0xf0 / 255)
-    }
-}
-
-// MARK: - Popover notch
-
-/// Upward-pointing triangular beak for the More popover. Apex at top
-/// center, base along the bottom edge — drawn behind the card so its
-/// base tucks under the card surface.
-private struct ReaderMorePopoverNotch: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
-        return path
-    }
-}
-
-// MARK: - Inline toggle switch
-
-/// Small iOS-style toggle rendered in the Auto-turn row, matching
-/// `vreader-more.jsx`'s `ToggleSwitch` (34×20 track, green `#3a6a5a`
-/// when on). Presentational only — the row's tap posts the toggle
-/// notification; the host flips the backing setting and the new
-/// `isOn` flows back in.
-private struct ReaderMoreToggle: View {
-    let isOn: Bool
-    let theme: ReaderThemeV2
-
-    var body: some View {
-        Capsule()
-            .fill(trackColor)
-            .frame(width: 34, height: 20)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 16, height: 16)
-                    .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
-                    .padding(.horizontal, 2)
-            }
-            .animation(.easeInOut(duration: 0.15), value: isOn)
-            .accessibilityHidden(true)
-    }
-
-    private var trackColor: Color {
-        isOn
-            ? Color(red: 0x3a / 255, green: 0x6a / 255, blue: 0x5a / 255)
-            : (theme.isDark
-                ? Color.white.opacity(0.12)
-                : Color.black.opacity(0.12))
-    }
-}
-
-// MARK: - More-menu action observers
-
-/// Feature #60 WI-6c: bundles the six More-menu notification
-/// observers into a single modifier, mirroring `ReaderToolbarActionObservers`
-/// (WI-6b). `ReaderContainerView` applies it as one `.modifier(...)`
-/// rather than six chained `.onReceive`s — its `body` is already near
-/// the Swift type-checker's expression-complexity ceiling.
-///
-/// Each observer maps its notification back to the `ReaderMoreMenuRow`
-/// that posted it via `ReaderMoreMenuRow(notification:)` (the inverse
-/// of `.notification`) and hands the row to a single
-/// `(ReaderMoreMenuRow) -> Void` callback, so the host has one action
-/// funnel instead of six.
-struct ReaderMoreMenuActionObservers: ViewModifier {
-    let onAction: (ReaderMoreMenuRow) -> Void
-
-    func body(content: Content) -> some View {
-        // SwiftUI `.onReceive` needs one publisher per concrete name —
-        // a dynamic set can't be observed — but each routes through the
-        // inverse initializer so the row resolution is single-sourced
-        // and round-trip-tested.
-        content
-            .onReceive(NotificationCenter.default.publisher(for: .readerMoreReadAloud), perform: dispatch)
-            .onReceive(NotificationCenter.default.publisher(for: .readerMoreToggleAutoTurn), perform: dispatch)
-            .onReceive(NotificationCenter.default.publisher(for: .readerMoreBilingual), perform: dispatch)
-            .onReceive(NotificationCenter.default.publisher(for: .readerMoreBookDetails), perform: dispatch)
-            .onReceive(NotificationCenter.default.publisher(for: .readerMoreShareBook), perform: dispatch)
-            .onReceive(NotificationCenter.default.publisher(for: .readerMoreExportAnnotations), perform: dispatch)
-    }
-
-    /// Resolves the posting row from the notification name and fires
-    /// the action funnel. An unrecognised name (no matching row) is
-    /// ignored.
-    private func dispatch(_ notification: Notification) {
-        guard let row = ReaderMoreMenuRow(notification: notification.name) else { return }
-        onAction(row)
-    }
-}
-
-extension View {
-    /// Attaches the six More-menu action observers (Feature #60
-    /// WI-6c). See `ReaderMoreMenuActionObservers`.
-    func readerMoreMenuActionObservers(
-        onAction: @escaping (ReaderMoreMenuRow) -> Void
-    ) -> some View {
-        modifier(ReaderMoreMenuActionObservers(onAction: onAction))
     }
 }
 #endif

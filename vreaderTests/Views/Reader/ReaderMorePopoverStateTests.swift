@@ -79,19 +79,6 @@ struct ReaderMorePopoverStateTests {
         #expect(high == "Every 60s")
     }
 
-    // MARK: - Bilingual mode
-
-    @Test("Bilingual sub-detail is the static translate prompt")
-    func bilingualSub() {
-        // WI-6c routes Bilingual to the AI translate panel (an
-        // existing surface) rather than a fabricated toggle, so the
-        // sub-detail is the static prompt — no on/off variant.
-        let sub = ReaderMoreMenuRow.bilingualMode.subDetail(
-            ttsPlaying: false, autoTurnOn: false, autoTurnInterval: 30
-        )
-        #expect(sub == "Translate inline")
-    }
-
     // MARK: - Book actions (static / nil sub-detail)
 
     @Test("Book details has no sub-detail")
@@ -144,7 +131,7 @@ struct ReaderMorePopoverStateTests {
 
     @Test("Static rows are never active")
     func staticRowsNeverActive() {
-        for row in [ReaderMoreMenuRow.bilingualMode, .bookDetails, .shareBook, .exportAnnotations] {
+        for row in [ReaderMoreMenuRow.bookDetails, .shareBook, .exportAnnotations] {
             #expect(!row.isActive(ttsPlaying: true, autoTurnOn: true), "row \(row) should not be active")
         }
     }

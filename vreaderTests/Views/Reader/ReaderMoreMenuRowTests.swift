@@ -7,7 +7,10 @@
 //
 // Design source:
 // `dev-docs/designs/vreader-fidelity-v1/project/vreader-more.jsx`
-// + `design-notes/reader-search-and-more-menu.md` §2.
+// + `design-notes/reader-search-and-more-menu.md` §2. The design
+// depicts six rows; WI-6c ships five — the Bilingual row is deferred
+// (GH #790, no backing toggle state). These tests pin the shipped
+// five-row contract.
 //
 // @coordinates-with: ReaderMoreMenuRow.swift, ReaderMorePopover.swift,
 //   ReaderNotifications.swift
@@ -21,46 +24,50 @@ struct ReaderMoreMenuRowTests {
 
     // MARK: - Cardinality + order
 
-    @Test("Menu has exactly 6 rows")
+    @Test("Menu has exactly 5 rows (design's 6 minus deferred Bilingual)")
     func rowCount() {
-        #expect(ReaderMoreMenuRow.allCases.count == 6)
+        #expect(ReaderMoreMenuRow.allCases.count == 5)
     }
 
     @Test("Row order matches the design bundle (vreader-more.jsx)")
     func rowOrder() {
-        // Mirrors `vreader-more.jsx` top → bottom: Read aloud /
-        // Auto-turn pages / Bilingual mode / (divider) / Book details
-        // / Share book / Export annotations.
+        // Mirrors `vreader-more.jsx` top → bottom minus the deferred
+        // Bilingual row (GH #790): Read aloud / Auto-turn pages /
+        // (divider) / Book details / Share book / Export annotations.
         #expect(ReaderMoreMenuRow.allCases == [
-            .readAloud, .autoTurnPages, .bilingualMode,
+            .readAloud, .autoTurnPages,
             .bookDetails, .shareBook, .exportAnnotations,
         ])
     }
 
+    @Test("Bilingual mode is not a shipped row (deferred — GH #790)")
+    func bilingualRowAbsent() {
+        // The design's Bilingual row has no backing toggle state;
+        // shipping it would be self-designed UI (rule 51). Pin its
+        // absence so a future re-add is a deliberate, tested change.
+        #expect(!ReaderMoreMenuRow.allCases.contains { $0.rawValue == "bilingualMode" })
+    }
+
     // MARK: - Divider placement
 
-    @Test("Divider sits after Bilingual mode (before Book details)")
+    @Test("Divider sits after Auto-turn pages (before Book details)")
     func dividerPlacement() {
         // The design draws one hairline divider between the
-        // reading-controls cluster and the book-action cluster.
-        #expect(ReaderMoreMenuRow.dividerAfter == .bilingualMode)
+        // reading-controls cluster and the book-action cluster. In the
+        // design it follows Bilingual; with that row deferred it
+        // follows Auto-turn — still the cluster boundary.
+        #expect(ReaderMoreMenuRow.dividerAfter == .autoTurnPages)
     }
 
     // MARK: - Toggle vs tap rows
 
     @Test("Auto-turn pages is the only toggle row")
     func toggleRowIdentity() {
-        // `vreader-more.jsx` draws a ToggleSwitch on Auto-turn and on
-        // Bilingual. Auto-turn has real backing state
-        // (`ReaderSettingsStore.autoPageTurn`); Bilingual has none —
-        // bilingual rendering lives entirely in the AI translate
-        // panel, so WI-6c routes Bilingual as a tap row to that
-        // existing surface rather than fabricating a toggle with no
-        // on/off state. Pin: exactly one toggle row, and it's
-        // Auto-turn.
+        // `vreader-more.jsx` draws a ToggleSwitch on Auto-turn. It has
+        // real backing state (`ReaderSettingsStore.autoPageTurn`).
+        // Pin: exactly one toggle row, and it's Auto-turn.
         #expect(ReaderMoreMenuRow.autoTurnPages.isToggle)
         #expect(!ReaderMoreMenuRow.readAloud.isToggle)
-        #expect(!ReaderMoreMenuRow.bilingualMode.isToggle)
         #expect(!ReaderMoreMenuRow.bookDetails.isToggle)
         #expect(!ReaderMoreMenuRow.shareBook.isToggle)
         #expect(!ReaderMoreMenuRow.exportAnnotations.isToggle)
@@ -77,11 +84,6 @@ struct ReaderMoreMenuRowTests {
     @Test("Auto-turn pages routes to .readerMoreToggleAutoTurn")
     func autoTurnRoutes() {
         #expect(ReaderMoreMenuRow.autoTurnPages.notification == .readerMoreToggleAutoTurn)
-    }
-
-    @Test("Bilingual mode routes to .readerMoreBilingual")
-    func bilingualRoutes() {
-        #expect(ReaderMoreMenuRow.bilingualMode.notification == .readerMoreBilingual)
     }
 
     @Test("Book details routes to .readerMoreBookDetails")
@@ -107,8 +109,8 @@ struct ReaderMoreMenuRowTests {
 
     @Test("Every row maps to a distinct notification")
     func everyRowMapsToDistinctNotification() {
-        // Exhaustive over the enum — a future 7th row without a
-        // mapping, or a duplicated mapping, fails here.
+        // Exhaustive over the enum — a future row without a mapping,
+        // or a duplicated mapping, fails here.
         let names = ReaderMoreMenuRow.allCases.map(\.notification)
         #expect(Set(names).count == ReaderMoreMenuRow.allCases.count)
     }
@@ -155,7 +157,6 @@ struct ReaderMoreMenuRowTests {
     func labelsMatchDesign() {
         #expect(ReaderMoreMenuRow.readAloud.label == "Read aloud")
         #expect(ReaderMoreMenuRow.autoTurnPages.label == "Auto-turn pages")
-        #expect(ReaderMoreMenuRow.bilingualMode.label == "Bilingual mode")
         #expect(ReaderMoreMenuRow.bookDetails.label == "Book details")
         #expect(ReaderMoreMenuRow.shareBook.label == "Share book")
         #expect(ReaderMoreMenuRow.exportAnnotations.label == "Export annotations")
@@ -184,7 +185,6 @@ struct ReaderMoreMenuRowTests {
         // contract — do not rename without updating every harness.
         #expect(ReaderMoreMenuRow.readAloud.accessibilityIdentifier == "readerMoreReadAloud")
         #expect(ReaderMoreMenuRow.autoTurnPages.accessibilityIdentifier == "readerMoreAutoTurn")
-        #expect(ReaderMoreMenuRow.bilingualMode.accessibilityIdentifier == "readerMoreBilingual")
         #expect(ReaderMoreMenuRow.bookDetails.accessibilityIdentifier == "readerMoreBookDetails")
         #expect(ReaderMoreMenuRow.shareBook.accessibilityIdentifier == "readerMoreShareBook")
         #expect(ReaderMoreMenuRow.exportAnnotations.accessibilityIdentifier == "readerMoreExportAnnotations")

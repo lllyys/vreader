@@ -245,6 +245,7 @@
 		3EA88656EFB66F3FFBAC7DC5 /* Feature41TTSAutoScrollVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40011CB1AB56C2F4DF2EE91 /* Feature41TTSAutoScrollVerificationTests.swift */; };
 		3EB8343FF1512E959CCEDD65 /* FoliateHighlightTapResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0461A65278F56C6D2271993 /* FoliateHighlightTapResolverTests.swift */; };
 		3EF51E3A99B073988655F8F8 /* LazyDownloadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01041344F18D1DE82B7E100C /* LazyDownloadCoordinator.swift */; };
+		3F690915D18151E5F28EFC40 /* ReaderMorePopoverParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12841E371391B5AD20122A37 /* ReaderMorePopoverParts.swift */; };
 		401E58831F4DC6EB06E53738 /* HTTPTTSConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10C9907D3479515B56338825 /* HTTPTTSConfig.swift */; };
 		40479825289343F4985EF7C7 /* SelectiveRestorePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C1A92ABEE677825BB310F05 /* SelectiveRestorePicker.swift */; };
 		408FD10C4D83D162C1A9D69C /* KeychainService+ProviderProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE50C2E67CBF0EB4747276C1 /* KeychainService+ProviderProfile.swift */; };
@@ -1021,6 +1022,7 @@
 		117731FF4D8AE414141C5ECF /* ImportJobQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportJobQueue.swift; sourceTree = "<group>"; };
 		11D4AD419DD1123CDA21CCD0 /* ReflowableTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReflowableTextSource.swift; sourceTree = "<group>"; };
 		11F6250C22449E7E83591620 /* SyncStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusView.swift; sourceTree = "<group>"; };
+		12841E371391B5AD20122A37 /* ReaderMorePopoverParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderMorePopoverParts.swift; sourceTree = "<group>"; };
 		13404BD286B135797ECF391A /* AccentColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccentColor.swift; sourceTree = "<group>"; };
 		138AEC5BBAD52B075096E5C8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		13A1A428419630E618721E37 /* UnifiedTextRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedTextRenderer.swift; sourceTree = "<group>"; };
@@ -2733,6 +2735,7 @@
 				FF23B1A0CC0BE35DF685C5FA /* ReaderFormatHosts.swift */,
 				2168679A3F58BF907CD746E0 /* ReaderMoreMenuRow.swift */,
 				83BA71E474E9C05E3689CF88 /* ReaderMorePopover.swift */,
+				12841E371391B5AD20122A37 /* ReaderMorePopoverParts.swift */,
 				82BC782199D1750DA66D1BCC /* ReaderNotificationHandlers.swift */,
 				A579625590B25F81679F1EA0 /* ReaderNotificationModifier.swift */,
 				DDB7C7EC41A96F5D4B53E983 /* ReaderNotifications.swift */,
@@ -4494,6 +4497,7 @@
 				83920E15721D7860684628BE /* ReaderLifecycleHelper.swift in Sources */,
 				77B74C8406A03676DD48F636 /* ReaderMoreMenuRow.swift in Sources */,
 				61303A8643869C6334AFB873 /* ReaderMorePopover.swift in Sources */,
+				3F690915D18151E5F28EFC40 /* ReaderMorePopoverParts.swift in Sources */,
 				B69C0AB6A9AECC0E9A1A8692 /* ReaderNotificationHandlers.swift in Sources */,
 				EE0F8A75700F581D5E2D1F3E /* ReaderNotificationModifier.swift in Sources */,
 				5A94BE236411F0F7268F803F /* ReaderNotifications.swift in Sources */,

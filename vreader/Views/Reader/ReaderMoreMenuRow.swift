@@ -10,14 +10,18 @@
 // `dev-docs/designs/vreader-fidelity-v1/project/vreader-more.jsx`
 // + `design-notes/reader-search-and-more-menu.md` §2.
 //
+// Scope note — Bilingual mode row omitted: `vreader-more.jsx` depicts
+// six rows; WI-6c ships five. The "Bilingual mode" row is deferred
+// because it has no backing surface — bilingual translation lives
+// entirely in the AI assistant's translate tab (`AITranslationViewModel`
+// + `BilingualView`), invoked per selection; there is no persistent
+// bilingual-mode toggle state. Rendering a fake toggle, or routing it
+// as a tap row, would both diverge from the designed toggle (rule 51,
+// self-designed UI). GH #790 tracks the backing feature + a design
+// confirmation before the row returns.
+//
 // Routing note: each row maps 1:1 to a `Notification.Name` the
-// `ReaderMorePopover` posts and `ReaderContainerView` observes. Two
-// rows route to interim/adjacent destinations because their designed
-// destination is not yet a committed design:
-//   - `.bilingualMode` — the design draws a toggle, but inline
-//     bilingual rendering has no backing state; it routes to the AI
-//     assistant's translate tab (the existing bilingual surface), so
-//     it renders as a tap row, not a toggle.
+// `ReaderMorePopover` posts and `ReaderContainerView` observes.
 //   - `.bookDetails` — the Book Details sheet is undesigned (design
 //     note §4 defers it; GH #789 tracks it). It routes to the reader
 //     settings panel — the design prototype's own interim punt
@@ -27,32 +31,33 @@
 import Foundation
 
 /// A row in the reader More-menu popover. `CaseIterable.allCases`
-/// returns the six rows in declared (top → bottom) order, matching
-/// `vreader-more.jsx`. `ReaderMorePopover` renders them via
+/// returns the five rows in declared (top → bottom) order, matching
+/// `vreader-more.jsx` minus the deferred Bilingual row (GH #790).
+/// `ReaderMorePopover` renders them via
 /// `ForEach(ReaderMoreMenuRow.allCases)`, inserting the hairline
 /// divider after `dividerAfter`.
 enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
     case readAloud
     case autoTurnPages
-    case bilingualMode
     case bookDetails
     case shareBook
     case exportAnnotations
 
     /// The row after which the design draws its single hairline
     /// divider — splitting the reading-controls cluster (Read aloud /
-    /// Auto-turn / Bilingual) from the book-action cluster (Book
-    /// details / Share / Export).
-    static let dividerAfter: ReaderMoreMenuRow = .bilingualMode
+    /// Auto-turn) from the book-action cluster (Book details / Share /
+    /// Export). In the design the divider sits after Bilingual; with
+    /// that row deferred (GH #790) it sits after Auto-turn — still the
+    /// boundary between the two clusters.
+    static let dividerAfter: ReaderMoreMenuRow = .autoTurnPages
 
     /// Notification posted on tap. `ReaderContainerView` observes all
-    /// six and runs the matching action. The popover does not thread
+    /// five and runs the matching action. The popover does not thread
     /// closures — posting keeps it composable in one place.
     var notification: Notification.Name {
         switch self {
         case .readAloud:         return .readerMoreReadAloud
         case .autoTurnPages:     return .readerMoreToggleAutoTurn
-        case .bilingualMode:     return .readerMoreBilingual
         case .bookDetails:       return .readerMoreBookDetails
         case .shareBook:         return .readerMoreShareBook
         case .exportAnnotations: return .readerMoreExportAnnotations
@@ -71,12 +76,10 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
     }
 
     /// Whether the row renders an inline iOS-style toggle switch
-    /// instead of a chevron. Only `autoTurnPages` is a real toggle —
-    /// it has backing state (`ReaderSettingsStore.autoPageTurn`). The
-    /// design also draws Bilingual as a toggle, but bilingual
-    /// rendering lives entirely in the AI translate panel with no
-    /// settings-level on/off state; WI-6c routes Bilingual to that
-    /// existing surface as a tap row rather than fabricating a toggle.
+    /// instead of a chevron. Only `autoTurnPages` is a toggle — it has
+    /// backing state (`ReaderSettingsStore.autoPageTurn`). (The design
+    /// also draws Bilingual as a toggle, but that row is deferred —
+    /// see the file header + GH #790.)
     var isToggle: Bool {
         self == .autoTurnPages
     }
@@ -86,7 +89,6 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         switch self {
         case .readAloud:         return "Read aloud"
         case .autoTurnPages:     return "Auto-turn pages"
-        case .bilingualMode:     return "Bilingual mode"
         case .bookDetails:       return "Book details"
         case .shareBook:         return "Share book"
         case .exportAnnotations: return "Export annotations"
@@ -95,14 +97,12 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
 
     /// SF Symbol rendered in the row's leading icon chip. Mapped to
     /// the design's icon family: Volume → `speaker.wave.2`, Timer →
-    /// `timer`, Translate → `character.book.closed`, Info →
-    /// `info.circle`, Share → `square.and.arrow.up`, Download →
-    /// `arrow.down.doc`.
+    /// `timer`, Info → `info.circle`, Share → `square.and.arrow.up`,
+    /// Download → `arrow.down.doc`.
     var systemImage: String {
         switch self {
         case .readAloud:         return "speaker.wave.2"
         case .autoTurnPages:     return "timer"
-        case .bilingualMode:     return "character.book.closed"
         case .bookDetails:       return "info.circle"
         case .shareBook:         return "square.and.arrow.up"
         case .exportAnnotations: return "arrow.down.doc"
@@ -116,7 +116,6 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         switch self {
         case .readAloud:         return "readerMoreReadAloud"
         case .autoTurnPages:     return "readerMoreAutoTurn"
-        case .bilingualMode:     return "readerMoreBilingual"
         case .bookDetails:       return "readerMoreBookDetails"
         case .shareBook:         return "readerMoreShareBook"
         case .exportAnnotations: return "readerMoreExportAnnotations"
@@ -148,8 +147,6 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
             guard autoTurnOn else { return "Off" }
             let clamped = min(60, max(1, autoTurnInterval.rounded()))
             return "Every \(Int(clamped))s"
-        case .bilingualMode:
-            return "Translate inline"
         case .bookDetails:
             return nil
         case .shareBook:
@@ -166,7 +163,7 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         switch self {
         case .readAloud:     return ttsPlaying
         case .autoTurnPages: return autoTurnOn
-        case .bilingualMode, .bookDetails, .shareBook, .exportAnnotations:
+        case .bookDetails, .shareBook, .exportAnnotations:
             return false
         }
     }
