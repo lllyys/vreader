@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VReader — Desktop Icon Explorations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100vh;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    background: #1a1815;
+    color: #d8d2c5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .dock-preview {
+    background: linear-gradient(180deg, #b9a986 0%, #897860 100%);
+    padding: 22px 28px 18px;
+    border-radius: 16px;
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 14px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.3),
+      inset 0 1px 0 rgba(255,255,255,0.4),
+      inset 0 -1px 0 rgba(0,0,0,0.1);
+    backdrop-filter: blur(20px);
+  }
+  .dock-shelf-line {
+    height: 1px; background: rgba(0,0,0,0.18); margin-top: 10px;
+  }
+</style>
+
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" rx="45" fill="#f6efde"/>
+    <text x="100" y="135" font-family="Georgia, serif" font-size="120" font-style="italic" font-weight="600" fill="#3a2913" text-anchor="middle">V</text>
+  </svg>
+</template>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="vreader-icon-options.jsx"></script>
+
+<script type="text/babel">
+  const OPTIONS = [
+    { id: 'monogram', name: 'A · Literary Monogram',
+      sub: 'Italic Source Serif V on warm paper with an oxblood rule. Closest match to the prototype\'s classic cover style.',
+      Cmp: IconLiteraryMonogram },
+    { id: 'letterpress', name: 'B · Letterpress',
+      sub: 'Inset V with deep paper shadow. Tactile, premium, references analog printing.',
+      Cmp: IconLetterpress },
+    { id: 'pages', name: 'C · Open Pages',
+      sub: 'V formed by two angled pages on oxblood. Most literal reading metaphor.',
+      Cmp: IconOpenPages },
+    { id: 'spine', name: 'D · Foiled Spine',
+      sub: 'Bookbound cloth + gilt-foil V. Heritage, library-stack reference.',
+      Cmp: IconBookSpine },
+    { id: 'solid', name: 'E · Modern Solid',
+      sub: 'Oxblood field, ivory italic V. Most contemporary, cleanest at 16px.',
+      Cmp: IconModernSolid },
+    { id: 'bookmark', name: 'F · Folded Bookmark',
+      sub: 'V is a tied ribbon bookmark on paper. Object-as-icon — playful but reads instantly.',
+      Cmp: IconBookmark },
+  ];
+
+  function IconCell({ Cmp }) {
+    return (
+      <div style={{
+        background: '#fdfaf3',
+        border: '1px solid rgba(58,41,19,0.08)',
+        borderRadius: 18,
+        padding: '40px 24px 28px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 36,
+      }}>
+        {/* Hero 256 */}
+        <Cmp size={256}/>
+
+        {/* Size ladder */}
+        <div style={{
+          display: 'flex', alignItems: 'flex-end', gap: 28,
+        }}>
+          <SizeBlock label="180" Cmp={Cmp} size={180}/>
+          <SizeBlock label="80"  Cmp={Cmp} size={80}/>
+          <SizeBlock label="40"  Cmp={Cmp} size={40}/>
+          <SizeBlock label="22"  Cmp={Cmp} size={22}/>
+        </div>
+
+        {/* Dock preview */}
+        <div className="dock-preview">
+          <DockIcon glyph="finder"/>
+          <DockIcon glyph="safari"/>
+          <DockIcon glyph="mail"/>
+          <Cmp size={56}/>
+          <DockIcon glyph="notes"/>
+          <DockIcon glyph="music"/>
+          <DockIcon glyph="terminal"/>
+        </div>
+      </div>
+    );
+  }
+
+  function SizeBlock({ label, Cmp, size }) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', height: 180 }}>
+          <Cmp size={size}/>
+        </div>
+        <div style={{
+          fontSize: 11, color: 'rgba(58,41,19,0.55)', letterSpacing: 0.5,
+          fontWeight: 500,
+        }}>{label}px</div>
+      </div>
+    );
+  }
+
+  function DockIcon({ glyph }) {
+    const palette = {
+      finder:   { bg: 'linear-gradient(180deg,#7eb9f0,#3a7bce)', face: true },
+      safari:   { bg: 'radial-gradient(circle,#fff 30%,#4aa2e8 70%)', dot: true },
+      mail:     { bg: 'linear-gradient(180deg,#6ec8ff,#2a82e8)', envelope: true },
+      notes:    { bg: 'linear-gradient(180deg,#fff2b4,#ffd86a)', notes: true },
+      music:    { bg: 'linear-gradient(180deg,#ff8090,#e8345c)', note: true },
+      terminal: { bg: 'linear-gradient(180deg,#1a1a1a,#000)', prompt: true },
+    };
+    const p = palette[glyph];
+    return (
+      <div style={{
+        width: 56, height: 56, borderRadius: 13,
+        background: p.bg,
+        boxShadow: '0 4px 10px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.25)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: glyph === 'terminal' ? '#80f080' : '#fff',
+        fontFamily: 'monospace', fontSize: 18, fontWeight: 700,
+      }}>
+        {p.face && '⌘'}
+        {p.dot && '◎'}
+        {p.envelope && '✉'}
+        {p.notes && <span style={{ color: '#7a5a08' }}>≡</span>}
+        {p.note && '♪'}
+        {p.prompt && '>_'}
+      </div>
+    );
+  }
+
+  function Root() {
+    return (
+      <DesignCanvas
+        title="VReader — Desktop Icon Explorations"
+        subtitle="Six directions for the macOS / iOS app icon. Same palette as the prototype: oxblood #8c2f2f, paper #f6efde, ink #3a2913. Source Serif 4 italic for the V."
+        background="#1a1815"
+      >
+        <DCSection id="options" title="Options" sub="Each shows the icon at 256, then a size ladder (180 / 80 / 40 / 22), then in a macOS dock for context.">
+          {OPTIONS.map(o => (
+            <DCArtboard key={o.id} id={o.id} label={o.name} sub={o.sub}
+              width={780} height={680}>
+              <IconCell Cmp={o.Cmp}/>
+            </DCArtboard>
+          ))}
+        </DCSection>
+      </DesignCanvas>
+    );
+  }
+
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<Root/>);
+</script>
+
+</body>
+</html>

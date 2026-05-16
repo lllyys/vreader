@@ -444,3 +444,300 @@ Fixed the verifier's bug — the toolbar buttons were passing React's SyntheticE
 
 The AI sheet's default tab now shows the full Summary view on first mount.
 
+## User
+
+https://github.com/lllyys/vreader/issues/718
+
+## Assistant
+
+_[tool: github_read_file]_
+
+_[tool: web_fetch]_
+
+Nice — looks like the prototype landed cleanly as Feature #60 with a solid implementation plan. A few thoughts on the risks/cross-refs in the issue, in case any of these need design extensions:
+
+**On the typography metric drift risk (#47 family)**
+Source Serif 4's x-height runs noticeably taller than Georgia at the same nominal size. If the offset-re-projection-on-font-change mitigation gets gnarly, an alternative is to pin a *visual size* per theme (e.g. SS4 17pt ≈ Georgia 18pt) and store both raw `fontSize` and resolved-CSS-px in `ReaderSettings` so position math always operates on resolved px. Happy to spec that if useful.
+
+**On AZW3/MOBI Foliate-js fall-through**
+SS4's static subsets are ~80 KB woff2 each — bundling Regular + Italic + Bold + Bold Italic into the IIFE adds ~320 KB to the 278 KB bundle, basically doubling it. Two ways to ease that: (a) bundle only Regular + Italic and let Foliate synthesize bold; (b) variable-font woff2 — single ~180 KB file covers the whole 300–900 weight range. (b) is what the prototype Google Fonts import uses, so the metrics will match the spec exactly.
+
+**Out-of-scope items needing design extension before implementation**
+- PDF chrome — your top/bottom bars assume reflowable text; PDF needs a page-thumbnail scrubber variant
+- Search results panel — I never designed one; can add to a v1.1 if you want
+- Bilingual inline mode (#56) — Translate tab is point-in-time only; inline needs a different surface
+- Reading-time dashboard (#58) — no surface in current design
+
+Want me to mock any of those, or do a v1.1 round addressing the cross-ref gaps (#15 / #17 presenter re-skins, configurable tap zones from #25)?
+
+## User
+
+up to you
+
+## Assistant
+
+_[tool: update_todos]_
+
+I'll fill three of the gaps that have no current surface — they'll slot into the existing prototype:
+
+1. **Search** — full-text results sheet (in-book + library)
+2. **Reading-time dashboard** — wire up the Stats button I left as a stub
+3. **Tap-on-existing-highlight popover** — the #53 re-skin (Edit note / Change color / Copy / Delete)
+
+PDF chrome I'll leave for a separate pass — it needs a page-thumbnail scrubber that's distinct enough to warrant proper thought.
+
+_[tool: write_file]_
+
+_[tool: write_file]_
+
+_[tool: str_replace_edit]_
+
+Now let me add the highlight-edit popover to the reader and wire all three entry points.
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: show_html]_
+
+_[tool: sleep]_
+
+_[tool: get_webview_logs]_
+
+_[tool: save_screenshot]_
+
+_[tool: done]_
+
+_[tool: fork_verifier_agent]_
+
+Three new surfaces added to the prototype to fill the gaps the issue called out:
+
+**Search** — magnifier in reader top chrome (between back and bookmark) opens a full sheet with This-book / All-books scope toggle, recent searches + FTS5 syntax hints when empty, results grouped by chapter (in-book) or by book (library) with bolded match terms and page numbers.
+
+**Stats dashboard** — Settings sheet → "Stats" pill now opens a real dashboard: 30-day total hero, daily activity chart, four stat tiles (streak / pages / books / wpm), hour-of-day distribution with auto-insight, per-book breakdown with mini bar chart, recent sessions, lifetime summary.
+
+**Highlight edit popover** (#53 re-skin) — tapping any existing highlight in the reader opens a popover showing the quote, color swatches (active one ringed), and four actions: Add/Edit note, Copy, Share, Delete. Add note expands an inline textarea with Save/Cancel.
+
+All wired through the existing app routing — same theme, same Source Serif 4 / Inter / oxblood palette across all three.
+
+## User
+
+Verifier agent check completed
+
+## Assistant
+
+Verifier passed. The prototype now covers the v1 design plus the three v1.1 gap-fills called out in Issue #718's cross-refs (search, stats, highlight edit). Let me know if you want me to tackle the remaining out-of-scope items — PDF chrome variant, bilingual inline mode (#56), configurable tap zones (#25), or the #15/#17 presenter re-skins.
+
+## User
+
+https://github.com/lllyys/vreader/issues/760
+
+## Assistant
+
+_[tool: github_read_file]_
+
+_[tool: str_replace_edit]_
+
+_[tool: write_file]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: str_replace_edit]_
+
+_[tool: web_fetch]_
+
+Got it — this is asking me to formally commit two things the v1 bundle missed:
+1. **Search placement** (I added it in v1.1 but it never made it back into the committed bundle)
+2. **What's in the More menu** (the `...` button is currently a stub)
+
+Decisions I'm making:
+- **Keep Search in the top bar** (where v1.1 put it) — 1-tap access, sits in the navigation cluster while the bottom toolbar is for in-place tools (Contents/Notes/Display/AI).
+- **More menu = popover** from `...` containing TTS (Read aloud), Auto page-turning, Bilingual mode toggle, book details, share, export annotations.
+
+Let me build it.
+
+_[tool: snip]_
+
+_[tool: snip]_
+
+_[tool: done]_
+
+_[tool: write_file]_
+
+_[tool: fork_verifier_agent]_
+
+Resolved Issue #760. Two deliverables:
+
+**1. Prototype** — `VReader Prototype.html` now has the live design:
+- Top chrome: `← Library | Title | 🔍 📑 ⋯` (Search stays where v1.1 put it)
+- `⋯` opens an anchored popover with 6 items split by a divider: Read aloud, Auto-turn pages (toggle), Bilingual mode (toggle), Book details, Share, Export annotations
+
+**2. Design note** — `design-notes/reader-search-and-more-menu.md` documents the decisions and rejection rationale for the other Search-placement options, More-menu contents + states + theme rendering, what's explicitly excluded, and accessibility-identifier mapping for WI-6a. Drop it into `dev-docs/designs/vreader-fidelity-v1/` to close the bundle gap.
+
+## User
+
+Verifier agent check completed
+
+## Assistant
+
+Verifier passed. Issue #760 fully resolved — the prototype demonstrates the design live, and `design-notes/reader-search-and-more-menu.md` is ready to commit alongside the bundle to unblock WI-6b.
+
+## User
+
+Design a desktop icon for this app.
+
+## Assistant
+
+_[tool: copy_starter_component]_
+
+Let me explore some directions. I'll keep the same identity (oxblood + Source Serif 4 + paper tones) and run a few different metaphors past you.
+
+_[tool: write_file]_
+
+_[tool: write_file]_
+
+_[tool: read_file]_
+
+_[tool: grep]_
+
+_[tool: str_replace_edit]_
+
+_[tool: show_html]_
+
+_[tool: sleep]_
+
+_[tool: get_webview_logs]_
+
+_[tool: save_screenshot]_
+
+_[tool: view_image]_
+
+_[tool: done]_
+
+_[tool: save_screenshot]_
+
+_[tool: view_image]_
+
+Six directions on the canvas — `VReader Desktop Icon.html`. Each shows the icon at 256px, a size ladder (180/80/40/22) to test small-size legibility, and a macOS dock preview alongside system icons.
+
+- **A · Literary Monogram** — italic V on warm paper with oxblood rule (closest to the prototype's classic cover style)
+- **B · Letterpress** — recessed/embossed V (most tactile)
+- **C · Open Pages** — V formed by two angled pages on oxblood (most literal reading metaphor)
+- **D · Foiled Spine** — gilt V on bound cloth (heritage/library vibe)
+- **E · Modern Solid** — oxblood field with ivory V (cleanest at 16px)
+- **F · Folded Bookmark** — V as a tied ribbon bookmark
+
+Pan and zoom the canvas to compare. Drag artboards to reorder, double-click any to focus it. Tell me which direction(s) to refine and I'll iterate — could also produce the final 1024×1024 PNG and the `.icns` size set for macOS / iOS once you pick.
+
+## User
+
+a
+
+## Assistant
+
+_[tool: write_file]_
+
+_[tool: write_file]_
+
+_[tool: done]_
+
+Going with A. Let me refine it, build a proper spec sheet with the full asset ladder + context shots, and bake the PNG exports.
+
+_[tool: run_script]_
+
+Now let me bake the actual PNG assets at canonical sizes.
+
+_[tool: view_image]_
+
+_[tool: view_image]_
+
+_[tool: view_image]_
+
+_[tool: run_script]_
+
+_[tool: view_image]_
+
+_[tool: view_image]_
+
+_[tool: view_image]_
+
+The rule is cutting through the top of the V — needs fixing. Let me move the rule below the V (classic title-page treatment) and tighten the proportions.
+
+_[tool: image_metadata]_
+
+_[tool: run_script]_
+
+_[tool: view_image]_
+
+_[tool: run_script]_
+
+_[tool: view_image]_
+
+Let me verify the file actually updated.
+
+_[tool: view_image]_
+
+_[tool: image_metadata]_
+
+_[tool: run_script]_
+
+_[tool: view_image]_
+
+_[tool: view_image]_
+
+The file IS the new layout (verified at pixel level — y=730 is oxblood, y=232 is paper). The view_image is just cached. Let me view a different file to confirm.
+
+_[tool: str_replace_edit]_
+
+_[tool: run_script]_
+
+_[tool: delete_file]_
+
+_[tool: done]_
+
+That's the refined design. Now let me update the spec sheet to match.Final icon delivered. Files in the project:
+
+**`icons/`**
+- `icon-1024.png` through `icon-16.png` — 11 canonical PNG sizes baked with Source Serif 4 italic
+- `icon.svg` — vector source (full variant, 256+)
+- `icon-small.svg` — vector source (V-only, sub-256)
+
+**`VReader Icon.html`** — spec sheet showing the mark, the asset ladder, macOS dock / iOS home / Finder list context, and dark/light wallpaper backdrops.
+
+**The design**
+Italic Source Serif 4 V on a warm paper gradient (#F6EFDE → #EAD8B4), a swelled rule with a tiny oxblood diamond, "READER" letterspaced caption. Below 256 px, the rule + caption drop and the V scales up to fill — same DNA, simpler silhouette.
+
+The PNG production note: I rasterized with the Source Serif 4 italic 600 woff2 loaded into the canvas, so the V's character (the calligraphic entry stroke, the long descender) is intact. The SVG source has the same glyph as live `<text>` — when you ship it inside the app bundle or asset catalog, embed the font file so the SVG renders identically in any tool that opens it.
+

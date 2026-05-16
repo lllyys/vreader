@@ -758,7 +758,7 @@ function TranslateView({ theme, book, context }) {
 // ────────────────────────────────────────────────────
 // App Settings Sheet
 // ────────────────────────────────────────────────────
-function SettingsSheet({ theme, onClose }) {
+function SettingsSheet({ theme, onClose, onOpenStats }) {
   const t = theme || THEMES.paper;
   const Row = ({ icon, color, title, detail, value, last, danger }) => (
     <div style={{
@@ -803,7 +803,7 @@ function SettingsSheet({ theme, onClose }) {
               152 books · 41h read this month
             </div>
           </div>
-          <button style={{
+          <button onClick={() => onOpenStats?.()} style={{
             padding: '6px 12px', borderRadius: 100, border: 'none',
             background: 'rgba(60,40,20,0.08)',
             fontSize: 12, color: t.ink, fontWeight: 500, cursor: 'pointer',

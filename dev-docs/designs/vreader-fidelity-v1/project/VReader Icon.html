@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VReader — Icon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100vh;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    background: #1a1815;
+    color: #d8d2c5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1180px; margin: 0 auto;
+    padding: 64px 56px 96px;
+  }
+  h1 {
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-size: 44px; font-weight: 600; margin: 0 0 4px;
+    color: #f4eee0; letter-spacing: -0.5px;
+  }
+  .sub { color: rgba(216,210,197,0.55); font-size: 14px; max-width: 600px; }
+  h2 {
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-size: 24px; font-weight: 600; margin: 64px 0 18px;
+    color: #f4eee0; letter-spacing: -0.2px;
+  }
+  .section-sub { font-size: 13px; color: rgba(216,210,197,0.5); margin-top: -10px; margin-bottom: 22px; max-width: 600px; line-height: 1.5; }
+
+  .panel {
+    background: #211f1c; border-radius: 16px; padding: 32px;
+    border: 0.5px solid rgba(255,255,255,0.06);
+  }
+
+  .hero {
+    display: flex; gap: 44px; align-items: center;
+    padding: 56px 48px;
+  }
+  .hero-text { flex: 1; }
+  .hero-text .eyebrow {
+    font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: #d6885a; font-weight: 600; margin-bottom: 12px;
+  }
+  .hero-text h3 {
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-weight: 600; font-size: 32px; margin: 0 0 12px;
+    color: #f4eee0; letter-spacing: -0.4px;
+  }
+  .hero-text p { font-size: 14px; line-height: 1.55; color: rgba(216,210,197,0.65); margin: 0 0 16px; max-width: 440px; }
+  .specs { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; font-size: 12.5px; margin-top: 20px; }
+  .specs dt { color: rgba(216,210,197,0.45); font-weight: 500; }
+  .specs dd { margin: 0; color: rgba(216,210,197,0.85); font-family: 'ui-monospace', 'SF Mono', Menlo, monospace; font-size: 11.5px; }
+
+  .ladder {
+    display: flex; align-items: flex-end; gap: 36px; flex-wrap: wrap;
+  }
+  .ladder-item {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .ladder-item .label {
+    font-size: 11px; color: rgba(216,210,197,0.5); letter-spacing: 0.5px;
+    font-family: 'ui-monospace', monospace;
+  }
+  .variant-tag {
+    font-size: 9.5px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(214,136,90,0.15); color: #d6885a; font-weight: 600;
+    letter-spacing: 0.5px; text-transform: uppercase;
+  }
+
+  /* Lifestyle frames */
+  .dock {
+    background: linear-gradient(180deg, rgba(180,160,130,0.95), rgba(120,100,80,0.95));
+    padding: 18px 22px 14px;
+    border-radius: 18px;
+    display: inline-flex; align-items: flex-end; gap: 12px;
+    box-shadow:
+      0 12px 30px rgba(0,0,0,0.4),
+      inset 0 1px 0 rgba(255,255,255,0.4),
+      inset 0 -1px 0 rgba(0,0,0,0.18),
+      0 0 0 0.5px rgba(255,255,255,0.18);
+    backdrop-filter: blur(20px);
+  }
+
+  .finder-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px; border-radius: 8px;
+    background: #2a2724; max-width: 360px;
+    border: 0.5px solid rgba(255,255,255,0.06);
+  }
+  .finder-name {
+    font-family: -apple-system, system-ui;
+    font-size: 13px; color: #e6dfd1;
+  }
+  .finder-meta { font-size: 11px; color: rgba(216,210,197,0.45); margin-top: 1px; }
+
+  .home-screen {
+    width: 320px; height: 480px; border-radius: 36px;
+    background: linear-gradient(180deg, #2d3848 0%, #1a2030 100%);
+    position: relative; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.4), 0 0 0 8px #0a0a0a, 0 0 0 9px rgba(255,255,255,0.06);
+    padding: 28px 24px;
+  }
+  .home-row {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px 12px;
+    margin-top: 22px;
+  }
+  .home-stub {
+    width: 60px; height: 60px; border-radius: 13px;
+    background: rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .home-label {
+    font-size: 10px; text-align: center; color: rgba(255,255,255,0.85);
+    margin-top: 5px; font-family: -apple-system, system-ui;
+  }
+  .ios-status {
+    display: flex; justify-content: space-between; align-items: center;
+    color: #fff; font-size: 13px; font-weight: 600;
+  }
+
+  .color-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  .swatch {
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,0.04); padding: 6px 12px 6px 6px;
+    border-radius: 100px; font-size: 11.5px;
+    font-family: 'ui-monospace', monospace;
+    color: rgba(216,210,197,0.85);
+  }
+  .swatch .chip { width: 18px; height: 18px; border-radius: 9px; }
+</style>
+
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" rx="45" fill="#f6efde"/>
+    <text x="100" y="138" font-family="Georgia, serif" font-size="120" font-style="italic" font-weight="600" fill="#2a1c0b" text-anchor="middle">V</text>
+  </svg>
+</template>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="vreader-icon-final.jsx"></script>
+
+<script type="text/babel">
+  function DockStub({ glyph, bg, color = '#fff' }) {
+    return (
+      <div style={{
+        width: 56, height: 56, borderRadius: 13, background: bg,
+        boxShadow: '0 4px 10px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.25)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color, fontSize: 22, fontFamily: 'monospace', fontWeight: 700,
+      }}>{glyph}</div>
+    );
+  }
+
+  function HomeStub({ ch, bg, color }) {
+    return (
+      <div style={{
+        width: 60, height: 60, borderRadius: 13, background: bg,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: color || '#fff', fontSize: 22, fontFamily: 'monospace', fontWeight: 700,
+        boxShadow: '0 4px 10px rgba(0,0,0,0.18)',
+      }}>{ch}</div>
+    );
+  }
+
+  function App() {
+    return (
+      <div className="page">
+        <h1>VReader — App Icon</h1>
+        <div className="sub">Literary Monogram. Italic Source Serif&nbsp;V on warm paper, with a thin oxblood rule and a "READER" caption. The caption + rule drop at small sizes to keep the V readable.</div>
+
+        {/* Hero */}
+        <h2>Mark</h2>
+        <div className="panel hero">
+          <div style={{ flexShrink: 0 }}>
+            <VReaderIconShadow size={420}/>
+          </div>
+          <div className="hero-text">
+            <div className="eyebrow">Literary Monogram</div>
+            <h3>The V is the brand</h3>
+            <p>An italic <strong>V</strong> set in Source Serif&nbsp;4 — the same serif body face used throughout the reader. Warm paper texture and a thin oxblood rule reference a typographic title page; the cap sets the tone before the user ever opens a book.</p>
+            <dl className="specs">
+              <dt>Glyph</dt><dd>Source Serif 4, italic, 600&nbsp;weight</dd>
+              <dt>Ink</dt><dd>#2A1C0B</dd>
+              <dt>Paper</dt><dd>#F6EFDE → #EAD8B4 (135° gradient)</dd>
+              <dt>Accent</dt><dd>#8C2F2F  (oxblood rule + dot)</dd>
+              <dt>Shape</dt><dd>Squircle, r = 22.37% × side</dd>
+              <dt>Texture</dt><dd>Multiplied fractal noise, 0.36 alpha</dd>
+            </dl>
+            <div className="color-row">
+              <div className="swatch"><div className="chip" style={{ background: '#f6efde' }}/>#F6EFDE</div>
+              <div className="swatch"><div className="chip" style={{ background: '#ead8b4' }}/>#EAD8B4</div>
+              <div className="swatch"><div className="chip" style={{ background: '#2a1c0b' }}/>#2A1C0B</div>
+              <div className="swatch"><div className="chip" style={{ background: '#8c2f2f' }}/>#8C2F2F</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Asset ladder */}
+        <h2>Asset ladder</h2>
+        <div className="section-sub">macOS &amp; iOS canonical sizes. The full mark holds down to 256&nbsp;px; below that the caption and rule drop so the V keeps its weight.</div>
+        <div className="panel">
+          <div className="ladder">
+            {[
+              { px: 1024, tag: 'app store' },
+              { px: 512 },
+              { px: 256 },
+              { px: 180, tag: 'iphone @3x' },
+              { px: 128 },
+              { px: 80 },
+              { px: 64 },
+              { px: 40 },
+              { px: 32 },
+              { px: 22 },
+              { px: 16, tag: 'finder min' },
+            ].map(s => (
+              <div key={s.px} className="ladder-item">
+                <VReaderIconShadow size={s.px}/>
+                <div className="label">{s.px}&times;{s.px}{s.tag ? ` · ${s.tag}` : ''}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Context: macOS dock */}
+        <h2>In context</h2>
+        <div className="section-sub">How the icon sits alongside system glyphs and at typical OS density.</div>
+        <div className="panel" style={{ display: 'flex', flexWrap: 'wrap', gap: 36, alignItems: 'flex-end' }}>
+          {/* macOS dock */}
+          <div>
+            <div style={{ fontSize: 11, color: 'rgba(216,210,197,0.5)', letterSpacing: 0.5, marginBottom: 10 }}>MACOS · DOCK</div>
+            <div className="dock">
+              <DockStub glyph="⌘" bg="linear-gradient(180deg,#7eb9f0,#3a7bce)"/>
+              <DockStub glyph="◎" bg="radial-gradient(circle,#fff 30%,#4aa2e8 70%)" color="#3a7bce"/>
+              <DockStub glyph="✉" bg="linear-gradient(180deg,#6ec8ff,#2a82e8)"/>
+              <DockStub glyph="≡" bg="linear-gradient(180deg,#fff2b4,#ffd86a)" color="#7a5a08"/>
+              <VReaderIcon size={56} radius={13}/>
+              <DockStub glyph="♪" bg="linear-gradient(180deg,#ff8090,#e8345c)"/>
+              <DockStub glyph=">_" bg="linear-gradient(180deg,#1a1a1a,#000)" color="#80f080"/>
+            </div>
+          </div>
+
+          {/* iOS home */}
+          <div>
+            <div style={{ fontSize: 11, color: 'rgba(216,210,197,0.5)', letterSpacing: 0.5, marginBottom: 10 }}>IOS · HOME SCREEN</div>
+            <div className="home-screen">
+              <div className="ios-status">
+                <span>9:41</span>
+                <span style={{ display: 'flex', gap: 4 }}>
+                  <svg width="16" height="11" viewBox="0 0 16 11"><rect x="0" y="7" width="2.8" height="4" fill="#fff" rx="0.5"/><rect x="4.4" y="5" width="2.8" height="6" fill="#fff" rx="0.5"/><rect x="8.8" y="3" width="2.8" height="8" fill="#fff" rx="0.5"/><rect x="13.2" y="0" width="2.8" height="11" fill="#fff" rx="0.5"/></svg>
+                  <svg width="22" height="11" viewBox="0 0 22 11"><rect x="0.5" y="0.5" width="19" height="10" rx="3" stroke="rgba(255,255,255,0.4)" fill="none"/><rect x="1.5" y="1.5" width="17" height="8" rx="2" fill="#fff"/><path d="M21 4v3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                </span>
+              </div>
+              <div className="home-row">
+                <div>
+                  <HomeStub ch="✉" bg="linear-gradient(180deg,#6ec8ff,#2a82e8)"/>
+                  <div className="home-label">Mail</div>
+                </div>
+                <div>
+                  <HomeStub ch="◎" bg="radial-gradient(circle,#fff 30%,#4aa2e8 70%)" color="#3a7bce"/>
+                  <div className="home-label">Safari</div>
+                </div>
+                <div>
+                  <HomeStub ch="≡" bg="linear-gradient(180deg,#fff2b4,#ffd86a)" color="#7a5a08"/>
+                  <div className="home-label">Notes</div>
+                </div>
+                <div>
+                  <HomeStub ch="♪" bg="linear-gradient(180deg,#ff8090,#e8345c)"/>
+                  <div className="home-label">Music</div>
+                </div>
+                <div>
+                  <VReaderIcon size={60} radius={13}/>
+                  <div className="home-label">VReader</div>
+                </div>
+                <div>
+                  <HomeStub ch="✓" bg="linear-gradient(180deg,#9ed870,#5aa838)"/>
+                  <div className="home-label">Reminders</div>
+                </div>
+                <div>
+                  <HomeStub ch="📷" bg="linear-gradient(180deg,#5a5a5a,#222)" color="#fff"/>
+                  <div className="home-label">Camera</div>
+                </div>
+                <div>
+                  <HomeStub ch="📅" bg="#fff" color="#222"/>
+                  <div className="home-label">Calendar</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Finder row */}
+          <div>
+            <div style={{ fontSize: 11, color: 'rgba(216,210,197,0.5)', letterSpacing: 0.5, marginBottom: 10 }}>FINDER · LIST VIEW</div>
+            <div className="finder-row">
+              <VReaderIcon size={32} radius={7}/>
+              <div>
+                <div className="finder-name">VReader.app</div>
+                <div className="finder-meta">42.8 MB · Application · Today, 9:41 AM</div>
+              </div>
+            </div>
+            <div className="finder-row" style={{ marginTop: 6 }}>
+              <VReaderIcon size={16} radius={3.6}/>
+              <div>
+                <div className="finder-name" style={{ fontSize: 11 }}>VReader.app</div>
+                <div className="finder-meta" style={{ fontSize: 9.5 }}>compact list — 16px</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Light wall + dark wall */}
+        <h2>Wallpaper context</h2>
+        <div className="section-sub">The icon needs to hold against both light and dark wallpapers. The paper bg gives enough contrast on dark; the shadow does the work on light.</div>
+        <div className="panel" style={{ display: 'flex', gap: 24, padding: 0, overflow: 'hidden' }}>
+          <div style={{
+            flex: 1, padding: '40px 32px',
+            background: 'linear-gradient(135deg, #d6cdb3 0%, #ad9d77 100%)',
+            display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 32,
+          }}>
+            <VReaderIconShadow size={120}/>
+            <VReaderIconShadow size={80}/>
+            <VReaderIconShadow size={56}/>
+          </div>
+          <div style={{
+            flex: 1, padding: '40px 32px',
+            background: 'linear-gradient(135deg, #2a2218 0%, #0e0a06 100%)',
+            display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 32,
+          }}>
+            <VReaderIconShadow size={120}/>
+            <VReaderIconShadow size={80}/>
+            <VReaderIconShadow size={56}/>
+          </div>
+        </div>
+
+        {/* Sign-off */}
+        <div style={{ marginTop: 56, fontSize: 12, color: 'rgba(216,210,197,0.4)', textAlign: 'center' }}>
+          VReader — Literary Monogram · Source Serif&thinsp;4 italic · Oxblood &amp; paper
+        </div>
+      </div>
+    );
+  }
+
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<App/>);
+</script>
+
+</body>
+</html>

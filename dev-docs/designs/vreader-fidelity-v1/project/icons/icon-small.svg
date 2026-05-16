@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>VReader app icon — small variant</title>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6efde"></stop>
+      <stop offset="1" stop-color="#ead8b4"></stop>
+    </linearGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.5" r="0.75">
+      <stop offset="0.3" stop-color="rgba(60,40,20,0)"></stop>
+      <stop offset="1" stop-color="rgba(60,40,20,0.18)"></stop>
+    </radialGradient>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229"></rect>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="url(#paper)"></rect>
+    <rect width="1024" height="1024" fill="url(#vignette)"></rect>
+    <text x="512" y="730" font-family="Source Serif 4, EB Garamond, Iowan Old Style, Georgia, serif" font-size="820" font-weight="600" font-style="italic" fill="#2a1c0b" text-anchor="middle">V</text>
+  </g>
+</svg>

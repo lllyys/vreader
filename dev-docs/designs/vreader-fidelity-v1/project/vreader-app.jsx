@@ -49,6 +49,14 @@ function App() {
     }]);
   };
 
+  const updateHighlight = (id, patch) => {
+    setHighlights(hs => hs.map(h => h.id === id ? { ...h, ...patch } : h));
+  };
+
+  const deleteHighlight = (id) => {
+    setHighlights(hs => hs.filter(h => h.id !== id));
+  };
+
   const statusBarDark = route === 'reader' && theme.isDark;
 
   return (
@@ -85,12 +93,15 @@ function App() {
           onPageChange={setPageIdx}
           highlights={highlights}
           onAddHighlight={addHighlight}
+          onUpdateHighlight={updateHighlight}
+          onDeleteHighlight={deleteHighlight}
           onClose={closeBook}
           onOpenAI={openAI}
           onOpenTOC={() => setOpenSheet('toc')}
           onOpenHighlights={() => setOpenSheet('highlights')}
           onOpenSettings={() => setOpenSheet('settings')}
           onOpenReaderSettings={() => setOpenSheet('reader-settings')}
+          onOpenSearch={() => setOpenSheet('search')}
         />
       )}
 
@@ -129,6 +140,21 @@ function App() {
       )}
       {openSheet === 'settings' && (
         <SettingsSheet
+          theme={route === 'reader' ? theme : THEMES.paper}
+          onClose={() => setOpenSheet(null)}
+          onOpenStats={() => setOpenSheet('stats')}
+        />
+      )}
+      {openSheet === 'search' && (
+        <SearchSheet
+          theme={route === 'reader' ? theme : THEMES.paper}
+          book={activeBook}
+          onClose={() => setOpenSheet(null)}
+          onJump={() => setOpenSheet(null)}
+        />
+      )}
+      {openSheet === 'stats' && (
+        <StatsSheet
           theme={route === 'reader' ? theme : THEMES.paper}
           onClose={() => setOpenSheet(null)}
         />

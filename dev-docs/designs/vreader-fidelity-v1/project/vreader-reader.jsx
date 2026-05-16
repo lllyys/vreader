@@ -2,13 +2,21 @@
 
 function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
                         onClose, onOpenAI, onOpenTOC, onOpenHighlights,
-                        onOpenSettings, onOpenReaderSettings,
-                        pageIdx, onPageChange, highlights, onAddHighlight, brightness }) {
+                        onOpenSettings, onOpenReaderSettings, onOpenSearch,
+                        pageIdx, onPageChange, highlights, onAddHighlight,
+                        onUpdateHighlight, onDeleteHighlight, brightness }) {
   const [chromeVisible, setChromeVisible] = React.useState(true);
   const [selection, setSelection] = React.useState(null); // {text, paraIdx, range}
+  const [activeHighlight, setActiveHighlight] = React.useState(null); // existing-highlight popover
   const [pageDir, setPageDir] = React.useState(0); // -1 prev, 1 next
   const [animating, setAnimating] = React.useState(false);
   const [bookmarked, setBookmarked] = React.useState(false);
+  const [moreOpen, setMoreOpen] = React.useState(false);
+  const [moreState, setMoreState] = React.useState({
+    autoTurn: false, autoTurnInterval: 30,
+    bilingual: false, bilingualLang: 'Chinese',
+    ttsPlaying: false,
+  });
 
   const pageRef = React.useRef(null);
   const t = theme;
@@ -33,6 +41,7 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
 
   const handleTap = (e) => {
     if (selection) { setSelection(null); return; }
+    if (activeHighlight) { setActiveHighlight(null); return; }
     const rect = pageRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const w = rect.width;
@@ -46,7 +55,17 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
     const para = pageData.paragraphs[paraIdx];
     const firstSentence = para.split(/(?<=[.!?])\s+/)[0];
     setSelection({ text: firstSentence, paraIdx });
+    setActiveHighlight(null);
     setChromeVisible(false);
+  };
+
+  const handleTapHighlight = (highlight, anchorEl) => {
+    setSelection(null);
+    setChromeVisible(false);
+    setActiveHighlight({
+      ...highlight,
+      anchorRect: anchorEl?.getBoundingClientRect(),
+    });
   };
 
   // Background — handles theme + optional photo
@@ -117,6 +136,7 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
           pageDir={pageDir} animating={animating} pageIdx={pageIdx}
           highlights={highlights} selection={selection}
           onLongPress={handleLongPress}
+          onTapHighlight={handleTapHighlight}
         />
 
         {/* Footer — page number + progress */}
@@ -137,7 +157,24 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
         <ReaderTopChrome
           book={book} theme={t} bookmarked={bookmarked}
           onClose={onClose} onToggleBookmark={() => setBookmarked(b => !b)}
-          onMore={onOpenSettings}/>
+          onSearch={onOpenSearch}
+          onMore={() => setMoreOpen(true)}
+          moreActive={moreOpen}/>
+      )}
+
+      {/* More menu popover */}
+      {moreOpen && (
+        <MorePopover
+          theme={t}
+          state={moreState}
+          onToggle={(k) => setMoreState(s => ({ ...s, [k]: !s[k] }))}
+          onAction={(a) => {
+            setMoreOpen(false);
+            if (a === 'tts') setMoreState(s => ({ ...s, ttsPlaying: !s.ttsPlaying }));
+            else if (a === 'details') onOpenSettings?.();
+          }}
+          onClose={() => setMoreOpen(false)}
+        />
       )}
 
       {/* Bottom chrome */}
@@ -163,6 +200,19 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
         />
       )}
 
+      {/* Tap-on-existing-highlight popover */}
+      {activeHighlight && (
+        <HighlightActionPopover
+          highlight={activeHighlight} theme={t}
+          onChangeColor={(color) => { onUpdateHighlight?.(activeHighlight.id, { color }); setActiveHighlight(h => ({ ...h, color })); }}
+          onEditNote={() => setActiveHighlight(h => ({ ...h, editingNote: true }))}
+          onSaveNote={(note) => { onUpdateHighlight?.(activeHighlight.id, { note }); setActiveHighlight(h => ({ ...h, note, editingNote: false })); }}
+          onCopy={() => setActiveHighlight(null)}
+          onDelete={() => { onDeleteHighlight?.(activeHighlight.id); setActiveHighlight(null); }}
+          onClose={() => setActiveHighlight(null)}
+        />
+      )}
+
       {brightnessOverlay}
     </div>
   );
@@ -172,7 +222,7 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
 // Page content (text)
 // ────────────────────────────────────────────────────
 function PageContent({ page, theme, fontFamily, fontSize, lineHeight, margin,
-                       pageDir, animating, pageIdx, highlights, selection, onLongPress }) {
+                       pageDir, animating, pageIdx, highlights, selection, onLongPress, onTapHighlight }) {
   const t = theme;
   const ff = fontFamily === 'serif'
     ? '"Source Serif 4", Georgia, "Times New Roman", serif'
@@ -210,17 +260,20 @@ function PageContent({ page, theme, fontFamily, fontSize, lineHeight, margin,
           theme={t} highlights={highlights.filter(h => h.pageIdx === pageIdx && h.paraIdx === i)}
           selection={selection && selection.paraIdx === i ? selection : null}
           onLongPress={onLongPress}
+          onTapHighlight={onTapHighlight}
         />
       ))}
     </div>
   );
 }
 
-function Paragraph({ text, idx, first, ff, fontSize, lineHeight, theme, highlights, selection, onLongPress }) {
+function Paragraph({ text, idx, first, ff, fontSize, lineHeight, theme, highlights, selection, onLongPress, onTapHighlight }) {
   const timerRef = React.useRef(null);
+  const movedRef = React.useRef(false);
 
   const startHold = (e) => {
     if (e && e.stopPropagation) e.stopPropagation();
+    movedRef.current = false;
     timerRef.current = setTimeout(() => { onLongPress(idx); }, 380);
   };
   const cancelHold = () => clearTimeout(timerRef.current);
@@ -232,7 +285,6 @@ function Paragraph({ text, idx, first, ff, fontSize, lineHeight, theme, highligh
     <p
       onMouseDown={startHold} onMouseUp={cancelHold} onMouseLeave={cancelHold}
       onTouchStart={startHold} onTouchEnd={cancelHold}
-      onClick={(e) => { /* let parent handle */ }}
       style={{
         fontFamily: ff,
         fontSize, lineHeight, color: theme.ink,
@@ -249,12 +301,14 @@ function Paragraph({ text, idx, first, ff, fontSize, lineHeight, theme, highligh
           color: theme.accent, fontWeight: 600,
         }}>{text[0]}</span>
       )}
-      {first ? <Segments segments={segments} skipFirst /> : <Segments segments={segments} />}
+      {first
+        ? <Segments segments={segments} skipFirst onTapHighlight={onTapHighlight} cancelHold={cancelHold}/>
+        : <Segments segments={segments} onTapHighlight={onTapHighlight} cancelHold={cancelHold}/>}
     </p>
   );
 }
 
-function Segments({ segments, skipFirst = false }) {
+function Segments({ segments, skipFirst = false, onTapHighlight, cancelHold }) {
   return segments.map((seg, i) => {
     const text = skipFirst && i === 0 ? seg.text.slice(1) : seg.text;
     if (seg.kind === 'highlight') {
@@ -264,10 +318,19 @@ function Segments({ segments, skipFirst = false }) {
         green: 'rgba(140,200,140,0.4)',
         blue: 'rgba(140,180,232,0.4)',
       };
-      return <span key={i} style={{
+      const handleClick = (e) => {
+        e.stopPropagation();
+        if (cancelHold) cancelHold();
+        if (onTapHighlight && seg.highlight) onTapHighlight(seg.highlight, e.currentTarget);
+      };
+      return <span key={i} onClick={handleClick}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        style={{
         background: colors[seg.color] || colors.yellow,
         padding: '0 1px', borderRadius: 2,
         boxShadow: 'inset 0 -1px 0 rgba(0,0,0,0.04)',
+        cursor: 'pointer',
       }}>{text}</span>;
     }
     if (seg.kind === 'selection') {
@@ -282,11 +345,11 @@ function Segments({ segments, skipFirst = false }) {
 }
 
 function buildSegments(text, highlights, selection) {
-  // marks: array of {start, end, kind, color?}
+  // marks: array of {start, end, kind, color?, highlight?}
   const marks = [];
   highlights.forEach(h => {
     const idx = text.indexOf(h.text);
-    if (idx >= 0) marks.push({ start: idx, end: idx + h.text.length, kind: 'highlight', color: h.color });
+    if (idx >= 0) marks.push({ start: idx, end: idx + h.text.length, kind: 'highlight', color: h.color, highlight: h });
   });
   if (selection) {
     const idx = text.indexOf(selection.text);
@@ -297,7 +360,7 @@ function buildSegments(text, highlights, selection) {
   let pos = 0;
   marks.forEach(m => {
     if (m.start > pos) segs.push({ kind: 'plain', text: text.slice(pos, m.start) });
-    segs.push({ kind: m.kind, color: m.color, text: text.slice(m.start, m.end) });
+    segs.push({ kind: m.kind, color: m.color, highlight: m.highlight, text: text.slice(m.start, m.end) });
     pos = m.end;
   });
   if (pos < text.length) segs.push({ kind: 'plain', text: text.slice(pos) });
@@ -308,7 +371,7 @@ function buildSegments(text, highlights, selection) {
 // ────────────────────────────────────────────────────
 // Top + bottom chrome
 // ────────────────────────────────────────────────────
-function ReaderTopChrome({ book, theme, bookmarked, onClose, onToggleBookmark, onMore }) {
+function ReaderTopChrome({ book, theme, bookmarked, onClose, onToggleBookmark, onSearch, onMore, moreActive }) {
   const t = theme;
   return (
     <div style={{
@@ -335,13 +398,19 @@ function ReaderTopChrome({ book, theme, bookmarked, onClose, onToggleBookmark, o
           fontFamily: '"Source Serif 4", Georgia, serif',
           fontSize: 14, fontWeight: 600, color: t.ink, fontStyle: 'italic',
         }}>{book.title}</div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button onClick={onToggleBookmark} style={iconBtnStyle(t)}>
+        <div style={{ display: 'flex', gap: 0 }}>
+          <button onClick={() => onSearch?.()} style={iconBtnStyle(t)} aria-label="Search">
+            <Icons.Search size={18} color={t.ink} stroke={1.7}/>
+          </button>
+          <button onClick={onToggleBookmark} style={iconBtnStyle(t)} aria-label="Bookmark">
             {bookmarked
               ? <Icons.BookmarkFilled size={18} color={t.accent} stroke={1.8}/>
               : <Icons.Bookmark size={18} color={t.ink} stroke={1.7}/>}
           </button>
-          <button onClick={onMore} style={iconBtnStyle(t)}>
+          <button onClick={onMore} style={{
+            ...iconBtnStyle(t),
+            background: moreActive ? (t.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)') : 'none',
+          }} aria-label="More">
             <Icons.More size={20} color={t.ink} stroke={1.7}/>
           </button>
         </div>
@@ -490,6 +559,143 @@ function SelectionPopover({ selection, theme, onHighlight, onTranslate, onAsk, o
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────
+// Tap-on-existing-highlight popover (#53 re-skin)
+// ────────────────────────────────────────────────────
+function HighlightActionPopover({ highlight, theme, onChangeColor, onEditNote, onSaveNote, onCopy, onDelete, onClose }) {
+  const t = theme;
+  const colors = ['yellow', 'pink', 'green', 'blue'];
+  const colorMap = {
+    yellow: '#f0d25a', pink: '#e88ca0', green: '#8cc88c', blue: '#8cb4e8',
+  };
+  const [noteDraft, setNoteDraft] = React.useState(highlight.note || '');
+  const editing = highlight.editingNote;
+
+  return (
+    <div style={{
+      position: 'absolute', left: 18, right: 18, bottom: 100, zIndex: 60,
+      borderRadius: 18, padding: 14,
+      background: t.isDark ? '#2a2724' : '#fcf8f0',
+      boxShadow: '0 10px 40px rgba(0,0,0,0.25), 0 0 0 0.5px ' + t.rule,
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 10,
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 11, color: t.sub, fontWeight: 600, letterSpacing: 0.5,
+          textTransform: 'uppercase',
+        }}>
+          <div style={{
+            width: 10, height: 10, borderRadius: 2,
+            background: colorMap[highlight.color] || colorMap.yellow,
+          }}/>
+          <span>Highlight</span>
+          {highlight.date && <span style={{ opacity: 0.6, textTransform: 'none', letterSpacing: 0 }}>· {highlight.date}</span>}
+        </div>
+        <button onClick={onClose} style={iconBtnStyle(t)}>
+          <Icons.Close size={14} color={t.sub} stroke={2}/>
+        </button>
+      </div>
+
+      <div style={{
+        fontFamily: '"Source Serif 4", Georgia, serif',
+        fontSize: 13.5, fontStyle: 'italic', color: t.ink, lineHeight: 1.45,
+        marginBottom: 12, paddingLeft: 10,
+        borderLeft: `2px solid ${colorMap[highlight.color] || colorMap.yellow}`,
+      }}>"{highlight.text}"</div>
+
+      {/* Note display or edit */}
+      {editing ? (
+        <div style={{
+          marginBottom: 12, padding: '8px 10px', borderRadius: 8,
+          background: t.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+          border: `1px solid ${t.accent}55`,
+        }}>
+          <textarea
+            value={noteDraft}
+            onChange={e => setNoteDraft(e.target.value)}
+            placeholder="Add a note…"
+            autoFocus
+            rows={3}
+            style={{
+              width: '100%', border: 'none', outline: 'none', background: 'transparent',
+              fontFamily: 'inherit', fontSize: 13, color: t.ink, resize: 'none',
+              lineHeight: 1.4,
+            }}/>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 4 }}>
+            <button onClick={onClose} style={{
+              padding: '4px 10px', borderRadius: 8, border: 'none',
+              background: 'transparent', color: t.sub,
+              fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            }}>Cancel</button>
+            <button onClick={() => onSaveNote(noteDraft)} style={{
+              padding: '4px 12px', borderRadius: 8, border: 'none',
+              background: t.accent, color: '#fff',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}>Save</button>
+          </div>
+        </div>
+      ) : highlight.note ? (
+        <div style={{
+          marginBottom: 12, padding: '8px 10px', borderRadius: 8,
+          background: t.isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+          display: 'flex', gap: 6, alignItems: 'flex-start',
+        }}>
+          <Icons.Note size={12} color={t.sub} stroke={1.7} style={{ marginTop: 3, flexShrink: 0 }}/>
+          <span style={{
+            flex: 1, fontSize: 12.5, color: t.ink, lineHeight: 1.45,
+          }}>{highlight.note}</span>
+        </div>
+      ) : null}
+
+      {/* Color row */}
+      {!editing && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
+          {colors.map(c => (
+            <button key={c} onClick={() => onChangeColor(c)} style={{
+              width: 28, height: 28, borderRadius: 14, padding: 0,
+              background: colorMap[c],
+              border: c === highlight.color
+                ? `2.5px solid ${t.accent}`
+                : '2px solid rgba(255,255,255,0.4)',
+              cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+              transform: c === highlight.color ? 'scale(1.08)' : 'none',
+              transition: 'transform 0.12s',
+            }}/>
+          ))}
+        </div>
+      )}
+
+      {/* Actions row */}
+      {!editing && (
+        <div style={{
+          display: 'flex', gap: 6, paddingTop: 10,
+          borderTop: `0.5px solid ${t.rule}`,
+        }}>
+          {[
+            { icon: Icons.Note,    label: highlight.note ? 'Edit note' : 'Add note', on: onEditNote },
+            { icon: Icons.Share,   label: 'Copy',  on: onCopy },
+            { icon: Icons.Share,   label: 'Share', on: onClose },
+            { icon: Icons.Close,   label: 'Delete', on: onDelete, danger: true },
+          ].map((b, i) => (
+            <button key={i} onClick={b.on} style={{
+              flex: 1, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', gap: 4, padding: '8px 4px',
+              borderRadius: 10, background: 'transparent', border: 'none',
+              cursor: 'pointer', color: b.danger ? '#c44' : t.ink,
+            }}>
+              <b.icon size={17} color={b.danger ? '#c44' : t.ink} stroke={1.7}/>
+              <span style={{ fontSize: 10.5, fontWeight: 500 }}>{b.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

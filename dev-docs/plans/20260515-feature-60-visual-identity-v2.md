@@ -658,3 +658,25 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   round-trip on TXT and MD fixtures); WI-7b is foundational so
   unit + integration tests + audit are sufficient per rule 47 Gate
   5.
+- 2026-05-16 v7: **WI-6b UNBLOCKED — #760 design gap closed.** A
+  fresh claude.ai/design handoff (share token
+  `SEI7UfqurCl2Kuj6ctt__Q`) delivered the in-Reader Search placement
+  + More-menu design that WI-6b was blocked on. The design note
+  `design-notes/reader-search-and-more-menu.md` is committed under
+  `dev-docs/designs/vreader-fidelity-v1/`. Decisions it pins:
+  (1) **Search stays in the top chrome** between back-to-Library and
+  Bookmark (`← Library | Title | 🔍 📑 ⋯`) — bottom toolbar is for
+  in-place tools, Search is a jump-elsewhere action; rejection
+  rationale recorded for the 4 alternatives. (2) **More menu = an
+  anchored popover** from `⋯` with 6 items split by a divider
+  (Read aloud, Auto-turn pages [toggle], Bilingual mode [toggle] |
+  Book details, Share, Export annotations); closed/open/toggles-on
+  states + per-theme rendering (all 5 themes) specified. (3) The
+  top-bar icons get `accessibilityIdentifier`s matching WI-6a's
+  `ReaderChromeButton` enum — `reader.chrome.search`,
+  `reader.chrome.bookmark`, `reader.chrome.more`. Explicitly NOT in
+  the menu: Search (top bar), Display/Contents/Notes/AI (bottom
+  toolbar), Settings (Library-global), renderer switch (DEBUG-only).
+  The note's §4 defers the Book Details sheet contents to a
+  follow-up issue. **WI-6b is no longer `BLOCKED: needs-design` —
+  it may now enter Gate 3.** GH #760 resolved + closed.
