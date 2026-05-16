@@ -35,6 +35,10 @@ struct BookCardView: View {
                 formatBadge: book.formatBadge,
                 cornerRadius: LibraryCardTokens.cardCoverCornerRadius
             )
+            // Per-book reading-progress accents (feature #60 WI-8) —
+            // the in-cover strip while reading, the checkmark when done.
+            .overlay { progressStrip }
+            .overlay(alignment: .topTrailing) { finishedBadge }
 
             // Title — Source Serif 4, 2-line clamp
             Text(book.title)
@@ -71,6 +75,13 @@ struct BookCardView: View {
     var accessibilityLabelForTesting: String { accessibilityLabel }
     var accessibilityHintForTesting: String { accessibilityHint }
 
+    /// Exposed so the WI-8 contract tests can assert which progress
+    /// state the card derives — the strip / checkmark are otherwise
+    /// opaque SwiftUI overlays.
+    var progressStateForTesting: LibraryBookItem.ReadingProgressState {
+        book.readingProgressState
+    }
+
     // MARK: - Private
 
     private let accessibilityHint = "Double tap to open"
@@ -101,5 +112,61 @@ struct BookCardView: View {
             format: book.format,
             readingTimeSeconds: book.totalReadingSeconds
         )
+    }
+
+    // MARK: - Reading-progress accents (feature #60 WI-8)
+
+    /// In-cover progress strip — design `GridView`: a thin bar inset
+    /// from the cover's bottom edge, shown only while the book is
+    /// partially read. The fill spans `fraction` of the track width.
+    ///
+    /// The `GeometryReader` spans the whole cover (it is the overlay
+    /// content); the strip's width and position are computed inside
+    /// the measured space, so the 6pt horizontal inset and 4pt bottom
+    /// inset never depend on outer-`padding` proposal order.
+    @ViewBuilder
+    private var progressStrip: some View {
+        if case .inProgress(let fraction) = book.readingProgressState {
+            GeometryReader { geo in
+                let inset = LibraryCardTokens.coverProgressStripInset
+                let height = LibraryCardTokens.coverProgressStripHeight
+                let radius = LibraryCardTokens.coverProgressStripCornerRadius
+                let trackWidth = max(0, geo.size.width - inset * 2)
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: radius)
+                        .fill(LibraryCardTokens.coverProgressTrack)
+                    RoundedRectangle(cornerRadius: radius)
+                        .fill(LibraryCardTokens.coverProgressFill)
+                        .frame(width: trackWidth * CGFloat(fraction))
+                }
+                .frame(width: trackWidth, height: height)
+                .position(
+                    x: geo.size.width / 2,
+                    y: geo.size.height - height / 2
+                        - LibraryCardTokens.coverProgressStripBottomInset
+                )
+            }
+        }
+    }
+
+    /// Finished checkmark — design `GridView`: a white disc with a
+    /// green check inset from the cover's top-trailing corner, shown
+    /// only when the book is fully read.
+    @ViewBuilder
+    private var finishedBadge: some View {
+        if book.readingProgressState == .finished {
+            Circle()
+                .fill(LibraryCardTokens.coverFinishedBadgeFill)
+                .frame(
+                    width: LibraryCardTokens.finishedBadgeSize,
+                    height: LibraryCardTokens.finishedBadgeSize
+                )
+                .overlay {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(LibraryCardTokens.finished)
+                }
+                .padding(LibraryCardTokens.finishedBadgeInset)
+        }
     }
 }

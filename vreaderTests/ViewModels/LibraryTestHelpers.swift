@@ -72,7 +72,8 @@ extension LibraryBookItem {
         totalReadingSeconds: Int = 0,
         lastReadAt: Date? = nil,
         averagePagesPerHour: Double? = nil,
-        averageWordsPerMinute: Double? = nil
+        averageWordsPerMinute: Double? = nil,
+        progressFraction: Double? = nil
     ) -> LibraryBookItem {
         LibraryBookItem(
             fingerprintKey: fingerprintKey,
@@ -87,7 +88,8 @@ extension LibraryBookItem {
             totalReadingSeconds: totalReadingSeconds,
             lastReadAt: lastReadAt,
             averagePagesPerHour: averagePagesPerHour,
-            averageWordsPerMinute: averageWordsPerMinute
+            averageWordsPerMinute: averageWordsPerMinute,
+            progressFraction: progressFraction
         )
     }
 }

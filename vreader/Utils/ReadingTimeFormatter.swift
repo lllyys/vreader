@@ -84,4 +84,52 @@ enum ReadingTimeFormatter {
     static func formatBadgeLabel(format: String) -> String {
         format.uppercased(with: Locale(identifier: "en_US_POSIX"))
     }
+
+    // MARK: - Relative Last-Read
+
+    /// Formats a "last read" timestamp into a compact relative string
+    /// for the Library list row's metadata line (feature #60 WI-8 —
+    /// the design's `{progress}% · {last-read}` span in `ListView`).
+    ///
+    /// Buckets are deterministic and locale-independent so the output
+    /// is stable across devices/OS versions and unit-testable with a
+    /// fixed `now` — unlike `RelativeDateTimeFormatter`, whose wording
+    /// shifts with locale and SDK:
+    /// - under 1 minute (or a future timestamp) → "Just now"
+    /// - under 1 hour   → "Xm ago"
+    /// - under 1 day    → "Xh ago"
+    /// - exactly 1 day  → "Yesterday"
+    /// - under 1 week   → "Xd ago"
+    /// - under 5 weeks  → "Xw ago"
+    /// - under 1 year   → "Xmo ago"
+    /// - otherwise      → "Xy ago"
+    ///
+    /// A future `date` (clock skew between the position write and the
+    /// render) falls into the "Just now" bucket rather than producing
+    /// a negative count.
+    static func formatRelativeLastRead(
+        from date: Date,
+        relativeTo now: Date = Date()
+    ) -> String {
+        let elapsed = now.timeIntervalSince(date)
+        if elapsed < 60 { return "Just now" }
+
+        let minutes = Int(elapsed / 60)
+        if minutes < 60 { return "\(minutes)m ago" }
+
+        let hours = Int(elapsed / 3_600)
+        if hours < 24 { return "\(hours)h ago" }
+
+        let days = Int(elapsed / 86_400)
+        if days == 1 { return "Yesterday" }
+        if days < 7 { return "\(days)d ago" }
+
+        let weeks = days / 7
+        if weeks < 5 { return "\(weeks)w ago" }
+
+        let months = days / 30
+        if months < 12 { return "\(months)mo ago" }
+
+        return "\(days / 365)y ago"
+    }
 }

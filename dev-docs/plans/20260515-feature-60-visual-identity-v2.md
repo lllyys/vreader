@@ -1051,3 +1051,21 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   WI-9's `LibraryView`. This is data-model-blocked, not
   design-blocked; a follow-up WI adds the progress field. Recorded
   so the gap is tracked, not silently dropped.
+- 2026-05-16 v12: **WI-8 progress UI implemented (v11 deferral
+  reversed).** Codex Gate 4 audit of the WI-8 PR found the v11
+  "data-model-blocked" assessment wrong: `Locator.totalProgression`
+  (`Double?`) already carries the per-book fraction, reachable via
+  `Book.readingPosition?.locator.totalProgression`. The fix round
+  added `progressFraction: Double?` to `LibraryBookItem`, projected
+  it in `PersistenceActor+Library.fetchAllLibraryBooks()`, and built
+  the design's progress UI: the in-cover progress strip + finished
+  checkmark on `BookCardView`, and the `%·last-read` / `Finished`
+  metadata span + trailing oxblood ring on `BookRowView`. A shared
+  `LibraryBookItem.ReadingProgressState` enum centralises the
+  notStarted / inProgress / finished boundary so the card and row
+  agree. No WI-9 collision — the projection is local to
+  `LibraryBookItem` + `PersistenceActor+Library`; `LibraryViewModel`
+  carries the new field through untouched. The design's
+  `progress === 0 → "{n} pages"` branch is intentionally rendered as
+  the format chip alone: `LibraryBookItem` carries no page count, and
+  substituting a different metric would be self-designed UI.

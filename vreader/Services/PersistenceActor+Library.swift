@@ -45,7 +45,8 @@ extension PersistenceActor: LibraryPersisting {
                 averageWordsPerMinute: stats?.averageWordsPerMinute,
                 fileState: BookFileState(rawValue: book.fileState) ?? .local,
                 blobPath: book.blobPath,
-                collectionNames: book.bookCollections.map { $0.name }
+                collectionNames: book.bookCollections.map { $0.name },
+                progressFraction: book.readingPosition?.locator.totalProgression
             )
         }
     }

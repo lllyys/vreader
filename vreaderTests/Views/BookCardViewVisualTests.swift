@@ -25,7 +25,8 @@ struct BookCardViewVisualTests {
         title: String = "Pride and Prejudice",
         author: String? = "Jane Austen",
         format: String = "epub",
-        readingSeconds: Int = 0
+        readingSeconds: Int = 0,
+        progressFraction: Double? = nil
     ) -> LibraryBookItem {
         LibraryBookItem(
             fingerprintKey: "epub:\(String(repeating: "a", count: 64)):1024",
@@ -39,7 +40,8 @@ struct BookCardViewVisualTests {
             isFavorite: false,
             totalReadingSeconds: readingSeconds,
             averagePagesPerHour: nil,
-            averageWordsPerMinute: nil
+            averageWordsPerMinute: nil,
+            progressFraction: progressFraction
         )
     }
 
@@ -142,6 +144,37 @@ struct BookCardViewVisualTests {
             let view = BookCardView(book: makeBook(format: format))
             #expect(!view.accessibilityLabelForTesting.isEmpty)
         }
+    }
+
+    // MARK: - Reading-progress accents (feature #60 WI-8)
+
+    @Test("Card with no reading position reports notStarted")
+    func cardNotStartedWithoutProgress() {
+        let view = BookCardView(book: makeBook(progressFraction: nil))
+        #expect(view.progressStateForTesting == .notStarted)
+    }
+
+    @Test("Card with a zero fraction reports notStarted")
+    func cardNotStartedAtZero() {
+        let view = BookCardView(book: makeBook(progressFraction: 0))
+        #expect(view.progressStateForTesting == .notStarted)
+    }
+
+    @Test("Card with a partial fraction reports inProgress")
+    func cardInProgressAtPartialFraction() {
+        let view = BookCardView(book: makeBook(progressFraction: 0.42))
+        #expect(view.progressStateForTesting == .inProgress(0.42))
+    }
+
+    @Test("Card at full progress reports finished")
+    func cardFinishedAtFullProgress() {
+        let view = BookCardView(book: makeBook(progressFraction: 1.0))
+        #expect(view.progressStateForTesting == .finished)
+    }
+
+    @Test("Finished green token is the design #3a6a5a")
+    func finishedTokenMatchesDesign() {
+        assertColor(LibraryCardTokens.finished, rgb: (0x3a, 0x6a, 0x5a))
     }
 
     // MARK: - Color assertion helper

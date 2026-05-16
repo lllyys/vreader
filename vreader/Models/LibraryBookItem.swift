@@ -37,9 +37,17 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
     /// when the user selects a collection in the sidebar. Bug #155.
     let collectionNames: [String]
 
+    /// Fractional reading progress in `[0, 1]`, or `nil` when the book
+    /// has never been opened / no reading position is recorded yet.
+    /// Projected from `ReadingPosition.locator.totalProgression`
+    /// (feature #60 WI-8). Drives the grid-card progress strip /
+    /// finished checkmark and the list-row progress ring.
+    let progressFraction: Double?
+
     /// Explicit memberwise init with feature-#47 + bug-#155 defaults so
     /// existing call sites that pre-date `fileState`/`blobPath`/`collectionNames`
     /// continue to compile; new call sites pass the persisted values through.
+    /// `progressFraction` defaults to `nil` for the same back-compat reason.
     init(
         fingerprintKey: String,
         title: String,
@@ -56,7 +64,8 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
         averageWordsPerMinute: Double?,
         fileState: BookFileState = .local,
         blobPath: String? = nil,
-        collectionNames: [String] = []
+        collectionNames: [String] = [],
+        progressFraction: Double? = nil
     ) {
         self.fingerprintKey = fingerprintKey
         self.title = title
@@ -74,6 +83,38 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
         self.fileState = fileState
         self.blobPath = blobPath
         self.collectionNames = collectionNames
+        self.progressFraction = progressFraction
+    }
+
+    // MARK: - Reading-progress state (feature #60 WI-8)
+
+    /// Three-way reading-progress state the Library card + row render,
+    /// mirroring the design's `progress === 0 / 0 < p < 1 / p === 1`
+    /// branches in `vreader-library.jsx`. Centralised here so the grid
+    /// card and the list row agree on the boundary rules and the
+    /// classification is unit-testable without a SwiftUI render.
+    enum ReadingProgressState: Sendable, Equatable {
+        /// Never opened, or no position recorded. The card shows no
+        /// progress strip; the row shows the format chip alone.
+        case notStarted
+        /// Partially read — associated value is the progress fraction,
+        /// strictly between 0 and 1.
+        case inProgress(Double)
+        /// Fully read (`progressFraction >= 1`). The card shows the
+        /// finished checkmark; the row shows the "Finished" label.
+        case finished
+    }
+
+    /// Classifies `progressFraction` into `ReadingProgressState`.
+    /// `nil`, non-finite (NaN / ∞), zero, or negative fractions are
+    /// `.notStarted`; `>= 1.0` is `.finished` (tolerating rounding
+    /// drift past 1); anything strictly between is `.inProgress`. The
+    /// view layer reads this rather than re-deriving the boundaries.
+    var readingProgressState: ReadingProgressState {
+        guard let fraction = progressFraction,
+              fraction.isFinite, fraction > 0 else { return .notStarted }
+        if fraction >= 1.0 { return .finished }
+        return .inProgress(fraction)
     }
 
     // MARK: - File-state helpers (feature #47 WI-5)

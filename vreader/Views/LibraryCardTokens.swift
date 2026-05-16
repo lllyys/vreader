@@ -23,6 +23,13 @@
 // - **`accent` reuses `AccentColor.light`'s oxblood** (`#8c2f2f`) so
 //   the Library badge accent stays coherent with the rest of the
 //   feature-#60 chrome rather than drifting to a Library-local hue.
+//   `accent` is also the swept-arc colour of the list-row progress
+//   ring.
+// - **List-container tokens** (`listCardBackground`, `listRowDivider`,
+//   `listCardCornerRadius`) are pinned in the WI-8 token pass but
+//   consumed by the WI-9 Library-container re-skin. The design file
+//   is shared, so the spec lives in one home rather than splitting
+//   the same `vreader-library.jsx` constants across two PRs.
 //
 // @coordinates-with: BookCardView.swift, BookRowView.swift,
 //   AccentColor.swift, ReaderThemeV2.swift,
@@ -58,6 +65,24 @@ enum LibraryCardTokens {
     /// Cover hairline border — keeps light-edged covers delineated
     /// against the warm-paper grid (carries bug #107's intent forward).
     static let coverBorder = rgb(0x3c, 0x28, 0x14, alpha: 0.14)
+
+    /// Finished-state green — `#3a6a5a`. The grid-card finished
+    /// checkmark glyph and the list-row "Finished" label both use it.
+    static let finished = rgb(0x3a, 0x6a, 0x5a)
+
+    /// In-cover progress-strip track — `rgba(255,255,255,0.2)`. Sits
+    /// on the cover art, so it is white-on-image, not on paper.
+    static let coverProgressTrack = Color.white.opacity(0.2)
+
+    /// In-cover progress-strip fill — `rgba(255,255,255,0.9)`.
+    static let coverProgressFill = Color.white.opacity(0.9)
+
+    /// Finished-checkmark disc fill — `rgba(255,255,255,0.95)`.
+    static let coverFinishedBadgeFill = Color.white.opacity(0.95)
+
+    /// List-row progress-ring track — `rgba(60,40,20,0.12)` warm wash.
+    /// The ring's swept arc uses `accent` (oxblood).
+    static let progressRingTrack = rgb(0x3c, 0x28, 0x14, alpha: 0.12)
 
     // MARK: - Layout constants
 
@@ -99,6 +124,26 @@ enum LibraryCardTokens {
 
     /// List-card corner radius — design `borderRadius: 20`.
     static let listCardCornerRadius: CGFloat = 20
+
+    /// In-cover progress strip (design `GridView`): a 2.5pt-tall bar
+    /// inset 6pt horizontally and 4pt up from the cover's bottom edge,
+    /// with a 2pt corner radius.
+    static let coverProgressStripHeight: CGFloat = 2.5
+    static let coverProgressStripInset: CGFloat = 6
+    static let coverProgressStripBottomInset: CGFloat = 4
+    static let coverProgressStripCornerRadius: CGFloat = 2
+
+    /// Finished checkmark disc (design `GridView`): an 18pt circle
+    /// inset 6pt from the cover's top-trailing corner.
+    static let finishedBadgeSize: CGFloat = 18
+    static let finishedBadgeInset: CGFloat = 6
+
+    /// List-row progress ring (design `ListView`): a 30pt box holding
+    /// a radius-12 circle (24pt drawn diameter → 3pt inset each side)
+    /// stroked at 2pt.
+    static let progressRingSize: CGFloat = 30
+    static let progressRingInset: CGFloat = 3
+    static let progressRingLineWidth: CGFloat = 2
 
     // MARK: - Serif title font
 

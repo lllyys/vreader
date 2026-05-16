@@ -197,3 +197,65 @@ struct ReadingTimeFormatterTests {
         #expect(ReadingTimeFormatter.formatBadgeLabel(format: "") == "")
     }
 }
+
+@Suite("ReadingTimeFormatter.formatRelativeLastRead (feature #60 WI-8)")
+struct ReadingTimeFormatterRelativeTests {
+
+    /// A fixed reference instant so every bucket is deterministic.
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func ago(_ seconds: TimeInterval) -> Date {
+        now.addingTimeInterval(-seconds)
+    }
+
+    @Test func underAMinuteIsJustNow() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(30), relativeTo: now) == "Just now")
+    }
+
+    @Test func aFutureTimestampIsJustNow() {
+        // Clock skew between the position write and the render.
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: now.addingTimeInterval(500), relativeTo: now) == "Just now")
+    }
+
+    @Test func exactlySixtySecondsIsOneMinute() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(60), relativeTo: now) == "1m ago")
+    }
+
+    @Test func minutesBucket() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(45 * 60), relativeTo: now) == "45m ago")
+    }
+
+    @Test func hoursBucket() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(3 * 3_600), relativeTo: now) == "3h ago")
+    }
+
+    @Test func oneDayIsYesterday() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(25 * 3_600), relativeTo: now) == "Yesterday")
+    }
+
+    @Test func daysBucket() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(3 * 86_400), relativeTo: now) == "3d ago")
+    }
+
+    @Test func weeksBucket() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(10 * 86_400), relativeTo: now) == "1w ago")
+    }
+
+    @Test func monthsBucket() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(95 * 86_400), relativeTo: now) == "3mo ago")
+    }
+
+    @Test func yearsBucket() {
+        #expect(ReadingTimeFormatter.formatRelativeLastRead(
+            from: ago(800 * 86_400), relativeTo: now) == "2y ago")
+    }
+}

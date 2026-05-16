@@ -27,7 +27,9 @@ struct BookRowViewVisualTests {
         author: String? = "David Deutsch",
         format: String = "pdf",
         readingSeconds: Int = 0,
-        fileState: BookFileState = .local
+        fileState: BookFileState = .local,
+        progressFraction: Double? = nil,
+        lastReadAt: Date? = nil
     ) -> LibraryBookItem {
         LibraryBookItem(
             fingerprintKey: "pdf:\(String(repeating: "b", count: 64)):2048",
@@ -40,9 +42,11 @@ struct BookRowViewVisualTests {
             lastOpenedAt: nil,
             isFavorite: false,
             totalReadingSeconds: readingSeconds,
+            lastReadAt: lastReadAt,
             averagePagesPerHour: nil,
             averageWordsPerMinute: nil,
-            fileState: fileState
+            fileState: fileState,
+            progressFraction: progressFraction
         )
     }
 
@@ -177,6 +181,50 @@ struct BookRowViewVisualTests {
     func localFileStateHasNoSymbol() {
         let view = BookRowView(book: makeBook(fileState: .local))
         #expect(view.fileStateBadgeSymbolForTesting == nil)
+    }
+
+    // MARK: - Reading-progress display (feature #60 WI-8)
+
+    @Test("Row with no reading position shows no progress span")
+    func rowNotStartedHasNoSpan() {
+        let view = BookRowView(book: makeBook(progressFraction: nil))
+        #expect(view.progressStateForTesting == .notStarted)
+        #expect(view.progressMetadataTextForTesting == nil)
+    }
+
+    @Test("Row in progress shows percent and a relative last-read")
+    func rowInProgressShowsPercentAndLastRead() {
+        let view = BookRowView(book: makeBook(
+            progressFraction: 0.37,
+            lastReadAt: Date(timeIntervalSinceNow: -3 * 86_400)
+        ))
+        // The relative suffix shifts with run time; the percent prefix
+        // and separator are the deterministic part of the contract.
+        #expect(view.progressMetadataTextForTesting?.hasPrefix("37% · ") == true)
+    }
+
+    @Test("Row in progress with no last-read shows percent only")
+    func rowInProgressNoLastReadShowsPercentOnly() {
+        let view = BookRowView(book: makeBook(
+            progressFraction: 0.6, lastReadAt: nil
+        ))
+        #expect(view.progressMetadataTextForTesting == "60%")
+    }
+
+    @Test("Row at full progress shows the Finished label")
+    func rowFinishedShowsFinishedLabel() {
+        let view = BookRowView(book: makeBook(progressFraction: 1.0))
+        #expect(view.progressStateForTesting == .finished)
+        #expect(view.progressMetadataTextForTesting == "Finished")
+    }
+
+    @Test("Progress-ring track is the design rgba(60,40,20,0.12)")
+    func progressRingTrackMatchesDesign() {
+        assertColor(
+            LibraryCardTokens.progressRingTrack,
+            rgb: (0x3c, 0x28, 0x14),
+            alpha: 0.12
+        )
     }
 
     // MARK: - Color assertion helper

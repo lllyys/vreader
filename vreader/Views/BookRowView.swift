@@ -59,22 +59,84 @@ struct BookRowView: View {
                         .lineLimit(1)
                 }
 
-                // Format badge OR file-state indicator (feature #47).
-                fileStateBadge
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1.5)
-                    .background(badgeBackground)
-                    .foregroundStyle(badgeForeground)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .padding(.top, 3)
+                metadataLine
             }
 
             Spacer(minLength: 0)
+
+            // Trailing reading-progress ring (feature #60 WI-8).
+            progressRing
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
+    }
+
+    // MARK: - Metadata line (feature #60 WI-8)
+
+    /// The format / file-state chip followed by the reading-progress
+    /// span — design `ListView`'s `gap:8` metadata row.
+    private var metadataLine: some View {
+        HStack(spacing: 8) {
+            // Format badge OR file-state indicator (feature #47).
+            fileStateBadge
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1.5)
+                .background(badgeBackground)
+                .foregroundStyle(badgeForeground)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+
+            if let progressText = progressMetadataText {
+                Text(progressText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(progressMetadataColor)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.top, 3)
+    }
+
+    /// Progress span text per `ReadingProgressState`:
+    /// - `.inProgress` → "X%", plus " · last-read" when a last-read
+    ///   timestamp exists.
+    /// - `.finished`   → "Finished".
+    /// - `.notStarted` → nil. The design's "{n} pages" branch needs a
+    ///   page count `LibraryBookItem` does not carry; the chip stands
+    ///   alone here rather than inventing a substitute metric.
+    private var progressMetadataText: String? {
+        switch book.readingProgressState {
+        case .notStarted:
+            return nil
+        case .finished:
+            return "Finished"
+        case .inProgress(let fraction):
+            let percent = Int((fraction * 100).rounded())
+            if let lastReadAt = book.lastReadAt {
+                let relative = ReadingTimeFormatter.formatRelativeLastRead(
+                    from: lastReadAt
+                )
+                return "\(percent)% · \(relative)"
+            }
+            return "\(percent)%"
+        }
+    }
+
+    /// Progress span colour — the finished green for a completed book,
+    /// otherwise the warm sub-text token.
+    private var progressMetadataColor: Color {
+        book.readingProgressState == .finished
+            ? LibraryCardTokens.finished
+            : LibraryCardTokens.subText
+    }
+
+    /// Trailing oxblood progress ring — shown only while the book is
+    /// partially read (design `ListView`).
+    @ViewBuilder
+    private var progressRing: some View {
+        if case .inProgress(let fraction) = book.readingProgressState {
+            LibraryProgressRing(progress: fraction)
+        }
     }
 
     // MARK: - File-state badge (feature #47 WI-5)
@@ -154,6 +216,16 @@ struct BookRowView: View {
     var accessibilityHintForTesting: String { accessibilityHint }
     var fileStateBadgeTextForTesting: String { fileStateBadgeText }
     var fileStateBadgeSymbolForTesting: String? { fileStateBadgeSymbol }
+
+    /// The reading-progress span text, or nil for a not-started book —
+    /// pins the `X% · last-read` / `Finished` contract without a render.
+    var progressMetadataTextForTesting: String? { progressMetadataText }
+
+    /// Which progress state the row derives — the span and trailing
+    /// ring are otherwise opaque SwiftUI subviews.
+    var progressStateForTesting: LibraryBookItem.ReadingProgressState {
+        book.readingProgressState
+    }
 
     // MARK: - Private
 

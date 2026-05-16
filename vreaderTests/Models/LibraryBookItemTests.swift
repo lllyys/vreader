@@ -90,6 +90,70 @@ struct LibraryBookItemTests {
     }
 }
 
+@Suite("LibraryBookItem.ReadingProgressState (feature #60 WI-8)")
+struct LibraryBookItemProgressStateTests {
+
+    @Test("nil progress fraction is notStarted")
+    func nilFractionIsNotStarted() {
+        #expect(LibraryBookItem.stub(progressFraction: nil)
+            .readingProgressState == .notStarted)
+    }
+
+    @Test("zero progress is notStarted")
+    func zeroFractionIsNotStarted() {
+        #expect(LibraryBookItem.stub(progressFraction: 0)
+            .readingProgressState == .notStarted)
+    }
+
+    @Test("a negative fraction is notStarted")
+    func negativeFractionIsNotStarted() {
+        #expect(LibraryBookItem.stub(progressFraction: -0.3)
+            .readingProgressState == .notStarted)
+    }
+
+    @Test("NaN progress is notStarted")
+    func nanFractionIsNotStarted() {
+        #expect(LibraryBookItem.stub(progressFraction: .nan)
+            .readingProgressState == .notStarted)
+    }
+
+    @Test("infinite progress is notStarted")
+    func infiniteFractionIsNotStarted() {
+        #expect(LibraryBookItem.stub(progressFraction: .infinity)
+            .readingProgressState == .notStarted)
+    }
+
+    @Test("a tiny positive fraction is inProgress")
+    func tinyFractionIsInProgress() {
+        #expect(LibraryBookItem.stub(progressFraction: 0.0001)
+            .readingProgressState == .inProgress(0.0001))
+    }
+
+    @Test("a mid fraction is inProgress carrying that fraction")
+    func midFractionIsInProgress() {
+        #expect(LibraryBookItem.stub(progressFraction: 0.5)
+            .readingProgressState == .inProgress(0.5))
+    }
+
+    @Test("just under 1.0 is inProgress, not finished")
+    func justUnderOneIsInProgress() {
+        #expect(LibraryBookItem.stub(progressFraction: 0.9999)
+            .readingProgressState == .inProgress(0.9999))
+    }
+
+    @Test("exactly 1.0 is finished")
+    func exactlyOneIsFinished() {
+        #expect(LibraryBookItem.stub(progressFraction: 1.0)
+            .readingProgressState == .finished)
+    }
+
+    @Test("past 1.0 is finished (rounding-drift tolerance)")
+    func pastOneIsFinished() {
+        #expect(LibraryBookItem.stub(progressFraction: 1.5)
+            .readingProgressState == .finished)
+    }
+}
+
 @Suite("LibrarySortOrder")
 struct LibrarySortOrderTests {
 
