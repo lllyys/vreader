@@ -67,6 +67,7 @@ struct FoliateSpikeView: View {
             presenter: highlightActionPresenter
         )
         .foliateSelectionHandler(fingerprintKey: fingerprintKey)
+        .foliateHighlightRestoreHandler(fingerprintKey: fingerprintKey)
         .onReceive(NotificationCenter.default.publisher(for: .readerBookmarkRequested)) { _ in
             guard let key = fingerprintKey,
                   let fp = DocumentFingerprint(canonicalKey: key) else { return }
@@ -416,6 +417,44 @@ extension FoliateSpikeView {
                         name: .foliateSelectionDetected,
                         object: nil,
                         userInfo: info
+                    )
+                }
+
+            case "create-overlay":
+                // Bug #207 / GH #765: Foliate-js fires `create-overlay`
+                // when a section's SVG overlay is freshly attached and
+                // ready to accept `readerAPI.addAnnotation` calls. The
+                // body shape is `{index: Int}` (foliate-host.js:48-52).
+                // Without this case the message dropped silently and
+                // saved AZW3/MOBI highlights never re-painted on book
+                // reopen (the create-on-tap path from Bug #201 worked
+                // because it ran inside an already-open overlay; the
+                // restore-on-load path was never wired).
+                //
+                // We post `.foliateOverlayReadyForSection` to the outer
+                // view (which holds `modelContext`); `FoliateSpikeView+
+                // Restore` queries persistence and fans the saved
+                // highlights out as per-CFI
+                // `.foliateRequestAnnotationJSCreate` events the
+                // existing observer at line 301 already evaluates.
+                //
+                // `addAnnotation` is idempotent on the JS side
+                // (view.js:387 `overlayer.remove(value)` precedes add),
+                // so refiring on every section's create-overlay is
+                // safe — and necessary, because highlights targeting
+                // later-loaded sections can't paint until their own
+                // overlay exists. Without a `fingerprintKey`, the
+                // restore can't route, so drop silently rather than
+                // emit a notification the modifier can't filter.
+                if let index = FoliateMessageParser.parseCreateOverlay(body),
+                   let key = self.fingerprintKey {
+                    NotificationCenter.default.post(
+                        name: .foliateOverlayReadyForSection,
+                        object: nil,
+                        userInfo: [
+                            "sectionIndex": index,
+                            "fingerprintKey": key,
+                        ]
                     )
                 }
 

@@ -719,3 +719,52 @@ struct CrossCuttingTests {
         #expect(event != nil)
     }
 }
+
+// MARK: - parseCreateOverlay (Bug #207 / GH #765)
+
+/// Foliate-js emits `create-overlay` (foliate-host.js:48-52) when a
+/// section's SVG overlay is freshly initialized and ready to accept
+/// `readerAPI.addAnnotation` calls. The body shape is `{index: Int}`
+/// — section index of the just-rendered section. Parsing it as a
+/// typed Int? keeps the dispatcher in `FoliateSpikeView.handleMessage`
+/// free of body-shape introspection.
+@Suite("FoliateMessageParser - parseCreateOverlay")
+struct ParseCreateOverlayTests {
+
+    @Test("happy path with index returns the int")
+    func happyPath() {
+        let body: [String: Any] = ["index": 7]
+        #expect(FoliateMessageParser.parseCreateOverlay(body) == 7)
+    }
+
+    @Test("index 0 returns 0 (not nil)")
+    func zeroIndex() {
+        // Section 0 is the typical first overlay event; it must not
+        // be confused with "missing index". (Caught in similar
+        // parsers via `as? Int` returning Optional<Int>(0).)
+        let body: [String: Any] = ["index": 0]
+        #expect(FoliateMessageParser.parseCreateOverlay(body) == 0)
+    }
+
+    @Test("missing index returns nil")
+    func missingIndex() {
+        let body: [String: Any] = ["unknown": 5]
+        #expect(FoliateMessageParser.parseCreateOverlay(body) == nil)
+    }
+
+    @Test("non-dict body returns nil")
+    func nonDict() {
+        #expect(FoliateMessageParser.parseCreateOverlay(NSNull()) == nil)
+        #expect(FoliateMessageParser.parseCreateOverlay(42) == nil)
+        #expect(FoliateMessageParser.parseCreateOverlay("string") == nil)
+    }
+
+    @Test("non-integer index returns nil (does NOT coerce from Double)")
+    func nonIntIndex() {
+        // Section indices are integers by foliate-host.js contract.
+        // A drifted Double payload should fail loudly so the
+        // mismatch surfaces in tests, not silently after launch.
+        let body: [String: Any] = ["index": 3.5]
+        #expect(FoliateMessageParser.parseCreateOverlay(body) == nil)
+    }
+}

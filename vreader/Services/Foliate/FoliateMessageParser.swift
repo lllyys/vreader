@@ -94,6 +94,23 @@ enum FoliateMessageParser {
         )
     }
 
+    /// Parse a `create-overlay` message body into a section index.
+    /// Expected shape: `{index: Int}` per `foliate-host.js:48-52`.
+    /// Returns `nil` when the body isn't a dict, the `index` key is
+    /// missing, or `index` is not an `Int` (e.g., drifted to Double).
+    /// `Int` 0 is a valid index (first section emits create-overlay
+    /// on book open), so missing must be distinguished from zero
+    /// — `as? Int` already does the right thing.
+    ///
+    /// Bug #207 / GH #765: lets `FoliateSpikeView.Coordinator.handleMessage`
+    /// surface section-overlay-ready events without inline body
+    /// introspection, mirroring the `parseSelection` /
+    /// `parseRelocate` pattern.
+    static func parseCreateOverlay(_ body: Any) -> Int? {
+        guard let dict = body as? [String: Any] else { return nil }
+        return dict["index"] as? Int
+    }
+
     /// Parse a `book-ready` message body into book metadata.
     /// Expected keys: title, author, language, sections, layout, toc
     static func parseBookReady(_ body: Any) -> FoliateBookInfo? {
