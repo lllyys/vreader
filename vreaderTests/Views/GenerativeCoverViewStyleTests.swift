@@ -188,9 +188,6 @@ struct GenerativeCoverViewStyleTests {
     func coverArtBuildsWithGenerativeFallback() {
         let view = BookCoverArtView(
             image: nil,
-            coverColor: .blue,
-            formatIcon: "book",
-            formatBadge: "EPUB",
             fingerprintKey: "epub:abc:1024",
             title: "A Book",
             author: "An Author"
@@ -202,9 +199,6 @@ struct GenerativeCoverViewStyleTests {
     func coverArtBuildsWithImage() {
         let view = BookCoverArtView(
             image: UIImage(),
-            coverColor: .red,
-            formatIcon: "doc",
-            formatBadge: "PDF",
             fingerprintKey: "pdf:def:2048",
             title: "Another Book",
             author: nil

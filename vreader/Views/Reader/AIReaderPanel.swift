@@ -86,7 +86,11 @@ struct AIReaderPanel: View {
     var body: some View {
         ReaderSheetChrome(theme: theme, title: nil) {
             VStack(spacing: 0) {
-                aiHeader
+                AIReaderPanelHeader(
+                    theme: theme,
+                    providerPickerViewModel: providerPickerViewModel,
+                    onDismiss: onDismiss
+                )
 
                 Picker("Mode", selection: $selectedTab) {
                     ForEach(AIReaderTab.allCases) { tab in
@@ -118,75 +122,6 @@ struct AIReaderPanel: View {
         }
         .accessibilityIdentifier("aiReaderPanel")
         .onAppear { selectedTab = initialTab } // bug #95
-    }
-
-    // MARK: - Custom header (design `AISheet`)
-
-    /// The design `AISheet`'s header row — a sparkle accent avatar, the
-    /// "AI Assistant" / "with this book's context" titles, the
-    /// feature-#50 provider picker, and a close button.
-    private var aiHeader: some View {
-        HStack(spacing: 8) {
-            // Sparkle accent avatar — the design's accent-gradient disc.
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(theme.accentColor),
-                            Color(theme.accentColor).opacity(0.67),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 28, height: 28)
-                .overlay(
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                )
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text("AI Assistant")
-                    .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 17)))
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Color(theme.inkColor))
-                Text("with this book's context")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(theme.subColor))
-            }
-
-            Spacer(minLength: 0)
-
-            // Feature #50 WI-7: in-reader provider picker — preserved
-            // through the WI-10 re-skin so the user can still flip the
-            // active provider without leaving the reader. Persists to
-            // the shared ProviderProfileStore; every in-flight
-            // AIService call picks the new provider up via
-            // resolveProvider.
-            AIProviderPicker(viewModel: providerPickerViewModel)
-
-            Button {
-                onDismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color(theme.subColor))
-                    .frame(width: 28, height: 28)
-                    .background(
-                        Circle().fill(
-                            theme.isDark
-                                ? Color.white.opacity(0.08)
-                                : Color.black.opacity(0.06)
-                        )
-                    )
-            }
-            .accessibilityLabel("Close")
-            .accessibilityIdentifier("aiPanelDoneButton")
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 14)
-        .padding(.bottom, 4)
     }
 
     // MARK: - Summarize Tab Content

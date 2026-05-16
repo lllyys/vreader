@@ -34,9 +34,6 @@ import SwiftUI
 /// treatment.
 struct BookCoverArtView: View {
     let image: UIImage?
-    let coverColor: Color
-    let formatIcon: String
-    let formatBadge: String
     /// The book's stable identity — drives the deterministic generative
     /// cover style + palette when no image exists (feature #60 WI-10).
     let fingerprintKey: String

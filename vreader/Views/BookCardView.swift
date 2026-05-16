@@ -30,9 +30,6 @@ struct BookCardView: View {
             // Cover: fixed 2:3 ratio container — uniform card height in grid
             BookCoverArtView(
                 image: customCoverImage,
-                coverColor: coverColor,
-                formatIcon: formatIcon,
-                formatBadge: book.formatBadge,
                 fingerprintKey: book.fingerprintKey,
                 title: book.title,
                 author: book.author,
@@ -95,18 +92,6 @@ struct BookCardView: View {
         _ = coverVersion // force re-evaluation when version changes
         return CustomCoverStore.loadCover(for: book.fingerprintKey)
     }
-
-    private var coverColor: Color {
-        switch book.format.lowercased() {
-        case "epub": return .blue
-        case "pdf": return .red
-        case "txt": return .gray
-        case "md": return .purple
-        default: return .secondary
-        }
-    }
-
-    private var formatIcon: String { book.formatIcon }
 
     private var accessibilityLabel: String {
         AccessibilityFormatters.accessibleBookDescription(

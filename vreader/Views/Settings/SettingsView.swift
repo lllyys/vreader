@@ -39,15 +39,17 @@ struct SettingsView: View {
     /// design `SettingsSheet` default.
     private let theme: ReaderThemeV2 = .paper
 
-    /// The four conceptual section groups this sheet organizes content
-    /// into, in render order — exposed for the WI-10 composition test.
-    /// Declared as a literal (not read from `ReaderSheetKind`) so a
-    /// drift between this view and the design contract fails the test.
-    /// (The "AI" group is rendered by the feature-#50 `AISettingsSection`
-    /// composite, which internally sub-divides; the group concept is
-    /// what this contract pins.)
+    /// The section labels this view declares *directly*, in render
+    /// order — exposed for the WI-10 composition test. The design
+    /// `SettingsSheet` shows four groups; this sheet renders the
+    /// Cloud & Sync / Reading / About groups itself and delegates the
+    /// "AI" group to the established feature-#50 `AISettingsSection`
+    /// composite (which internally sub-divides into AI Assistant /
+    /// Providers / Data & Privacy — re-shaping that component is out of
+    /// WI-10 scope). The test asserts these are exactly the three
+    /// directly-declared groups, between the AI-section delegate.
     var sectionsForTesting: [String] {
-        ["Cloud & Sync", "AI", "Reading", "About"]
+        ["Cloud & Sync", "Reading", "About"]
     }
 
     var body: some View {

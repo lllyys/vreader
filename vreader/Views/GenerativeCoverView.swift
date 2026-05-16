@@ -38,7 +38,7 @@ struct GenerativeCoverView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let metrics = CoverMetrics(width: geo.size.width)
+            let metrics = GenerativeCoverMetrics(width: geo.size.width)
             ZStack {
                 Color(rgb: palette.background)
                 styleContent(metrics: metrics)
@@ -49,7 +49,7 @@ struct GenerativeCoverView: View {
     // MARK: - Per-style content
 
     @ViewBuilder
-    private func styleContent(metrics: CoverMetrics) -> some View {
+    private func styleContent(metrics: GenerativeCoverMetrics) -> some View {
         switch style {
         case .classic:    classicArt(metrics)
         case .modern:     modernArt(metrics)
@@ -63,7 +63,7 @@ struct GenerativeCoverView: View {
 
     /// Italic serif title at the top, a half-width accent rule, and an
     /// uppercase author at the bottom — `vreader-cover.jsx` `classic`.
-    private func classicArt(_ m: CoverMetrics) -> some View {
+    private func classicArt(_ m: GenerativeCoverMetrics) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
                 .font(titleFont(m.titleSize))
@@ -77,8 +77,14 @@ struct GenerativeCoverView: View {
                 .frame(width: m.contentWidth * 0.5, height: 1)
                 .padding(.vertical, 4)
             Spacer(minLength: 0)
-            authorText(uppercase: true, size: m.authorSize, tracking: 0.4)
-                .opacity(0.85)
+            // Design `classic` author: uppercase Source Serif 4.
+            authorText(
+                family: .sourceSerif4,
+                uppercase: true,
+                size: m.authorSize,
+                tracking: 0.4
+            )
+            .opacity(0.85)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(m.padding)
@@ -88,7 +94,7 @@ struct GenerativeCoverView: View {
 
     /// Heavy Inter title top-left, a short accent tick + author at the
     /// bottom-left — `vreader-cover.jsx` `modern`.
-    private func modernArt(_ m: CoverMetrics) -> some View {
+    private func modernArt(_ m: GenerativeCoverMetrics) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
                 .font(titleFont(m.titleSize * 1.1))
@@ -101,9 +107,15 @@ struct GenerativeCoverView: View {
                 Rectangle()
                     .fill(Color(rgb: palette.accent))
                     .frame(width: 24, height: 2)
-                authorText(uppercase: false, size: m.authorSize, tracking: 0)
-                    .fontWeight(.medium)
-                    .opacity(0.8)
+                // Design `modern` author: Inter medium.
+                authorText(
+                    family: .inter,
+                    uppercase: false,
+                    size: m.authorSize,
+                    tracking: 0
+                )
+                .fontWeight(.medium)
+                .opacity(0.8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -114,7 +126,7 @@ struct GenerativeCoverView: View {
 
     /// Serif title, an abstract block in the middle, author at the
     /// bottom — `vreader-cover.jsx` `animal` (O'Reilly-style).
-    private func animalArt(_ m: CoverMetrics) -> some View {
+    private func animalArt(_ m: GenerativeCoverMetrics) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(titleFont(m.titleSize * 0.95))
@@ -124,55 +136,59 @@ struct GenerativeCoverView: View {
             abstractBlock(m)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(m.padding * 0.5)
-            authorText(uppercase: false, size: m.authorSize, tracking: 0)
-                .fontWeight(.medium)
-                .opacity(0.85)
+            // Design `animal` author: Inter medium.
+            authorText(
+                family: .inter,
+                uppercase: false,
+                size: m.authorSize,
+                tracking: 0
+            )
+            .fontWeight(.medium)
+            .opacity(0.85)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(m.padding)
     }
 
-    /// The design's abstract animal-silhouette panel — a faint inked
-    /// box with a centered glyph (`vreader-cover.jsx` draws an animal
-    /// SVG; an SF Symbol stands in for the silhouette here, kept inside
-    /// the framed box exactly as the design's `<svg>` is).
-    private func abstractBlock(_ m: CoverMetrics) -> some View {
+    /// The design's abstract block panel — the design `animal` branch
+    /// draws a framed `rgba(0,0,0,0.08)` box. The design's specific
+    /// animal SVG is not a reusable asset and is per-book in the real
+    /// design system; the generative fallback keeps the design's framed
+    /// abstract box with a neutral geometric mark (an ` AbstractMark`
+    /// derived from the palette) rather than a misleading specific
+    /// animal glyph.
+    private func abstractBlock(_ m: GenerativeCoverMetrics) -> some View {
         ZStack {
             Rectangle().fill(Color(rgb: palette.ink).opacity(0.08))
             Rectangle().stroke(Color(rgb: palette.ink).opacity(0.15), lineWidth: 1)
-            Image(systemName: "pawprint.fill")
-                .font(.system(size: m.titleSize * 1.6))
-                .foregroundStyle(Color(rgb: palette.ink).opacity(0.85))
+            // A neutral abstract diamond mark — no specific subject.
+            Rectangle()
+                .fill(Color(rgb: palette.ink).opacity(0.5))
+                .frame(width: m.titleSize * 1.1, height: m.titleSize * 1.1)
+                .rotationEffect(.degrees(45))
         }
     }
 
     // MARK: - Editorial
 
-    /// Uppercase accent author label at the top, a large serif title
-    /// on a 40% baseline, a hairline + year footer —
-    /// `vreader-cover.jsx` `editorial`.
-    private func editorialArt(_ m: CoverMetrics) -> some View {
+    /// Uppercase accent author label at the top and a large serif title
+    /// on a 40% baseline — `vreader-cover.jsx` `editorial`. The design
+    /// draws a hairline + `book.year` footer; `LibraryBookItem` carries
+    /// no year, so the footer is omitted rather than inventing a
+    /// stand-in value (a self-designed substitution would violate
+    /// rule 51).
+    private func editorialArt(_ m: GenerativeCoverMetrics) -> some View {
         ZStack {
             VStack {
+                // Design `editorial` author label: uppercase Inter.
                 Text(authorSurname.uppercased())
-                    .font(.system(size: m.authorSize * 0.85))
+                    .font(font(.inter, m.authorSize * 0.85))
                     .fontWeight(.bold)
                     .tracking(1.5)
                     .foregroundStyle(Color(rgb: palette.accent))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 0)
-                HStack(spacing: 6) {
-                    Rectangle()
-                        .fill(Color(rgb: palette.ink).opacity(0.5))
-                        .frame(width: 16, height: 1)
-                    Text(footerLabel)
-                        .font(.system(size: m.authorSize * 0.85))
-                        .tracking(0.6)
-                        .foregroundStyle(Color(rgb: palette.ink).opacity(0.7))
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Title centred on the design's 40% vertical baseline.
             VStack {
@@ -194,7 +210,7 @@ struct GenerativeCoverView: View {
 
     /// A centred mark glyph, the serif title, and the sans author —
     /// all centre-aligned — `vreader-cover.jsx` `minimal`.
-    private func minimalArt(_ m: CoverMetrics) -> some View {
+    private func minimalArt(_ m: GenerativeCoverMetrics) -> some View {
         VStack(spacing: 6) {
             ZStack {
                 Circle()
@@ -211,9 +227,15 @@ struct GenerativeCoverView: View {
                 .foregroundStyle(Color(rgb: palette.ink))
                 .multilineTextAlignment(.center)
                 .lineLimit(4)
-            authorText(uppercase: false, size: m.authorSize, tracking: 0.3)
-                .multilineTextAlignment(.center)
-                .opacity(0.7)
+            // Design `minimal` author: Inter.
+            authorText(
+                family: .inter,
+                uppercase: false,
+                size: m.authorSize,
+                tracking: 0.3
+            )
+            .multilineTextAlignment(.center)
+            .opacity(0.7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(m.padding)
@@ -228,15 +250,28 @@ struct GenerativeCoverView: View {
         Font(ReaderTypography.body(for: style.titleFontFamily, size: size))
     }
 
-    /// The author line — empty (rendered as a zero-height spacer) when
-    /// the book carries no author so the composition still balances.
+    /// A typeface resolved through `ReaderTypography` for the given
+    /// family — used for the author / footer text so the generative
+    /// cover honours the design's per-style Source Serif 4 / Inter
+    /// pairings rather than the platform system font.
+    private func font(_ family: ReaderFontFamily, _ size: CGFloat) -> Font {
+        Font(ReaderTypography.body(for: family, size: size))
+    }
+
+    /// The author line in the given typeface — empty (a zero-height
+    /// spacer) when the book carries no author so the composition still
+    /// balances. `family` matches the design's per-style author face
+    /// (`vreader-cover.jsx`).
     @ViewBuilder
     private func authorText(
-        uppercase: Bool, size: CGFloat, tracking: CGFloat
+        family: ReaderFontFamily,
+        uppercase: Bool,
+        size: CGFloat,
+        tracking: CGFloat
     ) -> some View {
         if let author, !author.isEmpty {
             Text(uppercase ? author.uppercased() : author)
-                .font(.system(size: size))
+                .font(font(family, size))
                 .tracking(tracking)
                 .foregroundStyle(Color(rgb: palette.ink))
                 .lineLimit(2)
@@ -252,46 +287,5 @@ struct GenerativeCoverView: View {
     private var authorSurname: String {
         guard let author, !author.isEmpty else { return "—" }
         return author.split(separator: " ").last.map(String.init) ?? author
-    }
-
-    /// The editorial style's footer label — the design draws the
-    /// publication year there. `LibraryBookItem` carries no year, so
-    /// the footer falls back to the author's surname (a stable,
-    /// book-specific token) rather than inventing a year.
-    private var footerLabel: String { authorSurname }
-}
-
-// MARK: - Cover metrics
-
-/// Width-derived layout metrics — mirrors the design `CoverArt`'s
-/// `w * 0.13` title / `w * 0.075` author / `w * 0.11` padding scaling
-/// so one view renders correctly at every cover size.
-private struct CoverMetrics {
-    let titleSize: CGFloat
-    let authorSize: CGFloat
-    let padding: CGFloat
-    let contentWidth: CGFloat
-
-    init(width: CGFloat) {
-        let w = width.isFinite && width > 0 ? width : 110
-        self.titleSize = max(11, w * 0.13)
-        self.authorSize = max(8, w * 0.075)
-        self.padding = max(8, w * 0.11)
-        self.contentWidth = max(0, w - padding * 2)
-    }
-}
-
-// MARK: - Color from RGBTriple
-
-extension Color {
-    /// Builds a SwiftUI `Color` from a Foundation-only `RGBTriple` in
-    /// the sRGB space.
-    init(rgb triple: RGBTriple) {
-        self = Color(
-            .sRGB,
-            red: Double(triple.red) / 255.0,
-            green: Double(triple.green) / 255.0,
-            blue: Double(triple.blue) / 255.0
-        )
     }
 }

@@ -26,6 +26,10 @@ import SwiftUI
 
 /// Settings panel for reader appearance.
 struct ReaderSettingsPanel: View {
+    /// Sheet dismissal — drives the `ReaderSheetChrome` close button
+    /// (feature #60 WI-10). The system swipe-down dismiss still works
+    /// too; this is the design `Sheet`'s explicit close affordance.
+    @Environment(\.dismiss) private var dismiss
     @Bindable var store: ReaderSettingsStore
     /// Tap zone configuration store (feature #25).
     var tapZoneStore: TapZoneStore?
@@ -67,7 +71,8 @@ struct ReaderSettingsPanel: View {
     var body: some View {
         ReaderSheetChrome(
             theme: sheetTheme,
-            title: ReaderSheetKind.display.designTitle
+            title: ReaderSheetKind.display.designTitle,
+            onClose: { dismiss() }
         ) {
             List {
                 themeSection

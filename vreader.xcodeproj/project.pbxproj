@@ -310,6 +310,7 @@
 		4CCBF4F6E186A7363A995303 /* ReaderContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB42EEEFFCAD8D654D57AE7 /* ReaderContainerView.swift */; };
 		4D262FBAEBAC69E057B371DA /* SourceSerif4-It.otf in Resources */ = {isa = PBXBuildFile; fileRef = BDD31D89F9B0E622F58B6F5C /* SourceSerif4-It.otf */; };
 		4D4A49E8738329EC2B336683 /* TXTReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D998048CE6DE8DC3BC77C284 /* TXTReaderViewModelTests.swift */; };
+		4D4D7B16BBA5732D1E6AB875 /* GenerativeCoverMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF66A8065E5B60907FB0A3C8 /* GenerativeCoverMetrics.swift */; };
 		4D66B6E16F96E24A0B01F7A9 /* WebDAVBackupIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F1695C0E7481CB3EA2B8A3 /* WebDAVBackupIntegrationTests.swift */; };
 		4D82E64F299F0EEBA0FD2851 /* WebDAVServerProfileListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CABA711375AB3BAEB2F42CFE /* WebDAVServerProfileListView.swift */; };
 		4E2207CD7F48BCE945A0971C /* AIReaderIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E706779E64026004319957F /* AIReaderIntegrationTests.swift */; };
@@ -899,6 +900,7 @@
 		EFA070B6FC93ED602B4ACCAA /* ReaderSafeAreaResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEA3693DF8AC58A111AFB692 /* ReaderSafeAreaResolver.swift */; };
 		F017AB8749D17949AC040CAA /* FoliateTOCConverterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91F653CA8E9B107CA2CA4CA /* FoliateTOCConverterTests.swift */; };
 		F064D551F461B2FA4C778D56 /* TXTOffsetTranslatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15D804BC38A65B71FB212B03 /* TXTOffsetTranslatorTests.swift */; };
+		F0A36C4FB1AD5746B8636062 /* AIReaderPanelHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A46EC81A33304A8D024F7CA /* AIReaderPanelHeader.swift */; };
 		F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 605C9BAEA41B7C63D7E343B1 /* VReaderApp.swift */; };
 		F14370F35DEFDB725452B5CA /* SearchWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C47B0077BE4937C424FFBD9 /* SearchWiringTests.swift */; };
 		F14A4E744781186C72D46349 /* CustomCoverStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5CB381B25E50D44505CAAB3 /* CustomCoverStore.swift */; };
@@ -1479,6 +1481,7 @@
 		89DE76057526BA48CAE2A83A /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		8A12A0D94CF17D48152929F0 /* ReadingStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStats.swift; sourceTree = "<group>"; };
 		8A1A348FFCBCC9C7A5360C28 /* RuleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleEngineTests.swift; sourceTree = "<group>"; };
+		8A46EC81A33304A8D024F7CA /* AIReaderPanelHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIReaderPanelHeader.swift; sourceTree = "<group>"; };
 		8A86CD6BD10792F5107FFB5A /* ReaderSettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsStoreTests.swift; sourceTree = "<group>"; };
 		8A9899D5096108025F3AA19C /* SchemaV6.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaV6.swift; sourceTree = "<group>"; };
 		8AB2B5F77B95D3402E699DA9 /* BackupProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupProvider.swift; sourceTree = "<group>"; };
@@ -1732,6 +1735,7 @@
 		CF50D372D73575F047EF0991 /* BookContentCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookContentCacheTests.swift; sourceTree = "<group>"; };
 		CF5C12635DFA6BEE42EBB1CE /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
 		CF65A328F9A79571A5164390 /* FoliateReaderContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateReaderContainerView.swift; sourceTree = "<group>"; };
+		CF66A8065E5B60907FB0A3C8 /* GenerativeCoverMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeCoverMetrics.swift; sourceTree = "<group>"; };
 		CFB26FE0A7766F5E461A6BC7 /* ReaderThemeV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderThemeV2.swift; sourceTree = "<group>"; };
 		D02AA769AEDBC25CEA896348 /* TXTChunkedLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChunkedLoader.swift; sourceTree = "<group>"; };
 		D02B540992E1F3C96A00723F /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
@@ -2698,6 +2702,7 @@
 			children = (
 				064AE6DC1BC56B9DD7CCA796 /* AIProviderPicker.swift */,
 				6DF113D7E83A1CE51F417258 /* AIReaderPanel.swift */,
+				8A46EC81A33304A8D024F7CA /* AIReaderPanelHeader.swift */,
 				F59ACCAF30F5092968415855 /* AnnotationsPanelView.swift */,
 				8781075EA7AF25572A741C40 /* BilingualView.swift */,
 				FBD54F8887091F46753F09A4 /* DictionarySheet.swift */,
@@ -2955,6 +2960,7 @@
 				04CBEAF6FEDB714FCE897550 /* BookCoverArtView.swift */,
 				23A84FE014139E7B5524445D /* BookRowView.swift */,
 				1FD65C0547DF264510657CA2 /* ContentView.swift */,
+				CF66A8065E5B60907FB0A3C8 /* GenerativeCoverMetrics.swift */,
 				F37CD153C986B71ECF9E65AB /* GenerativeCoverView.swift */,
 				1A7668891CD8BA0B6DED7A25 /* LibraryCardTokens.swift */,
 				F4104BB5FAFACC19E9FBB4D7 /* LibraryProgressRing.swift */,
@@ -4250,6 +4256,7 @@
 				A74E0B8A07E4DD90EB24B234 /* AIProviderPickerViewModel.swift in Sources */,
 				B6390E651DCC967457775D96 /* AIReaderAvailability.swift in Sources */,
 				81498F908FAF97F421A3C35F /* AIReaderPanel.swift in Sources */,
+				F0A36C4FB1AD5746B8636062 /* AIReaderPanelHeader.swift in Sources */,
 				04759BE2CD3CA39424689484 /* AIResponseCache.swift in Sources */,
 				8E153D7C3B713EDDBF484A24 /* AIService.swift in Sources */,
 				21864806F4268E51A9E589A6 /* AISettingsSection.swift in Sources */,
@@ -4396,6 +4403,7 @@
 				77922030EB933D898ED67C10 /* FoliateViewBridge.swift in Sources */,
 				581D8C5F46D4CAAD4DA31EF8 /* FoliateViewCoordinator.swift in Sources */,
 				DCB3DF75803B93E9AFB05F1D /* FormatCapabilities.swift in Sources */,
+				4D4D7B16BBA5732D1E6AB875 /* GenerativeCoverMetrics.swift in Sources */,
 				F4FE45E62955A90DF146DE4B /* GenerativeCoverStyle.swift in Sources */,
 				15BC7FE6B105319B5709C4A9 /* GenerativeCoverView.swift in Sources */,
 				2E988A3214761CEAEF22D451 /* HTMLHelper.swift in Sources */,

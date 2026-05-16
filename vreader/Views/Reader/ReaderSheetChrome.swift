@@ -50,20 +50,28 @@ struct ReaderSheetChrome<Body: View, Leading: View, Trailing: View>: View {
     /// button). Defaults to empty.
     let leading: Leading
     /// Trailing title-bar slot — a 50pt-wide region (e.g. a Done or
-    /// Share button). Defaults to empty.
+    /// Share button). Defaults to empty — and when empty, if `onClose`
+    /// is provided, the design's default circular close button fills
+    /// the slot (`vreader-panels.jsx` `Sheet`'s `trailing || <button>`).
     let trailing: Trailing
+    /// Optional explicit-close action. When set and `trailing` is the
+    /// empty default, the title bar shows the design's circular close
+    /// button — matching the design `Sheet`'s fallback affordance.
+    let onClose: (() -> Void)?
     /// The scrollable sheet body.
     @ViewBuilder let content: () -> Body
 
     init(
         theme: ReaderThemeV2,
         title: String?,
+        onClose: (() -> Void)? = nil,
         @ViewBuilder leading: () -> Leading = { EmptyView() },
         @ViewBuilder trailing: () -> Trailing = { EmptyView() },
         @ViewBuilder content: @escaping () -> Body
     ) {
         self.theme = theme
         self.title = title
+        self.onClose = onClose
         self.leading = leading()
         self.trailing = trailing()
         self.content = content
@@ -96,7 +104,7 @@ struct ReaderSheetChrome<Body: View, Leading: View, Trailing: View>: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity)
-            trailing
+            trailingSlot
                 .frame(width: 50, alignment: .trailing)
         }
         .padding(.horizontal, 18)
@@ -105,6 +113,40 @@ struct ReaderSheetChrome<Body: View, Leading: View, Trailing: View>: View {
         .overlay(alignment: .bottom) {
             Color(theme.ruleColor).frame(height: 0.5)
         }
+    }
+
+    /// The trailing title-bar slot. A caller-supplied `trailing` view
+    /// takes precedence; otherwise, when `onClose` is set, the design's
+    /// default circular close button fills the slot (the design
+    /// `Sheet`'s `trailing || <close button>` fallback).
+    @ViewBuilder
+    private var trailingSlot: some View {
+        if Trailing.self == EmptyView.self, let onClose {
+            closeButton(onClose)
+        } else {
+            trailing
+        }
+    }
+
+    /// The design's default sheet close button — a 28pt circular
+    /// faint-wash disc with an `xmark` glyph (`vreader-panels.jsx`
+    /// `Sheet`).
+    private func closeButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(theme.subColor))
+                .frame(width: 28, height: 28)
+                .background(
+                    Circle().fill(
+                        theme.isDark
+                            ? Color.white.opacity(0.08)
+                            : Color.black.opacity(0.06)
+                    )
+                )
+        }
+        .accessibilityLabel("Close")
+        .accessibilityIdentifier("sheetCloseButton")
     }
 }
 
