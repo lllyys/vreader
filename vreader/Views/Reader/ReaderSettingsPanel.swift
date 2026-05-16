@@ -168,6 +168,11 @@ struct ReaderSettingsPanel: View {
                 do {
                     try ThemeBackgroundStore.saveBackground(image, for: store.theme.rawValue)
                     store.useCustomBackground = true
+                    // Feature #60 WI-12 (#795): signal cached readers
+                    // (EPUB `data:` URL, ThemeBackgroundView) to re-read
+                    // the file — `theme` / `useCustomBackground` are
+                    // unchanged on a re-pick, so they need this nudge.
+                    store.customBackgroundRevision += 1
                 } catch {
                     backgroundErrorMessage = "Could not save background: \(error.localizedDescription)"
                 }

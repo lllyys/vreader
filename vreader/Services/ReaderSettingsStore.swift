@@ -52,6 +52,13 @@ final class ReaderSettingsStore {
         set { _backgroundOpacity = min(max(newValue, 0.0), 1.0); if !suppressPersistence { defaults.set(_backgroundOpacity, forKey: Self.backgroundOpacityKey) } }
     }
     private var _backgroundOpacity: Double
+    /// Feature #60 WI-12 (#795): bumped by `ReaderSettingsPanel` whenever
+    /// the custom background image is replaced on disk. Readers that cache
+    /// the image — `EPUBReaderContainerView`'s injected `data:` URL,
+    /// `ThemeBackgroundView`'s `UIImage` — observe this and re-read the
+    /// file when the bytes change but `theme` / `useCustomBackground` do
+    /// not. Session-scoped invalidation signal; never persisted.
+    var customBackgroundRevision: Int = 0
     /// When true, property mutations do NOT write to UserDefaults (bug #84 audit fix).
     /// Used by `applyResolvedSettings` to avoid leaking per-book overrides into global defaults.
     private var suppressPersistence = false

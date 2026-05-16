@@ -306,6 +306,7 @@ struct EPUBReaderContainerView: View {
         .onAppear { refreshPhotoBackgroundImage() }
         .onChange(of: settingsStore?.theme) { _, _ in refreshPhotoBackgroundImage() }
         .onChange(of: settingsStore?.useCustomBackground) { _, _ in refreshPhotoBackgroundImage() }
+        .onChange(of: settingsStore?.customBackgroundRevision) { _, _ in refreshPhotoBackgroundImage() }
     }
 
     // MARK: - Subviews
