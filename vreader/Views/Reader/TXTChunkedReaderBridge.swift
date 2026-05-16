@@ -510,7 +510,13 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             let nsRange = textView.selectedRange
             guard nsRange.length > 0 else { return }
             let chunkIndex = textView.tag
-            let chunkOffset = chunkIndex < chunkStartOffsets.count ? chunkStartOffsets[chunkIndex] : 0
+            // Codex Gate 4 round 1 (Low) sibling of the editMenuForTextIn
+            // fix: clamp negative tags too. Pre-WI-7c3 this was only
+            // a class-of-bug concern; aligning the two sites keeps
+            // them symmetric.
+            let chunkOffset = (chunkIndex >= 0 && chunkIndex < chunkStartOffsets.count)
+                ? chunkStartOffsets[chunkIndex]
+                : 0
             // Convert chunk-local range to document-global UTF16Range
             let globalStart = chunkOffset + nsRange.location
             let globalEnd = globalStart + nsRange.length
@@ -524,17 +530,46 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             editMenuForTextIn range: NSRange,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
-            let chunkIndex = textView.tag
-            let chunkOffset = chunkIndex < chunkStartOffsets.count ? chunkStartOffsets[chunkIndex] : 0
-            return TXTBridgeShared.buildReaderEditMenu(
-                range: range, textView: textView, suggestedActions: suggestedActions,
-                chunkOffset: chunkOffset,
-                isAITranslateAvailable: AIReaderAvailability.isAvailable(
-                    featureFlags: FeatureFlags.shared,
-                    keychainService: KeychainService(),
-                    consentManager: AIConsentManager()
+            // Feature #60 WI-7c3: chunked TXT bridge swap. Mirrors
+            // WI-7c2's non-chunked swap — post
+            // `.readerSelectionPopoverRequested` to the WI-7c1
+            // presenter and return an empty UIMenu to suppress the
+            // iOS surface. The chunked path differs only in needing
+            // a chunk-offset translation: local NSRange in the
+            // current `UITextView` (cell) → document-global UTF-16
+            // range. `TXTBridgeShared.postSelectionNotification`'s
+            // existing `chunkOffset:` parameter handles that.
+            //
+            // Why the `range.length > 0` guard: iOS calls this for
+            // caret placement (zero-length range) too; no popover
+            // should appear in that case. Returning the empty
+            // UIMenu unconditionally still suppresses iOS's default.
+            //
+            // The `textView.tag` carries the chunk index (set by
+            // `cellForRowAt`). Out-of-range tags fall back to
+            // offset 0 — defensive but should never fire in
+            // production.
+            if range.length > 0 {
+                let chunkIndex = textView.tag
+                // Codex Gate 4 round 1 (Low): clamp on both ends.
+                // `textView.tag` is `Int` and could in principle be
+                // negative; the existing high-side check
+                // `< chunkStartOffsets.count` doesn't protect
+                // against subscripting with a negative index (which
+                // would crash). In production `cellForRowAt`
+                // always sets a non-negative tag, but defensive
+                // coding earns its keep at the table-view boundary.
+                let chunkOffset = (chunkIndex >= 0 && chunkIndex < chunkStartOffsets.count)
+                    ? chunkStartOffsets[chunkIndex]
+                    : 0
+                TXTBridgeShared.postSelectionNotification(
+                    .readerSelectionPopoverRequested,
+                    from: textView,
+                    range: range,
+                    chunkOffset: chunkOffset
                 )
-            )
+            }
+            return UIMenu(children: [])
         }
 
         // Dynamic navigation (scrollToGlobalOffset) and highlight methods

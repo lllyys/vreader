@@ -23,6 +23,7 @@
 		04759BE2CD3CA39424689484 /* AIResponseCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4C18F1E19149F8DBAE36A31 /* AIResponseCache.swift */; };
 		05007F5C2D7687A1173C48CB /* ReaderSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B432A1C9D875A14C4E9E633 /* ReaderSettingsStore.swift */; };
 		054050637EFD8ACE415BCF2E /* ReplacementRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B9584B44764B8D11C7CC9F6 /* ReplacementRulesView.swift */; };
+		0551D7B498604A2F477349A1 /* TXTChunkedReaderBridgeEditMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B7F1A4BCC11533447A4829 /* TXTChunkedReaderBridgeEditMenuTests.swift */; };
 		05746231141B8C7001BEBDAD /* FoliateSelectionDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF493E1A2F50B0916C76306D /* FoliateSelectionDispatcher.swift */; };
 		058C2F104DE6D10D81F907D9 /* AnnotationExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB9773A4631BEDEDD187F08 /* AnnotationExporterTests.swift */; };
 		05BE70789318FA085B9A735E /* AIChatViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E861A379A620B769CEA36300 /* AIChatViewModelTests.swift */; };
@@ -973,6 +974,7 @@
 		103B5BF35C8DC9FB2BE4998F /* PDFPageNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageNavigator.swift; sourceTree = "<group>"; };
 		10909449DAD59CD16EE53A7F /* CSSRuleEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CSSRuleEvaluator.swift; sourceTree = "<group>"; };
 		10962D7E47EA2C6714E704CA /* MOBICoverExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBICoverExtractorTests.swift; sourceTree = "<group>"; };
+		10B7F1A4BCC11533447A4829 /* TXTChunkedReaderBridgeEditMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChunkedReaderBridgeEditMenuTests.swift; sourceTree = "<group>"; };
 		10C2FF255E2C0E968707942E /* AISettingsViewModel+Editor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AISettingsViewModel+Editor.swift"; sourceTree = "<group>"; };
 		10C9907D3479515B56338825 /* HTTPTTSConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTTSConfig.swift; sourceTree = "<group>"; };
 		10F8EE6C68FBB40F0A229AC0 /* utf16le_bom.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = utf16le_bom.txt; sourceTree = "<group>"; };
@@ -2262,6 +2264,7 @@
 				2B9AD84A4BE2CF0F8D59D9CC /* TXTChapterScrollOffsetTests.swift */,
 				FB9A749915A46E6DD506275A /* TXTChunkedBridgeHighlightTapTests.swift */,
 				C24D5425530ABBE0DDA4758F /* TXTChunkedHighlightDeferredTimerTests.swift */,
+				10B7F1A4BCC11533447A4829 /* TXTChunkedReaderBridgeEditMenuTests.swift */,
 				F213D0F6EFBD7D7088AAC40D /* TXTMDProgressTests.swift */,
 				F17C33D19BD1735676CA01BC /* TXTReaderContainerHighlightCoordinatorWiringTests.swift */,
 				7F71E759F980473A403CC70B /* TXTReaderContainerSearchHighlightWiringTests.swift */,
@@ -3996,6 +3999,7 @@
 				0A359570B32735E17EC5893F /* TXTChunkedBridgeHighlightTapTests.swift in Sources */,
 				23A8010F873969D18777639F /* TXTChunkedHighlightDeferredTimerTests.swift in Sources */,
 				E9177AEFF47DA3EFEAC13C50 /* TXTChunkedLoaderTests.swift in Sources */,
+				0551D7B498604A2F477349A1 /* TXTChunkedReaderBridgeEditMenuTests.swift in Sources */,
 				C81A31B52218576A75210100 /* TXTFileLoaderTests.swift in Sources */,
 				D9C467679B15F5EAA982BBF4 /* TXTLazyTextProviderTests.swift in Sources */,
 				7406A7805B98779AF9AA2F63 /* TXTMDProgressTests.swift in Sources */,
