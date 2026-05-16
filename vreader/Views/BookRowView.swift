@@ -1,13 +1,23 @@
-// Purpose: List row view for a book in the library.
-// Shows format badge, title, author, reading time, and speed in a horizontal layout.
+// Purpose: List row view for a book in the library — re-skinned for
+// feature #60 visual identity v2.
 //
 // Key decisions:
-// - Horizontal layout with format icon, text stack, and trailing metadata.
-// - Accessibility label uses AccessibilityFormatters for VoiceOver-friendly expanded text.
-// - Dynamic Type supported via system fonts.
-// - Reading time label omitted for zero reading time.
+// - Horizontal layout: cover thumbnail (44×62), then a left-aligned
+//   text stack — Source Serif 4 title, warm-taupe author, and a
+//   metadata line carrying the format chip (or feature-#47 file-state
+//   badge).
+// - Visual tokens come from `LibraryCardTokens` (one home for the
+//   design spec). Reading-time / speed metadata rows are omitted in
+//   the v2 design — the row is cover + title + author + chip.
+// - The feature-#47 file-state badge is preserved verbatim per state
+//   (remote / downloading / failed / missing); only the chip container
+//   is re-skinned to the design's warm-wash capsule.
+// - Accessibility label uses AccessibilityFormatters for VoiceOver-
+//   friendly expanded text; exposed as a testing surface so the WI-8
+//   contract tests can pin it without inspecting SwiftUI internals.
 //
-// @coordinates-with: AccessibilityFormatters.swift, LibraryBookItem.swift, CustomCoverStore.swift
+// @coordinates-with: AccessibilityFormatters.swift, LibraryBookItem.swift,
+//   CustomCoverStore.swift, LibraryCardTokens.swift, BookFileState.swift
 
 import SwiftUI
 
@@ -18,76 +28,53 @@ struct BookRowView: View {
     var coverVersion: Int = 0
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Format icon or custom cover
-            ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(formatColor)
-                    .frame(width: 44, height: 44)
+        HStack(spacing: LibraryCardTokens.rowContentSpacing) {
+            // Cover thumbnail — shared spine/page-edge treatment.
+            BookCoverArtView(
+                image: customCoverImage,
+                coverColor: formatColor,
+                formatIcon: formatIcon,
+                formatBadge: book.formatBadge,
+                cornerRadius: LibraryCardTokens.rowCoverCornerRadius
+            )
+            .frame(
+                width: LibraryCardTokens.rowCoverWidth,
+                height: LibraryCardTokens.rowCoverHeight
+            )
 
-                if let customCover = customCoverImage {
-                    Image(uiImage: customCover)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                } else {
-                    Image(systemName: formatIcon)
-                        .font(.system(size: 18))
-                        .foregroundStyle(.white)
-                }
-            }
-
-            // Title and author
+            // Title, author, metadata chip — left-aligned.
             VStack(alignment: .leading, spacing: 2) {
                 Text(book.title)
-                    .font(.body)
-                    .fontWeight(.medium)
+                    .font(LibraryCardTokens.serifTitleFont(
+                        size: LibraryCardTokens.rowTitleFontSize
+                    ))
+                    .fontWeight(.semibold)
                     .lineLimit(1)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(LibraryCardTokens.ink)
 
                 if let author = book.author {
                     Text(author)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: LibraryCardTokens.rowAuthorFontSize))
+                        .foregroundStyle(LibraryCardTokens.subText)
                         .lineLimit(1)
                 }
-            }
 
-            Spacer()
-
-            // Reading metadata
-            VStack(alignment: .trailing, spacing: 2) {
                 // Format badge OR file-state indicator (feature #47).
-                // Non-`.local` rows replace the format badge with a
-                // status icon so the user immediately sees the row is
-                // remote / downloading / failed.
                 fileStateBadge
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(formatColor.opacity(0.15))
-                    .foregroundStyle(formatColor)
-                    .clipShape(Capsule())
-
-                // Reading time (omitted for zero)
-                if let readingTime = book.formattedReadingTime {
-                    Text(readingTime)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                // Speed
-                if let speed = book.formattedSpeed {
-                    Text(speed)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                    .padding(.vertical, 1.5)
+                    .background(badgeBackground)
+                    .foregroundStyle(badgeForeground)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .padding(.top, 3)
             }
+
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint("Double tap to open")
+        .accessibilityHint(accessibilityHint)
     }
 
     // MARK: - File-state badge (feature #47 WI-5)
@@ -101,38 +88,79 @@ struct BookRowView: View {
     ///   - `.missingRemote` → xmark.icloud + "Missing"
     @ViewBuilder
     private var fileStateBadge: some View {
-        switch book.fileState {
-        case .local:
-            Text(book.formatBadge)
-                .font(.caption2)
-                .fontWeight(.semibold)
-        case .remoteOnly:
-            Label("Remote", systemImage: "cloud")
-                .font(.caption2)
+        let text = fileStateBadgeText
+        if let symbol = fileStateBadgeSymbol {
+            Label(text, systemImage: symbol)
+                .font(.system(size: LibraryCardTokens.rowChipFontSize))
                 .fontWeight(.semibold)
                 .labelStyle(.titleAndIcon)
-        case .downloading:
-            Label("Downloading", systemImage: "arrow.down.circle")
-                .font(.caption2)
+        } else {
+            Text(text)
+                .font(.system(size: LibraryCardTokens.rowChipFontSize))
                 .fontWeight(.semibold)
-                .labelStyle(.titleAndIcon)
-        case .failed:
-            Label("Retry", systemImage: "exclamationmark.icloud")
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .labelStyle(.titleAndIcon)
-        case .missingRemote:
-            Label("Missing", systemImage: "xmark.icloud")
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .labelStyle(.titleAndIcon)
+                .tracking(0.5)
         }
     }
 
+    /// Badge text per file state — the format badge for `.local`,
+    /// otherwise the transfer-state word (feature #47 contract).
+    private var fileStateBadgeText: String {
+        switch book.fileState {
+        case .local:         return book.formatBadge
+        case .remoteOnly:    return "Remote"
+        case .downloading:   return "Downloading"
+        case .failed:        return "Retry"
+        case .missingRemote: return "Missing"
+        }
+    }
+
+    /// SF Symbol for non-local file states; nil for `.local` (format
+    /// badge is text-only).
+    private var fileStateBadgeSymbol: String? {
+        switch book.fileState {
+        case .local:         return nil
+        case .remoteOnly:    return "cloud"
+        case .downloading:   return "arrow.down.circle"
+        case .failed:        return "exclamationmark.icloud"
+        case .missingRemote: return "xmark.icloud"
+        }
+    }
+
+    /// Chip fill — the design's warm wash for the format badge, the
+    /// format color tint for active transfer states (keeps the
+    /// feature-#47 status colour-coding).
+    private var badgeBackground: Color {
+        switch book.fileState {
+        case .local: return LibraryCardTokens.chipBackground
+        default:     return formatColor.opacity(0.15)
+        }
+    }
+
+    /// Chip text/icon colour — warm sub-text for the format badge,
+    /// format colour for transfer states.
+    private var badgeForeground: Color {
+        switch book.fileState {
+        case .local: return LibraryCardTokens.subText
+        default:     return formatColor
+        }
+    }
+
+    // MARK: - Testing surface
+
+    /// Exposed so the WI-8 contract tests can assert the accessibility
+    /// contract + feature-#47 badge logic without inspecting opaque
+    /// SwiftUI modifier state.
+    var accessibilityLabelForTesting: String { accessibilityLabel }
+    var accessibilityHintForTesting: String { accessibilityHint }
+    var fileStateBadgeTextForTesting: String { fileStateBadgeText }
+    var fileStateBadgeSymbolForTesting: String? { fileStateBadgeSymbol }
+
     // MARK: - Private
 
-    /// Loads the custom cover for this book (if any). `coverVersion` dependency
-    /// ensures SwiftUI re-evaluates when covers change.
+    private let accessibilityHint = "Double tap to open"
+
+    /// Loads the custom cover for this book (if any). `coverVersion`
+    /// dependency ensures SwiftUI re-evaluates when covers change.
     private var customCoverImage: UIImage? {
         _ = coverVersion // force re-evaluation when version changes
         return CustomCoverStore.loadCover(for: book.fingerprintKey)
