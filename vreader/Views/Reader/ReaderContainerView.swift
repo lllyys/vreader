@@ -49,6 +49,13 @@ struct ReaderContainerView: View {
     /// `.highlights`.
     @State var annotationsPanelInitialTab: AnnotationsPanelTab = .toc
     @State var showSearch = false
+    /// Feature #60 WI-6c: whether the reader More-menu popover is
+    /// presented. The `⋯` button in `ReaderTopChrome` toggles it; the
+    /// popover floats in the chrome overlay anchored to that button.
+    @State var showMorePopover = false
+    /// Feature #60 WI-6c: whether the system share sheet for the book
+    /// file is presented — driven by the More-menu's "Share book" row.
+    @State var showShareSheet = false
     @State var showAIPanel = false
     @State var aiInitialTab: AIReaderTab = .summarize
     @State private var showDictionary = false
@@ -134,9 +141,25 @@ struct ReaderContainerView: View {
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+
+            // Feature #60 WI-6c: the reader More-menu popover, anchored
+            // to the `⋯` button in the top chrome. Floats above all
+            // content + chrome; only present while the chrome is too,
+            // so hiding the chrome dismisses it.
+            if showMorePopover && isChromeVisible {
+                readerMorePopoverOverlay
+                    .transition(.opacity)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerContentTapped)) { _ in
-            toggleChrome()
+            // A content tap toggles the chrome. If the More popover is
+            // open, the tap should dismiss it rather than (also)
+            // flipping the chrome out from under it.
+            if showMorePopover {
+                showMorePopover = false
+            } else {
+                toggleChrome()
+            }
         }
         // Feature #60 WI-6b: the shared `ReaderBottomChrome` toolbar
         // posts these instead of threading handler closures through
@@ -164,6 +187,15 @@ struct ReaderContainerView: View {
                 }
             }
         )
+        // Feature #60 WI-6c: the More-menu popover posts these six
+        // notifications; each maps 1:1 from a `ReaderMoreMenuRow`.
+        // Bundled into one modifier so `body` stays inside the
+        // type-checker's complexity budget (same reason as the WI-6b
+        // toolbar observers above). Action semantics live in
+        // `handleMoreMenuAction(_:)`.
+        .readerMoreMenuActionObservers { row in
+            handleMoreMenuAction(row)
+        }
         // Page turn from tap zones — handled by unified renderer directly.
         // Native mode bridges handle taps internally (center=chrome toggle).
         // Left/right zones only functional in unified paged mode. (bug #81)
@@ -348,6 +380,12 @@ struct ReaderContainerView: View {
             searchSheet
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+        // Feature #60 WI-6c: the More-menu "Share book" row presents
+        // the system share sheet for the book file. Reuses the
+        // library's `ShareSheet` (book-file `UIActivityViewController`).
+        .sheet(isPresented: $showShareSheet) {
+            ShareSheet(book: book)
         }
         // Search setup deferred until search sheet opens (bug #64)
         .onChange(of: showSearch) { _, isShowing in

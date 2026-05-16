@@ -1,8 +1,11 @@
 // Purpose: Sheets, deferred setup, and chrome overlay for ReaderContainerView.
-// Pure code extraction — no logic changes.
+// Also hosts the Feature #60 WI-6c More-menu popover composition
+// (`readerMorePopoverOverlay`) and its row-action router
+// (`handleMoreMenuAction`).
 //
 // @coordinates-with: ReaderContainerView.swift, ReaderTopChrome.swift,
-//   SearchView.swift, AIReaderPanel.swift, ReaderAICoordinator.swift,
+//   ReaderMorePopover.swift, ShareSheet.swift, SearchView.swift,
+//   AIReaderPanel.swift, ReaderAICoordinator.swift,
 //   ReaderSearchCoordinator.swift, BookContentCache.swift
 
 import SwiftUI
@@ -161,26 +164,96 @@ extension ReaderContainerView {
         }
     }
 
-    // MARK: - Custom Chrome Overlay (bug #62 v3, Feature #60 WI-6b)
+    // MARK: - Custom Chrome Overlay (bug #62 v3, Feature #60 WI-6b/WI-6c)
 
     /// Feature #60 WI-6b: the shared top reader chrome. The four shed
     /// actions (Contents / Notes / Display / AI) now live in
     /// `ReaderBottomChrome`, composed per-format inside each container.
-    /// `onMore` routes to the existing settings sheet as the interim
-    /// wiring — WI-6c swaps it for the anchored More popover.
+    /// WI-6c: `onMore` toggles the anchored `ReaderMorePopover` (the
+    /// WI-6b interim `⋯` → settings routing is removed); `moreActive`
+    /// draws the design's backdrop tint while the popover is open.
     var readerChromeOverlay: some View {
         ReaderTopChrome(
             theme: settingsStore.theme.asV2,
             title: book.title,
             bookmarked: false,
-            moreActive: false,
+            moreActive: showMorePopover,
             onBack: { dismiss() },
             onSearch: { showSearch = true },
             onBookmark: {
                 NotificationCenter.default.post(name: .readerBookmarkRequested, object: nil)
             },
-            onMore: { showSettings = true }
+            onMore: {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    showMorePopover.toggle()
+                }
+            }
         )
+    }
+
+    // MARK: - More-menu Popover (Feature #60 WI-6c)
+
+    /// The anchored More-menu popover, floating above the chrome.
+    /// Presented while `showMorePopover` is set; the host's
+    /// `.readerMoreMenuActionObservers` modifier handles row taps.
+    var readerMorePopoverOverlay: some View {
+        ReaderMorePopover(
+            theme: settingsStore.theme.asV2,
+            ttsPlaying: ttsService.state != .idle,
+            autoTurnOn: settingsStore.autoPageTurn,
+            autoTurnInterval: settingsStore.autoPageTurnInterval,
+            // The design anchors the popover just below the top chrome.
+            // Chrome height = the Dynamic-Island inset + the ~52pt
+            // button row; add a small gap so the notch tucks under the
+            // `⋯` button. The prototype's fixed `top: 92` is the
+            // equivalent for its fixed-height chrome.
+            topInset: ReaderSafeAreaResolver.windowSafeAreaTop + 56,
+            onClose: {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    showMorePopover = false
+                }
+            }
+        )
+    }
+
+    /// Routes a tapped More-menu row to the matching reader action.
+    /// The popover already posted `row.notification` and dismissed
+    /// itself; this is the host-side effect.
+    ///
+    /// Two rows route to interim/adjacent destinations because their
+    /// designed destination is not a committed design:
+    ///   - `.bilingualMode` opens the AI assistant on its translate
+    ///     tab — the existing bilingual surface — gated on AI being
+    ///     configured (mirrors the bottom chrome's AI gate).
+    ///   - `.bookDetails` opens the reader settings panel as the
+    ///     interim destination; the real Book Details sheet is
+    ///     undesigned (design note §4) and tracked by GH #789.
+    ///   - `.exportAnnotations` opens the annotations panel on the
+    ///     Highlights tab, which carries the existing export action —
+    ///     WI-6c ships no new export-picker UI.
+    func handleMoreMenuAction(_ row: ReaderMoreMenuRow) {
+        switch row {
+        case .readAloud:
+            startTTS()
+        case .autoTurnPages:
+            // The design draws an inline toggle; flipping
+            // `autoPageTurn` is live-applied by the paged TXT/MD
+            // containers' `onChange` observers.
+            settingsStore.autoPageTurn.toggle()
+        case .bilingualMode:
+            if resolvedAICoordinator.isAIAvailable {
+                ensureAIReady()
+                aiInitialTab = .translate
+                showAIPanel = true
+            }
+        case .bookDetails:
+            showSettings = true
+        case .shareBook:
+            showShareSheet = true
+        case .exportAnnotations:
+            annotationsPanelInitialTab = .highlights
+            showAnnotationsPanel = true
+        }
     }
 
     // MARK: - AI Sheet

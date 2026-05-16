@@ -9,13 +9,14 @@
 //   ← Library  |  Title (italic, centered)  |  🔍  📑  ⋯
 //
 // The four shed actions (Contents / Notes / Display / AI) move to
-// `ReaderBottomChrome`. The ⋯ More button's anchored popover lands in
-// WI-6c; until then the caller routes ⋯ to the existing settings
-// sheet.
+// `ReaderBottomChrome`. The ⋯ More button toggles the anchored
+// `ReaderMorePopover` (Feature #60 WI-6c) via its `onMore` closure;
+// `moreActive` draws the design's backdrop tint while it is open.
 //
 // @coordinates-with: ReaderBottomChrome.swift, ReaderChromeButton.swift,
 //   ReaderThemeV2.swift, ReaderSafeAreaResolver.swift,
-//   ReaderContainerView+Sheets.swift (composition site)
+//   ReaderMorePopover.swift, ReaderContainerView+Sheets.swift
+//   (composition site)
 
 import SwiftUI
 
