@@ -35,6 +35,9 @@ struct BookRowView: View {
                 coverColor: formatColor,
                 formatIcon: formatIcon,
                 formatBadge: book.formatBadge,
+                fingerprintKey: book.fingerprintKey,
+                title: book.title,
+                author: book.author,
                 cornerRadius: LibraryCardTokens.rowCoverCornerRadius
             )
             .frame(

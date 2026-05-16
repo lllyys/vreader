@@ -1,6 +1,15 @@
 // Purpose: Tabbed panel for bookmarks, TOC, highlights, and annotations.
 // Extracted from ReaderContainerView (WI-004) to reduce its size.
 //
+// Re-skinned for feature #60 visual-identity v2 (WI-10): wrapped in the
+// shared `ReaderSheetChrome` ("Annotations" title bar + theme-tinted
+// surface) instead of a `NavigationStack`. The unified panel covers
+// the design's `TOCSheet` (Contents / Bookmarks) and `HighlightsSheet`
+// (Annotations) as one 4-tab sheet; the export / import actions move
+// from the nav-bar toolbar to the chrome's trailing slot. Every tab,
+// view-model, the export / import flows, and the navigate closure are
+// preserved unchanged.
+//
 // Key decisions:
 // - Owns @State selectedTab (parent does not need to track tab selection).
 // - Uses closure-based interface: onNavigate + onDismiss.
@@ -8,7 +17,8 @@
 // - Does NOT own sheet presentation — parent controls .sheet(isPresented:).
 //
 // @coordinates-with ReaderContainerView.swift, BookmarkListView.swift,
-//   HighlightListView.swift, AnnotationListView.swift, TOCListView.swift
+//   HighlightListView.swift, AnnotationListView.swift, TOCListView.swift,
+//   ReaderSheetChrome.swift, ReaderThemeV2.swift
 
 import SwiftUI
 import SwiftData
@@ -44,6 +54,10 @@ struct AnnotationsPanelView: View {
     let modelContainer: ModelContainer
     let tocEntries: [TOCEntry]
     let currentLocator: Locator?
+    /// Visual-identity-v2 theme tokens for the sheet chrome (feature
+    /// #60 WI-10). Defaults to `.paper` so callers / previews that omit
+    /// it keep working.
+    let theme: ReaderThemeV2
     let onNavigate: (Locator) -> Void
     let onDismiss: () -> Void
 
@@ -66,6 +80,7 @@ struct AnnotationsPanelView: View {
         modelContainer: ModelContainer,
         tocEntries: [TOCEntry],
         currentLocator: Locator?,
+        theme: ReaderThemeV2 = .paper,
         initialTab: AnnotationsPanelTab = .toc,
         onNavigate: @escaping (Locator) -> Void,
         onDismiss: @escaping () -> Void
@@ -74,13 +89,18 @@ struct AnnotationsPanelView: View {
         self.modelContainer = modelContainer
         self.tocEntries = tocEntries
         self.currentLocator = currentLocator
+        self.theme = theme
         self.onNavigate = onNavigate
         self.onDismiss = onDismiss
         self._selectedTab = State(initialValue: initialTab)
     }
 
     var body: some View {
-        NavigationStack {
+        ReaderSheetChrome(
+            theme: theme,
+            title: "Annotations",
+            trailing: { exportImportButtons }
+        ) {
             VStack(spacing: 0) {
                 Picker("Section", selection: $selectedTab) {
                     ForEach(AnnotationsPanelTab.allCases) { tab in
@@ -90,9 +110,10 @@ struct AnnotationsPanelView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
-                .padding(.top, 8)
+                .padding(.top, 12)
 
-                Divider()
+                Color(theme.ruleColor)
+                    .frame(height: 0.5)
                     .padding(.top, 8)
 
                 Group {
@@ -120,27 +141,6 @@ struct AnnotationsPanelView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .navigationTitle("Reader Panels")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        Task { await exportAnnotations() }
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                    .accessibilityLabel("Export annotations")
-                    .accessibilityIdentifier("annotationsExportButton")
-
-                    Button {
-                        isShowingImporter = true
-                    } label: {
-                        Image(systemName: "square.and.arrow.down")
-                    }
-                    .accessibilityLabel("Import annotations")
-                    .accessibilityIdentifier("annotationsImportButton")
-                }
             }
         }
         .sheet(isPresented: $isShowingExportShare) {
@@ -192,6 +192,34 @@ struct AnnotationsPanelView: View {
             annotationVM = aVM
         }
         .accessibilityIdentifier("annotationsPanelSheet")
+    }
+
+    /// The export + import actions — moved from the legacy nav-bar
+    /// toolbar into the `ReaderSheetChrome` trailing slot (feature #60
+    /// WI-10). Same `Export` / `Import` behavior; only the host chrome
+    /// changed.
+    private var exportImportButtons: some View {
+        HStack(spacing: 10) {
+            Button {
+                Task { await exportAnnotations() }
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(Color(theme.accentColor))
+            }
+            .accessibilityLabel("Export annotations")
+            .accessibilityIdentifier("annotationsExportButton")
+
+            Button {
+                isShowingImporter = true
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(Color(theme.accentColor))
+            }
+            .accessibilityLabel("Import annotations")
+            .accessibilityIdentifier("annotationsImportButton")
+        }
     }
 
     private func handleNavigate(_ locator: Locator) {

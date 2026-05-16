@@ -269,6 +269,7 @@ extension ReaderContainerView {
                 textContent: ai.currentTextContent,
                 format: resolvedBookFormat,
                 onDismiss: { showAIPanel = false },
+                theme: settingsStore.theme.asV2,
                 initialTab: aiInitialTab
             )
             .presentationDetents([.medium, .large])

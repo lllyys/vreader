@@ -3,14 +3,23 @@
 // font family picker, CJK spacing toggle, and live-preview text.
 // When paged layout is selected, shows page turn animation picker and auto page turn toggle.
 //
+// Re-skinned for feature #60 visual-identity v2 (WI-10): wrapped in the
+// shared `ReaderSheetChrome` ("Display" title bar + theme-tinted
+// surface) instead of a `NavigationStack`. The panel has no push
+// destinations — every control is inline — so the design's `Sheet`
+// title bar cleanly replaces the nav bar. Every existing section,
+// control, binding, gate, `.onChange`, and the background-picker alert
+// are preserved unchanged.
+//
 // Key decisions:
-// - Presented as a sheet from reader toolbar.
+// - Presented as a sheet from the reader bottom chrome's Display button.
 // - All changes apply immediately (no "save" button needed).
 // - Preview text updates live as settings change.
 // - Theme picker uses colored circles (light/sepia/dark).
 // - Compact layout suitable for half-sheet presentation.
 //
-// @coordinates-with: ReaderSettingsStore.swift, ReaderContainerView.swift
+// @coordinates-with: ReaderSettingsStore.swift, ReaderContainerView.swift,
+//   ReaderSheetChrome.swift, SheetSectionContract.swift
 
 import PhotosUI
 import SwiftUI
@@ -44,8 +53,22 @@ struct ReaderSettingsPanel: View {
     /// Bug #134: surface theme-background load/save/remove failures.
     @State private var backgroundErrorMessage: String?
 
+    /// The design theme for the sheet chrome — projected from the
+    /// reader's current `ReaderTheme` so the Display sheet's surface
+    /// tint follows the book's theme.
+    private var sheetTheme: ReaderThemeV2 { store.theme.asV2 }
+
+    /// The re-skinned panel's `ReaderSheetChrome` title — exposed for
+    /// the WI-10 composition test.
+    var sheetChromeTitleForTesting: String? {
+        ReaderSheetKind.display.designTitle
+    }
+
     var body: some View {
-        NavigationStack {
+        ReaderSheetChrome(
+            theme: sheetTheme,
+            title: ReaderSheetKind.display.designTitle
+        ) {
             List {
                 themeSection
                 themeBackgroundSection
@@ -100,8 +123,9 @@ struct ReaderSettingsPanel: View {
                 if bookFingerprintKey != nil { perBookSection }
                 previewSection
             }
-            .navigationTitle("Reading Settings")
-            .navigationBarTitleDisplayMode(.inline)
+            // Hide the grouped-List backdrop so the design's sheet
+            // surface tint (`ReaderSheetChrome`) shows through.
+            .scrollContentBackground(.hidden)
         }
         .onAppear { loadPerBookState() }
         .onChange(of: store.typography.fontSize) { _, _ in syncPerBookIfEnabled() }

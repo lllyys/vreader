@@ -33,6 +33,9 @@ struct BookCardView: View {
                 coverColor: coverColor,
                 formatIcon: formatIcon,
                 formatBadge: book.formatBadge,
+                fingerprintKey: book.fingerprintKey,
+                title: book.title,
+                author: book.author,
                 cornerRadius: LibraryCardTokens.cardCoverCornerRadius
             )
             // Per-book reading-progress accents (feature #60 WI-8) —

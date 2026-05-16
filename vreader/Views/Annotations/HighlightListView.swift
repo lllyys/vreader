@@ -1,7 +1,12 @@
 // Purpose: List of highlights with color indicator, text preview, and note preview.
 // Supports swipe-to-delete and tap-to-navigate.
 //
-// @coordinates-with: HighlightListViewModel.swift, HighlightRecord.swift
+// Rendered as the Highlights tab inside `AnnotationsPanelView`'s
+// `ReaderSheetChrome` (feature #60 WI-10) — the `List` background is
+// hidden so the design's sheet surface tint shows through.
+//
+// @coordinates-with: HighlightListViewModel.swift, HighlightRecord.swift,
+//   AnnotationsPanelView.swift
 
 import SwiftUI
 
@@ -18,7 +23,6 @@ struct HighlightListView: View {
                 highlightList
             }
         }
-        .navigationTitle("Highlights")
         .task {
             await viewModel.loadHighlights()
         }
@@ -69,6 +73,9 @@ struct HighlightListView: View {
             }
             .onDelete(perform: deleteHighlights)
         }
+        // Hide the grouped-List backdrop so the design's sheet surface
+        // tint (`ReaderSheetChrome`) shows through.
+        .scrollContentBackground(.hidden)
     }
 
     private func deleteHighlights(at offsets: IndexSet) {

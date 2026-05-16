@@ -204,6 +204,13 @@ struct ReaderContainerView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .statusBarHidden(!isChromeVisible)
+        // Feature #60 WI-10: tint the status bar to match the reader
+        // theme. `preferredColorScheme` resolves to `.dark` for the
+        // dark-family themes (Dark / OLED / Photo) so the status-bar
+        // text stays light-on-dark, and `.light` for Paper / Sepia so
+        // it stays dark-on-light. The legacy 3-case `ReaderTheme` is
+        // projected through `asV2`.
+        .preferredColorScheme(settingsStore.theme.asV2.preferredColorScheme)
         .ignoresSafeArea(edges: .top)
         .sheet(isPresented: $showAIPanel, onDismiss: { aiInitialTab = .summarize }) { aiSheet }
         .onReceive(NotificationCenter.default.publisher(for: .readerDefineRequested)) { notification in
@@ -362,6 +369,7 @@ struct ReaderContainerView: View {
                 modelContainer: modelContext.container,
                 tocEntries: tocEntries,
                 currentLocator: currentLocator,
+                theme: settingsStore.theme.asV2,
                 initialTab: annotationsPanelInitialTab,
                 onNavigate: { locator in
                     NotificationCenter.default.post(

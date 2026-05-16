@@ -57,6 +57,9 @@ struct LibraryContinueCard: View {
             coverColor: coverColor,
             formatIcon: book.formatIcon,
             formatBadge: book.formatBadge,
+            fingerprintKey: book.fingerprintKey,
+            title: book.title,
+            author: book.author,
             cornerRadius: LibraryCardTokens.continueCardCoverCornerRadius
         )
         .frame(
