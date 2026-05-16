@@ -1,5 +1,6 @@
 // Purpose: Feature #60 visual-identity v2 — Library-screen design tokens
-// for the grid card (`BookCardView`) and list row (`BookRowView`).
+// for the grid card (`BookCardView`), the list row (`BookRowView`), and
+// the Library container shell (`LibraryView` re-skin, WI-9).
 //
 // The Library is always presented in the warm-paper light palette in
 // the committed design bundle (it is not theme-switchable like the
@@ -84,6 +85,41 @@ enum LibraryCardTokens {
     /// The ring's swept arc uses `accent` (oxblood).
     static let progressRingTrack = rgb(0x3c, 0x28, 0x14, alpha: 0.12)
 
+    // MARK: - Container shell palette (feature #60 WI-9)
+
+    /// Library shell background — the warm paper `#f7f4ee`. A different
+    /// shade from `ReaderThemeV2.paper` (`#f4eee0`); the Library is not
+    /// theme-switchable, so this is the one Library backdrop.
+    static let shellBackground = rgb(0xf7, 0xf4, 0xee)
+
+    /// Nav-bar pill button fill — `rgba(60,40,20,0.06)` warm wash.
+    /// Shared by the search-field container and the unselected filter
+    /// chip (the design uses the same wash for all three).
+    static let navPillBackground = rgb(0x3c, 0x28, 0x14, alpha: 0.06)
+
+    /// Nav-bar icon tint — the design dark brown `#3a2913`.
+    static let navIconTint = rgb(0x3a, 0x29, 0x13)
+
+    /// Selected filter-chip fill — the design near-black `#1d1a14`
+    /// (identical to `ink`; aliased for call-site clarity).
+    static let filterChipSelectedBackground = ink
+
+    /// Unselected filter-chip fill — the warm wash (same as `navPillBackground`).
+    static let filterChipBackground = navPillBackground
+
+    /// Selected filter-chip text — the warm-paper shell colour `#f7f4ee`.
+    static let filterChipSelectedText = shellBackground
+
+    /// Unselected filter-chip text — the design dark brown `#3a2913`.
+    static let filterChipText = navIconTint
+
+    /// Search-field container fill — the warm wash (same as `navPillBackground`).
+    static let searchFieldBackground = navPillBackground
+
+    /// "See all" affordance colour on the Continue-reading header —
+    /// the design oxblood accent.
+    static let seeAllAccent = accent
+
     // MARK: - Layout constants
 
     /// Cover corner radius for the grid card. Design `BookCover` is
@@ -144,6 +180,80 @@ enum LibraryCardTokens {
     static let progressRingSize: CGFloat = 30
     static let progressRingInset: CGFloat = 3
     static let progressRingLineWidth: CGFloat = 2
+
+    // MARK: - Container shell layout (feature #60 WI-9)
+
+    /// Nav-bar pill button — design `pillBtn`: a 36pt square with an
+    /// 18pt radius (a full circle).
+    static let navPillSize: CGFloat = 36
+    static let navPillCornerRadius: CGFloat = 18
+
+    /// Nav-bar icon point size — design `Icons.* size={19}`.
+    static let navIconSize: CGFloat = 19
+
+    /// Gap between the trailing nav-bar pill buttons — design `gap: 8`.
+    static let navPillSpacing: CGFloat = 8
+
+    /// Library title point size — design `fontSize: 36` Source Serif 4.
+    static let titleFontSize: CGFloat = 36
+
+    /// Section-header point size — `Continue reading` / `All books`
+    /// headers, design `fontSize: 18` Source Serif 4.
+    static let sectionHeaderFontSize: CGFloat = 18
+
+    /// Subtitle point size — `{N} books · {M} reading`, design `13`.
+    static let subtitleFontSize: CGFloat = 13
+
+    /// Filter chip — design: `borderRadius: 100` (a full pill),
+    /// `padding: 6px 12px`, `fontSize: 13`.
+    static let filterChipCornerRadius: CGFloat = 100
+    static let filterChipFontSize: CGFloat = 13
+    static let filterChipHorizontalPadding: CGFloat = 12
+    static let filterChipVerticalPadding: CGFloat = 6
+
+    /// Gap between filter chips — design `gap: 6`.
+    static let filterChipSpacing: CGFloat = 6
+
+    /// Continue-reading card cover — design `ContinueCard`:
+    /// `BookCover` at `124 × 186` (a 2:3 portrait), `radius: 5`.
+    static let continueCardCoverWidth: CGFloat = 124
+    static let continueCardCoverHeight: CGFloat = 186
+    static let continueCardCoverCornerRadius: CGFloat = 5
+
+    /// Continue-reading card title point size — design `13.5`.
+    static let continueCardTitleFontSize: CGFloat = 13.5
+
+    /// Continue-reading card metadata point size — design `11`.
+    static let continueCardMetaFontSize: CGFloat = 11
+
+    /// Gap between cover and the title/meta block in a Continue card —
+    /// design `gap: 10`.
+    static let continueCardStackSpacing: CGFloat = 10
+
+    /// Gap between Continue-reading cards in the rail — design `gap: 14`.
+    static let continueRailSpacing: CGFloat = 14
+
+    /// Search-field container — design: `borderRadius: 12`,
+    /// `padding: 10px 14px`, leading-icon gap `8`.
+    static let searchFieldCornerRadius: CGFloat = 12
+    static let searchFieldHorizontalPadding: CGFloat = 14
+    static let searchFieldVerticalPadding: CGFloat = 10
+    static let searchFieldIconSpacing: CGFloat = 8
+
+    /// Search-field text point size — design `fontSize: 15`.
+    static let searchFieldFontSize: CGFloat = 15
+
+    /// Standard content horizontal inset — the design uses `18` for the
+    /// nav bar / chips / search / list card and `22` for the title /
+    /// section headers / grid. Both are exposed so each surface reads
+    /// its own design value.
+    static let shellEdgePadding: CGFloat = 18
+    static let shellContentPadding: CGFloat = 22
+
+    /// In-cover progress strip for the Continue card — design
+    /// `ContinueCard`: a 2.5pt-tall bar inset 6pt horizontally, 5pt up
+    /// from the bottom, 2pt corner radius.
+    static let continueCardStripBottomInset: CGFloat = 5
 
     // MARK: - Serif title font
 
