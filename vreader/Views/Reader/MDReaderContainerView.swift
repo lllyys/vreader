@@ -96,6 +96,14 @@ struct MDReaderContainerView: View {
                 }
             }
         }
+        // Feature #60 WI-7c4: present `SelectionPopoverView` (WI-7a)
+        // when a long-press selection finishes in MD. MD renders via
+        // the shared `TXTTextViewBridge` whose coordinator's
+        // `editMenuForTextIn` was swapped to post
+        // `.readerSelectionPopoverRequested` in WI-7c2; this modifier
+        // observes the notification and shows the sheet, mirroring
+        // the TXT container's attachment from WI-7c2.
+        .selectionPopoverPresenter(theme: settingsStore?.theme.asV2 ?? .paper)
         .task {
             // PERF: open already called by MDReaderHost
             if viewModel.renderedText == nil {
