@@ -145,7 +145,17 @@ persistence, search, WebDAV, or AI is in scope.
 - **EPUB** (`vreader/Models/ReaderTheme.swift:epubOverrideCSS`,
   `vreader/Views/Reader/EPUBReaderContainerView.swift:329` themed
   background flow) — emit the new five-theme CSS. Photo-theme CSS
-  injects a background image via local file URL.
+  *can* inject a background image via local file URL
+  (`ReaderThemeV2+EPUBCSS.backgroundImageRule`), but that branch
+  ships **deferred**: `EPUBWebViewBridge`'s `allowingReadAccessTo`
+  is scoped to the EPUB extraction root, so a `file://` URL into
+  `ThemeBackgroundStore` (Application Support) is refused by
+  WKWebView. WI-4 ships the dormant branch (callers pass
+  `backgroundImageURL: nil`); WI-11 makes the Photo theme
+  user-selectable with its token surface rendering correctly on
+  every format, and the EPUB photo *image* backdrop is tracked as
+  a follow-up (**GH #795**) — copy/symlink the image under the EPUB
+  root before injection, or widen WKWebView read access.
 - **TXT/MD** (`vreader/Models/TXTViewConfig.swift` →
   `TXTAttributedStringBuilder`) — bundle the new fonts; replace
   hard-coded `Georgia` resolution with `ReaderTypography.body(for:)`.
@@ -1069,3 +1079,27 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   `progress === 0 → "{n} pages"` branch is intentionally rendered as
   the format chip alone: `LibraryBookItem` carries no page count, and
   substituting a different metric would be self-designed UI.
+- 2026-05-16 WI-11: **5-theme settings picker — final WI gap closer.**
+  WI-2 shipped the 5-case `ReaderThemeV2` model and WI-4/WI-5 routed
+  reader rendering through it, but the user-facing theme SETTING
+  (`ReaderSettingsStore.theme`) stayed on the legacy 3-case
+  `ReaderTheme`, so `ReaderSettingsPanel`'s picker iterated
+  `ReaderTheme.allCases` — only 3 swatches, OLED + Photo unreachable.
+  WI-11 migrates `ReaderSettingsStore.theme` to `ReaderThemeV2`, adds
+  the backward-compat string decoders `ReaderThemeV2(legacyOrNew:)`
+  (non-throwing, default fallback — for the UserDefaults load) and
+  `ReaderThemeV2(recognized:)` (strict, nil on unknown — so an
+  unrecognized per-book `themeName` doesn't clobber the live theme),
+  and switches the picker to all 5 `ReaderThemeV2` swatches per the
+  design's `ReaderSettingsSheet`. `PDFViewBridge` + the DebugBridge
+  `theme` command/snapshot migrate to `ReaderThemeV2` for the type
+  change. Codex Gate 4 thread `019e30fd-3424-7a90-ba6d-b0f1ddde2a80`,
+  2 rounds, final verdict `follow-up-recommended`. Round 1 raised the
+  EPUB Photo background-image gap as High; round 2 agreed it is a
+  pre-existing WI-4 deferral (not a WI-11 regression — the EPUB CSS
+  `background-image` branch was dormant before WI-11) and downgraded
+  to a tracked follow-up (**GH #795**). Round-1 Low (picker not
+  literal to the design) fixed: the swatch now uses the design's
+  two-ring selected treatment + the 135° Photo gradient. Round-2
+  Medium (plan/code mismatch on the EPUB Photo claim) fixed by this
+  revision (see "Reader-engine theme injection updates > EPUB").

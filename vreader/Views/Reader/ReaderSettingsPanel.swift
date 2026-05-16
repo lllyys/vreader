@@ -221,14 +221,31 @@ struct ReaderSettingsPanel: View {
         }
     }
 
+    /// The Photo swatch's preview fill — the design renders the Photo
+    /// theme's chip as a 135° diagonal gradient (`vreader-panels.jsx`:
+    /// `linear-gradient(135deg, #3a2818, #1a1410)`) rather than a flat
+    /// color, since the real Photo theme shows a user image.
+    private static let photoSwatchGradient = LinearGradient(
+        colors: [
+            Color(red: 0x3a / 255, green: 0x28 / 255, blue: 0x18 / 255),
+            Color(red: 0x1a / 255, green: 0x14 / 255, blue: 0x10 / 255),
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     /// One theme swatch — the design's rounded-square chip
     /// (`vreader-panels.jsx` `ReaderSettingsSheet` theme selector):
-    /// a 12pt-radius tile filled with the theme background, an `Aa`
-    /// glyph (or a photo glyph for the Photo theme), the theme name
-    /// below, and a ring on the selected tile. Per the design, the
-    /// selected ring uses the *sheet's* accent (`t.accent`) and the
-    /// caption colour uses the sheet's `sub` token — consistent
-    /// across all swatches regardless of which theme each depicts.
+    /// a 12pt-radius tile filled with the theme background (a diagonal
+    /// gradient for the Photo theme), an `Aa` glyph (or a photo glyph
+    /// for the Photo theme), the theme name below, and — on the
+    /// selected tile — the design's two-ring treatment: a 2.5pt accent
+    /// ring hugging the tile plus a 1.5pt outer band in the sheet's
+    /// surface color (the design's `0 0 0 2.5px accent, 0 0 0 4px
+    /// surface` box-shadow). Per the design the selected ring uses the
+    /// *sheet's* accent (`t.accent`) and the caption colour uses the
+    /// sheet's `sub` token — consistent across all swatches regardless
+    /// of which theme each depicts.
     @ViewBuilder
     private func themeSwatch(_ theme: ReaderThemeV2) -> some View {
         let isSelected = store.theme == theme
@@ -236,29 +253,21 @@ struct ReaderSettingsPanel: View {
             store.theme = theme
         } label: {
             VStack(spacing: 6) {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(theme.backgroundColor))
+                themeSwatchTile(theme)
                     .aspectRatio(1, contentMode: .fit)
+                    // Outer band — the design's second box-shadow ring
+                    // in the sheet surface color (`0 0 0 4px surface`).
+                    // Only drawn when selected; the 1.5pt padding makes
+                    // room for it so the tile size stays constant.
+                    .padding(1.5)
                     .overlay {
-                        if theme.usesBackgroundImage {
-                            Image(systemName: "photo")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundStyle(Color(theme.accentColor))
-                        } else {
-                            Text("Aa")
-                                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 20)))
-                                .fontWeight(.semibold)
-                                .foregroundStyle(Color(theme.inkColor))
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 13.5)
+                                .strokeBorder(
+                                    Color(sheetTheme.sheetSurfaceColor),
+                                    lineWidth: 1.5
+                                )
                         }
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(
-                                isSelected
-                                    ? Color(sheetTheme.accentColor)
-                                    : Color(sheetTheme.ruleColor),
-                                lineWidth: isSelected ? 2.5 : 0.5
-                            )
                     }
 
                 Text(Self.themeDisplayName(theme))
@@ -270,6 +279,47 @@ struct ReaderSettingsPanel: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(Self.themeDisplayName(theme)) theme")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    /// The inner tile of a theme swatch — the 12pt-radius filled chip
+    /// with the `Aa`/photo glyph and the selected/unselected hairline
+    /// ring (the design's first box-shadow: `0 0 0 2.5px accent` when
+    /// selected, `inset 0 0 0 0.5px rule` otherwise).
+    @ViewBuilder
+    private func themeSwatchTile(_ theme: ReaderThemeV2) -> some View {
+        let isSelected = store.theme == theme
+        RoundedRectangle(cornerRadius: 12)
+            .fill(swatchTileShading(theme))
+            .overlay {
+                if theme.usesBackgroundImage {
+                    Image(systemName: "photo")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Color(theme.accentColor))
+                } else {
+                    Text("Aa")
+                        .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 20)))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color(theme.inkColor))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(
+                        isSelected
+                            ? Color(sheetTheme.accentColor)
+                            : Color(sheetTheme.ruleColor),
+                        lineWidth: isSelected ? 2.5 : 0.5
+                    )
+            }
+    }
+
+    /// Fill for a swatch tile — the theme background for the four flat
+    /// themes; the design's 135° diagonal gradient for the Photo theme.
+    private func swatchTileShading(_ theme: ReaderThemeV2) -> AnyShapeStyle {
+        if theme.usesBackgroundImage {
+            return AnyShapeStyle(Self.photoSwatchGradient)
+        }
+        return AnyShapeStyle(Color(theme.backgroundColor))
     }
 
     // MARK: - Theme Background (A04, feature #32)
