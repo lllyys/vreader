@@ -146,3 +146,83 @@ struct PersistenceActorLibraryFileStateTests {
         )
     }
 }
+
+@Suite("PersistenceActor+Library — progressFraction projection (#60 WI-8)")
+struct PersistenceActorLibraryProgressTests {
+
+    /// A book with a saved reading position projects its
+    /// `totalProgression` into `LibraryBookItem.progressFraction`; a
+    /// book with no position projects `nil`. This is the end-to-end
+    /// data path that drives the grid-card strip and the row ring.
+    @Test func fetchAllLibraryBooks_projectsProgressFromReadingPosition() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+
+        let read = makeRecord(sha: String(repeating: "a", count: 64))
+        let unread = makeRecord(sha: String(repeating: "b", count: 64))
+        _ = try await persistence.insertBook(read)
+        _ = try await persistence.insertBook(unread)
+
+        let locator = try #require(
+            Locator.validated(bookFingerprint: read.fingerprint, totalProgression: 0.5)
+        )
+        try await persistence.savePosition(
+            bookFingerprintKey: read.fingerprintKey,
+            locator: locator,
+            deviceId: "test-device"
+        )
+
+        let items = try await persistence.fetchAllLibraryBooks()
+        let byKey = Dictionary(uniqueKeysWithValues: items.map { ($0.fingerprintKey, $0) })
+
+        #expect(byKey[read.fingerprintKey]?.progressFraction == 0.5)
+        #expect(byKey[read.fingerprintKey]?.readingProgressState == .inProgress(0.5))
+        #expect(byKey[unread.fingerprintKey]?.progressFraction == nil)
+        #expect(byKey[unread.fingerprintKey]?.readingProgressState == .notStarted)
+    }
+
+    /// A fully-read book (`totalProgression` 1.0) projects to the
+    /// `.finished` state — drives the grid-card checkmark.
+    @Test func fetchAllLibraryBooks_finishedBookProjectsFullProgress() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        let book = makeRecord(sha: String(repeating: "c", count: 64))
+        _ = try await persistence.insertBook(book)
+
+        let locator = try #require(
+            Locator.validated(bookFingerprint: book.fingerprint, totalProgression: 1.0)
+        )
+        try await persistence.savePosition(
+            bookFingerprintKey: book.fingerprintKey,
+            locator: locator,
+            deviceId: "test-device"
+        )
+
+        let items = try await persistence.fetchAllLibraryBooks()
+        #expect(items.first?.progressFraction == 1.0)
+        #expect(items.first?.readingProgressState == .finished)
+    }
+
+    private func makeRecord(sha: String) -> BookRecord {
+        let fp = DocumentFingerprint(
+            contentSHA256: sha,
+            fileByteCount: 1024,
+            format: .epub
+        )
+        return BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "T",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: ImportProvenance(
+                source: .filesApp,
+                importedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                originalURLBookmarkData: nil
+            ),
+            detectedEncoding: nil,
+            addedAt: Date(),
+            originalExtension: "epub",
+            fileState: .local,
+            blobPath: nil
+        )
+    }
+}
