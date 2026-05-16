@@ -1004,3 +1004,50 @@ category 2 (PLANNED feature with plan doc → Gate 3).
   coordinator, which is the cleaner boundary."* Gate 2 closed
   after 3 rounds — within the rule-47 limit. **WI-7c5a + WI-7c5b
   may now enter Gate 3.**
+- 2026-05-16 v11: **WI-6b scoped to top + bottom chrome; More menu
+  split out as WI-6c.** Implementing WI-6b surfaced that the chrome
+  re-skin cannot ship the top bar alone — restructuring the single
+  shared `ReaderChromeBar` sheds Contents / Notes / Display / AI,
+  and the v2 design re-homes those four only in the bottom bar (the
+  design note §2 explicitly keeps them out of the More menu).
+  Shipping top-without-bottom would make TOC/Notes/Display/AI
+  unreachable — a regression. A north-star judgment pass confirmed
+  **Option C**: WI-6b ships `ReaderTopChrome` + `ReaderBottomChrome`
+  atomically, wiring each paginated format's existing seek closure
+  through the shared bottom chrome and deleting the legacy
+  `ReadingProgressBar` / `ReaderBottomOverlay` / `ChapterBottomOverlay`
+  compositions. Scope details:
+  - Bottom chrome covers the 4 paginated native formats (TXT both
+    modes / MD / EPUB / PDF). **Foliate (AZW3/MOBI) keeps its own
+    bottom overlay** — pre-accepted by Risk (f) ("AZW3 keeps
+    Foliate's own chrome"). The shared top chrome still covers all
+    5 formats (composed once in `ReaderContainerView`).
+  - EPUB + TXT-chapter inline prev/next chapter buttons are removed;
+    chapter navigation relocates to the Contents (TOC) toolbar
+    button — the v2 design's model (no chapter-nav bar). Chapter
+    position is surfaced in the bottom chrome's leading label. The
+    now-orphaned `EPUBReaderContainerView.navigateChapter` /
+    `currentChapterTitle` helpers and the `ChapterBottomOverlay`
+    view are deleted as dead code.
+  - The ⋯ More button routes to the existing settings sheet as the
+    interim wiring; **WI-6c** ships the anchored More-menu popover
+    (`vreader-more.jsx`). WI-6c is split out because it wires 6
+    cross-feature actions and carries the rule-51 boundary for the
+    "Book details" row — the design note §4 already punts the Book
+    Details *sheet* to a follow-up, so WI-6c builds the designed
+    *row* and files a `needs-design` issue for the destination.
+  - The `ReaderBottomChrome` toolbar posts four new notifications
+    (`.readerOpenContents` / `.readerOpenNotes` / `.readerOpenDisplay`
+    / `.readerOpenAI`) that `ReaderContainerView` observes, so the
+    chrome composes inside any container with no closure plumbing.
+- 2026-05-16 v11: **WI-8 progress UI deferred (data-model gap).**
+  WI-8 (BookCardView + BookRowView re-skin) shipped the design's
+  typography / palette / cover treatment, but the per-book progress
+  indicators the design shows (in-cover progress strip, finished
+  checkmark, list-row progress ring, `%·lastRead` metadata) are
+  deferred — `LibraryBookItem` carries no reading-progress fraction
+  and plumbing one would touch `LibraryBookItem` +
+  `PersistenceActor+Library` + `LibraryViewModel`, colliding with
+  WI-9's `LibraryView`. This is data-model-blocked, not
+  design-blocked; a follow-up WI adds the progress field. Recorded
+  so the gap is tracked, not silently dropped.

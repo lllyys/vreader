@@ -182,6 +182,10 @@ All cross-component communication uses NotificationCenter:
 | `.searchHighlightClear`        | nil                  | SearchViewModel → Bridges                               |
 | `.readerPreviousPage`          | nil                  | TapZoneOverlay → Container                              |
 | `.readerNextPage`              | nil                  | TapZoneOverlay → Container                              |
+| `.readerOpenContents`          | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens annotations panel on the Contents tab) |
+| `.readerOpenNotes`             | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens annotations panel on the Highlights tab) |
+| `.readerOpenDisplay`           | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens reader settings) |
+| `.readerOpenAI`                | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens the AI assistant when configured) |
 | `.epubFootnoteDetected`        | footnote ref         | EPUB bridge → Container (footnote popup)                |
 | `.bookFileStateDidChange`      | `["fingerprintKey","state"]` | LazyDownloadCoordinator (reconcile) → LibraryView (refresh row, feature #47) |
 | `.libraryRowTappedWhileNotLocal` | `["fingerprintKey","fileState"]` | LibraryView → BookDownloadSheet (future, #47 WI-6) |
