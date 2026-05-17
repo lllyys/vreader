@@ -75,6 +75,53 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         self = match
     }
 
+    // MARK: - Capability gating
+
+    /// The rows `ReaderMorePopover` should render for a book whose
+    /// reader engine advertises `capabilities`.
+    ///
+    /// Bug #176 / GH #602 (REOPENED): the `Read aloud` row is a no-op
+    /// for formats that lack `.tts` (AZW3 / MOBI route through
+    /// Foliate-js, and `FormatCapabilities.capabilities(for: .azw3)`
+    /// excludes `.tts` because the AVSpeechSynthesizer pipeline has no
+    /// azw3/mobi text-extraction path). The original fix removed `.tts`
+    /// from the capability set, but WI-6c's popover re-surfaced the row
+    /// unconditionally — this filter re-applies the gate so the no-op
+    /// affordance never appears.
+    ///
+    /// Declared (top → bottom) order is preserved — `ReaderMorePopover`
+    /// draws its hairline divider after `dividerAfter` by index, so the
+    /// filter must not reorder. `dividerAfter` (`.autoTurnPages`) has
+    /// no capability requirement, so the divider anchor always
+    /// survives.
+    ///
+    /// - Parameter capabilities: the active format's capability set, or
+    ///   `nil` for callers that don't supply one (previews / older
+    ///   tests / legacy call sites). A `nil` set yields every row —
+    ///   the same permissive default as the bug #156 auto-page-turn
+    ///   and bug #158 reading-mode gates.
+    /// - Returns: the rows to render, in declared order.
+    static func visibleRows(
+        for capabilities: FormatCapabilities?
+    ) -> [ReaderMoreMenuRow] {
+        allCases.filter { $0.isVisible(for: capabilities) }
+    }
+
+    /// Whether this row should be rendered for a book whose reader
+    /// engine advertises `capabilities`. Only `.readAloud` is gated
+    /// (on `.tts`); every other row is always visible. A `nil`
+    /// capability set keeps the row (backward compat — see
+    /// `visibleRows(for:)`).
+    func isVisible(for capabilities: FormatCapabilities?) -> Bool {
+        switch self {
+        case .readAloud:
+            guard let caps = capabilities else { return true }
+            return caps.contains(.tts)
+        case .autoTurnPages, .bookDetails, .shareBook, .exportAnnotations:
+            return true
+        }
+    }
+
     /// Whether the row renders an inline iOS-style toggle switch
     /// instead of a chevron. Only `autoTurnPages` is a toggle — it has
     /// backing state (`ReaderSettingsStore.autoPageTurn`). (The design

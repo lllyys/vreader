@@ -43,6 +43,14 @@ struct ReaderMorePopover: View {
     /// Auto-turn interval in seconds — rendered in the Auto-turn
     /// sub-detail ("Every Ns") when the toggle is on.
     let autoTurnInterval: Double
+    /// The active book format's capability set, used to gate rows
+    /// whose backing action would be a no-op for this format.
+    /// Bug #176 / GH #602: the `Read aloud` row is dropped when the
+    /// format excludes `.tts` (AZW3 / MOBI) — otherwise the menu
+    /// surfaces a silent dead-end control. `nil` keeps every row, for
+    /// previews / tests / legacy call sites (see
+    /// `ReaderMoreMenuRow.visibleRows(for:)`).
+    let formatCapabilities: FormatCapabilities?
     /// Top inset (points) at which the popover floats — passed from
     /// the host so the popover clears the top chrome. The design's
     /// `top: 92` baseline is for the prototype's fixed-height chrome;
@@ -79,9 +87,22 @@ struct ReaderMorePopover: View {
 
     // MARK: - Popover card
 
+    /// The rows this popover renders — capability-gated for the active
+    /// format (bug #176 / GH #602: the `Read aloud` row is dropped when
+    /// the format lacks `.tts`). Exposed (not `private`) so a wiring
+    /// test can prove the popover actually consults `formatCapabilities`
+    /// rather than rendering `ReaderMoreMenuRow.allCases` unconditionally.
+    var resolvedRows: [ReaderMoreMenuRow] {
+        ReaderMoreMenuRow.visibleRows(for: formatCapabilities)
+    }
+
     private var popoverCard: some View {
+        // Bug #176 / GH #602: filter capability-gated rows (e.g. drop
+        // `Read aloud` for AZW3 / MOBI, which lack `.tts`) before
+        // rendering. The divider still trails `dividerAfter` — that row
+        // is never gated, so the anchor always survives the filter.
         VStack(spacing: 0) {
-            ForEach(Array(ReaderMoreMenuRow.allCases.enumerated()), id: \.element) { _, row in
+            ForEach(resolvedRows, id: \.self) { row in
                 rowButton(row)
                 if row == ReaderMoreMenuRow.dividerAfter {
                     divider
