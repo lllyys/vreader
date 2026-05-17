@@ -114,10 +114,16 @@ struct VReaderApp: App {
             let modelConfig = ModelConfiguration()
             #endif
 
-            let container = try ModelContainer(
-                for: schema,
-                migrationPlan: VReaderMigrationPlan.self,
-                configurations: [modelConfig]
+            // Bug #186 / GH #633: build the container via the factory,
+            // which skips `VReaderMigrationPlan` on a fresh install. There
+            // is no store to migrate on first launch, and applying the plan
+            // forces SwiftData to materialize SchemaV1–V5 on the main
+            // thread here in `init()` — the multi-second first-launch
+            // freeze. Existing installs still get the plan (their store
+            // file already exists on disk).
+            let container = try ModelContainerFactory.makeContainer(
+                schema: schema,
+                configuration: modelConfig
             )
             self.modelContainer = container
             self.initError = nil
