@@ -13,8 +13,18 @@ enum AccessibilityID {
     // MARK: - Reader Chrome
     static let readerBackButton = "readerBackButton"
     static let readerSearchButton = "readerSearchButton"
-    static let readerAnnotationsButton = "readerAnnotationsButton"
-    static let readerSettingsButton = "readerSettingsButton"
+    // Bug #209 / GH #804: Feature #60's v2 reader chrome (WI-6b
+    // `ReaderBottomChrome`) renamed the bottom-toolbar buttons — the legacy
+    // "Annotations" button is now "Notes" (`readerNotesButton`) and the
+    // legacy "Settings" button is now "Display" (`readerDisplayButton`), per
+    // `ReaderBottomChromeButton.accessibilityIdentifier`. The Notes button
+    // still opens the annotations panel (`annotationsPanelSheet`); the
+    // Display button still opens `ReaderSettingsPanel` (`readerSettingsPanel`).
+    // The constant names keep the semantic role (Settings / Annotations) so
+    // the existing call sites don't churn; only the underlying identifier
+    // strings move to the v2 contract.
+    static let readerAnnotationsButton = "readerNotesButton"
+    static let readerSettingsButton = "readerDisplayButton"
 
     // MARK: - Sheets
     static let searchSheet = "searchSheet"
