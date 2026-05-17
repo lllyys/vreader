@@ -103,6 +103,7 @@ struct VReaderApp: App {
                     || config.seedWarAndPeace
                     || config.seedMDTOC
                     || config.seedMDMultiPage
+                    || config.seedEPUBFixture
                     || config.seedKeepExisting
                 modelConfig = needsDiskBackedStore
                     ? ModelConfiguration()
@@ -182,6 +183,8 @@ struct VReaderApp: App {
                         await TestSeeder.seedMDWithTOC(persistence: persistence)
                     } else if seedConfig.seedMDMultiPage {
                         await TestSeeder.seedMDMultiPage(persistence: persistence)
+                    } else if seedConfig.seedEPUBFixture {
+                        await TestSeeder.seedMiniEPUB(persistence: persistence)
                     } else if seedConfig.seedTwoBooks {
                         await TestSeeder.seedTwoBooks(persistence: persistence)
                     } else if seedConfig.seedBooks {
@@ -411,6 +414,13 @@ struct TestLaunchConfig: Sendable {
     /// `--seed-two-books` — two TXT books with real backing files for
     /// Feature #37's per-book-settings isolation test. Bug #209 / GH #804.
     let seedTwoBooks: Bool
+    /// `--seed-epub-fixture` — seed the bundled `mini-epub3.epub` as a
+    /// single real, openable EPUB. Bug #214 / GH #834: the `.books` seed's
+    /// EPUB fixtures are metadata-only (no backing file) and never open, so
+    /// the EPUB reader bottom-chrome verification test needs its own
+    /// real-file seed. Implies a disk-backed store (EPUB import + selective
+    /// extraction touch the filesystem).
+    let seedEPUBFixture: Bool
     let seedCorruptDB: Bool
     /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
     /// SwiftData store to remain. Used for terminate-then-relaunch tests
@@ -493,6 +503,7 @@ struct TestLaunchConfig: Sendable {
             seedMDTOC: args.contains("--seed-md-toc"),
             seedMDMultiPage: args.contains("--seed-md-multi-page"),
             seedTwoBooks: args.contains("--seed-two-books"),
+            seedEPUBFixture: args.contains("--seed-epub-fixture"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
@@ -516,6 +527,7 @@ struct TestLaunchConfig: Sendable {
         seedMDTOC: false,
         seedMDMultiPage: false,
         seedTwoBooks: false,
+        seedEPUBFixture: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,

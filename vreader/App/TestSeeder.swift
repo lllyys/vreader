@@ -373,6 +373,76 @@ enum TestSeeder {
         }
     }
 
+    /// Seeds the bundled `mini-epub3.epub` fixture as a real, openable EPUB.
+    /// Copies the DebugFixtures bundle resource into `ImportedBooks/` and
+    /// inserts a matching `BookRecord` so the book opens into the EPUB
+    /// reader.
+    ///
+    /// Bug #214 / GH #834: the `.books` seed's EPUB fixtures are
+    /// metadata-only (`makeRecord` writes no backing file), so tapping
+    /// them never opens the EPUB reader — the same Bug #209 Cause-A defect
+    /// that motivated `seedTwoBooks` for TXT. This is the EPUB equivalent:
+    /// a single openable EPUB so the EPUB reader bottom-chrome verification
+    /// test can exercise the real reader screen. The reader resolves the
+    /// file by `fingerprintKey` (see `ReaderContainerView.resolvedFileURL`),
+    /// so the faked SHA-256 hash is harmless — the path is derived from the
+    /// canonical key, not re-hashed.
+    static func seedMiniEPUB(persistence: PersistenceActor) async {
+        await clearAllBooks(persistence: persistence)
+
+        guard let bundleURL = Bundle.main.url(
+            forResource: "mini-epub3",
+            withExtension: "epub",
+            subdirectory: "DebugFixtures"
+        ) else {
+            AppLogger.general.warning("mini-epub3.epub not found in DebugFixtures bundle")
+            return
+        }
+
+        guard let data = try? Data(contentsOf: bundleURL) else {
+            AppLogger.general.warning("failed to read mini-epub3.epub from bundle")
+            return
+        }
+
+        let hash = "00000000000000000000000000000000000000000000000000000000e9b00001"
+        let fingerprint = DocumentFingerprint(
+            contentSHA256: hash,
+            fileByteCount: Int64(data.count),
+            format: .epub
+        )
+
+        let booksDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedBooks", isDirectory: true)
+        try? FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+
+        let safeName = fingerprint.canonicalKey.replacingOccurrences(of: ":", with: "_")
+        let filePath = booksDir.appendingPathComponent(safeName).appendingPathExtension("epub")
+        try? data.write(to: filePath)
+
+        let provenance = ImportProvenance(
+            source: .localCopy,
+            importedAt: Date(),
+            originalURLBookmarkData: nil
+        )
+        let record = BookRecord(
+            fingerprintKey: fingerprint.canonicalKey,
+            title: "Mini EPUB Fixture",
+            author: "VReader Tests",
+            coverImagePath: nil,
+            fingerprint: fingerprint,
+            provenance: provenance,
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+
+        do {
+            _ = try await persistence.insertBook(record)
+        } catch {
+            AppLogger.general.warning("failed to seed mini-epub3: \(error)")
+        }
+    }
+
     /// Seeds two real-file TXT books for Feature #37's per-book-settings
     /// isolation test, which needs two distinct *openable* books. The
     /// `.books` seed's fixtures are metadata-only (no backing file) and

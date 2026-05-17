@@ -35,6 +35,10 @@ enum TestSeedState {
     /// distinct *openable* books (Feature #37 per-book-settings isolation).
     /// Bug #209 / GH #804.
     case twoBooks
+    /// Single real, openable EPUB (`mini-epub3.epub`) — for EPUB reader
+    /// verification tests. Bug #214 / GH #834: the `.books` EPUB fixtures
+    /// are metadata-only (no backing file) and never open.
+    case epubFixture
     /// Keep existing database state (no seeding). For relaunch tests.
     case keepExisting
     /// Corrupted database (triggers init error screen).
@@ -50,6 +54,7 @@ enum TestSeedState {
         case .mdTOC: return "--seed-md-toc"
         case .mdMultiPage: return "--seed-md-multi-page"
         case .twoBooks: return "--seed-two-books"
+        case .epubFixture: return "--seed-epub-fixture"
         case .keepExisting: return "--uitesting-no-seed"
         case .corruptDB: return "--seed-corrupt-db"
         }

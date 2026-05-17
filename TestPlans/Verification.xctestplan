@@ -18,6 +18,8 @@
   "testTargets" : [
     {
       "selectedTests" : [
+        "Feature11EPUBBottomChromeVerificationTests\/test_verify_bug_214_epub_bottom_chrome_buttons_resolve()",
+        "Feature11EPUBBottomChromeVerificationTests\/test_verify_bug_214_epub_display_button_opens_settings_panel()",
         "Feature11EPUBHighlightVerificationTests\/test_verify_feature_11_epub_highlight_happy_path()",
         "Feature11EPUBHighlightVerificationTests\/test_verify_feature_11_epub_highlight_regression_bug77_buffering_race()",
         "Feature21PaginatedModeVerificationTests\/test_verify_feature_21_paged_mode_shows_paged_view()",

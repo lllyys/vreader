@@ -79,20 +79,32 @@ struct EPUBReaderContainerView: View {
 
     var body: some View {
         ZStack {
-            if viewModel.isLoading {
-                loadingView
-            } else if let errorMessage = viewModel.errorMessage, viewModel.metadata == nil {
-                errorView(message: errorMessage)
-            } else if let webViewError {
-                errorView(message: webViewError)
-            } else if let contentURL, let extractedRoot {
-                readerContent(contentURL: contentURL, accessRoot: extractedRoot)
-            } else if viewModel.metadata != nil {
-                // Metadata loaded but content URL not yet resolved
-                loadingView
-            } else {
-                Color.clear
+            // Bug #214 / GH #834: scope `epubReaderContainer` to the
+            // content subtree so the container identifier does not
+            // propagate onto and clobber `ReaderBottomChrome`'s toolbar
+            // button identifiers (`readerDisplayButton` / `readerNotesButton`).
+            // Same root cause + fix as Bug #209 / GH #804 Cause B for
+            // TXT/MDReaderContainerView. Scoped here it still propagates
+            // onto the inner WebView — `Feature11EPUBHighlightVerificationTests`
+            // looks the content view up by `epubReaderContainer` — without
+            // reaching the bottom chrome, a separate ZStack sibling.
+            Group {
+                if viewModel.isLoading {
+                    loadingView
+                } else if let errorMessage = viewModel.errorMessage, viewModel.metadata == nil {
+                    errorView(message: errorMessage)
+                } else if let webViewError {
+                    errorView(message: webViewError)
+                } else if let contentURL, let extractedRoot {
+                    readerContent(contentURL: contentURL, accessRoot: extractedRoot)
+                } else if viewModel.metadata != nil {
+                    // Metadata loaded but content URL not yet resolved
+                    loadingView
+                } else {
+                    Color.clear
+                }
             }
+            .accessibilityIdentifier("epubReaderContainer")
 
             // Bottom navigation overlay (Issue 9: spacing: 0 to match PDF/TXT containers)
             // Hidden when TTS is active to avoid overlap (bug #97)
@@ -298,7 +310,6 @@ struct EPUBReaderContainerView: View {
         .sheet(isPresented: $showNoteSheet) {
             noteInputSheet
         }
-        .accessibilityIdentifier("epubReaderContainer")
         // Feature #60 WI-12 (#795): keep the Photo background-image data
         // URL fresh. Driven by theme + custom-background changes — never
         // by scroll — so the file read + base64 encode stays off the

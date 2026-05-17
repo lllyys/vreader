@@ -74,28 +74,44 @@ struct PDFReaderContainerView: View {
 
     var body: some View {
         ZStack {
-            // Bridge is always mounted so PDFDocument stays loaded
-            PDFViewBridge(
-                url: fileURL,
-                restorePage: restoredPage,
-                password: submittedPassword,
-                passwordAttemptId: passwordAttemptId,
-                viewModel: viewModel,
-                highlightRecords: savedHighlightRecords,
-                pendingHighlight: pendingHighlightPayload,
-                pendingHighlightId: pendingHighlightId,
-                searchHighlightText: searchHighlightText,
-                highlightRenderer: highlightRenderer,
-                theme: settingsStore?.theme,
-                highlightActionPresenter: UIKitHighlightActionPresenter(),
-                onHighlightTapAction: { [highlightCoordinator] action, id in
-                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
-                }
-            )
-            .ignoresSafeArea(edges: .bottom)
-            .accessibilityIdentifier("pdfReaderContent")
+            // Bug #214 / GH #834: scope `pdfReaderContainer` to the PDF
+            // content bridge ONLY. A container `.accessibilityIdentifier`
+            // propagates onto every descendant accessibility element;
+            // applied to the whole `body` ZStack it clobbered
+            // `ReaderBottomChrome`'s toolbar buttons (`readerDisplayButton`
+            // / `readerNotesButton`). Scoped to just the bridge it must
+            // also NOT reach the password / loading / error overlays —
+            // those carry their own identifiers (`pdfPasswordField`,
+            // `pdfReaderLoading`, `pdfReaderError`, …) and stay separate
+            // ZStack siblings. Same fix as Bug #209 / GH #804 Cause B for
+            // TXT/MDReaderContainerView.
+            Group {
+                // Bridge is always mounted so PDFDocument stays loaded
+                PDFViewBridge(
+                    url: fileURL,
+                    restorePage: restoredPage,
+                    password: submittedPassword,
+                    passwordAttemptId: passwordAttemptId,
+                    viewModel: viewModel,
+                    highlightRecords: savedHighlightRecords,
+                    pendingHighlight: pendingHighlightPayload,
+                    pendingHighlightId: pendingHighlightId,
+                    searchHighlightText: searchHighlightText,
+                    highlightRenderer: highlightRenderer,
+                    theme: settingsStore?.theme,
+                    highlightActionPresenter: UIKitHighlightActionPresenter(),
+                    onHighlightTapAction: { [highlightCoordinator] action, id in
+                        await highlightCoordinator?.handleTapAction(action, highlightID: id)
+                    }
+                )
+                .ignoresSafeArea(edges: .bottom)
+                .accessibilityIdentifier("pdfReaderContent")
+            }
+            .accessibilityIdentifier("pdfReaderContainer")
 
-            // Overlays on top of the bridge
+            // Overlays on top of the bridge — separate ZStack siblings so
+            // `pdfReaderContainer` does not propagate onto their own
+            // identifiers (Bug #214).
             if viewModel.needsPassword {
                 passwordOverlay
             }
@@ -277,7 +293,6 @@ struct PDFReaderContainerView: View {
         .sheet(isPresented: $showNoteSheet) {
             pdfNoteInputSheet
         }
-        .accessibilityIdentifier("pdfReaderContainer")
     }
 
 }

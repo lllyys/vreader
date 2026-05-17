@@ -67,6 +67,14 @@ extension PDFReaderContainerView {
     /// dropped — the v2 design's two-label row has no slot for it.
     @ViewBuilder
     var bottomOverlay: some View {
+        // Bug #214 / GH #834: do NOT apply a container `.accessibilityIdentifier`
+        // here. A container identifier on `ReaderBottomChrome` propagates
+        // onto every descendant accessibility element, overriding the
+        // toolbar buttons' own identifiers (`readerDisplayButton` /
+        // `readerNotesButton` — set inside `ReaderBottomChrome`) so XCUITest
+        // cannot resolve them. TXT/MDReaderContainerView mount the same
+        // chrome with no wrapping identifier; EPUB/PDF now match. The
+        // former `pdfBottomOverlay` identifier had no test consumer.
         ReaderBottomChrome(
             theme: settingsStore?.theme ?? .paper,
             progress: $readingProgress,
@@ -84,7 +92,6 @@ extension PDFReaderContainerView {
             ),
             trailingLabel: viewModel.sessionTimeDisplay ?? ""
         )
-        .accessibilityIdentifier("pdfBottomOverlay")
     }
 }
 #endif

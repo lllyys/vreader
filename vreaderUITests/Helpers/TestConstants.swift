@@ -56,7 +56,13 @@ enum AccessibilityID {
     static let pdfReaderContent = "pdfReaderContent"
     static let pdfReaderLoading = "pdfReaderLoading"
     static let pdfReaderError = "pdfReaderError"
-    static let pdfBottomOverlay = "pdfBottomOverlay"
+    // Bug #214 / GH #834: the `pdfBottomOverlay` identifier was REMOVED
+    // from production — applied on the v2 `ReaderBottomChrome` it
+    // propagated onto and clobbered the toolbar buttons'
+    // `readerDisplayButton`/`readerNotesButton` identifiers. No test ever
+    // consumed it. Kept here (annotated) so a future grep finds the
+    // context rather than a bare missing symbol.
+    static let pdfBottomOverlay = "pdfBottomOverlay"   // STALE — removed from production (Bug #214)
     static let pdfPageIndicator = "pdfPageIndicator"
 
     // MARK: - TXT/MD Reader

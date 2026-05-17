@@ -121,6 +121,39 @@ struct LaunchArgParsingTests {
         #expect(config.seedMDMultiPage == true)
         #expect(config.isUITesting == true)
     }
+
+    // MARK: - Bug #214 / GH #834: --seed-epub-fixture
+
+    @Test func seedEPUBFixtureDefaultsFalse() {
+        let config = TestLaunchConfig.parse(["--uitesting"])
+        #expect(config.seedEPUBFixture == false)
+    }
+
+    @Test func seedEPUBFixtureParsedWhenFlagPresent() {
+        let config = TestLaunchConfig.parse([
+            "--uitesting", "--seed-epub-fixture"
+        ])
+        #expect(config.seedEPUBFixture == true)
+        #expect(config.isUITesting == true)
+    }
+
+    @Test func seedEPUBFixtureNoneConfigIsFalse() {
+        #expect(TestLaunchConfig.none.seedEPUBFixture == false)
+    }
+
+    @Test func seedEPUBFixtureCoexistsWithOtherFlags() {
+        let config = TestLaunchConfig.parse([
+            "--uitesting",
+            "--seed-epub-fixture",
+            "--reset-preferences"
+        ])
+        #expect(config.isUITesting == true)
+        #expect(config.seedEPUBFixture == true)
+        #expect(config.seedResetPreferences == true)
+        // Mutually-exclusive seed flags stay false.
+        #expect(config.seedEmpty == false)
+        #expect(config.seedWarAndPeace == false)
+    }
 }
 
 #endif
