@@ -125,33 +125,47 @@ struct TXTReaderContainerView: View {
 
     var body: some View {
         ZStack {
-            if viewModel.isLoading || isBuildingInitialAttrString {
-                loadingView
-            } else if let errorMessage = viewModel.errorMessage,
-                      viewModel.textContent == nil && viewModel.currentChapterText == nil {
-                errorView(message: errorMessage)
-            } else if let chapterText = viewModel.currentChapterText,
-                      let attrStr = chapterAttrString {
-                // Chapter-based display (WI-6) — fast path for files with detected chapters
-                chapterReaderContent(text: chapterText, attributedText: attrStr)
-            } else if viewModel.currentChapterText != nil {
-                // Chapter text available but attributed string still building
-                loadingView
-            } else if viewModel.textContent != nil && isLargeFile {
-                // Legacy: large file → chunked renderer (fallback when no chapter index)
-                if let chunks = textChunks, let offsets = chunkStartOffsets {
-                    chunkedReaderContent(chunks: chunks, offsets: offsets)
-                } else {
+            // Bug #209 / GH #804: scope the `txtReaderContainer`
+            // identifier to the content subtree. A container
+            // `.accessibilityIdentifier` propagates onto every descendant
+            // accessibility element; applied to the whole `body` ZStack it
+            // also clobbered `ReaderBottomChrome`'s toolbar buttons
+            // (`readerDisplayButton` / `readerNotesButton`) so XCUITest
+            // could not resolve them. Scoped here it still propagates onto
+            // the inner UITextView — the TXT highlight/position tests look
+            // the content view up by `txtReaderContainer` — without
+            // reaching the bottom chrome, a separate ZStack sibling.
+            Group {
+                if viewModel.isLoading || isBuildingInitialAttrString {
                     loadingView
+                } else if let errorMessage = viewModel.errorMessage,
+                          viewModel.textContent == nil && viewModel.currentChapterText == nil {
+                    errorView(message: errorMessage)
+                } else if let chapterText = viewModel.currentChapterText,
+                          let attrStr = chapterAttrString {
+                    // Chapter-based display (WI-6) — fast path for files with detected chapters
+                    chapterReaderContent(text: chapterText, attributedText: attrStr)
+                } else if viewModel.currentChapterText != nil {
+                    // Chapter text available but attributed string still building
+                    loadingView
+                } else if viewModel.textContent != nil && isLargeFile {
+                    // Legacy: large file → chunked renderer (fallback when no chapter index)
+                    if let chunks = textChunks, let offsets = chunkStartOffsets {
+                        chunkedReaderContent(chunks: chunks, offsets: offsets)
+                    } else {
+                        loadingView
+                    }
+                } else if let text = viewModel.textContent, let attrStr = preparedAttrString {
+                    // Legacy: small file → single UITextView (fallback when no chapter index)
+                    readerContent(text: text, attributedText: attrStr)
+                } else if viewModel.textContent != nil {
+                    loadingView
+                } else {
+                    Color.clear
                 }
-            } else if let text = viewModel.textContent, let attrStr = preparedAttrString {
-                // Legacy: small file → single UITextView (fallback when no chapter index)
-                readerContent(text: text, attributedText: attrStr)
-            } else if viewModel.textContent != nil {
-                loadingView
-            } else {
-                Color.clear
             }
+            .accessibilityIdentifier("txtReaderContainer")
+            .accessibilityValue(readerAccessibilityValue)
 
             // Top overlay: chapter title (WI-6)
             if hasChapterDisplay && isChromeVisible,
@@ -432,8 +446,6 @@ struct TXTReaderContainerView: View {
             uiState: uiState,
             highlightCoordinator: highlightCoordinator ?? makeNoOpCoordinator()
         )
-        .accessibilityIdentifier("txtReaderContainer")
-        .accessibilityValue(readerAccessibilityValue)
     }
 
     // MARK: - Notification Dependencies

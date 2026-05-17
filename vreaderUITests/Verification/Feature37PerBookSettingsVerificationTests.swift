@@ -4,7 +4,9 @@
 //     not affect book B).
 // (2) Per-book settings persist across reopening the same book.
 //
-// Seed: .books (two or more fixture books needed for isolation test).
+// Seed: .twoBooks — two real-file TXT books. The isolation test needs two
+// distinct *openable* books; the .books seed's fixtures are metadata-only
+// and fail to open (Bug #209 / GH #804).
 //
 // The per-book "Custom settings for this book" Section is at the bottom of
 // ReaderSettingsPanel; SwiftUI Form sections are lazy-rendered, so the toggle
@@ -24,7 +26,7 @@ final class Feature37PerBookSettingsVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .books, resetPreferences: true)
+        app = launchApp(seed: .twoBooks, resetPreferences: true)
         settingsHelper = VerificationSettingsHelper(app: app)
     }
 
@@ -104,6 +106,29 @@ final class Feature37PerBookSettingsVerificationTests: XCTestCase {
         return toggle
     }
 
+    /// Flips the per-book toggle by tapping its underlying switch control.
+    ///
+    /// Bug #209 / GH #804: the SwiftUI `Toggle` row exposes a full-width
+    /// *outer* `.switch` accessibility element (the labeled row) that
+    /// *contains* the inner `UISwitch`. `perBookToggle()` keys on the row
+    /// label, so it resolves the outer element — and `XCUIElement.tap()`
+    /// taps that element's centre, which lands on the label `StaticText`,
+    /// not the switch. Feature #60 WI-10 re-skinned `ReaderSettingsPanel`
+    /// from a `Form` to a `List`; a label-area tap no longer flips the
+    /// control, so the centre tap silently no-ops. Tapping the inner
+    /// switch (the real toggle, with no label of its own) flips it
+    /// reliably. `.value` is still read from the passed-in outer element —
+    /// it mirrors the inner switch's state.
+    private func tapPerBookToggle(_ toggle: XCUIElement) {
+        let innerSwitch = toggle.switches.firstMatch
+        if innerSwitch.exists {
+            innerSwitch.tap()
+        } else {
+            // Fallback: tap the trailing edge where the switch sits.
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        }
+    }
+
     // MARK: - Feature #37 Verification
 
     /// Verifies that enabling per-book settings for book A does not affect book B:
@@ -132,7 +157,7 @@ final class Feature37PerBookSettingsVerificationTests: XCTestCase {
         }
 
         if toggle.value as? String == "0" || toggle.value as? String == "false" {
-            toggle.tap()
+            tapPerBookToggle(toggle)
             XCTAssertEqual(
                 toggle.value as? String, "1",
                 "Per-book toggle should be enabled after tap"
@@ -201,7 +226,7 @@ final class Feature37PerBookSettingsVerificationTests: XCTestCase {
 
         // Ensure toggle is ON
         if toggle.value as? String == "0" || toggle.value as? String == "false" {
-            toggle.tap()
+            tapPerBookToggle(toggle)
         }
         XCTAssertEqual(toggle.value as? String, "1", "Per-book toggle should be ON")
 

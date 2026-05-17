@@ -2,7 +2,10 @@
 // Exercises switching the Reading Mode picker to "Native" / "Unified" and
 // confirms the paginated container surface (nativeTextPagedView) appears.
 //
-// Seed: .books (bundled fixtures — war-and-peace.txt covers the TXT path).
+// Seed: .warAndPeace — a real-file TXT fixture that opens into a working
+// reader. The .books seed inserts metadata-only BookRecords with no backing
+// file, so opening one fails with "The file could not be found" and the
+// reader chrome never renders (Bug #209 / GH #804).
 //
 // Notes:
 // - The "Paged" surface for TXT is the native paginated view; the Reading
@@ -26,7 +29,7 @@ final class Feature21PaginatedModeVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .books, resetPreferences: true)
+        app = launchApp(seed: .warAndPeace, resetPreferences: true)
         settingsHelper = VerificationSettingsHelper(app: app)
     }
 

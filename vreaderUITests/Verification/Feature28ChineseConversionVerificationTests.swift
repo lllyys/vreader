@@ -2,8 +2,10 @@
 // (Simplified ↔ Traditional). Confirms the "Chinese Text" segmented picker
 // is present in the reader settings panel.
 //
-// Seed: .books (the picker is rendered regardless of book content — the
-// disabled-vs-enabled state depends on format + reading mode).
+// Seed: .warAndPeace — a real-file TXT fixture that opens into a working
+// reader (the .books seed's fixtures are metadata-only and fail to open —
+// Bug #209 / GH #804). The picker is rendered regardless of book content;
+// the disabled-vs-enabled state depends on format + reading mode.
 //
 // Notes:
 // - The conversion-applied-to-reader-content test requires a CJK TXT
@@ -26,7 +28,7 @@ final class Feature28ChineseConversionVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .books, resetPreferences: true)
+        app = launchApp(seed: .warAndPeace, resetPreferences: true)
         settingsHelper = VerificationSettingsHelper(app: app)
     }
 

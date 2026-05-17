@@ -373,6 +373,108 @@ enum TestSeeder {
         }
     }
 
+    /// Seeds two real-file TXT books for Feature #37's per-book-settings
+    /// isolation test, which needs two distinct *openable* books. The
+    /// `.books` seed's fixtures are metadata-only (no backing file) and
+    /// fail to open with "The file could not be found" — Bug #209 / GH #804.
+    static func seedTwoBooks(persistence: PersistenceActor) async {
+        await clearAllBooks(persistence: persistence)
+        clearPerBookSettings()
+        let baseDate = Date(timeIntervalSinceReferenceDate: 700_000_000)
+        await insertRealTXTBook(
+            persistence: persistence,
+            title: "Per-Book Settings Test One",
+            sha256Suffix: "b0010001",
+            text: generateTestText(),
+            addedAt: baseDate
+        )
+        await insertRealTXTBook(
+            persistence: persistence,
+            title: "Per-Book Settings Test Two",
+            sha256Suffix: "b0020002",
+            text: generateTestText() + "\n\nSecond book — distinct content for a distinct fingerprint.",
+            addedAt: baseDate.addingTimeInterval(3600)
+        )
+    }
+
+    /// Writes one real TXT file to `ImportedBooks/` and inserts a matching
+    /// `BookRecord`, so the book opens into a working reader. Used by
+    /// `seedTwoBooks`; mirrors the file-write path of `seedPositionTest`.
+    private static func insertRealTXTBook(
+        persistence: PersistenceActor,
+        title: String,
+        sha256Suffix: String,
+        text: String,
+        addedAt: Date
+    ) async {
+        let data = Data(text.utf8)
+        let paddedHash = String(repeating: "0", count: max(0, 64 - sha256Suffix.count))
+            + sha256Suffix.lowercased()
+        let hash = String(paddedHash.suffix(64))
+        let fingerprint = DocumentFingerprint(
+            contentSHA256: hash,
+            fileByteCount: Int64(data.count),
+            format: .txt
+        )
+        let booksDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedBooks", isDirectory: true)
+        let safeName = fingerprint.canonicalKey.replacingOccurrences(of: ":", with: "_")
+        let filePath = booksDir.appendingPathComponent(safeName).appendingPathExtension("txt")
+        do {
+            // Bug #209 / GH #804 (Codex audit): fail fast — if the backing
+            // file is not written, do NOT fall through to `insertBook`.
+            // Metadata without a file reproduces the very "file could not
+            // be found" open failure this seed exists to prevent.
+            try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+            try data.write(to: filePath)
+        } catch {
+            AppLogger.general.warning("failed to write seed TXT file for '\(title)': \(error)")
+            return
+        }
+        let provenance = ImportProvenance(
+            source: .localCopy,
+            importedAt: addedAt,
+            originalURLBookmarkData: nil
+        )
+        let record = BookRecord(
+            fingerprintKey: fingerprint.canonicalKey,
+            title: title,
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fingerprint,
+            provenance: provenance,
+            detectedEncoding: "utf-8",
+            addedAt: addedAt
+        )
+        do {
+            _ = try await persistence.insertBook(record)
+        } catch {
+            AppLogger.general.warning("failed to seed real TXT book '\(title)': \(error)")
+        }
+    }
+
+    /// Removes the file-backed per-book settings overrides. Bug #209 /
+    /// GH #804 (Codex audit): `clearKnownPreferences` wipes only
+    /// UserDefaults, but per-book overrides are JSON files under
+    /// `Application Support/PerBookSettings` (see
+    /// `ReaderContainerView.perBookSettingsBaseURL`). Feature #37's
+    /// isolation / persistence tests reopen books with fixed fingerprint
+    /// keys, so a leftover override from a prior run would make the
+    /// "toggle starts OFF" assertions nondeterministic. `seedTwoBooks`
+    /// clears the directory so every run starts from a known-empty state.
+    private static func clearPerBookSettings() {
+        let dir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PerBookSettings", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: dir.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: dir)
+        } catch {
+            AppLogger.general.warning("failed to clear PerBookSettings: \(error)")
+        }
+    }
+
     /// Generates ~5000 characters of scrollable test content with numbered paragraphs.
     private static func generateTestText() -> String {
         var lines: [String] = []

@@ -191,6 +191,10 @@ struct AnnotationsPanelView: View {
             highlightVM = hVM
             annotationVM = aVM
         }
+        // Bug #209 / GH #804: see ReaderSettingsPanel — make the sheet one
+        // container element so the identifier names a single
+        // `otherElement` instead of propagating onto its descendants.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("annotationsPanelSheet")
     }
 

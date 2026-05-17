@@ -53,20 +53,27 @@ struct MDReaderContainerView: View {
 
     var body: some View {
         ZStack {
-            if viewModel.isLoading {
-                loadingView
-            } else if let errorMessage = viewModel.errorMessage, viewModel.renderedText == nil {
-                errorView(message: errorMessage)
-            } else if let attrStr = viewModel.renderedAttributedString {
-                if isPagedMode, let nav = uiState.pageNavigator {
-                    pagedReaderContent(attributedString: attrStr, navigator: nav)
+            // Bug #209 / GH #804: scope `mdReaderContainer` to the content
+            // subtree so the container identifier does not propagate onto
+            // and clobber `ReaderBottomChrome`'s toolbar button identifiers
+            // (`readerDisplayButton` etc.). See TXTReaderContainerView.
+            Group {
+                if viewModel.isLoading {
+                    loadingView
+                } else if let errorMessage = viewModel.errorMessage, viewModel.renderedText == nil {
+                    errorView(message: errorMessage)
+                } else if let attrStr = viewModel.renderedAttributedString {
+                    if isPagedMode, let nav = uiState.pageNavigator {
+                        pagedReaderContent(attributedString: attrStr, navigator: nav)
+                    } else {
+                        readerContent(attributedString: attrStr)
+                    }
                 } else {
-                    readerContent(attributedString: attrStr)
+                    // Not yet opened
+                    Color.clear
                 }
-            } else {
-                // Not yet opened
-                Color.clear
             }
+            .accessibilityIdentifier("mdReaderContainer")
 
             // Bottom overlay for progress, scrubber, and session time (WI-004b)
             // Hidden when TTS is active to avoid overlap (bug #97)
@@ -233,7 +240,6 @@ struct MDReaderContainerView: View {
             uiState: uiState,
             highlightCoordinator: highlightCoordinator ?? makeNoOpCoordinator()
         )
-        .accessibilityIdentifier("mdReaderContainer")
     }
 
     // MARK: - Notification Dependencies

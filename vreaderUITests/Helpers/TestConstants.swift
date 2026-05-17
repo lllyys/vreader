@@ -30,6 +30,12 @@ enum AccessibilityID {
     static let searchSheet = "searchSheet"
     static let annotationsPanelSheet = "annotationsPanelSheet"
     static let readerSettingsPanel = "readerSettingsPanel"
+    /// Feature #60's `ReaderSheetChrome` close button (the `xmark` disc in
+    /// the sheet's title bar). Bug #209 / GH #804: the re-skinned settings
+    /// sheet wraps a scrollable `List`, so a content `swipeDown()` scrolls
+    /// the list instead of dismissing the sheet — tests dismiss via this
+    /// explicit button instead.
+    static let sheetCloseButton = "sheetCloseButton"
 
     // MARK: - Reader Placeholders
     static let epubReaderPlaceholder = "epubReaderPlaceholder"

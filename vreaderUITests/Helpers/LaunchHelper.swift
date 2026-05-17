@@ -31,6 +31,10 @@ enum TestSeedState {
     /// multiple pages" contract is unit-tested via the production MD render
     /// + paginate pipeline; the exact byte size drifts with content edits.
     case mdMultiPage
+    /// Two TXT books with real backing files — for tests that need two
+    /// distinct *openable* books (Feature #37 per-book-settings isolation).
+    /// Bug #209 / GH #804.
+    case twoBooks
     /// Keep existing database state (no seeding). For relaunch tests.
     case keepExisting
     /// Corrupted database (triggers init error screen).
@@ -45,6 +49,7 @@ enum TestSeedState {
         case .warAndPeace: return "--seed-war-and-peace"
         case .mdTOC: return "--seed-md-toc"
         case .mdMultiPage: return "--seed-md-multi-page"
+        case .twoBooks: return "--seed-two-books"
         case .keepExisting: return "--uitesting-no-seed"
         case .corruptDB: return "--seed-corrupt-db"
         }

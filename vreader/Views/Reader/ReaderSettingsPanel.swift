@@ -190,6 +190,12 @@ struct ReaderSettingsPanel: View {
         } message: {
             Text(backgroundErrorMessage ?? "")
         }
+        // Bug #209 / GH #804: `.accessibilityElement(children: .contain)`
+        // makes the panel one container element so the identifier names
+        // that single element (resolvable as `app.otherElements`) instead
+        // of propagating onto — and duplicating across — the panel's
+        // title, Close button, and settings list.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("readerSettingsPanel")
     }
 

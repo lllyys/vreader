@@ -182,6 +182,8 @@ struct VReaderApp: App {
                         await TestSeeder.seedMDWithTOC(persistence: persistence)
                     } else if seedConfig.seedMDMultiPage {
                         await TestSeeder.seedMDMultiPage(persistence: persistence)
+                    } else if seedConfig.seedTwoBooks {
+                        await TestSeeder.seedTwoBooks(persistence: persistence)
                     } else if seedConfig.seedBooks {
                         await TestSeeder.seedBooks(persistence: persistence)
                     }
@@ -406,6 +408,9 @@ struct TestLaunchConfig: Sendable {
     /// real MD render + paginate pipeline; exact byte counts drift with
     /// fixture text edits and are not contractual.
     let seedMDMultiPage: Bool
+    /// `--seed-two-books` — two TXT books with real backing files for
+    /// Feature #37's per-book-settings isolation test. Bug #209 / GH #804.
+    let seedTwoBooks: Bool
     let seedCorruptDB: Bool
     /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
     /// SwiftData store to remain. Used for terminate-then-relaunch tests
@@ -487,6 +492,7 @@ struct TestLaunchConfig: Sendable {
             seedWarAndPeace: args.contains("--seed-war-and-peace"),
             seedMDTOC: args.contains("--seed-md-toc"),
             seedMDMultiPage: args.contains("--seed-md-multi-page"),
+            seedTwoBooks: args.contains("--seed-two-books"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
@@ -509,6 +515,7 @@ struct TestLaunchConfig: Sendable {
         seedWarAndPeace: false,
         seedMDTOC: false,
         seedMDMultiPage: false,
+        seedTwoBooks: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,

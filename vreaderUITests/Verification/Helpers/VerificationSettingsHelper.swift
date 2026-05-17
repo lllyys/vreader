@@ -42,15 +42,31 @@ struct VerificationSettingsHelper {
         return panel
     }
 
-    /// Closes the reader settings panel by swiping down.
+    /// Closes the reader settings panel via the chrome's Close button.
+    ///
+    /// Bug #209 / GH #804: the panel was previously dismissed with
+    /// `panel.swipeDown()`, which worked when `ReaderSettingsPanel` was a
+    /// `Form` sheet. Feature #60 WI-10 re-skinned it into `ReaderSheetChrome`
+    /// wrapping a scrollable `List`; a `swipeDown()` on the panel lands on
+    /// the list content and is consumed as a scroll-to-top (callers such as
+    /// `revealPerBookToggle` leave the list scrolled to the bottom), so it
+    /// never triggers the sheet's interactive dismiss. Tapping the chrome's
+    /// explicit `sheetCloseButton` dismisses it deterministically; the
+    /// `swipeDown()` path is kept as a fallback for any caller/sheet that
+    /// does not render the button.
     func closeReaderSettings(
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
         let panel = app.otherElements[AccessibilityID.readerSettingsPanel]
         guard panel.exists else { return }
-        panel.swipeDown()
-        _ = panel.waitForDisappearance(timeout: 3)
+        let closeButton = app.buttons[AccessibilityID.sheetCloseButton]
+        if closeButton.waitForHittable(timeout: 3) {
+            closeButton.tap()
+        } else {
+            panel.swipeDown()
+        }
+        _ = panel.waitForDisappearance(timeout: 5)
     }
 
     // MARK: - Section navigation
