@@ -62,7 +62,7 @@ private final class TestHandlerState: ReaderNotificationHandlerStateProtocol {
     var scrollToOffset: Int?
     var highlightRange: NSRange?
     var highlightIsTemporary: Bool = true
-    var persistedHighlightRanges: [NSRange] = []
+    var persistedHighlightRanges: [PaintedHighlight] = []
     var pendingAnnotationInfo: TextSelectionInfo?
     var annotationNoteText: String = ""
 }
@@ -176,7 +176,7 @@ struct ReaderNotificationHandlerTests {
         #expect(state.highlightIsTemporary == false)
         #expect(state.highlightRange == NSRange(location: 0, length: 5))
         #expect(state.persistedHighlightRanges.count == 1)
-        #expect(state.persistedHighlightRanges.first == NSRange(location: 0, length: 5))
+        #expect(state.persistedHighlightRanges.first?.range == NSRange(location: 0, length: 5))
         let count = await highlights.addCallCount
         #expect(count == 1)
     }

@@ -22,7 +22,7 @@ protocol ReaderNotificationHandlerStateProtocol: AnyObject {
     var scrollToOffset: Int? { get set }
     var highlightRange: NSRange? { get set }
     var highlightIsTemporary: Bool { get set }
-    var persistedHighlightRanges: [NSRange] { get set }
+    var persistedHighlightRanges: [PaintedHighlight] { get set }
     var pendingAnnotationInfo: TextSelectionInfo? { get set }
     var annotationNoteText: String { get set }
 }
@@ -128,7 +128,11 @@ enum ReaderNotificationHandlers {
         state.highlightIsTemporary = false
         let newRange = NSRange(location: info.startUTF16, length: info.endUTF16 - info.startUTF16)
         state.highlightRange = newRange
-        state.persistedHighlightRanges.append(newRange)
+        // This legacy path persists a "yellow" highlight (see addHighlight
+        // below); the optimistic paint carries the same color.
+        state.persistedHighlightRanges.append(
+            PaintedHighlight(range: newRange, colorName: "yellow")
+        )
         let persistence = deps.highlightPersistence
         let key = deps.bookFingerprintKey
         try? await persistence.addHighlight(

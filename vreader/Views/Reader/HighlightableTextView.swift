@@ -22,13 +22,19 @@ import UIKit
 /// glyph range only — efficient, synchronized with scrolling, zero text storage mutation.
 final class HighlightingLayoutManager: NSLayoutManager {
 
-    /// Character ranges to draw as highlight backgrounds.
-    var highlightRanges: [NSRange] = []
-    private let highlightColor = UIColor.systemYellow.withAlphaComponent(0.4).cgColor
+    /// Persisted highlights to draw — each painted with its own resolved
+    /// color (Bug #208 / GH #776). Was previously a bare `[NSRange]`
+    /// painted with one hardcoded yellow fill, which dropped the user's
+    /// chosen highlight color.
+    var persistedHighlights: [PaintedHighlight] = []
+    /// Transient search / navigation highlight range. Painted in the
+    /// fixed `HighlightPaintColor.searchHighlight` yellow — kept distinct
+    /// from a persisted highlight, which carries a user-chosen color.
+    var searchHighlightRange: NSRange?
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
-        guard !highlightRanges.isEmpty,
+        guard !persistedHighlights.isEmpty || searchHighlightRange != nil,
               let ctx = UIGraphicsGetCurrentContext(),
               let tc = textContainers.first,
               let ts = textStorage else { return }
@@ -41,25 +47,55 @@ final class HighlightingLayoutManager: NSLayoutManager {
             forGlyphRange: glyphsToShow, actualGlyphRange: nil
         )
 
-        for charRange in highlightRanges {
-            // Clamp to text storage bounds — protects against stale/corrupted ranges
-            let clamped = NSIntersectionRange(charRange, validBounds)
-            guard clamped.length > 0 else { continue }
-            guard NSIntersectionRange(clamped, visibleCharRange).length > 0 else { continue }
-            let glyphRange = self.glyphRange(
-                forCharacterRange: clamped, actualCharacterRange: nil
+        for highlight in persistedHighlights {
+            paint(
+                charRange: highlight.range,
+                color: HighlightPaintColor.fill(for: highlight.colorName).cgColor,
+                ctx: ctx, container: tc, validBounds: validBounds,
+                visibleCharRange: visibleCharRange,
+                glyphsToShow: glyphsToShow, origin: origin
             )
-            let visible = NSIntersectionRange(glyphRange, glyphsToShow)
-            guard visible.length > 0 else { continue }
+        }
+        if let searchHighlightRange {
+            paint(
+                charRange: searchHighlightRange,
+                color: HighlightPaintColor.searchHighlight.cgColor,
+                ctx: ctx, container: tc, validBounds: validBounds,
+                visibleCharRange: visibleCharRange,
+                glyphsToShow: glyphsToShow, origin: origin
+            )
+        }
+    }
 
-            ctx.setFillColor(highlightColor)
-            enumerateEnclosingRects(
-                forGlyphRange: visible,
-                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-                in: tc
-            ) { rect, _ in
-                ctx.fill(rect.offsetBy(dx: origin.x, dy: origin.y))
-            }
+    /// Fills the visible portion of one highlight range with `color`.
+    /// Clamps to text storage bounds first — protects against
+    /// stale/corrupted ranges (bug #47).
+    private func paint(
+        charRange: NSRange,
+        color: CGColor,
+        ctx: CGContext,
+        container: NSTextContainer,
+        validBounds: NSRange,
+        visibleCharRange: NSRange,
+        glyphsToShow: NSRange,
+        origin: CGPoint
+    ) {
+        let clamped = NSIntersectionRange(charRange, validBounds)
+        guard clamped.length > 0 else { return }
+        guard NSIntersectionRange(clamped, visibleCharRange).length > 0 else { return }
+        let glyphRange = self.glyphRange(
+            forCharacterRange: clamped, actualCharacterRange: nil
+        )
+        let visible = NSIntersectionRange(glyphRange, glyphsToShow)
+        guard visible.length > 0 else { return }
+
+        ctx.setFillColor(color)
+        enumerateEnclosingRects(
+            forGlyphRange: visible,
+            withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+            in: container
+        ) { rect, _ in
+            ctx.fill(rect.offsetBy(dx: origin.x, dy: origin.y))
         }
     }
 }
@@ -76,8 +112,8 @@ final class HighlightableTextView: UITextView {
 
     /// Guard flag to suppress delegate callbacks during source text replacement.
     var isReplacingText = false
-    /// Stores the most recently set persisted highlight ranges (separate from active).
-    private var storedPersistedRanges: [NSRange] = []
+    /// Stores the most recently set persisted highlights (separate from active).
+    private var storedPersistedRanges: [PaintedHighlight] = []
 
     /// Creates a text view with HighlightingLayoutManager for safe highlight drawing.
     convenience init() {
@@ -108,15 +144,21 @@ final class HighlightableTextView: UITextView {
 
     /// Updates highlight visualization via the layout manager's drawing layer.
     /// NEVER modifies text storage — completely avoids the crash chain (bug #47 v12).
-    func setHighlightRanges(persisted: [NSRange], active: NSRange?) {
+    /// Each persisted highlight carries its own color (Bug #208); the active
+    /// search range is painted in the fixed search-highlight yellow.
+    func setHighlightRanges(persisted: [PaintedHighlight], active: NSRange?) {
         guard let lm = layoutManager as? HighlightingLayoutManager else { return }
         storedPersistedRanges = persisted
-        var ranges = persisted
+        lm.persistedHighlights = persisted
+        // Drop the active search highlight when it exactly matches a
+        // persisted range — otherwise the two translucent fills stack and
+        // darken (preserves the pre-#208 dedup behavior).
         if let active, active.length > 0,
-           !ranges.contains(active) {
-            ranges.append(active)
+           !persisted.contains(where: { $0.range == active }) {
+            lm.searchHighlightRange = active
+        } else {
+            lm.searchHighlightRange = nil
         }
-        lm.highlightRanges = ranges
         let glyphCount = lm.numberOfGlyphs
         if glyphCount > 0 {
             lm.invalidateDisplay(forGlyphRange: NSRange(location: 0, length: glyphCount))

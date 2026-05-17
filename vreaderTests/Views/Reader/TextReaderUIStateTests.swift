@@ -33,7 +33,8 @@ private func makeLocator(
 private func makeHighlightRecord(
     start: Int,
     end: Int,
-    selectedText: String = "test"
+    selectedText: String = "test",
+    color: String = "yellow"
 ) -> HighlightRecord {
     HighlightRecord(
         highlightId: UUID(),
@@ -41,7 +42,7 @@ private func makeHighlightRecord(
         anchor: nil,
         profileKey: "test-key",
         selectedText: selectedText,
-        color: "yellow",
+        color: color,
         note: nil,
         createdAt: Date(),
         updatedAt: Date()
@@ -62,7 +63,9 @@ struct TextReaderUIStateTests {
         state.scrollToOffset = 42
         state.highlightRange = NSRange(location: 0, length: 5)
         state.highlightIsTemporary = false
-        state.persistedHighlightRanges = [NSRange(location: 10, length: 3)]
+        state.persistedHighlightRanges = [
+            PaintedHighlight(range: NSRange(location: 10, length: 3), colorName: "yellow")
+        ]
         state.pendingAnnotationInfo = TextSelectionInfo(selectedText: "hi", startUTF16: 0, endUTF16: 2)
         state.annotationNoteText = "note"
 
@@ -112,9 +115,25 @@ struct TextReaderUIStateTests {
         state.refreshPersistedHighlights(from: records)
 
         #expect(state.persistedHighlightRanges.count == 3)
-        #expect(state.persistedHighlightRanges[0] == NSRange(location: 0, length: 10))
-        #expect(state.persistedHighlightRanges[1] == NSRange(location: 20, length: 10))
-        #expect(state.persistedHighlightRanges[2] == NSRange(location: 50, length: 30))
+        #expect(state.persistedHighlightRanges[0].range == NSRange(location: 0, length: 10))
+        #expect(state.persistedHighlightRanges[1].range == NSRange(location: 20, length: 10))
+        #expect(state.persistedHighlightRanges[2].range == NSRange(location: 50, length: 30))
+    }
+
+    @Test @MainActor func refreshPersistedHighlightsPreservesRecordColor() {
+        // Bug #208 / GH #776: each refreshed highlight must carry the
+        // record's stored color through to the painter.
+        let state = TextReaderUIState()
+        let records = [
+            makeHighlightRecord(start: 0, end: 10, color: "pink"),
+            makeHighlightRecord(start: 20, end: 30, color: "green"),
+        ]
+
+        state.refreshPersistedHighlights(from: records)
+
+        #expect(state.persistedHighlightRanges.count == 2)
+        #expect(state.persistedHighlightRanges[0].colorName == "pink")
+        #expect(state.persistedHighlightRanges[1].colorName == "green")
     }
 
     @Test @MainActor func refreshPersistedHighlightsFiltersInvalid() {
@@ -128,12 +147,14 @@ struct TextReaderUIStateTests {
         state.refreshPersistedHighlights(from: records)
 
         #expect(state.persistedHighlightRanges.count == 1)
-        #expect(state.persistedHighlightRanges[0] == NSRange(location: 0, length: 10))
+        #expect(state.persistedHighlightRanges[0].range == NSRange(location: 0, length: 10))
     }
 
     @Test @MainActor func refreshPersistedHighlightsEmptyRecords() {
         let state = TextReaderUIState()
-        state.persistedHighlightRanges = [NSRange(location: 0, length: 5)]
+        state.persistedHighlightRanges = [
+            PaintedHighlight(range: NSRange(location: 0, length: 5), colorName: "yellow")
+        ]
 
         state.refreshPersistedHighlights(from: [])
 

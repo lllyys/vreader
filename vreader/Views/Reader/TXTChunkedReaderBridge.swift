@@ -37,8 +37,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     /// Whether the current highlight is temporary (search navigation) vs persistent
     /// (user-created). Temporary highlights auto-clear after 3s. (bug #54)
     var highlightIsTemporary: Bool = true
-    /// Persisted highlight ranges (document-global UTF-16) loaded from DB (bug #55).
-    var persistedHighlights: [NSRange] = []
+    /// Persisted highlights (document-global UTF-16) loaded from DB (bug #55).
+    /// Each carries its stored color (Bug #208).
+    var persistedHighlights: [PaintedHighlight] = []
     /// Persisted highlight lookup keyed by UUID — global UTF-16 ranges plus
     /// their highlight IDs, used by the tap-on-highlight hit-tester.
     /// Feature #53 WI-3. When empty, tap-on-highlight is dormant (the gesture
@@ -217,8 +218,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         var chunks: [String] = []
         var config = TXTViewConfig()
         var chunkStartOffsets: [Int] = []
-        /// Persisted highlight ranges (document-global UTF-16) from DB (bug #55).
-        var persistedHighlights: [NSRange] = []
+        /// Persisted highlights (document-global UTF-16) from DB (bug #55).
+        /// Each carries its stored color (Bug #208).
+        var persistedHighlights: [PaintedHighlight] = []
         /// Lookup table (UUID, global UTF-16 range) used by the tap-on-
         /// highlight hit-tester. Feature #53 WI-3.
         var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []

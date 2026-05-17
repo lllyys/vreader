@@ -35,6 +35,12 @@ struct TXTChapterHighlightRenderingTests {
                    globalStartUTF16: 2500, textLengthUTF16: 700),
     ]
 
+    /// Builds a `PaintedHighlight`. Color defaults to yellow for the
+    /// range-translation tests that don't exercise color.
+    private static func ph(_ loc: Int, _ len: Int, color: String = "yellow") -> PaintedHighlight {
+        PaintedHighlight(range: NSRange(location: loc, length: len), colorName: color)
+    }
+
     // MARK: - Tests
 
     @Test("persisted highlights from other chapters are dropped; ch1 highlight translates correctly")
@@ -42,18 +48,28 @@ struct TXTChapterHighlightRenderingTests {
         // ch1 = [1000, 2500); global [1100, 1200) → local [100, 200) for ch1.
         // global [2600, 2700) is in ch2, must be dropped.
         let (persisted, temp) = TXTReaderContainerView.chapterLocalHighlightRanges(
-            persistedGlobalRanges: [
-                NSRange(location: 1100, length: 100),
-                NSRange(location: 2600, length: 100),
-            ],
+            persistedGlobalRanges: [Self.ph(1100, 100), Self.ph(2600, 100)],
             tempGlobalRange: nil,
             chapterIndex: 1,
             chapters: Self.chapters3
         )
         #expect(persisted.count == 1)
-        #expect(persisted.first == NSRange(location: 100, length: 100),
+        #expect(persisted.first?.range == NSRange(location: 100, length: 100),
                 "ch1 persisted highlight must translate from global [1100,1200) to local [100,200)")
         #expect(temp == nil)
+    }
+
+    @Test("persisted highlight color survives chapter-local translation")
+    func chapterModePreservesPersistedHighlightColor() {
+        // Bug #208 / GH #776: chapter-mode rendering must keep the
+        // highlight's stored color through the global→chapter-local hop.
+        let (persisted, _) = TXTReaderContainerView.chapterLocalHighlightRanges(
+            persistedGlobalRanges: [Self.ph(1100, 100, color: "blue")],
+            tempGlobalRange: nil,
+            chapterIndex: 1,
+            chapters: Self.chapters3
+        )
+        #expect(persisted.first?.colorName == "blue")
     }
 
     @Test("temp highlight translates global to chapter-local for ch1")
@@ -74,7 +90,7 @@ struct TXTChapterHighlightRenderingTests {
     func chapterModeDropsOutOfChapterHighlights() {
         // global [50, 150) is entirely in ch0 [0, 1000); ch2 = [2500, 3000) — must be empty.
         let (persisted, temp) = TXTReaderContainerView.chapterLocalHighlightRanges(
-            persistedGlobalRanges: [NSRange(location: 50, length: 100)],
+            persistedGlobalRanges: [Self.ph(50, 100)],
             tempGlobalRange: NSRange(location: 50, length: 100),
             chapterIndex: 2,
             chapters: Self.chapters3
@@ -91,13 +107,13 @@ struct TXTChapterHighlightRenderingTests {
         // global [2400, 2700) straddles ch1/ch2 boundary at 2500.
         // ch1 portion: [2400, 2500) = 100 units, local = 2400 - 1500 = 900 → NSRange(900, 100).
         let (persisted, _) = TXTReaderContainerView.chapterLocalHighlightRanges(
-            persistedGlobalRanges: [NSRange(location: 2400, length: 300)],
+            persistedGlobalRanges: [Self.ph(2400, 300)],
             tempGlobalRange: nil,
             chapterIndex: 1,
             chapters: Self.chaptersStraddling
         )
         #expect(persisted.count == 1)
-        #expect(persisted.first == NSRange(location: 900, length: 100),
+        #expect(persisted.first?.range == NSRange(location: 900, length: 100),
                 "straddling highlight must be clipped to ch1's portion (local [900, 1000))")
     }
 
@@ -106,7 +122,7 @@ struct TXTChapterHighlightRenderingTests {
         // chapterIndex 5 is out of bounds for chapters3 (only 3 chapters).
         // Represents the nil-chapterIndex guard path in chapterReaderContent.
         let (persisted, temp) = TXTReaderContainerView.chapterLocalHighlightRanges(
-            persistedGlobalRanges: [NSRange(location: 1100, length: 100)],
+            persistedGlobalRanges: [Self.ph(1100, 100)],
             tempGlobalRange: NSRange(location: 1100, length: 100),
             chapterIndex: 5,
             chapters: Self.chapters3

@@ -16,8 +16,9 @@ extension TXTTextViewBridge {
 
         /// Base attributed string (source without highlights). Used by timer to rebuild.
         var baseAttributedText: NSAttributedString?
-        /// Persisted highlight ranges from DB (bug #55). Stored for timer rebuild.
-        var persistedHighlights: [NSRange] = []
+        /// Persisted highlights from DB (bug #55). Stored for timer rebuild.
+        /// Each carries its own color (Bug #208).
+        var persistedHighlights: [PaintedHighlight] = []
         /// Parallel lookup mapping ranges to their highlight UUIDs. Used by
         /// `handleContentTap` to resolve a tap on a painted range back to
         /// the original `HighlightRecord.highlightId` for the inline-menu

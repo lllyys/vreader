@@ -36,9 +36,10 @@ struct TXTTextViewBridge: UIViewRepresentable {
     /// Whether the current highlight is temporary (search navigation) vs persistent
     /// (user-created). Temporary highlights auto-clear after 3s. (bug #54)
     var highlightIsTemporary: Bool = true
-    /// Persisted highlight ranges loaded from DB on file open (bug #55).
-    /// Applied as yellow background attributes that survive text rebuilds.
-    var persistedHighlights: [NSRange] = []
+    /// Persisted highlights loaded from DB on file open (bug #55). Each
+    /// carries its stored color (Bug #208); the layout-manager painter
+    /// resolves the color per highlight.
+    var persistedHighlights: [PaintedHighlight] = []
     /// Parallel lookup mapping each persisted range to its highlight UUID
     /// (Feature #53 WI-2). Used by the bridge coordinator's tap handler
     /// to resolve a tap → highlight ID for the inline edit/delete menu.

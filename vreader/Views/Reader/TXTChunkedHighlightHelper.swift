@@ -166,8 +166,9 @@ extension TXTChunkedReaderBridge.Coordinator {
     }
 
     /// Computes chunk-local highlight ranges for the layout manager (bug #47 v12).
-    /// Returns persisted ranges + active range, all in chunk-local coordinates.
-    func chunkLocalHighlightRanges(forChunk index: Int) -> (persisted: [NSRange], active: NSRange?) {
+    /// Returns persisted highlights (color preserved — Bug #208) + active
+    /// range, all in chunk-local coordinates.
+    func chunkLocalHighlightRanges(forChunk index: Int) -> (persisted: [PaintedHighlight], active: NSRange?) {
         guard index < chunkStartOffsets.count, index < chunks.count else { return ([], nil) }
 
         let chunkStart = chunkStartOffsets[index]
@@ -176,11 +177,12 @@ extension TXTChunkedReaderBridge.Coordinator {
             : chunkStart + chunks[index].utf16.count
         let chunkTextLen = chunkEnd - chunkStart
 
-        // Collect chunk-local persisted highlight ranges
-        var localPersistedRanges: [NSRange] = []
-        for globalRange in persistedHighlights {
-            let globalStart = globalRange.location
-            let globalEnd = globalRange.location + globalRange.length
+        // Collect chunk-local persisted highlights — translate the range to
+        // chunk coordinates while carrying each highlight's color (Bug #208).
+        var localPersistedRanges: [PaintedHighlight] = []
+        for painted in persistedHighlights {
+            let globalStart = painted.range.location
+            let globalEnd = painted.range.location + painted.range.length
             guard globalEnd > chunkStart, globalStart < chunkEnd else { continue }
             let localStart = max(0, globalStart - chunkStart)
             let localEnd = min(chunkEnd - chunkStart, globalEnd - chunkStart)
@@ -188,7 +190,10 @@ extension TXTChunkedReaderBridge.Coordinator {
             guard localLength > 0, localStart < chunkTextLen else { continue }
             let clampedLength = min(localLength, chunkTextLen - localStart)
             guard clampedLength > 0 else { continue }
-            localPersistedRanges.append(NSRange(location: localStart, length: clampedLength))
+            localPersistedRanges.append(PaintedHighlight(
+                range: NSRange(location: localStart, length: clampedLength),
+                colorName: painted.colorName
+            ))
         }
 
         // Active highlight (chunk-local)

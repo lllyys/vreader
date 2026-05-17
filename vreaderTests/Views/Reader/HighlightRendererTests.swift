@@ -75,7 +75,19 @@ struct TextHighlightRendererTests {
         #expect(state.highlightRange == NSRange(location: 10, length: 10))
         #expect(state.highlightIsTemporary == false)
         #expect(state.persistedHighlightRanges.count == 1)
-        #expect(state.persistedHighlightRanges[0] == NSRange(location: 10, length: 10))
+        #expect(state.persistedHighlightRanges[0].range == NSRange(location: 10, length: 10))
+    }
+
+    @Test @MainActor func applyCarriesRecordColor() {
+        // Bug #208 / GH #776: apply must thread the record's stored color
+        // through to the painter instead of dropping it.
+        let state = TextReaderUIState()
+        let renderer = TextHighlightRenderer(uiState: state)
+
+        renderer.apply(record: makeRecord(start: 0, end: 5, color: "pink"))
+
+        #expect(state.persistedHighlightRanges.count == 1)
+        #expect(state.persistedHighlightRanges[0].colorName == "pink")
     }
 
     @Test @MainActor func applyIgnoresInvertedRange() {
@@ -146,7 +158,9 @@ struct TextHighlightRendererTests {
 
     @Test @MainActor func removeDoesNotClearPersistedRanges() {
         let state = TextReaderUIState()
-        state.persistedHighlightRanges = [NSRange(location: 0, length: 5)]
+        state.persistedHighlightRanges = [
+            PaintedHighlight(range: NSRange(location: 0, length: 5), colorName: "yellow")
+        ]
         let renderer = TextHighlightRenderer(uiState: state)
 
         renderer.remove(id: UUID())
@@ -157,7 +171,9 @@ struct TextHighlightRendererTests {
 
     @Test @MainActor func restoreRefreshesPersistedRanges() {
         let state = TextReaderUIState()
-        state.persistedHighlightRanges = [NSRange(location: 99, length: 1)]
+        state.persistedHighlightRanges = [
+            PaintedHighlight(range: NSRange(location: 99, length: 1), colorName: "yellow")
+        ]
         let renderer = TextHighlightRenderer(uiState: state)
         let records = [
             makeRecord(start: 0, end: 10),
@@ -167,13 +183,30 @@ struct TextHighlightRendererTests {
         renderer.restore(records: records)
 
         #expect(state.persistedHighlightRanges.count == 2)
-        #expect(state.persistedHighlightRanges[0] == NSRange(location: 0, length: 10))
-        #expect(state.persistedHighlightRanges[1] == NSRange(location: 20, length: 10))
+        #expect(state.persistedHighlightRanges[0].range == NSRange(location: 0, length: 10))
+        #expect(state.persistedHighlightRanges[1].range == NSRange(location: 20, length: 10))
+    }
+
+    @Test @MainActor func restoreCarriesRecordColors() {
+        // Bug #208 / GH #776: restored highlights must keep their stored
+        // colors so reopening a book repaints pink/green/blue, not yellow.
+        let state = TextReaderUIState()
+        let renderer = TextHighlightRenderer(uiState: state)
+        let records = [
+            makeRecord(start: 0, end: 10, color: "green"),
+            makeRecord(start: 20, end: 30, color: "blue"),
+        ]
+
+        renderer.restore(records: records)
+
+        #expect(state.persistedHighlightRanges.map(\.colorName) == ["green", "blue"])
     }
 
     @Test @MainActor func restoreWithEmptyRecordsClearsRanges() {
         let state = TextReaderUIState()
-        state.persistedHighlightRanges = [NSRange(location: 0, length: 5)]
+        state.persistedHighlightRanges = [
+            PaintedHighlight(range: NSRange(location: 0, length: 5), colorName: "yellow")
+        ]
         let renderer = TextHighlightRenderer(uiState: state)
 
         renderer.restore(records: [])

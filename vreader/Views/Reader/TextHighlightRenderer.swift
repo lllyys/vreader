@@ -32,7 +32,11 @@ final class TextHighlightRenderer: HighlightRenderer {
         let range = NSRange(location: start, length: end - start)
         uiState.highlightIsTemporary = false
         uiState.highlightRange = range
-        uiState.persistedHighlightRanges.append(range)
+        // Bug #208 / GH #776: carry the record's stored color through to
+        // the painter instead of dropping it (which forced a yellow paint).
+        uiState.persistedHighlightRanges.append(
+            PaintedHighlight(range: range, colorName: record.color)
+        )
         // Feature #53 WI-2/WI-2b: keep the UUID-keyed lookup in sync with
         // newly-created highlights so the tap-on-highlight hit-test can
         // resolve a fresh paint. Pre-WI-2b, only the range array was

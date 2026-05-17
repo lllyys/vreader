@@ -18,13 +18,15 @@ import Foundation
 /// Used at the TXTReaderContainerView boundary to adapt persisted highlights for chapter display.
 enum TXTChapterHighlightHelper {
 
-    /// Filters and translates persisted highlight ranges (global UTF-16) to chapter-local ranges.
-    /// Only returns highlights that fall within the given chapter.
+    /// Filters and translates persisted highlights (global UTF-16) to
+    /// chapter-local coordinates. Only returns highlights that fall within
+    /// the given chapter; each translated highlight keeps its stored color
+    /// (Bug #208).
     static func highlightsForChapter(
         chapterIndex: Int,
         chapters: [TXTChapter],
-        persistedGlobalRanges: [NSRange]
-    ) -> [NSRange] {
+        persistedGlobalRanges: [PaintedHighlight]
+    ) -> [PaintedHighlight] {
         guard chapterIndex >= 0, chapterIndex < chapters.count else { return [] }
         let chapter = chapters[chapterIndex]
         guard chapter.globalStartUTF16 >= 0, chapter.textLengthUTF16 > 0 else { return [] }
@@ -32,9 +34,9 @@ enum TXTChapterHighlightHelper {
         let chapterStart = chapter.globalStartUTF16
         let chapterEnd = chapterStart + chapter.textLengthUTF16
 
-        return persistedGlobalRanges.compactMap { globalRange in
-            let rangeStart = globalRange.location
-            let rangeEnd = globalRange.location + globalRange.length
+        return persistedGlobalRanges.compactMap { painted in
+            let rangeStart = painted.range.location
+            let rangeEnd = painted.range.location + painted.range.length
 
             // Skip if entirely outside this chapter
             guard rangeEnd > chapterStart, rangeStart < chapterEnd else { return nil }
@@ -43,10 +45,13 @@ enum TXTChapterHighlightHelper {
             let clippedStart = max(rangeStart, chapterStart)
             let clippedEnd = min(rangeEnd, chapterEnd)
 
-            // Translate to chapter-local
-            return NSRange(
-                location: clippedStart - chapterStart,
-                length: clippedEnd - clippedStart
+            // Translate to chapter-local — color preserved (Bug #208)
+            return PaintedHighlight(
+                range: NSRange(
+                    location: clippedStart - chapterStart,
+                    length: clippedEnd - clippedStart
+                ),
+                colorName: painted.colorName
             )
         }
     }

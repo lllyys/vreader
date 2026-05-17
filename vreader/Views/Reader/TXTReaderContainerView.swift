@@ -663,11 +663,11 @@ struct TXTReaderContainerView: View {
     /// an explicit `if let` to bypass the introspection path that triggered the hang.
     /// Behavior is identical (see `TXTChapterHighlightRenderingTests` for the proof).
     static func chapterLocalHighlightRanges(
-        persistedGlobalRanges: [NSRange],
+        persistedGlobalRanges: [PaintedHighlight],
         tempGlobalRange: NSRange?,
         chapterIndex: Int,
         chapters: [TXTChapter]
-    ) -> (persisted: [NSRange], temp: NSRange?) {
+    ) -> (persisted: [PaintedHighlight], temp: NSRange?) {
         let persisted = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: chapterIndex,
             chapters: chapters,
@@ -675,11 +675,15 @@ struct TXTReaderContainerView: View {
         )
         let temp: NSRange?
         if let tempRange = tempGlobalRange {
+            // The temp range is the search/nav highlight — the bridge
+            // paints it as its `active` highlight, so the colorName on
+            // this throwaway wrapper is never read; only the clipped
+            // range is taken. Reuse `highlightsForChapter`'s clip math.
             temp = TXTChapterHighlightHelper.highlightsForChapter(
                 chapterIndex: chapterIndex,
                 chapters: chapters,
-                persistedGlobalRanges: [tempRange]
-            ).first
+                persistedGlobalRanges: [PaintedHighlight(range: tempRange, colorName: "yellow")]
+            ).first?.range
         } else {
             temp = nil
         }

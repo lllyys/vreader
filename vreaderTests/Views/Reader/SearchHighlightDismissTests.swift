@@ -36,30 +36,32 @@ struct SearchHighlightDismissTests {
         let tv = Self.makeHighlightedTextView()
         let lm = tv.layoutManager as! HighlightingLayoutManager
 
-        // Precondition: highlight is active
-        #expect(lm.highlightRanges.count == 1)
+        // Precondition: search highlight is active
+        #expect(lm.searchHighlightRange != nil)
 
         tv.clearSearchHighlight()
 
-        // Active highlight should be cleared
-        #expect(lm.highlightRanges.isEmpty)
+        // Active search highlight should be cleared
+        #expect(lm.searchHighlightRange == nil)
     }
 
     @Test @MainActor func clearSearchHighlightPreservesPersistedHighlights() {
         let tv = Self.makeHighlightedTextView()
-        let persisted = [NSRange(location: 0, length: 5)]
+        let persisted = [PaintedHighlight(range: NSRange(location: 0, length: 5), colorName: "yellow")]
         let active = NSRange(location: 12, length: 13)
         tv.setHighlightRanges(persisted: persisted, active: active)
         let lm = tv.layoutManager as! HighlightingLayoutManager
 
         // Precondition: both persisted + active
-        #expect(lm.highlightRanges.count == 2)
+        #expect(lm.persistedHighlights.count == 1)
+        #expect(lm.searchHighlightRange != nil)
 
         tv.clearSearchHighlight()
 
-        // Only persisted should remain
-        #expect(lm.highlightRanges.count == 1)
-        #expect(lm.highlightRanges[0] == NSRange(location: 0, length: 5))
+        // Only the persisted highlight should remain
+        #expect(lm.persistedHighlights.count == 1)
+        #expect(lm.persistedHighlights[0].range == NSRange(location: 0, length: 5))
+        #expect(lm.searchHighlightRange == nil)
     }
 
     @Test @MainActor func clearSearchHighlightNoHighlightNoCrash() {
@@ -67,12 +69,13 @@ struct SearchHighlightDismissTests {
         let lm = tv.layoutManager as! HighlightingLayoutManager
 
         // Precondition: no highlight
-        #expect(lm.highlightRanges.isEmpty)
+        #expect(lm.persistedHighlights.isEmpty)
+        #expect(lm.searchHighlightRange == nil)
 
         // Should be a no-op, no crash
         tv.clearSearchHighlight()
 
-        #expect(lm.highlightRanges.isEmpty)
+        #expect(lm.searchHighlightRange == nil)
     }
 
     @Test @MainActor func clearSearchHighlightIdempotent() {
@@ -82,7 +85,7 @@ struct SearchHighlightDismissTests {
         tv.clearSearchHighlight() // Second call should be safe
 
         let lm = tv.layoutManager as! HighlightingLayoutManager
-        #expect(lm.highlightRanges.isEmpty)
+        #expect(lm.searchHighlightRange == nil)
     }
 
     // MARK: - Coordinator scroll dismiss
@@ -233,7 +236,7 @@ struct SearchHighlightDismissTests {
         #expect(coordinator.currentHighlightRange == nil)
         // Layout manager highlights also rebuilt (active highlight removed)
         let lm = tv.layoutManager as! HighlightingLayoutManager
-        #expect(lm.highlightRanges.isEmpty)
+        #expect(lm.searchHighlightRange == nil)
     }
 
     // MARK: - Programmatic scroll guard (bug #43 regression)

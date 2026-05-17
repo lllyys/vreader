@@ -31,8 +31,10 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
     var highlightRange: NSRange?
     /// Whether the current highlight is temporary (search nav) or persistent (user-created).
     var highlightIsTemporary: Bool = true
-    /// Persisted highlight ranges loaded from DB on file open.
-    var persistedHighlightRanges: [NSRange] = []
+    /// Persisted highlights loaded from DB on file open. Each carries its
+    /// stored color name so the layout-manager painter renders the color
+    /// the user chose (Bug #208 / GH #776) instead of a hardcoded yellow.
+    var persistedHighlightRanges: [PaintedHighlight] = []
     /// Parallel lookup mapping each persisted range to its highlight UUID,
     /// used by tap-on-highlight hit-test (Feature #53 WI-2).
     /// `persistedHighlightRanges` is kept separate so the layout-manager
@@ -134,22 +136,23 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
     /// coordinator can resolve a tapped range back to its highlight UUID
     /// for the inline edit/delete menu.
     func refreshPersistedHighlights(from records: [HighlightRecord]) {
-        var ranges: [NSRange] = []
+        var highlights: [PaintedHighlight] = []
         var lookup: [PersistedHighlightLookupEntry] = []
-        ranges.reserveCapacity(records.count)
+        highlights.reserveCapacity(records.count)
         lookup.reserveCapacity(records.count)
         for record in records {
             guard let start = record.locator.charRangeStartUTF16,
                   let end = record.locator.charRangeEndUTF16,
                   end > start else { continue }
             let range = NSRange(location: start, length: end - start)
-            ranges.append(range)
+            // Bug #208: carry the stored color through to the painter.
+            highlights.append(PaintedHighlight(range: range, colorName: record.color))
             lookup.append(PersistedHighlightLookupEntry(
                 id: record.highlightId,
                 range: range
             ))
         }
-        persistedHighlightRanges = ranges
+        persistedHighlightRanges = highlights
         persistedHighlightLookup = lookup
     }
 }

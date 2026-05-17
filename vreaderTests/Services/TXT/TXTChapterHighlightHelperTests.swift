@@ -17,29 +17,46 @@ struct TXTChapterHighlightHelperTests {
         TXTChapter(index: 2, title: "Chapter 3", startByte: 500, endByte: 800, globalStartUTF16: 250, textLengthUTF16: 150),
     ]
 
+    /// Builds a `PaintedHighlight`. Color defaults to yellow for the
+    /// range-translation tests that don't exercise color.
+    private static func ph(_ loc: Int, _ len: Int, color: String = "yellow") -> PaintedHighlight {
+        PaintedHighlight(range: NSRange(location: loc, length: len), colorName: color)
+    }
+
     // MARK: - highlightsForChapter
 
     @Test("highlights within chapter — returns correctly translated ranges")
     func testHighlightsWithinChapter() {
         // Highlight at global [110, 140) should map to local [10, 40) in chapter 2
-        let globalRanges = [NSRange(location: 110, length: 30)]
         let result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 1,
             chapters: Self.chapters,
-            persistedGlobalRanges: globalRanges
+            persistedGlobalRanges: [Self.ph(110, 30)]
         )
         #expect(result.count == 1)
-        #expect(result[0] == NSRange(location: 10, length: 30))
+        #expect(result[0].range == NSRange(location: 10, length: 30))
+    }
+
+    @Test("highlight color is preserved through chapter translation")
+    func testHighlightColorPreserved() {
+        // Bug #208 / GH #776: chapter-local translation must keep each
+        // highlight's color, not just its range.
+        let result = TXTChapterHighlightHelper.highlightsForChapter(
+            chapterIndex: 1,
+            chapters: Self.chapters,
+            persistedGlobalRanges: [Self.ph(110, 30, color: "pink")]
+        )
+        #expect(result.count == 1)
+        #expect(result[0].colorName == "pink")
     }
 
     @Test("highlights outside chapter — returns empty")
     func testHighlightsOutsideChapter() {
         // Highlight at global [0, 50) is in chapter 1, not chapter 2
-        let globalRanges = [NSRange(location: 0, length: 50)]
         let result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 1,
             chapters: Self.chapters,
-            persistedGlobalRanges: globalRanges
+            persistedGlobalRanges: [Self.ph(0, 50)]
         )
         #expect(result.isEmpty)
     }
@@ -49,7 +66,7 @@ struct TXTChapterHighlightHelperTests {
         // Highlight at global [80, 130) spans chapters 1 and 2.
         // For chapter 1 [0..100): clipped to [80, 100) → local [80, 20len)
         // For chapter 2 [100..250): clipped to [100, 130) → local [0, 30)
-        let globalRanges = [NSRange(location: 80, length: 50)]
+        let globalRanges = [Self.ph(80, 50)]
 
         let ch1Result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 0,
@@ -57,7 +74,7 @@ struct TXTChapterHighlightHelperTests {
             persistedGlobalRanges: globalRanges
         )
         #expect(ch1Result.count == 1)
-        #expect(ch1Result[0] == NSRange(location: 80, length: 20))
+        #expect(ch1Result[0].range == NSRange(location: 80, length: 20))
 
         let ch2Result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 1,
@@ -65,16 +82,16 @@ struct TXTChapterHighlightHelperTests {
             persistedGlobalRanges: globalRanges
         )
         #expect(ch2Result.count == 1)
-        #expect(ch2Result[0] == NSRange(location: 0, length: 30))
+        #expect(ch2Result[0].range == NSRange(location: 0, length: 30))
     }
 
     @Test("multiple highlights — filters and translates correctly")
     func testMultipleHighlights() {
         // Mix of highlights: one in chapter 2, one outside, one spanning
         let globalRanges = [
-            NSRange(location: 110, length: 10),  // fully in chapter 2
-            NSRange(location: 300, length: 20),  // fully in chapter 3
-            NSRange(location: 240, length: 30),  // spans chapters 2 and 3
+            Self.ph(110, 10),  // fully in chapter 2
+            Self.ph(300, 20),  // fully in chapter 3
+            Self.ph(240, 30),  // spans chapters 2 and 3
         ]
 
         let ch2Result = TXTChapterHighlightHelper.highlightsForChapter(
@@ -86,8 +103,8 @@ struct TXTChapterHighlightHelperTests {
         // Second: [300,320) entirely in ch3 → skipped
         // Third: [240,270) spans ch2[100..250) → clipped [240,250) → local [140, 10)
         #expect(ch2Result.count == 2)
-        #expect(ch2Result[0] == NSRange(location: 10, length: 10))
-        #expect(ch2Result[1] == NSRange(location: 140, length: 10))
+        #expect(ch2Result[0].range == NSRange(location: 10, length: 10))
+        #expect(ch2Result[1].range == NSRange(location: 140, length: 10))
     }
 
     @Test("empty persisted ranges — returns empty")
@@ -102,11 +119,10 @@ struct TXTChapterHighlightHelperTests {
 
     @Test("chapter index out of bounds — returns empty")
     func testChapterIndexOutOfBounds() {
-        let globalRanges = [NSRange(location: 10, length: 20)]
         let result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 99,
             chapters: Self.chapters,
-            persistedGlobalRanges: globalRanges
+            persistedGlobalRanges: [Self.ph(10, 20)]
         )
         #expect(result.isEmpty)
     }
@@ -116,7 +132,7 @@ struct TXTChapterHighlightHelperTests {
         let result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 0,
             chapters: [],
-            persistedGlobalRanges: [NSRange(location: 0, length: 10)]
+            persistedGlobalRanges: [Self.ph(0, 10)]
         )
         #expect(result.isEmpty)
     }
@@ -127,7 +143,7 @@ struct TXTChapterHighlightHelperTests {
         let result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 0,
             chapters: chapters,
-            persistedGlobalRanges: [NSRange(location: 0, length: 10)]
+            persistedGlobalRanges: [Self.ph(0, 10)]
         )
         #expect(result.isEmpty)
     }
@@ -138,7 +154,7 @@ struct TXTChapterHighlightHelperTests {
         let result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 0,
             chapters: chapters,
-            persistedGlobalRanges: [NSRange(location: 0, length: 10)]
+            persistedGlobalRanges: [Self.ph(0, 10)]
         )
         #expect(result.isEmpty)
     }
@@ -146,24 +162,22 @@ struct TXTChapterHighlightHelperTests {
     @Test("highlight at exact chapter start boundary")
     func testHighlightAtExactStart() {
         // Highlight starting at exact start of chapter 2 (offset 100)
-        let globalRanges = [NSRange(location: 100, length: 10)]
         let result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 1,
             chapters: Self.chapters,
-            persistedGlobalRanges: globalRanges
+            persistedGlobalRanges: [Self.ph(100, 10)]
         )
         #expect(result.count == 1)
-        #expect(result[0] == NSRange(location: 0, length: 10))
+        #expect(result[0].range == NSRange(location: 0, length: 10))
     }
 
     @Test("highlight at exact chapter end boundary — not included")
     func testHighlightAtExactEnd() {
         // Highlight starting at offset 250 (chapter 2 ends at 250)
-        let globalRanges = [NSRange(location: 250, length: 10)]
         let result = TXTChapterHighlightHelper.highlightsForChapter(
             chapterIndex: 1,
             chapters: Self.chapters,
-            persistedGlobalRanges: globalRanges
+            persistedGlobalRanges: [Self.ph(250, 10)]
         )
         #expect(result.isEmpty)
     }
