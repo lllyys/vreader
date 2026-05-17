@@ -441,6 +441,16 @@ struct ReaderContainerView: View {
                         options: [.fragmentsAllowed]
                     )
                 }
+                // Bug #141: wire settleStrategy for EPUB. The registry's
+                // `awaitReaderSettled` fast-paths if the WKWebView already
+                // fired `didFinish` (page-load complete), else suspends
+                // until it does or the timeout throws `settleTimeout` —
+                // replacing the 100ms placeholder for native EPUB.
+                probe.settleStrategy = { @MainActor timeout in
+                    try await DebugReaderRegistry.shared.awaitReaderSettled(
+                        for: key, token: token, timeout: timeout
+                    )
+                }
             } else if resolvedBookFormat == .azw3 {
                 // BookFormat.azw3 covers all Foliate-rendered formats
                 // (azw3/azw/mobi/prc per FormatCapabilities); the
@@ -464,7 +474,22 @@ struct ReaderContainerView: View {
                         options: [.fragmentsAllowed]
                     )
                 }
+                // Bug #141: wire settleStrategy for AZW3/MOBI. Foliate-js
+                // fires `relocate` only after the book is paginated and
+                // rendered; `FoliateSpikeView.Coordinator` marks the
+                // reader settled from its `relocate` handler. The registry
+                // fast-paths if that already fired, else suspends until it
+                // does or the timeout throws `settleTimeout` — replacing
+                // the 100ms placeholder for the Foliate path.
+                probe.settleStrategy = { @MainActor timeout in
+                    try await DebugReaderRegistry.shared.awaitReaderSettled(
+                        for: key, token: token, timeout: timeout
+                    )
+                }
             }
+            // TXT/MD/PDF intentionally leave `settleStrategy` nil — the
+            // 100ms `Task.sleep` fallback in `DebugReaderProbeAdapter`
+            // stays for those formats (out of scope for bug #141).
             // Feature #45 WI-4c-c: surface TTS state into DebugSnapshot.
             // Closure captures the @MainActor @Observable TTSService owned
             // by this view; runs @MainActor whenever the snapshot path

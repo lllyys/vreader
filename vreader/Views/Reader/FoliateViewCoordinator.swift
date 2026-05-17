@@ -135,6 +135,19 @@ final class FoliateViewCoordinator: NSObject, WKScriptMessageHandler, WKNavigati
 
         case "relocate":
             guard let event = FoliateMessageParser.parseRelocate(body) else { return }
+            // Bug #141: `relocate` is the AZW3/MOBI render-complete signal.
+            // foliate-js fires it only after the book is paginated and the
+            // current location is rendered — `didFinish` is just the HTML
+            // shell, so settle must key on `relocate`. Mark the reader
+            // settled so `vreader-debug://settle` unblocks on real
+            // render-complete. DEBUG-only; same key/token the
+            // `setActiveFoliateWebView` binding uses (the registry drops
+            // the mark if it's a stale callback from an outgoing reader).
+            #if DEBUG
+            if let key = fingerprintKey, let token = readerToken {
+                DebugReaderRegistry.shared.markReaderSettled(for: key, token: token)
+            }
+            #endif
             onRelocate(event)
 
         case "selection":

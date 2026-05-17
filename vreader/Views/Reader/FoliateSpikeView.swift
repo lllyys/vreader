@@ -483,6 +483,24 @@ extension FoliateSpikeView {
                     onError(msg)
                 }
 
+            case "relocate":
+                // Bug #141: `relocate` is the AZW3/MOBI render-complete
+                // signal. foliate-js fires it only after the book is
+                // paginated and the current location is rendered — the
+                // navigation delegate's `didFinish` is just the HTML
+                // shell. `FoliateSpikeView` is the live AZW3/MOBI host
+                // (ReaderContainerView routes `.azw3` here), so settle
+                // must key on `relocate` from THIS coordinator. Mark the
+                // reader settled so `vreader-debug://settle` unblocks on
+                // real render-complete instead of the 100ms placeholder.
+                // DEBUG-only; the registry drops the mark if it's a stale
+                // callback from an outgoing reader (key/token guard).
+                #if DEBUG
+                if let key = fingerprintKey, let token = readerToken {
+                    DebugReaderRegistry.shared.markReaderSettled(for: key, token: token)
+                }
+                #endif
+
             default:
                 break
             }

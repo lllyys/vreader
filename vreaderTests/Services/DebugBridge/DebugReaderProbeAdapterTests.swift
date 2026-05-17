@@ -61,6 +61,55 @@ final class DebugReaderProbeAdapterTests: XCTestCase {
         XCTAssertEqual(adapter.currentTTSState, "idle")
         XCTAssertNil(adapter.currentTTSOffsetUTF16)
     }
+
+    // MARK: - awaitSettle strategy wiring (bug #141)
+
+    func test_awaitSettle_usesStrategyWhenSet() async throws {
+        // When a settleStrategy is wired, awaitSettle must delegate to it
+        // (and NOT fall through to the 100ms placeholder).
+        let adapter = DebugReaderProbeAdapter(
+            fingerprintKey: "epub:abc:1024",
+            format: "epub"
+        )
+        nonisolated(unsafe) var strategyCalledWith: TimeInterval?
+        adapter.settleStrategy = { @MainActor timeout in
+            strategyCalledWith = timeout
+        }
+
+        try await adapter.awaitSettle(timeout: 7.5)
+        XCTAssertEqual(strategyCalledWith, 7.5)
+    }
+
+    func test_awaitSettle_propagatesStrategyError() async {
+        // A throwing strategy must surface its error, not be swallowed.
+        let adapter = DebugReaderProbeAdapter(
+            fingerprintKey: "epub:abc:1024",
+            format: "epub"
+        )
+        adapter.settleStrategy = { @MainActor _ in
+            throw DebugReaderProbeError.settleTimeout
+        }
+
+        do {
+            try await adapter.awaitSettle(timeout: 1.0)
+            XCTFail("expected settleTimeout to propagate")
+        } catch DebugReaderProbeError.settleTimeout {
+            // expected
+        } catch {
+            XCTFail("wrong error: \(error)")
+        }
+    }
+
+    func test_awaitSettle_fallsBackToPlaceholderWhenStrategyNil() async throws {
+        // No strategy → the 100ms placeholder path runs without throwing.
+        // (TXT/MD/PDF keep this fallback — settleStrategy is only wired
+        // for EPUB/AZW3.)
+        let adapter = DebugReaderProbeAdapter(
+            fingerprintKey: "txt:abc:1024",
+            format: "txt"
+        )
+        try await adapter.awaitSettle(timeout: 1.0)
+    }
 }
 
 #endif

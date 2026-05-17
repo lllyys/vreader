@@ -232,6 +232,14 @@ extension EPUBWebViewBridge {
             // to binding to a half-identity.
             if let key = fingerprintKey, let token = readerToken {
                 DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: key, token: token)
+                // Bug #141: `didFinish` is the EPUB render-complete signal
+                // (the chapter HTML has loaded and laid out). Mark the
+                // reader settled so `vreader-debug://settle` unblocks on
+                // real render-complete instead of the 100ms placeholder.
+                // Same key/token guard as the binding above — the registry
+                // drops the mark if it's a stale callback from an outgoing
+                // reader.
+                DebugReaderRegistry.shared.markReaderSettled(for: key, token: token)
             }
             #endif
 
