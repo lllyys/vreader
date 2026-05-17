@@ -14,20 +14,42 @@ import Foundation
 /// Intercepts URLSession requests for testing without real network access.
 final class MockURLProtocol: URLProtocol, @unchecked Sendable {
 
+    /// Guards the process-global mock state below. `URLProtocol`
+    /// instances run on the URL loading system's own threads, and
+    /// `fetchPage_concurrent_safe` drives several requests at once,
+    /// so every access to the shared handler / capture log must be
+    /// synchronized (Bug #213 / GH #830).
+    private static let lock = NSLock()
+
+    nonisolated(unsafe) private static var _requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) private static var _capturedRequests: [URLRequest] = []
+
     /// Handler to provide mock responses. Set before each test.
-    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        get { lock.lock(); defer { lock.unlock() }; return _requestHandler }
+        set { lock.lock(); defer { lock.unlock() }; _requestHandler = newValue }
+    }
 
     /// Captured requests for verification.
-    nonisolated(unsafe) static var capturedRequests: [URLRequest] = []
+    static var capturedRequests: [URLRequest] {
+        get { lock.lock(); defer { lock.unlock() }; return _capturedRequests }
+        set { lock.lock(); defer { lock.unlock() }; _capturedRequests = newValue }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        Self.capturedRequests.append(request)
+        // Snapshot the handler and record the request under one lock
+        // acquisition; release before invoking the handler / client
+        // callbacks so slow work never runs while holding the lock.
+        Self.lock.lock()
+        Self._capturedRequests.append(request)
+        let handler = Self._requestHandler
+        Self.lock.unlock()
 
-        guard let handler = Self.requestHandler else {
+        guard let handler else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
         }
@@ -74,7 +96,15 @@ private func mockResponse(
 
 // MARK: - Tests
 
-@Suite("BookSourceHTTPClient")
+// Bug #213 / GH #830: `.serialized` is mandatory here. `MockURLProtocol`
+// holds the mock handler and captured-request log in process-global
+// `static` storage; Swift Testing runs a suite's `@Test`s in parallel
+// by default, so without serialization a concurrent test's `init()`
+// (below) wipes another test's handler mid-flight — tests then receive
+// each other's mocked responses and see each other's captured requests,
+// failing non-deterministically. `.serialized` runs these tests one at
+// a time, which makes the per-test `init()` reset sound.
+@Suite("BookSourceHTTPClient", .serialized)
 struct BookSourceHTTPClientTests {
 
     init() {
