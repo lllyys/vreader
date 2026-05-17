@@ -31,11 +31,11 @@ extension Notification.Name {
     /// readers a chance to pick up the change too.
     ///
     /// userInfo:
-    /// - `"mode"`: String — a `ReaderThemeV2` rawValue. The bridge's
-    ///   two-valued `ThemeMode` posts `"dark"` or `"paper"` (Feature
-    ///   #60 WI-11 migrated the reader theme to `ReaderThemeV2`); a
-    ///   legacy `"light"` from an older sender still decodes via
-    ///   `ReaderThemeV2(recognized:)` on the observer side.
+    /// - `"mode"`: String — always a canonical `ReaderThemeV2` rawValue
+    ///   (`paper`/`sepia`/`dark`/`oled`/`photo`). `RealDebugBridgeContext.theme`
+    ///   maps the URL's `ThemeMode` to `ReaderThemeV2` before posting, so
+    ///   the legacy `mode=light` alias arrives here already resolved to
+    ///   `"paper"` (bug #206; Feature #60 WI-11 migrated to `ReaderThemeV2`).
     /// - `"fontSize"`: Int? — optional new font size, present only when
     ///   the bridge command included a fontSize parameter.
     static let debugBridgeThemeChanged = Notification.Name("vreader.debugBridge.themeChanged")

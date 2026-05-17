@@ -150,6 +150,24 @@ final class DebugCommandTests: XCTestCase {
         }
     }
 
+    func test_parse_themeV2PaletteModes_returnTheme() throws {
+        // Bug #206: Feature #60's 5-theme palette (paper/sepia/dark/oled/
+        // photo) must all be drivable from the debug URL. The pre-fix
+        // ThemeMode enum accepted only dark|light, so sepia/oled/photo
+        // verify slices got `parse.invalidParam` and silently fell back
+        // to UI gestures. (`dark` + `light` are covered above.)
+        for raw in ["paper", "sepia", "oled", "photo"] {
+            let url = URL(string: "vreader-debug://theme?mode=\(raw)")!
+            let cmd = try DebugCommand.parse(url)
+            guard case .theme(let mode, let fontSize) = cmd else {
+                XCTFail("mode=\(raw): expected .theme, got \(cmd)")
+                continue
+            }
+            XCTAssertEqual(mode.rawValue, raw, "mode=\(raw) should round-trip")
+            XCTAssertNil(fontSize)
+        }
+    }
+
     // MARK: - settle
 
     func test_parse_settleWithToken_returnsSettle() throws {

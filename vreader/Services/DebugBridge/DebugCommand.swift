@@ -17,7 +17,8 @@ import Foundation
 ///   #49 WI ships a `DebugPositionResolver` for native-mode TXT/EPUB/PDF.
 ///   The legacy `?cfi=<value>` parameter is rejected — feature #49 WI-0
 ///   reconciled the grammar to use `position` consistently across all formats.
-/// - `theme?mode=<dark|light>[&fontSize=<int>]` — set appearance state.
+/// - `theme?mode=<dark|light|paper|sepia|oled|photo>[&fontSize=<int>]` — set the
+///   reader appearance. `light` is a backward-compatible alias for `paper`.
 /// - `settle?token=<id>` — write `Caches/ready-<id>.json` after layout settles.
 /// - `snapshot?dest=<file>` — write semantic state JSON to the app container.
 /// - `eval?bridge=<name>&js=<base64>` — evaluate JS in the named webview bridge.
@@ -35,9 +36,19 @@ enum DebugCommand: Equatable {
     case eval(bridge: String, js: String)
     case tts(action: String)
 
-    enum ThemeMode: String, Equatable {
+    /// Reader theme selector for the `theme` command.
+    ///
+    /// Feature #60 WI-11 migrated the reader to `ReaderThemeV2`'s
+    /// 5-theme palette (paper / sepia / dark / oled / photo). `light`
+    /// is retained as a backward-compatible alias for `paper` so older
+    /// `mode=light` callers and verification scripts keep working.
+    enum ThemeMode: String, Equatable, CaseIterable {
         case dark
         case light
+        case paper
+        case sepia
+        case oled
+        case photo
     }
 }
 
@@ -99,7 +110,8 @@ extension DebugCommand {
         case "theme":
             let modeRaw = try requireParam("mode", in: params)
             guard let mode = ThemeMode(rawValue: modeRaw) else {
-                throw DebugCommandError.invalidParam("mode", reason: "expected dark|light, got \(modeRaw)")
+                let valid = ThemeMode.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam("mode", reason: "expected \(valid), got \(modeRaw)")
             }
             let fontSize: Int?
             if let raw = nonEmpty(params["fontSize"]) {

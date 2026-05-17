@@ -265,6 +265,31 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
+    func test_theme_v2PaletteModesSetMatchingTheme() async throws {
+        // Bug #206: every ReaderThemeV2 case must be reachable through
+        // the bridge — not just dark + light(=paper).
+        let cases: [(DebugCommand.ThemeMode, ReaderThemeV2)] = [
+            (.paper, .paper), (.sepia, .sepia), (.oled, .oled), (.photo, .photo),
+        ]
+        for (mode, expected) in cases {
+            // Pre-set to dark (none of these targets is dark) so the
+            // assertion proves a real flip, not a stale default.
+            let pre = ReaderSettingsStore(defaults: defaults)
+            pre.theme = .dark
+
+            let context = RealDebugBridgeContext(
+                persistence: persistence,
+                importer: importer,
+                userDefaults: defaults
+            )
+            try await context.theme(mode: mode, fontSize: nil)
+
+            let store = ReaderSettingsStore(defaults: defaults)
+            XCTAssertEqual(store.theme, expected, "mode=\(mode.rawValue)")
+        }
+    }
+
+    @MainActor
     func test_theme_fontSizeIsPersisted() async throws {
         let context = RealDebugBridgeContext(
             persistence: persistence,
