@@ -123,5 +123,69 @@ struct UIKitHighlightActionPresenterTests {
         box.fire { count += 1 }
         #expect(count == 1)
     }
+
+    // MARK: - Delegate retention (Bug #205 / GH #751)
+
+    @Test @MainActor
+    func present_retainsItsDelegate_preventingComposeFailure() {
+        // Bug #205: `UIEditMenuInteraction` holds its `delegate` weakly. The
+        // pre-fix presenter created the `PresenterDelegate` as a local with no
+        // owning reference, so it deallocated the instant `present` returned —
+        // UIKit then queried a nil delegate, got no menu, and logged
+        // `[EditMenuInteraction] <compose failure>`. The fix associates the
+        // delegate onto the interaction. Because the interaction holds its
+        // `delegate` *weakly*, a non-nil `delegate` read after `present`
+        // returns proves something still retains the delegate — the exact
+        // regression boundary. The pre-fix code would read nil here.
+        let presenter = UIKitHighlightActionPresenter()
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        presenter.present(for: makeEvent(), in: view, completion: { _ in })
+        let interaction = view.interactions
+            .compactMap { $0 as? UIEditMenuInteraction }
+            .first
+        #expect(interaction != nil)
+        #expect(interaction?.delegate != nil)
+    }
+
+    @Test @MainActor
+    func present_addsAnEditMenuInteractionToTheHostView() {
+        // The interaction must be installed on the host view — UIKit routes
+        // the menu-composition callback through it. Without it on the
+        // responder chain there is nothing for UIKit to query.
+        let presenter = UIKitHighlightActionPresenter()
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        presenter.present(for: makeEvent(), in: view, completion: { _ in })
+        let hasEditMenuInteraction = view.interactions.contains { $0 is UIEditMenuInteraction }
+        #expect(hasEditMenuInteraction)
+    }
+
+    @Test @MainActor
+    func present_calledTwice_supersedesThePriorMenuInteraction() {
+        // Tapping a second highlight before the first menu dismisses must not
+        // accumulate interactions: the second `present` removes the prior
+        // edit-menu interaction it installed and leaves exactly one — whose
+        // delegate is still retained (the compose-failure regression).
+        let presenter = UIKitHighlightActionPresenter()
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        presenter.present(for: makeEvent(), in: view, completion: { _ in })
+        presenter.present(for: makeEvent(), in: view, completion: { _ in })
+        let interactions = view.interactions.compactMap { $0 as? UIEditMenuInteraction }
+        #expect(interactions.count == 1)
+        #expect(interactions.first?.delegate != nil)
+    }
+
+    @Test @MainActor
+    func present_leavesAnUnrelatedEditMenuInteractionInPlace() {
+        // A `UITextView` host owns its own built-in `UIEditMenuInteraction`
+        // for the selection menu. The supersede sweep keys on the presenter's
+        // delegate association, so it must not remove an interaction it did
+        // not install.
+        let presenter = UIKitHighlightActionPresenter()
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        let foreign = UIEditMenuInteraction(delegate: nil)
+        view.addInteraction(foreign)
+        presenter.present(for: makeEvent(), in: view, completion: { _ in })
+        #expect(view.interactions.contains { $0 === foreign })
+    }
 }
 #endif

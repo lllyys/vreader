@@ -23,6 +23,21 @@
 //   UIAction handlers + UIEditMenuInteraction delegate callbacks run on main.
 // - `FireOnceBox` is @MainActor-isolated; the single-shot guard prevents
 //   double delivery under fast taps + dismiss races.
+// - `UIEditMenuInteraction` holds its `delegate` *weakly* (SDK:
+//   `@property (weak, readonly) delegate`). `present` therefore associates
+//   the `PresenterDelegate` onto the interaction object itself with an
+//   `OBJC_ASSOCIATION_RETAIN_NONATOMIC` policy: the interaction — which the
+//   host view retains — strongly owns its delegate, so the delegate lives
+//   exactly as long as the interaction and is reclaimed with it (on dismiss,
+//   or when the host view is torn down). Without this the delegate
+//   deallocates the instant `present` returns, UIKit queries a nil delegate,
+//   and the menu fails to compose (Bug #205 / GH #751). Binding the lifetime
+//   to the interaction rather than the presenter means a presenter recreated
+//   on every SwiftUI render (the reader containers build one inline in
+//   `body`) cannot strand an in-flight menu — the presenter is stateless.
+//   `present` also removes any edit-menu interaction it installed on the
+//   same view earlier, so a superseded/aborted presentation that never got
+//   a `willDismissMenuFor` callback can't linger until view teardown.
 // - WI-1 ships .delete only; the UIMenu has one item titled "Delete Highlight".
 //   Future actions extend the menu builder; the protocol surface is unchanged.
 //
@@ -31,6 +46,7 @@
 
 #if canImport(UIKit)
 import UIKit
+import ObjectiveC
 
 @MainActor
 protocol HighlightActionPresenting: AnyObject {
@@ -49,6 +65,12 @@ final class UIKitHighlightActionPresenter: HighlightActionPresenting {
 
     /// Title used for the Delete menu item. Exposed for test assertion.
     static let deleteItemTitle = "Delete Highlight"
+
+    /// Identity key for the delegate→interaction object association in
+    /// `present`. Only the *address* of this byte is used as the key; the
+    /// stored value is never read or mutated. `nonisolated(unsafe)` is sound
+    /// for an immutable identity token like this.
+    nonisolated(unsafe) private static var delegateAssociationKey: UInt8 = 0
 
     /// Builds the `UIMenu` shown for `event`. Exposed for test assertion —
     /// tests inspect the menu structure without actually presenting it.
@@ -101,6 +123,8 @@ final class UIKitHighlightActionPresenter: HighlightActionPresenting {
         in view: UIView,
         completion: @escaping @MainActor (HighlightTapAction?) -> Void
     ) {
+        // One FireOnceBox shared by the Delete action and the dismiss path
+        // so a tap-then-dismiss race delivers the completion exactly once.
         let didFire = FireOnceBox()
         let menu = UIMenu(title: "", options: .displayInline, children: [
             UIAction(
@@ -113,14 +137,31 @@ final class UIKitHighlightActionPresenter: HighlightActionPresenting {
                 }
             }
         ])
-        let interaction = UIEditMenuInteraction(delegate: PresenterDelegate(
+        let delegate = PresenterDelegate(
             menu: menu,
-            onDismiss: {
-                MainActor.assumeIsolated {
-                    Self.invokeDismiss(didFire: didFire, completion: completion)
-                }
-            }
-        ))
+            didFire: didFire,
+            completion: completion
+        )
+        let interaction = UIEditMenuInteraction(delegate: delegate)
+        delegate.hostView = view
+        // `UIEditMenuInteraction.delegate` is weak. Associate the delegate
+        // onto the interaction so the interaction — itself strongly retained
+        // by the host view — owns it. The delegate then outlives `present`
+        // and is reclaimed only when the interaction is (on dismiss, or when
+        // the host view is torn down). This is what fixes Bug #205; see the
+        // file header for why the lifetime is bound here and not on `self`.
+        objc_setAssociatedObject(
+            interaction,
+            &Self.delegateAssociationKey,
+            delegate,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        )
+        // Drop any edit-menu interaction a prior `present` installed on this
+        // view. Normal dismiss already removes it via `willDismissMenuFor`,
+        // but a superseded or aborted presentation (no menu produced, no
+        // dismiss callback) would otherwise linger — with its associated
+        // delegate — until the view is torn down.
+        Self.removePriorMenuInteractions(from: view)
         view.addInteraction(interaction)
 
         let cfg = UIEditMenuConfiguration(identifier: nil, sourcePoint: CGPoint(
@@ -128,6 +169,21 @@ final class UIKitHighlightActionPresenter: HighlightActionPresenting {
             y: event.sourceRect.midY
         ))
         interaction.presentEditMenu(with: cfg)
+    }
+
+    /// Removes every `UIEditMenuInteraction` a previous `present` call
+    /// installed on `view`, identified by the delegate association. A view
+    /// the presenter targets can own an unrelated `UIEditMenuInteraction`
+    /// (e.g. `UITextView`'s built-in selection menu); that one has no
+    /// association under our key and is left in place.
+    private static func removePriorMenuInteractions(from view: UIView) {
+        let installed = view.interactions.compactMap { interaction -> UIEditMenuInteraction? in
+            guard let editMenu = interaction as? UIEditMenuInteraction,
+                  objc_getAssociatedObject(editMenu, &delegateAssociationKey) is PresenterDelegate
+            else { return nil }
+            return editMenu
+        }
+        installed.forEach { view.removeInteraction($0) }
     }
 }
 
@@ -143,18 +199,31 @@ final class FireOnceBox {
     }
 }
 
-/// Delegate that hands the menu builder back to `UIEditMenuInteraction` and
-/// notifies on dismiss. Conformance is `nonisolated` because the SDK protocol
-/// is unannotated; the delegate methods land on the main thread at runtime,
-/// and the stored callbacks hop to the main actor explicitly via
-/// `MainActor.assumeIsolated` when fired.
+/// Delegate that hands the menu back to `UIEditMenuInteraction` and, on
+/// dismiss, detaches the interaction from its host view so the interaction
+/// — and this delegate, associated onto it — can deallocate (Bug #205).
+/// Conformance is `nonisolated` because the SDK protocol is unannotated;
+/// the delegate methods land on the main thread at runtime, and the
+/// main-actor work hops explicitly via `MainActor.assumeIsolated`.
 private final class PresenterDelegate: NSObject, UIEditMenuInteractionDelegate {
     private let menu: UIMenu
-    private let onDismiss: @Sendable () -> Void
+    private let didFire: FireOnceBox
+    private let completion: @MainActor (HighlightTapAction?) -> Void
 
-    init(menu: UIMenu, onDismiss: @escaping @Sendable () -> Void) {
+    /// Weak — the host view retains the interaction, which in turn owns this
+    /// delegate via object association, so the delegate must not retain the
+    /// view back. Used on dismiss to detach the dismissing interaction so a
+    /// stale one doesn't accumulate on the host.
+    weak var hostView: UIView?
+
+    init(
+        menu: UIMenu,
+        didFire: FireOnceBox,
+        completion: @escaping @MainActor (HighlightTapAction?) -> Void
+    ) {
         self.menu = menu
-        self.onDismiss = onDismiss
+        self.didFire = didFire
+        self.completion = completion
     }
 
     func editMenuInteraction(
@@ -170,7 +239,23 @@ private final class PresenterDelegate: NSObject, UIEditMenuInteractionDelegate {
         willDismissMenuFor configuration: UIEditMenuConfiguration,
         animator: any UIEditMenuInteractionAnimating
     ) {
-        onDismiss()
+        // This SDK callback is `nonisolated`, so every value used inside the
+        // `@MainActor` hop is first copied into a Sendable local — the
+        // closure must never capture non-Sendable `self`.
+        let didFire = self.didFire
+        let completion = self.completion
+        let hostView = self.hostView
+        MainActor.assumeIsolated {
+            // Dismiss without a prior action delivers nil; FireOnceBox
+            // suppresses it when a menu action already fired the completion.
+            UIKitHighlightActionPresenter.invokeDismiss(
+                didFire: didFire, completion: completion
+            )
+            // Detach the dismissing interaction from the host view. Nothing
+            // else retains the interaction, so it — and this delegate,
+            // associated onto it — deallocate once the callback unwinds.
+            hostView?.removeInteraction(interaction)
+        }
     }
 }
 #endif
