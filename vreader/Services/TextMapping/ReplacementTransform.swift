@@ -5,8 +5,9 @@
 // Key decisions:
 // - Rules applied in order (sorted by `order` field).
 // - Invalid regex patterns are skipped (logged, not crashed).
-// - Regex timeout: each rule evaluation is time-limited to prevent
-//   catastrophic backtracking from freezing the UI.
+// - Regex matching is synchronous on the calling thread (Bug #217). The
+//   prior DispatchQueue.global() + 1s-semaphore timeout was removed: it
+//   misfired under dispatch-pool saturation and silently dropped the rule.
 // - Replacements are non-recursive (a replacement's output is not
 //   re-scanned by the same rule).
 //
@@ -37,9 +38,6 @@ struct ReplacementRuleDescriptor: Sendable {
 /// Text transform that applies content replacement rules.
 struct ReplacementTransform: TextTransform {
     let rules: [ReplacementRuleDescriptor]
-
-    /// Timeout per regex rule in seconds.
-    static let regexTimeoutSeconds: TimeInterval = 1.0
 
     func transform(input: String) -> TransformResult {
         let sortedRules = rules.filter(\.enabled).sorted { $0.order < $1.order }
@@ -143,29 +141,15 @@ struct ReplacementTransform: TextTransform {
         let nsText = text as NSString
         let fullRange = NSRange(location: 0, length: nsText.length)
 
-        // Find all matches (with timeout protection via work item)
-        let matches: [NSTextCheckingResult]
-        let semaphore = DispatchSemaphore(value: 0)
-        var foundMatches: [NSTextCheckingResult] = []
-        var timedOut = false
+        // Match synchronously on the calling thread. Bug #217: the previous
+        // implementation dispatched this to DispatchQueue.global() and waited
+        // on a 1s DispatchSemaphore — under dispatch-pool saturation the work
+        // item could not get a thread within the window, the wait spuriously
+        // timed out, and the rule silently no-op'd. The dispatch hop bought
+        // nothing: matching a content-replacement pattern is microsecond-scale.
+        let matches = regex.matches(in: text, options: [], range: fullRange)
 
-        let workItem = DispatchWorkItem {
-            foundMatches = regex.matches(in: text, options: [], range: fullRange)
-            semaphore.signal()
-        }
-
-        DispatchQueue.global().async(execute: workItem)
-        let waitResult = semaphore.wait(timeout: .now() + Self.regexTimeoutSeconds)
-
-        if waitResult == .timedOut {
-            workItem.cancel()
-            timedOut = true
-            matches = []
-        } else {
-            matches = foundMatches
-        }
-
-        if timedOut || matches.isEmpty {
+        if matches.isEmpty {
             return TransformResult(text: text, offsetMap: .identity(lengthUTF16: text.utf16.count))
         }
 

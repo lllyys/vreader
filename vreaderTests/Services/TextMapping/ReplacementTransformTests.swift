@@ -108,6 +108,46 @@ struct ReplacementTransformTests {
         #expect(result.text == "page # of #")
     }
 
+    // Opt-in only — set VREADER_RUN_CONTENTION_TESTS=1 to run it. This is the
+    // deterministic RED that proved Bug #217: it fails on the pre-fix commit
+    // (the regex rule no-op'd) and passes after the fix. It is gated out of
+    // normal runs because it CPU-saturates DispatchQueue.global() for ~1.6s —
+    // no QoS setting can both starve the default-QoS pool the buggy code used
+    // and spare neighbours — which would slow parallel tests and could perturb
+    // wall-clock assertions such as
+    // SimpTradTransformTests.performance_1MBText_under500ms.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["VREADER_RUN_CONTENTION_TESTS"] == "1"))
+    func regexRule_appliesUnderGlobalQueueContention() {
+        // Bug #217 regression: applyRegexRule used to run the match on
+        // DispatchQueue.global() and block on a 1s DispatchSemaphore. When the
+        // global queue was saturated, the work item could not get a thread
+        // within the window, the wait spuriously timed out, and the rule
+        // silently no-op'd (returned the input unchanged). CPU-saturate the
+        // global queue for longer than that old 1s timeout, then confirm the
+        // regex rule STILL applies — the fixed code matches synchronously on
+        // the calling thread and has no dependency on the dispatch pool.
+        let deadline = Date().addingTimeInterval(1.6)
+        let spinnerCount = ProcessInfo.processInfo.activeProcessorCount * 4
+        let group = DispatchGroup()
+        for _ in 0..<spinnerCount {
+            group.enter()
+            DispatchQueue.global().async {
+                while Date() < deadline { /* CPU-bound spin holds a pool thread */ }
+                group.leave()
+            }
+        }
+        defer { group.wait() }  // drain spinners so the pool is not left saturated
+
+        let rules = [ReplacementRuleDescriptor(
+            pattern: "\\d+",
+            replacement: "#",
+            isRegex: true
+        )]
+        let result = ReplacementTransform(rules: rules).transform(input: "page 1 of 100")
+        #expect(result.text == "page # of #",
+                "Bug #217: regex replacement must apply even when DispatchQueue.global() is saturated")
+    }
+
     @Test func emptyInput_noOp() {
         let rules = [ReplacementRuleDescriptor(pattern: "x", replacement: "y")]
         let transform = ReplacementTransform(rules: rules)
