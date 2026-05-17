@@ -142,4 +142,28 @@ struct EPUBHighlightTapBridgeJSTests {
         let js = EPUBHighlightBridge.highlightAPIJS
         #expect(js.contains("window.__vreader_highlightRanges = {}"))
     }
+
+    @Test
+    func highlightAPIJS_tapHitTest_comparesEndBoundaryAgainstTapPoint() {
+        // Bug #211 / GH #820: the WI-4 tap-on-highlight membership test
+        // used the wrong `Range.compareBoundaryPoints` constant for its
+        // end-boundary check. It called
+        // `range.compareBoundaryPoints(Range.END_TO_START, probe)` —
+        // which compares `range`'s START boundary to `probe`'s END
+        // boundary — when the hit-test needs `range`'s END vs `probe`'s
+        // START, i.e. `Range.START_TO_END`. With the wrong constant
+        // `endVsProbe` came back -1 for every tap past the highlight's
+        // first character, the `endVsProbe >= 0` guard failed, no
+        // `highlightTapHandler` message posted, and the inline Delete
+        // menu never appeared. Device-verified in
+        // `dev-docs/verification/feature-53-20260517-round5.md`.
+        //
+        // The assertions match the full call expression (not the bare
+        // constant) so the explanatory JS comment — which names the
+        // old `END_TO_START` constant on purpose — cannot satisfy or
+        // break this guard.
+        let js = EPUBHighlightBridge.highlightAPIJS
+        #expect(js.contains("compareBoundaryPoints(Range.START_TO_END, probe)"))
+        #expect(!js.contains("compareBoundaryPoints(Range.END_TO_START, probe)"))
+    }
 }

@@ -287,8 +287,16 @@ extension EPUBHighlightBridge {
                 try {
                     // probe ∈ [range.start, range.end] iff:
                     //   range.start <= probe.start  AND  range.end >= probe.start
+                    // Bug #211: `compareBoundaryPoints` constant names read
+                    // counter-intuitively. `START_TO_START` compares
+                    // range.start vs probe.start; `START_TO_END` compares
+                    // range.END vs probe.start — the comparison the end
+                    // check needs. The pre-fix code used `END_TO_START`,
+                    // which compares range.start vs probe.END, so
+                    // `endVsProbe` was never >= 0 for an in-range tap and
+                    // every tap-on-highlight missed.
                     var startVsProbe = range.compareBoundaryPoints(Range.START_TO_START, probe);
-                    var endVsProbe = range.compareBoundaryPoints(Range.END_TO_START, probe);
+                    var endVsProbe = range.compareBoundaryPoints(Range.START_TO_END, probe);
                     if (startVsProbe <= 0 && endVsProbe >= 0) {
                         var rect;
                         try { rect = range.getBoundingClientRect(); } catch (err2) {}
