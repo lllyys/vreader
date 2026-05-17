@@ -277,6 +277,21 @@ final class DebugReaderRegistry {
     /// No-op if a different probe is now active (e.g., a quick switch
     /// between readers where unregister fires after a new register).
     func unregister(_ reader: DebugReaderProbe) {
+        // Bug #141 (Codex Medium): settle state is keyed by
+        // `(fingerprintKey, token)`, not by probe identity. When reader A
+        // is replaced by reader B for the SAME book before A's
+        // `onDisappear` fires, `activeReader === reader` is false for A,
+        // so the block below is skipped — and A's pending settle waiters
+        // would leak until timeout. Clear the outgoing probe's settle
+        // state UNCONDITIONALLY here, preserving only the currently-
+        // expected token's state (that token belongs to the incoming
+        // reader B; A's own token never equals it). When A IS still the
+        // active reader (normal close, nothing replaced it), the
+        // `if` block below clears everything for the key anyway.
+        clearSettleState(
+            forFingerprintKey: reader.fingerprintKey,
+            preservingToken: expectedReaderToken
+        )
         if activeReader === reader as AnyObject {
             activeReader = nil
             // Bug #142: drop the expected reader token in lockstep with
@@ -302,10 +317,12 @@ final class DebugReaderRegistry {
                 activeFoliateWebViewToken = nil
             }
             #endif
-            // Bug #141: drop any render-settled state + pending settle
-            // waiters for the leaving probe's key. A settled flag from an
-            // outgoing reader must not fast-path a freshly-mounted reader
-            // on the same key; pending waiters are resumed with timeout so
+            // Bug #141: the leaving probe IS the active reader and
+            // nothing replaced it — clear ALL render-settled state +
+            // pending settle waiters for its key (no token preserved).
+            // A settled flag from an outgoing reader must not fast-path a
+            // freshly-mounted reader on the same key; pending waiters are
+            // resumed with timeout so
             // an in-flight `settle` doesn't hang past the reader's life.
             clearSettleState(forFingerprintKey: reader.fingerprintKey)
         }

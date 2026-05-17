@@ -1,20 +1,18 @@
-// Purpose: Tests for DebugReaderRegistry render-settled signal (bug #141
-// remaining settle portion). Covers the matrix:
+// Purpose: Core render-settled tests for DebugReaderRegistry (bug #141).
+// Covers the happy-path settle machinery:
 //   1. Already-settled fast path — awaitReaderSettled returns immediately.
 //   2. Suspend-then-resume — markReaderSettled wakes a pending waiter.
 //   3. Timeout — no markReaderSettled before deadline throws settleTimeout.
 //   4. Two waiters, different timeouts — token-based ownership; neither
 //      resumes the other's continuation.
 //   5. Multiple waiters on the same (key, token) — one mark resumes all.
-//   6. unregister / reset clear settled state — a subsequent await suspends
-//      again rather than fast-pathing on stale settled state.
-//   7. Stale-token write rejected — markReaderSettled with a token that
-//      doesn't match the expected reader token is dropped (no resume, no
-//      fast-path satisfied).
+//   7b. Matching-token mark accepted when an expected token is set.
 //   8. Settle keyed by (fingerprintKey, token) — a mark for a different
 //      key/token does not satisfy a waiter on this key/token.
 //
-// DEBUG-only — the registry and its settle machinery are #if DEBUG.
+// Cleanup (unregister/reset/reopen) and edge cases (stale token,
+// non-positive timeout) live in the sibling Settle{Cleanup,EdgeCase}
+// suites. DEBUG-only — the registry and its settle machinery are #if DEBUG.
 
 #if DEBUG
 
@@ -23,8 +21,8 @@ import Foundation
 @testable import vreader
 
 @MainActor
-@Suite("DebugReaderRegistry settle — bug #141")
-struct DebugReaderRegistrySettleTests {
+@Suite("DebugReaderRegistry settle core — bug #141")
+struct DebugReaderRegistrySettleCoreTests {
 
     private func makeRegistry() -> DebugReaderRegistry {
         DebugReaderRegistry.shared.reset()
@@ -141,97 +139,6 @@ struct DebugReaderRegistrySettleTests {
         try await (r1, r2)
     }
 
-    // MARK: - Case 6a: unregister clears settled state
-
-    @Test func case6a_unregisterClearsSettledState() async throws {
-        let registry = makeRegistry()
-        let token = UUID()
-        let probe = SettleStubProbe(key: "epub:pqr:64", fmt: "epub")
-        registry.register(probe)
-        registry.markReaderSettled(for: "epub:pqr:64", token: token)
-        registry.unregister(probe)
-
-        // Settled state for that key was cleared — awaiting again must
-        // suspend (and time out) rather than fast-path on stale state.
-        do {
-            try await registry.awaitReaderSettled(
-                for: "epub:pqr:64", token: token, timeout: 0.2
-            )
-            Issue.record("expected settleTimeout after unregister cleared state")
-        } catch DebugReaderProbeError.settleTimeout {
-            // expected
-        } catch {
-            Issue.record("wrong error: \(error)")
-        }
-    }
-
-    // MARK: - Case 6b: reset clears settled state
-
-    @Test func case6b_resetClearsSettledState() async throws {
-        let registry = makeRegistry()
-        let token = UUID()
-        registry.markReaderSettled(for: "epub:stu:32", token: token)
-        registry.reset()
-
-        do {
-            try await registry.awaitReaderSettled(
-                for: "epub:stu:32", token: token, timeout: 0.2
-            )
-            Issue.record("expected settleTimeout after reset cleared state")
-        } catch DebugReaderProbeError.settleTimeout {
-            // expected
-        } catch {
-            Issue.record("wrong error: \(error)")
-        }
-    }
-
-    // MARK: - Case 6c: reset cancels pending settle waiters
-
-    @Test func case6c_resetCancelsPendingSettleWaiters() async throws {
-        let registry = makeRegistry()
-        let token = UUID()
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            registry.reset()
-        }
-
-        do {
-            try await registry.awaitReaderSettled(
-                for: "epub:vwx:16", token: token, timeout: 5.0
-            )
-            Issue.record("expected settleTimeout from reset")
-        } catch DebugReaderProbeError.settleTimeout {
-            // expected — reset resumes pending settle waiters with timeout
-        } catch {
-            Issue.record("wrong error: \(error)")
-        }
-    }
-
-    // MARK: - Case 7: stale-token write rejected
-
-    @Test func case7_staleTokenMarkRejected() async throws {
-        let registry = makeRegistry()
-        let expected = UUID()
-        let stale = UUID()
-        registry.setExpectedReaderToken(expected)
-
-        // A mark with the stale token must NOT satisfy a waiter on the
-        // expected token, and must NOT establish a fast-path settled state.
-        registry.markReaderSettled(for: "epub:yz1:8", token: stale)
-
-        do {
-            try await registry.awaitReaderSettled(
-                for: "epub:yz1:8", token: expected, timeout: 0.2
-            )
-            Issue.record("stale-token mark should not satisfy expected-token wait")
-        } catch DebugReaderProbeError.settleTimeout {
-            // expected — stale mark dropped
-        } catch {
-            Issue.record("wrong error: \(error)")
-        }
-    }
-
     // MARK: - Case 7b: matching-token mark accepted when expected token set
 
     @Test func case7b_matchingTokenMarkAccepted() async throws {
@@ -278,25 +185,6 @@ struct DebugReaderRegistrySettleTests {
         } catch {
             Issue.record("wrong error: \(error)")
         }
-    }
-}
-
-/// Test-only probe satisfying DebugReaderProbe for the unregister-clears
-/// case. Named distinctly so it doesn't collide with other suites' stubs.
-@MainActor
-private final class SettleStubProbe: DebugReaderProbe {
-    let fingerprintKey: String
-    let format: String
-    var currentPositionString: String? = nil
-
-    init(key: String, fmt: String) {
-        self.fingerprintKey = key
-        self.format = fmt
-    }
-
-    func awaitSettle(timeout: TimeInterval) async throws {}
-    func evaluateJavaScript(_ script: String) async throws -> Data {
-        throw DebugReaderProbeError.evalUnsupported(format: format)
     }
 }
 

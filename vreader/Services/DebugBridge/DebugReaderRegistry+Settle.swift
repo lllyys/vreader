@@ -76,6 +76,12 @@ extension DebugReaderRegistry {
         if settledKeys.contains(key) {
             return
         }
+        // A non-positive timeout can never produce a render-complete
+        // wait — and `UInt64(timeout * 1e9)` would trap for a negative
+        // value. Surface `settleTimeout` immediately instead.
+        guard timeout > 0 else {
+            throw DebugReaderProbeError.settleTimeout
+        }
 
         let waiterToken = UUID()
         let timeoutTask = Task { [weak self] in
@@ -114,14 +120,30 @@ extension DebugReaderRegistry {
         waiter.continuation.resume(throwing: DebugReaderProbeError.settleTimeout)
     }
 
-    /// Internal: drop all render-settled state for `fingerprintKey` (any
-    /// token) and resume any pending settle waiters on that key with a
-    /// timeout error. Called from `unregister(_:)` so a leaving reader's
-    /// settled flag can't fast-path a freshly-mounted reader on the same
-    /// key, and an in-flight `settle` doesn't hang past the reader's life.
-    func clearSettleState(forFingerprintKey fingerprintKey: String) {
-        settledKeys = settledKeys.filter { $0.fingerprintKey != fingerprintKey }
-        let matching = settleWaiters.filter { $0.key.fingerprintKey == fingerprintKey }
+    /// Internal: drop render-settled state for `fingerprintKey` and resume
+    /// any pending settle waiters on that key with a timeout error. Called
+    /// from `unregister(_:)` so a leaving reader's settled flag can't
+    /// fast-path a freshly-mounted reader on the same key, and an in-flight
+    /// `settle` doesn't hang past the reader's life.
+    ///
+    /// - Parameter preservingToken: when non-nil, `(fingerprintKey,
+    ///   preservingToken)` is left untouched. This protects an INCOMING
+    ///   reader's settle state during the same-key reopen race: reader A
+    ///   is replaced by reader B (same book, new token), then A's late
+    ///   `unregister` fires — A must clear its OWN stale state without
+    ///   clobbering B's. B's token is the registry's `expectedReaderToken`
+    ///   at that moment. Pass `nil` to clear every token for the key
+    ///   (used when the leaving probe is genuinely the last reader).
+    func clearSettleState(
+        forFingerprintKey fingerprintKey: String,
+        preservingToken: UUID? = nil
+    ) {
+        settledKeys = settledKeys.filter {
+            $0.fingerprintKey != fingerprintKey || $0.token == preservingToken
+        }
+        let matching = settleWaiters.filter {
+            $0.key.fingerprintKey == fingerprintKey && $0.key.token != preservingToken
+        }
         for (key, bucket) in matching {
             settleWaiters[key] = nil
             for waiter in bucket {
