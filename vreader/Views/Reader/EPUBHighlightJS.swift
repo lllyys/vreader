@@ -209,7 +209,100 @@ extension EPUBHighlightBridge {
             }
         };
 
+        // Bug #212 / GH #828: deleting a CSS Highlight API entry does
+        // not reliably invalidate an already-composited paged/columned
+        // EPUB column, so a removed highlight's yellow paint lingered
+        // on screen until the chapter reloaded. Force the text blocks
+        // the highlight covered to re-rasterize by recreating their
+        // render objects: `display:none` destroys the RenderObject,
+        // the forced synchronous reflow commits that teardown, and
+        // restoring `display` rebuilds it — a freshly-built
+        // RenderObject always paints fresh, with no highlight
+        // registered. The browser does not paint between the two
+        // style writes within one JS turn, so the element never
+        // visibly disappears; the user sees only highlight ->
+        // no-highlight. A paint-only invalidation (opacity /
+        // visibility toggle) is the class of invalidation WebKit
+        // drops here, so the render-object rebuild is the reliable
+        // nudge.
+
+        // Inline-level tags a highlight boundary can land inside.
+        // Climbing past them yields the containing text block, so a
+        // multi-paragraph highlight's start/end blocks compare as
+        // siblings. Keyed by lowercase `localName` — EPUB chapters
+        // are application/xhtml+xml, where tag names are
+        // case-sensitive and authored lowercase.
+        var REPAINT_INLINE_TAGS = {
+            span: 1, a: 1, em: 1, strong: 1, i: 1, b: 1, u: 1, s: 1,
+            sup: 1, sub: 1, small: 1, mark: 1, code: 1, abbr: 1,
+            cite: 1, q: 1, bdi: 1, bdo: 1, ruby: 1, font: 1, tt: 1,
+            "var": 1, kbd: 1, samp: 1, dfn: 1
+        };
+
+        // Resolve a range boundary to a bounded repaint target — the
+        // text block containing the boundary node, climbing past any
+        // inline wrappers. Never <body> / <html> / the document root:
+        // rebuilding those repaginates the whole chapter and resets
+        // the paged-column scroll position (Codex audit, Bug #212).
+        function repaintBlockFor(node) {
+            var el = (node && node.nodeType === 1)
+                ? node
+                : (node && node.parentElement);
+            while (el && el.parentElement
+                   && el !== document.body
+                   && el !== document.documentElement
+                   && REPAINT_INLINE_TAGS[el.localName]) {
+                el = el.parentElement;
+            }
+            if (!el || el === document.body
+                || el === document.documentElement) {
+                return null;
+            }
+            return el;
+        }
+
+        function repaintElement(el) {
+            var prevDisplay = el.style.display;
+            el.style.display = 'none';
+            // Forced synchronous reflow: commits the display:none
+            // teardown so the restore below is seen as a real change
+            // rather than coalesced away to a no-op.
+            void el.offsetHeight;
+            el.style.display = prevDisplay;
+        }
+
+        function forceRangeRepaint(range) {
+            if (!range) return;
+            try {
+                var startEl = repaintBlockFor(range.startContainer);
+                var endEl = repaintBlockFor(range.endContainer);
+                var targets = [];
+                if (startEl) targets.push(startEl);
+                if (endEl && endEl !== startEl) targets.push(endEl);
+                // Multi-block highlight whose start and end blocks are
+                // siblings: also repaint the blocks between them so no
+                // middle paragraph keeps stale paint. Bounded so a
+                // malformed range cannot walk the whole chapter.
+                if (startEl && endEl && startEl !== endEl
+                    && startEl.parentElement === endEl.parentElement) {
+                    var guard = 0;
+                    for (var n = startEl.nextElementSibling;
+                         n && n !== endEl && guard < 64;
+                         n = n.nextElementSibling, guard++) {
+                        targets.push(n);
+                    }
+                }
+                for (var i = 0; i < targets.length; i++) {
+                    repaintElement(targets[i]);
+                }
+            } catch (e) {}
+        }
+
         window.__vreader_removeHighlight = function(id) {
+            // Bug #212 / GH #828: capture the range before the registry
+            // entry is dropped — forceRangeRepaint needs it to find the
+            // container element to re-rasterize.
+            var range = window.__vreader_highlightRanges[id];
             // Remove from Overlayer
             if (window.__foliate && window.__foliate.overlayer) {
                 window.__foliate.overlayer.remove('hl-' + id);
@@ -223,6 +316,9 @@ extension EPUBHighlightBridge {
             // WI-4: drop the registry entry so a deleted highlight stops
             // being tap-targetable.
             delete window.__vreader_highlightRanges[id];
+            // Bug #212 / GH #828: nudge WebKit to drop the now-stale
+            // highlight paint from the composited column.
+            forceRangeRepaint(range);
         };
 
         window.__vreader_clearAllHighlights = function() {

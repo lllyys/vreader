@@ -166,4 +166,58 @@ struct EPUBHighlightTapBridgeJSTests {
         #expect(js.contains("compareBoundaryPoints(Range.START_TO_END, probe)"))
         #expect(!js.contains("compareBoundaryPoints(Range.END_TO_START, probe)"))
     }
+
+    @Test
+    func highlightAPIJS_removeHighlight_forcesRepaintOfAffectedRange() {
+        // Bug #212 / GH #828: tapping "Delete Highlight" on an EPUB
+        // highlight cleared persistence AND all JS/CSS highlight state
+        // (`CSS.highlights.delete`, the `vreader-hl-style-*` element,
+        // the `__vreader_highlightRanges` registry entry) — yet the
+        // yellow paint lingered on screen until the chapter reloaded.
+        // Deleting a CSS Highlight API entry does not reliably
+        // invalidate an already-composited paged/columned EPUB column,
+        // so `__vreader_removeHighlight` must additionally force the
+        // removed range's container element to re-rasterize.
+        //
+        // The reliable nudge is a render-object rebuild — display
+        // none → forced synchronous reflow (`offsetHeight`) → restore
+        // — because a freshly-built RenderObject always paints fresh.
+        // A paint-only invalidation (opacity / visibility toggle) is
+        // exactly the class of invalidation WebKit drops here. These
+        // assertions are a JS-bundle string guard: the JS is embedded
+        // as a Swift string with no JS-execution harness, so pinning
+        // the helper name + the rebuild mechanism is the right
+        // lightweight guard (mirrors the suite's other JS-bundle
+        // string assertions).
+        let js = EPUBHighlightBridge.highlightAPIJS
+        // Pin the call path inside __vreader_removeHighlight itself —
+        // not just that the tokens exist somewhere in the bundle (the
+        // range-capture line also appears in the click hit-test).
+        // Slice the bundle to the removeHighlight function body so the
+        // assertions cannot be satisfied by an unrelated code path.
+        guard let removeStart = js.range(
+            of: "window.__vreader_removeHighlight = function(id) {"
+        )?.lowerBound else {
+            Issue.record("highlightAPIJS no longer defines __vreader_removeHighlight")
+            return
+        }
+        let afterRemove = String(js[removeStart...])
+        guard let removeEnd = afterRemove.range(
+            of: "window.__vreader_clearAllHighlights"
+        )?.lowerBound else {
+            Issue.record("__vreader_clearAllHighlights no longer follows removeHighlight")
+            return
+        }
+        let removeBody = String(afterRemove[..<removeEnd])
+        // Inside removeHighlight: capture the range, drop the registry
+        // entry, then force the repaint of the affected block(s).
+        #expect(removeBody.contains("var range = window.__vreader_highlightRanges[id];"))
+        #expect(removeBody.contains("delete window.__vreader_highlightRanges[id];"))
+        #expect(removeBody.contains("forceRangeRepaint(range);"))
+        // The helper definition + its render-object-rebuild mechanism
+        // (display toggle around a forced synchronous reflow).
+        #expect(js.contains("function forceRangeRepaint("))
+        #expect(js.contains("style.display = 'none'"))
+        #expect(js.contains("offsetHeight"))
+    }
 }
