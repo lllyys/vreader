@@ -98,6 +98,17 @@ struct CollectionSidebar: View {
                             activeFilter == .collection(collection.name)
                                 ? .primary : .secondary
                         )
+                        // Bug #210 / GH #809: stable identifier so the
+                        // Verification XCUITest can target this sidebar
+                        // filter row precisely. Feature #60's new
+                        // `LibraryFilterChips` row also renders a chip per
+                        // collection (`libraryFilterChip_<name>`) whose
+                        // label collides with this row's name under a
+                        // `label CONTAINS` query — the test now matches on
+                        // this identifier instead.
+                        .accessibilityIdentifier(
+                            "collectionFilterRow_\(collection.name)"
+                        )
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 Task {

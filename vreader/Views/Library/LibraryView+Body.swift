@@ -212,7 +212,11 @@ extension LibraryView {
 
         Divider()
 
-        // Add to Collection submenu (bug #85)
+        // Add to Collection submenu (bug #85). Bug #210 / GH #809:
+        // stable identifiers so the Verification XCUITest can target the
+        // submenu and each collection button precisely — a `label
+        // CONTAINS 'Collection'` query is ambiguous against feature
+        // #60's "Collections" toolbar button and per-collection chips.
         Menu {
             if collectionRecords.isEmpty {
                 Text("No collections yet")
@@ -223,11 +227,15 @@ extension LibraryView {
                     } label: {
                         Label(collection.name, systemImage: "folder")
                     }
+                    .accessibilityIdentifier(
+                        "addToCollectionMenuItem_\(collection.name)"
+                    )
                 }
             }
         } label: {
             Label("Add to Collection", systemImage: "folder.badge.plus")
         }
+        .accessibilityIdentifier("addToCollectionMenu")
 
         Divider()
 

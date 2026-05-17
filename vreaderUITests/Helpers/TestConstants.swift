@@ -98,6 +98,27 @@ enum AccessibilityID {
     static let addCollectionButton = "addCollectionButton"
     static let filterDoneButton = "filterDoneButton"
 
+    // MARK: - Book context menu — Add to Collection (Bug #210 / GH #809)
+    /// The "Add to Collection" submenu in the book card long-press
+    /// context menu. Bug #210: feature #60's library re-skin added a
+    /// "Collections" toolbar button and per-collection filter chips, so
+    /// the prior `label CONTAINS 'Collection'` query was ambiguous.
+    static let addToCollectionMenu = "addToCollectionMenu"
+
+    /// A single collection button inside the "Add to Collection"
+    /// submenu. Format: "addToCollectionMenuItem_{collectionName}".
+    static func addToCollectionMenuItem(_ collectionName: String) -> String {
+        "addToCollectionMenuItem_\(collectionName)"
+    }
+
+    /// A collection's filter row in the collections sidebar. Format:
+    /// "collectionFilterRow_{collectionName}". Bug #210: distinct from
+    /// the library filter chip `libraryFilterChip_{name}`, which the
+    /// re-skin's `LibraryFilterChips` row also renders per collection.
+    static func collectionFilterRow(_ collectionName: String) -> String {
+        "collectionFilterRow_\(collectionName)"
+    }
+
     // MARK: - Global settings
     static let settingsView = "settingsView"
     static let settingsDoneButton = "settingsDoneButton"
