@@ -4,6 +4,14 @@
 // no-op before the fix). Tests the static helper, not the full UIViewRepresentable
 // construction, so they remain fast and don't need a UIScene environment.
 //
+// The suite is @MainActor (bug #216 / GH #838): the helper still
+// constructs a PDFView (a UIView subclass) and mutates its layer-backed
+// backgroundColor, so the tests must run on the main thread. Without it,
+// Swift Testing's parallel scheduler dispatches them off-main and every
+// PDFView mutation trips UIKit's main-thread-only layer guard
+// (_raiseExceptionForBackgroundThreadLayerPropertyModification), which
+// crashes the test process intermittently.
+//
 // Feature #60 WI-11: `PDFViewBridge`'s theme parameter migrated from the legacy
 // 3-case `ReaderTheme` to the 5-case `ReaderThemeV2` along with
 // `ReaderSettingsStore.theme`. These tests track that — `.paper` replaces the
@@ -17,6 +25,7 @@ import UIKit
 @testable import vreader
 
 @Suite("PDFViewBridge — theme background (bug #198)")
+@MainActor
 struct PDFViewBridgeThemeTests {
 
     @Test
@@ -85,7 +94,6 @@ struct PDFViewBridgeThemeTests {
     }
 
     @Test
-    @MainActor
     func applyThemeIfChanged_drivesProductionGuard() {
         // Drives the SAME helper that PDFViewBridge.makeUIView /
         // updateUIView call (PDFViewBridge.applyThemeIfChanged), so a future
