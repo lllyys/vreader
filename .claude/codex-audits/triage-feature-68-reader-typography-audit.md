@@ -11,7 +11,7 @@ date: 2026-05-18
 Docs-only triage commit. Files one new feature row (#68) in
 `docs/features.md` for two reader-typography gaps found in a design-vs-shipped
 audit. Touches `docs/features.md` only, plus `project.yml` /
-`project.pbxproj` (version bump 3.30.1/452 → 3.30.2/453).
+`project.pbxproj` (version bump — rebased onto main: 3.30.2/453 → 3.30.3/454).
 
 **No Swift source files changed.** The audit-gate hook fires on
 `project.pbxproj` — false positive of the Swift-file heuristic. Manual
