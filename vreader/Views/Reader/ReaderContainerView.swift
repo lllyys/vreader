@@ -51,6 +51,12 @@ struct ReaderContainerView: View {
     /// extension — same reason as the sibling `showSettings` /
     /// `showShareSheet` flags.
     @State var showBookDetails = false
+    /// Feature #61 WI-4: set by the Book Details "Export annotations…"
+    /// row. The annotations panel and Book Details are sibling sheets
+    /// on this view, so the panel is opened from Book Details'
+    /// `.sheet(onDismiss:)` once it has fully dismissed — presenting
+    /// both in one state update can drop the second sheet.
+    @State var exportAnnotationsAfterBookDetailsDismiss = false
     @State var showAnnotationsPanel = false
     /// Feature #60 WI-6b: which tab the annotations panel opens on —
     /// the bottom chrome's Contents button opens `.toc`, Notes opens
@@ -84,6 +90,11 @@ struct ReaderContainerView: View {
     @State var aiCoordinator: ReaderAICoordinator?
     @State var searchCoordinator = ReaderSearchCoordinator()
     @State var unifiedCoordinator = ReaderUnifiedCoordinator()
+    /// Feature #61 WI-4: drives the Book Details sheet's cover-replace
+    /// PhotosPicker flow. Owned here (not inside `BookDetailsSheet`) so
+    /// the pick survives the sheet's dismiss / re-present and its
+    /// `coverVersion` bump re-renders the cover.
+    @State var coverPickCoordinator = CoverPickCoordinator()
 
     /// Shared content cache — loads book text once, shared across AI/search/TTS.
     @State var contentCache = BookContentCache()
@@ -412,7 +423,17 @@ struct ReaderContainerView: View {
         // the reader Book Details sheet. Content composed in
         // `bookDetailsSheet` (ReaderContainerView+Sheets.swift) so the
         // body stays inside the type-checker's complexity budget.
-        .sheet(isPresented: $showBookDetails) {
+        .sheet(isPresented: $showBookDetails, onDismiss: {
+            // Feature #61 WI-4: the "Export annotations…" row routes to
+            // the annotations panel — opened here, after Book Details
+            // has fully dismissed, because the two are sibling sheets
+            // sharing this view's presenter.
+            if exportAnnotationsAfterBookDetailsDismiss {
+                exportAnnotationsAfterBookDetailsDismiss = false
+                annotationsPanelInitialTab = .highlights
+                showAnnotationsPanel = true
+            }
+        }) {
             // Design `vreader-book-details.jsx` sizes the stacked sheet
             // at 660pt — a tall partial sheet, not full-height; `.large`
             // is offered so the user can expand it.

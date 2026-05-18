@@ -1,5 +1,5 @@
-// Purpose: Feature #61 WI-3 — pins the reader More-menu → host-effect
-// route and the Book Details sheet's metadata-row composition.
+// Purpose: Feature #61 — pins the reader More-menu → host-effect route
+// and the Book Details sheet's metadata-row composition.
 //
 // The route half: `ReaderMoreMenuEffect(row:)` is the pure decision
 // `ReaderContainerView.handleMoreMenuAction(_:)` switches on. The
@@ -21,7 +21,8 @@ import Testing
 import Foundation
 @testable import vreader
 
-@Suite("Feature #61 WI-3 — Book Details route + sheet composition")
+@Suite("Feature #61 — Book Details route + sheet composition")
+@MainActor
 struct BookDetailsRouteTests {
 
     // MARK: - Fixtures
@@ -53,6 +54,17 @@ struct BookDetailsRouteTests {
             averageWordsPerMinute: nil,
             collectionNames: collectionNames,
             totalPageCount: totalPageCount
+        )
+    }
+
+    /// Builds a `BookDetailsSheet` with throwaway action dependencies —
+    /// these tests exercise the pure `metadataRows` projection only.
+    private func makeSheet(_ book: LibraryBookItem) -> BookDetailsSheet {
+        BookDetailsSheet(
+            book: book,
+            theme: .paper,
+            coverPickCoordinator: CoverPickCoordinator(),
+            onExportAnnotations: {}
         )
     }
 
@@ -97,7 +109,7 @@ struct BookDetailsRouteTests {
 
     @Test("Metadata rows include Pages when the book has a page count")
     func metadataRowsIncludePagesWhenCountPresent() {
-        let sheet = BookDetailsSheet(book: makeItem(totalPageCount: 312), theme: .paper)
+        let sheet = makeSheet(makeItem(totalPageCount: 312))
         let pages = sheet.metadataRows.first { $0.label == "Pages" }
         #expect(pages != nil)
         #expect(pages?.value == "312")
@@ -105,7 +117,7 @@ struct BookDetailsRouteTests {
 
     @Test("Metadata rows omit Pages when the book has no page count")
     func metadataRowsOmitPagesWhenCountNil() {
-        let sheet = BookDetailsSheet(book: makeItem(totalPageCount: nil), theme: .paper)
+        let sheet = makeSheet(makeItem(totalPageCount: nil))
         #expect(!sheet.metadataRows.contains { $0.label == "Pages" })
     }
 
@@ -113,13 +125,13 @@ struct BookDetailsRouteTests {
     func metadataRowsOmitPagesWhenCountZero() {
         // A zero page count (reflowable / un-indexed book) is treated the
         // same as absent — the row is dropped, not rendered as "0".
-        let sheet = BookDetailsSheet(book: makeItem(totalPageCount: 0), theme: .paper)
+        let sheet = makeSheet(makeItem(totalPageCount: 0))
         #expect(!sheet.metadataRows.contains { $0.label == "Pages" })
     }
 
     @Test("Metadata rows follow the design order (Format, Size, Pages, Fingerprint, Location)")
     func metadataRowsFollowDesignOrder() {
-        let sheet = BookDetailsSheet(book: makeItem(totalPageCount: 312), theme: .paper)
+        let sheet = makeSheet(makeItem(totalPageCount: 312))
         #expect(sheet.metadataRows.map(\.label) == [
             "Format", "Size", "Pages", "Fingerprint", "Location",
         ])
@@ -127,7 +139,7 @@ struct BookDetailsRouteTests {
 
     @Test("With Pages omitted the remaining rows keep their order")
     func metadataRowsKeepOrderWithoutPages() {
-        let sheet = BookDetailsSheet(book: makeItem(totalPageCount: nil), theme: .paper)
+        let sheet = makeSheet(makeItem(totalPageCount: nil))
         #expect(sheet.metadataRows.map(\.label) == [
             "Format", "Size", "Fingerprint", "Location",
         ])
@@ -135,7 +147,7 @@ struct BookDetailsRouteTests {
 
     @Test("Fingerprint row carries the copy accessory; Location carries reveal")
     func metadataRowAccessories() {
-        let sheet = BookDetailsSheet(book: makeItem(), theme: .paper)
+        let sheet = makeSheet(makeItem())
         #expect(sheet.metadataRows.first { $0.label == "Fingerprint" }?.accessory == .copy)
         #expect(sheet.metadataRows.first { $0.label == "Location" }?.accessory == .reveal)
         #expect(sheet.metadataRows.first { $0.label == "Format" }?.accessory == nil)
@@ -144,7 +156,7 @@ struct BookDetailsRouteTests {
     @Test("Metadata row values are projected from the view model")
     func metadataRowValuesMatchViewModel() {
         let book = makeItem(format: "epub", fileByteCount: 204_800)
-        let sheet = BookDetailsSheet(book: book, theme: .paper)
+        let sheet = makeSheet(book)
         let vm = BookDetailsViewModel(book: book)
         #expect(sheet.metadataRows.first { $0.label == "Format" }?.value == vm.formatDisplay)
         #expect(sheet.metadataRows.first { $0.label == "Size" }?.value == vm.fileSizeDisplay)
