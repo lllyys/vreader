@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/icon.png" width="120" alt="VReader app icon">
+</p>
+
 # VReader
 
 **Built entirely by AI — coded, tested, and debugged by AI agents. Human-directed.**
