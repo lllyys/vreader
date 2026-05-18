@@ -15,9 +15,9 @@
 // - Uses AITranslationViewModel for translation with bilingual display.
 // - Uses AIChatViewModel for multi-turn chat with book context.
 // - Segmented picker at the top switches between Summarize, Translate, and Chat tabs.
-// - States: idle (with action button), loading (ProgressView),
-//   complete (scrollable response), error (message + retry),
-//   featureDisabled, consentRequired.
+// - The Summarize tab body is the re-skinned `AISummaryTabView`
+//   (feature #65 WI-1) — its summary card's Share chip presents a
+//   `ShareActivityView` carrying the summary text.
 // - Dismiss button always available (the header's close button).
 // - The feature-#50 in-reader provider picker is preserved — it sits in
 //   the custom header next to the close button so a user can still flip
@@ -25,7 +25,8 @@
 // - Locator and text content passed in from the reader container.
 //
 // @coordinates-with: AIAssistantViewModel.swift, AITranslationViewModel.swift,
-//   AIChatViewModel.swift, ReaderContainerView.swift, ReaderSheetChrome.swift,
+//   AIChatViewModel.swift, AISummaryTabView.swift, ShareSheet.swift,
+//   ReaderContainerView.swift, ReaderSheetChrome.swift,
 //   ReaderThemeV2.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
 
@@ -83,6 +84,11 @@ struct AIReaderPanel: View {
     /// re-evaluations.
     @State private var providerPickerViewModel = AIProviderPickerViewModel()
 
+    /// Feature #65 WI-1: the summary text to share. Set by the
+    /// `AISummaryTabView` summary card's Share chip; presenting the
+    /// `.sheet(item:)` with a non-nil value shows `ShareActivityView`.
+    @State private var summaryShareItem: SummaryShareItem?
+
     var body: some View {
         ReaderSheetChrome(theme: theme, title: nil) {
             VStack(spacing: 0) {
@@ -106,7 +112,14 @@ struct AIReaderPanel: View {
 
                 switch selectedTab {
                 case .summarize:
-                    summarizeContent
+                    AISummaryTabView(
+                        viewModel: viewModel,
+                        locator: locator,
+                        textContent: textContent,
+                        format: format,
+                        theme: theme,
+                        onShare: { summaryShareItem = SummaryShareItem(text: $0) }
+                    )
                 case .translate:
                     TranslationPanel(
                         viewModel: translationViewModel,
@@ -122,199 +135,18 @@ struct AIReaderPanel: View {
         }
         .accessibilityIdentifier("aiReaderPanel")
         .onAppear { selectedTab = initialTab } // bug #95
-    }
-
-    // MARK: - Summarize Tab Content
-
-    @ViewBuilder
-    private var summarizeContent: some View {
-        switch viewModel.state {
-        case .idle:
-            idleView
-        case .loading:
-            loadingView
-        case .complete:
-            completeView
-        case .error(let message):
-            errorView(message: message)
-        case .featureDisabled:
-            featureDisabledView
-        case .consentRequired:
-            consentRequiredView
-        case .streaming:
-            // Streaming uses same display as complete (text accumulates)
-            completeView
+        .sheet(item: $summaryShareItem) { item in
+            ShareActivityView(activityItems: [item.text])
+                .ignoresSafeArea()
         }
     }
+}
 
-    // MARK: - Subviews
-
-    @ViewBuilder
-    private var idleView: some View {
-        VStack(spacing: 20) {
-            Spacer()
-
-            Image(systemName: "sparkles")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            Text("Summarize the current section")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-
-            Button {
-                Task {
-                    await viewModel.summarize(
-                        locator: locator,
-                        textContent: textContent,
-                        format: format
-                    )
-                }
-            } label: {
-                Label("Summarize", systemImage: "text.quote")
-                    .frame(maxWidth: 200)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .accessibilityIdentifier("aiSummarizeButton")
-
-            Spacer()
-        }
-        .padding()
-    }
-
-    @ViewBuilder
-    private var loadingView: some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            ProgressView()
-                .controlSize(.large)
-
-            Text("Generating summary\u{2026}")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Spacer()
-        }
-        .accessibilityIdentifier("aiPanelLoading")
-    }
-
-    @ViewBuilder
-    private var completeView: some View {
-        ScrollView {
-            Text(viewModel.responseText)
-                .font(.body)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-        }
-        .accessibilityIdentifier("aiPanelResponse")
-
-        Divider()
-
-        HStack {
-            Button {
-                viewModel.reset()
-            } label: {
-                Label("New Request", systemImage: "arrow.counterclockwise")
-                    .font(.subheadline)
-            }
-            .accessibilityIdentifier("aiNewRequestButton")
-
-            Spacer()
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-    }
-
-    private func errorView(message: String) -> some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40))
-                .foregroundStyle(.orange)
-                .accessibilityHidden(true)
-
-            Text(message)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-
-            Button("Try Again") {
-                Task {
-                    await viewModel.summarize(
-                        locator: locator,
-                        textContent: textContent,
-                        format: format
-                    )
-                }
-            }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("aiRetryButton")
-
-            Spacer()
-        }
-        .accessibilityIdentifier("aiPanelError")
-    }
-
-    @ViewBuilder
-    private var featureDisabledView: some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(systemName: "sparkles.slash")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            Text("AI features are currently disabled.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            Text("Enable AI in Settings to use this feature.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            Spacer()
-        }
-        .padding()
-        .accessibilityIdentifier("aiPanelDisabled")
-    }
-
-    @ViewBuilder
-    private var consentRequiredView: some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(systemName: "hand.raised")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            Text("AI features require your consent.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            Text("Grant consent in Settings to use AI features.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            Button("Grant Consent") {
-                viewModel.grantConsent()
-            }
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("aiGrantConsentButton")
-
-            Spacer()
-        }
-        .padding()
-        .accessibilityIdentifier("aiPanelConsent")
-    }
+/// Feature #65 WI-1: an `Identifiable` wrapper so the summary text can
+/// drive a `.sheet(item:)` presenting `ShareActivityView`. A fresh
+/// `id` per instance means each Share tap re-presents the sheet.
+struct SummaryShareItem: Identifiable {
+    let id = UUID()
+    let text: String
 }
 #endif
