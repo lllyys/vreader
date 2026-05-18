@@ -5,7 +5,10 @@
 // (2) Regression gate for bug #77 (JS buffering race): rapid long-press
 //     before DOMContentLoaded settles still creates the highlight.
 //
-// Seed: .books (mini-epub3 fixture available as "EPUB Fixture" in library).
+// Seed: .epubFixture — the bundled mini-epub3.epub seeded in-process as
+// a single real, openable EPUB. The .books launch seed only carries
+// metadata-only EPUB records that never open (Bug #209 Cause A); seeding
+// .books here silently skipped both tests — Bug #219 / GH #844.
 //
 // @coordinates-with: EPUBReaderContainerView.swift, EPUBWebViewBridge.swift,
 //   HighlightCoordinator.swift, AnnotationsPanelView.swift
@@ -19,7 +22,10 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .books, resetPreferences: true)
+        // .epubFixture seeds the bundled mini-epub3.epub in-process as a
+        // single real, openable EPUB (Bug #219 — .books records are
+        // metadata-only and never open).
+        app = launchApp(seed: .epubFixture, resetPreferences: true)
         bridgeHelper = VerificationDebugBridgeHelper(app: app)
     }
 
@@ -30,28 +36,50 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func openEPUBBook() throws {
-        // Try to find an EPUB book — search for epub-related identifiers
-        // then fall back to tapFirstBook
-        let epubPredicate = NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
-        let cards = app.buttons.matching(epubPredicate)
-        guard cards.firstMatch.waitForExistence(timeout: 5) else {
-            throw XCTSkip("No book cards in library — cannot run EPUB highlight test")
+    /// Opens the seeded EPUB and waits for the reader to push. Returns
+    /// `false` if the card or reader never appeared.
+    ///
+    /// With the `.epubFixture` seed the EPUB is guaranteed-openable, so a
+    /// `false` is a real seed/launch/navigation regression — callers fail
+    /// hard, never `XCTSkip` (an `XCTSkip` on the reader-load gate is how
+    /// Bug #219's silent vacuous pass happened). The tap is retried up to
+    /// 3× because a first tap can land before the library LazyVGrid
+    /// finishes layout (the card exists but is not yet hittable /
+    /// navigation-wired) — mirrors
+    /// `Feature11EPUBBottomChromeVerificationTests.openEPUB()`.
+    private func openEPUBBook() -> Bool {
+        let card = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+        ).firstMatch
+        guard card.waitForExistence(timeout: 20) else { return false }
+
+        let backButton = app.buttons[AccessibilityID.readerBackButton]
+        for _ in 0..<3 {
+            if card.waitForHittable(timeout: 8) {
+                card.tap()
+            } else if card.exists {
+                card.tap()
+            }
+            if backButton.waitForExistence(timeout: 20) {
+                return true
+            }
         }
-        cards.firstMatch.tap()
+        return false
     }
 
     private func waitForEPUBReaderReady(timeout: TimeInterval = 20) -> Bool {
         let backButton = app.buttons[AccessibilityID.readerBackButton]
         guard backButton.waitForExistence(timeout: timeout) else { return false }
 
-        // Wait for EPUB content WebView to load
-        let content = app.webViews.matching(identifier: AccessibilityID.epubReaderContent).firstMatch
-        if content.exists { return true }
-
-        // Fallback: wait for the epub reader container
-        let container = app.otherElements[AccessibilityID.epubReaderContainer]
-        return container.waitForExistence(timeout: timeout)
+        // The EPUB content is a WKWebView. Query it by element TYPE, not
+        // by a11y identifier: Bug #214 scoped `epubReaderContainer` to an
+        // inner content `Group`, and the `epubReaderContent` /
+        // `epubReaderContainer` identifiers no longer resolve as a
+        // top-level `webViews`/`otherElements` identifier query (that
+        // stale probe made this test fail even after the Bug #219 seed
+        // fix). `app.webViews.firstMatch` is the identifier-independent
+        // signal that the reader's content view has mounted.
+        return app.webViews.firstMatch.waitForExistence(timeout: timeout)
     }
 
     private func openAnnotationsPanelHighlightsTab() {
@@ -84,11 +112,16 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
     /// Verifies the EPUB highlight happy path: long-press text → Highlight
     /// menu → entry persists in Highlights tab → re-open = still there.
     func test_verify_feature_11_epub_highlight_happy_path() throws {
-        try openEPUBBook()
-
-        guard waitForEPUBReaderReady() else {
-            throw XCTSkip("EPUB reader did not load within timeout")
-        }
+        XCTAssertTrue(
+            openEPUBBook(),
+            "The seeded mini-epub3 EPUB should open into the reader — a " +
+            "failure here is a seed/launch-arg/navigation regression, not " +
+            "an environmental skip (Bug #219)"
+        )
+        XCTAssertTrue(
+            waitForEPUBReaderReady(),
+            "EPUB reader content should load after opening the seeded EPUB"
+        )
 
         // Settle: wait for DOMContentLoaded to prevent bug #77 race
         // (settle fires vreader-debug://settle, but we can also just wait
@@ -132,19 +165,26 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
         panel.swipeDown()
         _ = panel.waitForDisappearance(timeout: 3)
 
-        // Go back to library and reopen the book to test persistence
+        // Go back to library and reopen the book to test persistence.
         let backButton = app.buttons[AccessibilityID.readerBackButton]
-        XCTAssertTrue(backButton.waitForHittable(timeout: 5))
+        XCTAssertTrue(
+            backButton.waitForHittable(timeout: 5),
+            "Reader back button should be hittable"
+        )
         backButton.tap()
 
-        // Reopen same book (first card)
-        let card = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
-        ).firstMatch
-        guard card.waitForExistence(timeout: 5) else { return }
-        card.tap()
-
-        guard waitForEPUBReaderReady() else { return }
+        // Reopen the same book. `openEPUBBook()` re-finds the card and
+        // retries the tap; a failure here is a real regression, not a
+        // silent pass — the reopen half previously had `else { return }`
+        // vacuous-success exits (Codex audit finding, Bug #219).
+        XCTAssertTrue(
+            openEPUBBook(),
+            "The EPUB should reopen from the library for the persistence check"
+        )
+        XCTAssertTrue(
+            waitForEPUBReaderReady(),
+            "EPUB reader content should reload on reopen"
+        )
         _ = XCTWaiter().wait(for: [], timeout: 2.5)
 
         // Verify highlights still exist after reopen
@@ -166,11 +206,16 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
     /// has fully rendered before the gesture. The highlight must still
     /// be created when the gesture is gated on the settle signal.
     func test_verify_feature_11_epub_highlight_regression_bug77_buffering_race() throws {
-        try openEPUBBook()
-
-        guard waitForEPUBReaderReady() else {
-            throw XCTSkip("EPUB reader did not load")
-        }
+        XCTAssertTrue(
+            openEPUBBook(),
+            "The seeded mini-epub3 EPUB should open into the reader — a " +
+            "failure here is a seed/launch-arg/navigation regression, not " +
+            "an environmental skip (Bug #219)"
+        )
+        XCTAssertTrue(
+            waitForEPUBReaderReady(),
+            "EPUB reader content should load after opening the seeded EPUB"
+        )
 
         // Send settle command — gates on DOMContentLoaded before gesture
         let settleToken = "epub-highlight-bug77-\(Int(Date().timeIntervalSince1970))"
