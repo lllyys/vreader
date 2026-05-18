@@ -85,10 +85,9 @@ extension Notification.Name {
     ///
     /// `.readerMoreToggleAutoTurn` flips `ReaderSettingsStore.autoPageTurn`
     /// (the only row with real backing state — the design draws it as
-    /// a toggle). `.readerMoreBookDetails` opens the reader settings
-    /// panel as the interim destination (the real Book Details sheet
-    /// is undesigned — GH #789). The design's Bilingual row is
-    /// deferred (GH #790) — no notification for it.
+    /// a toggle). `.readerMoreBookDetails` opens the reader Book Details
+    /// sheet (`BookDetailsSheet`, feature #61). The design's Bilingual
+    /// row is deferred (GH #790) — no notification for it.
     static let readerMoreReadAloud = Notification.Name("vreader.readerMoreReadAloud")
     static let readerMoreToggleAutoTurn = Notification.Name("vreader.readerMoreToggleAutoTurn")
     static let readerMoreBookDetails = Notification.Name("vreader.readerMoreBookDetails")

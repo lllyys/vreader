@@ -166,6 +166,17 @@ extension ReaderContainerView {
         }
     }
 
+    /// Feature #61 WI-3: the reader Book Details sheet content,
+    /// presented by `ReaderContainerView`'s
+    /// `.sheet(isPresented: $showBookDetails)`. Held here so the host
+    /// body's `.sheet` closure stays trivial — the same pattern as
+    /// `searchSheet` / `aiSheet`. The sheet dismisses via swipe-down
+    /// (its title bar carries a Share button, not a close button —
+    /// design `vreader-book-details.jsx`).
+    var bookDetailsSheet: some View {
+        BookDetailsSheet(book: book, theme: settingsStore.theme)
+    }
+
     // MARK: - Custom Chrome Overlay (bug #62 v3, Feature #60 WI-6b/WI-6c)
 
     /// Feature #60 WI-6b: the shared top reader chrome. The four shed
@@ -228,27 +239,29 @@ extension ReaderContainerView {
     /// The popover already posted `row.notification` and dismissed
     /// itself; this is the host-side effect.
     ///
-    /// Interim/adjacent destinations:
-    ///   - `.bookDetails` opens the reader settings panel as the
-    ///     interim destination; the real Book Details sheet is
-    ///     undesigned (design note §4) and tracked by GH #789.
-    ///   - `.exportAnnotations` opens the annotations panel on the
-    ///     Highlights tab, which carries the existing export action —
-    ///     WI-6c ships no new export-picker UI.
+    /// The row → effect decision is `ReaderMoreMenuEffect`, a pure type
+    /// pinned by `BookDetailsRouteTests`; this method applies the
+    /// `@State` mutation each effect maps to. Feature #61 WI-3 routes
+    /// `.bookDetails` to the dedicated Book Details sheet (the
+    /// feature-#60 WI-6c interim opened the reader settings panel).
+    ///
+    /// `.presentAnnotationsExport` opens the annotations panel on the
+    /// Highlights tab, which carries the existing export action — there
+    /// is no separate export-picker sheet.
     func handleMoreMenuAction(_ row: ReaderMoreMenuRow) {
-        switch row {
-        case .readAloud:
+        switch ReaderMoreMenuEffect(row: row) {
+        case .toggleReadAloud:
             startTTS()
-        case .autoTurnPages:
+        case .toggleAutoPageTurn:
             // The design draws an inline toggle; flipping
             // `autoPageTurn` is live-applied by the paged TXT/MD
             // containers' `onChange` observers.
             settingsStore.autoPageTurn.toggle()
-        case .bookDetails:
-            showSettings = true
-        case .shareBook:
+        case .presentBookDetails:
+            showBookDetails = true
+        case .presentShareSheet:
             showShareSheet = true
-        case .exportAnnotations:
+        case .presentAnnotationsExport:
             annotationsPanelInitialTab = .highlights
             showAnnotationsPanel = true
         }

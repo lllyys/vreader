@@ -1,0 +1,48 @@
+// Purpose: Feature #61 WI-3 — the host-side effect a reader More-menu
+// row resolves to. `ReaderMoreMenuRow` is the popover-presentation
+// model (label / icon / notification / toggle-ness); this enum is the
+// reader-host routing model — it names what `ReaderContainerView` does
+// when a row is tapped, decoupled from the `@State` mutation so the
+// routing decision is unit-testable without a SwiftUI render path.
+//
+// It pins feature #61's behavior change: `.bookDetails` now resolves
+// to `.presentBookDetails` (the dedicated Book Details sheet),
+// replacing the feature-#60 WI-6c interim that routed the row to the
+// reader settings panel.
+//
+// @coordinates-with: ReaderMoreMenuRow.swift, ReaderContainerView+Sheets.swift,
+//   BookDetailsRouteTests.swift
+
+import Foundation
+
+/// The reader-host effect a `ReaderMoreMenuRow` tap triggers. Case
+/// names describe the *host action*, not the menu row — e.g.
+/// `presentAnnotationsExport` records that the Export-annotations row
+/// reuses the annotations panel rather than opening a dedicated export
+/// sheet. `ReaderContainerView.handleMoreMenuAction(_:)` switches on
+/// this; `BookDetailsRouteTests` pins the row → effect mapping.
+enum ReaderMoreMenuEffect: Hashable {
+    /// Start or stop text-to-speech read-aloud.
+    case toggleReadAloud
+    /// Flip the auto-page-turn setting.
+    case toggleAutoPageTurn
+    /// Present the dedicated Book Details sheet (feature #61).
+    case presentBookDetails
+    /// Present the system share sheet for the book file.
+    case presentShareSheet
+    /// Open the annotations panel on its Highlights tab — the export
+    /// affordance lives there; the row has no dedicated export sheet.
+    case presentAnnotationsExport
+
+    /// Resolves the host effect for a tapped More-menu row. Exhaustive
+    /// over `ReaderMoreMenuRow` so a future row forces a decision here.
+    init(row: ReaderMoreMenuRow) {
+        switch row {
+        case .readAloud:         self = .toggleReadAloud
+        case .autoTurnPages:     self = .toggleAutoPageTurn
+        case .bookDetails:       self = .presentBookDetails
+        case .shareBook:         self = .presentShareSheet
+        case .exportAnnotations: self = .presentAnnotationsExport
+        }
+    }
+}
