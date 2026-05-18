@@ -1,4 +1,4 @@
-// Purpose: Feature #61 WI-3 — the reader Book Details sheet (stacked
+// Purpose: Feature #61 — the reader Book Details sheet (stacked
 // layout). A half-sheet reached from the reader More-menu's "Book
 // details" row, replacing the feature-#60 WI-6c settings-panel interim.
 // Renders the book's cover, title, author, collection tags, a metadata
@@ -14,15 +14,19 @@
 //    renders a generative typographic fallback, so a coverless state is
 //    unreachable here. `hasCover` only switches the cover action's label.
 //
-// Action wiring (cover-swap via the WI-2 CoverPickCoordinator / share /
-// export / fingerprint-copy / location-reveal) lands in WI-4. WI-3 ships
-// the rendered surface and routes the More-menu row here; the action
-// controls render per design with inert handlers until WI-4.
+// WI-3 shipped the rendered surface + the More-menu route. WI-4 wires
+// the actions: the cover pencil + "Replace/Add cover…" row drive the
+// shared `CoverPickCoordinator`; the title-bar Share button + "Share
+// book…" row + the Location row's reveal mini-action present the system
+// share sheet for the book file; the Fingerprint row's copy mini-action
+// writes the full key to the pasteboard; "Export annotations…" routes
+// to the annotations panel (via `onExportAnnotations`, the same
+// destination the More-menu's Export row uses).
 //
 // @coordinates-with: BookDetailsViewModel.swift, BookDetailsMetadataRow.swift,
 //   BookDetailsActionRow.swift, BookDetailsTagFlow.swift, ReaderSheetChrome.swift,
 //   ReaderThemeV2.swift, BookCoverArtView.swift, CustomCoverStore.swift,
-//   ReaderTypography.swift
+//   CoverPickCoordinator.swift, ShareSheet.swift, ReaderTypography.swift
 
 #if canImport(UIKit)
 import SwiftUI
@@ -32,9 +36,24 @@ struct BookDetailsSheet: View {
     let book: LibraryBookItem
     /// Visual-identity-v2 theme tokens for the sheet surface.
     let theme: ReaderThemeV2
+    /// Drives the cover-replace PhotosPicker flow (feature #61 WI-2).
+    /// Owned by `ReaderContainerView` so the pick survives sheet
+    /// dismiss / re-present, and its `coverVersion` refreshes the cover.
+    let coverPickCoordinator: CoverPickCoordinator
+    /// Routes "Export annotations…" to the host — the reader opens the
+    /// annotations panel on its Highlights tab (the export affordance
+    /// lives there; no separate export sheet — same as the More-menu).
+    let onExportAnnotations: () -> Void
+
+    /// Presents the system share sheet for the book file — driven by
+    /// the title-bar Share button, the "Share book…" action row, and
+    /// the Location row's reveal mini-action. `internal` so the
+    /// `+Actions.swift` action router can drive it.
+    @State var showShareSheet = false
 
     /// Display projection of the book — a cheap pure struct (WI-1).
-    private var viewModel: BookDetailsViewModel { BookDetailsViewModel(book: book) }
+    /// `internal` so `+Actions.swift` can read `fingerprintFull`.
+    var viewModel: BookDetailsViewModel { BookDetailsViewModel(book: book) }
 
     // MARK: - Composed rows (testing surface)
 
@@ -57,8 +76,8 @@ struct BookDetailsSheet: View {
         return rows
     }
 
-    /// The Actions card's rows, in design order. Exposed for the WI-4
-    /// action-list tests; the cover row's label tracks `hasCover`.
+    /// The Actions card's rows, in design order. The cover row's label
+    /// tracks `hasCover`. Exposed for `BookDetailsActionsTests`.
     var actionRows: [BookDetailsActionRow.Model] {
         [
             .init(
@@ -91,6 +110,10 @@ struct BookDetailsSheet: View {
             }
         }
         .accessibilityIdentifier("bookDetailsSheet")
+        .coverPicker(coverPickCoordinator)
+        .sheet(isPresented: $showShareSheet) {
+            ShareSheet(book: book)
+        }
     }
 
     // MARK: - Header
@@ -119,9 +142,11 @@ struct BookDetailsSheet: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The 120×180 cover with the inert WI-3 cover-swap affordance.
+    /// The 120×180 cover with the cover-swap affordance. Reads
+    /// `coverVersion` so a successful swap re-renders the artwork.
     private var cover: some View {
-        BookCoverArtView(
+        _ = coverPickCoordinator.coverVersion
+        return BookCoverArtView(
             image: CustomCoverStore.loadCover(for: book.fingerprintKey),
             fingerprintKey: book.fingerprintKey,
             title: book.title,
@@ -132,9 +157,10 @@ struct BookDetailsSheet: View {
         .overlay(alignment: .bottomTrailing) { coverSwapButton }
     }
 
-    /// The accent pencil disc — design `CoverWithSwap`. Wired in WI-4.
+    /// The accent pencil disc — design `CoverWithSwap`. Starts the
+    /// shared cover-replace PhotosPicker flow.
     private var coverSwapButton: some View {
-        Button(action: {}) {
+        Button { coverPickCoordinator.present(for: book) } label: {
             Image(systemName: "pencil")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white)
@@ -149,11 +175,11 @@ struct BookDetailsSheet: View {
     }
 
     /// The title-bar Share button — design `Sheet`'s `trailing` slot.
-    /// Inert in WI-3; wired in WI-4 alongside the Actions "Share book…"
-    /// row. The design's `Sheet` shows this in place of the default
-    /// close button, so the sheet dismisses via swipe-down.
+    /// Presents the system share sheet for the book file. The design's
+    /// `Sheet` shows this in place of the default close button, so the
+    /// sheet dismisses via swipe-down.
     private var shareButton: some View {
-        Button(action: {}) {
+        Button { showShareSheet = true } label: {
             Image(systemName: "square.and.arrow.up")
                 .font(.system(size: 16, weight: .regular))
                 .foregroundStyle(Color(theme.inkColor))
@@ -196,7 +222,9 @@ struct BookDetailsSheet: View {
     private var metadataCard: some View {
         let rows = metadataRows
         return ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-            BookDetailsMetadataRow(model: row, theme: theme, onAccessory: {})
+            BookDetailsMetadataRow(model: row, theme: theme, onAccessory: {
+                if let accessory = row.accessory { handleAccessory(accessory) }
+            })
             if index < rows.count - 1 {
                 rowDivider
             }
@@ -207,7 +235,9 @@ struct BookDetailsSheet: View {
     private var actionCard: some View {
         let rows = actionRows
         return ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-            BookDetailsActionRow(model: row, theme: theme, onTap: {})
+            BookDetailsActionRow(model: row, theme: theme, onTap: {
+                handleAction(row.kind)
+            })
             if index < rows.count - 1 {
                 rowDivider
             }

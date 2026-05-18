@@ -174,7 +174,22 @@ extension ReaderContainerView {
     /// (its title bar carries a Share button, not a close button —
     /// design `vreader-book-details.jsx`).
     var bookDetailsSheet: some View {
-        BookDetailsSheet(book: book, theme: settingsStore.theme)
+        BookDetailsSheet(
+            book: book,
+            theme: settingsStore.theme,
+            coverPickCoordinator: coverPickCoordinator,
+            onExportAnnotations: {
+                // Reuse the existing export surface — the annotations
+                // panel's Highlights tab carries the export action, the
+                // same destination the More-menu's Export row uses.
+                // Book Details + the panel share `ReaderContainerView`'s
+                // presenter, so the panel is opened from Book Details'
+                // `.sheet(onDismiss:)` once this sheet has dismissed —
+                // not in the same update (which can drop the panel).
+                exportAnnotationsAfterBookDetailsDismiss = true
+                showBookDetails = false
+            }
+        )
     }
 
     // MARK: - Custom Chrome Overlay (bug #62 v3, Feature #60 WI-6b/WI-6c)
