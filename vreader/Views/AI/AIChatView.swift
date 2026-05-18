@@ -1,6 +1,14 @@
 // Purpose: Chat interface view for multi-turn AI conversations.
 // Displays message bubbles, text input, and loading/error states.
 //
+// Re-skinned for feature #65 visual-identity v2 (WI-2): the message
+// list renders the design's two `ChatBubble` forms via `AIChatMessageRow`
+// (accent user bubble + sparkle-avatar serif assistant row), and the
+// input bar is the design's rounded pill field with a circular send
+// button. The empty-state, error banner, auto-scroll, the bug-#94
+// keyboard handling, and the `clearHistory` toolbar button are
+// preserved unchanged.
+//
 // Key decisions:
 // - ScrollView + ForEach for message list with auto-scroll to bottom.
 // - Text input at bottom with send button.
@@ -8,8 +16,12 @@
 // - Loading indicator during requests.
 // - Error banner dismissible by tapping or sending next message.
 // - User messages right-aligned, assistant messages left-aligned.
+// - `theme` is additive with a `.paper` default so the call site stays
+//   non-breaking; `AIReaderPanel` passes the real theme it holds.
 //
-// @coordinates-with: AIChatViewModel.swift, ChatMessage.swift, AIReaderPanel.swift
+// @coordinates-with: AIChatViewModel.swift, ChatMessage.swift,
+//   AIChatMessageRow.swift, AIReaderPanel.swift, ReaderThemeV2.swift,
+//   `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
 
 #if canImport(UIKit)
 import SwiftUI
@@ -20,6 +32,10 @@ struct AIChatView: View {
     @Bindable var viewModel: AIChatViewModel
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
+
+    /// Visual-identity-v2 theme tokens (feature #65 WI-2). Defaults to
+    /// `.paper` so existing callers / previews that omit it keep working.
+    var theme: ReaderThemeV2 = .paper
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,7 +83,7 @@ struct AIChatView: View {
                     }
 
                     ForEach(viewModel.messages) { message in
-                        ChatBubbleView(message: message)
+                        AIChatMessageRow(message: message, theme: theme)
                             .id(message.id)
                     }
 
@@ -177,42 +193,89 @@ struct AIChatView: View {
 
     // MARK: - Input Bar
 
+    /// The design's rounded pill input field with a circular send
+    /// button — `vreader-panels.jsx` `ChatView`'s input row. The
+    /// previous plain `TextField` + `arrow.up.circle.fill` button is
+    /// replaced; the multiline (`axis: .vertical`, `lineLimit(1...5)`)
+    /// behaviour and the bug-#94 focus / submit wiring are preserved.
     @ViewBuilder
     private var inputBar: some View {
-        Divider()
+        Color(theme.ruleColor).frame(height: 0.5)
 
         HStack(spacing: 8) {
-            TextField("Type a message\u{2026}", text: $inputText, axis: .vertical)
+            TextField(inputPlaceholder, text: $inputText, axis: .vertical)
                 .lineLimit(1...5)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(theme.inkColor))
                 .textFieldStyle(.plain)
                 .focused($isInputFocused)
                 .onSubmit {
                     sendCurrentMessage()
                 }
+                .padding(.leading, 14)
+                .padding(.vertical, 6)
                 .accessibilityIdentifier("chatInputField")
 
             Button {
                 sendCurrentMessage()
             } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(
-                        canSend ? .blue : .gray.opacity(0.5)
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle().fill(Color(sendButtonFillColor))
                     )
             }
+            .buttonStyle(.plain)
             .disabled(!canSend)
             .accessibilityIdentifier("chatSendButton")
             .accessibilityLabel("Send message")
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+        .padding(6)
+        .background(
+            Capsule().fill(Color(pillFillColor))
+        )
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 16)
     }
 
     // MARK: - Private
 
+    /// The input placeholder mirrors the empty state's book/no-book
+    /// split: the reader AI-sheet chat (`bookFingerprint != nil`) uses
+    /// the design's book-specific copy; the Library general-chat sheet
+    /// (`bookFingerprint == nil`) keeps the neutral pre-v2 wording so
+    /// the WI-2 re-skin does not regress that reused surface.
+    private var inputPlaceholder: String {
+        viewModel.bookFingerprint != nil
+            ? "Ask about this book\u{2026}"
+            : "Type a message\u{2026}"
+    }
+
     private var canSend: Bool {
         !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !viewModel.isLoading
+    }
+
+    /// The pill's neutral wash — design `ChatView` input container.
+    private var pillFillColor: UIColor {
+        theme.isDark
+            ? UIColor.white.withAlphaComponent(0.06)
+            : UIColor.black.withAlphaComponent(0.04)
+    }
+
+    /// The send button's fill — accent when a message can be sent,
+    /// a neutral wash otherwise (design `ChatView`'s `draft.trim()`
+    /// conditional).
+    private var sendButtonFillColor: UIColor {
+        guard canSend else {
+            return theme.isDark
+                ? UIColor.white.withAlphaComponent(0.12)
+                : UIColor.black.withAlphaComponent(0.10)
+        }
+        return theme.accentColor
     }
 
     private func sendCurrentMessage() {
@@ -220,49 +283,6 @@ struct AIChatView: View {
         inputText = ""
         Task {
             await viewModel.sendMessage(text)
-        }
-    }
-}
-
-// MARK: - Chat Bubble View
-
-/// Individual chat message bubble.
-private struct ChatBubbleView: View {
-    let message: ChatMessage
-
-    var body: some View {
-        HStack {
-            if message.role == .user {
-                Spacer(minLength: 60)
-            }
-
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                Text(message.content)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(bubbleBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                Text(message.timestamp, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if message.role == .assistant || message.role == .system {
-                Spacer(minLength: 60)
-            }
-        }
-        .padding(.horizontal)
-        .accessibilityIdentifier("chatBubble-\(message.role.rawValue)")
-    }
-
-    private var bubbleBackground: some ShapeStyle {
-        if message.role == .user {
-            return Color.blue.opacity(0.15)
-        } else {
-            return Color.secondary.opacity(0.1)
         }
     }
 }

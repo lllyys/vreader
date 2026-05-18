@@ -10,7 +10,7 @@ date: 2026-05-19
 
 Adds the VReader app icon to the `README.md` header. Touches `README.md`
 and `docs/icon.png` (new), plus `project.yml` / `project.pbxproj`
-(version bump 3.30.4/455 → 3.30.5/456).
+(version bump — rebased onto main: 3.30.6/457 → 3.30.7/458).
 
 **No Swift source files changed.** The audit-gate hook fires on
 `project.pbxproj` — false positive of the Swift-file heuristic. Manual
@@ -40,8 +40,8 @@ mini-audit.
 3. **HTML-in-Markdown** — `<p align="center">` + `<img>` is standard
    GFM; the `<img>` has an `alt` attribute. The existing `# VReader`
    heading and all following content are unchanged.
-4. **Version bump** — 3.30.5 / build 456 (patch — docs / asset change).
-   `xcodegen generate` confirmed.
+4. **Version bump** — 3.30.7 / build 458 (patch — docs / asset change),
+   rebased over main's 3.30.6/457. `xcodegen generate` confirmed.
 
 ## Verdict
 
