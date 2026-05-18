@@ -21,7 +21,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
   <tr>
     <td align="center">Library</td>
     <td align="center">Reading</td>
-    <td align="center">Display settings</td>
+    <td align="center">Settings</td>
   </tr>
 </table>
 
