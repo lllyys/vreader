@@ -6,16 +6,17 @@
 // Behavior is preserved verbatim from the pre-#60 `LibraryView`: the
 // delete-confirmation alert, the error alert, the Info / Share /
 // Download / Settings / AI-chat / OPDS-catalog / collections sheets,
-// the `.fileImporter`, the `.photosPicker`, and the OPDS-download
-// notification observer that re-imports a downloaded catalog book.
+// the `.fileImporter`, the custom-cover picker (feature #61 WI-2 — now
+// driven by `CoverPickCoordinator` via `.coverPicker`), and the
+// OPDS-download notification observer that re-imports a downloaded
+// catalog book.
 //
 // @coordinates-with: LibraryView.swift, LibraryViewModel.swift,
 //   BookInfoSheet.swift, ShareSheet.swift, BookDownloadSheet.swift,
 //   SettingsView.swift, AIChatView.swift, OPDSCatalogListView.swift,
-//   CollectionSidebar.swift, CustomCoverStore.swift
+//   CollectionSidebar.swift, CoverPickCoordinator.swift
 
 import SwiftUI
-import PhotosUI
 
 /// The sheet / alert / importer chain for the re-skinned `LibraryView`.
 struct LibraryViewSheets: ViewModifier {
@@ -36,10 +37,8 @@ struct LibraryViewSheets: ViewModifier {
     @Binding var collectionRecords: [CollectionRecord]
     @Binding var allTags: [String]
     @Binding var allSeries: [String]
-    @Binding var coverPickerItem: PhotosPickerItem?
-    @Binding var bookForCover: LibraryBookItem?
-    @Binding var isShowingCoverPicker: Bool
-    @Binding var coverVersion: Int
+    /// Coordinates the custom-cover PhotosPicker flow (feature #61 WI-2).
+    let coverPickCoordinator: CoverPickCoordinator
     /// Resolved lazily by the parent so multi-turn chat history survives
     /// sheet dismiss / re-present (bug #93).
     let resolvedGeneralChatVM: AIChatViewModel
@@ -88,31 +87,7 @@ struct LibraryViewSheets: ViewModifier {
                     viewModel.setError(ErrorMessageAuditor.sanitize(error))
                 }
             }
-            .photosPicker(
-                isPresented: $isShowingCoverPicker,
-                selection: $coverPickerItem,
-                matching: .images
-            )
-            // Present picker after bookForCover is set (waits for context
-            // menu dismiss). (bug #80)
-            .onChange(of: bookForCover) { _, newBook in
-                if newBook != nil {
-                    isShowingCoverPicker = true
-                }
-            }
-            .onChange(of: coverPickerItem) { _, newItem in
-                guard let item = newItem, let book = bookForCover else { return }
-                Task {
-                    if let data = try? await item.loadTransferable(type: Data.self),
-                       let image = UIImage(data: data) {
-                        try? CustomCoverStore.saveCover(image, for: book.fingerprintKey)
-                        coverVersion += 1
-                    }
-                    coverPickerItem = nil
-                    bookForCover = nil
-                    isShowingCoverPicker = false
-                }
-            }
+            .coverPicker(coverPickCoordinator)
     }
 
     // MARK: - Sheets
