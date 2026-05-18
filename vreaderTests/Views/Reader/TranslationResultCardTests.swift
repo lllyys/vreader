@@ -5,16 +5,25 @@
 // (Original)" card with a serif body, and an accent-tinted translation
 // card labelled with the target language.
 //
-// `TranslationResultCard` is a pure presentational view — its honest
-// unit-testable surface is composition, not closure plumbing. These
-// tests force SwiftUI to materialise `body` for representative
-// original / translated / target-language inputs (empty, long, CJK,
-// RTL) across every `ReaderThemeV2` case so a re-skin regression that
-// traps the card under a particular theme or input is caught without a
-// render pass. Per plan §2.2 the design's "Speak" button and "Notes on
-// the translation" card are OMITTED — the card's public surface
-// carries no speak / notes hook, which the compile-shaped test below
-// pins.
+// `TranslationResultCard` is a pure presentational view. Its honest
+// unit-testable surface is two layers (the `AIChatMessageRow.form(for:)`
+// precedent):
+//
+//  1. Behaviour — `translationFontFamily(for:)` is the pure
+//     per-language serif-stack switch (CJK → the CJK-capable system
+//     stack, everything else → the Latin serif), and `originalCardLabel`
+//     pins the honest "Original" label decision (the source language
+//     is unknown — plan §2.2). Both are asserted directly.
+//
+//  2. Composition — SwiftUI is forced to materialise `body` for
+//     representative original / translated / target-language inputs
+//     (empty, long, CJK, RTL) across every `ReaderThemeV2` case so a
+//     re-skin regression that traps the card under a particular theme
+//     or input is caught without a render pass.
+//
+// Per plan §2.2 the design's "Speak" button and "Notes on the
+// translation" card are OMITTED — the card's public surface carries no
+// speak / notes hook, which the compile-shaped test below pins.
 //
 // @coordinates-with: TranslationResultCard.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
@@ -187,5 +196,50 @@ struct TranslationResultCardTests {
         _ = card.body
         // If a Speak/Notes parameter were added without a default the
         // four-arg initialiser above would not compile.
+    }
+
+    // MARK: - Translation font-family switch (behavioural)
+
+    @Test("CJK target languages select the CJK-capable system font stack")
+    func cjkTargetLanguagesSelectSystemFont() {
+        // The translation card switches the serif stack on the target
+        // language: Chinese / Japanese / Korean — English or native
+        // labels — must render with the CJK-capable `.system` stack.
+        for language in ["Chinese", "Japanese", "Korean", "中文", "日本語", "한국어"] {
+            #expect(
+                TranslationResultCard.translationFontFamily(for: language) == .system,
+                "\(language) is CJK — must select the CJK-capable .system stack"
+            )
+        }
+    }
+
+    @Test("Non-CJK target languages select the Latin serif stack")
+    func latinTargetLanguagesSelectSerif() {
+        for language in ["Spanish", "French", "German", "Portuguese",
+                         "Russian", "Arabic", "English"] {
+            #expect(
+                TranslationResultCard.translationFontFamily(for: language) == .sourceSerif4,
+                "\(language) is non-CJK — must select the Latin .sourceSerif4 stack"
+            )
+        }
+    }
+
+    @Test("An unknown or empty target language falls back to the Latin serif")
+    func unknownOrEmptyTargetLanguageFallsBackToSerif() {
+        // Defensive: the production language list never yields these,
+        // but the switch's `default` must not pick the CJK stack.
+        #expect(TranslationResultCard.translationFontFamily(for: "") == .sourceSerif4)
+        #expect(TranslationResultCard.translationFontFamily(for: "Klingon") == .sourceSerif4)
+    }
+
+    // MARK: - Original-card label (design decision pin)
+
+    @Test("The original card is labelled 'Original' — the source language is unknown")
+    func originalCardLabelIsHonestOriginal() {
+        // The committed design labels this card "English (Original)",
+        // but the translation contract carries no source-language
+        // field, so the honest label is "Original" (plan §2.2). Pin it
+        // so a re-skin cannot regress to a hardcoded source language.
+        #expect(TranslationResultCard.originalCardLabel == "Original")
     }
 }

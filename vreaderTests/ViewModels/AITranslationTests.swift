@@ -158,12 +158,45 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "This is the original text.",
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
 
         #expect(stub.sendRequestCallCount == 1)
         #expect(stub.lastRequest?.actionType == .translate)
         #expect(stub.lastRequest?.targetLanguage == "Chinese")
+    }
+
+    // MARK: - Translate uses the passed language, not the property
+
+    @Test @MainActor func translateUsesThePassedLanguageNotTheStaleProperty() async {
+        // Gate-4 finding #1: `translate` must translate the language
+        // PASSED to it, never whatever `targetLanguage` happens to
+        // hold. Pre-set the property to a stale value (as an
+        // overlapping rail tap would), then request a different
+        // language: the provider must receive the passed language and
+        // the property must be updated to follow the request.
+        let stub = StubAIProvider()
+        stub.stubbedResponse = AIResponse(
+            content: "翻訳結果",
+            actionType: .translate,
+            promptVersion: "v1",
+            createdAt: Date()
+        )
+        let (vm, _) = makeViewModel(provider: stub)
+
+        vm.targetLanguage = "German"   // stale UI state from an earlier tap
+        await vm.translate(
+            originalText: "A passage to translate.",
+            locator: WI11TestHelpers.makeLocator(),
+            format: .txt,
+            targetLanguage: "Japanese"
+        )
+
+        #expect(stub.lastRequest?.targetLanguage == "Japanese",
+                "The request must carry the language passed to translate, not the stale property")
+        #expect(vm.targetLanguage == "Japanese",
+                "translate must update the property so the rail's selection follows the request")
     }
 
     // MARK: - Bilingual view model shows both texts
@@ -182,7 +215,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "Original text for translation.",
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
 
         #expect(vm.originalText == "Original text for translation.")
@@ -221,7 +255,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "Some text to translate.",
             locator: locator,
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
         #expect(stub.sendRequestCallCount == 1)
         #expect(vm.translatedText == "Cached translation")
@@ -234,7 +269,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "Some text to translate.",
             locator: locator,
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
         #expect(stub.sendRequestCallCount == 1, "Provider should not be called on cache hit")
         #expect(vm.translatedText == "Cached translation")
@@ -256,16 +292,15 @@ struct AITranslationViewModelTests {
         let locator = WI11TestHelpers.makeLocator()
 
         // Translate to Chinese
-        vm.targetLanguage = "Chinese"
         await vm.translate(
             originalText: "Hello world",
             locator: locator,
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
         #expect(stub.sendRequestCallCount == 1)
 
         // Change to Japanese — different cache key, should call provider again
-        vm.targetLanguage = "Japanese"
         stub.stubbedResponse = AIResponse(
             content: "Japanese translation",
             actionType: .translate,
@@ -276,7 +311,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "Hello world",
             locator: locator,
-            format: .txt
+            format: .txt,
+            targetLanguage: "Japanese"
         )
         #expect(stub.sendRequestCallCount == 2, "Different language should produce a new provider call")
         #expect(vm.translatedText == "Japanese translation")
@@ -298,7 +334,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "",
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
 
         #expect(vm.errorMessage != nil)
@@ -318,7 +355,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "Text to translate",
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
 
         #expect(vm.errorMessage != nil)
@@ -335,7 +373,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "Text to translate",
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
 
         #expect(vm.errorMessage != nil)
@@ -350,7 +389,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "Text to translate",
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
 
         #expect(vm.errorMessage != nil)
@@ -369,12 +409,11 @@ struct AITranslationViewModelTests {
         )
 
         let (vm, _) = makeViewModel(provider: stub)
-        vm.targetLanguage = "English"
-
         await vm.translate(
             originalText: "这是一段中文文本，用于测试翻译功能。",
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "English"
         )
 
         #expect(vm.translatedText == "This is the translated text from Chinese")
@@ -397,7 +436,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: "Some text",
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
         #expect(vm.translatedText != nil)
 
@@ -441,7 +481,8 @@ struct AITranslationViewModelTests {
         await vm.translate(
             originalText: longContent,
             locator: WI11TestHelpers.makeLocator(),
-            format: .txt
+            format: .txt,
+            targetLanguage: "Chinese"
         )
 
         #expect(vm.translatedText == "Translation of long text")
@@ -489,22 +530,22 @@ struct AITranslationViewModelTests {
         )
 
         // Call 1 — distinct content so it is not a cache hit of call 2.
-        vm.targetLanguage = "Chinese"
         let first = Task { @MainActor in
             await vm.translate(
                 originalText: "First passage to translate.",
-                locator: locator, format: .txt
+                locator: locator, format: .txt,
+                targetLanguage: "Chinese"
             )
         }
         // Yield so call 1 reaches the provider and parks on its gate.
         while await gated.sendRequestCallCount < 1 { await Task.yield() }
 
         // Call 2 — overlaps call 1. This must cancel call 1.
-        vm.targetLanguage = "Japanese"
         let second = Task { @MainActor in
             await vm.translate(
                 originalText: "Second passage to translate.",
-                locator: locator, format: .txt
+                locator: locator, format: .txt,
+                targetLanguage: "Japanese"
             )
         }
         while await gated.sendRequestCallCount < 2 { await Task.yield() }
@@ -543,20 +584,20 @@ struct AITranslationViewModelTests {
             forCall: 1
         )
 
-        vm.targetLanguage = "Chinese"
         let first = Task { @MainActor in
             await vm.translate(
                 originalText: "Stale first passage.",
-                locator: locator, format: .txt
+                locator: locator, format: .txt,
+                targetLanguage: "Chinese"
             )
         }
         while await gated.sendRequestCallCount < 1 { await Task.yield() }
 
-        vm.targetLanguage = "Korean"
         let second = Task { @MainActor in
             await vm.translate(
                 originalText: "Fresh second passage.",
-                locator: locator, format: .txt
+                locator: locator, format: .txt,
+                targetLanguage: "Korean"
             )
         }
         while await gated.sendRequestCallCount < 2 { await Task.yield() }
@@ -592,7 +633,8 @@ struct AITranslationViewModelTests {
         let work = Task { @MainActor in
             await vm.translate(
                 originalText: "A single passage with no overlap.",
-                locator: WI11TestHelpers.makeLocator(), format: .txt
+                locator: WI11TestHelpers.makeLocator(), format: .txt,
+                targetLanguage: "Chinese"
             )
         }
         while await gated.sendRequestCallCount < 1 { await Task.yield() }

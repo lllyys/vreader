@@ -46,6 +46,14 @@ struct TranslationResultCard: View {
     /// Visual-identity-v2 theme tokens for the card surfaces + ink.
     let theme: ReaderThemeV2
 
+    /// The original card's section label. The committed design labels
+    /// this card "English (Original)", but the translation contract
+    /// carries no source-language field — the source language is
+    /// genuinely unknown — so the honest label is "Original" (file
+    /// header / plan §2.2). Exposed `static` so a re-skin regressing it
+    /// back to a hardcoded source language is unit-catchable.
+    static let originalCardLabel = "Original"
+
     var body: some View {
         ScrollView {
             VStack(spacing: 10) {
@@ -64,7 +72,7 @@ struct TranslationResultCard: View {
     /// card with an uppercase sub label and a serif body.
     private var originalCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Original", color: Color(theme.subColor))
+            sectionLabel(Self.originalCardLabel, color: Color(theme.subColor))
             Text(originalText)
                 .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 15)))
                 .lineSpacing(4)
@@ -93,7 +101,7 @@ struct TranslationResultCard: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel(targetLanguage, color: Color(theme.accentColor))
             Text(translatedText)
-                .font(Font(ReaderTypography.body(for: translationFontFamily, size: 16)))
+                .font(Font(ReaderTypography.body(for: Self.translationFontFamily(for: targetLanguage), size: 16)))
                 .lineSpacing(5)
                 .foregroundStyle(Color(theme.inkColor))
                 .textSelection(.enabled)
@@ -139,7 +147,11 @@ struct TranslationResultCard: View {
     /// Latin serif — design `TranslateView`'s per-language font switch.
     /// `.system` is the registry's CJK-capable fallback (the bundled
     /// CJK serif binary is deferred — see `ReaderTypography`).
-    private var translationFontFamily: ReaderFontFamily {
+    ///
+    /// Exposed `static` so the per-language font switch is unit-pinnable
+    /// without a SwiftUI render pass (the `TranslateLanguageRail.tapAction`
+    /// precedent).
+    static func translationFontFamily(for targetLanguage: String) -> ReaderFontFamily {
         switch targetLanguage {
         case "Chinese", "Japanese", "Korean", "中文", "日本語", "한국어":
             return .system

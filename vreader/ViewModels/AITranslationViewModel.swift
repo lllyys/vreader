@@ -75,8 +75,7 @@ final class AITranslationViewModel {
 
     // MARK: - Actions
 
-    /// Translates the given text into the currently selected target
-    /// language.
+    /// Translates the given text into `targetLanguage`.
     ///
     /// If a previous translate is still in flight (the re-skinned
     /// language rail fires this on every pill tap), that predecessor is
@@ -85,25 +84,34 @@ final class AITranslationViewModel {
     /// `async`: it awaits the task it owns, so the caller sees settled
     /// state on return.
     ///
+    /// `targetLanguage` is taken as a parameter, not re-read from the
+    /// `targetLanguage` property: each request's language is fixed at
+    /// the call site, so an overlapping later tap that mutates shared
+    /// state cannot retarget an already-spawned request. The property
+    /// is updated from the parameter so the rail's selection highlight
+    /// still follows the request.
+    ///
     /// - Parameters:
     ///   - originalText: The text to translate.
     ///   - locator: The reading position for context extraction.
     ///   - format: The book format.
+    ///   - targetLanguage: The language to translate into.
     func translate(
         originalText: String,
         locator: Locator,
-        format: BookFormat
+        format: BookFormat,
+        targetLanguage: String
     ) async {
         // Supersede any in-flight predecessor — its result will be
         // discarded once it observes cancellation.
         translateTask?.cancel()
 
         self.originalText = originalText
+        self.targetLanguage = targetLanguage
         self.translatedText = nil
         self.errorMessage = nil
         self.isLoading = true
 
-        let targetLanguage = self.targetLanguage
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.performTranslation(

@@ -92,13 +92,19 @@ struct TranslationPanel: View {
     /// of the rail — including a re-tap of the already-selected
     /// language — so the default-preselected language is requestable
     /// on first open (Gate-2 finding #3).
+    ///
+    /// The tapped `language` is passed straight through to
+    /// `translate(...)` rather than staged via `viewModel.targetLanguage`
+    /// first: the request's language is captured in this closure, so a
+    /// rapid follow-up tap cannot retarget an already-spawned request
+    /// (Gate-4 finding #1).
     private func requestTranslation(_ language: String) {
-        viewModel.targetLanguage = language
         Task {
             await viewModel.translate(
                 originalText: textContent,
                 locator: locator,
-                format: format
+                format: format,
+                targetLanguage: language
             )
         }
     }
