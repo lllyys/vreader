@@ -14,7 +14,7 @@
 // six rows; WI-6c ships five. The "Bilingual mode" row is deferred
 // because it has no backing surface — bilingual translation lives
 // entirely in the AI assistant's translate tab (`AITranslationViewModel`
-// + `BilingualView`), invoked per selection; there is no persistent
+// + `TranslationResultCard`), invoked per selection; there is no persistent
 // bilingual-mode toggle state. Rendering a fake toggle, or routing it
 // as a tap row, would both diverge from the designed toggle (rule 51,
 // self-designed UI). GH #790 tracks the backing feature + a design

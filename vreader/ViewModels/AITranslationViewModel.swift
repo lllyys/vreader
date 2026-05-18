@@ -1,15 +1,27 @@
-// Purpose: ViewModel for AI-powered translation with bilingual display.
-// Manages translation state, language selection, and caching through AIService.
+// Purpose: ViewModel for AI-powered translation with a re-skinned
+// result card. Manages translation state, language selection, and
+// caching through AIService.
 //
 // Key decisions:
 // - @Observable + @MainActor for SwiftUI integration.
-// - Stores both originalText and translatedText for bilingual display.
+// - Stores both originalText and translatedText for the result card.
 // - Uses AIService for the full gate sequence (feature flag, consent, API key, cache).
 // - Context extraction uses AIContextExtractor (same as summarize).
 // - Caching is built into AIService — same content + language uses cache.
 // - Default target language is "Chinese" (most common for CJK users).
+// - **In-flight cancellation (feature #65 WI-3)**: the re-skinned
+//   Translate language rail fires `translate(...)` on every pill tap
+//   (the design has no separate Translate button), so rapid taps
+//   overlap. `translate(...)` holds the running `Task`, cancels it
+//   before starting a new one, and a request that finds its task
+//   cancelled discards its result without writing state — so a stale
+//   superseded response can never overwrite the newest selection.
+//   `translate(...)` stays `async` from the caller's perspective: it
+//   awaits the task it owns, so callers still see settled state on
+//   return.
 //
-// @coordinates-with: AIService.swift, TranslationPanel.swift, BilingualView.swift
+// @coordinates-with: AIService.swift, TranslationPanel.swift,
+//   TranslationResultCard.swift
 
 import Foundation
 
@@ -46,6 +58,11 @@ final class AITranslationViewModel {
     private let aiService: AIService
     private let contextExtractor: AIContextExtractor
 
+    /// The currently-running translate task, retained so a fresh
+    /// `translate(...)` can cancel a still-in-flight predecessor before
+    /// starting. `nil` when no translate is in progress.
+    private var translateTask: Task<Void, Never>?
+
     // MARK: - Init
 
     init(
@@ -58,22 +75,66 @@ final class AITranslationViewModel {
 
     // MARK: - Actions
 
-    /// Translates the given text into the currently selected target language.
+    /// Translates the given text into `targetLanguage`.
+    ///
+    /// If a previous translate is still in flight (the re-skinned
+    /// language rail fires this on every pill tap), that predecessor is
+    /// cancelled first; its result — if it still arrives — is discarded
+    /// so it cannot overwrite this newer request. The method stays
+    /// `async`: it awaits the task it owns, so the caller sees settled
+    /// state on return.
+    ///
+    /// `targetLanguage` is taken as a parameter, not re-read from the
+    /// `targetLanguage` property: each request's language is fixed at
+    /// the call site, so an overlapping later tap that mutates shared
+    /// state cannot retarget an already-spawned request. The property
+    /// is updated from the parameter so the rail's selection highlight
+    /// still follows the request.
     ///
     /// - Parameters:
     ///   - originalText: The text to translate.
     ///   - locator: The reading position for context extraction.
     ///   - format: The book format.
+    ///   - targetLanguage: The language to translate into.
     func translate(
         originalText: String,
         locator: Locator,
-        format: BookFormat
+        format: BookFormat,
+        targetLanguage: String
     ) async {
+        // Supersede any in-flight predecessor — its result will be
+        // discarded once it observes cancellation.
+        translateTask?.cancel()
+
         self.originalText = originalText
+        self.targetLanguage = targetLanguage
         self.translatedText = nil
         self.errorMessage = nil
         self.isLoading = true
 
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performTranslation(
+                originalText: originalText,
+                locator: locator,
+                format: format,
+                targetLanguage: targetLanguage
+            )
+        }
+        translateTask = task
+        await task.value
+    }
+
+    /// Runs one translation request and applies its result — but only
+    /// if this task was not superseded. Every state write is guarded by
+    /// `Task.isCancelled` so a stale, cancelled request silently drops
+    /// its outcome rather than clobbering a newer translate.
+    private func performTranslation(
+        originalText: String,
+        locator: Locator,
+        format: BookFormat,
+        targetLanguage: String
+    ) async {
         let context = contextExtractor.extractContext(
             locator: locator,
             textContent: originalText,
@@ -81,8 +142,7 @@ final class AITranslationViewModel {
         )
 
         guard !context.isEmpty else {
-            isLoading = false
-            errorMessage = AIError.contextExtractionFailed.localizedDescription
+            applyFailure(AIError.contextExtractionFailed.localizedDescription)
             return
         }
 
@@ -98,18 +158,28 @@ final class AITranslationViewModel {
 
         do {
             let response = try await aiService.sendRequest(request)
+            // A superseded request must not write its result.
+            guard !Task.isCancelled else { return }
             translatedText = response.content
-        } catch let error as AIError {
-            errorMessage = error.localizedDescription
+            isLoading = false
         } catch {
-            errorMessage = error.localizedDescription
+            applyFailure(error.localizedDescription)
         }
+    }
 
+    /// Applies a failure outcome unless this task was superseded — a
+    /// cancelled request must surface neither a result nor an error.
+    private func applyFailure(_ message: String) {
+        guard !Task.isCancelled else { return }
+        errorMessage = message
         isLoading = false
     }
 
-    /// Resets all state to initial values.
+    /// Resets all state to initial values and cancels any in-flight
+    /// translate.
     func reset() {
+        translateTask?.cancel()
+        translateTask = nil
         originalText = ""
         translatedText = nil
         errorMessage = nil

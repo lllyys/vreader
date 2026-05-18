@@ -127,7 +127,8 @@ struct AIReaderPanel: View {
                         viewModel: translationViewModel,
                         locator: locator,
                         textContent: textContent,
-                        format: format
+                        format: format,
+                        theme: theme
                     )
                 case .chat:
                     AIChatView(viewModel: chatViewModel, theme: theme)
