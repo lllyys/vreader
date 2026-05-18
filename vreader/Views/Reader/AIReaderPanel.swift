@@ -18,6 +18,8 @@
 // - The Summarize tab body is the re-skinned `AISummaryTabView`
 //   (feature #65 WI-1) — its summary card's Share chip presents a
 //   `ShareActivityView` carrying the summary text.
+// - The Chat tab body is the re-skinned `AIChatView` (feature #65
+//   WI-2) — it takes the v2 `theme` for its bubble forms + pill input.
 // - Dismiss button always available (the header's close button).
 // - The feature-#50 in-reader provider picker is preserved — it sits in
 //   the custom header next to the close button so a user can still flip
@@ -128,7 +130,7 @@ struct AIReaderPanel: View {
                         format: format
                     )
                 case .chat:
-                    AIChatView(viewModel: chatViewModel)
+                    AIChatView(viewModel: chatViewModel, theme: theme)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
