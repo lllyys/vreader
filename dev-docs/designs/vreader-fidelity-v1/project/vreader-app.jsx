@@ -7,7 +7,9 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "detailsLayout": "stacked",
   "annotationsTab": "all",
   "bilingualLang": "Chinese",
-  "aiUnavailable": false
+  "aiUnavailable": false,
+  "readerMode": "auto",
+  "debugTapZones": false
 }/*EDITMODE-END*/;
 
 function App() {
@@ -20,6 +22,7 @@ function App() {
     lineHeight: 1.55,
     margin: 26,
     brightness: 1,
+    mode: 'paged',
   });
   const [pageIdx, setPageIdx] = React.useState(0);
   const [highlights, setHighlights] = React.useState(SAMPLE_HIGHLIGHTS.map(h => ({
@@ -38,6 +41,14 @@ function App() {
   const [bilingualOn, setBilingualOn] = React.useState(false);
   const [bilingualConfig, setBilingualConfig] = React.useState({ lang: 'Chinese', granularity: 'paragraph' });
   const [bilingualSetupSeen, setBilingualSetupSeen] = React.useState(false);
+
+  // Tap-zone hint replay nonce — incrementing it from a tweak triggers the hint without
+  // clearing localStorage.
+  const [tapHintNonce, setTapHintNonce] = React.useState(0);
+  const replayTapHint = () => setTapHintNonce(n => n + 1);
+  const resetTapHintSeen = () => {
+    try { localStorage.removeItem('vreader.tap-hint-seen'); } catch (e) {}
+  };
 
   // Tweaks — exposed via the toolbar's Tweaks toggle.
   const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -154,6 +165,9 @@ function App() {
           bilingualOn={bilingualOn}
           bilingualLang={bilingualConfig.lang}
           aiUnavailable={tw.aiUnavailable}
+          readerMode={tw.readerMode && tw.readerMode !== 'auto' ? tw.readerMode : (readerSettings.mode || 'paged')}
+          debugTapZones={!!tw.debugTapZones}
+          tapHintNonce={tapHintNonce}
         />
       )}
 
@@ -242,6 +256,7 @@ function App() {
       <AppTweaksPanel tw={tw} setTweak={setTweak}
         onOpenBookDetails={() => setOpenSheet('book-details')}
         onOpenBilingualSetup={() => setOpenSheet('bilingual-setup')}
+        onReplayTapHint={() => { resetTapHintSeen(); replayTapHint(); }}
       />
     </div>
   );

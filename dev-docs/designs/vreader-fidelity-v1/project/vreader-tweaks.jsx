@@ -1,7 +1,7 @@
 // AppTweaksPanel — wires the prototype's tweakable knobs into the host's Tweaks toggle.
 // Built on the starter TweaksPanel + Tweak* controls from tweaks-panel.jsx.
 
-function AppTweaksPanel({ tw, setTweak, onOpenBookDetails, onOpenBilingualSetup }) {
+function AppTweaksPanel({ tw, setTweak, onOpenBookDetails, onOpenBilingualSetup, onReplayTapHint }) {
   return (
     <TweaksPanel title="Tweaks">
       <TweakSection label="Theme">
@@ -18,6 +18,31 @@ function AppTweaksPanel({ tw, setTweak, onOpenBookDetails, onOpenBilingualSetup 
             { value: 'image', label: 'Photo' },
           ]}
         />
+      </TweakSection>
+
+      <TweakSection label="Reader navigation · #812 · #842">
+        <TweakRadio
+          label="Reading mode (override Display sheet)"
+          value={tw.readerMode || 'auto'}
+          onChange={(v) => setTweak('readerMode', v)}
+          options={[
+            { value: 'auto',   label: 'Display' },
+            { value: 'paged',  label: 'Paged' },
+            { value: 'scroll', label: 'Scroll' },
+          ]}
+        />
+        <TweakToggle
+          label="Debug tap zones"
+          value={!!tw.debugTapZones}
+          onChange={(v) => setTweak('debugTapZones', v)}
+        />
+        <TweakButton label="Replay first-open tap-zone hint" onClick={onReplayTapHint}/>
+        <div className="twk-row" style={{
+          fontSize: 11, opacity: 0.65, lineHeight: 1.45,
+        }}>
+          Mode is set from <b>Display (Aa)</b> in the reader. Tweak above lets you override for review.
+          Auto-page-turn lives in the More menu (⋯) — when on, a ribbon sweeps along the bottom.
+        </div>
       </TweakSection>
 
       <TweakSection label="Book details · #789">

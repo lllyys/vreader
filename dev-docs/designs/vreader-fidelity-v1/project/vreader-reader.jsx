@@ -6,7 +6,9 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
                         pageIdx, onPageChange, highlights, onAddHighlight,
                         onUpdateHighlight, onDeleteHighlight, brightness,
                         onMoreAction, onToggleBilingual,
-                        bilingualOn, bilingualLang, aiUnavailable }) {
+                        bilingualOn, bilingualLang, aiUnavailable,
+                        readerMode = 'paged',
+                        debugTapZones = false, tapHintNonce = 0, onTapHintComplete }) {
   const [chromeVisible, setChromeVisible] = React.useState(true);
   const [selection, setSelection] = React.useState(null); // {text, paraIdx, range}
   const [activeHighlight, setActiveHighlight] = React.useState(null); // existing-highlight popover
@@ -19,7 +21,23 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
     bilingualLang: bilingualLang || 'Chinese',
     ttsPlaying: false,
   });
-  // Sync the popover's bilingual-active reflection with the parent-owned bilingual state.
+  const [showTapHint, setShowTapHint] = React.useState(false);
+
+  // First-open hint: localStorage gate + force-show via tapHintNonce.
+  React.useEffect(() => {
+    try {
+      const seen = localStorage.getItem('vreader.tap-hint-seen');
+      if (!seen) setShowTapHint(true);
+    } catch (e) { /* ignore */ }
+  }, []);
+  React.useEffect(() => {
+    if (tapHintNonce > 0) setShowTapHint(true);
+  }, [tapHintNonce]);
+  const dismissTapHint = () => {
+    setShowTapHint(false);
+    try { localStorage.setItem('vreader.tap-hint-seen', '1'); } catch (e) {}
+    onTapHintComplete?.();
+  };
   const popoverState = {
     ...moreState,
     bilingual: !!bilingualOn,
@@ -49,8 +67,15 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
   };
 
   const handleTap = (e) => {
+    if (showTapHint) dismissTapHint();
     if (selection) { setSelection(null); return; }
     if (activeHighlight) { setActiveHighlight(null); return; }
+    if (readerMode === 'scroll') {
+      // In scroll mode, only the center zone toggles chrome — sides are a no-op
+      // because the user already has scroll for navigation.
+      setChromeVisible(c => !c);
+      return;
+    }
     const rect = pageRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const w = rect.width;
@@ -139,7 +164,13 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
         </div>
 
         {/* Page text */}
-        {bilingualOn && typeof BilingualPageContent !== 'undefined' ? (
+        {readerMode === 'scroll' && typeof ScrollModeContent !== 'undefined' ? (
+          <ScrollModeContent
+            theme={t} fontFamily={fontFamily}
+            fontSize={fontSize} lineHeight={lineHeight} margin={margin}
+            chapters={SCROLL_DEMO_CHAPTERS}
+          />
+        ) : bilingualOn && typeof BilingualPageContent !== 'undefined' ? (
           <BilingualPageContent
             page={pageData} theme={t} fontFamily={fontFamily}
             fontSize={fontSize} lineHeight={lineHeight} margin={margin}
@@ -154,21 +185,44 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
             highlights={highlights} selection={selection}
             onLongPress={handleLongPress}
             onTapHighlight={handleTapHighlight}
+            chromeVisible={chromeVisible}
           />
         )}
 
-        {/* Footer — page number + progress */}
-        <div style={{
-          position: 'absolute', bottom: 26, left: 0, right: 0,
-          padding: `0 ${margin}px`,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          fontFamily: '"Inter", system-ui', fontSize: 11,
-          color: t.sub, zIndex: 6, pointerEvents: 'none',
-        }}>
-          <span>{Math.round(progress * 100)}%</span>
-          <span style={{ letterSpacing: 0.5 }}>{displayPage} / {totalPages}</span>
-        </div>
+        {/* Tap-zone debug overlay (designer-only tweak) */}
+        {debugTapZones && readerMode === 'paged' && typeof TapZoneDebug !== 'undefined' && (
+          <TapZoneDebug theme={t}/>
+        )}
+
+        {/* Footer — page number + progress.
+            #842: when chrome is visible, the chrome's scrubber row shows page +
+            "N pages left" already; hiding this avoids duplicating that. When
+            chrome is hidden, this footer is the canonical indicator. */}
+        {readerMode === 'paged' && !chromeVisible && (
+          <div style={{
+            position: 'absolute', bottom: 18, left: 0, right: 0,
+            padding: `0 ${margin}px`,
+            display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10,
+            fontFamily: '"Inter", system-ui', fontSize: 11,
+            color: t.sub, opacity: 0.65, zIndex: 6, pointerEvents: 'none',
+            letterSpacing: 0.5,
+          }}>
+            <span>{displayPage} / {totalPages}</span>
+          </div>
+        )}
       </div>
+
+      {/* Auto-page-turn ribbon (#842 state) — thin sweeping bar at very bottom */}
+      {typeof AutoTurnRibbon !== 'undefined' && (
+        <AutoTurnRibbon theme={t} running={!!moreState.autoTurn}
+          interval={moreState.autoTurnInterval || 30}
+          paused={chromeVisible || moreOpen}/>
+      )}
+
+      {/* First-open tap-zone hint (#842 §2) */}
+      {readerMode === 'paged' && typeof TapZoneHint !== 'undefined' && (
+        <TapZoneHint theme={t} visible={showTapHint} onDone={dismissTapHint}/>
+      )}
 
       {/* Top chrome */}
       {chromeVisible && (
@@ -249,7 +303,8 @@ function ReaderScreen({ book, theme, fontFamily, fontSize, lineHeight, margin,
 // Page content (text)
 // ────────────────────────────────────────────────────
 function PageContent({ page, theme, fontFamily, fontSize, lineHeight, margin,
-                       pageDir, animating, pageIdx, highlights, selection, onLongPress, onTapHighlight }) {
+                       pageDir, animating, pageIdx, highlights, selection, onLongPress, onTapHighlight,
+                       chromeVisible = false }) {
   const t = theme;
   const ff = fontFamily === 'serif'
     ? '"Source Serif 4", Georgia, "Times New Roman", serif'
@@ -261,14 +316,19 @@ function PageContent({ page, theme, fontFamily, fontSize, lineHeight, margin,
     : 'translateX(0) ';
   const animOpacity = animating ? 0 : 1;
 
+  // #842 §1 — chrome-aware bottom inset so the text never extends under
+  // the bottom chrome. CHROME_HEIGHT ≈ chrome's actual rendered height (top: ~88,
+  // bottom: ~128) plus 8px breathing room.
+  const bottomInset = chromeVisible ? 136 : 56;
+
   return (
     <div style={{
-      position: 'absolute', top: 76, bottom: 56,
+      position: 'absolute', top: 76, bottom: bottomInset,
       left: margin, right: margin,
       overflow: 'hidden',
       transform: animTransform,
       opacity: animOpacity,
-      transition: 'transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.22s ease-out',
+      transition: 'transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.22s ease-out, bottom 0.18s ease-out',
     }}>
       {/* Chapter heading when paragraphs start a chapter */}
       {(pageIdx === 0 || page.chapter !== PP_PAGES[(pageIdx - 1 + PP_PAGES.length) % PP_PAGES.length].chapter) && (

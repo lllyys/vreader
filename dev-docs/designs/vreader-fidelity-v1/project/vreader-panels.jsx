@@ -109,6 +109,33 @@ function ReaderSettingsSheet({ theme, settings, onChange, onClose }) {
 
         {/* Font family */}
         <div style={{ marginTop: 22 }}>
+          <SectionLabel theme={t}>Layout</SectionLabel>
+          <div style={{
+            display: 'flex', marginTop: 10, borderRadius: 12,
+            background: t.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+            padding: 3,
+          }}>
+            {[
+              { k: 'paged',  label: 'Paged',  icon: 'paged' },
+              { k: 'scroll', label: 'Scroll', icon: 'scroll' },
+            ].map(o => (
+              <button key={o.k} onClick={() => update('mode', o.k)} style={{
+                flex: 1, padding: '10px 0', borderRadius: 10, border: 'none',
+                background: (s.mode || 'paged') === o.k ? (t.isDark ? '#3a3530' : '#fff') : 'transparent',
+                color: t.ink, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer',
+                fontWeight: (s.mode || 'paged') === o.k ? 600 : 500,
+                boxShadow: (s.mode || 'paged') === o.k ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}>
+                <LayoutGlyph mode={o.icon} color={t.ink} active={(s.mode || 'paged') === o.k}/>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Font family */}
+        <div style={{ marginTop: 22 }}>
           <SectionLabel theme={t}>Font</SectionLabel>
           <div style={{
             display: 'flex', marginTop: 10, borderRadius: 12,
@@ -164,6 +191,28 @@ function SectionLabel({ theme, children }) {
       fontSize: 12, fontWeight: 600, color: theme.sub,
       letterSpacing: 0.8, textTransform: 'uppercase',
     }}>{children}</div>
+  );
+}
+
+// Small inline pictogram for Paged vs Scroll layout — paged = open book, scroll = stacked pages.
+function LayoutGlyph({ mode, color, active }) {
+  const c = color || '#000';
+  if (mode === 'paged') {
+    return (
+      <svg width="16" height="14" viewBox="0 0 16 14" fill="none">
+        <rect x="0.5" y="1.5" width="6.5" height="11" rx="0.5" stroke={c} strokeWidth="1.2"/>
+        <rect x="9" y="1.5" width="6.5" height="11" rx="0.5" stroke={c} strokeWidth="1.2"/>
+        <path d="M2 5h4M2 7.5h4M2 10h3M10.5 5h4M10.5 7.5h4M10.5 10h3" stroke={c} strokeWidth="0.8" opacity="0.55"/>
+      </svg>
+    );
+  }
+  return (
+    <svg width="16" height="14" viewBox="0 0 16 14" fill="none">
+      <rect x="2.5" y="0.5" width="11" height="13" rx="1" stroke={c} strokeWidth="1.2"/>
+      <path d="M5 3h6M5 5.5h6M5 8h6M5 10.5h4" stroke={c} strokeWidth="0.9"/>
+      <path d="M0.7 4l1.6 1.6M0.7 10l1.6-1.6" stroke={c} strokeWidth="1" strokeLinecap="round" opacity="0.45"/>
+      <path d="M15.3 4l-1.6 1.6M15.3 10l-1.6-1.6" stroke={c} strokeWidth="1" strokeLinecap="round" opacity="0.45"/>
+    </svg>
   );
 }
 
