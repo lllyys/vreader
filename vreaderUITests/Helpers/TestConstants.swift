@@ -83,7 +83,17 @@ enum AccessibilityID {
 
     // MARK: - Search
     static let searchView = "searchView"
-    static let searchDismissButton = "searchDismissButton"
+    // Feature #63 WI-1: the v2 re-skin replaced the system `.searchable`
+    // bar (an `XCUIElementTypeSearchField`) + NavigationStack "Done"
+    // toolbar with a custom in-sheet bar — a plain `TextField`
+    // (`searchTextField`), a clear button (`searchClearButton`), and a
+    // "Cancel" button (`searchCancelButton`). The legacy
+    // `searchDismissButton` ("Done") identifier is removed from
+    // production; kept here annotated so a grep finds the context.
+    static let searchDismissButton = "searchDismissButton"   // STALE — removed from production (Feature #63 WI-1)
+    static let searchTextField = "searchTextField"
+    static let searchClearButton = "searchClearButton"
+    static let searchCancelButton = "searchCancelButton"
     static let searchResultsList = "searchResultsList"
     static let searchLoadingView = "searchLoadingView"
     static let searchNoResultsView = "searchNoResultsView"

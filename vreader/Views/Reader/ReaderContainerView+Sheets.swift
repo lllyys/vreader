@@ -135,6 +135,7 @@ extension ReaderContainerView {
         if let searchViewModel = searchCoordinator.searchViewModel {
             SearchView(
                 viewModel: searchViewModel,
+                theme: settingsStore.theme,
                 onNavigate: { locator in
                     NotificationCenter.default.post(
                         name: .readerNavigateToLocator,
@@ -144,7 +145,8 @@ extension ReaderContainerView {
                 },
                 onDismiss: {
                     showSearch = false
-                }
+                },
+                bookTitle: book.title
             )
             .accessibilityIdentifier("searchSheet")
         } else {
