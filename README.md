@@ -8,6 +8,35 @@ An iOS reader for EPUB, AZW3/MOBI (Kindle), PDF, TXT, and Markdown — built ent
 
 VReader is a modern reading app designed for iPhone and iPad, built entirely by AI coding agents (Claude Code + Codex CLI) with human direction on requirements and testing. It supports EPUB, AZW3/MOBI (Kindle), PDF, TXT, and Markdown with annotations, full-text search, AI assistant, TTS, book source scraping, and WebDAV backup.
 
+## Screens
+
+Live captures from the iOS Simulator (iPhone 17 Pro) showing VReader's v2 visual identity.
+
+### Reading themes
+
+Five built-in themes restyle the page surface, ink, and accent color for any lighting condition:
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/theme-paper.png" width="150" alt="Paper theme"></td>
+    <td align="center"><img src="docs/screenshots/theme-sepia.png" width="150" alt="Sepia theme"></td>
+    <td align="center"><img src="docs/screenshots/theme-dark.png" width="150" alt="Dark theme"></td>
+    <td align="center"><img src="docs/screenshots/theme-oled.png" width="150" alt="OLED theme"></td>
+    <td align="center"><img src="docs/screenshots/theme-photo.png" width="150" alt="Photo theme"></td>
+  </tr>
+  <tr>
+    <td align="center">Paper</td>
+    <td align="center">Sepia</td>
+    <td align="center">Dark</td>
+    <td align="center">OLED</td>
+    <td align="center">Photo</td>
+  </tr>
+</table>
+
+### Library
+
+<img src="docs/screenshots/library.png" width="280" alt="Library grid view">
+
 ## Features
 
 ### Reading
