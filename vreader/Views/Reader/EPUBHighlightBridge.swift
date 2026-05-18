@@ -204,23 +204,30 @@ enum EPUBHighlightBridge {
     /// The highlight auto-clears after 3 seconds.
     /// Returns an empty string if textQuote is empty or whitespace-only.
     ///
+    /// Bug #182 round-3: a cross-chapter search-result tap defers this JS to
+    /// `webView(_:didFinish:)`, but at that instant the freshly-loaded chapter
+    /// has not finished its post-load relayout — foliate-js `cssPreprocessJS`
+    /// rewrites every `-epub-*` / `page-break-*` rule `atDocumentEnd`. A single
+    /// `window.find()` there returns `false`, so the highlight span is never
+    /// created. The JS now polls `window.find()` on a 50ms cadence (bounded at
+    /// 40 attempts ≈ 2s) until the rendered text tree is searchable, then stops.
+    ///
     /// - Parameters:
     ///   - textQuote: The text to search for and highlight.
     ///   - progression: Optional scroll fraction (0.0-1.0). When provided and > 0,
-    ///     the JS scrolls to that position and clears any selection first, so
-    ///     `window.find()` starts searching from near the target location instead
-    ///     of always finding the first occurrence (Issue 4).
+    ///     the JS scrolls to that position once before searching so the viewport
+    ///     starts near the target location (Issue 4).
     static func searchHighlightJS(textQuote: String, progression: Double? = nil) -> String {
         let trimmed = textQuote.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         let escaped = jsEscape(trimmed)
 
-        // Build optional scroll-before-find block
+        // Build optional scroll-before-find block. Runs once, before the
+        // retry loop — re-scrolling on every poll would fight scrollIntoView.
         let scrollBlock: String
         if let progression, progression > 0 {
             scrollBlock = """
-                // Issue 4: Scroll to approximate position so window.find starts near target
-                window.getSelection().removeAllRanges();
+                // Issue 4: Scroll to approximate position so the viewport starts near target
                 var docHeight = document.documentElement.scrollHeight || document.body.scrollHeight;
                 window.scrollTo(0, \(progression) * docHeight);
             """
@@ -230,41 +237,72 @@ enum EPUBHighlightBridge {
 
         return """
         (function() {
-            // Remove any previous search highlight
-            var existing = document.querySelectorAll('.vreader_search_highlight');
-            existing.forEach(function(el) {
-                var parent = el.parentNode;
-                while (el.firstChild) parent.insertBefore(el.firstChild, el);
-                parent.removeChild(el);
-            });
+            // Bug #182 round-3 (audit): bump a generation token so two
+            // rapid search taps can't leave two retry loops racing — an
+            // older loop bails as soon as a newer tap supersedes it.
+            var myGen = (window.__vreaderSearchHighlightGen || 0) + 1;
+            window.__vreaderSearchHighlightGen = myGen;
+
+            // Unwrap every previous search highlight (querySelectorAll, so
+            // a stale span from a superseded loop can never leak).
+            function clearAll() {
+                var spans = document.querySelectorAll('.vreader_search_highlight');
+                spans.forEach(function(el) {
+                    var parent = el.parentNode;
+                    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+                    parent.removeChild(el);
+                });
+            }
+            clearAll();
 
             \(scrollBlock)
-            // Use window.find to locate text, then wrap selection
-            var found = window.find('\(escaped)', false, false, true);
-            if (found) {
-                var sel = window.getSelection();
-                if (sel && sel.rangeCount > 0) {
-                    var range = sel.getRangeAt(0);
-                    var span = document.createElement('span');
-                    span.className = 'vreader_search_highlight';
-                    span.style.backgroundColor = 'rgba(255, 230, 0, 0.45)';
-                    span.style.borderRadius = '2px';
-                    var contents = range.extractContents();
-                    span.appendChild(contents);
-                    range.insertNode(span);
-                    sel.removeAllRanges();
-                    span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    // Auto-clear after 3s
-                    setTimeout(function() {
-                        var hl = document.querySelector('.vreader_search_highlight');
-                        if (hl) {
-                            var p = hl.parentNode;
-                            while (hl.firstChild) p.insertBefore(hl.firstChild, hl);
-                            p.removeChild(hl);
+            var selection = window.getSelection();
+            if (selection) { selection.removeAllRanges(); }
+
+            // Bug #182 round-3: poll window.find() until the freshly-loaded
+            // chapter DOM has settled enough to be searchable. Bounded so a
+            // genuinely-absent quote self-terminates instead of looping.
+            var attemptsLeft = 40;
+            function attempt() {
+                // A newer search tap superseded this loop — stop.
+                if (window.__vreaderSearchHighlightGen !== myGen) { return; }
+                var found = window.find('\(escaped)', false, false, true);
+                if (found) {
+                    var sel = window.getSelection();
+                    if (sel && sel.rangeCount > 0) {
+                        try {
+                            var range = sel.getRangeAt(0);
+                            var span = document.createElement('span');
+                            span.className = 'vreader_search_highlight';
+                            span.style.backgroundColor = 'rgba(255, 230, 0, 0.45)';
+                            span.style.borderRadius = '2px';
+                            var contents = range.extractContents();
+                            span.appendChild(contents);
+                            range.insertNode(span);
+                            sel.removeAllRanges();
+                            span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            // Auto-clear after 3s (skip if a newer tap took over)
+                            setTimeout(function() {
+                                if (window.__vreaderSearchHighlightGen === myGen) { clearAll(); }
+                            }, 3000);
+                            return;
+                        } catch (e) {
+                            // Range invalidated mid-relayout — clear and let
+                            // the bounded retry loop try again once settled.
+                            sel.removeAllRanges();
                         }
-                    }, 3000);
+                    } else if (sel) {
+                        // window.find() matched but produced no usable range —
+                        // reset the selection so the next poll restarts clean.
+                        sel.removeAllRanges();
+                    }
+                }
+                attemptsLeft--;
+                if (attemptsLeft > 0) {
+                    setTimeout(attempt, 50);
                 }
             }
+            attempt();
         })();
         """
     }

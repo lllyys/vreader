@@ -301,6 +301,59 @@ struct EPUBHighlightBridgeTests {
         #expect(jsTab.contains("\\t"))
     }
 
+    // MARK: - Search Highlight Retry (bug #182 round-3)
+
+    @Test("searchHighlightJS retries window.find() until the chapter settles — bug #182")
+    func searchHighlightJSRetriesWindowFind() {
+        // Bug #182 round-3: a cross-chapter search-result tap defers the
+        // highlight JS to `webView(_:didFinish:)`, but at that instant the
+        // freshly-loaded EPUB chapter has not finished its post-load
+        // relayout — foliate-js `cssPreprocessJS` rewrites every `-epub-*`
+        // / `page-break-*` rule `atDocumentEnd`. A single `window.find()`
+        // there returns false, so the `.vreader_search_highlight` span is
+        // never created (the user-visible "navigates but no highlight"
+        // symptom). The generated JS must poll `window.find()` on a short
+        // cadence until the rendered text tree is searchable.
+        let js = EPUBHighlightBridge.searchHighlightJS(textQuote: "navigation")
+        #expect(js.contains("window.find("), "must still locate text via window.find()")
+        #expect(
+            js.contains("setTimeout(attempt"),
+            "a failed window.find() must reschedule another attempt — not give up after one"
+        )
+    }
+
+    @Test("searchHighlightJS retry is bounded and self-terminates — bug #182 round-3")
+    func searchHighlightJSRetryIsBounded() {
+        // A genuinely-absent quote must not poll forever: each failed
+        // attempt decrements a counter and rescheduling is gated on it.
+        // The success path returns before that decrement-and-reschedule
+        // tail, so a found highlight is never re-found.
+        let js = EPUBHighlightBridge.searchHighlightJS(textQuote: "navigation")
+        #expect(js.contains("attemptsLeft--"), "each failed attempt must decrement the counter")
+        #expect(js.contains("if (attemptsLeft > 0)"), "rescheduling must be gated on the counter")
+        #expect(js.contains("return;"), "the success path must return before the reschedule tail")
+    }
+
+    @Test("searchHighlightJS supersedes a prior in-flight retry loop — bug #182 round-3")
+    func searchHighlightJSSupersedesConcurrentLoops() {
+        // Two rapid same-chapter search taps must not leave two retry
+        // loops racing and double-wrapping spans: each invocation bumps a
+        // generation token and bails once a newer invocation supersedes it.
+        let js = EPUBHighlightBridge.searchHighlightJS(textQuote: "navigation")
+        #expect(
+            js.contains("__vreaderSearchHighlightGen"),
+            "must guard against concurrent retry loops via a generation token"
+        )
+    }
+
+    @Test("searchHighlightJS retry preserves the 3s auto-clear — bug #182 round-3")
+    func searchHighlightJSRetryKeepsAutoClear() {
+        // The retry rewrite must not drop the temporary-highlight contract:
+        // once the span is wrapped it still auto-clears after 3 seconds.
+        let js = EPUBHighlightBridge.searchHighlightJS(textQuote: "navigation")
+        #expect(js.contains("3000"), "the temporary search highlight must still auto-clear after 3s")
+    }
+
     // MARK: - Restore Highlights JS
 
     @Test("restoreHighlightsJS produces valid script for multiple highlights")
