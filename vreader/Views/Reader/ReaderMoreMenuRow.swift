@@ -21,12 +21,9 @@
 // confirmation before the row returns.
 //
 // Routing note: each row maps 1:1 to a `Notification.Name` the
-// `ReaderMorePopover` posts and `ReaderContainerView` observes.
-//   - `.bookDetails` — the Book Details sheet is undesigned (design
-//     note §4 defers it; GH #789 tracks it). It routes to the reader
-//     settings panel — the design prototype's own interim punt
-//     (`vreader-more.jsx` / `vreader-reader.jsx`:
-//     `onAction('details') → onOpenSettings`).
+// `ReaderMorePopover` posts and `ReaderContainerView` observes. The
+// host-side effect each row triggers is modelled by
+// `ReaderMoreMenuEffect` (feature #61 WI-3).
 
 import Foundation
 

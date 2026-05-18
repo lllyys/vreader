@@ -44,10 +44,16 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
     /// finished checkmark and the list-row progress ring.
     let progressFraction: Double?
 
+    /// Indexing-produced total page count (`Book.totalPageCount`). `nil`
+    /// for books not yet indexed, or reflowable formats without a fixed
+    /// pagination. Drives the Book Details sheet's Pages row (feature #61).
+    let totalPageCount: Int?
+
     /// Explicit memberwise init with feature-#47 + bug-#155 defaults so
     /// existing call sites that pre-date `fileState`/`blobPath`/`collectionNames`
     /// continue to compile; new call sites pass the persisted values through.
-    /// `progressFraction` defaults to `nil` for the same back-compat reason.
+    /// `progressFraction` and `totalPageCount` default to `nil` for the
+    /// same back-compat reason.
     init(
         fingerprintKey: String,
         title: String,
@@ -65,7 +71,8 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
         fileState: BookFileState = .local,
         blobPath: String? = nil,
         collectionNames: [String] = [],
-        progressFraction: Double? = nil
+        progressFraction: Double? = nil,
+        totalPageCount: Int? = nil
     ) {
         self.fingerprintKey = fingerprintKey
         self.title = title
@@ -84,6 +91,7 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
         self.blobPath = blobPath
         self.collectionNames = collectionNames
         self.progressFraction = progressFraction
+        self.totalPageCount = totalPageCount
     }
 
     // MARK: - Reading-progress state (feature #60 WI-8)

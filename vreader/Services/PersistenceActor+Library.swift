@@ -46,7 +46,8 @@ extension PersistenceActor: LibraryPersisting {
                 fileState: BookFileState(rawValue: book.fileState) ?? .local,
                 blobPath: book.blobPath,
                 collectionNames: book.bookCollections.map { $0.name },
-                progressFraction: book.readingPosition?.locator.totalProgression
+                progressFraction: book.readingPosition?.locator.totalProgression,
+                totalPageCount: book.totalPageCount
             )
         }
     }

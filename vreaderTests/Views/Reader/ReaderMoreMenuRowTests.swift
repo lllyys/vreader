@@ -88,12 +88,10 @@ struct ReaderMoreMenuRowTests {
 
     @Test("Book details routes to .readerMoreBookDetails")
     func bookDetailsRoutes() {
-        // Destination Book Details sheet is undesigned (design note
-        // §4); GH #789 tracks it. WI-6c routes the row to the existing
-        // reader settings panel — the design prototype's own interim
-        // punt (`vreader-more.jsx`/`vreader-reader.jsx`:
-        // `onAction('details') → onOpenSettings`). The notification is
-        // the seam; the container picks the interim destination.
+        // The notification is the seam; `ReaderContainerView` maps it
+        // via `ReaderMoreMenuEffect` to the dedicated Book Details
+        // sheet (feature #61 WI-3). The row → effect routing contract
+        // is pinned by `BookDetailsRouteTests`.
         #expect(ReaderMoreMenuRow.bookDetails.notification == .readerMoreBookDetails)
     }
 

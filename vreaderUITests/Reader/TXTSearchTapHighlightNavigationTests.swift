@@ -16,6 +16,10 @@
 // temporary yellow highlight is transient (3s auto-clear) and render-asserted
 // by TXTReaderContainerSearchHighlightWiringTests (4 source-level tests).
 //
+// Feature #63 WI-1: the search sheet's v2 re-skin replaced the system
+// `.searchable` UISearchBar with a custom `TextField` — this test now
+// queries `searchTextField` instead of `app.searchFields`.
+//
 // @coordinates-with: TXTReaderContainerView.swift, ReaderNotificationModifier.swift,
 //   SearchView.swift, SearchViewModel.swift, TXTTextViewBridge.swift
 
@@ -104,13 +108,14 @@ final class TXTSearchTapHighlightNavigationTests: XCTestCase {
         // 5. Wait for the SearchView's search field to appear.
         //    The search sheet first shows "Preparing search…" (no search field) while
         //    ReaderSearchCoordinator.setup() creates the SQLite store + SearchViewModel.
-        //    Once searchViewModel is non-nil, SearchView renders with a .searchable
-        //    modifier that injects a UISearchBar (XCUIElementTypeSearchField).
+        //    Once searchViewModel is non-nil, SearchView renders.
+        //    Feature #63 WI-1: the v2 re-skin replaced the `.searchable`
+        //    UISearchBar with a custom `TextField` (`searchTextField`).
         //    Allow up to 45s for SQLite open + initial indexing of the TXT file.
-        let searchField = app.searchFields.firstMatch
+        let searchField = app.textFields[AccessibilityID.searchTextField]
         XCTAssertTrue(
             searchField.waitForExistence(timeout: 45),
-            "Search field (UISearchBar injected by .searchable) should appear once " +
+            "Custom search field (searchTextField) should appear once " +
             "ReaderSearchCoordinator finishes setup. If still 'Preparing search...', " +
             "SQLite open or background indexing is taking too long."
         )

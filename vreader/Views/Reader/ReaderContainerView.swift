@@ -43,6 +43,14 @@ struct ReaderContainerView: View {
     @State var settingsStore = ReaderSettingsStore()
     @State var tapZoneStore = TapZoneStore()
     @State var showSettings = false
+    /// Feature #61 WI-3: whether the reader Book Details sheet is
+    /// presented — driven by the More-menu's "Book details" row,
+    /// replacing the feature-#60 WI-6c settings-panel interim.
+    /// `internal` (not `private`) because the More-menu router and the
+    /// `bookDetailsSheet` content both live in the `+Sheets.swift`
+    /// extension — same reason as the sibling `showSettings` /
+    /// `showShareSheet` flags.
+    @State var showBookDetails = false
     @State var showAnnotationsPanel = false
     /// Feature #60 WI-6b: which tab the annotations panel opens on —
     /// the bottom chrome's Contents button opens `.toc`, Notes opens
@@ -399,6 +407,18 @@ struct ReaderContainerView: View {
         // library's `ShareSheet` (book-file `UIActivityViewController`).
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(book: book)
+        }
+        // Feature #61 WI-3: the More-menu "Book details" row presents
+        // the reader Book Details sheet. Content composed in
+        // `bookDetailsSheet` (ReaderContainerView+Sheets.swift) so the
+        // body stays inside the type-checker's complexity budget.
+        .sheet(isPresented: $showBookDetails) {
+            // Design `vreader-book-details.jsx` sizes the stacked sheet
+            // at 660pt — a tall partial sheet, not full-height; `.large`
+            // is offered so the user can expand it.
+            bookDetailsSheet
+                .presentationDetents([.height(660), .large])
+                .presentationDragIndicator(.visible)
         }
         // Search setup deferred until search sheet opens (bug #64)
         .onChange(of: showSearch) { _, isShowing in

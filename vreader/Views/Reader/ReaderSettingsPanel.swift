@@ -512,71 +512,70 @@ struct ReaderSettingsPanel: View {
 
     // MARK: - Font Size
 
+    /// Feature #66 WI-1: the design's custom accent-track `SettingsSliderRow`
+    /// (`vreader-panels.jsx` `SliderRow`) replaces the native `Slider`.
     @ViewBuilder
     private var fontSizeSection: some View {
         Section("Font Size") {
-            HStack {
-                Text("A")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                Slider(
-                    value: Binding(
-                        get: { store.typography.fontSize },
-                        set: { store.typography.fontSize = $0 }
-                    ),
-                    in: TypographySettings.fontSizeRange,
-                    step: 1
-                )
-                .accessibilityLabel("Font size")
-                Text("A")
-                    .font(.system(size: 24))
-                    .foregroundStyle(.secondary)
-                Text("\(Int(store.typography.fontSize))pt")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .frame(width: 36)
-            }
+            SettingsSliderRow(
+                value: Binding(
+                    get: { store.typography.fontSize },
+                    set: { store.typography.fontSize = $0 }
+                ),
+                range: TypographySettings.fontSizeRange,
+                step: 1,
+                leading: .text("Aa", size: 12),
+                trailing: .text("Aa", size: 22),
+                accessibilityLabel: "Font size",
+                theme: sheetTheme
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
         }
     }
 
     // MARK: - Line Spacing
 
+    /// Feature #66 WI-1: `SettingsSliderRow` replaces the native `Slider`.
+    /// The design's `lines-tight` / `lines-loose` SVG pictograms map to
+    /// the closest stable SF Symbols (dense block vs three spaced lines).
     @ViewBuilder
     private var lineSpacingSection: some View {
         Section("Line Spacing") {
-            HStack {
-                Image(systemName: "text.alignleft")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Slider(
-                    value: Binding(
-                        get: { store.typography.lineSpacing },
-                        set: { store.typography.lineSpacing = $0 }
-                    ),
-                    in: TypographySettings.lineSpacingRange,
-                    step: 0.1
-                )
-                .accessibilityLabel("Line spacing")
-                Text(String(format: "%.1fx", store.typography.lineSpacing))
-                    .font(.caption)
-                    .monospacedDigit()
-                    .frame(width: 36)
-            }
+            SettingsSliderRow(
+                value: Binding(
+                    get: { store.typography.lineSpacing },
+                    set: { store.typography.lineSpacing = $0 }
+                ),
+                range: TypographySettings.lineSpacingRange,
+                step: 0.1,
+                leading: .symbol("text.justify"),
+                trailing: .symbol("line.3.horizontal"),
+                accessibilityLabel: "Line spacing",
+                theme: sheetTheme
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
         }
     }
 
     // MARK: - Font Family
 
+    /// Feature #66 WI-2: the design's `TypefacePillToggle`
+    /// (`vreader-panels.jsx` "Font" pill) replaces the native segmented
+    /// `Picker`. Behavior-preserving re-skin — it presents the same three
+    /// `ReaderFontFamily` options this picker offered (System / Serif /
+    /// Monospace), not the design's 2-option reduction (plan §2).
     @ViewBuilder
     private var fontFamilySection: some View {
         Section("Font") {
-            Picker("Font Family", selection: $store.typography.fontFamily) {
-                Text("System").tag(ReaderFontFamily.system)
-                Text("Serif").tag(ReaderFontFamily.serif)
-                Text("Monospace").tag(ReaderFontFamily.monospace)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Font family")
+            TypefacePillToggle(
+                selection: $store.typography.fontFamily,
+                accessibilityLabel: "Font family",
+                theme: sheetTheme
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
         }
     }
 

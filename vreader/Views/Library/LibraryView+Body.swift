@@ -41,7 +41,7 @@ extension LibraryView {
                 Button {
                     openBook(book)
                 } label: {
-                    BookCardView(book: book, coverVersion: coverVersion)
+                    BookCardView(book: book, coverVersion: coverPickCoordinator.coverVersion)
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -100,7 +100,7 @@ extension LibraryView {
         Button {
             openBook(book)
         } label: {
-            BookRowView(book: book, coverVersion: coverVersion)
+            BookRowView(book: book, coverVersion: coverPickCoordinator.coverVersion)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -196,7 +196,7 @@ extension LibraryView {
         Divider()
 
         Button {
-            bookForCover = book
+            coverPickCoordinator.present(for: book)
         } label: {
             Label("Set Cover", systemImage: "photo")
         }
@@ -204,7 +204,7 @@ extension LibraryView {
         if CustomCoverStore.hasCover(for: book.fingerprintKey) {
             Button(role: .destructive) {
                 try? CustomCoverStore.removeCover(for: book.fingerprintKey)
-                coverVersion += 1
+                coverPickCoordinator.bumpCoverVersion()
             } label: {
                 Label("Remove Cover", systemImage: "photo.badge.minus")
             }

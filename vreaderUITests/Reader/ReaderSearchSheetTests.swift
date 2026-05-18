@@ -2,6 +2,11 @@
 //
 // Tests verify the search sheet presents from the reader toolbar
 // and can be dismissed.
+//
+// Feature #63 WI-1: the v2 re-skin replaced the system `.searchable`
+// bar + `NavigationStack` `Done` toolbar with a custom in-sheet bar.
+// The dismiss affordance is now the "Cancel" button
+// (`searchCancelButton`), not "Done".
 
 import XCTest
 
@@ -46,10 +51,12 @@ final class ReaderSearchSheetTests: XCTestCase {
         let searchSheet = app.otherElements[AccessibilityID.searchSheet]
         XCTAssertTrue(searchSheet.waitForExistence(timeout: 5))
 
-        // The search sheet has a "Done" button in the toolbar
-        let doneButton = app.buttons["Done"]
-        if doneButton.waitForExistence(timeout: 3) {
-            doneButton.tap()
+        // Feature #63 WI-1: the re-skinned sheet's custom bar has a
+        // "Cancel" button (`searchCancelButton`) in place of the old
+        // NavigationStack "Done" toolbar button.
+        let cancelButton = app.buttons[AccessibilityID.searchCancelButton]
+        if cancelButton.waitForExistence(timeout: 3) {
+            cancelButton.tap()
         } else {
             // Fallback: swipe down to dismiss
             searchSheet.swipeDown()

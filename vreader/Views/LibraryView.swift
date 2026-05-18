@@ -34,7 +34,6 @@ import SwiftUI
 import OSLog
 
 private let log = Logger(subsystem: "com.vreader.app", category: "LibraryView")
-import PhotosUI
 import UniformTypeIdentifiers
 
 /// Main library view for the book collection.
@@ -73,11 +72,10 @@ struct LibraryView: View {
     @State private var allSeries: [String] = []
     /// Fingerprint keys of books with new chapters detected by UpdateChecker (D07a).
     @State private var booksWithUpdates: Set<String> = []
-    @State private var coverPickerItem: PhotosPickerItem?
-    @State var bookForCover: LibraryBookItem?
-    @State private var isShowingCoverPicker = false
-    /// Incremented when a custom cover is set or removed, to force card/row views to reload.
-    @State var coverVersion: Int = 0
+    /// Owns the custom-cover PhotosPicker flow (feature #61 WI-2): the
+    /// picker state plus a coverVersion counter the card / row / rail
+    /// views observe. Not `private` — `LibraryView+Body.swift` reads it.
+    @State var coverPickCoordinator = CoverPickCoordinator()
     /// Tracks NavigationStack path so the library chrome can hide during push transitions.
     @State private var navigationPath = NavigationPath()
     /// Set before appending to navigationPath so the chrome hides before the push animation starts (bug #72).
@@ -153,10 +151,7 @@ struct LibraryView: View {
                 collectionRecords: $collectionRecords,
                 allTags: $allTags,
                 allSeries: $allSeries,
-                coverPickerItem: $coverPickerItem,
-                bookForCover: $bookForCover,
-                isShowingCoverPicker: $isShowingCoverPicker,
-                coverVersion: $coverVersion,
+                coverPickCoordinator: coverPickCoordinator,
                 resolvedGeneralChatVM: resolvedGeneralChatVM
             ))
         }
@@ -323,7 +318,7 @@ struct LibraryView: View {
             if !inProgress.isEmpty {
                 ContinueReadingRail(
                     books: sortedContinueReading(inProgress),
-                    coverVersion: coverVersion,
+                    coverVersion: coverPickCoordinator.coverVersion,
                     onOpen: openBook
                 )
             }

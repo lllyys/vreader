@@ -3,6 +3,11 @@
 // Tests verify the search sheet opens from the reader toolbar,
 // shows its placeholder content, and can be dismissed.
 // The full SearchView with FTS5 is not mounted yet.
+//
+// Feature #63 WI-1: once the FTS5 `SearchView` mounts, its v2-re-skinned
+// custom bar dismisses via the "Cancel" button (`searchCancelButton`).
+// The pre-mount "Preparing search…" placeholder still uses a
+// NavigationStack "Done" button — the dismiss helper accepts either.
 
 import XCTest
 
@@ -47,9 +52,16 @@ final class SearchSheetPlaceholderTests: XCTestCase {
         let searchSheet = app.otherElements[AccessibilityID.searchSheet]
         XCTAssertTrue(searchSheet.waitForExistence(timeout: 5))
 
-        // The placeholder search sheet has a "Done" button
+        // Feature #63 WI-1: depending on indexing timing the sheet shows
+        // either the pre-mount "Preparing search…" placeholder ("Done"
+        // toolbar button) or the mounted FTS5 `SearchView` whose
+        // re-skinned custom bar dismisses via "Cancel"
+        // (`searchCancelButton`). Accept whichever is present.
+        let cancelButton = app.buttons[AccessibilityID.searchCancelButton]
         let doneButton = app.buttons["Done"]
-        if doneButton.waitForExistence(timeout: 3) {
+        if cancelButton.waitForExistence(timeout: 3) {
+            cancelButton.tap()
+        } else if doneButton.exists {
             doneButton.tap()
         } else {
             // Fallback: swipe down
