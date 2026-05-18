@@ -13,11 +13,13 @@
 //     mapper from a `ChatRole` to the `BubbleForm` it renders. These
 //     tests pin that `.user` selects the accent bubble form and that
 //     `.assistant` / `.system` both select the sparkle-avatar row form
-//     — the design's two-branch split. A future role added without
-//     updating the mapper trips the exhaustiveness tripwire.
+//     — the design's two-branch split. The compile-time guard against
+//     a new unmapped `ChatRole` is the exhaustive `switch` in
+//     `form(for:)` itself; these tests pin the split for the three
+//     current roles.
 //
 //  2. Composition — SwiftUI is forced to materialise `body` for
-//     representative message inputs (empty, long, CJK) across every
+//     representative message inputs (empty, long, CJK, RTL) across every
 //     `ReaderThemeV2` case and both forms, so a re-skin regression that
 //     traps under a particular theme/role/input is caught without a
 //     render pass.
@@ -39,14 +41,15 @@ struct AIChatMessageRowTests {
     /// Representative message-content inputs the row must lay out:
     /// an empty string (an assistant message is appended empty before
     /// the first stream chunk arrives — `AIChatViewModel.sendMessage`),
-    /// a long multi-sentence string, and CJK text (no inter-word
-    /// spaces — exercises the wrapping path of both the accent bubble
-    /// and the serif assistant row).
+    /// a long multi-sentence string, CJK text (no inter-word spaces —
+    /// exercises the wrapping path of both forms), and an RTL Arabic
+    /// string (bidi text through the accent bubble + serif row).
     private static let contentInputs: [String] = [
         "",
         String(repeating: "Drawing on the book's context, here is a "
             + "focused answer to your question. ", count: 20),
         "根据这本书的语境，这是对你问题的一个有针对性的回答。",
+        "ما رأيك في هذا المقطع؟ هذا نص عربي يُكتب من اليمين إلى اليسار.",
     ]
 
     private static func message(_ role: ChatRole, _ content: String = "x") -> ChatMessage {
@@ -88,10 +91,11 @@ struct AIChatMessageRowTests {
 
     @Test("Only `.user` selects the user-bubble form — the role split is exact")
     func onlyUserRoleSelectsUserBubble() {
-        // Exhaustiveness tripwire: enumerate every `ChatRole`; exactly
+        // Pins the role split for the three current `ChatRole`s: exactly
         // one (`.user`) maps to `.userBubble`, the other two to
-        // `.assistantRow`. A new role added without updating the mapper
-        // diverges this and fails.
+        // `.assistantRow`. The compile-time guard for a *new* role is
+        // the exhaustive `switch` in `form(for:)`; `allRoles` here is
+        // hand-maintained and must be extended alongside any new case.
         let allRoles: [ChatRole] = [.user, .assistant, .system]
         let userBubbleRoles = allRoles.filter {
             AIChatMessageRow.form(for: $0) == .userBubble
@@ -113,7 +117,7 @@ struct AIChatMessageRowTests {
         // A re-skin regression that traps the row under a specific
         // theme/role/input (a token that traps, a layout that crashes
         // on empty content, a CJK wrapping fault) surfaces here. All
-        // five themes × three roles × three content inputs must
+        // five themes × three roles × four content inputs must
         // materialise `body` without trapping.
         for role in [ChatRole.user, .assistant, .system] {
             for content in Self.contentInputs {

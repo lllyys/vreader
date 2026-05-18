@@ -203,7 +203,7 @@ struct AIChatView: View {
         Color(theme.ruleColor).frame(height: 0.5)
 
         HStack(spacing: 8) {
-            TextField("Ask about this book\u{2026}", text: $inputText, axis: .vertical)
+            TextField(inputPlaceholder, text: $inputText, axis: .vertical)
                 .lineLimit(1...5)
                 .font(.system(size: 14))
                 .foregroundStyle(Color(theme.inkColor))
@@ -242,6 +242,17 @@ struct AIChatView: View {
     }
 
     // MARK: - Private
+
+    /// The input placeholder mirrors the empty state's book/no-book
+    /// split: the reader AI-sheet chat (`bookFingerprint != nil`) uses
+    /// the design's book-specific copy; the Library general-chat sheet
+    /// (`bookFingerprint == nil`) keeps the neutral pre-v2 wording so
+    /// the WI-2 re-skin does not regress that reused surface.
+    private var inputPlaceholder: String {
+        viewModel.bookFingerprint != nil
+            ? "Ask about this book\u{2026}"
+            : "Type a message\u{2026}"
+    }
 
     private var canSend: Bool {
         !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
