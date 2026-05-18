@@ -9,10 +9,11 @@ date: 2026-05-18
 ## Scope
 
 Follow-up to PR #858. Replaces the three README screenshots with clean,
-device-framed exports supplied by the user. Touches `README.md` (one
-caption word) and `docs/screenshots/*` (three image files), plus
-`project.yml` / `project.pbxproj` (version bump 3.29.3/450 →
-3.29.4/451).
+device-framed exports supplied by the user, and refreshes the stale
+`## Status` line. Touches `README.md` (screenshot captions + Status
+line) and `docs/screenshots/*` (three image files), plus `project.yml` /
+`project.pbxproj` (version bump — rebased onto main: 3.30.0/451 →
+3.30.1/452).
 
 **No Swift source files changed.** The audit-gate hook fires on
 `project.pbxproj` — false positive of the Swift-file heuristic. Manual
@@ -35,6 +36,11 @@ canvas. This PR swaps those in.
 - `README.md` — third caption changed `Display settings` → `Settings`,
   because the new third image is the app Settings sheet, not the reading
   Display sheet.
+- `README.md` — `## Status` line refreshed: bug count `150 fixed` →
+  `211 fixed`, feature count `40 done` → `52 done`, matching the current
+  trackers (`docs/bugs.md`: 211 `FIXED`; `docs/features.md`: 12 `DONE` +
+  40 `VERIFIED` = 52 with merged implementations). The old counts were
+  badly stale; `.claude/rules/24-doc-sync.md` flags ≥5-row drift.
 
 ### Correctness checks
 
@@ -51,8 +57,13 @@ canvas. This PR swaps those in.
    accurate. Feature #60 (status VERIFIED) shipped this design.
 4. **Image weight** — three PNGs, ~677 KB total; reasonable for a README
    asset folder.
-5. **Version bump** — 3.29.4 / build 451 (patch — docs / asset change).
-   `xcodegen generate` confirmed.
+5. **Status counts verified** — `grep` on the trackers: `docs/bugs.md`
+   has 211 `FIXED` rows; `docs/features.md` has 12 `DONE` + 40
+   `VERIFIED`. README schema claim (`SchemaV6`) re-checked against
+   `VReaderApp.swift` (`Schema(SchemaV6.models)`) — still accurate, left
+   unchanged.
+6. **Version bump** — 3.30.1 / build 452 (patch — docs / asset change),
+   rebased over main's 3.30.0/451. `xcodegen generate` confirmed.
 
 ## Verdict
 
