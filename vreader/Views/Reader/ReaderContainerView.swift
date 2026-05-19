@@ -41,7 +41,6 @@ struct ReaderContainerView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.modelContext) var modelContext
     @State var settingsStore = ReaderSettingsStore()
-    @State var tapZoneStore = TapZoneStore()
     @State var showSettings = false
     /// Feature #61 WI-3: whether the reader Book Details sheet is
     /// presented — driven by the More-menu's "Book details" row,
@@ -345,7 +344,6 @@ struct ReaderContainerView: View {
         .sheet(isPresented: $showSettings) {
             ReaderSettingsPanel(
                 store: settingsStore,
-                tapZoneStore: tapZoneStore,
                 bookFingerprintKey: book.fingerprintKey,
                 perBookBaseURL: Self.perBookSettingsBaseURL,
                 formatCapabilities: BookFormat(rawValue: book.format.lowercased())?.capabilities,
