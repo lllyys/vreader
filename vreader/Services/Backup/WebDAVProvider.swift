@@ -37,6 +37,11 @@ protocol BackupDataCollecting: Sendable {
     /// returns an empty manifest envelope so older provider impls stay
     /// source-compatible.
     func collectLibraryManifest() async throws -> Data
+
+    /// Feature #58 (WI-5): emits `reading-history.json` carrying every
+    /// `ReadingSession` + `ReadingStats` row. Default impl returns an empty
+    /// envelope so existing mock collectors stay source-compatible.
+    func collectReadingHistory() async throws -> Data
 }
 
 extension BackupDataCollecting {
@@ -44,6 +49,16 @@ extension BackupDataCollecting {
         let envelope = BackupLibraryManifestEnvelope(
             schemaVersion: 1,
             books: []
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(envelope)
+    }
+
+    func collectReadingHistory() async throws -> Data {
+        let envelope = BackupReadingHistoryEnvelope(
+            schemaVersion: kBackupCurrentSchemaVersion, sessions: [], stats: []
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -64,6 +79,16 @@ protocol BackupDataRestoring: Sendable {
     func restoreBookSources(from data: Data) async throws
     func restorePerBookSettings(from data: Data) async throws
     func restoreReplacementRules(from data: Data) async throws
+
+    /// Feature #58 (WI-5): restores the `reading-history.json` section.
+    /// Default impl is a no-op so existing mock restorers stay source-compatible.
+    func restoreReadingHistory(from data: Data) async throws
+}
+
+extension BackupDataRestoring {
+    func restoreReadingHistory(from data: Data) async throws {
+        // Default: no-op. The production BackupDataRestorer overrides this.
+    }
 }
 
 // MARK: - WebDAVProvider
@@ -140,13 +165,15 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
             let c = try await dataCollector.collectCollections(); progress(0.16)
             let bs = try await dataCollector.collectBookSources(); progress(0.20)
             let pbs = try await dataCollector.collectPerBookSettings(); progress(0.24)
-            let rr = try await dataCollector.collectReplacementRules(); progress(0.26)
-            manifestData = try await dataCollector.collectLibraryManifest(); progress(0.28)
+            let rr = try await dataCollector.collectReplacementRules(); progress(0.25)
+            let rh = try await dataCollector.collectReadingHistory(); progress(0.27)
+            manifestData = try await dataCollector.collectLibraryManifest(); progress(0.29)
             bookCount = await dataCollector.getBookCount(); progress(0.30)
             collected = [
                 ("annotations.json", a), ("positions.json", p), ("settings.json", s),
                 ("collections.json", c), ("book-sources.json", bs), ("per-book-settings.json", pbs),
                 ("replacement-rules.json", rr),
+                ("reading-history.json", rh),
                 ("library-manifest.json", manifestData),
             ]
 
@@ -346,6 +373,7 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
             ("book-sources.json", "book sources", dataRestorer.restoreBookSources),
             ("per-book-settings.json", "per-book settings", dataRestorer.restorePerBookSettings),
             ("replacement-rules.json", "replacement rules", dataRestorer.restoreReplacementRules),
+            ("reading-history.json", "reading history", dataRestorer.restoreReadingHistory),
         ]
 
         let restorePhaseStart = (bookImporter != nil) ? 0.75 : 0.55
