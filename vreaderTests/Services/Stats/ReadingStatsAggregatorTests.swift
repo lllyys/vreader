@@ -76,6 +76,32 @@ struct ReadingStatsAggregatorTests {
         ReadingStatsAggregator(modelContainer: container, calendarProvider: { Self.utcCalendar() })
     }
 
+    /// Attaches `n` highlights + `m` annotation notes to the existing Book row
+    /// for `fp` (via the cascade relationship). Must be called after `seedBook`.
+    private func seedAnnotations(
+        _ container: ModelContainer, fp: DocumentFingerprint,
+        highlights: Int, notes: Int
+    ) throws {
+        let context = ModelContext(container)
+        let key = fp.canonicalKey
+        let descriptor = FetchDescriptor<Book>(
+            predicate: #Predicate { $0.fingerprintKey == key }
+        )
+        let book = try #require(context.fetch(descriptor).first)
+        let locator = try #require(Locator.validated(bookFingerprint: fp, page: 1))
+        for _ in 0..<highlights {
+            let hl = Highlight(locator: locator, selectedText: "h")
+            hl.book = book
+            context.insert(hl)
+        }
+        for _ in 0..<notes {
+            let note = AnnotationNote(locator: locator, content: "n")
+            note.book = book
+            context.insert(note)
+        }
+        try context.save()
+    }
+
     // MARK: - Empty / basic
 
     @Test func emptyDatabaseYieldsAllZeroSnapshot() async throws {
@@ -167,6 +193,44 @@ struct ReadingStatsAggregatorTests {
         #expect(snap.total(for: .today).totalSeconds == 0)
         // But within 7d.
         #expect(snap.total(for: .last7Days).totalSeconds == 2400)
+    }
+
+    // MARK: - Zero-session live book (edge case a — Codex WI-2 audit finding)
+
+    @Test func liveBookWithNoSessionsStillShownAsZeroRow() async throws {
+        let container = try makeContainer()
+        let fp = fingerprint("zero")
+        // A live Book row but ZERO ReadingSession rows.
+        try seedBook(container, fp: fp, title: "Unread Book")
+
+        let snap = try await aggregator(container).snapshot(
+            window: .allTime, sort: .default, now: Self.now
+        )
+        // Plan edge case (a): the book is still shown, with 0m.
+        #expect(snap.perBook.count == 1)
+        let row = snap.perBook[0]
+        #expect(row.title == "Unread Book")
+        #expect(row.isDeleted == false)
+        #expect(row.readingSecondsInWindow == 0)
+        #expect(row.lastReadAt == nil)
+    }
+
+    @Test func liveBookHighlightAndNoteCountsMatchRelationships() async throws {
+        let container = try makeContainer()
+        let fp = fingerprint("annotated")
+        try seedBook(container, fp: fp, title: "Annotated Book")
+        try seedAnnotations(container, fp: fp, highlights: 3, notes: 2)
+        try seedSession(container, book: fp,
+                        startedAt: Self.now.addingTimeInterval(-3600), durationSeconds: 120)
+
+        let snap = try await aggregator(container).snapshot(
+            window: .allTime, sort: .default, now: Self.now
+        )
+        #expect(snap.perBook.count == 1)
+        let row = snap.perBook[0]
+        #expect(row.highlightsCount == 3)
+        #expect(row.notesCount == 2)
+        #expect(row.readingSecondsInWindow == 120)
     }
 
     // MARK: - Deleted book

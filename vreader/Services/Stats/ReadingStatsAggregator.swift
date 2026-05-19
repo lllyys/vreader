@@ -105,10 +105,19 @@ actor ReadingStatsAggregator {
 
     // MARK: - Per-book rows
 
-    /// Builds the per-book table for `window`: one row per distinct
-    /// `bookFingerprintKey` seen in the sessions, joined to its `Book` for the
-    /// title + cascade-scoped highlight/note counts. A key with no `Book` row
-    /// is a deleted book → `isDeleted`, title "(deleted)", zero counts.
+    /// Builds the per-book table for `window`: one row per book key in the
+    /// UNION of (every live `Book` key) and (every key seen in the sessions).
+    ///
+    /// - A live `Book` with sessions → title + cascade-scoped highlight/note
+    ///   counts + reading seconds derived from its sessions.
+    /// - A live `Book` with NO sessions → still shown as a `0m` row (plan
+    ///   edge case (a)) — `lastReadAt` nil, in-window seconds 0.
+    /// - A session key with no `Book` row → a deleted book: `isDeleted`,
+    ///   title "(deleted)", zero notes/highlights (cascade-deleted with the
+    ///   `Book`), reading seconds still derived from the surviving sessions.
+    ///
+    /// Reading seconds / `lastReadAt` are derived from `ReadingSession` rows
+    /// ONLY — `ReadingStats` is never read (the F10 consistency model).
     private func computePerBook(
         sessions: [ReadingSession], bookByKey: [String: Book],
         window: ReadingStatsWindow, sort: ReadingDashboardSort,
@@ -120,7 +129,13 @@ actor ReadingStatsAggregator {
             sessionsByKey[session.bookFingerprintKey, default: []].append(session)
         }
 
-        let rows = sessionsByKey.map { key, bookSessions -> PerBookStatsRow in
+        // The row set is the union of live-book keys and session keys: a live
+        // book with no sessions still gets a 0m row; an orphan session key
+        // (deleted book) still surfaces its history.
+        let allKeys = Set(bookByKey.keys).union(sessionsByKey.keys)
+
+        let rows = allKeys.map { key -> PerBookStatsRow in
+            let bookSessions = sessionsByKey[key] ?? []
             let inWindowSeconds = bookSessions
                 .filter { window.contains($0.startedAt, now: now, calendar: calendar) }
                 .reduce(0) { $0 + max(0, $1.durationSeconds) }
