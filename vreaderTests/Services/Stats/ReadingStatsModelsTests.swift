@@ -98,37 +98,37 @@ struct ReadingStatsWindowIntervalTests {
         #expect(ReadingStatsWindow.last365Days.label == "365d")
         #expect(ReadingStatsWindow.allTime.label == "All")
     }
-}
 
-@Suite("ReadingDashboardSort string round-trip")
-struct ReadingDashboardSortStorageTests {
+    // MARK: - Half-open membership (Codex WI-1 audit finding 1)
 
-    @Test func defaultIsReadingTimeDescending() {
-        #expect(ReadingDashboardSort.default.field == .readingTime)
-        #expect(ReadingDashboardSort.default.ascending == false)
+    @Test func containsExcludesExactlyNow() {
+        // The end is EXCLUSIVE — a session anchored at exactly `now` is NOT
+        // counted. DateInterval.contains() would (wrongly) include it.
+        let cal = utcCalendar()
+        for window in ReadingStatsWindow.allCases where window != .allTime {
+            #expect(window.contains(now, now: now, calendar: cal) == false,
+                    "window \(window.rawValue) must exclude a session at exactly now")
+        }
     }
 
-    @Test(arguments: [
-        ReadingDashboardSort(field: .title, ascending: true),
-        ReadingDashboardSort(field: .title, ascending: false),
-        ReadingDashboardSort(field: .readingTime, ascending: true),
-        ReadingDashboardSort(field: .readingTime, ascending: false),
-        ReadingDashboardSort(field: .highlights, ascending: true),
-        ReadingDashboardSort(field: .notes, ascending: false),
-    ])
-    func roundTripsThroughStorageString(_ sort: ReadingDashboardSort) {
-        let restored = ReadingDashboardSort(storageString: sort.storageString)
-        #expect(restored == sort)
+    @Test func containsIncludesStartBoundary() {
+        // The start is INCLUSIVE — a session at exactly the window start counts.
+        let cal = utcCalendar()
+        let weekStart = ReadingStatsWindow.last7Days.dateInterval(now: now, calendar: cal)!.start
+        #expect(ReadingStatsWindow.last7Days.contains(weekStart, now: now, calendar: cal))
     }
 
-    @Test func storageStringFormat() {
-        #expect(ReadingDashboardSort(field: .readingTime, ascending: false).storageString == "readingTime:desc")
-        #expect(ReadingDashboardSort(field: .title, ascending: true).storageString == "title:asc")
+    @Test func containsAllTimeAlwaysTrue() {
+        let cal = utcCalendar()
+        let ancient = Date(timeIntervalSince1970: 0)
+        #expect(ReadingStatsWindow.allTime.contains(ancient, now: now, calendar: cal))
+        #expect(ReadingStatsWindow.allTime.contains(now, now: now, calendar: cal))
     }
 
-    @Test(arguments: ["", "garbage", "readingTime", "readingTime:sideways", "bogusField:asc", ":asc", "readingTime:"])
-    func malformedStringYieldsNil(_ raw: String) {
-        #expect(ReadingDashboardSort(storageString: raw) == nil)
+    @Test func containsExcludesFutureDates() {
+        let cal = utcCalendar()
+        let future = now.addingTimeInterval(86_400)
+        #expect(ReadingStatsWindow.last30Days.contains(future, now: now, calendar: cal) == false)
     }
 }
 
@@ -170,14 +170,29 @@ struct PerBookStatsRowSortTests {
         #expect(sorted.map(\.title) == ["alpha", "Beta", "Gamma"])
     }
 
+    @Test func sortsByTitleCaseInsensitiveDescending() {
+        let sorted = PerBookStatsRow.sorted(sample, by: ReadingDashboardSort(field: .title, ascending: false))
+        #expect(sorted.map(\.title) == ["Gamma", "Beta", "alpha"])
+    }
+
     @Test func sortsByNotesDescending() {
         let sorted = PerBookStatsRow.sorted(sample, by: ReadingDashboardSort(field: .notes, ascending: false))
         #expect(sorted.map(\.bookFingerprintKey) == ["c", "a", "b"])
     }
 
+    @Test func sortsByNotesAscending() {
+        let sorted = PerBookStatsRow.sorted(sample, by: ReadingDashboardSort(field: .notes, ascending: true))
+        #expect(sorted.map(\.bookFingerprintKey) == ["b", "a", "c"])
+    }
+
     @Test func sortsByHighlightsDescending() {
         let sorted = PerBookStatsRow.sorted(sample, by: ReadingDashboardSort(field: .highlights, ascending: false))
         #expect(sorted.map(\.bookFingerprintKey) == ["a", "c", "b"])
+    }
+
+    @Test func sortsByHighlightsAscending() {
+        let sorted = PerBookStatsRow.sorted(sample, by: ReadingDashboardSort(field: .highlights, ascending: true))
+        #expect(sorted.map(\.bookFingerprintKey) == ["b", "c", "a"])
     }
 
     @Test func tiesBreakByTitleStably() {
@@ -204,34 +219,5 @@ struct PerBookStatsRowSortTests {
     @Test func emptyInputYieldsEmptyOutput() {
         let sorted = PerBookStatsRow.sorted([], by: ReadingDashboardSort.default)
         #expect(sorted.isEmpty)
-    }
-}
-
-@Suite("ReadingDashboardSnapshot lookup")
-struct ReadingDashboardSnapshotTests {
-
-    @Test func totalForPresentWindowReturnsStoredValue() {
-        let totals = ReadingStatsWindow.allCases.map {
-            WindowTotal(window: $0, totalSeconds: $0 == .today ? 600 : 0, sessionCount: $0 == .today ? 2 : 0)
-        }
-        let snapshot = ReadingDashboardSnapshot(
-            windowTotals: totals, activeWindow: .today, perBook: [],
-            lifetimeTotalSeconds: 600, trackingSince: nil
-        )
-        #expect(snapshot.total(for: .today).totalSeconds == 600)
-        #expect(snapshot.total(for: .today).sessionCount == 2)
-    }
-
-    @Test func totalForMissingWindowReturnsZeroed() {
-        // A snapshot whose windowTotals omits last90Days → total(for:) zeroes it.
-        let totals = [WindowTotal(window: .today, totalSeconds: 100, sessionCount: 1)]
-        let snapshot = ReadingDashboardSnapshot(
-            windowTotals: totals, activeWindow: .today, perBook: [],
-            lifetimeTotalSeconds: 100, trackingSince: nil
-        )
-        let missing = snapshot.total(for: .last90Days)
-        #expect(missing.window == .last90Days)
-        #expect(missing.totalSeconds == 0)
-        #expect(missing.sessionCount == 0)
     }
 }

@@ -62,6 +62,10 @@ enum ReadingStatsWindow: String, CaseIterable, Identifiable, Sendable {
     /// - `today` = local-midnight(now) ..< now.
     /// - the rolling `Nd` windows = (now - N·86400s) ..< now.
     /// - `allTime` returns `nil` (no lower bound — count everything).
+    ///
+    /// Callers MUST use `contains(_:now:calendar:)` for membership tests rather
+    /// than `DateInterval.contains(_:)` — `DateInterval` membership is
+    /// end-INCLUSIVE, which would wrongly count a session at exactly `now`.
     func dateInterval(now: Date, calendar: Calendar) -> DateInterval? {
         switch self {
         case .allTime:
@@ -74,6 +78,19 @@ enum ReadingStatsWindow: String, CaseIterable, Identifiable, Sendable {
             let start = now.addingTimeInterval(-Double(days) * 86_400)
             return DateInterval(start: start, end: now)
         }
+    }
+
+    /// Half-open `[start, now)` membership test for a session anchor date.
+    ///
+    /// - `allTime` → always true (no lower bound).
+    /// - every other window → `start <= date && date < now`. The end is
+    ///   EXCLUSIVE, so a session whose anchor is exactly `now` is NOT counted
+    ///   (unlike `DateInterval.contains(_:)`, which is end-inclusive).
+    func contains(_ date: Date, now: Date, calendar: Calendar) -> Bool {
+        guard let interval = dateInterval(now: now, calendar: calendar) else {
+            return true // allTime
+        }
+        return date >= interval.start && date < interval.end
     }
 }
 
@@ -200,8 +217,15 @@ extension ReadingDashboardSort {
 /// Carries totals for ALL seven windows (cheap — seven small structs) so a
 /// window-pill tap need not re-hit the actor; the per-book table is computed
 /// for `activeWindow` only (the table is the expensive part).
+///
+/// The `windowTotals` invariant — exactly seven entries, one per
+/// `ReadingStatsWindow`, in canonical `allCases` order — is enforced BY THE
+/// INITIALIZER: the only init normalizes its input (missing window zero-filled,
+/// duplicate's first occurrence wins, input order ignored). There is no way to
+/// construct a malformed snapshot, so WI-2/WI-4 consumers can rely on the shape.
 struct ReadingDashboardSnapshot: Sendable, Equatable {
-    /// All present windows, in canonical `ReadingStatsWindow.allCases` order.
+    /// Exactly seven windows, in canonical `ReadingStatsWindow.allCases` order
+    /// — guaranteed by `init`.
     let windowTotals: [WindowTotal]
     let activeWindow: ReadingStatsWindow
     /// Per-book rows for `activeWindow`, already sorted per the requested sort.
@@ -209,7 +233,31 @@ struct ReadingDashboardSnapshot: Sendable, Equatable {
     let lifetimeTotalSeconds: Int
     let trackingSince: Date?
 
-    /// Total for a window; a window absent from `windowTotals` returns a zeroed total.
+    /// The sole initializer. `windowTotals` is NORMALIZED to exactly seven
+    /// entries in canonical order regardless of what is passed: a missing
+    /// window is zero-filled, a duplicate window keeps its first occurrence,
+    /// and input order is discarded. Malformed construction is impossible.
+    init(
+        windowTotals: [WindowTotal],
+        activeWindow: ReadingStatsWindow,
+        perBook: [PerBookStatsRow],
+        lifetimeTotalSeconds: Int,
+        trackingSince: Date?
+    ) {
+        let byWindow = Dictionary(
+            windowTotals.map { ($0.window, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        self.windowTotals = ReadingStatsWindow.allCases.map { window in
+            byWindow[window] ?? WindowTotal(window: window, totalSeconds: 0, sessionCount: 0)
+        }
+        self.activeWindow = activeWindow
+        self.perBook = perBook
+        self.lifetimeTotalSeconds = lifetimeTotalSeconds
+        self.trackingSince = trackingSince
+    }
+
+    /// Total for a window. Always present (the init guarantees all seven).
     func total(for window: ReadingStatsWindow) -> WindowTotal {
         windowTotals.first { $0.window == window }
             ?? WindowTotal(window: window, totalSeconds: 0, sessionCount: 0)
