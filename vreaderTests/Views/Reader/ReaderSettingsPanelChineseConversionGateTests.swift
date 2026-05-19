@@ -1,172 +1,98 @@
 // Purpose: Regression-guard tests for the Chinese-conversion picker gate
-// in ReaderSettingsPanel. Verifies that TXT and MD in Native reading mode
-// correctly show the picker as enabled (feature #28 WI-A), while EPUB
-// native mode and PDF remain disabled.
+// in ReaderSettingsPanel. After feature #54 retired the Native/Unified
+// toggle, the gate is purely format-driven: TXT and MD support native
+// conversion (feature #28 WI-A) so the picker is enabled; EPUB/AZW3 have
+// no native conversion path yet (deferred to feature #54 Phase D) so the
+// picker is disabled with `.nativeMode`; PDF has no text-transform path
+// at all so it is disabled with `.formatUnsupported`.
 //
-// @coordinates-with: vreader/Views/Reader/ReaderSettingsPanel.swift,
-// vreader/Models/FormatCapabilities.swift, vreader/Models/ReadingMode.swift
+// @coordinates-with: vreader/Views/Reader/ReaderSettingsPanel.swift
 
 import Testing
 import Foundation
 @testable import vreader
 
-@Suite("ReaderSettingsPanel Chinese conversion gate (feature #28 WI-A)")
+@Suite("ReaderSettingsPanel Chinese conversion gate (feature #54 — format-driven)")
 struct ReaderSettingsPanelChineseConversionGateTests {
 
-    // MARK: - TXT
+    // MARK: - TXT / MD — native conversion path (feature #28 WI-A)
 
-    @Test func txt_nativeMode_noDisableReason() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .txt,
-            readingMode: .native,
-            capabilities: FormatCapabilities.capabilities(for: .txt)
+    @Test func txt_noDisableReason() {
+        #expect(
+            ReaderSettingsPanel.chineseConversionDisableReason(for: .txt) == nil,
+            "TXT supports native Chinese conversion — picker enabled"
         )
-        #expect(reason == nil, "TXT in Native mode should show picker enabled")
     }
 
-    @Test func txt_unifiedMode_noDisableReason() {
-        // TXT has no .unifiedReflow (bug #158), but if readingMode is
-        // somehow set to .unified, native-path detection still fires.
-        // Picker is enabled because TXT supports native transforms.
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .txt,
-            readingMode: .unified,
-            capabilities: FormatCapabilities.capabilities(for: .txt)
+    @Test func md_noDisableReason() {
+        #expect(
+            ReaderSettingsPanel.chineseConversionDisableReason(for: .md) == nil,
+            "MD supports native Chinese conversion — picker enabled"
         )
-        #expect(reason == nil, "TXT (no unifiedReflow) should still enable picker via native path")
     }
 
-    // MARK: - MD
+    // MARK: - EPUB / AZW3 — no native conversion path yet (Phase D)
 
-    @Test func md_nativeMode_noDisableReason() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .md,
-            readingMode: .native,
-            capabilities: FormatCapabilities.capabilities(for: .md)
+    @Test func epub_disabledWithNativeModeReason() {
+        #expect(
+            ReaderSettingsPanel.chineseConversionDisableReason(for: .epub) == .nativeMode,
+            "EPUB has no native conversion path yet — disabled with .nativeMode"
         )
-        #expect(reason == nil, "MD in Native mode should show picker enabled")
     }
 
-    @Test func md_unifiedMode_noDisableReason() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .md,
-            readingMode: .unified,
-            capabilities: FormatCapabilities.capabilities(for: .md)
+    @Test func azw3_disabledWithNativeModeReason() {
+        #expect(
+            ReaderSettingsPanel.chineseConversionDisableReason(for: .azw3) == .nativeMode,
+            "AZW3 has no native conversion path yet — disabled with .nativeMode"
         )
-        #expect(reason == nil, "MD in Unified mode should remain enabled")
     }
 
-    // MARK: - EPUB
+    // MARK: - PDF — no text-transform path
 
-    @Test func epub_nativeMode_disabledWithNativeModeReason() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .epub,
-            readingMode: .native,
-            capabilities: FormatCapabilities.capabilities(for: .epub)
+    @Test func pdf_disabledFormatUnsupported() {
+        #expect(
+            ReaderSettingsPanel.chineseConversionDisableReason(for: .pdf) == .formatUnsupported,
+            "PDF has no text-transform path — disabled with .formatUnsupported"
         )
-        #expect(reason == .nativeMode, "EPUB in Native mode should show nativeMode disable reason")
     }
 
-    @Test func epub_unifiedMode_noDisableReason() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .epub,
-            readingMode: .unified,
-            capabilities: FormatCapabilities.capabilities(for: .epub)
+    // MARK: - Unknown / nil format (backward compat)
+
+    @Test func nilFormat_disabledWithNativeModeReason() {
+        // An unknown format has no proven native conversion path —
+        // conservative default is disabled (.nativeMode), matching the
+        // EPUB/AZW3 not-yet-supported case.
+        #expect(
+            ReaderSettingsPanel.chineseConversionDisableReason(for: nil) == .nativeMode,
+            "nil/unknown format defaults to disabled (.nativeMode)"
         )
-        #expect(reason == nil, "EPUB in Unified mode with unifiedReflow should be enabled")
     }
 
-    @Test func epub_complexEpub_nativeMode_disabledNativeMode() {
-        let caps = FormatCapabilities.capabilities(for: .epub, isComplexEPUB: true)
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .epub,
-            readingMode: .native,
-            capabilities: caps
-        )
-        #expect(reason == .nativeMode, "Complex EPUB in Native mode should show nativeMode reason")
-    }
+    // MARK: - Every BookFormat is covered
 
-    @Test func epub_complexEpub_unifiedMode_disabledNativeMode() {
-        // Complex EPUB loses .unifiedReflow; even in unified mode, picker should be disabled.
-        let caps = FormatCapabilities.capabilities(for: .epub, isComplexEPUB: true)
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .epub,
-            readingMode: .unified,
-            capabilities: caps
-        )
-        #expect(reason == .nativeMode, "Complex EPUB in Unified (but no unifiedReflow) shows nativeMode")
-    }
-
-    // MARK: - PDF
-
-    @Test func pdf_nativeMode_disabledFormatUnsupported() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .pdf,
-            readingMode: .native,
-            capabilities: FormatCapabilities.capabilities(for: .pdf)
-        )
-        #expect(reason == .formatUnsupported, "PDF should always show formatUnsupported")
-    }
-
-    @Test func pdf_unifiedMode_disabledFormatUnsupported() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .pdf,
-            readingMode: .unified,
-            capabilities: FormatCapabilities.capabilities(for: .pdf)
-        )
-        #expect(reason == .formatUnsupported, "PDF in any mode should show formatUnsupported")
-    }
-
-    // MARK: - AZW3
-
-    @Test func azw3_unifiedMode_noDisableReason() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .azw3,
-            readingMode: .unified,
-            capabilities: FormatCapabilities.capabilities(for: .azw3)
-        )
-        #expect(reason == nil, "AZW3 in Unified mode (has unifiedReflow) should be enabled")
-    }
-
-    @Test func azw3_nativeMode_disabledNativeMode() {
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .azw3,
-            readingMode: .native,
-            capabilities: FormatCapabilities.capabilities(for: .azw3)
-        )
-        #expect(reason == .nativeMode, "AZW3 in Native mode should show nativeMode reason")
-    }
-
-    // MARK: - Nil capabilities (backward compat)
-
-    @Test func nilCaps_txt_nativeMode_noDisableReason() {
-        // When capabilities aren't supplied (previews, tests), TXT native mode
-        // should still enable the picker — format check wins.
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .txt,
-            readingMode: .native,
-            capabilities: nil
-        )
-        #expect(reason == nil, "TXT native mode with nil caps should be enabled")
-    }
-
-    @Test func nilCaps_epub_unifiedMode_noDisableReason() {
-        // Legacy: nil caps + unified mode → fallback allows picker (matches old behavior).
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: .epub,
-            readingMode: .unified,
-            capabilities: nil
-        )
-        #expect(reason == nil, "nil caps + Unified mode should fall back to enabled")
-    }
-
-    @Test func nilFormat_unifiedMode_noDisableReason() {
-        // Unknown format (nil): fall through to caps-based gate.
-        let reason = ReaderSettingsPanel.chineseConversionDisableReason(
-            for: nil,
-            readingMode: .unified,
-            capabilities: [.unifiedReflow]
-        )
-        #expect(reason == nil, "nil format + unified + unifiedReflow caps → enabled")
+    @Test func everyBookFormatHasADefinedGate() {
+        // Exhaustiveness — the gate must return the expected value for
+        // every format. `expected` maps each format to its reason (a
+        // non-optional dict value; `nil` reasons are listed separately
+        // to avoid the double-optional `.some(.none)` subscript pitfall).
+        let enabledFormats: Set<BookFormat> = [.txt, .md]
+        let disabledReasons: [BookFormat: ReaderSettingsPanel.ChineseConversionDisableReason] = [
+            .epub: .nativeMode,
+            .azw3: .nativeMode,
+            .pdf:  .formatUnsupported
+        ]
+        for format in BookFormat.allCases {
+            let actual = ReaderSettingsPanel.chineseConversionDisableReason(for: format)
+            if enabledFormats.contains(format) {
+                #expect(actual == nil, "gate for \(format.rawValue) should be nil (enabled)")
+            } else {
+                #expect(
+                    actual == disabledReasons[format],
+                    "gate for \(format.rawValue) should be \(String(describing: disabledReasons[format]))"
+                )
+            }
+        }
+        // Every format is classified in exactly one bucket.
+        #expect(enabledFormats.count + disabledReasons.count == BookFormat.allCases.count)
     }
 }

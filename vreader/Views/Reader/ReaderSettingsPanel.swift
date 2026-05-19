@@ -1,6 +1,7 @@
-// Purpose: Slide-up settings panel for reader theme, reading mode, and typography controls.
-// Provides theme picker, reading mode picker, font size slider, line spacing slider,
-// font family picker, CJK spacing toggle, and live-preview text.
+// Purpose: Slide-up settings panel for reader theme and typography controls.
+// Provides theme picker, font size slider, line spacing slider,
+// font family picker, CJK spacing toggle, Chinese-conversion picker, and
+// live-preview text.
 // When paged layout is selected, shows page turn animation picker and auto page turn toggle.
 //
 // Re-skinned for feature #60 visual-identity v2 (WI-10): wrapped in the
@@ -33,24 +34,19 @@ struct ReaderSettingsPanel: View {
     /// too; this is the design `Sheet`'s explicit close affordance.
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: ReaderSettingsStore
-    /// Tap zone configuration store (feature #25).
-    var tapZoneStore: TapZoneStore?
     /// Fingerprint key for the currently open book (nil if no per-book support).
     var bookFingerprintKey: String?
     /// Base URL for per-book settings storage.
     var perBookBaseURL: URL?
     /// Capabilities of the current book's format. Used to gate settings whose
-    /// effect depends on the active rendering path (bug #120). When nil, the
-    /// panel falls back to "available everywhere" — preserves backward compat
-    /// for callers (and tests/previews) that don't supply the value.
+    /// effect depends on the active rendering path. When nil, the panel falls
+    /// back to "available everywhere" — preserves backward compat for callers
+    /// (and tests/previews) that don't supply the value.
     var formatCapabilities: FormatCapabilities? = nil
-    /// The book's format identity. Some gates need to mirror the dispatch
-    /// switch in `ReaderUnifiedDispatch` directly (e.g. AZW3 falls to a
-    /// placeholder in unified mode without ever installing
-    /// `TapZoneOverlay`), so capability membership alone is too loose.
-    /// When nil, gates that key off this fall back to the
-    /// "available everywhere" default — preserves backward compat for
-    /// tests/previews/legacy callers that don't supply the value.
+    /// The book's format identity. The Chinese-conversion gate is purely
+    /// format-driven (feature #54 — TXT/MD have a native conversion path;
+    /// EPUB/AZW3 do not yet; PDF never). When nil, that gate falls back to
+    /// the conservative "disabled" default.
     var bookFormat: BookFormat? = nil
     /// Whether per-book settings are currently enabled for this book.
     @State private var isPerBookEnabled = false
@@ -80,15 +76,6 @@ struct ReaderSettingsPanel: View {
             List {
                 themeSection
                 themeBackgroundSection
-                // Bug #158 / GH #468: only show the Native/Unified picker
-                // when the format actually has a working unified pipeline.
-                // For TXT (and PDF) the unified renderer is broken or absent,
-                // so showing the toggle leads users into a partial-render
-                // dead-end. Defaulting to "show" when capabilities aren't
-                // supplied keeps tests/previews/legacy callers working.
-                if Self.shouldShowReadingModeSection(for: formatCapabilities) {
-                    readingModeSection
-                }
                 epubLayoutSection
                 if store.epubLayout == .paged {
                     pageTurnAnimationSection
@@ -109,25 +96,6 @@ struct ReaderSettingsPanel: View {
                 fontFamilySection
                 cjkSection
                 chineseConversionSection
-                // Bug #162 / GH #482: only show the Tap Zones section when
-                // the configured zones will actually take effect — that
-                // requires (a) the format has `.unifiedReflow` capability
-                // AND (b) the user is currently in Unified mode.
-                // `TapZoneOverlay` is wired only in `ReaderUnifiedDispatch`;
-                // native renderers post `.readerContentTapped` unconditionally
-                // and ignore zone config. Without this gate, users on the
-                // dominant native code path saw a configurable picker whose
-                // selections silently no-op'd. Defaulting to "show" when
-                // capabilities aren't supplied keeps tests/previews/legacy
-                // callers working — same shape as the bug #156 / #158 gates.
-                if tapZoneStore != nil
-                    && Self.shouldShowTapZonesSection(
-                        for: formatCapabilities,
-                        format: bookFormat,
-                        currentMode: store.readingMode
-                    ) {
-                    tapZoneSection
-                }
                 if bookFingerprintKey != nil { perBookSection }
                 previewSection
             }
@@ -141,7 +109,6 @@ struct ReaderSettingsPanel: View {
         .onChange(of: store.typography.fontFamily) { _, _ in syncPerBookIfEnabled() }
         .onChange(of: store.typography.cjkSpacing) { _, _ in syncPerBookIfEnabled() }
         .onChange(of: store.theme) { _, _ in syncPerBookIfEnabled() }
-        .onChange(of: store.readingMode) { _, _ in syncPerBookIfEnabled() }
         .onChange(of: store.chineseConversion) { _, _ in syncPerBookIfEnabled() }
         .onChange(of: backgroundPickerItem) { _, newItem in
             // Bug #134: surface failures instead of silently swallowing.
@@ -204,8 +171,7 @@ struct ReaderSettingsPanel: View {
     /// The themes the picker offers — Feature #60 WI-11: all 5
     /// `ReaderThemeV2` cases (Paper / Sepia / Dark / OLED / Photo), in
     /// the design bundle's `THEMES` declaration order. Exposed
-    /// `static` for the WI-11 composition-contract test (same pattern
-    /// as `shouldShowReadingModeSection`).
+    /// `static` for the WI-11 composition-contract test.
     static var themePickerThemes: [ReaderThemeV2] { ReaderThemeV2.allCases }
 
     /// Human label for a theme swatch caption — matches the design
@@ -373,78 +339,6 @@ struct ReaderSettingsPanel: View {
         }
     }
 
-    // MARK: - Reading Mode
-
-    @ViewBuilder
-    private var readingModeSection: some View {
-        Section {
-            Picker("Reading Mode", selection: $store.readingMode) {
-                Text("Native").tag(ReadingMode.native)
-                Text("Unified").tag(ReadingMode.unified)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Reading mode")
-        } footer: {
-            Text("Native uses format-specific readers. Unified reflow engine is coming in V2.")
-                .font(.caption)
-        }
-    }
-
-    /// Bug #158 / GH #468: gate for the Reading Mode picker.
-    /// Returns `true` when the picker should be visible — i.e. the active
-    /// format has a working unified pipeline. Returns `true` when
-    /// `formatCapabilities` is `nil` to preserve legacy/test/preview behavior
-    /// (matches the same default as the bug #156 auto-page-turn gate).
-    static func shouldShowReadingModeSection(
-        for capabilities: FormatCapabilities?
-    ) -> Bool {
-        guard let caps = capabilities else { return true }
-        return caps.contains(.unifiedReflow)
-    }
-
-    /// Bug #162 / GH #482: gate for the Tap Zones section.
-    /// Returns `true` when the section should be visible — i.e. the
-    /// configured zones will actually take effect. Three conditions:
-    /// (a) the active format has `.unifiedReflow` capability (so the
-    /// user has a path to be in Unified mode), AND
-    /// (b) the user is currently in Unified mode, AND
-    /// (c) the dispatch switch in `ReaderUnifiedDispatch.unifiedReaderView`
-    /// installs `.tapZoneOverlay(...)` for this format — capability
-    /// membership alone is too loose because AZW3 has `.unifiedReflow`
-    /// but its unified path falls to `UnifiedPlaceholderView` (no overlay),
-    /// and PDF is excluded from the unified switch entirely.
-    /// Returns `true` when `formatCapabilities` is `nil` to preserve
-    /// legacy/test/preview behavior — same default as the bug #156 / #158
-    /// gates.
-    static func shouldShowTapZonesSection(
-        for capabilities: FormatCapabilities?,
-        format: BookFormat?,
-        currentMode: ReadingMode
-    ) -> Bool {
-        guard let caps = capabilities else { return true }
-        guard caps.contains(.unifiedReflow), currentMode == .unified else { return false }
-        guard let format = format else { return true }
-        return Self.unifiedDispatchInstallsTapZoneOverlay(for: format)
-    }
-
-    /// Mirrors the switch in `ReaderUnifiedDispatch.unifiedReaderView(fingerprint:)`.
-    /// Returns `true` for formats whose unified path installs
-    /// `.tapZoneOverlay(...)` on the rendered content. AZW3 falls to
-    /// `UnifiedPlaceholderView` (no overlay) and PDF has no unified case
-    /// at all, so both return `false` even though they may carry
-    /// `.unifiedReflow` (AZW3) or be Unified-capable in some sense (PDF
-    /// via complex-EPUB-style fallback). Complex-EPUB falls back to the
-    /// native WKWebView reader at runtime — same documented same-gap-as-
-    /// `chineseConversionSupported` caveat: the gate sees the simple-EPUB
-    /// default, so a complex EPUB still shows the picker. Threading an
-    /// `isComplexEPUB` runtime signal through is feature-class scope.
-    private static func unifiedDispatchInstallsTapZoneOverlay(for format: BookFormat) -> Bool {
-        switch format {
-        case .txt, .md, .epub: return true
-        case .pdf, .azw3: return false
-        }
-    }
-
     // MARK: - EPUB Layout
 
     @ViewBuilder
@@ -594,73 +488,44 @@ struct ReaderSettingsPanel: View {
 
     // MARK: - Chinese Conversion (E04)
 
-    /// Whether the Simp/Trad transform actually applies in the current state.
-    /// Bug #120: the transform is wired only into Unified mode's
-    /// `activeTransforms`; Native mode (the default) is a no-op for this
-    /// setting, AND formats without `.unifiedReflow` (PDF, complex EPUB) never
-    /// run through the unified pipeline regardless of mode. Disabling the
-    /// picker in those cases prevents a silent UX dead-end.
-    ///
-    /// Residual gap (separate sub-bug): EPUB books are reported as
-    /// `.unifiedReflow`-capable here based on format alone, but a complex EPUB
-    /// can fall back to native WKWebView at render time (`ReaderUnifiedDispatch.swift:73`).
-    /// In that case the picker shows enabled even though the transform is a
-    /// runtime no-op. The render-time `isComplexEPUB` signal isn't available
-    /// at panel-open time, so this guard intentionally errs on "show enabled"
-    /// for EPUBs to avoid a false-disable for the simple-EPUB-in-unified path
-    /// where the conversion does work.
-    private var chineseConversionSupported: Bool {
-        chineseConversionDisableReason == nil
-    }
-
     /// Why the picker is disabled, used to pick the right footer/hint copy.
     /// Returns nil when the picker is enabled.
     /// Internal (not private) so `ReaderSettingsPanelChineseConversionGateTests` can test directly.
     enum ChineseConversionDisableReason: Equatable {
-        case nativeMode       // EPUB/AZW3 in Native; Unified would enable it
+        case nativeMode        // EPUB/AZW3 — no native conversion path yet (#54 Phase D)
         case formatUnsupported // format never supports conversion (PDF)
     }
     private var chineseConversionDisableReason: ChineseConversionDisableReason? {
-        Self.chineseConversionDisableReason(
-            for: bookFormat,
-            readingMode: store.readingMode,
-            capabilities: formatCapabilities
-        )
+        Self.chineseConversionDisableReason(for: bookFormat)
     }
 
-    /// Testable static helper (mirrors `shouldShowReadingModeSection(for:)` pattern).
+    /// Testable static helper — the Chinese-conversion picker gate.
     ///
-    /// TXT and MD support character-level conversion in Native mode via
-    /// `SimpTradTransform` applied before `TXTAttributedStringBuilder` /
-    /// `MDAttributedStringRenderer`. All other formats still require Unified mode
-    /// (EPUB/AZW3 are JS-rendered; PDF has no text transform path).
+    /// Purely format-driven (feature #54 retired the Native/Unified toggle, so
+    /// the gate no longer depends on a reading mode):
+    /// - **TXT / MD** → `nil` (enabled). Both apply `SimpTradTransform` natively
+    ///   before `TXTAttributedStringBuilder` / `MDFileLoader` parse.
+    /// - **EPUB / AZW3** → `.nativeMode`. These are JS-rendered and have no
+    ///   native conversion path yet — feature #54 Phase D wires one.
+    /// - **PDF** → `.formatUnsupported`. No text-transform path at all.
+    /// - **nil / unknown format** → `.nativeMode` (conservative — no proven
+    ///   native conversion path).
     ///
-    /// - Important: `SimpTradTransform` (Hans-Hant ICU) produces 1:1 UTF-16 mappings
-    ///   for BMP CJK characters, so reading-position and highlight offsets saved in
-    ///   source-text coordinates remain valid in the transformed display text.
+    /// - Important: `SimpTradTransform` (Hans-Hant ICU) produces 1:1 UTF-16
+    ///   mappings for BMP CJK characters, so reading-position and highlight
+    ///   offsets saved in source-text coordinates remain valid in the
+    ///   transformed display text.
     static func chineseConversionDisableReason(
-        for format: BookFormat?,
-        readingMode: ReadingMode,
-        capabilities: FormatCapabilities?
+        for format: BookFormat?
     ) -> ChineseConversionDisableReason? {
-        // TXT and MD support native-mode character transforms (feature #28 WI-A).
-        if let fmt = format, fmt == .txt || fmt == .md {
+        switch format {
+        case .txt, .md:
             return nil
-        }
-
-        // PDF has no text-transform path regardless of reading mode.
-        if let fmt = format, fmt == .pdf {
+        case .pdf:
             return .formatUnsupported
+        case .epub, .azw3, nil:
+            return .nativeMode
         }
-
-        // EPUB/AZW3 and unknown formats: Unified mode + unifiedReflow → enabled.
-        if readingMode == .unified {
-            guard let caps = capabilities else { return nil } // nil caps: trust unified mode
-            return caps.contains(.unifiedReflow) ? nil : .nativeMode
-        }
-
-        // Native mode for all remaining formats (EPUB/AZW3 don't have a native transform path).
-        return .nativeMode
     }
 
     @ViewBuilder
@@ -686,7 +551,7 @@ struct ReaderSettingsPanel: View {
         case nil:
             return "Choose conversion direction between Simplified and Traditional Chinese"
         case .nativeMode:
-            return "Disabled — switch Reading Mode to Unified to convert Chinese text"
+            return "Disabled — Chinese conversion is not yet available for this book's format"
         case .formatUnsupported:
             return "Disabled — this book's format does not support text conversion"
         }
@@ -699,7 +564,7 @@ struct ReaderSettingsPanel: View {
             Text("Convert Chinese text between Simplified and Traditional scripts.")
                 .font(.caption)
         case .nativeMode:
-            Text("Switch to Unified reading mode to enable Chinese text conversion.")
+            Text("Chinese text conversion is not yet available for this book's format.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .formatUnsupported:
@@ -707,43 +572,6 @@ struct ReaderSettingsPanel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    // MARK: - Tap Zones (A03, feature #25)
-
-    @ViewBuilder
-    private var tapZoneSection: some View {
-        if let zoneStore = tapZoneStore {
-            Section {
-                tapZonePicker("Left Zone", action: Binding(
-                    get: { zoneStore.config.leftAction },
-                    set: { zoneStore.config.leftAction = $0 }
-                ))
-                tapZonePicker("Center Zone", action: Binding(
-                    get: { zoneStore.config.centerAction },
-                    set: { zoneStore.config.centerAction = $0 }
-                ))
-                tapZonePicker("Right Zone", action: Binding(
-                    get: { zoneStore.config.rightAction },
-                    set: { zoneStore.config.rightAction = $0 }
-                ))
-            } header: {
-                Text("Tap Zones")
-            } footer: {
-                Text("Choose what happens when you tap each area of the screen.")
-                    .font(.caption)
-            }
-        }
-    }
-
-    private func tapZonePicker(_ label: String, action: Binding<TapAction>) -> some View {
-        Picker(label, selection: action) {
-            Text("Previous Page").tag(TapAction.previousPage)
-            Text("Next Page").tag(TapAction.nextPage)
-            Text("Toggle Toolbar").tag(TapAction.toggleChrome)
-            Text("None").tag(TapAction.none)
-        }
-        .accessibilityLabel(label)
     }
 
     // MARK: - Per-Book Settings (A05)
@@ -771,13 +599,15 @@ struct ReaderSettingsPanel: View {
 
     private func savePerBookSnapshot() {
         guard let key = bookFingerprintKey, let baseURL = perBookBaseURL else { return }
+        // `readingMode` is intentionally omitted (feature #54 removed the
+        // picker); the `PerBookSettingsOverride.readingMode` field is
+        // removed entirely in WI-5.
         let override = PerBookSettingsOverride(
             fontSize: store.typography.fontSize,
             fontName: store.typography.fontFamily.rawValue,
             lineSpacing: store.typography.lineSpacing,
             letterSpacing: store.typography.cjkSpacing ? store.typography.fontSize * 0.05 : 0,
-            themeName: store.theme.rawValue,
-            readingMode: store.readingMode.rawValue
+            themeName: store.theme.rawValue
         )
         try? PerBookSettingsStore.save(override, for: key, baseURL: baseURL)
     }

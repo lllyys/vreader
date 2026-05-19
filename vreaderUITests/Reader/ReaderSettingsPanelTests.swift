@@ -1,14 +1,11 @@
-// Purpose: UI tests for the Reader Settings Panel surface — focused on
-// the Tap Zones section (feature #25) but also exercises the broader
-// panel presentation invariants. Verifies the panel opens from the
-// reader chrome's settings button, surfaces the Tap Zones section
-// header, exposes 3 picker rows (Left / Center / Right), and dismisses
-// cleanly via the standard sheet drag-down.
+// Purpose: UI tests for the Reader Settings Panel surface. Verifies the
+// panel opens from the reader chrome's settings button and renders its
+// standard sections, and — post feature #54 WI-4 — that the removed
+// Reading Mode picker and Tap Zones section are absent.
 //
 // @coordinates-with: vreader/Views/Reader/ReaderSettingsPanel.swift,
 //   vreader/Views/Reader/ReaderChromeBar.swift,
-//   vreader/Views/Reader/ReaderContainerView.swift,
-//   vreader/Models/TapZoneStore.swift, vreader/Models/TapZoneConfig.swift
+//   vreader/Views/Reader/ReaderContainerView.swift
 
 import XCTest
 
@@ -18,7 +15,12 @@ final class ReaderSettingsPanelTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .books)
+        // `.warAndPeace` is a real-file TXT fixture that opens into a
+        // working reader. The `.books` seed inserts metadata-only
+        // BookRecords with no backing file, so opening one fails with
+        // "The file could not be found" and the reader chrome never
+        // renders (Bug #209 / GH #804) — the panel is then unreachable.
+        app = launchApp(seed: .warAndPeace, resetPreferences: true)
     }
 
     override func tearDownWithError() throws {
@@ -82,54 +84,43 @@ final class ReaderSettingsPanelTests: XCTestCase {
         )
     }
 
-    // MARK: - Tap Zones Section (feature #25)
+    // MARK: - Removed controls (feature #54 WI-4)
 
-    func testReaderSettingsExposesTapZonesSection() {
+    /// Feature #54 WI-4 removed the Unified-only Tap Zones configuration
+    /// section. The panel must no longer surface it — even after
+    /// scrolling the whole panel.
+    func testReaderSettingsHasNoTapZonesSection() {
         openReaderSettingsPanel()
 
-        // Tap Zones lives near the bottom of the Form; scroll until
-        // the header is in the accessibility tree (SwiftUI's Form
-        // lazily renders below-fold sections).
         let header = scrollPanelUntilLabelExists("Tap Zones")
-        XCTAssertTrue(
+        XCTAssertFalse(
             header.exists,
-            "Tap Zones section header should render — feature #25 ships a TapZoneStore through ReaderContainerView"
+            "Tap Zones section must be gone — feature #54 WI-4 removed it"
         )
     }
 
-    // Note: a per-picker test (Left/Center/Right Zone) was attempted
-    // but iOS 26 SwiftUI's Picker rendering inside a Form sheet
-    // doesn't reliably expose each picker's accessibilityLabel as a
-    // matchable element after scrolling to the Tap Zones section
-    // (the section header appears in the tree but the rows beneath
-    // it are inconsistent). The data layer's wiring is verified by
-    // `TapZoneConfigTests`; the section presence assertion above is
-    // sufficient at the UI tier without overfitting to Form picker
-    // markup that may shift between OS versions.
-
-    // MARK: - Section Coverage (cross-feature smoke)
-
-    func testReaderSettingsExposesReadingModeSection() {
+    /// Feature #54 WI-4 removed the Native/Unified Reading Mode picker.
+    /// Neither the section nor its "Native" / "Unified" options render.
+    func testReaderSettingsHasNoReadingModePicker() {
         openReaderSettingsPanel()
 
-        // Reading Mode picker — Native vs Unified — is the gate for
-        // many other features (#27 replacement rules, #28 unified
-        // typography, #21 paginated mode interaction). Just confirm
-        // the row renders.
+        // The picker is gone, so neither tag option ("Native" / "Unified")
+        // should appear in the panel's accessibility tree.
         let nativeOption = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@", "Native"))
             .firstMatch
-        XCTAssertTrue(
-            nativeOption.waitForExistence(timeout: 5),
-            "Reading Mode picker should expose the Native option"
+        XCTAssertFalse(
+            nativeOption.waitForExistence(timeout: 3),
+            "Reading Mode picker must be gone — feature #54 WI-4 removed it"
+        )
+        let unifiedOption = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Unified"))
+            .firstMatch
+        XCTAssertFalse(
+            unifiedOption.exists,
+            "Reading Mode picker 'Unified' option must be gone — feature #54 WI-4"
         )
     }
-
-    // (Removed Font Size section test — the SwiftUI Form sheet's
-    // section header rendering doesn't reliably surface as a
-    // queryable static text on iOS 26 once scrolled to. Font size
-    // behavior is covered by the existing ReaderSettingsStore unit
-    // tests; the panel presentation tests above are sufficient.)
 
     // MARK: - Accessibility Audit
 
