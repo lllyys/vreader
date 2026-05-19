@@ -69,24 +69,78 @@ struct BilingualSetupSheetTests {
         #expect(BilingualSetupSheet.accessibilityIdentifier == "bilingualSetupSheet")
     }
 
-    @Test("CTA label changes with the AI-configured state")
-    func ctaLabelMatchesAIState() {
-        // Per design (§2.2) — when AI is configured, the CTA is
-        // "Turn on bilingual mode"; when not, it's the Set-up
-        // engine button next to "No AI provider configured".
-        #expect(BilingualSetupSheet.ctaLabel(aiConfigured: true) == "Turn on bilingual mode")
+    @Test("Primary CTA label is the design-pinned string")
+    func ctaLabelIsPinned() {
+        // Per design §2.2: the primary action is always "Turn on
+        // bilingual mode" — no AI-state branch on the CTA itself.
+        // The AI gating is surfaced by the engine strip, not the
+        // CTA copy.
+        #expect(BilingualSetupSheet.primaryCTALabel == "Turn on bilingual mode")
+    }
+
+    @Test("Engine button label reflects the AI-configured state")
+    func engineButtonLabelMatchesAIState() {
         #expect(BilingualSetupSheet.engineButtonLabel(aiConfigured: false) == "Set up")
         #expect(BilingualSetupSheet.engineButtonLabel(aiConfigured: true) == "Change\u{2026}")
     }
 
-    @Test("Engine descriptor reflects the AI-configured state")
-    func engineDescriptorMatchesAIState() {
-        let configured = BilingualSetupSheet.engineDescriptor(aiConfigured: true)
-        #expect(!configured.subtitle.isEmpty)
-        #expect(!configured.title.isEmpty)
+    @Test("Engine descriptor surfaces the host-provided provider name when configured")
+    func engineDescriptorWhenConfigured() {
+        // The host supplies a `BilingualEngineDescriptor`; the sheet
+        // shows the descriptor's name + subtitle verbatim when the
+        // descriptor's `configured` flag is true. A generic fallback
+        // is used only when the host omits a name.
+        let descriptor = BilingualEngineDescriptor(
+            configured: true,
+            providerName: "Claude",
+            subtitle: "Translations cached per paragraph."
+        )
+        #expect(descriptor.displayTitle == "Claude")
+        #expect(descriptor.displaySubtitle == "Translations cached per paragraph.")
+    }
 
-        let unconfigured = BilingualSetupSheet.engineDescriptor(aiConfigured: false)
-        #expect(unconfigured.title == "No AI provider configured")
-        #expect(unconfigured.subtitle.contains("AI provider"))
+    @Test("Engine descriptor falls back to a generic configured title when no name is supplied")
+    func engineDescriptorWhenConfiguredNoName() {
+        let descriptor = BilingualEngineDescriptor(
+            configured: true,
+            providerName: nil,
+            subtitle: nil
+        )
+        #expect(descriptor.displayTitle == "AI provider configured")
+        #expect(descriptor.displaySubtitle.contains("paragraph"))
+    }
+
+    @Test("Engine descriptor surfaces the unconfigured copy when no provider is set")
+    func engineDescriptorWhenUnconfigured() {
+        let descriptor = BilingualEngineDescriptor(
+            configured: false,
+            providerName: nil,
+            subtitle: nil
+        )
+        #expect(descriptor.displayTitle == "No AI provider configured")
+        #expect(descriptor.displaySubtitle.contains("AI provider"))
+    }
+
+    @Test("Initialising the state with an unknown language normalises through the registry")
+    func normalisesUnknownLanguageOnInit() {
+        // A per-book file from an older release carrying a deleted
+        // language key must NOT produce an unselected grid; the
+        // state surface should canonicalise the key on construction
+        // so the picker always paints a selection.
+        let state = BilingualSetupSheetState(
+            languageKey: "Klingon",
+            granularity: .paragraph
+        ).normalised()
+        #expect(state.languageKey == "Chinese")
+    }
+
+    @Test("Normalising a known language is the identity")
+    func normalisingKnownLanguageIsIdentity() {
+        let state = BilingualSetupSheetState(
+            languageKey: "Japanese",
+            granularity: .sentence
+        ).normalised()
+        #expect(state.languageKey == "Japanese")
+        #expect(state.granularity == .sentence)
     }
 }

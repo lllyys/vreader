@@ -93,13 +93,18 @@ struct BilingualPill: View {
 
     // MARK: - Parts
 
-    /// Accent-filled rounded square with white `EN`.
+    /// Accent-filled rounded square with white `EN` — per design
+    /// the badge is a 16×16 rounded rectangle (corner radius 4),
+    /// not a circle.
     private var sourceBadge: some View {
         Text(Self.sourceLanguageGlyph)
             .font(.system(size: 9, weight: .bold))
             .foregroundStyle(Color.white)
             .frame(width: 16, height: 16)
-            .background(Circle().fill(Color(theme.accentColor)))
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(theme.accentColor))
+            )
     }
 
     /// Dimmed accent `↔` joiner.

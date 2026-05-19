@@ -1,37 +1,27 @@
 // Purpose: Feature #56 WI-9 — the first-enable bilingual setup
-// half-sheet. Shown the first time the More-menu Bilingual toggle
-// flips ON for a book (and reachable later from the row's
-// "Tap to change" detail per design §2.2). Picks target language,
-// segmentation granularity, and surfaces the AI provider chip.
-//
-// Design source:
-//   `dev-docs/designs/vreader-fidelity-v1/project/vreader-bilingual.jsx`
-//   — `BilingualSetupSheet` (~27–155 in the JSX).
-//   `dev-docs/designs/vreader-fidelity-v1/project/design-notes/feature-60-followups.md`
-//   §2.2.
+// half-sheet (design §2.2). Picks target language, granularity, and
+// surfaces the AI provider chip.
 //
 // Key decisions:
-// - **Bindings out, not VM-in.** The sheet takes a `Binding` for the
-//   shared `BilingualSetupSheetState` (language + granularity) so the
-//   host owns the source of truth and can persist via the bilingual
-//   view model. The same sheet shape serves both first-enable (the
-//   "Turn on bilingual mode" CTA confirms + dismisses) and later
-//   preferences edit (no CTA, dismiss is automatic).
-// - **No direct AI dependency.** The sheet receives `aiConfigured`
-//   as input and exposes an `onOpenSettings` callback. Wiring to
-//   `ProviderProfileStore` lives at the host (WI-10..13 — different
-//   per format), exactly like the More-menu row pattern.
-// - **Shares `ReaderSheetChrome`** (feature #60 WI-10) for the sheet
-//   surface + title bar. The design's `Sheet` wrapper maps cleanly
-//   onto it; doubling the implementation would risk drift.
-// - **9-language grid uses a 3-column adaptive layout** matching the
-//   JSX's `gridTemplateColumns: repeat(3, 1fr)`. Each cell is a
-//   `BilingualLanguagePickerCell` (its own helper view) so the per-
-//   cell highlight + script-aware font choice stay readable.
+// - **`onCancel` and `onConfirm` are distinct.** Close button
+//   dismisses without persisting; primary CTA confirms + persists.
+// - **No direct AI dependency.** Host produces a
+//   `BilingualEngineDescriptor` (configured? + provider name +
+//   subtitle); the sheet renders it verbatim, with the configured-
+//   state title carrying the host-supplied provider name.
+// - **Language normalisation** through `BilingualLanguage.findOrDefault`
+//   on appear — a persisted key not in the current registry
+//   canonicalises to the first registered entry so the picker grid
+//   always paints a selection.
+// - **Sections split across `+Sections.swift`** to stay under the
+//   ~300-line per-file budget (rule 50 §9). This file owns grid +
+//   granularity + CTA + state types; engine strip + preview live in
+//   the sibling.
 //
 // @coordinates-with: BilingualLanguage.swift, ReaderSheetChrome.swift,
 //   ReaderThemeV2.swift, ChapterTranslationService.swift
 //   (`TranslationGranularity`), BilingualReadingViewModel.swift,
+//   BilingualSetupSheet+Sections.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-bilingual.jsx`
 
 import SwiftUI
@@ -60,6 +50,61 @@ struct BilingualSetupSheetState: Equatable, Sendable {
 
     /// Granularity options in design order (paragraph then sentence).
     static let availableGranularities: [TranslationGranularity] = [.paragraph, .sentence]
+
+    /// Returns a copy with the language key canonicalised through the
+    /// registry (`BilingualLanguage.findOrDefault`). A persisted key
+    /// that's no longer in `BilingualLanguage.all` is rewritten to
+    /// the registry's first entry — same fallback the pill uses, so
+    /// the picker always paints a selection.
+    func normalised() -> BilingualSetupSheetState {
+        let resolvedKey = BilingualLanguage.findOrDefault(key: languageKey).key
+        return BilingualSetupSheetState(
+            languageKey: resolvedKey,
+            granularity: granularity
+        )
+    }
+}
+
+/// AI provider descriptor the host passes into the setup sheet. The
+/// sheet renders the descriptor's display surface verbatim; the host
+/// resolves the provider name + subtitle from `ProviderProfileStore`.
+struct BilingualEngineDescriptor: Equatable, Sendable {
+
+    /// Whether an AI provider profile is configured. Drives the
+    /// engine strip's visual + the engine button label.
+    let configured: Bool
+
+    /// Provider display name (e.g. `"Claude"`). Optional — `nil`
+    /// degrades to a generic "AI provider configured" title.
+    let providerName: String?
+
+    /// Subtitle shown under the title. Optional — `nil` degrades to
+    /// the design's generic copy.
+    let subtitle: String?
+
+    /// Display title — provider name when configured + supplied,
+    /// otherwise a generic title.
+    var displayTitle: String {
+        if configured {
+            if let name = providerName, !name.isEmpty {
+                return name
+            }
+            return "AI provider configured"
+        }
+        return "No AI provider configured"
+    }
+
+    /// Display subtitle — host-supplied when configured + supplied,
+    /// otherwise the design's generic copy.
+    var displaySubtitle: String {
+        if let subtitle, !subtitle.isEmpty {
+            return subtitle
+        }
+        if configured {
+            return "Translations cached per paragraph, one page ahead."
+        }
+        return "Bilingual mode needs an AI provider to translate."
+    }
 }
 
 /// First-enable bilingual setup half-sheet — target language,
@@ -73,13 +118,17 @@ struct BilingualSetupSheet: View {
     /// confirm.
     @Binding var state: BilingualSetupSheetState
 
-    /// True when an AI provider profile is configured. Drives the
-    /// engine strip's visual + the engine button label.
-    let aiConfigured: Bool
+    /// AI provider descriptor — produced by the host. Drives the
+    /// engine-strip title, subtitle, button label.
+    let engineDescriptor: BilingualEngineDescriptor
 
-    /// Tap on the "Turn on bilingual mode" CTA — host should persist
-    /// the chosen settings and dismiss.
+    /// Tap on the primary CTA — host should persist the chosen
+    /// settings and dismiss.
     let onConfirm: () -> Void
+
+    /// Tap on the close button — host should dismiss WITHOUT
+    /// persisting. Tap on the system swipe-down also routes here.
+    let onCancel: () -> Void
 
     /// Tap on the engine "Set up" / "Change…" button — host should
     /// route to AI Settings.
@@ -88,38 +137,26 @@ struct BilingualSetupSheet: View {
     /// Sheet accessibility identifier for XCUITest + verify-cron.
     static let accessibilityIdentifier = "bilingualSetupSheet"
 
-    /// Primary CTA label — pinned by tests.
-    static func ctaLabel(aiConfigured: Bool) -> String {
-        aiConfigured ? "Turn on bilingual mode" : "Turn on bilingual mode"
-    }
+    /// Primary CTA label — pinned by tests. Per design §2.2 this is
+    /// a constant string; the AI gating is surfaced by the engine
+    /// strip, not by branching the CTA copy.
+    static let primaryCTALabel = "Turn on bilingual mode"
 
-    /// Engine strip button label.
+    /// Engine strip button label — branches on the AI-configured
+    /// state.
     static func engineButtonLabel(aiConfigured: Bool) -> String {
         aiConfigured ? "Change\u{2026}" : "Set up"
-    }
-
-    /// Engine strip descriptor — title + subtitle pair.
-    static func engineDescriptor(aiConfigured: Bool) -> (title: String, subtitle: String) {
-        if aiConfigured {
-            return (
-                "AI provider configured",
-                "Translations cached per paragraph, one page ahead."
-            )
-        }
-        return (
-            "No AI provider configured",
-            "Bilingual mode needs an AI provider to translate."
-        )
     }
 
     var body: some View {
         ReaderSheetChrome(
             theme: theme,
             title: "Bilingual mode",
-            onClose: onConfirm,
+            onClose: onCancel,
             content: {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
+                        previewSection
                         languageSection
                         granularitySection
                         engineSection
@@ -132,13 +169,19 @@ struct BilingualSetupSheet: View {
             }
         )
         .accessibilityIdentifier(Self.accessibilityIdentifier)
+        .onAppear {
+            // Canonicalise the language key on appear — a stale key
+            // from an older release otherwise leaves the picker grid
+            // with no selection painted.
+            state = state.normalised()
+        }
     }
 
     // MARK: - Target language
 
-    private var languageSection: some View {
+    var languageSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionLabel("Target language")
+            BilingualSectionLabel(theme: theme, text: "Target language")
             LazyVGrid(
                 columns: Array(
                     repeating: GridItem(.flexible(), spacing: 8),
@@ -160,9 +203,9 @@ struct BilingualSetupSheet: View {
 
     // MARK: - Granularity
 
-    private var granularitySection: some View {
+    var granularitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionLabel("Granularity")
+            BilingualSectionLabel(theme: theme, text: "Granularity")
             HStack(spacing: 0) {
                 ForEach(BilingualSetupSheetState.availableGranularities, id: \.self) { option in
                     Button(action: { state.granularity = option }) {
@@ -209,95 +252,11 @@ struct BilingualSetupSheet: View {
         }
     }
 
-    // MARK: - Engine
-
-    private var engineSection: some View {
-        let descriptor = Self.engineDescriptor(aiConfigured: aiConfigured)
-        return VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Translation engine")
-            HStack(spacing: 12) {
-                engineAvatar
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(descriptor.title)
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(Color(theme.inkColor))
-                    Text(descriptor.subtitle)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Color(theme.subColor))
-                        .lineLimit(2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Button(action: onOpenSettings) {
-                    Text(Self.engineButtonLabel(aiConfigured: aiConfigured))
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(aiConfigured ? Color(theme.inkColor) : Color.white)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule().fill(
-                                aiConfigured
-                                    ? (theme.isDark
-                                        ? Color.white.opacity(0.08)
-                                        : Color.black.opacity(0.06))
-                                    : Color(theme.accentColor)
-                            )
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("bilingualEngineButton")
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(engineStripBackground)
-        }
-    }
-
-    private var engineAvatar: some View {
-        Image(systemName: "sparkles")
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(aiConfigured ? Color.white : Color(theme.subColor))
-            .frame(width: 28, height: 28)
-            .background(
-                Circle().fill(
-                    aiConfigured
-                        ? AnyShapeStyle(LinearGradient(
-                            colors: [
-                                Color(theme.accentColor),
-                                Color(theme.accentColor).opacity(0.67),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                        : AnyShapeStyle(Color.black.opacity(0.08))
-                )
-            )
-    }
-
-    @ViewBuilder
-    private var engineStripBackground: some View {
-        RoundedRectangle(cornerRadius: 12)
-            .strokeBorder(
-                aiConfigured
-                    ? Color(theme.ruleColor)
-                    : Color(theme.accentColor).opacity(0.33),
-                lineWidth: 0.5
-            )
-            .background(
-                RoundedRectangle(cornerRadius: 12).fill(
-                    aiConfigured
-                        ? (theme.isDark
-                            ? Color.white.opacity(0.04)
-                            : Color.white)
-                        : Color(theme.accentColor).opacity(0.06)
-                )
-            )
-    }
-
     // MARK: - CTA
 
-    private var cta: some View {
+    var cta: some View {
         Button(action: onConfirm) {
-            Text(Self.ctaLabel(aiConfigured: aiConfigured))
+            Text(Self.primaryCTALabel)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Color.white)
                 .frame(maxWidth: .infinity)
@@ -314,20 +273,11 @@ struct BilingualSetupSheet: View {
         .padding(.top, 6)
         .accessibilityIdentifier("bilingualSetupConfirm")
     }
-
-    // MARK: - Helpers
-
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.system(size: 10.5, weight: .semibold))
-            .tracking(1.5)
-            .foregroundStyle(Color(theme.subColor))
-    }
 }
 
 // MARK: - Granularity labels
 
-private extension TranslationGranularity {
+extension TranslationGranularity {
 
     /// Display label for the segmented control — design pins these.
     var label: String {

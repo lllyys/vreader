@@ -1,7 +1,9 @@
 // Purpose: Feature #56 WI-9 — one cell in the
 // `BilingualSetupSheet`'s 3-column target-language grid. Extracted
-// into its own file so the parent stays under the ~300-line budget
-// and the per-cell highlight + script-aware font choice stay clear.
+// into its own file so the per-cell highlight + script-aware font
+// choice stay clear (and the parent setup sheet, with its sibling
+// `+Sections.swift` extension, stays under the ~300-line per-file
+// budget).
 //
 // Design source:
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-bilingual.jsx`
