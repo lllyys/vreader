@@ -94,4 +94,14 @@ final class EPUBHighlightRenderer: HighlightRenderer {
         }
     }
 }
+
+// MARK: - ChapterScopedHighlightRenderer (Feature #64 WI-3)
+
+extension EPUBHighlightRenderer: ChapterScopedHighlightRenderer {
+    /// The chapter href the popover's recolor path captures before its
+    /// persistence `await`. Surfaces the existing mutable `currentHref`
+    /// through the protocol so `HighlightCoordinator.changeColor` does not
+    /// depend on the concrete renderer type (R1-4).
+    var currentChapterHref: String? { currentHref }
+}
 #endif

@@ -59,3 +59,18 @@ extension HighlightRenderer {
         restore(records: records, forHref: nil, using: nil)
     }
 }
+
+/// A `HighlightRenderer` whose restore is scoped to a current chapter href.
+///
+/// Feature #64 WI-3: only the EPUB renderer filters highlights by chapter on
+/// restore. `HighlightCoordinator.changeColor` captures the chapter context
+/// through this protocol — not via a concrete `EPUBHighlightRenderer` cast —
+/// so the href-capture race fix (R1-4) is testable with a fake conformer
+/// instead of the real WKWebView-bound renderer.
+@MainActor
+protocol ChapterScopedHighlightRenderer: HighlightRenderer {
+    /// The href of the chapter currently rendered. `changeColor` reads this
+    /// BEFORE its persistence `await` so a racing chapter-nav cannot redirect
+    /// the post-mutation repaint to the wrong chapter.
+    var currentChapterHref: String? { get }
+}

@@ -20,6 +20,23 @@
 #if canImport(UIKit)
 import Foundation
 
+/// Feature #64 — the highlight-mutation boundary the unified highlight-action
+/// popover's router dispatches through. A protocol (not the concrete
+/// `HighlightCoordinator`) so `HighlightPopoverActionRouter` is unit-testable
+/// with a fake. `HighlightCoordinator` is the production conformer.
+@MainActor
+protocol HighlightMutating: AnyObject {
+    /// Persists a new color and repaints the rendered highlight.
+    func changeColor(highlightID: UUID, to color: String) async -> HighlightMutationOutcome
+    /// Persists a note edit (no reader-surface repaint).
+    func updateNote(highlightID: UUID, note: String?) async -> HighlightMutationOutcome
+    /// Deletes a highlight from persistence and clears its rendered visual.
+    /// Returns a typed outcome: `.success` (record carries the deleted
+    /// highlight), `.notFound` (already gone — a concurrent-deletion race),
+    /// `.failed` (a generic persistence error).
+    func deleteHighlight(highlightID: UUID) async -> HighlightMutationOutcome
+}
+
 /// Coordinates highlight create/delete/restore across persistence and rendering.
 @MainActor
 final class HighlightCoordinator {
@@ -122,5 +139,150 @@ final class HighlightCoordinator {
             }
         }
     }
+
+    // MARK: - Feature #64 — unified highlight-action popover mutations
+
+    /// Feature #64 WI-3 — persists a new highlight color, then repaints the
+    /// rendered highlight via the format's `HighlightRenderer`.
+    ///
+    /// Returns a typed `HighlightMutationOutcome` so the popover presenter can
+    /// distinguish a deleted-record race (→ dismiss) from a generic failure
+    /// (→ keep the popover open, no local mutation). `PersistenceActor`
+    /// throws a distinct `PersistenceError.recordNotFound`.
+    ///
+    /// EPUB href-race (R1-4): when the renderer is chapter-scoped (the EPUB
+    /// renderer), its `currentChapterHref` is captured BEFORE the persistence
+    /// `await` and threaded into `restoreAll(forHref:)`.
+    /// `EPUBHighlightRenderer.restore` resolves `href ?? currentHref` and
+    /// `currentHref` is a mutable `var` — across the `await`, a racing
+    /// chapter-nav could mutate it and repaint the wrong chapter. Capturing it
+    /// up front is the Bug #103 immutable-href pattern. The capture goes
+    /// through `ChapterScopedHighlightRenderer`, not a concrete-type cast, so
+    /// it is unit-testable with a fake. Non-EPUB renderers (TXT/MD/PDF) are
+    /// not chapter-scoped — they ignore the href and get `forHref: nil`.
+    func changeColor(highlightID: UUID, to color: String) async -> HighlightMutationOutcome {
+        // Capture the chapter context at call time, before the await.
+        let capturedHref = (renderer as? any ChapterScopedHighlightRenderer)?.currentChapterHref
+
+        do {
+            try await persistence.updateHighlightColor(highlightId: highlightID, color: color)
+        } catch let error as PersistenceError {
+            if case .recordNotFound = error { return .notFound }
+            return .failed
+        } catch {
+            return .failed
+        }
+
+        // Re-fetch to get the persisted post-mutation state AND the records to
+        // repaint from. A fetch failure here is a generic failure (`.failed`),
+        // NOT a deleted-record race — only a successful fetch with no matching
+        // id means the record was concurrently deleted (R1-5).
+        let records: [HighlightRecord]
+        do {
+            records = try await persistence.fetchHighlights(forBookWithKey: bookFingerprintKey)
+        } catch {
+            return .failed
+        }
+        guard let record = records.first(where: { $0.highlightId == highlightID }) else {
+            return .notFound
+        }
+        // Repaint from the already-fetched records directly, so the repaint
+        // is not silently dropped by `restoreAll`'s own fetch (which swallows
+        // failures). The re-fetch above already carries the new color.
+        renderer.restore(records: records, forHref: capturedHref, using: nil)
+        return .success(record)
+    }
+
+    /// Feature #64 WI-3 — persists a note edit on a highlight. No
+    /// reader-surface repaint — the note is not drawn on the page, so the
+    /// only UI to refresh is the popover card itself (handled by the caller).
+    ///
+    /// A trimmed-empty draft (`nil` / `""` / all-whitespace) is normalized to
+    /// `nil` before persisting, so a note "cleared" to whitespace stores as no
+    /// note and the popover flips to the empty state. Returns the typed
+    /// outcome for the same reason as `changeColor`.
+    func updateNote(highlightID: UUID, note: String?) async -> HighlightMutationOutcome {
+        let normalized = HighlightCoordinator.normalizedNote(note)
+
+        do {
+            try await persistence.updateHighlightNote(highlightId: highlightID, note: normalized)
+        } catch let error as PersistenceError {
+            if case .recordNotFound = error { return .notFound }
+            return .failed
+        } catch {
+            return .failed
+        }
+
+        // Re-fetch to get the persisted post-mutation record. Same R1-5
+        // discipline as `changeColor`: a fetch throw is `.failed`; only a
+        // successful fetch with no match is `.notFound`.
+        let records: [HighlightRecord]
+        do {
+            records = try await persistence.fetchHighlights(forBookWithKey: bookFingerprintKey)
+        } catch {
+            return .failed
+        }
+        guard let record = records.first(where: { $0.highlightId == highlightID }) else {
+            return .notFound
+        }
+        return .success(record)
+    }
+
+    /// Normalizes a note draft: an all-whitespace (or empty / nil) draft
+    /// becomes `nil`; a non-empty draft is preserved verbatim (including its
+    /// own surrounding whitespace).
+    static func normalizedNote(_ note: String?) -> String? {
+        guard let note else { return nil }
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : note
+    }
+
+    /// Feature #64 WI-3/WI-4 — deletes a highlight from persistence and clears
+    /// its rendered visual via the `.readerHighlightRemoved` notification
+    /// (the existing Bug #78 visual-clear pipeline).
+    ///
+    /// Returns a typed `HighlightMutationOutcome` so the popover presenter
+    /// routes consistently with `changeColor` / `updateNote` (R1-5): the
+    /// record is fetched up front so a concurrent-deletion race is
+    /// `.notFound` (the popover dismisses) rather than collapsing into a
+    /// generic failure that wrongly keeps a stale surface open. A genuine
+    /// persistence error is `.failed` — the popover stays, no UI alert (the
+    /// same precedent as `handleTapAction`).
+    ///
+    /// This is the unified popover's `confirmDelete` path — it supersedes the
+    /// feature #53 `handleTapAction(.delete)` route (removed in WI-10).
+    func deleteHighlight(highlightID: UUID) async -> HighlightMutationOutcome {
+        // Fetch the record up front — both to return it on `.success` and to
+        // distinguish "already gone" (.notFound) from a fetch failure.
+        let records: [HighlightRecord]
+        do {
+            records = try await persistence.fetchHighlights(forBookWithKey: bookFingerprintKey)
+        } catch {
+            return .failed
+        }
+        guard let record = records.first(where: { $0.highlightId == highlightID }) else {
+            return .notFound
+        }
+        do {
+            try await persistence.removeHighlight(highlightId: highlightID)
+        } catch let error as PersistenceError {
+            if case .recordNotFound = error { return .notFound }
+            return .failed
+        } catch {
+            return .failed
+        }
+        NotificationCenter.default.post(
+            name: .readerHighlightRemoved,
+            object: highlightID.uuidString
+        )
+        return .success(record)
+    }
 }
+
+// MARK: - HighlightMutating (Feature #64)
+
+/// `HighlightCoordinator` is the production conformer of the popover's
+/// highlight-mutation boundary. `changeColor` / `updateNote` / `deleteHighlight`
+/// are already defined above — this declares the conformance.
+extension HighlightCoordinator: HighlightMutating {}
 #endif

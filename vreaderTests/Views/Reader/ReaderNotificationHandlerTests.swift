@@ -62,6 +62,7 @@ private final class TestHandlerState: ReaderNotificationHandlerStateProtocol {
     var scrollToOffset: Int?
     var highlightRange: NSRange?
     var highlightIsTemporary: Bool = true
+    var highlightNonce: Int = 0
     var persistedHighlightRanges: [PaintedHighlight] = []
     var pendingAnnotationInfo: TextSelectionInfo?
     var annotationNoteText: String = ""
@@ -161,6 +162,59 @@ struct ReaderNotificationHandlerTests {
         ReaderNotificationHandlers.handleNavigateToLocator(locator: locator, state: state, deps: deps)
 
         #expect(state.scrollToOffset == nil)
+    }
+
+    // MARK: - Navigate Nonce (Bug #154 / GH #443)
+
+    /// A single navigate event bumps `highlightNonce` exactly once.
+    @Test @MainActor func handleNavigateToLocatorBumpsNonce() {
+        let state = TestHandlerState()
+        let deps = makeDeps()
+        #expect(state.highlightNonce == 0)
+
+        let locator = makeLocator(charOffsetUTF16: 500, charRangeStartUTF16: 500, charRangeEndUTF16: 510)
+        ReaderNotificationHandlers.handleNavigateToLocator(locator: locator, state: state, deps: deps)
+
+        #expect(state.highlightNonce == 1)
+    }
+
+    /// THE BUG #154 REGRESSION GUARD. Two consecutive navigate events to the
+    /// SAME locator — the search-tap-while-already-there case. `scrollToOffset`
+    /// and `highlightRange` are re-set to values they already hold (an
+    /// `@Observable` no-op write that never re-evaluates the SwiftUI body), so
+    /// the temporary highlight was never re-painted. The nonce MUST change on
+    /// the repeat-nav so the body re-evaluates and the bridge re-paints.
+    @Test @MainActor func handleNavigateToLocatorBumpsNonceOnRepeatNavToSameTarget() {
+        let state = TestHandlerState()
+        let deps = makeDeps()
+        let locator = makeLocator(charOffsetUTF16: 8847, charRangeStartUTF16: 8847, charRangeEndUTF16: 8859)
+
+        // First navigate — establishes scrollToOffset / highlightRange.
+        ReaderNotificationHandlers.handleNavigateToLocator(locator: locator, state: state, deps: deps)
+        let firstNonce = state.highlightNonce
+        let firstRange = state.highlightRange
+
+        // Second navigate to the EXACT same locator. scrollToOffset and
+        // highlightRange are unchanged — but the nonce must still advance.
+        ReaderNotificationHandlers.handleNavigateToLocator(locator: locator, state: state, deps: deps)
+
+        #expect(state.highlightRange == firstRange,
+                "range is unchanged on a repeat-nav to the same target — that is exactly the no-op-write the bug exploited")
+        #expect(state.highlightNonce > firstNonce,
+                "highlightNonce MUST advance on every navigate event so a repeat-nav to an already-current target still re-paints the temporary highlight (bug #154 / GH #443)")
+    }
+
+    /// Even a navigate event with nil offsets — an early-return no-op for
+    /// scroll/highlight state — leaves the nonce untouched. The nonce only
+    /// advances when an actual navigation is performed, so it never fires a
+    /// spurious bridge re-paint for an ignored event.
+    @Test @MainActor func handleNavigateToLocatorNilOffsetsDoesNotBumpNonce() {
+        let state = TestHandlerState()
+        let deps = makeDeps()
+
+        ReaderNotificationHandlers.handleNavigateToLocator(locator: makeLocator(), state: state, deps: deps)
+
+        #expect(state.highlightNonce == 0)
     }
 
     // MARK: - Highlight

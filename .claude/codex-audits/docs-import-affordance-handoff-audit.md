@@ -11,7 +11,7 @@ date: 2026-05-19
 Syncs the claude.ai/design "VReader Import Affordance Canvas" handoff
 into the `dev-docs/designs/vreader-fidelity-v1/` bundle. Touches the
 design bundle, plus `project.yml` / `project.pbxproj` (version bump
-3.36.2/517 → 3.36.3/518).
+3.36.11/526 → 3.36.12/527 (rebased onto main)).
 
 **No Swift source files changed.** The audit-gate hook fires on
 `project.pbxproj` — false positive of the Swift-file heuristic. Manual
@@ -52,7 +52,7 @@ that design (`vreader-annotation-import.jsx`).
 4. **No Swift implemented** — design-delivery only. Wiring the import
    affordance is gated feature-#62 feature-workflow work; deliberately
    not in this PR.
-5. **Version bump** — 3.36.3 / build 518 (patch — docs / design-bundle
+5. **Version bump** — 3.36.12 / build 527 (patch — docs / design-bundle
    sync). `xcodegen generate` confirmed.
 
 ## Verdict

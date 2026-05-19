@@ -36,6 +36,14 @@ struct TXTTextViewBridge: UIViewRepresentable {
     /// Whether the current highlight is temporary (search navigation) vs persistent
     /// (user-created). Temporary highlights auto-clear after 3s. (bug #54)
     var highlightIsTemporary: Bool = true
+    /// Monotonic navigate-event counter (Bug #154 / GH #443). A search-tap to
+    /// a location the reader is already at re-sets `highlightRange` to a value
+    /// it already holds — a no-op write that the auto-clear timer also can't
+    /// see, so the highlight is never re-painted. The container bumps this
+    /// nonce on every navigate event; the bridge folds a nonce change into
+    /// `highlightShouldReapply` so a repeat-nav re-paints and re-arms the
+    /// 3 s auto-clear timer even when the NSRange is byte-for-byte identical.
+    var highlightNonce: Int = 0
     /// Persisted highlights loaded from DB on file open (bug #55). Each
     /// carries its stored color (Bug #208); the layout-manager painter
     /// resolves the color per highlight.
@@ -57,6 +65,15 @@ struct TXTTextViewBridge: UIViewRepresentable {
     /// `HighlightCoordinator.handleTapAction(_:highlightID:)`. nil when
     /// `highlightActionPresenter` is also nil.
     var onHighlightTapAction: (@MainActor (HighlightTapAction, UUID) async -> Void)?
+    /// Bug #154 / GH #443 (Codex audit): invoked when the bridge clears a
+    /// *temporary* search/navigation highlight — the 3 s auto-clear timer
+    /// fired, the user scrolled, or a new search posted `.searchHighlightClear`.
+    /// The container wires this to nil `uiState.highlightRange`, so the model
+    /// and the bridge coordinator clear in lockstep. Without it, the timer
+    /// nils only `coordinator.currentHighlightRange`; `uiState.highlightRange`
+    /// stays set, and a later font/theme `updateUIView` re-paints the
+    /// already-expired highlight.
+    var onTemporaryHighlightCleared: (@MainActor () -> Void)?
     /// Top safe-area inset added on top of `config.textInset.top` so the first
     /// line of text clears the Dynamic Island / status bar. Bug #179 (mirrors
     /// bug #163 for EPUB). Default `0` preserves prior behaviour for callers
@@ -120,6 +137,7 @@ struct TXTTextViewBridge: UIViewRepresentable {
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         context.coordinator.highlightActionPresenter = highlightActionPresenter
         context.coordinator.onHighlightTapAction = onHighlightTapAction
+        context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         context.coordinator.lastAppliedText = text
         context.coordinator.lastAppliedAttrText = attributedText
         // Set highlights first so drawBackground has correct ranges during initial layout.
@@ -173,7 +191,18 @@ struct TXTTextViewBridge: UIViewRepresentable {
         let textChanged = text != context.coordinator.lastAppliedText
         let attrChanged = attributedText !== context.coordinator.lastAppliedAttrText
         let persistedChanged = persistedHighlights != context.coordinator.persistedHighlights
-        let highlightChanged = highlightRange != context.coordinator.currentHighlightRange
+        // Bug #154 / GH #443: fold a navigate-nonce change into the highlight-
+        // change signal. A repeat-nav to an already-current target leaves
+        // `highlightRange` byte-for-byte identical (and, within the 3 s
+        // window, identical to the coordinator's `currentHighlightRange`
+        // too), so the range diff alone reports "no change" — the highlight
+        // would not re-paint and the auto-clear timer would not re-arm. The
+        // nonce always advances on a navigate event, so it forces both.
+        let nonceChanged = highlightNonce != context.coordinator.lastHighlightNonce
+        let highlightChanged = Self.highlightShouldReapply(
+            rangeChanged: highlightRange != context.coordinator.currentHighlightRange,
+            nonceChanged: nonceChanged
+        )
 
         // Update coordinator state
         let sourceChanged = textChanged || attrChanged || configChanged
@@ -197,8 +226,13 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // bookFingerprintKey changes (open a different book).
         context.coordinator.highlightActionPresenter = highlightActionPresenter
         context.coordinator.onHighlightTapAction = onHighlightTapAction
+        context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         if highlightChanged {
             context.coordinator.currentHighlightRange = highlightRange
+            // Bug #154 / GH #443: record the nonce we just consumed so the
+            // next non-navigate `updateUIView` (font / theme change) does not
+            // re-trigger a re-paint.
+            context.coordinator.lastHighlightNonce = highlightNonce
             // Manage auto-clear timer for temporary highlights
             context.coordinator.highlightClearTimer?.invalidate()
             context.coordinator.highlightClearTimer = nil
@@ -210,6 +244,11 @@ struct TXTTextViewBridge: UIViewRepresentable {
                         guard let coordinator, let textView else { return }
                         coordinator.currentHighlightRange = nil
                         coordinator.rebuildHighlights(in: textView)
+                        // Bug #154 / GH #443 (Codex audit): clear the
+                        // container model too, so a later font/theme
+                        // `updateUIView` doesn't re-paint the expired
+                        // temporary highlight from a stale `uiState`.
+                        coordinator.onTemporaryHighlightCleared?()
                     }
                 }
             }
@@ -281,6 +320,16 @@ struct TXTTextViewBridge: UIViewRepresentable {
     }
 
     // MARK: - Static seams (testable)
+
+    /// Bug #154 / GH #443: decides whether the temporary search/navigation
+    /// highlight should be re-applied (and its 3 s auto-clear timer re-armed).
+    /// A re-apply is needed when the highlight range changed OR when the
+    /// navigate nonce advanced — the latter covers a search-tap to a location
+    /// the reader is already at, where the range is byte-for-byte identical
+    /// but the user still expects the highlight to flash again.
+    static func highlightShouldReapply(rangeChanged: Bool, nonceChanged: Bool) -> Bool {
+        rangeChanged || nonceChanged
+    }
 
     /// WI-2 Part 2c: determines whether a scroll should fire given the current dedupe state.
     /// When `sourceChanged` is true the coordinator's last target is treated as nil so that

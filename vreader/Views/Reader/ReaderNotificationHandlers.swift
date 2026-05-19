@@ -22,6 +22,13 @@ protocol ReaderNotificationHandlerStateProtocol: AnyObject {
     var scrollToOffset: Int? { get set }
     var highlightRange: NSRange? { get set }
     var highlightIsTemporary: Bool { get set }
+    /// Monotonic counter bumped on every `.readerNavigateToLocator` event.
+    /// Bug #154 / GH #443: a search-tap to an already-current target re-sets
+    /// `scrollToOffset` / `highlightRange` to values they already hold — an
+    /// `@Observable` no-op write that never re-evaluates the SwiftUI body, so
+    /// the temporary highlight is never re-applied. The nonce always changes,
+    /// guaranteeing the body re-evaluates and the bridge re-paints.
+    var highlightNonce: Int { get set }
     var persistedHighlightRanges: [PaintedHighlight] { get set }
     var pendingAnnotationInfo: TextSelectionInfo? { get set }
     var annotationNoteText: String { get set }
@@ -92,6 +99,17 @@ enum ReaderNotificationHandlers {
     }
 
     /// Navigate to a locator (from search result or annotation panel).
+    ///
+    /// Bug #154 / GH #443: `highlightNonce` is bumped on every navigation that
+    /// is actually performed. When a search-tap targets the location the
+    /// reader is already at, `scrollToOffset` / `highlightRange` are
+    /// re-assigned to values they already hold — an `@Observable` no-op write
+    /// that does NOT re-evaluate the SwiftUI body, so the reader bridge's
+    /// `updateUIView` never runs and the temporary highlight is never
+    /// re-painted. The nonce always advances, so the body re-evaluates and the
+    /// bridge re-paints + re-arms its 3 s auto-clear timer. The bump is placed
+    /// AFTER the nil-offset guard so an ignored event never fires a spurious
+    /// re-paint.
     @MainActor
     static func handleNavigateToLocator(
         locator: Locator,
@@ -107,6 +125,7 @@ enum ReaderNotificationHandlers {
         } else {
             state.highlightRange = nil
         }
+        state.highlightNonce &+= 1
         deps.onNavigate(offset)
     }
 
