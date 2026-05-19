@@ -104,6 +104,14 @@ struct ReaderContainerView: View {
     /// state with no Release-build cost beyond a UUID.
     @State private var readerToken: UUID = UUID()
 
+    /// Feature #57: handle to the live `FoliateSpikeView.Coordinator`
+    /// for AZW3/MOBI books, populated by the spike's `makeCoordinator()`.
+    /// The TTS path (`startTTS()`) calls the Coordinator's
+    /// `extractPlainText()` through this box once the book has rendered.
+    /// Holds the Coordinator `weak`, so this `@State` does not leak the
+    /// reader.
+    @State private var foliateCoordinatorBox = FoliateCoordinatorBox()
+
     #if DEBUG
     /// DebugBridge probe (feature #44). Registers on appear, unregisters on
     /// disappear. Holds a closure that the registry queries for the current
@@ -653,7 +661,8 @@ struct ReaderContainerView: View {
                     fingerprintKey: book.fingerprintKey,
                     readerToken: readerToken,
                     settingsStore: settingsStore,
-                    highlightActionPresenter: UIKitHighlightActionPresenter()
+                    highlightActionPresenter: UIKitHighlightActionPresenter(),
+                    coordinatorBox: foliateCoordinatorBox
                 )
             }
         } else {

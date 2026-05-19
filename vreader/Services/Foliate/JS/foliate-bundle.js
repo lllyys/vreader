@@ -2439,7 +2439,7 @@ ${doc.querySelector("parsererror").innerText}`);
   var init_comic_book = __esm({
     "comic-book.js"() {
       makeComicBook = () => {
-        throw new Error("Comic books not supported");
+        throw new Error("not supported");
       };
     }
   });
@@ -2453,7 +2453,7 @@ ${doc.querySelector("parsererror").innerText}`);
   var init_fb2 = __esm({
     "fb2.js"() {
       makeFB2 = () => {
-        throw new Error("FB2 not supported");
+        throw new Error("not supported");
       };
     }
   });
@@ -2467,7 +2467,7 @@ ${doc.querySelector("parsererror").innerText}`);
   var init_pdf = __esm({
     "pdf.js"() {
       makePDF = () => {
-        throw new Error("PDF not supported in Foliate renderer");
+        throw new Error("not supported");
       };
     }
   });
@@ -6684,6 +6684,30 @@ ${doc.querySelector("parsererror").innerText}`);
       if (opts.maxInlineSize != null) r3.setAttribute("max-inline-size", String(opts.maxInlineSize));
       if (opts.maxBlockSize != null) r3.setAttribute("max-block-size", String(opts.maxBlockSize));
       if (opts.maxColumnCount != null) r3.setAttribute("max-column-count", String(opts.maxColumnCount));
+    },
+    // Feature #57: whole-book plain-text extraction for TTS.
+    // Walks `currentBook.sections` (the same pattern view.search()'s
+    // `#searchBook` uses), builds an off-screen Document per section
+    // via `createDocument()`, and concatenates the body text. Runs on
+    // the host page where `currentBook` is in scope — no shadow-root
+    // or iframe traversal. Returns a Promise<string> that
+    // evaluateJavaScript is expected to resolve to a Swift String.
+    // A section that fails to parse is skipped (partial text is
+    // better than no TTS); a book with no sections returns ''.
+    async extractPlainText() {
+      if (!bookReady || !currentBook?.sections) return "";
+      const parts = [];
+      for (const section of currentBook.sections) {
+        if (typeof section.createDocument !== "function") continue;
+        try {
+          const doc = await section.createDocument();
+          const text = (doc?.body?.textContent ?? "").trim();
+          if (text) parts.push(text);
+        } catch (e3) {
+          console.warn("[foliate-host] extractPlainText section failed:", e3);
+        }
+      }
+      return parts.join("\n\n");
     },
     // Cleanup
     close() {

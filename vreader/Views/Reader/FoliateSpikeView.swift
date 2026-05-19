@@ -26,6 +26,12 @@ struct FoliateSpikeView: View {
     /// `.readerHighlightTapped` still fires from WI-5 so other observers
     /// (annotations panel, etc.) react.
     var highlightActionPresenter: (any HighlightActionPresenting)?
+    /// Feature #57: set in `makeCoordinator()` so the parent
+    /// (`ReaderContainerView`) can request whole-book TTS text
+    /// extraction once the book is ready. Optional → preview/test call
+    /// sites stay source-compatible (same pattern as `fingerprintKey`,
+    /// `readerToken`, `settingsStore`, `highlightActionPresenter`).
+    var coordinatorBox: FoliateCoordinatorBox?
 
     @State private var isBookReady = false
     @State private var bookTitle = ""
@@ -39,6 +45,7 @@ struct FoliateSpikeView: View {
                 fingerprintKey: fingerprintKey,
                 readerToken: readerToken,
                 layoutFlow: FoliateLayoutFlowMapper.layoutFlow(for: settingsStore?.epubLayout),
+                coordinatorBox: coordinatorBox,
                 onBookReady: { title in
                     isBookReady = true
                     bookTitle = title
@@ -104,6 +111,10 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
     /// (the store is `@Observable @MainActor`), so this value reaches
     /// `updateUIView` as soon as the user toggles reading mode.
     let layoutFlow: String
+    /// Feature #57: parent-owned handle; `makeCoordinator()` assigns the
+    /// live Coordinator into it so the TTS path can call
+    /// `extractPlainText()`.
+    let coordinatorBox: FoliateCoordinatorBox?
     let onBookReady: @MainActor (String) -> Void
     let onError: @MainActor (String) -> Void
 
@@ -117,6 +128,10 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         #if DEBUG
         coord.readerToken = readerToken
         #endif
+        // Feature #57: hand the live Coordinator to the parent so
+        // `ReaderContainerView`'s TTS path can request whole-book text
+        // extraction once the book has rendered.
+        coordinatorBox?.coordinator = coord
         return coord
     }
 
@@ -549,6 +564,43 @@ extension FoliateSpikeView {
             })(); void 0;
             """
             webView?.evaluateJavaScript(js) { _, _ in }
+        }
+
+        // MARK: - Feature #57: TTS text extraction
+
+        /// Feature #57: the exact JS expression `extractPlainText()`
+        /// evaluates. A fixed string literal — no interpolation, no
+        /// injection surface. Held as a constant so a unit test can
+        /// assert it without a live WKWebView.
+        static let extractPlainTextScript = "readerAPI.extractPlainText()"
+
+        /// Feature #57: extract the rendered book's whole-book plain
+        /// text for TTS by calling the `foliate-host.js`
+        /// `readerAPI.extractPlainText()` helper (a section-walk over
+        /// `view.book.sections[].createDocument()`). Returns `nil` if
+        /// the webView is gone or the book has not finished rendering.
+        ///
+        /// `@MainActor` — `WKWebView.evaluateJavaScript` requires the
+        /// main actor. The Coordinator is used on the main actor in
+        /// practice (`handleMessage` is `@MainActor`; the notification
+        /// observers hop via `MainActor.assumeIsolated`), but `webView`
+        /// is not statically isolated, so this method carries its own
+        /// explicit `@MainActor` and is the single main-actor entry for
+        /// the production text touch.
+        ///
+        /// The helper returns a `Promise<string>`; `evaluateJavaScript`
+        /// is expected to resolve it and deliver the resolved `String`.
+        /// That Promise-value marshalling is validated by WI-1's
+        /// device-slice feasibility gate (plan §5) — it is not asserted
+        /// here as pre-proven. The `as? String` coercion defensively
+        /// maps a JS error / `NSNull` / a non-resolving Promise to nil.
+        @MainActor
+        func extractPlainText() async -> String? {
+            guard isBookReady, let webView else { return nil }
+            let raw = try? await webView.evaluateJavaScript(
+                Coordinator.extractPlainTextScript
+            )
+            return raw as? String
         }
     }
 }

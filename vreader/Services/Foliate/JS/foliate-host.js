@@ -242,6 +242,31 @@ window.readerAPI = {
         if (opts.maxColumnCount != null) r.setAttribute('max-column-count', String(opts.maxColumnCount))
     },
 
+    // Feature #57: whole-book plain-text extraction for TTS.
+    // Walks `currentBook.sections` (the same pattern view.search()'s
+    // `#searchBook` uses), builds an off-screen Document per section
+    // via `createDocument()`, and concatenates the body text. Runs on
+    // the host page where `currentBook` is in scope — no shadow-root
+    // or iframe traversal. Returns a Promise<string> that
+    // evaluateJavaScript is expected to resolve to a Swift String.
+    // A section that fails to parse is skipped (partial text is
+    // better than no TTS); a book with no sections returns ''.
+    async extractPlainText() {
+        if (!bookReady || !currentBook?.sections) return ''
+        const parts = []
+        for (const section of currentBook.sections) {
+            if (typeof section.createDocument !== 'function') continue
+            try {
+                const doc = await section.createDocument()
+                const text = (doc?.body?.textContent ?? '').trim()
+                if (text) parts.push(text)
+            } catch (e) {
+                console.warn('[foliate-host] extractPlainText section failed:', e)
+            }
+        }
+        return parts.join('\n\n')
+    },
+
     // Cleanup
     close() {
         view.close()
