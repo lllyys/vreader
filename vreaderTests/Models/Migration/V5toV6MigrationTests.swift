@@ -25,15 +25,14 @@ struct V5toV6MigrationTests {
     }
 
     @Test func migrationPlanIncludesV6() {
-        let schemas = VReaderMigrationPlan.schemas
-        let last = schemas.last
-        #expect(last != nil)
-        #expect(String(describing: last!) == String(describing: SchemaV6.self))
+        // V6 is in the plan; SchemaV7 (feature #56) is now the tail.
+        let names = VReaderMigrationPlan.schemas.map { String(describing: $0) }
+        #expect(names.contains(String(describing: SchemaV6.self)))
     }
 
     @Test func migrationPlanLength() {
-        // V1, V2, V3, V4, V5, V6 — six schemas.
-        #expect(VReaderMigrationPlan.schemas.count == 6)
+        // V1, V2, V3, V4, V5, V6, V7 — seven schemas (V7 added by feature #56).
+        #expect(VReaderMigrationPlan.schemas.count == 7)
     }
 
     @Test func migrationPlanHasNoExplicitStages() {
