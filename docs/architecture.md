@@ -125,6 +125,7 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `TTSService`                         | AVSpeechSynthesizer + HTTP | Read aloud with controls                                                  |
 | `BookContentCache`                   | In-memory                  | Text cache for AI context loading (TXT/MD only)                           |
 | `PreferenceStore`                    | UserDefaults               | Sort order, view mode persistence                                         |
+| `ReadingStatsAggregator`             | SwiftData (actor-isolated) | Reading-stats dashboard aggregator (feature #58). Sweeps `ReadingSession` + `Book` rows in one `ModelContext` pass and returns a `ReadingDashboardSnapshot` — per-window totals (today / 7d / 30d / 90d / 180d / 365d / all) + per-book breakdown. Derives every number from session rows, never from `ReadingStats`, so a stale stats cache cannot desync the dashboard. Holds a `@Sendable () -> Calendar` provider so window boundaries follow timezone/DST changes |
 | `CustomCoverStore`                   | JPEG files                 | Custom book cover images                                                  |
 | `WebDAVClient`                       | HTTP                       | Low-level WebDAV transport (PROPFIND/PUT/GET/DELETE/MKCOL/MOVE)           |
 | `WebDAVProvider`                     | `WebDAVClient`             | `BackupProvider` impl — backup/restore/list/delete over a WebDAV server   |
