@@ -55,7 +55,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "This is a long text about philosophy and nature.",
+            fullText: "This is a long text about philosophy and nature.",
             format: .txt
         )
 
@@ -78,7 +78,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "A long discussion about consciousness and its implications.",
+            fullText: "A long discussion about consciousness and its implications.",
             format: .txt
         )
 
@@ -96,7 +96,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some content for the AI to process.",
+            fullText: "Some content for the AI to process.",
             format: .txt
         )
 
@@ -123,7 +123,7 @@ struct AIReaderIntegrationTests {
         // Also verify the summarize call transitions to featureDisabled
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Text",
+            fullText: "Text",
             format: .txt
         )
         #expect(vm.state == .featureDisabled)
@@ -148,7 +148,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: longContent,
+            fullText: longContent,
             format: .txt
         )
 
@@ -183,7 +183,7 @@ struct AIReaderIntegrationTests {
         // After request completes
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text for summarization.",
+            fullText: "Some text for summarization.",
             format: .txt
         )
 
@@ -214,7 +214,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text.",
+            fullText: "Some text.",
             format: .txt
         )
 
@@ -241,7 +241,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "",
+            fullText: "",
             format: .txt
         )
 
@@ -260,7 +260,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text",
+            fullText: "Some text",
             format: .txt
         )
 
@@ -282,7 +282,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(format: .pdf),
-            textContent: "PDF page content about machine learning.",
+            fullText: "PDF page content about machine learning.",
             format: .pdf
         )
 
@@ -322,7 +322,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: epubLocator,
-            textContent: "The EPUB chapter content with interesting topics.",
+            fullText: "The EPUB chapter content with interesting topics.",
             format: .epub
         )
 
@@ -345,7 +345,7 @@ struct AIReaderIntegrationTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text",
+            fullText: "Some text",
             format: .txt
         )
         #expect(vm.state == .complete)

@@ -294,9 +294,14 @@ struct AISummaryTabView: View {
             break
         }
         Task {
+            // Feature #69 WI-4: summarize now takes the full book text +
+            // a scope. WI-5 threads the real `loadedTextContent` and the
+            // scope-chip selection here; until then this passes the
+            // existing section content as `fullText` with the default
+            // `.section` scope — byte-identical to the pre-#69 behavior.
             await viewModel.summarize(
                 locator: locator,
-                textContent: textContent,
+                fullText: textContent,
                 format: format
             )
         }

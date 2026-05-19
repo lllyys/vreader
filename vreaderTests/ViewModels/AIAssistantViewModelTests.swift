@@ -49,7 +49,7 @@ struct AIAssistantViewModelTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text content for testing.",
+            fullText: "Some text content for testing.",
             format: .txt
         )
 
@@ -85,7 +85,7 @@ struct AIAssistantViewModelTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text content for testing.",
+            fullText: "Some text content for testing.",
             format: .txt
         )
 
@@ -130,7 +130,7 @@ struct AIAssistantViewModelTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "", // empty!
+            fullText: "", // empty!
             format: .txt
         )
 
@@ -158,13 +158,13 @@ struct AIAssistantViewModelTests {
         let text = "Some text content for testing."
 
         // First call populates cache
-        await vm.summarize(locator: locator, textContent: text, format: .txt)
+        await vm.summarize(locator: locator, fullText: text, format: .txt)
         #expect(vm.state == .complete)
         #expect(stub.sendRequestCallCount == 1)
 
         // Reset and call again — should hit cache
         vm.reset()
-        await vm.summarize(locator: locator, textContent: text, format: .txt)
+        await vm.summarize(locator: locator, fullText: text, format: .txt)
         #expect(vm.state == .complete)
         #expect(vm.responseText == "Cached content")
         #expect(stub.sendRequestCallCount == 1, "Provider should not be called on cache hit")
@@ -185,7 +185,7 @@ struct AIAssistantViewModelTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text content for testing.",
+            fullText: "Some text content for testing.",
             format: .txt
         )
         #expect(vm.state == .complete)

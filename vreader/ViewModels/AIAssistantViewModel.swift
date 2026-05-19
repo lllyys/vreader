@@ -8,8 +8,17 @@
 // - Each action method resets state before starting.
 // - Streaming accumulates text chunks into responseText.
 // - Errors are mapped to user-friendly messages via AIError.localizedDescription.
+// - Summary scope (feature #69): `selectedScope` tracks the AI Summarize
+//   tab's scope chip; `summarize` takes the FULL flattened book text +
+//   scope + chapterBounds and forwards them to the extractor. The
+//   non-summarize actions (explain/translate/vocabulary/askQuestion) are
+//   selection-driven and always extract with `.section`.
+// - The context extractor is injected as `any AIContextExtracting` (a
+//   boundary protocol) so tests can record what scope/bounds/fullText
+//   the view model forwards.
 //
-// @coordinates-with: AIService.swift, AIAssistantView.swift
+// @coordinates-with: AIService.swift, AIContextExtracting.swift,
+//   SummaryScope.swift, ChapterBounds.swift, AISummaryTabView.swift
 
 import Foundation
 
@@ -40,10 +49,14 @@ final class AIAssistantViewModel {
     /// The action type of the current/last request.
     private(set) var currentAction: AIActionType?
 
+    /// The AI Summarize tab's selected scope chip. Defaults to `.section`
+    /// (the pre-feature-#69 behavior). Mutated only via `setScope`.
+    private(set) var selectedScope: SummaryScope = .section
+
     // MARK: - Dependencies
 
     private let aiService: AIService
-    private let contextExtractor: AIContextExtractor
+    private let contextExtractor: any AIContextExtracting
 
     // MARK: - Private
 
@@ -53,29 +66,49 @@ final class AIAssistantViewModel {
 
     init(
         aiService: AIService,
-        contextExtractor: AIContextExtractor = AIContextExtractor()
+        contextExtractor: any AIContextExtracting = AIContextExtractor()
     ) {
         self.aiService = aiService
         self.contextExtractor = contextExtractor
     }
 
+    // MARK: - Scope
+
+    /// Updates the Summarize tab's selected scope. Does NOT re-run the
+    /// summary — the user explicitly taps Summarize / Regenerate. Every
+    /// `AIAssistantViewModel` state change is a method (codebase convention).
+    func setScope(_ scope: SummaryScope) {
+        selectedScope = scope
+    }
+
     // MARK: - Actions
 
-    /// Summarizes the text around the given locator.
+    /// Summarizes the book at the given scope around the locator.
+    ///
+    /// `fullText` is the FULL flattened book text — NOT a section snippet.
+    /// It is intentionally non-defaulted: the Summarize call site must
+    /// pass the full text explicitly so a `.chapter` / `.bookSoFar` scope
+    /// can slice a meaningful span (defaulting it would re-introduce the
+    /// "scoped summary runs on a pre-extracted snippet" bug).
     func summarize(
         locator: Locator,
-        textContent: String,
-        format: BookFormat
+        fullText: String,
+        format: BookFormat,
+        scope: SummaryScope = .section,
+        chapterBounds: ChapterBounds? = nil
     ) async {
         await performAction(
             type: .summarize,
             locator: locator,
-            textContent: textContent,
-            format: format
+            fullText: fullText,
+            format: format,
+            scope: scope,
+            chapterBounds: chapterBounds
         )
     }
 
-    /// Explains the text around the given locator.
+    /// Explains the text around the given locator. Selection-driven —
+    /// always extracts with `.section` scope (out of feature #69's scope).
     func explain(
         locator: Locator,
         textContent: String,
@@ -84,12 +117,13 @@ final class AIAssistantViewModel {
         await performAction(
             type: .explain,
             locator: locator,
-            textContent: textContent,
+            fullText: textContent,
             format: format
         )
     }
 
-    /// Translates the text around the given locator.
+    /// Translates the text around the given locator. Selection-driven —
+    /// always extracts with `.section` scope.
     func translate(
         locator: Locator,
         textContent: String,
@@ -99,13 +133,14 @@ final class AIAssistantViewModel {
         await performAction(
             type: .translate,
             locator: locator,
-            textContent: textContent,
+            fullText: textContent,
             format: format,
             targetLanguage: targetLanguage
         )
     }
 
     /// Looks up vocabulary in the text around the given locator.
+    /// Selection-driven — always extracts with `.section` scope.
     func vocabulary(
         locator: Locator,
         textContent: String,
@@ -114,12 +149,13 @@ final class AIAssistantViewModel {
         await performAction(
             type: .vocabulary,
             locator: locator,
-            textContent: textContent,
+            fullText: textContent,
             format: format
         )
     }
 
     /// Answers a question about the text around the given locator.
+    /// Selection-driven — always extracts with `.section` scope.
     func askQuestion(
         question: String,
         locator: Locator,
@@ -129,7 +165,7 @@ final class AIAssistantViewModel {
         await performAction(
             type: .questionAnswer,
             locator: locator,
-            textContent: textContent,
+            fullText: textContent,
             format: format,
             userPrompt: question
         )
@@ -155,8 +191,10 @@ final class AIAssistantViewModel {
     private func performAction(
         type: AIActionType,
         locator: Locator,
-        textContent: String,
+        fullText: String,
         format: BookFormat,
+        scope: SummaryScope = .section,
+        chapterBounds: ChapterBounds? = nil,
         userPrompt: String? = nil,
         targetLanguage: String? = nil
     ) async {
@@ -168,10 +206,17 @@ final class AIAssistantViewModel {
         responseText = ""
         currentAction = type
 
+        // `contextExtractor` is `any AIContextExtracting`, so the 6-arg
+        // requirement is called with `maxUTF16` passed explicitly — a
+        // protocol-requirement default argument is not visible through
+        // the existential (see AIContextExtracting.swift).
         let context = contextExtractor.extractContext(
             locator: locator,
-            textContent: textContent,
-            format: format
+            fullText: fullText,
+            format: format,
+            scope: scope,
+            chapterBounds: chapterBounds,
+            maxUTF16: AIContextBudget.defaultMaxUTF16
         )
 
         guard !context.isEmpty else {

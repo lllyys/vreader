@@ -206,7 +206,7 @@ struct AISummaryTabViewTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text content for testing.",
+            fullText: "Some text content for testing.",
             format: .txt
         )
 
@@ -225,7 +225,7 @@ struct AISummaryTabViewTests {
 
         await vm.summarize(
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text content for testing.",
+            fullText: "Some text content for testing.",
             format: .txt
         )
 
