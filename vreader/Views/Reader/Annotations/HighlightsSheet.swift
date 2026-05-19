@@ -33,6 +33,10 @@ import SwiftData
 struct HighlightsSheet: View {
     let bookFingerprintKey: String
     let modelContainer: ModelContainer
+    /// The book's TOC — used to resolve each card's chapter label.
+    /// Empty for books that ship no TOC; the card meta then degrades to
+    /// the page (or nothing) per the design's graceful fallback.
+    let tocEntries: [TOCEntry]
     let theme: ReaderThemeV2
     let onNavigate: (Locator) -> Void
     let onDismiss: () -> Void
@@ -51,6 +55,7 @@ struct HighlightsSheet: View {
     init(
         bookFingerprintKey: String,
         modelContainer: ModelContainer,
+        tocEntries: [TOCEntry] = [],
         theme: ReaderThemeV2,
         initialFilter: HighlightsSheetFilter = .all,
         onNavigate: @escaping (Locator) -> Void,
@@ -58,6 +63,7 @@ struct HighlightsSheet: View {
     ) {
         self.bookFingerprintKey = bookFingerprintKey
         self.modelContainer = modelContainer
+        self.tocEntries = tocEntries
         self.theme = theme
         self.onNavigate = onNavigate
         self.onDismiss = onDismiss
@@ -101,6 +107,7 @@ struct HighlightsSheet: View {
         .sheet(isPresented: $isShowingExportShare) {
             if let url = exportedFileURL {
                 ShareActivityView(activityItems: [url])
+                    .ignoresSafeArea()
             }
         }
         .alert(

@@ -222,6 +222,38 @@ struct HighlightsSheetTests {
         #expect(Set(titles).count == HighlightsSheetFilter.allCases.count)
     }
 
+    // MARK: - Card meta label (chapter · p. N)
+
+    @Test("metaLabel resolves the chapter from tocEntries for a page-based locator")
+    func metaLabelResolvesChapter() {
+        let pdfFP = wi9PDFFingerprint
+        let entries = [
+            TOCEntry(title: "Prologue", level: 0, locator: makePDFLocator(fingerprint: pdfFP, page: 0)),
+            TOCEntry(title: "Act Two", level: 0, locator: makePDFLocator(fingerprint: pdfFP, page: 10)),
+        ]
+        let sheet = HighlightsSheet(
+            bookFingerprintKey: wi9EPUBFingerprint.canonicalKey,
+            modelContainer: inMemoryContainer(),
+            tocEntries: entries, theme: .paper, initialFilter: .all,
+            onNavigate: { _ in }, onDismiss: {}
+        )
+        // A locator on page 12 is inside "Act Two"; display page 13.
+        let label = sheet.metaLabel(for: makePDFLocator(fingerprint: pdfFP, page: 12))
+        #expect(label.contains("Act Two"))
+        #expect(label.contains("p. 13"))
+    }
+
+    @Test("metaLabel degrades to empty when no TOC and no page")
+    func metaLabelDegradesWithoutTOC() {
+        // EPUB locator (no page) + no TOC → empty meta, matching the
+        // design's graceful fallback.
+        let sheet = makeSheet()   // tocEntries default empty
+        let label = sheet.metaLabel(
+            for: makeEPUBLocator(href: "ch1.xhtml", progression: 0.3)
+        )
+        #expect(label.isEmpty)
+    }
+
     // MARK: - Edges
 
     @Test("Builds with a large highlight set")
@@ -249,17 +281,61 @@ struct HighlightsSheetTests {
 
     // MARK: - Import engine retained (UI deferred to needs-design #963)
 
-    @Test("The retained import path still drives the AnnotationImporter engine")
+    @Test("The retained import path actually drives AnnotationImporter.importJSON")
     func retainedImportEngineStillReachable() async throws {
         // HighlightsSheet ships NO import UI (round-2 finding 2 / #963),
-        // but the importAnnotationsFrom engine path is retained — exercise
-        // it so the AnnotationImporter stays covered. A bogus URL yields a
-        // graceful "could not read" status, not a crash.
-        let sheet = makeSheet()
-        let bogus = FileManager.default.temporaryDirectory
-            .appendingPathComponent("does-not-exist-\(UUID()).json")
-        let status = await sheet.importForTesting(url: bogus)
-        #expect(status.isEmpty == false)   // a status string, not a crash
+        // but importAnnotationsFrom is retained so AnnotationImporter
+        // stays covered. Prove the engine is genuinely reached: build a
+        // valid export JSON, write it to a temp file, import it, and
+        // assert the imported records actually landed in persistence.
+        let container = inMemoryContainer()
+        let persistence = PersistenceActor(modelContainer: container)
+        let key = try await CollectionTestHelper.insertBook(persistence: persistence)
+        let fp = DocumentFingerprint(canonicalKey: key)!
+
+        // A valid annotation export payload — one highlight, one note.
+        let exportPayload = AnnotationExporter.buildPayload(
+            highlights: [
+                HighlightRecord(
+                    highlightId: UUID(),
+                    locator: LocatorFactory.epub(fingerprint: fp, href: "ch0.xhtml", progression: 0.1)!,
+                    anchor: nil, profileKey: "p", selectedText: "imported passage",
+                    color: "yellow", note: nil, createdAt: Date(), updatedAt: Date()
+                ),
+            ],
+            bookmarks: [],
+            notes: [
+                AnnotationRecord(
+                    annotationId: UUID(),
+                    locator: LocatorFactory.epub(fingerprint: fp, href: "ch1.xhtml", progression: 0.2)!,
+                    profileKey: "p", content: "imported note",
+                    createdAt: Date(), updatedAt: Date()
+                ),
+            ],
+            bookTitle: key,
+            bookAuthor: nil
+        )
+        let data = try AnnotationExporter.export(payload: exportPayload, format: .json)
+        let fixtureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("f62-import-fixture-\(UUID()).json")
+        try data.write(to: fixtureURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fixtureURL) }
+
+        let sheet = HighlightsSheet(
+            bookFingerprintKey: key, modelContainer: container,
+            theme: .paper, initialFilter: .all,
+            onNavigate: { _ in }, onDismiss: {}
+        )
+        let status = await sheet.importForTesting(url: fixtureURL)
+        // The status reports a successful import — the engine ran.
+        #expect(status.contains("Imported"))
+
+        // And the records actually landed in persistence — definitive
+        // proof importJSON executed, not just that the method returned.
+        let highlights = try await persistence.fetchHighlights(forBookWithKey: key)
+        let notes = try await persistence.fetchAnnotations(forBookWithKey: key)
+        #expect(highlights.count == 1)
+        #expect(notes.count == 1)
     }
 
     @Test("Builds with CJK highlight text and note")

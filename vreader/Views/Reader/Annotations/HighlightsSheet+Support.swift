@@ -37,16 +37,40 @@ extension HighlightsSheet {
 
     // MARK: - Card meta label
 
-    /// The `chapter · p. N` meta sub-line a card shows. `HighlightsSheet`
-    /// has no TOC, so it derives the page only — and only when the
-    /// locator carries one (EPUB/TXT degrade to an empty meta, matching
-    /// what `AnnotationRowView` shows today). 0-based `Locator.page`
-    /// (PDF) is shown 1-based.
+    /// The `chapter · p. N` meta sub-line a card shows, per the
+    /// `HighlightsSheetV3` design. The chapter is resolved from
+    /// `tocEntries` (the last entry at or before the locator — the same
+    /// matching rule `TOCSheet` uses); the page is the 1-based display
+    /// number. Each component degrades gracefully: a book with no TOC
+    /// yields no chapter; an EPUB/TXT locator yields no page.
     func metaLabel(for locator: Locator) -> String {
-        if let page = locator.page {
-            return "p. \(page + 1)"
+        var parts: [String] = []
+        if let chapter = chapterTitle(for: locator) { parts.append(chapter) }
+        if let page = locator.page { parts.append("p. \(page + 1)") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The TOC chapter title containing `locator` — the title of the
+    /// last `tocEntries` entry at or before that position, matched by
+    /// `charOffsetUTF16` (TXT/MD), `page` (PDF), or `href` (EPUB).
+    /// `nil` when the book ships no TOC or no entry precedes the locator.
+    func chapterTitle(for locator: Locator) -> String? {
+        var best: Int?
+        if let offset = locator.charOffsetUTF16 {
+            for (i, e) in tocEntries.enumerated() {
+                if let o = e.locator.charOffsetUTF16, o <= offset { best = i }
+            }
+        } else if let page = locator.page {
+            for (i, e) in tocEntries.enumerated() {
+                if let p = e.locator.page, p <= page { best = i }
+            }
+        } else if let href = locator.href {
+            for (i, e) in tocEntries.enumerated() {
+                if e.locator.href == href { best = i }
+            }
         }
-        return ""
+        guard let index = best else { return nil }
+        return tocEntries[index].title
     }
 
     // MARK: - Empty-state copy (per filter, per #860 design)
