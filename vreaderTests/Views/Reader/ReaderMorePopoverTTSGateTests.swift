@@ -1,14 +1,17 @@
-// Purpose: Regression-guard tests for bug #176 / GH #602 (REOPENED) —
-// the `Read aloud` row is hidden in the reader More-menu popover
-// (`ReaderMorePopover`) when the active format does not advertise
-// `.tts`. The original bug #176 fix removed `.tts` from
-// `FormatCapabilities.capabilities(for: .azw3)`, but feature #60
-// WI-6c's `ReaderMorePopover` re-surfaced a `Read aloud` row for ALL
-// formats unconditionally (`ForEach(ReaderMoreMenuRow.allCases)`),
-// bypassing that capability gate. On AZW3/MOBI the row reappeared and
-// tapping it was a silent no-op. This gate is the user-visible half of
-// the fix; the capability declaration in `FormatCapabilities.swift` is
-// the other half.
+// Purpose: Regression-guard tests for the per-format `.tts` capability
+// gate on the reader More-menu popover (`ReaderMorePopover`) — the
+// `Read aloud` row is shown only when the active format advertises
+// `.tts`. The gate originated with bug #176 / GH #602 (which removed
+// `.tts` from `FormatCapabilities.capabilities(for: .azw3)` while
+// AZW3/MOBI TTS was unimplemented); feature #60 WI-6c's
+// `ReaderMorePopover` then had to honor that gate rather than render
+// every row unconditionally.
+//
+// Feature #57 wired the AZW3/MOBI TTS path and re-added `.tts` to the
+// AZW3 capability set, so AZW3/MOBI now SHOW the `Read aloud` row. PDF
+// remains the format that genuinely lacks `.tts`. These tests pin the
+// gate as a per-capability contract: TTS-capable formats show the row,
+// non-TTS formats (PDF, empty caps) hide it.
 //
 // The gate lives in `ReaderMoreMenuRow.visibleRows(for:)` so the
 // design's row contract stays testable without a SwiftUI render path —
@@ -27,22 +30,22 @@ import Foundation
 struct ReaderMorePopoverTTSGateTests {
 
     @Test func readAloud_absent_whenFormatLacksTTS() {
-        // AZW3 / MOBI route through Foliate-js; `FormatCapabilities`
-        // excludes `.tts` for `.azw3` (bug #176). PDF never had `.tts`.
-        // All three must drop the Read aloud row.
-        for format in [BookFormat.azw3, .pdf] {
-            let caps = FormatCapabilities.capabilities(for: format)
-            let rows = ReaderMoreMenuRow.visibleRows(for: caps)
-            #expect(
-                !rows.contains(.readAloud),
-                "Expected \(format) to hide the Read aloud row"
-            )
-        }
+        // PDF never had `.tts` (PDFKit has no TTS path) — it must drop
+        // the Read aloud row. (AZW3/MOBI used to be here too, under the
+        // bug #176 cap-gate; feature #57 wired AZW3 TTS and re-added
+        // `.tts`, so AZW3 now moves to the positive test below.)
+        let caps = FormatCapabilities.capabilities(for: .pdf)
+        let rows = ReaderMoreMenuRow.visibleRows(for: caps)
+        #expect(
+            !rows.contains(.readAloud),
+            "Expected pdf to hide the Read aloud row"
+        )
     }
 
     @Test func readAloud_present_whenFormatHasTTS() {
-        // TXT, MD, and EPUB advertise `.tts` — the row stays.
-        for format in [BookFormat.txt, .md, .epub] {
+        // TXT, MD, EPUB, and — since feature #57 — AZW3/MOBI advertise
+        // `.tts`, so the row stays.
+        for format in [BookFormat.txt, .md, .epub, .azw3] {
             let caps = FormatCapabilities.capabilities(for: format)
             let rows = ReaderMoreMenuRow.visibleRows(for: caps)
             #expect(
@@ -78,7 +81,7 @@ struct ReaderMorePopoverTTSGateTests {
         // The four non-TTS rows (Auto-turn / Book details / Share /
         // Export) must survive the gate regardless of `.tts` — only the
         // Read aloud row is capability-gated.
-        let caps = FormatCapabilities.capabilities(for: .azw3) // no `.tts`
+        let caps = FormatCapabilities.capabilities(for: .pdf) // no `.tts`
         let rows = ReaderMoreMenuRow.visibleRows(for: caps)
         for row in ReaderMoreMenuRow.allCases where row != .readAloud {
             #expect(
@@ -130,15 +133,25 @@ struct ReaderMorePopoverTTSGateTests {
         // Wiring guard: `ReaderMorePopover` must consult
         // `formatCapabilities` — a revert to `allCases`, or passing the
         // wrong capability set, regresses this even while
-        // `visibleRows(for:)` itself stays correct.
-        let azw3 = FormatCapabilities.capabilities(for: .azw3)
-        #expect(!makePopover(capabilities: azw3).resolvedRows.contains(.readAloud))
+        // `visibleRows(for:)` itself stays correct. PDF is the format
+        // that genuinely lacks `.tts`.
+        let pdf = FormatCapabilities.capabilities(for: .pdf)
+        #expect(!makePopover(capabilities: pdf).resolvedRows.contains(.readAloud))
     }
 
     @MainActor
     @Test func popover_resolvedRows_keepReadAloud_forFormatWithTTS() {
         let epub = FormatCapabilities.capabilities(for: .epub)
         #expect(makePopover(capabilities: epub).resolvedRows.contains(.readAloud))
+    }
+
+    @MainActor
+    @Test func popover_resolvedRows_keepReadAloud_forAZW3() {
+        // Feature #57: AZW3/MOBI regained `.tts`, so the popover must
+        // surface the Read aloud row for it — the user-visible half of
+        // the WI-3 cap-gate reversal.
+        let azw3 = FormatCapabilities.capabilities(for: .azw3)
+        #expect(makePopover(capabilities: azw3).resolvedRows.contains(.readAloud))
     }
 
     @MainActor

@@ -77,14 +77,16 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
     /// The rows `ReaderMorePopover` should render for a book whose
     /// reader engine advertises `capabilities`.
     ///
-    /// Bug #176 / GH #602 (REOPENED): the `Read aloud` row is a no-op
-    /// for formats that lack `.tts` (AZW3 / MOBI route through
-    /// Foliate-js, and `FormatCapabilities.capabilities(for: .azw3)`
-    /// excludes `.tts` because the AVSpeechSynthesizer pipeline has no
-    /// azw3/mobi text-extraction path). The original fix removed `.tts`
-    /// from the capability set, but WI-6c's popover re-surfaced the row
-    /// unconditionally — this filter re-applies the gate so the no-op
-    /// affordance never appears.
+    /// The `Read aloud` row is gated on the active format's `.tts`
+    /// capability: it renders only for formats whose reader engine
+    /// advertises `.tts`. The gate originated with bug #176 / GH #602
+    /// (which removed `.tts` from AZW3 while AZW3/MOBI TTS was
+    /// unimplemented) and feature #60 WI-6c's popover had to honor it
+    /// rather than render the row unconditionally. Feature #57 wired
+    /// the AZW3/MOBI TTS path and re-added `.tts` to the AZW3
+    /// capability set, so AZW3/MOBI now show the row; PDF remains the
+    /// format that genuinely lacks `.tts`. This filter is the generic
+    /// per-capability gate — no format is special-cased here.
     ///
     /// Declared (top → bottom) order is preserved — `ReaderMorePopover`
     /// draws its hairline divider after `dividerAfter` by index, so the

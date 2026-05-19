@@ -11,7 +11,7 @@ date: 2026-05-19
 Syncs the claude.ai/design "VReader Note Editor Canvas" handoff into
 the `dev-docs/designs/vreader-fidelity-v1/` bundle. Touches the design
 bundle, plus `project.yml` / `project.pbxproj` (version bump
-3.34.2/489 → 3.34.3/490).
+3.34.10/497 → 3.34.11/498 (rebased onto main)).
 
 **No Swift source files changed.** The audit-gate hook fires on
 `project.pbxproj` — false positive of the Swift-file heuristic. Manual
@@ -57,7 +57,7 @@ Save commits via the existing `HighlightPersisting.updateHighlightNote`.
 4. **No Swift implemented** — design-delivery only. Implementing the
    `HighlightNoteEditSheet` is gated feature-#55 feature-workflow work
    (Edit slice); deliberately not in this PR.
-5. **Version bump** — 3.34.3 / build 490 (patch — docs / design-bundle
+5. **Version bump** — 3.34.11 / build 498 (patch — docs / design-bundle
    sync). `xcodegen generate` confirmed.
 
 ## Verdict

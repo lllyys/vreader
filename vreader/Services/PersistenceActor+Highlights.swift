@@ -143,6 +143,32 @@ extension PersistenceActor: HighlightPersisting {
             .map { highlightToRecord($0) }
     }
 
+    /// Fetches a single highlight by id, scoped to the book identified by
+    /// `key`. Returns `nil` when no highlight with that id belongs to that
+    /// book — feature #55's note-preview tap path.
+    ///
+    /// A dedicated single-row fetch with a predicate on `highlightId` AND the
+    /// owning book's `fingerprintKey`: the note-preview path fires on every
+    /// annotated-text tap, so it must not page the whole book's highlight set
+    /// into memory (plan §2.4 / §6 R-1). The `(id, key)` scoping makes a
+    /// lookup unable to leak a highlight from a different book.
+    func highlight(withID id: UUID, forBookWithKey key: String) async throws -> HighlightRecord? {
+        let context = ModelContext(modelContainer)
+        let highlightID = id
+        let bookKey = key
+        let predicate = #Predicate<Highlight> { highlight in
+            highlight.highlightId == highlightID
+                && highlight.book?.fingerprintKey == bookKey
+        }
+        var descriptor = FetchDescriptor<Highlight>(predicate: predicate)
+        descriptor.fetchLimit = 1
+
+        guard let highlight = try context.fetch(descriptor).first else {
+            return nil
+        }
+        return highlightToRecord(highlight)
+    }
+
     /// Total count of all highlights in the library, across all books.
     /// Single aggregate query — does not materialize any record.
     func countAllHighlights() async throws -> Int {
@@ -167,3 +193,8 @@ extension PersistenceActor: HighlightPersisting {
         )
     }
 }
+
+// Feature #55: `highlight(withID:forBookWithKey:)` above satisfies the
+// `HighlightLookup` boundary protocol, letting `NotePreviewViewModel` (WI-3)
+// be unit-tested against a mock instead of a live actor.
+extension PersistenceActor: HighlightLookup {}

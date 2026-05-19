@@ -288,11 +288,11 @@ extension ReaderContainerView {
             ttsPlaying: ttsService.state != .idle,
             autoTurnOn: settingsStore.autoPageTurn,
             autoTurnInterval: settingsStore.autoPageTurnInterval,
-            // Bug #176 / GH #602: gate the `Read aloud` row by the
-            // book format's capabilities — AZW3 / MOBI exclude `.tts`,
-            // so the row is dropped rather than surfacing a no-op.
-            // Same `BookFormat(...).capabilities` lookup the reader
-            // settings panel uses (`ReaderContainerView`).
+            // Gate the `Read aloud` row by the book format's `.tts`
+            // capability — the row drops for formats without a wired
+            // TTS path (PDF). AZW3/MOBI regained `.tts` in feature #57,
+            // so they show the row. Same `BookFormat(...).capabilities`
+            // lookup the reader settings panel uses (`ReaderContainerView`).
             formatCapabilities: BookFormat(rawValue: book.format.lowercased())?.capabilities,
             // The design anchors the popover just below the top chrome.
             // Chrome height = the Dynamic-Island inset + the ~52pt

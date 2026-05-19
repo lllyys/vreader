@@ -88,19 +88,20 @@ struct ReaderMorePopover: View {
     // MARK: - Popover card
 
     /// The rows this popover renders — capability-gated for the active
-    /// format (bug #176 / GH #602: the `Read aloud` row is dropped when
-    /// the format lacks `.tts`). Exposed (not `private`) so a wiring
-    /// test can prove the popover actually consults `formatCapabilities`
-    /// rather than rendering `ReaderMoreMenuRow.allCases` unconditionally.
+    /// format: the `Read aloud` row is dropped when the format lacks
+    /// `.tts` (PDF). AZW3/MOBI regained `.tts` in feature #57, so they
+    /// keep the row. Exposed (not `private`) so a wiring test can prove
+    /// the popover actually consults `formatCapabilities` rather than
+    /// rendering `ReaderMoreMenuRow.allCases` unconditionally.
     var resolvedRows: [ReaderMoreMenuRow] {
         ReaderMoreMenuRow.visibleRows(for: formatCapabilities)
     }
 
     private var popoverCard: some View {
-        // Bug #176 / GH #602: filter capability-gated rows (e.g. drop
-        // `Read aloud` for AZW3 / MOBI, which lack `.tts`) before
-        // rendering. The divider still trails `dividerAfter` — that row
-        // is never gated, so the anchor always survives the filter.
+        // Filter capability-gated rows (e.g. drop `Read aloud` for a
+        // format without a wired TTS path — PDF) before rendering. The
+        // divider still trails `dividerAfter` — that row is never
+        // gated, so the anchor always survives the filter.
         VStack(spacing: 0) {
             ForEach(resolvedRows, id: \.self) { row in
                 rowButton(row)
