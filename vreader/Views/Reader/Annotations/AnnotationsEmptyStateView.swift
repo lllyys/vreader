@@ -66,8 +66,11 @@ struct AnnotationsEmptyStateView: View {
     }
 
     /// Test-only hook: invokes the CTA action so a unit test can pin the
-    /// closure wiring without a tap-gesture render path.
+    /// closure wiring without a tap-gesture render path. Gated on
+    /// `hasCTA` so it is a faithful proxy for "tap the visible CTA" — it
+    /// no-ops when no button is rendered (label or action absent).
     func invokeCTAForTesting() {
+        guard hasCTA else { return }
         onCTA?()
     }
 
@@ -78,7 +81,8 @@ struct AnnotationsEmptyStateView: View {
                 .opacity(0.85)
 
             Text(title)
-                .font(.system(size: 18, weight: .semibold, design: .serif))
+                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 18)))
+                .fontWeight(.semibold)
                 .foregroundStyle(Color(theme.inkColor))
                 .multilineTextAlignment(.center)
 

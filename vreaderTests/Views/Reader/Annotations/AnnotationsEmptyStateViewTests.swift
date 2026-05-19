@@ -132,4 +132,39 @@ struct AnnotationsEmptyStateViewTests {
         )
         _ = view.body
     }
+
+    @Test("title and body are wired from the init arguments")
+    func titleAndBodyWired() {
+        // The design's EmptyState renders the supplied title + body —
+        // pin that they are carried onto the view, not dropped or
+        // swapped (a value-type View's testable contract).
+        let view = AnnotationsEmptyStateView(
+            theme: .sepia,
+            accessibilityIdentifier: "tocEmptyState",
+            art: AnyView(EmptyTOCArt(theme: .sepia)),
+            title: "No table of contents",
+            body: "This book doesn't ship a TOC."
+        )
+        #expect(view.title == "No table of contents")
+        #expect(view.body_ == "This book doesn't ship a TOC.")
+    }
+
+    @Test("invokeCTAForTesting no-ops when no CTA label is supplied")
+    func invokeCTANoOpsWithoutLabel() {
+        // The hook is gated on hasCTA — an action with no label means no
+        // button renders, so the hook must not fire (faithful proxy for
+        // "tap the visible CTA").
+        var fired = false
+        let view = AnnotationsEmptyStateView(
+            theme: .paper,
+            accessibilityIdentifier: "tocEmptyState",
+            art: AnyView(EmptyTOCArt(theme: .paper)),
+            title: "t", body: "b",
+            ctaLabel: nil,
+            onCTA: { fired = true }
+        )
+        #expect(view.hasCTA == false)
+        view.invokeCTAForTesting()
+        #expect(fired == false)
+    }
 }
