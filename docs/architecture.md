@@ -228,7 +228,10 @@ All cross-component communication uses NotificationCenter:
 | `.readerMoreBookDetails`       | nil                  | `ReaderMorePopover` → ReaderContainerView (opens the `BookDetailsSheet`, feature #61) |
 | `.readerMoreShareBook`         | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — presents the system share sheet for the book file) |
 | `.readerMoreExportAnnotations` | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #62 — opens `HighlightsSheet` on the Highlights filter, which carries the export button) |
+| `.readerMoreBilingual`         | nil                  | `ReaderMorePopover` → format containers (Feature #56 WI-8 — tap the bilingual row; per-format containers route to `BilingualReadingViewModel.setEnabled(...)`, or to AI Settings when bilingual is `.unavailable`) |
+| `.readerMoreReTranslateChapter` | nil                 | `ReaderMorePopover` → format containers (Feature #56 WI-8 — tap the conditional re-translate row; per-format containers present `ReTranslatePickerSheet` per #864) |
 | `.readerBilingualDidChange`    | `["fingerprintKey"]` | `BilingualReadingViewModel` → format renderers (Feature #56 WI-7b — bilingual toggled on/off, or a unit's translation became available / unavailable; renderers re-inject or clear the interlinear translation) |
+| `.readerBookTranslationProgressDidChange` | `["fingerprintKey","completed","total"]` | `BookTranslationCoordinator` → reader / library (Feature #56 WI-8 declared, WI-14 producer — drives `ReaderTranslateBanner` + library card badge) |
 | `.epubFootnoteDetected`        | footnote ref         | EPUB bridge → Container (footnote popup)                |
 | `.bookFileStateDidChange`      | `["fingerprintKey","state"]` | LazyDownloadCoordinator (reconcile) → LibraryView (refresh row, feature #47) |
 | `.libraryRowTappedWhileNotLocal` | `["fingerprintKey","fileState"]` | LibraryView → BookDownloadSheet (future, #47 WI-6) |
