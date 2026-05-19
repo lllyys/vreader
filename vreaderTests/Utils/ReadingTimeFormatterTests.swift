@@ -301,4 +301,39 @@ struct ReadingTimeFormatterDurationTests {
         let result = ReadingTimeFormatter.formatDuration(totalSeconds: 3_600)
         #expect(!result.contains("read"))
     }
+
+    // MARK: - formatCompactHours (feature #67 WI-1)
+
+    @Test func compactHoursZeroSecondsIsZeroH() {
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 0) == "0h")
+    }
+
+    @Test func compactHoursSubHourIsLessThanOneH() {
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 30) == "<1h")
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 3_599) == "<1h")
+    }
+
+    @Test func compactHoursExactlyOneHour() {
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 3_600) == "1h")
+    }
+
+    @Test func compactHoursRoundsDownPartialHour() {
+        // 1h30m → "1h" (whole hours only, floored).
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 5_400) == "1h")
+    }
+
+    @Test func compactHoursDesignValue() {
+        // 41h30m (the design's "41h read this month" subline value).
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 149_400) == "41h")
+    }
+
+    @Test func compactHoursNegativeFloorsToZeroH() {
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: -100) == "0h")
+    }
+
+    @Test func compactHoursHasNoReadSuffix() {
+        // The card's subline supplies "read this month" itself.
+        let result = ReadingTimeFormatter.formatCompactHours(totalSeconds: 7_200)
+        #expect(!result.contains("read"))
+    }
 }

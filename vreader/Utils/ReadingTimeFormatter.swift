@@ -5,6 +5,8 @@
 //   "<1m" for 1-59s; "Xm" for 60-3599s; "Xh Ym" for 3600+; appends " read".
 // - formatDuration: bare-duration variant for the stats dashboard (feature #58)
 //   — never nil ("0m" for zero/negative), no " read" suffix.
+// - formatCompactHours: whole-hours-only variant for the Settings profile-card
+//   subline (feature #67) — "0h" for zero/negative, "<1h" for sub-hour, "Nh".
 // - Speed display requires >= 60 seconds total reading time.
 // - Pages/hr rounded to nearest int; wpm rounded to nearest 10.
 // - Pages/hr preferred over wpm when both available.
@@ -72,6 +74,31 @@ enum ReadingTimeFormatter {
             return "\(minutes)m"
         }
         return "\(hours)h \(minutes)m"
+    }
+
+    /// Formats total reading seconds as whole hours only — the compact
+    /// form the Settings profile-card subline needs (feature #67).
+    ///
+    /// The card subline reads "{N} books · {hours} read this month", so
+    /// this returns just the hours token; the caller supplies "read
+    /// this month". Whole hours are floored; a non-zero sub-hour total
+    /// renders "<1h" so the card never claims "0h" while reading
+    /// genuinely happened. A zero or negative input is "0h".
+    ///
+    /// Examples:
+    /// - 0       -> "0h"
+    /// - 30      -> "<1h"
+    /// - 3599    -> "<1h"
+    /// - 3600    -> "1h"
+    /// - 5400    -> "1h"    (whole hours, floored)
+    /// - 149400  -> "41h"   (41h30m — the design subline value)
+    /// - negative -> "0h"
+    static func formatCompactHours(totalSeconds: Int) -> String {
+        let clamped = max(0, totalSeconds)
+        if clamped == 0 { return "0h" }
+        let hours = clamped / 3_600
+        if hours == 0 { return "<1h" }
+        return "\(hours)h"
     }
 
     // MARK: - Speed
