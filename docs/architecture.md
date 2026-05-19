@@ -100,7 +100,7 @@ Each host owns its ViewModel lifecycle via `@State`:
 
 #### Unified Engine (retained, not dispatched)
 
-`ReaderUnifiedCoordinator` loads text + applies transforms (replacement rules, simp/trad); `UnifiedTextRenderer` displays with TextKit 2 pagination or scroll. Feature #54 removed the unified path from the reader dispatch and the reader-settings Reading Mode picker, so this stack is **no longer reachable from reader dispatch** — it is retained (a follow-up may consume it for bilingual reading, or delete it once provably orphaned).
+`ReaderUnifiedCoordinator` loads text + applies transforms (replacement rules, simp/trad); `UnifiedTextRenderer` displays with TextKit 2 pagination or scroll. Feature #54 removed the unified path from the reader dispatch and the reader-settings Reading Mode picker, so this stack is **no longer reachable from reader dispatch** — it is retained (a follow-up may consume it for bilingual reading, or delete it once provably orphaned). Content replacement rules and Chinese conversion that previously required Unified mode now run in the native readers directly: `MDFileLoader.load` composes `ReplacementTransform` + `SimpTradTransform` over the decoded source text before parsing (feature #54 WI-7); native TXT has Chinese conversion only — TXT replacement rules are deferred (they need a source↔display offset map).
 
 ### 4. Coordinator Layer (`vreader/Views/Reader/`)
 
@@ -149,7 +149,7 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `FoliateURLSchemeHandler`            | WKURLSchemeHandler         | Scheme-handler implementation (not on the live load path; see Foliate-js Bridge note) |
 | `FoliateMessageParser`               | Pure functions             | Parses raw JS message bodies into typed Swift events                      |
 | `FoliateJSEscaper`                   | Pure functions             | Escapes/sanitizes strings for safe JS/CSS interpolation in Foliate bridge |
-| `ReaderSettingsStore`                | UserDefaults               | Global reader UI prefs: theme, typography, reading mode, EPUB layout, auto-page-turn, page-turn animation, Chinese conversion, custom background |
+| `ReaderSettingsStore`                | UserDefaults               | Global reader UI prefs: theme, typography, EPUB layout, auto-page-turn, page-turn animation, Chinese conversion, custom background |
 | `PerBookSettingsStore`               | Per-book JSON files        | Per-book overrides on top of `ReaderSettingsStore` (font/theme/spacing) |
 | `KeychainService`                    | Keychain                   | Secure credential storage (used by `WebDAVProviderFactory`)               |
 | `BookSourcePipeline`                 | Actor + HTTP / rule engine | Search → BookInfo → TOC → Content scraping for Legado-style web novels    |
