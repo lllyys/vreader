@@ -36,6 +36,16 @@
 import SwiftUI
 import UIKit
 
+/// Which subtree the callout renders below the meta + excerpt rows.
+/// Extracted so the empty-vs-note branch decision is unit-testable without a
+/// SwiftUI render — the `body` switches on `displayMode`.
+enum NoteCalloutDisplayMode: Equatable {
+    /// No note body — the empty/no-note state ("No note attached.").
+    case empty
+    /// A note body — the note-body hero + the handoff row.
+    case note
+}
+
 /// Anchored note-preview card — the SwiftUI realization of the design's
 /// `NoteCallout`. Purely presentational; the parent owns presentation state.
 struct NoteCalloutView: View {
@@ -58,13 +68,21 @@ struct NoteCalloutView: View {
     /// The design's note-body `maxHeight` — past this the body scrolls.
     private static let bodyMaxHeight: CGFloat = 180
 
+    /// Which subtree to render — the empty/no-note state or the note hero +
+    /// handoff row. Driven by `content.isEmpty`. Unit-tested via
+    /// `NoteCalloutView.displayMode(for:)`.
+    private var displayMode: NoteCalloutDisplayMode {
+        Self.displayMode(for: content)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             metaRow
             excerptRow
-            if content.isEmpty {
+            switch displayMode {
+            case .empty:
                 emptyStateRow
-            } else {
+            case .note:
                 noteBody
                 Divider().background(Color(theme.ruleColor))
                 handoffRow
@@ -210,6 +228,14 @@ struct NoteCalloutView: View {
     }
 
     // MARK: - Testable statics
+
+    /// The subtree the callout renders for `content` — the empty/no-note
+    /// state when the content has no note body, the note hero + handoff row
+    /// otherwise. The `body`'s branch switches on this; exposed `static` so
+    /// the branch decision is unit-tested without a SwiftUI render.
+    static func displayMode(for content: NotePreviewContent) -> NoteCalloutDisplayMode {
+        content.isEmpty ? .empty : .note
+    }
 
     /// Resolves a stored highlight color name to the meta-row swatch color.
     ///
