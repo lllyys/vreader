@@ -9,7 +9,6 @@
 //   ReaderSearchCoordinator.swift, BookContentCache.swift
 
 import SwiftUI
-import SwiftData
 
 extension ReaderContainerView {
 
@@ -94,37 +93,6 @@ extension ReaderContainerView {
                 fingerprint: fingerprint
             )
         }
-    }
-
-    /// Loads replacement rules for the unified coordinator.
-    func loadReplacementRules() async {
-        let bookKey = book.fingerprintKey
-        let container = modelContext.container
-        let rules: [ReplacementRuleDescriptor] = await Task.detached {
-            let ctx = ModelContext(container)
-            let descriptor = FetchDescriptor<ContentReplacementRule>(
-                sortBy: [SortDescriptor(\.order)]
-            )
-            let allRules = (try? ctx.fetch(descriptor)) ?? []
-            return allRules
-                .filter { $0.enabled && ($0.scopeKey.isEmpty || $0.scopeKey == bookKey) }
-                .map { ReplacementRuleDescriptor(
-                    pattern: $0.pattern,
-                    replacement: $0.replacement,
-                    isRegex: $0.isRegex,
-                    enabled: $0.enabled,
-                    order: $0.order
-                ) }
-        }.value
-
-        var transforms: [any TextTransform] = []
-        if !rules.isEmpty {
-            transforms.append(ReplacementTransform(rules: rules))
-        }
-        if settingsStore.chineseConversion != .none {
-            transforms.append(SimpTradTransform(direction: settingsStore.chineseConversion))
-        }
-        unifiedCoordinator.activeTransforms = transforms
     }
 
     // MARK: - Sheets & Placeholders

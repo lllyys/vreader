@@ -2,7 +2,7 @@
 
 ## Overview
 
-VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT, EPUB, AZW3/MOBI, PDF, and Markdown formats with dual rendering modes (native UIKit/WebView bridges + unified TextKit 2 reflow). AZW3/MOBI is rendered via Foliate-js inside a WKWebView; the unified path falls back to a placeholder for AZW3 today.
+VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT, EPUB, AZW3/MOBI, PDF, and Markdown formats, each rendered by a format-specific native host (UIKit/WebView bridges) selected internally by `ReaderEngine` (feature #54). AZW3/MOBI is rendered via Foliate-js inside a WKWebView. The `UnifiedTextRenderer` (TextKit 2 reflow) stack is retained in the codebase but no longer wired into the reader dispatch. (Feature #54 is in progress — the reader-settings Reading Mode picker UI is removed in a later work item.)
 
 ## System Diagram
 
@@ -48,10 +48,20 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 
 #### Dispatcher
 
-`ReaderContainerView.swift` routes to format-specific readers:
+`ReaderContainerView.swift` routes to format-specific readers via
+`engineReaderView(fingerprint:)`, which switches on `ReaderEngine.resolve(format:)`
+— an internal per-format engine selector (feature #54). The dispatch no
+longer consults a reading-mode preference. (The reader-settings Reading
+Mode picker UI is still present until a later feature-#54 work item removes
+it.)
 
-- If unified mode is on and `FormatCapabilities.unifiedReflow` is true → `unifiedReaderView` (TXT/MD/EPUB → `UnifiedTextRenderer`; AZW3 has no unified case yet and falls back to `UnifiedPlaceholderView`).
-- Else → native format host. AZW3/MOBI specifically routes to `FoliateSpikeView` (`ReaderContainerView.swift:368`), not `FoliateReaderHost`. The host wrapper exists but isn't currently in the dispatch path.
+- `.textNative` → `TXTReaderHost`, `.markdownNative` → `MDReaderHost`,
+  `.epubWKWebView` → `EPUBReaderHost`, `.pdfKit` → `PDFReaderHost`,
+  `.foliateWeb` → `FoliateSpikeView` (AZW3/MOBI; routes directly to
+  `FoliateSpikeView`, not `FoliateReaderHost` — the host wrapper exists but
+  isn't currently in the dispatch path).
+- `resolve(format:)` maps `.epub` to `.epubWKWebView` unconditionally;
+  feature #42 will later route EPUB to `.foliateWeb` behind a flag.
 
 #### Chrome
 
@@ -85,9 +95,9 @@ Each host owns its ViewModel lifecycle via `@State`:
 
 `FoliateViewBridge` (UIViewRepresentable) hosts a WKWebView and uses `loadHTMLString` with the IIFE-bundled `foliate-bundle.js` inlined; books are handed to JS as base64 (no scheme handler in the live load path — `FoliateURLSchemeHandler` exists in the codebase but isn't wired into the active bridge today). `FoliateViewCoordinator` (WKScriptMessageHandler + WKNavigationDelegate) receives JS messages, parses via `FoliateMessageParser`, and routes to typed callbacks. `FoliateHighlightRenderer` generates JS strings for SVG overlay annotations — but it is **not** plugged in as a `HighlightRenderer` adapter today; AZW3 highlight create has a TODO for persistence/JS injection and overlay restore is a no-op placeholder (`FoliateReaderContainerView+Highlights.swift`). `FoliateJSEscaper` provides shared sanitization for all JS/CSS string interpolation across the bridge. `FoliateReaderViewModel` maps bridge events to `Locator` for position persistence.
 
-#### Unified Engine
+#### Unified Engine (retained, not dispatched)
 
-`ReaderUnifiedCoordinator` loads text + applies transforms (replacement rules, simp/trad). `UnifiedTextRenderer` displays with TextKit 2 pagination or scroll.
+`ReaderUnifiedCoordinator` loads text + applies transforms (replacement rules, simp/trad); `UnifiedTextRenderer` displays with TextKit 2 pagination or scroll. Feature #54 removed the unified path from the reader dispatch, so this stack is **no longer reachable from reader dispatch** — it is retained (a follow-up may consume it for bilingual reading, or delete it once provably orphaned). The reader-settings Reading Mode picker UI is removed in a later feature-#54 work item.
 
 ### 4. Coordinator Layer (`vreader/Views/Reader/`)
 
@@ -97,7 +107,7 @@ Cross-format coordinators that compose with multiple readers:
 | -------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `ReaderAICoordinator`      | AI ViewModels, text loading, context extraction                     | On AI/TTS invoke                                                      |
 | `ReaderSearchCoordinator`  | Search service, indexing, FTS5                                      | Service+VM via `ensureSearchReady()` when the search sheet opens      |
-| `ReaderUnifiedCoordinator` | Unified renderer state, text transforms                             | On reader open (unified mode only)                                    |
+| `ReaderUnifiedCoordinator` | Unified renderer state, text transforms — retained but no longer dispatched (feature #54) | n/a (no dispatch path)                                     |
 | `HighlightCoordinator`     | Persists via `HighlightPersisting`, dispatches to `HighlightRenderer` adapters | On reader open per format (TXT/MD/PDF/EPUB)                          |
 
 Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordinator`, `TXTTextViewBridgeCoordinator`) handle delegate / WKScriptMessageHandler plumbing for one bridge each; they're not cross-cutting and aren't enumerated here.
