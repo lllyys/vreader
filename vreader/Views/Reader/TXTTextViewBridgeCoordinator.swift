@@ -31,8 +31,18 @@ extension TXTTextViewBridge {
         /// WI-2b: Action callback fired after the presenter dismisses with
         /// a non-nil action. Typically wraps `HighlightCoordinator.handleTapAction`.
         var onHighlightTapAction: (@MainActor (HighlightTapAction, UUID) async -> Void)?
+        /// Bug #154 / GH #443 (Codex audit): fired when a temporary
+        /// search/navigation highlight is cleared (3 s timer, user scroll, or
+        /// `.searchHighlightClear`). The container wires it to nil
+        /// `uiState.highlightRange` so model + coordinator clear in lockstep.
+        var onTemporaryHighlightCleared: (@MainActor () -> Void)?
         /// Active search/navigation highlight range (bug #43).
         var currentHighlightRange: NSRange?
+        /// Last navigate-nonce consumed (Bug #154 / GH #443). When the
+        /// container's `highlightNonce` differs from this, a navigate event
+        /// occurred — re-paint the temporary highlight + re-arm the auto-clear
+        /// timer even if `currentHighlightRange` is unchanged.
+        var lastHighlightNonce: Int = 0
         /// Timer to auto-clear temporary highlight after 3s (bug #54).
         var highlightClearTimer: Timer?
         /// Weak reference to the text view, used by notification-based highlight clear.
@@ -101,7 +111,13 @@ extension TXTTextViewBridge {
             }
             highlightClearTimer?.invalidate()
             highlightClearTimer = nil
+            // Bug #154 / GH #443 (Codex audit): only notify the container —
+            // and only clear — when there is actually a temporary highlight
+            // showing, so a stray scroll callback after the highlight already
+            // cleared doesn't fire a redundant `uiState.highlightRange` nil.
+            guard currentHighlightRange != nil else { return }
             currentHighlightRange = nil
+            onTemporaryHighlightCleared?()
         }
 
         /// Rebuilds highlight visualization from coordinator state (for timer callback).

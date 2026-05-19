@@ -203,6 +203,41 @@ struct SearchHighlightDismissTests {
         #expect(coordinator.currentHighlightRange == nil)
     }
 
+    // MARK: - Bug #154 / GH #443 (Codex audit) — model/coordinator clear in lockstep
+
+    /// When the coordinator clears a temporary highlight (here via the
+    /// `.searchHighlightClear` path), it must also fire
+    /// `onTemporaryHighlightCleared` so the container can nil
+    /// `uiState.highlightRange`. Without this, the model outlives the visible
+    /// highlight and a later font/theme `updateUIView` re-paints it.
+    @Test @MainActor func coordinatorFiresClearCallbackOnSearchHighlightClear() {
+        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
+        coordinator.currentHighlightRange = NSRange(location: 10, length: 5)
+        var clearCallbackFired = false
+        coordinator.onTemporaryHighlightCleared = { clearCallbackFired = true }
+
+        NotificationCenter.default.post(name: .searchHighlightClear, object: nil)
+
+        #expect(clearCallbackFired,
+                "clearing a temporary highlight must notify the container so uiState.highlightRange is nilled in lockstep (bug #154 / GH #443)")
+        #expect(coordinator.currentHighlightRange == nil)
+    }
+
+    /// The clear callback must NOT fire when there is no highlight showing —
+    /// a stray scroll callback or a duplicate `.searchHighlightClear` after
+    /// the highlight already cleared should not fire a redundant model nil.
+    @Test @MainActor func coordinatorDoesNotFireClearCallbackWhenNoHighlight() {
+        let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
+        #expect(coordinator.currentHighlightRange == nil)
+        var clearCallbackFireCount = 0
+        coordinator.onTemporaryHighlightCleared = { clearCallbackFireCount += 1 }
+
+        NotificationCenter.default.post(name: .searchHighlightClear, object: nil)
+
+        #expect(clearCallbackFireCount == 0,
+                "no highlight is showing — clearing must be a no-op that does not fire the model-clear callback")
+    }
+
     @Test @MainActor func coordinatorNoOpOnSearchHighlightClearWhenNoHighlight() {
         let coordinator = TXTTextViewBridge.Coordinator(delegate: nil)
         #expect(coordinator.currentHighlightRange == nil)

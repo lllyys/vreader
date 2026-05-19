@@ -37,6 +37,14 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     /// Whether the current highlight is temporary (search navigation) vs persistent
     /// (user-created). Temporary highlights auto-clear after 3s. (bug #54)
     var highlightIsTemporary: Bool = true
+    /// Monotonic navigate-event counter (Bug #154 / GH #443). Mirrors the
+    /// non-chunked `TXTTextViewBridge`'s same-named param: a search-tap to an
+    /// already-current target re-sets `highlightRange` to a value it already
+    /// holds, so the range diff alone never re-applies the highlight. The
+    /// container bumps this nonce on every navigate event; a nonce change is
+    /// folded into the bridge's highlight-change detection so a repeat-nav
+    /// re-paints + re-arms the 3 s auto-clear timer.
+    var highlightNonce: Int = 0
     /// Persisted highlights (document-global UTF-16) loaded from DB (bug #55).
     /// Each carries its stored color (Bug #208).
     var persistedHighlights: [PaintedHighlight] = []
@@ -53,6 +61,13 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     /// Feature #53 WI-3. When nil, presenter results have nowhere to go and
     /// the menu only acts as a discoverability cue (no persistence change).
     var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
+    /// Bug #154 / GH #443 (Codex audit): invoked when the 3 s auto-clear timer
+    /// expires a *temporary* search/navigation highlight. The container wires
+    /// this to nil `uiState.highlightRange` so the model and the coordinator's
+    /// `lastHighlightRange` clear together — otherwise a later font/theme
+    /// `updateUIView` re-paints the already-expired highlight from a stale
+    /// `uiState`. Mirrors the non-chunked `TXTTextViewBridge` param.
+    var onTemporaryHighlightCleared: (@MainActor () -> Void)?
     /// Top safe-area inset applied to the UITableView's `contentInset.top` so
     /// the first chunk renders below the Dynamic Island. Bug #179 (mirrors
     /// the non-chunked path's same-named param). Default `0` preserves prior
@@ -144,6 +159,7 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         context.coordinator.highlightActionPresenter = highlightActionPresenter
         context.coordinator.onHighlightTapAction = onHighlightTapAction
+        context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         context.coordinator.delegate = delegate
 
         // Tap gesture for toolbar toggle
@@ -215,6 +231,7 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         context.coordinator.highlightActionPresenter = highlightActionPresenter
         context.coordinator.onHighlightTapAction = onHighlightTapAction
+        context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
 
         // Bug #179: re-apply safe-area top inset on every update (rotation,
         // split-screen resize, etc. can change `proxy.safeAreaInsets.top`).
@@ -258,11 +275,20 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             }
         }
 
-        // Highlight range for visual feedback (bug #53)
-        if highlightRange != context.coordinator.lastHighlightRange {
+        // Highlight range for visual feedback (bug #53).
+        // Bug #154 / GH #443: fold a navigate-nonce change into the change
+        // signal — a repeat-nav to an already-current target leaves
+        // `highlightRange` byte-for-byte identical, so the range diff alone
+        // would skip the re-paint and never re-arm the 3 s auto-clear timer.
+        let nonceChanged = highlightNonce != context.coordinator.lastHighlightNonce
+        if TXTTextViewBridge.highlightShouldReapply(
+            rangeChanged: highlightRange != context.coordinator.lastHighlightRange,
+            nonceChanged: nonceChanged
+        ) {
             // Clear previous highlight
             context.coordinator.clearHighlight(in: tableView)
             context.coordinator.lastHighlightRange = highlightRange
+            context.coordinator.lastHighlightNonce = highlightNonce
             if let range = highlightRange {
                 context.coordinator.applyHighlight(range, in: tableView, isTemporary: highlightIsTemporary)
             }
@@ -337,6 +363,17 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
         /// Tracks last processed highlightRange to avoid redundant applications (bug #53).
         var lastHighlightRange: NSRange?
+
+        /// Last navigate-nonce consumed (Bug #154 / GH #443). When the
+        /// container's `highlightNonce` differs from this, a navigate event
+        /// occurred — re-paint the temporary highlight + re-arm the 3 s
+        /// auto-clear timer even if `lastHighlightRange` is unchanged.
+        var lastHighlightNonce: Int = 0
+
+        /// Bug #154 / GH #443 (Codex audit): fired by the 3 s auto-clear timer
+        /// when a temporary highlight expires. The container wires it to nil
+        /// `uiState.highlightRange` so model + coordinator clear in lockstep.
+        var onTemporaryHighlightCleared: (@MainActor () -> Void)?
 
         /// Timer to auto-clear highlight after a delay.
         /// Internal access needed by TXTChunkedHighlightHelper extension.

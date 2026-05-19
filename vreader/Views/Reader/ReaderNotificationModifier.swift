@@ -33,17 +33,16 @@ struct ReaderNotificationModifier: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .readerNavigateToLocator)) { notification in
                 guard let locator = notification.object as? Locator else { return }
-                // Sync handler — mutate state directly (no race)
-                guard let offset = locator.charOffsetUTF16 ?? locator.charRangeStartUTF16 else { return }
-                uiState.scrollToOffset = offset
-                uiState.highlightIsTemporary = true
-                if let start = locator.charRangeStartUTF16,
-                   let end = locator.charRangeEndUTF16, end > start {
-                    uiState.highlightRange = NSRange(location: start, length: end - start)
-                } else {
-                    uiState.highlightRange = nil
-                }
-                deps.onNavigate(offset)
+                // Sync handler — mutate state directly (no race).
+                // Bug #154 / GH #443: delegate to the extracted, unit-tested
+                // `ReaderNotificationHandlers.handleNavigateToLocator`, which
+                // bumps `uiState.highlightNonce` so a repeat-nav to an
+                // already-current target still re-paints the temporary
+                // highlight. Previously the modifier carried a duplicate
+                // inline copy of this logic that omitted the nonce bump.
+                ReaderNotificationHandlers.handleNavigateToLocator(
+                    locator: locator, state: uiState, deps: deps
+                )
             }
             .onReceive(NotificationCenter.default.publisher(for: .readerHighlightRequested)) { notification in
                 guard let info = notification.object as? TextSelectionInfo else { return }

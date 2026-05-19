@@ -31,6 +31,17 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
     var highlightRange: NSRange?
     /// Whether the current highlight is temporary (search nav) or persistent (user-created).
     var highlightIsTemporary: Bool = true
+    /// Monotonic counter bumped on every `.readerNavigateToLocator` event
+    /// (Bug #154 / GH #443). When a search-tap targets the location the reader
+    /// is already at, `scrollToOffset` / `highlightRange` are re-assigned to
+    /// values they already hold — an `@Observable` no-op write that does NOT
+    /// re-evaluate the SwiftUI body, so the bridge's `updateUIView` never runs
+    /// and the temporary highlight is never re-painted. The 3 s auto-clear
+    /// timer also clears only the bridge coordinator's range, never this
+    /// `highlightRange`, so the two drift apart. Bumping this counter on every
+    /// navigate event forces a real observable change → body re-evaluation →
+    /// bridge re-paint, regardless of whether the range value changed.
+    var highlightNonce: Int = 0
     /// Persisted highlights loaded from DB on file open. Each carries its
     /// stored color name so the layout-manager painter renders the color
     /// the user chose (Bug #208 / GH #776) instead of a hardcoded yellow.

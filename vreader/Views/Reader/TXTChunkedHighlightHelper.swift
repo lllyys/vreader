@@ -122,6 +122,10 @@ extension TXTChunkedReaderBridge.Coordinator {
                 guard let self, let tableView else { return }
                 self.clearHighlight(in: tableView)
                 self.lastHighlightRange = nil
+                // Bug #154 / GH #443 (Codex audit): clear the container model
+                // too, so a later font/theme `updateUIView` doesn't re-paint
+                // the expired temporary highlight from a stale `uiState`.
+                self.onTemporaryHighlightCleared?()
             }
         }
     }

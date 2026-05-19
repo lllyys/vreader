@@ -626,11 +626,18 @@ struct TXTReaderContainerView: View {
                 scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
+                highlightNonce: uiState.highlightNonce,
                 persistedHighlights: uiState.persistedHighlightRanges,
                 persistedHighlightLookup: uiState.persistedHighlightLookup,
                 highlightActionPresenter: UIKitHighlightActionPresenter(),
                 onHighlightTapAction: { [highlightCoordinator] action, id in
                     await highlightCoordinator?.handleTapAction(action, highlightID: id)
+                },
+                onTemporaryHighlightCleared: { [uiState] in
+                    // Bug #154 / GH #443 (Codex audit): the bridge expired the
+                    // temporary search highlight — drop it from the model too
+                    // so a later font/theme re-render can't re-paint it.
+                    uiState.highlightRange = nil
                 },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 delegate: viewModel
@@ -687,11 +694,18 @@ struct TXTReaderContainerView: View {
                 scrollToOffset: localScrollOffset,
                 highlightRange: highlights.temp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
+                highlightNonce: uiState.highlightNonce,
                 persistedHighlights: highlights.persisted,
                 persistedHighlightLookup: chapterLookup,
                 highlightActionPresenter: UIKitHighlightActionPresenter(),
                 onHighlightTapAction: { [highlightCoordinator] action, id in
                     await highlightCoordinator?.handleTapAction(action, highlightID: id)
+                },
+                onTemporaryHighlightCleared: { [uiState] in
+                    // Bug #154 / GH #443 (Codex audit): the bridge expired the
+                    // temporary search highlight — drop it from the model too
+                    // so a later font/theme re-render can't re-paint it.
+                    uiState.highlightRange = nil
                 },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 delegate: viewModel
@@ -729,11 +743,18 @@ struct TXTReaderContainerView: View {
                 scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
+                highlightNonce: uiState.highlightNonce,
                 persistedHighlights: uiState.persistedHighlightRanges,
                 persistedHighlightLookup: uiState.persistedHighlightLookup,
                 highlightActionPresenter: UIKitHighlightActionPresenter(),
                 onHighlightTapAction: { [highlightCoordinator] action, id in
                     await highlightCoordinator?.handleTapAction(action, highlightID: id)
+                },
+                onTemporaryHighlightCleared: { [uiState] in
+                    // Bug #154 / GH #443 (Codex audit): the bridge expired the
+                    // temporary search highlight — drop it from the model too
+                    // so a later font/theme re-render can't re-paint it.
+                    uiState.highlightRange = nil
                 },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top)
             )
@@ -766,11 +787,18 @@ struct TXTReaderContainerView: View {
                 scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
+                highlightNonce: uiState.highlightNonce,
                 persistedHighlights: uiState.persistedHighlightRanges,
                 persistedHighlightLookup: uiState.persistedHighlightLookup,
                 highlightActionPresenter: UIKitHighlightActionPresenter(),
                 onHighlightTapAction: { [highlightCoordinator] action, id in
                     await highlightCoordinator?.handleTapAction(action, highlightID: id)
+                },
+                onTemporaryHighlightCleared: { [uiState] in
+                    // Bug #154 / GH #443 (Codex audit): the bridge expired the
+                    // temporary search highlight — drop it from the model too
+                    // so a later font/theme re-render can't re-paint it.
+                    uiState.highlightRange = nil
                 },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 chapterOffsetIndex: viewModel.chapterOffsetIndex,
