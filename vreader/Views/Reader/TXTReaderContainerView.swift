@@ -274,9 +274,14 @@ struct TXTReaderContainerView: View {
         // WI-7c3..7c5 attach the same modifier to the chunked TXT /
         // MD / EPUB containers.
         .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
-        .notePreviewPresenterIfAvailable(
+        // Feature #64 WI-6: a tap on a highlight opens the unified
+        // highlight-action popover (color / note / copy / share / delete) —
+        // superseding feature #55's note preview and feature #53's long-press
+        // delete `UIMenu`. `mutating` is the TXT `HighlightCoordinator`.
+        .unifiedHighlightPopoverPresenterIfAvailable(
             modelContainer: modelContainer,
             bookFingerprintKey: viewModel.bookFingerprintKey,
+            mutating: highlightCoordinator,
             theme: settingsStore?.theme ?? .paper
         )
         .task {
@@ -629,10 +634,6 @@ struct TXTReaderContainerView: View {
                 highlightNonce: uiState.highlightNonce,
                 persistedHighlights: uiState.persistedHighlightRanges,
                 persistedHighlightLookup: uiState.persistedHighlightLookup,
-                highlightActionPresenter: UIKitHighlightActionPresenter(),
-                onHighlightTapAction: { [highlightCoordinator] action, id in
-                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
-                },
                 onTemporaryHighlightCleared: { [uiState] in
                     // Bug #154 / GH #443 (Codex audit): the bridge expired the
                     // temporary search highlight — drop it from the model too
@@ -697,10 +698,6 @@ struct TXTReaderContainerView: View {
                 highlightNonce: uiState.highlightNonce,
                 persistedHighlights: highlights.persisted,
                 persistedHighlightLookup: chapterLookup,
-                highlightActionPresenter: UIKitHighlightActionPresenter(),
-                onHighlightTapAction: { [highlightCoordinator] action, id in
-                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
-                },
                 onTemporaryHighlightCleared: { [uiState] in
                     // Bug #154 / GH #443 (Codex audit): the bridge expired the
                     // temporary search highlight — drop it from the model too
@@ -746,10 +743,6 @@ struct TXTReaderContainerView: View {
                 highlightNonce: uiState.highlightNonce,
                 persistedHighlights: uiState.persistedHighlightRanges,
                 persistedHighlightLookup: uiState.persistedHighlightLookup,
-                highlightActionPresenter: UIKitHighlightActionPresenter(),
-                onHighlightTapAction: { [highlightCoordinator] action, id in
-                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
-                },
                 onTemporaryHighlightCleared: { [uiState] in
                     // Bug #154 / GH #443 (Codex audit): the bridge expired the
                     // temporary search highlight — drop it from the model too
@@ -790,10 +783,6 @@ struct TXTReaderContainerView: View {
                 highlightNonce: uiState.highlightNonce,
                 persistedHighlights: uiState.persistedHighlightRanges,
                 persistedHighlightLookup: uiState.persistedHighlightLookup,
-                highlightActionPresenter: UIKitHighlightActionPresenter(),
-                onHighlightTapAction: { [highlightCoordinator] action, id in
-                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
-                },
                 onTemporaryHighlightCleared: { [uiState] in
                     // Bug #154 / GH #443 (Codex audit): the bridge expired the
                     // temporary search highlight — drop it from the model too

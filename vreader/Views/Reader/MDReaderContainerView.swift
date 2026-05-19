@@ -105,9 +105,14 @@ struct MDReaderContainerView: View {
         // observes the notification and shows the sheet, mirroring
         // the TXT container's attachment from WI-7c2.
         .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
-        .notePreviewPresenterIfAvailable(
+        // Feature #64 WI-6: a tap on a highlight opens the unified
+        // highlight-action popover — superseding feature #55's note preview
+        // and feature #53's long-press delete `UIMenu`. MD renders via the
+        // shared `TXTTextViewBridge`; `mutating` is the MD `HighlightCoordinator`.
+        .unifiedHighlightPopoverPresenterIfAvailable(
             modelContainer: modelContainer,
             bookFingerprintKey: viewModel.bookFingerprintKey,
+            mutating: highlightCoordinator,
             theme: settingsStore?.theme ?? .paper
         )
         .task {
@@ -359,10 +364,6 @@ struct MDReaderContainerView: View {
                 highlightNonce: uiState.highlightNonce,
                 persistedHighlights: uiState.persistedHighlightRanges,
                 persistedHighlightLookup: uiState.persistedHighlightLookup,
-                highlightActionPresenter: UIKitHighlightActionPresenter(),
-                onHighlightTapAction: { [highlightCoordinator] action, id in
-                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
-                },
                 onTemporaryHighlightCleared: { [uiState] in
                     // Bug #154 / GH #443 (Codex audit): the bridge expired the
                     // temporary search highlight — drop it from the model too

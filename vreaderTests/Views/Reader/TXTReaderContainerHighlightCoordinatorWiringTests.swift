@@ -101,36 +101,41 @@ struct TXTReaderContainerHighlightCoordinatorWiringTests {
         )
     }
 
-    /// Bug #202 / GH #740: the chapter-mode TXT path (`chapterReaderContent`)
-    /// was missing three of the WI-2/WI-2b parameters that the small-file
-    /// path (`readerContent`) and chunked path (`chunkedReaderContent`) both
-    /// pass to the bridge. Without these, the bridge's `persistedHighlightLookup`
-    /// stays empty and `handleContentTap` falls through to chrome-toggle
-    /// instead of presenting the inline edit/delete menu. The fix passes the
-    /// chapter-local lookup + the same presenter and onAction the other two
-    /// paths use. These three source-check tests pin the wiring so a future
-    /// refactor cannot regress it.
+    /// Feature #64 WI-6: the TXT container migrated from feature #55's
+    /// `notePreviewPresenterIfAvailable` to the unified highlight-action
+    /// popover's `unifiedHighlightPopoverPresenterIfAvailable`. The old
+    /// feature #53 long-press `UIMenu` wiring (`highlightActionPresenter:` +
+    /// `onHighlightTapAction:` passed to `TXTTextViewBridge`) is removed —
+    /// a *tap* on a highlight now opens the unified popover. These
+    /// source-check tests pin the migrated wiring so a refactor cannot
+    /// regress it.
 
-    @Test func chapterPassesHighlightActionPresenter() throws {
+    @Test func attachesUnifiedHighlightPopoverPresenter() throws {
         let source = try Self.loadContainerSource()
-        // Required in all three bridge call sites (small-file, chunked, chapter).
-        let required = "highlightActionPresenter: UIKitHighlightActionPresenter()"
-        let occurrences = source.components(separatedBy: required).count - 1
+        // The TXT container must attach the feature #64 unified popover.
         #expect(
-            occurrences >= 3,
-            "TXTReaderContainerView must pass `highlightActionPresenter: UIKitHighlightActionPresenter()` to TXTTextViewBridge in ALL THREE paths (readerContent, chunkedReaderContent, chapterReaderContent). Found \(occurrences) occurrence(s); expected ≥ 3. See bug #202 / GH #740."
+            source.contains("unifiedHighlightPopoverPresenterIfAvailable"),
+            "TXTReaderContainerView must attach `unifiedHighlightPopoverPresenterIfAvailable` (feature #64 WI-6). A tap on a highlight opens the unified highlight-action popover."
+        )
+        // And must NOT still attach feature #55's superseded note preview.
+        #expect(
+            !source.contains("notePreviewPresenterIfAvailable"),
+            "TXTReaderContainerView must no longer attach `notePreviewPresenterIfAvailable` — feature #55's note preview is superseded by the unified popover (feature #64 WI-6)."
         )
     }
 
-    @Test func chapterPassesOnHighlightTapAction() throws {
+    @Test func feature53LongPressMenuWiringRemoved() throws {
         let source = try Self.loadContainerSource()
-        // The closure form `onHighlightTapAction: { [highlightCoordinator] action, id in ... }`
-        // is identical across the three call sites; pin the leading token.
-        let required = "onHighlightTapAction: { [highlightCoordinator] action, id in"
-        let occurrences = source.components(separatedBy: required).count - 1
+        // Feature #64 WI-6 removes the #53 long-press UIMenu wiring from the
+        // TXT bridge call sites — the unified popover's action row carries
+        // Delete, opened by a tap.
         #expect(
-            occurrences >= 3,
-            "TXTReaderContainerView must pass an `onHighlightTapAction` closure to TXTTextViewBridge in ALL THREE paths. Found \(occurrences) occurrence(s); expected ≥ 3. See bug #202 / GH #740."
+            !source.contains("highlightActionPresenter:"),
+            "TXTReaderContainerView must no longer pass `highlightActionPresenter:` to TXTTextViewBridge — the feature #53 long-press delete menu is superseded by the unified popover (feature #64 WI-6)."
+        )
+        #expect(
+            !source.contains("onHighlightTapAction:"),
+            "TXTReaderContainerView must no longer pass `onHighlightTapAction:` to TXTTextViewBridge (feature #64 WI-6)."
         )
     }
 

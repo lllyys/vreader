@@ -24,13 +24,6 @@ extension TXTTextViewBridge {
         /// the original `HighlightRecord.highlightId` for the inline-menu
         /// dispatcher. Feature #53 WI-2 / GH #596.
         var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
-        /// WI-2b: Presenter for the inline edit/delete menu shown on
-        /// tap-of-highlight. nil → coordinator only posts the notification
-        /// and skips chrome-toggle (matches WI-2's dormant-subscriber path).
-        var highlightActionPresenter: (any HighlightActionPresenting)?
-        /// WI-2b: Action callback fired after the presenter dismisses with
-        /// a non-nil action. Typically wraps `HighlightCoordinator.handleTapAction`.
-        var onHighlightTapAction: (@MainActor (HighlightTapAction, UUID) async -> Void)?
         /// Bug #154 / GH #443 (Codex audit): fired when a temporary
         /// search/navigation highlight is cleared (3 s timer, user scroll, or
         /// `.searchHighlightClear`). The container wires it to nil
@@ -202,13 +195,13 @@ extension TXTTextViewBridge {
         // MARK: - Content Tap (Toolbar Toggle)
 
         @objc func handleContentTap(_ gesture: UITapGestureRecognizer) {
-            // Feature #53 WI-2 + feature #55 WI-6: hit-test against persisted
-            // highlight ranges first. On hit, post `.readerHighlightTapped`
-            // and SKIP the chrome-toggle path. Feature #55 makes a single tap
-            // open the NOTE PREVIEW (via `NotePreviewModifier`, which observes
-            // `.readerHighlightTapped`) — so the tap handler no longer
-            // presents #53's delete menu. The #53 delete menu is re-homed to
-            // `handleHighlightLongPress` below.
+            // Feature #64 WI-6: hit-test against persisted highlight ranges
+            // first. On hit, post `.readerHighlightTapped` and SKIP the
+            // chrome-toggle path. A tap on a highlight opens the unified
+            // highlight-action popover (via `HighlightPopoverModifier`, which
+            // observes `.readerHighlightTapped`) — its action row carries
+            // Delete. (Feature #55's note preview + feature #53's long-press
+            // delete `UIMenu` are both superseded by the unified popover.)
             if let tv = gesture.view as? UITextView,
                !persistedHighlightLookup.isEmpty,
                let event = Self.resolveHighlightTap(
@@ -227,33 +220,6 @@ extension TXTTextViewBridge {
                 rebuildHighlights(in: tv)
             }
             TXTBridgeShared.postContentTappedNotification()
-        }
-
-        /// Feature #55 WI-6: re-homes feature #53's inline delete menu from a
-        /// tap to a long-press. A tap now opens the #55 note preview; a
-        /// deliberate long-press on the same highlight opens #53's
-        /// `UIEditMenuInteraction` delete menu. Same hit-test, same presenter,
-        /// same `HighlightTapAction.delete` dispatch — only the triggering
-        /// gesture moved (plan §2.7.2). Fires on `.began` so the menu appears
-        /// as soon as the long-press is recognized.
-        @objc func handleHighlightLongPress(_ gesture: UILongPressGestureRecognizer) {
-            guard gesture.state == .began,
-                  let tv = gesture.view as? UITextView,
-                  !persistedHighlightLookup.isEmpty,
-                  let presenter = highlightActionPresenter,
-                  let onAction = onHighlightTapAction,
-                  let event = Self.resolveHighlightTap(
-                      tapPoint: gesture.location(in: tv),
-                      in: tv,
-                      lookup: persistedHighlightLookup
-                  )
-            else { return }
-            presenter.present(for: event, in: tv) { action in
-                guard let action else { return }
-                Task { @MainActor in
-                    await onAction(action, event.highlightID)
-                }
-            }
         }
 
         /// Resolves a tap into a `ReaderHighlightTapEvent` if the location
@@ -324,40 +290,11 @@ extension TXTTextViewBridge {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            // Feature #55 WI-6: the highlight long-press is mutually
-            // exclusive with the native text-selection long-press — a
-            // long-press on a persisted highlight opens ONLY #53's delete
-            // menu, never UITextView's selection. The tap recognizer keeps
-            // the legacy "always simultaneous" answer. Either side of the
-            // pair being the highlight long-press denies simultaneity.
-            guard TXTBridgeShared.simultaneousRecognitionAllowed(
-                    for: gestureRecognizer.name),
-                  TXTBridgeShared.simultaneousRecognitionAllowed(
-                    for: otherGestureRecognizer.name)
-            else { return false }
+            // Feature #64 WI-6: with the feature #53 highlight long-press
+            // removed, the only custom recognizer is the content-tap, which
+            // keeps the legacy "always simultaneous" answer alongside
+            // UITextView's native gestures.
             return TXTBridgeShared.gestureRecognizerShouldRecognizeSimultaneously()
-        }
-
-        /// Feature #55 WI-6: gates the highlight long-press recognizer with
-        /// the SAME hit-test the handler reuses, so the recognizer only
-        /// *begins* when the press lands on a persisted highlight. A
-        /// long-press anywhere else never engages it — UITextView's native
-        /// text-selection long-press proceeds undisturbed. Recognizers
-        /// other than the named highlight long-press are unaffected (the
-        /// content-tap recognizer keeps UIKit's default begin behavior).
-        func gestureRecognizerShouldBegin(
-            _ gestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            guard gestureRecognizer.name == TXTBridgeShared.highlightLongPressName
-            else { return true }
-            guard let tv = gestureRecognizer.view as? UITextView,
-                  !persistedHighlightLookup.isEmpty
-            else { return false }
-            return Self.resolveHighlightTap(
-                tapPoint: gestureRecognizer.location(in: tv),
-                in: tv,
-                lookup: persistedHighlightLookup
-            ) != nil
         }
 
         // MARK: - Link Interaction Policy

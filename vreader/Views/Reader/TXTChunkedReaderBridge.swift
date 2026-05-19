@@ -54,14 +54,6 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     /// Feature #53 WI-3. When empty, tap-on-highlight is dormant (the gesture
     /// falls through to the existing chrome-toggle behavior).
     var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
-    /// Presenter that shows the inline edit-menu when a tap resolves to a
-    /// highlight. Feature #53 WI-3. When nil, only the
-    /// `.readerHighlightTapped` notification fires.
-    var highlightActionPresenter: (any HighlightActionPresenting)?
-    /// Callback that routes the user's chosen action through the coordinator.
-    /// Feature #53 WI-3. When nil, presenter results have nowhere to go and
-    /// the menu only acts as a discoverability cue (no persistence change).
-    var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
     /// Bug #154 / GH #443 (Codex audit): invoked when the 3 s auto-clear timer
     /// expires a *temporary* search/navigation highlight. The container wires
     /// this to nil `uiState.highlightRange` so the model and the coordinator's
@@ -158,8 +150,6 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         context.coordinator.chunkStartOffsets = chunkStartOffsets
         context.coordinator.persistedHighlights = persistedHighlights
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
-        context.coordinator.highlightActionPresenter = highlightActionPresenter
-        context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         context.coordinator.delegate = delegate
         // Bug #232 / GH #960: hand the coordinator a table-view handle so its
@@ -174,23 +164,10 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         tapRecognizer.delegate = context.coordinator
         tableView.addGestureRecognizer(tapRecognizer)
 
-        // Feature #55 WI-6: long-press gesture re-homing feature #53's inline
-        // delete menu off the tap (the tap now opens the #55 note preview).
-        // The coordinator's `gestureRecognizerShouldBegin` runs the highlight
-        // hit-test up front, so this recognizer ONLY begins when the press
-        // lands on a persisted highlight — a long-press on plain body text
-        // never engages it and proceeds into the cell UITextView's native
-        // text selection. When it DOES begin, the coordinator denies
-        // simultaneous recognition against the native selection long-press,
-        // so the highlight long-press opens only #53's menu. The `.name`
-        // lets the shared delegate identify this recognizer.
-        let highlightLongPress = UILongPressGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleHighlightLongPress)
-        )
-        highlightLongPress.name = TXTBridgeShared.highlightLongPressName
-        highlightLongPress.delegate = context.coordinator
-        tableView.addGestureRecognizer(highlightLongPress)
+        // Feature #64 WI-6: the feature #53 highlight long-press gesture (which
+        // opened the bare delete `UIMenu`) is removed. A *tap* on a highlight
+        // posts `.readerHighlightTapped`, observed by the unified
+        // highlight-action popover — its action row carries Delete.
 
         // Restore scroll position — asyncAfter allows SwiftUI to size the table view
         // before scrolling. In makeUIView the view has no frame yet.
@@ -229,12 +206,11 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
     func updateUIView(_ tableView: UITableView, context: Context) {
         context.coordinator.delegate = delegate
-        // Feature #53 WI-3: refresh tap-on-highlight inputs every update so
+        // Feature #64 WI-6: refresh tap-on-highlight inputs every update so
         // late-arriving highlights (created after the bridge was first
-        // installed) become tap-targetable as soon as the lookup grows.
+        // installed) become tap-targetable as soon as the lookup grows. The
+        // tap posts `.readerHighlightTapped` for the unified popover.
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
-        context.coordinator.highlightActionPresenter = highlightActionPresenter
-        context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         // Bug #232 / GH #960: keep the coordinator's table-view handle current
         // so the `.searchHighlightClear` observer always routes to the live
@@ -346,12 +322,8 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         /// Each carries its stored color (Bug #208).
         var persistedHighlights: [PaintedHighlight] = []
         /// Lookup table (UUID, global UTF-16 range) used by the tap-on-
-        /// highlight hit-tester. Feature #53 WI-3.
+        /// highlight hit-tester. Feeds the `.readerHighlightTapped` post.
         var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
-        /// Presenter for the inline tap-on-highlight menu. Feature #53 WI-3.
-        var highlightActionPresenter: (any HighlightActionPresenting)?
-        /// Tap-action routing callback. Feature #53 WI-3.
-        var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
         weak var delegate: TXTTextViewBridgeDelegate?
 
         /// LRU cache for attributed strings keyed by chunk index.
@@ -563,13 +535,12 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         // MARK: - Content Tap (Toolbar Toggle / Tap-on-Highlight)
 
         @objc func handleContentTap(_ gesture: UITapGestureRecognizer) {
-            // Feature #53 WI-3 + feature #55 WI-6: if the tap lands inside a
-            // persisted highlight range, fire `.readerHighlightTapped`
-            // instead of toggling chrome. Feature #55 makes a single tap open
-            // the NOTE PREVIEW (via `NotePreviewModifier`) — so the tap
-            // handler no longer presents #53's delete menu; that menu is
-            // re-homed to `handleHighlightLongPress`. Lookup-empty
-            // short-circuit keeps non-highlight callers cost-free.
+            // Feature #64 WI-6: if the tap lands inside a persisted highlight
+            // range, fire `.readerHighlightTapped` instead of toggling chrome.
+            // A tap on a highlight opens the unified highlight-action popover
+            // (via `HighlightPopoverModifier`) — its action row carries
+            // Delete. Lookup-empty short-circuit keeps non-highlight callers
+            // cost-free.
             if let tableView = gesture.view as? UITableView,
                !persistedHighlightLookup.isEmpty,
                let event = Self.resolveChunkedHighlightTap(
@@ -586,33 +557,7 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             TXTBridgeShared.postContentTappedNotification()
         }
 
-        /// Feature #55 WI-6: re-homes feature #53's inline delete menu from a
-        /// tap to a long-press for the chunked TXT path (plan §2.7.2). Same
-        /// hit-test (`resolveChunkedHighlightTap`), same presenter, same
-        /// `HighlightTapAction.delete` dispatch — only the gesture moved. A
-        /// tap now opens the #55 note preview.
-        @objc func handleHighlightLongPress(_ gesture: UILongPressGestureRecognizer) {
-            guard gesture.state == .began,
-                  let tableView = gesture.view as? UITableView,
-                  !persistedHighlightLookup.isEmpty,
-                  let presenter = highlightActionPresenter,
-                  let onAction = onHighlightTapAction,
-                  let event = Self.resolveChunkedHighlightTap(
-                      gesture: gesture,
-                      in: tableView,
-                      chunkStartOffsets: chunkStartOffsets,
-                      lookup: persistedHighlightLookup
-                  )
-            else { return }
-            presenter.present(for: event, in: tableView) { action in
-                guard let action else { return }
-                Task { @MainActor in
-                    await onAction(action, event.highlightID)
-                }
-            }
-        }
-
-        // MARK: - Tap-on-Highlight Resolution (Feature #53 WI-3)
+        // MARK: - Tap-on-Highlight Resolution
 
         /// Resolves a gesture-driven tap into a `ReaderHighlightTapEvent`
         /// by walking from `UITableView` → containing cell → embedded
@@ -725,39 +670,11 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            // Feature #55 WI-6: the highlight long-press is mutually
-            // exclusive with the cell UITextView's native text-selection
-            // long-press — a long-press on a persisted highlight opens ONLY
-            // #53's delete menu. The tap recognizer keeps the legacy
-            // "always simultaneous" answer.
-            guard TXTBridgeShared.simultaneousRecognitionAllowed(
-                    for: gestureRecognizer.name),
-                  TXTBridgeShared.simultaneousRecognitionAllowed(
-                    for: otherGestureRecognizer.name)
-            else { return false }
+            // Feature #64 WI-6: with the feature #53 highlight long-press
+            // removed, the only custom recognizer is the content-tap, which
+            // keeps the legacy "always simultaneous" answer alongside the
+            // cell UITextView's native gestures.
             return TXTBridgeShared.gestureRecognizerShouldRecognizeSimultaneously()
-        }
-
-        /// Feature #55 WI-6: gates the highlight long-press recognizer with
-        /// the SAME hit-test the handler reuses, so it only *begins* when
-        /// the press lands on a persisted highlight. A long-press anywhere
-        /// else never engages it — the cell UITextView's native
-        /// text-selection long-press proceeds undisturbed. Other recognizers
-        /// (the content-tap) keep UIKit's default begin behavior.
-        func gestureRecognizerShouldBegin(
-            _ gestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            guard gestureRecognizer.name == TXTBridgeShared.highlightLongPressName
-            else { return true }
-            guard let tableView = gestureRecognizer.view as? UITableView,
-                  !persistedHighlightLookup.isEmpty
-            else { return false }
-            return Self.resolveChunkedHighlightTap(
-                gesture: gestureRecognizer,
-                in: tableView,
-                chunkStartOffsets: chunkStartOffsets,
-                lookup: persistedHighlightLookup
-            ) != nil
         }
 
         // MARK: - UITextViewDelegate
