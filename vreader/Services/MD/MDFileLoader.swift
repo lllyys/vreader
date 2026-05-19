@@ -10,7 +10,8 @@
 // - Checks Task.isCancelled between parse and position restore.
 //
 // @coordinates-with: MDReaderViewModel.swift, MDParserProtocol.swift,
-//   ReadingPositionPersisting.swift, EncodingDetector.swift
+//   ReadingPositionPersisting.swift, EncodingDetector.swift,
+//   ReplacementTransform.swift, SimpTradTransform.swift, TextMapper.swift
 
 import Foundation
 
@@ -40,28 +41,63 @@ enum MDFileLoader {
     /// theme-aware colors. Replaces the previously-hardcoded
     /// `MDRenderConfig.default`. Every existing call site that omits the
     /// argument compiles and behaves exactly as before.
+    ///
+    /// Feature #54 WI-7: `replacementRules` (default `[]`) wires content
+    /// replacement rules into the native MD reader. The transform chain is
+    /// applied to the decoded source text BEFORE `parser.parse`, in this
+    /// order: `ReplacementTransform` first, then `SimpTradTransform`. (A
+    /// replacement rule that targets simplified-Chinese text must run
+    /// before the conversion; this order matches the pre-#54 Unified-mode
+    /// pipeline.) An empty `replacementRules` is a no-op identity
+    /// passthrough — every existing call site is unaffected.
+    ///
+    /// Offset safety: the chain runs on the *source text before parse*, and
+    /// `restoreOffset` clamps the saved offset to
+    /// `docInfo.renderedTextLengthUTF16` — the rendered length the
+    /// post-transform parse produced. Unlike the native TXT stack, MD does
+    /// not persist global *source-coordinate* offsets/boundaries, so a
+    /// transform-before-parse pipeline yields self-consistent rendered
+    /// coordinates. A mid-book rule edit triggers a full reload (the
+    /// open-time pattern); positions are re-derived against the new
+    /// rendered text — a re-derivation on reload, not a silent
+    /// misplacement. This matches the existing `chineseConversion`
+    /// "live re-apply requires reopen" behavior.
     static func load(
         url: URL,
         parser: any MDParserProtocol,
         positionStore: any ReadingPositionPersisting,
         bookFingerprintKey: String,
         renderConfig: MDRenderConfig = .default,
-        chineseConversion: ChineseConversionDirection = .none
+        chineseConversion: ChineseConversionDirection = .none,
+        replacementRules: [ReplacementRuleDescriptor] = []
     ) async throws -> MDLoadResult {
-        // Stage 1: Read file, detect encoding, optionally apply Chinese
-        // conversion, and parse on background thread.
+        // Stage 1: Read file, detect encoding, apply the transform chain
+        // (replacement rules → Chinese conversion), and parse on a
+        // background thread.
         let config = renderConfig
         let docInfo: MDDocumentInfo = try await Task.detached {
             let data = try Data(contentsOf: url)
             let result = try EncodingDetector.detect(data: data)
-            let sourceText: String
+            // Build the transform chain in fixed order: replacement rules
+            // first, then Chinese conversion. Each element is omitted when
+            // it would be a no-op so an all-empty chain skips `TextMapper`
+            // entirely (identity passthrough).
+            var transforms: [any TextTransform] = []
+            let enabledRules = replacementRules.filter(\.enabled)
+            if !enabledRules.isEmpty {
+                transforms.append(ReplacementTransform(rules: enabledRules))
+            }
             if chineseConversion != .none {
+                transforms.append(SimpTradTransform(direction: chineseConversion))
+            }
+            let sourceText: String
+            if transforms.isEmpty {
+                sourceText = result.text
+            } else {
                 sourceText = TextMapper.apply(
-                    transforms: [SimpTradTransform(direction: chineseConversion)],
+                    transforms: transforms,
                     to: result.text
                 ).text
-            } else {
-                sourceText = result.text
             }
             return await parser.parse(text: sourceText, config: config)
         }.value

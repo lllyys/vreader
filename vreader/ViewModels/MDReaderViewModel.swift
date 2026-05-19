@@ -120,10 +120,18 @@ final class MDReaderViewModel {
     /// MD has no live theme re-render path — the chapter-start colors apply
     /// on the next open of the file, consistent with the Chinese-conversion
     /// limitation above.
+    ///
+    /// Feature #54 WI-7: `replacementRules` (default `[]`) is forwarded to
+    /// `MDFileLoader.load`, which applies a `ReplacementTransform` to the
+    /// source text before Markdown parsing. Pass the enabled
+    /// `ContentReplacementRule` rows scoped to this book from the call
+    /// site. Like Chinese conversion, a mid-book rule change re-applies
+    /// only on the next open of the file.
     func open(
         url: URL,
         renderConfig: MDRenderConfig = .default,
-        chineseConversion: ChineseConversionDirection = .none
+        chineseConversion: ChineseConversionDirection = .none,
+        replacementRules: [ReplacementRuleDescriptor] = []
     ) async {
         guard !isLoading else { return }
 
@@ -148,7 +156,8 @@ final class MDReaderViewModel {
                 positionStore: positionStore,
                 bookFingerprintKey: bookFingerprintKey,
                 renderConfig: renderConfig,
-                chineseConversion: chineseConversion
+                chineseConversion: chineseConversion,
+                replacementRules: replacementRules
             )
         } catch is CancellationError {
             resetState()
