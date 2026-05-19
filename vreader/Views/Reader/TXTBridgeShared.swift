@@ -6,6 +6,9 @@
 // - buildReaderEditMenu builds the shared Highlight, Add Note, Define, and Translate menu.
 // - postContentTappedNotification extracts the identical tap handler body.
 // - gestureRecognizerShouldRecognizeSimultaneously extracts the identical delegate answer.
+// - highlightLongPressName + simultaneousRecognitionAllowed gate feature #55 WI-6's
+//   long-press recognizer so it stays mutually exclusive with UITextView's native
+//   text-selection long-press when the press lands on a persisted highlight.
 //
 // @coordinates-with TXTTextViewBridge.swift, TXTChunkedReaderBridge.swift,
 //   ReaderNotifications.swift, DictionaryLookup.swift
@@ -14,6 +17,15 @@ import UIKit
 
 /// Shared utility functions for TXT/MD reader bridge coordinators.
 enum TXTBridgeShared {
+
+    /// `UIGestureRecognizer.name` stamped on feature #55 WI-6's highlight
+    /// long-press recognizer (TXT non-chunked, chunked, and PDF). The
+    /// coordinator's `UIGestureRecognizerDelegate` reads this name to (a)
+    /// gate `gestureRecognizerShouldBegin` with a highlight hit-test and
+    /// (b) deny simultaneous recognition against the native selection
+    /// long-press — so a long-press on a highlight opens ONLY feature
+    /// #53's delete menu, never the system text-selection / edit menu.
+    static let highlightLongPressName = "vreader.feature55.highlightLongPress"
 
     /// Posts a selection notification with text and UTF-16 range.
     /// For chunked readers, pass `chunkOffset` to convert chunk-local to document-global.
@@ -134,5 +146,25 @@ enum TXTBridgeShared {
     /// Shared gesture recognizer delegate answer — always allow simultaneous recognition.
     static func gestureRecognizerShouldRecognizeSimultaneously() -> Bool {
         true
+    }
+
+    /// Feature #55 WI-6 simultaneous-recognition policy. The tap recognizer
+    /// keeps the legacy "always allow" answer (it must coexist with
+    /// UITextView's own tap handling). The highlight long-press recognizer
+    /// — identified by `highlightLongPressName` — instead returns `false`
+    /// so it is mutually exclusive with the system text-selection
+    /// long-press: a deliberate long-press on a persisted highlight opens
+    /// feature #53's delete menu WITHOUT UITextView/PDFView also starting a
+    /// selection. (`gestureRecognizerShouldBegin` already keeps the
+    /// long-press from beginning on plain body text, so this denial only
+    /// ever applies on top of a confirmed highlight hit.)
+    ///
+    /// - Parameters:
+    ///   - gestureName: `gestureRecognizer.name` of the recognizer the
+    ///     delegate callback fired for.
+    /// - Returns: `false` only when the recognizer is WI-6's highlight
+    ///   long-press; `true` otherwise (the pre-WI-6 behavior).
+    static func simultaneousRecognitionAllowed(for gestureName: String?) -> Bool {
+        gestureName != highlightLongPressName
     }
 }

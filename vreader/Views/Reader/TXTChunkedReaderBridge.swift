@@ -156,12 +156,19 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
         // Feature #55 WI-6: long-press gesture re-homing feature #53's inline
         // delete menu off the tap (the tap now opens the #55 note preview).
-        // `handleHighlightLongPress` no-ops unless the press lands on a
-        // persisted highlight.
+        // The coordinator's `gestureRecognizerShouldBegin` runs the highlight
+        // hit-test up front, so this recognizer ONLY begins when the press
+        // lands on a persisted highlight — a long-press on plain body text
+        // never engages it and proceeds into the cell UITextView's native
+        // text selection. When it DOES begin, the coordinator denies
+        // simultaneous recognition against the native selection long-press,
+        // so the highlight long-press opens only #53's menu. The `.name`
+        // lets the shared delegate identify this recognizer.
         let highlightLongPress = UILongPressGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.handleHighlightLongPress)
         )
+        highlightLongPress.name = TXTBridgeShared.highlightLongPressName
         highlightLongPress.delegate = context.coordinator
         tableView.addGestureRecognizer(highlightLongPress)
 
@@ -605,7 +612,39 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            TXTBridgeShared.gestureRecognizerShouldRecognizeSimultaneously()
+            // Feature #55 WI-6: the highlight long-press is mutually
+            // exclusive with the cell UITextView's native text-selection
+            // long-press — a long-press on a persisted highlight opens ONLY
+            // #53's delete menu. The tap recognizer keeps the legacy
+            // "always simultaneous" answer.
+            guard TXTBridgeShared.simultaneousRecognitionAllowed(
+                    for: gestureRecognizer.name),
+                  TXTBridgeShared.simultaneousRecognitionAllowed(
+                    for: otherGestureRecognizer.name)
+            else { return false }
+            return TXTBridgeShared.gestureRecognizerShouldRecognizeSimultaneously()
+        }
+
+        /// Feature #55 WI-6: gates the highlight long-press recognizer with
+        /// the SAME hit-test the handler reuses, so it only *begins* when
+        /// the press lands on a persisted highlight. A long-press anywhere
+        /// else never engages it — the cell UITextView's native
+        /// text-selection long-press proceeds undisturbed. Other recognizers
+        /// (the content-tap) keep UIKit's default begin behavior.
+        func gestureRecognizerShouldBegin(
+            _ gestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard gestureRecognizer.name == TXTBridgeShared.highlightLongPressName
+            else { return true }
+            guard let tableView = gestureRecognizer.view as? UITableView,
+                  !persistedHighlightLookup.isEmpty
+            else { return false }
+            return Self.resolveChunkedHighlightTap(
+                gesture: gestureRecognizer,
+                in: tableView,
+                chunkStartOffsets: chunkStartOffsets,
+                lookup: persistedHighlightLookup
+            ) != nil
         }
 
         // MARK: - UITextViewDelegate

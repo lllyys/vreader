@@ -308,7 +308,40 @@ extension TXTTextViewBridge {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            TXTBridgeShared.gestureRecognizerShouldRecognizeSimultaneously()
+            // Feature #55 WI-6: the highlight long-press is mutually
+            // exclusive with the native text-selection long-press — a
+            // long-press on a persisted highlight opens ONLY #53's delete
+            // menu, never UITextView's selection. The tap recognizer keeps
+            // the legacy "always simultaneous" answer. Either side of the
+            // pair being the highlight long-press denies simultaneity.
+            guard TXTBridgeShared.simultaneousRecognitionAllowed(
+                    for: gestureRecognizer.name),
+                  TXTBridgeShared.simultaneousRecognitionAllowed(
+                    for: otherGestureRecognizer.name)
+            else { return false }
+            return TXTBridgeShared.gestureRecognizerShouldRecognizeSimultaneously()
+        }
+
+        /// Feature #55 WI-6: gates the highlight long-press recognizer with
+        /// the SAME hit-test the handler reuses, so the recognizer only
+        /// *begins* when the press lands on a persisted highlight. A
+        /// long-press anywhere else never engages it — UITextView's native
+        /// text-selection long-press proceeds undisturbed. Recognizers
+        /// other than the named highlight long-press are unaffected (the
+        /// content-tap recognizer keeps UIKit's default begin behavior).
+        func gestureRecognizerShouldBegin(
+            _ gestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard gestureRecognizer.name == TXTBridgeShared.highlightLongPressName
+            else { return true }
+            guard let tv = gestureRecognizer.view as? UITextView,
+                  !persistedHighlightLookup.isEmpty
+            else { return false }
+            return Self.resolveHighlightTap(
+                tapPoint: gestureRecognizer.location(in: tv),
+                in: tv,
+                lookup: persistedHighlightLookup
+            ) != nil
         }
 
         // MARK: - Link Interaction Policy
