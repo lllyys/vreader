@@ -182,29 +182,14 @@ struct TXTReaderViewModelContinuousTests {
     }
 
     // MARK: - TOC jump retargeting (WI-6)
-
-    @Test func continuousChapterGlobalStartReturnsChapterStartOffset() async {
-        let (vm, _) = await Self.makeVM(result: Self.makeOpenResult())
-        await vm.openContinuous(url: Self.testURL)
-        #expect(vm.continuousChapterGlobalStart(forChapter: 0) == 0)
-        #expect(vm.continuousChapterGlobalStart(forChapter: 1) == 100)
-        #expect(vm.continuousChapterGlobalStart(forChapter: 2) == 250)
-    }
-
-    @Test func continuousChapterGlobalStartOutOfBoundsReturnsNil() async {
-        let (vm, _) = await Self.makeVM(result: Self.makeOpenResult())
-        await vm.openContinuous(url: Self.testURL)
-        #expect(vm.continuousChapterGlobalStart(forChapter: -1) == nil)
-        #expect(vm.continuousChapterGlobalStart(forChapter: 99) == nil)
-    }
-
-    @Test func continuousGlobalOffsetForTitleMatchesChapter() async {
-        let (vm, _) = await Self.makeVM(result: Self.makeOpenResult())
-        await vm.openContinuous(url: Self.testURL)
-        #expect(vm.continuousGlobalOffset(forChapterTitle: "Chapter Two") == 100)
-        #expect(vm.continuousGlobalOffset(forChapterTitle: "  Chapter Three  ") == 250)
-        #expect(vm.continuousGlobalOffset(forChapterTitle: "Nonexistent") == nil)
-    }
+    //
+    // In continuous mode the container's `onNavigate` publishes the TOC
+    // entry's already-document-global `charOffsetUTF16` straight to
+    // `uiState.scrollToOffset` (plan §3.3) — the chunked bridge's
+    // `scrollToGlobalOffset` then binary-searches the containing chunk. The
+    // chapter is derived afterward from where the scroll lands, so there is
+    // no VM-level TOC-jump helper to unit-test here; `chapterContaining`
+    // (TXTChapterOffsetIndexTests) covers the offset→chapter derivation.
 
     // MARK: - chapterScrollFraction in continuous mode (WI-8)
 
@@ -279,9 +264,15 @@ struct TXTReaderViewModelContinuousTests {
         #expect(vm.continuousChunks == nil)
     }
 
-    // MARK: - empty / single chapter edge cases
+    // MARK: - single-chapter fallback
 
-    @Test func openContinuousSingleChapterDerivesChapterZero() async {
+    @Test func openContinuousSingleChapterFallsBackToNonContinuous() async {
+        // Codex round-1 audit fix [High]: a book with <2 chapters never swaps
+        // chapters, so `openContinuous` must NOT route it through the
+        // continuous surface — it falls back to the legacy chapter-based path.
+        // This preserves the plan's "non-chaptered TXT unchanged" invariant
+        // (`openChapterBased` synthesizes exactly one chapter for short
+        // non-chaptered text).
         let text = String(repeating: "X", count: 200)
         let data = Data(text.utf8)
         let chapters = [TXTChapter(
@@ -299,8 +290,10 @@ struct TXTReaderViewModelContinuousTests {
         )
         let (vm, _) = await Self.makeVM(result: result)
         await vm.openContinuous(url: Self.testURL)
-        vm.updateScrollPosition(charOffsetUTF16: 150)
-        #expect(vm.currentChapterIdx == 0)
-        #expect(vm.isContinuousMode == true)
+        // Single chapter → continuous surface NOT built; legacy chapter path.
+        #expect(vm.isContinuousMode == false)
+        #expect(vm.chapterOffsetIndex == nil)
+        // Still opened (the legacy chapter path loaded the one chapter).
+        #expect(vm.currentChapterText == text)
     }
 }

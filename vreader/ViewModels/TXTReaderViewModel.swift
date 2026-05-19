@@ -223,10 +223,6 @@ final class TXTReaderViewModel {
         return (Double(currentChapterIdx) + scrollFraction) / Double(idx.count)
     }
 
-    /// Aliases for WI-6 overlay compatibility.
-    func goToNextChapter() { Task { await nextChapter() } }
-    func goToPreviousChapter() { Task { await previousChapter() } }
-
     // MARK: - Init
 
     init(
@@ -459,6 +455,18 @@ final class TXTReaderViewModel {
         let openResult = chapterLoadResult.chapterOpenResult
         let index = openResult.chapterIndex
 
+        // Continuous scroll only solves the multi-chapter SWAP jump. A book
+        // with fewer than 2 chapters (a non-chaptered file — `openChapterBased`
+        // synthesizes exactly one synthetic chapter for short non-chaptered
+        // text) never swaps, so it keeps the legacy small-file / large-file
+        // rendering split. This preserves the plan's "non-chaptered TXT
+        // unchanged" invariant.
+        guard index.chapters.count >= 2 else {
+            AppLogger.txt.debug("openContinuous: <2 chapters, falling back to chapter-based")
+            await txtService.close(); isLoading = false
+            await openChapterBased(url: url); return
+        }
+
         // Decode the whole book once and split it into the continuous-surface
         // chunk array. A decode failure (or empty book) falls back to the
         // legacy chapter-based open so the user can still read.
@@ -497,15 +505,26 @@ final class TXTReaderViewModel {
         // Resolve the saved position to a document-global offset. The loader
         // already parsed `txtchapter:idx:local` / legacy global locators into
         // (chapterIndex, localOffset); convert to global via the offset index.
-        if chapterLoadResult.hadSavedPosition, !index.chapters.isEmpty {
+        //
+        // Codex round-1 audit fix [Medium]: derive `currentChapterIdx` /
+        // `currentChapterLocalUTF16` FROM the computed global offset rather
+        // than trusting the saved (idx, local) pair. `resolveChapterPosition`
+        // can clamp `localOffset` to `textLengthUTF16` at an exact chapter
+        // end, which makes the global offset land on the NEXT chapter's
+        // start. Deriving keeps the continuous-mode "chapter is a function
+        // of global offset" invariant — so `makeLocator` does not emit a
+        // stale `txtchapter:` href before the first scroll callback arrives.
+        if chapterLoadResult.hadSavedPosition, !index.chapters.isEmpty,
+           let offsetIndex = chapterOffsetIndex {
             let savedIdx = chapterLoadResult.initialChapterIndex
             let savedLocal = chapterLoadResult.restoredLocalOffsetUTF16
-            let globalStart = chapterOffsetIndex?.globalStart(ofChapter: savedIdx) ?? 0
-            let globalOffset = globalStart + savedLocal
+            let rawGlobal = offsetIndex.globalStart(ofChapter: savedIdx) + savedLocal
+            let globalOffset = min(max(rawGlobal, 0), totalTextLengthUTF16)
             continuousRestoreGlobalOffset = globalOffset > 0 ? globalOffset : nil
             currentOffsetUTF16 = globalOffset
-            currentChapterIdx = savedIdx
-            currentChapterLocalUTF16 = savedLocal
+            let derivedIdx = offsetIndex.chapterContaining(globalOffset)
+            currentChapterIdx = derivedIdx
+            currentChapterLocalUTF16 = globalOffset - offsetIndex.globalStart(ofChapter: derivedIdx)
         } else {
             continuousRestoreGlobalOffset = nil
             currentOffsetUTF16 = 0
@@ -525,35 +544,13 @@ final class TXTReaderViewModel {
         broadcastPosition(makeLocator())
     }
 
-    // MARK: - Continuous-Scroll Navigation (Bug #180 re-scoped fix)
-
-    /// Document-global UTF-16 start offset of the given chapter, for
-    /// retargeting a TOC / chrome-button chapter jump to a scroll offset.
-    /// Returns nil when not in continuous mode or the index is out of bounds.
-    func continuousChapterGlobalStart(forChapter index: Int) -> Int? {
-        guard let offsetIndex = chapterOffsetIndex,
-              index >= 0, index < offsetIndex.chapters.count else { return nil }
-        return offsetIndex.globalStart(ofChapter: index)
-    }
-
-    /// Document-global UTF-16 start offset of the chapter whose title matches,
-    /// for retargeting a TOC tap to a scroll offset. Returns nil for no match.
-    func continuousGlobalOffset(forChapterTitle title: String) -> Int? {
-        guard let offsetIndex = chapterOffsetIndex else { return nil }
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let idx = offsetIndex.chapters.firstIndex(where: {
-            $0.title.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
-        }) else { return nil }
-        return offsetIndex.globalStart(ofChapter: idx)
-    }
-
     // MARK: - Chapter Navigation (WI-5)
 
     /// Navigates to a specific chapter by index. No-op if out of bounds or not in chapter mode.
     /// Used by TOC / Contents-toolbar chapter jumps in the legacy single-chapter
-    /// (Paged) path. In continuous mode the container retargets navigation to a
-    /// scroll offset (see `continuousChapterGlobalStart`); this swap path is the
-    /// Paged fallback only.
+    /// (Paged) path. In continuous mode the container's `onNavigate` instead
+    /// publishes the target as a document-global `uiState.scrollToOffset`
+    /// (no text swap); this swap path is the Paged fallback only.
     func navigateToChapter(_ index: Int) async {
         guard let chIdx = chapterIndex, let loader = chapterContentLoader,
               index >= 0, index < chIdx.chapters.count else { return }

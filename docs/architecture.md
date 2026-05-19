@@ -88,7 +88,7 @@ The app sheets share `ReaderSheetChrome.swift` — a reusable wrapper matching t
 
 Each host owns its ViewModel lifecycle via `@State`:
 
-- `TXTReaderHost` → `TXTReaderContainerView` → `TXTTextViewBridge` (small) or `TXTChunkedReaderBridge` (>500K UTF-16)
+- `TXTReaderHost` → `TXTReaderContainerView` → `TXTTextViewBridge` (small single-chapter / Paged) or `TXTChunkedReaderBridge` (>500K UTF-16, **and** chaptered TXT in Scroll layout — bug #180). Chaptered TXT in Scroll layout renders as one continuous `UITableView` surface fed the whole book: `TXTContinuousChunkBuilder` splits the decoded book into document-global-offset chunks, `TXTChapterOffsetIndex` layers chapter awareness so `currentChapterIdx` is *derived* from scroll offset (no per-chapter render unit, no chapter-swap).
 - `EPUBReaderHost` → `EPUBReaderContainerView` → `EPUBWebViewBridge` (WKWebView + JS injection)
 - `PDFReaderHost` → `PDFReaderContainerView` → `PDFViewBridge` (PDFKit)
 - `MDReaderHost` → `MDReaderContainerView` → reuses `TXTTextViewBridge` with NSAttributedString

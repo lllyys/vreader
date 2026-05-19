@@ -136,6 +136,33 @@ struct TXTReaderPositionBackCompatTests {
         #expect(vm3.currentOffsetUTF16 == 330)
     }
 
+    @Test func restoreAtExactChapterEndDerivesChapterFromGlobalOffset() async {
+        // Codex round-1 audit fix [Medium]: `resolveChapterPosition` can clamp
+        // a saved local offset to the chapter's textLengthUTF16 at an exact
+        // chapter end. A saved `txtchapter:0:120` (chapter 0 length 120 → local
+        // clamps to 120) yields global = 0 + 120 = 120, which is chapter 1's
+        // start. The VM must DERIVE currentChapterIdx from the global offset
+        // (→ chapter 1), not trust the saved idx 0.
+        let (vm, store) = await Self.makeVM(result: Self.makeOpenResult())
+        let locator = Locator(
+            bookFingerprint: Self.fingerprint, href: "txtchapter:0:120",
+            progression: nil, totalProgression: nil, cfi: nil, page: nil,
+            charOffsetUTF16: 120, charRangeStartUTF16: nil,
+            charRangeEndUTF16: nil, textQuote: nil, textContextBefore: nil,
+            textContextAfter: nil
+        )
+        await store.seed(bookFingerprintKey: Self.fingerprint.canonicalKey,
+                         locator: locator)
+        await vm.openContinuous(url: Self.testURL)
+        #expect(vm.continuousRestoreGlobalOffset == 120)
+        #expect(vm.currentOffsetUTF16 == 120)
+        // Global 120 is chapter 1's start ([120,300)), NOT chapter 0.
+        #expect(vm.currentChapterIdx == 1)
+        #expect(vm.currentChapterLocalUTF16 == 0)
+        // makeLocator must reflect the derived chapter, not the saved idx 0.
+        #expect(vm.makeLocator().href == "txtchapter:1:0")
+    }
+
     @Test func positionAtChapterZeroStartDoesNotForceRestoreScroll() async {
         // A saved position at global offset 0 → no restore scroll needed.
         let (vm, store) = await Self.makeVM(result: Self.makeOpenResult())
