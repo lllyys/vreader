@@ -211,6 +211,8 @@ All cross-component communication uses NotificationCenter:
 | `.readerHighlightRequested`    | `TextSelectionInfo`  | Bridge → Container                                      |
 | `.readerSelectionPopoverRequested` | `TextSelectionInfo` (object) | Bridge → `SelectionPopoverPresenterModifier` (Feature #60 WI-7c1). Bridges that have swapped to the popover suppress their legacy `UIMenu` and post this instead; the presenter mounts `SelectionPopoverView` (WI-7a) as a sheet and routes taps through `SelectionPopoverActionRouter` (WI-7b). |
 | `.readerHighlightRemoved`      | UUID string          | HighlightListVM → Container                             |
+| `.readerHighlightTapped`       | `ReaderHighlightTapEvent` (object) | Bridge → `HighlightPopoverModifier`. Posted on a tap that hits a persisted highlight; the modifier opens the unified highlight-action popover (feature #64). |
+| `.foliateRequestAnnotationJSCreate` / `JSDelete` | `{cfi, color?, fingerprintKey}` | `FoliateHighlightJSBridge` → `FoliateSpikeView.Coordinator` (evaluate the SVG-overlay create/remove JS on the live WKWebView — Foliate's renderer-less highlight repaint path). |
 | `.readerHighlightsDidImport`   | fingerprintKey       | Importer → format containers (refresh persisted highlights) |
 | `.readerDidClose`              | fingerprintKey       | ViewModel → LibraryView                                 |
 | `.readerAnnotationRequested`   | `TextSelectionInfo`  | Bridge → Container                                      |
@@ -258,19 +260,46 @@ Format-specific state remains in each container:
 | `TextHighlightRenderer` | TXT, MD   | Mutates `TextReaderUIState.persistedHighlightRanges`                                |
 | `EPUBHighlightRenderer` | EPUB      | Generates CSS Highlight API JS via `onInjectJS` callback                            |
 | `PDFHighlightRenderer`  | PDF       | Creates/removes `PDFAnnotation` objects; tracks `highlightId → [PDFAnnotation]` map |
-| _(none yet)_            | AZW3/MOBI | Selection capture + CFI anchoring landed; `FoliateHighlightRenderer` exists for SVG-overlay JS but is not yet wired as a `HighlightRenderer` adapter. AZW3 highlight create/restore are TODO/no-op placeholders today. |
+| _(no `HighlightRenderer` conformer)_ | AZW3/MOBI | `FoliateHighlightRenderer` is a static-method `struct` of JS builders; Foliate highlight visuals are driven by `NotificationCenter` messages keyed on CFI (`.foliateRequestAnnotationJSCreate` / `Delete`), observed inside `FoliateSpikeView.Coordinator`. |
 
-`HighlightCoordinator` orchestrates the highlight lifecycle:
+`HighlightCoordinator` orchestrates the highlight lifecycle for the `HighlightRenderer`-backed formats (TXT/MD/PDF/EPUB):
 
 - `create()` — persists via `HighlightPersisting`, then calls `renderer.apply()`
 - `handleRemoval()` — calls `renderer.remove()`, re-fetches, calls `renderer.restore()`
 - `restoreAll()` — fetches from persistence, calls `renderer.restore()`
 
-Each container creates its format-specific renderer and coordinator:
+### Unified highlight-action popover (feature #64)
 
-- TXT/MD: via `ReaderNotificationModifier` (handles `readerHighlightRequested` / `readerHighlightRemoved`)
-- EPUB: coordinator for persistence, renderer for JS injection
-- PDF: coordinator + renderer with annotation map (fixes bug #87: highlight deletion)
+A tap on an existing highlight in **any** format opens one shared, styled
+SwiftUI popover (color swatch row, note editor, copy / share / delete) — the
+unified highlight-action popover. It supersedes feature #55's read-only note
+callout and feature #53's long-press delete `UIMenu` (both deleted in
+feature #64 WI-10).
+
+- **Trigger** — every reader bridge posts `.readerHighlightTapped` (a
+  `ReaderHighlightTapEvent` with the highlight UUID + a host-`UIView`-local
+  `sourceRect`) on a tap that hits a persisted highlight.
+- **`HighlightPopoverModifier`** — the `ViewModifier` attached to every
+  container via `unifiedHighlightPopoverPresenterIfAvailable(...)`. It observes
+  the notification, drives `HighlightPopoverViewModel` (record → presentation
+  content over the `HighlightLookup` boundary), and routes to either an
+  anchored card (`UIKitHighlightPopoverPresenter`, a `UIPopoverPresentationController`)
+  or a SwiftUI bottom sheet. `HighlightPopoverPresenter` is the pure
+  card-vs-sheet decision table.
+- **`HighlightMutating`** — the `@MainActor` protocol the popover's
+  `HighlightPopoverActionRouter` dispatches color / note / delete mutations
+  through (`changeColor` / `updateNote` / `deleteHighlight`, each returning a
+  typed `HighlightMutationOutcome`). `HighlightCoordinator` conforms for the
+  `HighlightRenderer`-backed formats; `FoliateHighlightMutator` is the Foliate
+  conformer — it has no renderer, so it composes `HighlightPersisting` (persist)
+  + `FoliateHighlightJSBridge` (CFI-keyed JS-overlay repaint).
+
+Each container creates its format-specific renderer + mutation boundary:
+
+- TXT/MD: `HighlightCoordinator` via `ReaderNotificationModifier`
+- EPUB: `HighlightCoordinator` (persistence + JS injection)
+- PDF: `HighlightCoordinator` + renderer with annotation map (fixes bug #87: highlight deletion)
+- AZW3/MOBI: `FoliateHighlightMutator` (no renderer — persistence + the CFI JS-notification bridge)
 
 ## Key Design Patterns
 

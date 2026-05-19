@@ -56,11 +56,14 @@ extension Notification.Name {
     /// Posted by reader bridges (TXT/MD/EPUB/Foliate/PDF) when the user
     /// taps an existing highlight in the content area.
     /// The notification's `object` is a `ReaderHighlightTapEvent` carrying
-    /// the highlight's UUID and a `sourceRect` in the coordinate space of
-    /// the same `UIView` the bridge later passes to
-    /// `HighlightActionPresenting.present(for:in:)` — see the doc on
-    /// `ReaderHighlightTapEvent.sourceRect` for the cross-bridge contract.
-    /// Feature #53 / GH #596.
+    /// the highlight's UUID and a `sourceRect`. Feature #64's
+    /// `HighlightPopoverModifier` observes this to open the unified
+    /// highlight-action popover anchored at `sourceRect` — see the doc on
+    /// `ReaderHighlightTapEvent.sourceRect` for the cross-bridge
+    /// coordinate-space contract. (Originally feature #53 / GH #596; the
+    /// feature-#53 long-press `UIMenu` was replaced by the unified popover and
+    /// torn down in feature #64 WI-10 — this notification is the surviving,
+    /// now tap-triggered, entry point.)
     static let readerHighlightTapped = Notification.Name("vreader.readerHighlightTapped")
     /// Posted after annotation import completes (bug #88).
     /// Reader containers observe this to re-render persisted highlights.
@@ -211,14 +214,16 @@ struct PDFHighlightNotificationPayload {
     let color: String
 }
 
-/// Carries the tap event for an existing highlight (Feature #53).
-/// Posted via `.readerHighlightTapped` from any reader format's bridge.
+/// Carries the tap event for an existing highlight. Posted via
+/// `.readerHighlightTapped` from any reader format's bridge; observed by
+/// feature #64's `HighlightPopoverModifier` to open the unified
+/// highlight-action popover.
 ///
 /// **`sourceRect` coordinate-space contract (Bug #203 / GH #743)**: the rect
-/// must be in the coordinate space of the same `UIView` the bridge passes
-/// to `HighlightActionPresenting.present(for:in:)`. The presenter feeds it
-/// to `UIEditMenuConfiguration.sourcePoint`, which UIKit interprets in the
-/// interaction-view's coords. Per-bridge:
+/// must be in the coordinate space of the same `UIView` the bridge supplies
+/// as the popover's `hostViewProvider`. `UIKitHighlightPopoverPresenter` feeds
+/// it to `UIPopoverPresentationController.sourceRect`, which UIKit interprets
+/// in the host view's coords. Per-bridge:
 ///   - TXT (non-chunked): textView-local; presenter view is the textView.
 ///   - TXT chunked: tableView-local; presenter view is the tableView. The
 ///     chunked gesture wrapper converts textView-local rects from the
@@ -227,8 +232,9 @@ struct PDFHighlightNotificationPayload {
 ///     view is the webView.
 ///   - PDF: pdfView-local via `pdfView.convert(hit.bounds, from: page)`.
 ///   - Foliate (AZW3/MOBI): `.zero` (known follow-up — Foliate JS doesn't
-///     forward annotation rects yet); the menu anchors at view origin.
-/// Window-space rects (the pre-Bug-#203 contract) anchored the menu
+///     forward annotation rects yet); with no rect the unified popover
+///     resolves to its bottom-sheet form.
+/// Window-space rects (the pre-Bug-#203 contract) anchored the popover
 /// off-screen whenever the host UIView was offset within its window.
 struct ReaderHighlightTapEvent: Sendable, Equatable {
     let highlightID: UUID

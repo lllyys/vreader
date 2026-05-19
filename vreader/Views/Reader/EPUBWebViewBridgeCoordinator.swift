@@ -107,21 +107,17 @@ extension EPUBWebViewBridge {
             }
         }
 
-        /// Feature #53 WI-4 / feature #55 WI-7: parse a `{id, rect}`
-        /// payload from the JS `highlightTapHandler` channel and post the
-        /// cross-format `.readerHighlightTapped` notification.
+        /// Parses a `{id, rect}` payload from the JS `highlightTapHandler`
+        /// channel and posts the cross-format `.readerHighlightTapped`
+        /// notification.
         ///
-        /// Feature #55 WI-7 re-homes the EPUB tap: a tap on an annotated
-        /// highlight now opens the #55 note preview (`NotePreviewModifier`,
+        /// Feature #64 WI-8: a tap on an annotated EPUB highlight opens the
+        /// unified highlight-action popover (`HighlightPopoverModifier`,
         /// attached on `EPUBReaderContainerView`, observes
-        /// `.readerHighlightTapped`). The legacy #53 tap-time inline
-        /// delete menu is therefore dropped for EPUB v1 — highlight
-        /// deletion stays reachable via the Annotations panel's
-        /// Highlights tab (the note preview's "Open in panel" action
-        /// routes there). A native EPUB long-press → #53 menu is a
-        /// deferred follow-up (plan §9); EPUB has no native long-press
-        /// recognizer for a highlight, so unlike TXT/MD/PDF (WI-6) there
-        /// is no `present(...)` call to move.
+        /// `.readerHighlightTapped`) — color / note / copy / share / delete.
+        /// EPUB has no native long-press recognizer for a highlight, so
+        /// unlike the native TXT/MD/PDF bridges there was never a feature-#53
+        /// long-press `UIMenu` here to remove.
         private func handleHighlightTapMessage(_ body: Any) {
             guard let event = EPUBHighlightBridge.parseHighlightTapMessage(body)
             else { return }

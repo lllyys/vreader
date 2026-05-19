@@ -45,12 +45,12 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 
 ### Annotations
 
-- **Bookmarks, highlights, notes** — Full CRUD for TXT/MD/PDF/EPUB; AZW3 in progress
+- **Bookmarks, highlights, notes** — Full CRUD across all five formats (TXT/MD/PDF/EPUB/AZW3)
 - **EPUB highlights** — CSS Highlight API with JS bridge + buffered delivery
-- **AZW3 highlights** — Selection capture + CFI anchoring shipped; overlay restoration deferred to WI-7
+- **AZW3 highlights** — Selection capture + CFI anchoring with SVG-overlay rendering via the Foliate-js bridge
 - **PDF highlights** — PDFAnnotation-based with selection detection
 - **TXT/MD highlights** — NSAttributedString with persistent rendering
-- **Tap-to-preview notes** — Tapping an annotated highlight shows its note inline (read-only preview) across all five formats; a long-press opens the edit/delete menu on TXT/MD/PDF
+- **Tap-to-edit highlights** — Tapping an existing highlight in any format (TXT/MD/PDF/EPUB/AZW3) opens one unified highlight-action popover — change color, edit the note, copy, share, or delete
 - **Export/import** — Markdown + JSON export, VReader JSON round-trip import
 
 ### Search & Navigation

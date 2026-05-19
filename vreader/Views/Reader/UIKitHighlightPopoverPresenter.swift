@@ -258,4 +258,24 @@ private final class HighlightPopoverDelegate: NSObject, UIPopoverPresentationCon
         MainActor.assumeIsolated { onDismiss() }
     }
 }
+
+// MARK: - UIView → presenting UIViewController
+
+extension UIView {
+    /// Walks the responder chain to the nearest enclosing `UIViewController`
+    /// — the controller a popover anchored in this view should present from.
+    /// (Feature #64 WI-10: re-homed here from the deleted feature-#55
+    /// `UIKitNotePreviewPresenter`; `UIKitHighlightPopoverPresenter` is its
+    /// only caller.)
+    var nearestViewController: UIViewController? {
+        var responder: UIResponder? = self
+        while let next = responder?.next {
+            if let viewController = next as? UIViewController {
+                return viewController
+            }
+            responder = next
+        }
+        return nil
+    }
+}
 #endif

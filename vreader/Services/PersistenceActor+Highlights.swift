@@ -194,7 +194,7 @@ extension PersistenceActor: HighlightPersisting {
     }
 }
 
-// Feature #55: `highlight(withID:forBookWithKey:)` above satisfies the
-// `HighlightLookup` boundary protocol, letting `NotePreviewViewModel` (WI-3)
-// be unit-tested against a mock instead of a live actor.
+// `highlight(withID:forBookWithKey:)` above satisfies the `HighlightLookup`
+// boundary protocol, letting feature #64's `HighlightPopoverViewModel` be
+// unit-tested against a mock instead of a live actor.
 extension PersistenceActor: HighlightLookup {}
