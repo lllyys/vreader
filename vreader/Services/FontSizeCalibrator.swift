@@ -49,21 +49,29 @@ struct FontSizeCalibrator: Sendable {
     /// calibrated value can never exceed what the renderer accepts. For the
     /// `.foliate` target the band is `8...72`; for `.txt` / `.md` / `.epub` it
     /// is `12...64`.
+    ///
+    /// Non-finite safety: if `unified` or the configured multiplier is `NaN`
+    /// or infinite, the scaled product is non-finite and `Swift.min`/`max`
+    /// cannot clamp it deterministically. In that case the method falls back
+    /// to the target band's lower bound — a readable, in-range value — so the
+    /// calibrator NEVER hands a `NaN`/infinite size to a renderer.
     func calibratedSize(
         forUnified unified: CGFloat,
         target: CalibrationTarget
     ) -> CGFloat {
-        let scaled = unified * CGFloat(profile.multiplier(for: target))
+        let lower: CGFloat
+        let upper: CGFloat
         switch target {
         case .txt, .md, .epub:
-            return Self.clamp(scaled, lower: Self.textMinimum, upper: Self.textMaximum)
+            lower = Self.textMinimum
+            upper = Self.textMaximum
         case .foliate:
-            return Self.clamp(
-                scaled,
-                lower: CGFloat(Self.foliateMinimum),
-                upper: CGFloat(Self.foliateMaximum)
-            )
+            lower = CGFloat(Self.foliateMinimum)
+            upper = CGFloat(Self.foliateMaximum)
         }
+        let scaled = unified * CGFloat(profile.multiplier(for: target))
+        guard scaled.isFinite else { return lower }
+        return Self.clamp(scaled, lower: lower, upper: upper)
     }
 
     /// Map the stored unified font-size value to the integer px value Foliate
@@ -73,9 +81,14 @@ struct FontSizeCalibrator: Sendable {
     /// BEFORE `FoliateJSEscaper.clampFontSize` ever sees it, so that downstream
     /// clamp is a verified belt-and-braces no-op rather than a silent value
     /// change.
+    ///
+    /// Rounding rule: `.toNearestOrAwayFromZero` (the default behaviour of
+    /// `FloatingPoint.rounded()`, stated explicitly here so the contract is
+    /// pinned). A halfway value rounds away from zero — `34.5 → 35`,
+    /// `-0.5 → -1` — and the result is then clamped to `8...72`.
     func calibratedFoliateSize(forUnified unified: CGFloat) -> Int {
         let calibrated = calibratedSize(forUnified: unified, target: .foliate)
-        let rounded = Int(calibrated.rounded())
+        let rounded = Int(calibrated.rounded(.toNearestOrAwayFromZero))
         return min(max(rounded, Self.foliateMinimum), Self.foliateMaximum)
     }
 

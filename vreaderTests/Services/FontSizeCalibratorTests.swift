@@ -51,16 +51,28 @@ struct FontSizeCalibratorTests {
 
     // MARK: - Multiplier Application
 
+    /// The legal clamp band for a target, used to compute expected values.
+    /// TXT/MD/EPUB share `12...64`; `.foliate` uses the distinct `8...72`
+    /// band — this helper makes the test sensitive to a target mistakenly
+    /// using the wrong band.
+    private static func clampBand(for target: CalibrationTarget) -> (CGFloat, CGFloat) {
+        switch target {
+        case .txt, .md, .epub: return (12, 64)
+        case .foliate: return (8, 72)
+        }
+    }
+
     @Test(arguments: CalibrationTarget.allCases)
     func calibratedSizeAppliesMultiplier(_ target: CalibrationTarget) {
         let profile = FontSizeCalibrationProfile(txt: 1.0, md: 1.5, epub: 1.5, foliate: 1.5)
         let calibrator = FontSizeCalibrator(profile: profile)
         let unified: CGFloat = 24
-        // 24 * multiplier, then clamped to the target range (here all in
-        // range). Computed with the same CGFloat arithmetic the calibrator
-        // uses so the comparison is bit-exact.
+        // 24 * multiplier, then clamped to the TARGET'S OWN band. Computed
+        // with the same CGFloat arithmetic the calibrator uses so the
+        // comparison is bit-exact.
         let scaled: CGFloat = unified * CGFloat(profile.multiplier(for: target))
-        let expected: CGFloat = min(max(scaled, CGFloat(12)), CGFloat(64))
+        let (lo, hi) = Self.clampBand(for: target)
+        let expected: CGFloat = min(max(scaled, lo), hi)
         let actual: CGFloat = calibrator.calibratedSize(forUnified: unified, target: target)
         #expect(actual == expected)
     }
@@ -70,10 +82,30 @@ struct FontSizeCalibratorTests {
         for target in CalibrationTarget.allCases {
             let mult = FontSizeCalibrationProfile.standard.multiplier(for: target)
             let scaled: CGFloat = CGFloat(24) * CGFloat(mult)
-            let expected: CGFloat = min(max(scaled, CGFloat(12)), CGFloat(64))
+            let (lo, hi) = Self.clampBand(for: target)
+            let expected: CGFloat = min(max(scaled, lo), hi)
             let actual: CGFloat = calibrator.calibratedSize(forUnified: 24, target: target)
             #expect(actual == expected)
         }
+    }
+
+    /// `.foliate`'s `calibratedSize` must clamp to `8...72`, NOT the text
+    /// band `12...64`. These assertions use values that distinguish the two
+    /// bands: a calibrated result of 9 is legal for Foliate but would be
+    /// clamped UP to 12 by the text band; a result of 70 is legal for
+    /// Foliate but would be clamped DOWN to 64 by the text band. A
+    /// regression that text-clamps `.foliate` fails here.
+    @Test func calibratedSizeForFoliateUsesFoliateBandNotTextBand() {
+        // multiplier 0.75 → 12 * 0.75 = 9.0 — must stay 9 (text band would
+        // raise it to 12).
+        let lowProfile = FontSizeCalibrationProfile(txt: 1.0, md: 1.0, epub: 1.0, foliate: 0.75)
+        let lowCalibrator = FontSizeCalibrator(profile: lowProfile)
+        #expect(lowCalibrator.calibratedSize(forUnified: 12, target: .foliate) == 9)
+        // multiplier 1.09375 → 64 * 1.09375 = 70.0 — must stay 70 (text band
+        // would lower it to 64).
+        let highProfile = FontSizeCalibrationProfile(txt: 1.0, md: 1.0, epub: 1.0, foliate: 1.09375)
+        let highCalibrator = FontSizeCalibrator(profile: highProfile)
+        #expect(highCalibrator.calibratedSize(forUnified: 64, target: .foliate) == 70)
     }
 
     // MARK: - Lower-Bound Clamp (TXT/MD/EPUB → 12)
@@ -109,6 +141,56 @@ struct FontSizeCalibratorTests {
         #expect(calibrator.calibratedSize(forUnified: -50, target: .epub) == 12)
     }
 
+    // MARK: - Non-Finite Safety
+
+    /// A `NaN` multiplier produces a non-finite scaled product; the
+    /// calibrator must NEVER hand a `NaN` size to a renderer. It falls back
+    /// to the target band's lower bound (12 for text, 8 for Foliate).
+    @Test(arguments: CalibrationTarget.allCases)
+    func nanMultiplierFallsBackToTargetLowerBound(_ target: CalibrationTarget) {
+        let profile = FontSizeCalibrationProfile(
+            txt: .nan, md: .nan, epub: .nan, foliate: .nan
+        )
+        let calibrator = FontSizeCalibrator(profile: profile)
+        let result = calibrator.calibratedSize(forUnified: 24, target: target)
+        #expect(result.isFinite)
+        let expectedFloor: CGFloat = (target == .foliate) ? 8 : 12
+        #expect(result == expectedFloor)
+    }
+
+    /// A `+infinity` multiplier likewise falls back to the lower bound, not
+    /// an infinite (or clamped-from-infinite) value.
+    @Test func positiveInfinityMultiplierFallsBackToLowerBound() {
+        let profile = FontSizeCalibrationProfile(
+            txt: 1.0, md: .infinity, epub: .infinity, foliate: .infinity
+        )
+        let calibrator = FontSizeCalibrator(profile: profile)
+        #expect(calibrator.calibratedSize(forUnified: 24, target: .md) == 12)
+        #expect(calibrator.calibratedSize(forUnified: 24, target: .epub) == 12)
+        #expect(calibrator.calibratedSize(forUnified: 24, target: .foliate) == 8)
+        // The anchor (.txt, finite 1.0) is unaffected.
+        #expect(calibrator.calibratedSize(forUnified: 24, target: .txt) == 24)
+    }
+
+    /// A `-infinity` multiplier falls back to the lower bound too.
+    @Test func negativeInfinityMultiplierFallsBackToLowerBound() {
+        let profile = FontSizeCalibrationProfile(
+            txt: 1.0, md: -.infinity, epub: -.infinity, foliate: -.infinity
+        )
+        let calibrator = FontSizeCalibrator(profile: profile)
+        #expect(calibrator.calibratedSize(forUnified: 24, target: .epub) == 12)
+        #expect(calibrator.calibratedFoliateSize(forUnified: 24) == 8)
+    }
+
+    /// A non-finite `unified` input (not just a non-finite multiplier) is
+    /// also handled — the product is non-finite, so the fallback applies.
+    @Test func nonFiniteUnifiedInputFallsBackToLowerBound() {
+        let calibrator = FontSizeCalibrator(profile: Self.identityProfile)
+        #expect(calibrator.calibratedSize(forUnified: .nan, target: .txt) == 12)
+        #expect(calibrator.calibratedSize(forUnified: .infinity, target: .epub) == 12)
+        #expect(calibrator.calibratedFoliateSize(forUnified: .nan) == 8)
+    }
+
     // MARK: - Boundary Values
 
     @Test func boundaryUnifiedValuesFlowThrough() {
@@ -126,17 +208,32 @@ struct FontSizeCalibratorTests {
         #expect(calibrator.calibratedFoliateSize(forUnified: 24) == 25)
     }
 
-    @Test func calibratedFoliateSizeRoundsHalfUp() {
-        // 8.0 unified clamped to 12 (text min applied first via calibratedSize),
-        // then Foliate clamp 8...72. Use a value that produces a .5 fraction.
-        // 23 * 1.5 = 34.5 → rounds to 34 or 35 (Swift .rounded() is half-to-even
-        // -> 34; .toNearestOrAwayFromZero -> 35). We assert via the documented
-        // rounding: rounded() to nearest.
+    /// Pins the exact rounding contract: `.toNearestOrAwayFromZero`. A
+    /// halfway value rounds AWAY from zero, so `34.5 → 35` (NOT 34 — which
+    /// `.toNearestOrEven` / "banker's rounding" would produce). A
+    /// rounding-mode regression fails here.
+    @Test func calibratedFoliateSizeRoundsHalfwayAwayFromZero() {
+        // 23 * 1.5 = 34.5 — exactly halfway. Must round to 35.
         let profile = FontSizeCalibrationProfile(txt: 1.0, md: 1.0, epub: 1.0, foliate: 1.5)
         let calibrator = FontSizeCalibrator(profile: profile)
-        let result = calibrator.calibratedFoliateSize(forUnified: 23)
-        // 23 * 1.5 = 34.5; accept either standard rounding outcome.
-        #expect(result == 34 || result == 35)
+        #expect(calibrator.calibratedFoliateSize(forUnified: 23) == 35)
+        // 25 * 1.5 = 37.5 — also exactly halfway. Must round to 38, not 37.
+        #expect(calibrator.calibratedFoliateSize(forUnified: 25) == 38)
+    }
+
+    /// Pins the negative-halfway behaviour of the underlying
+    /// `Int(_.rounded(.toNearestOrAwayFromZero))` conversion. A negative
+    /// calibrated value can never survive `calibratedFoliateSize`'s `8...72`
+    /// clamp (it floors at 8), so the negative-halfway rounding rule is
+    /// asserted directly on `rounded(.toNearestOrAwayFromZero)` here — this
+    /// guards the documented `-0.5 → -1` contract independent of the clamp.
+    @Test func negativeHalfwayRoundsAwayFromZero() {
+        #expect(Int(CGFloat(-0.5).rounded(.toNearestOrAwayFromZero)) == -1)
+        #expect(Int(CGFloat(-34.5).rounded(.toNearestOrAwayFromZero)) == -35)
+        // And confirm a negative calibrated input still clamps to the floor.
+        let profile = FontSizeCalibrationProfile(txt: 1.0, md: 1.0, epub: 1.0, foliate: -1.0)
+        let calibrator = FontSizeCalibrator(profile: profile)
+        #expect(calibrator.calibratedFoliateSize(forUnified: 24) == 8)
     }
 
     @Test func calibratedFoliateSizeNeverExceedsFoliateMaximum() {
