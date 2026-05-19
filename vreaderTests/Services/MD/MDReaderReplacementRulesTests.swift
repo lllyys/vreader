@@ -184,18 +184,22 @@ struct MDReaderReplacementRulesTests {
 
     // MARK: - Composition with Chinese conversion
 
-    @Test("replacement rules compose with Chinese conversion in chain order")
+    @Test("replacement rules apply before Chinese conversion — order is provable")
     func composesWithChineseConversion() async throws {
         let parser = MockMDParser()
         let store = MockPositionStore()
-        // Simplified 国 — SimpTradTransform(.simpToTrad) → 國.
-        let source = "我的国\n"
+        // The source carries the SIMPLIFIED token 测试.
+        let source = "这是测试文本\n"
         let url = try writeTempMD(source)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        // Replacement rule (runs first in the chain): 我的 → 你的.
+        // Replacement rule matches the SIMPLIFIED form 测试 → 检测.
+        // Chain order MUST be replacement-then-conversion:
+        //   correct order:  测试 →(rule)→ 检测 →(s2t)→ 檢測   ✓ match
+        //   flipped order:  测试 →(s2t)→ 測試 ... rule no longer matches  ✗
+        // so a passing assertion only holds for replacement-before-conversion.
         let rule = ReplacementRuleDescriptor(
-            pattern: "我的", replacement: "你的", isRegex: false, enabled: true, order: 0
+            pattern: "测试", replacement: "检测", isRegex: false, enabled: true, order: 0
         )
 
         _ = try await MDFileLoader.load(
@@ -208,12 +212,14 @@ struct MDReaderReplacementRulesTests {
             replacementRules: [rule]
         )
 
-        // Both transforms applied: replacement (我的→你的) THEN s2t (国→國).
         let parsed = try #require(parser.lastParsedText)
-        #expect(parsed.contains("你的"))
-        #expect(parsed.contains("國"))
-        #expect(!parsed.contains("我的"))
-        #expect(!parsed.contains("国"))
+        // Rule applied first (测试→检测), then s2t converted everything:
+        // 这→這, 检测→檢測, 文本 unchanged.
+        #expect(parsed.contains("檢測"))
+        #expect(!parsed.contains("测试"))   // simplified rule pattern gone
+        #expect(!parsed.contains("測試"))   // would appear if s2t ran first
+        #expect(!parsed.contains("检测"))   // pre-conversion replacement output gone
+        #expect(parsed.contains("這"))      // 这 → 這 confirms s2t also ran
     }
 
     // MARK: - Corrupt regex is skipped, not fatal

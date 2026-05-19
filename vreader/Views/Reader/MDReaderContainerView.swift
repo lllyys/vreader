@@ -124,7 +124,7 @@ struct MDReaderContainerView: View {
                 // parsing. Replaces the retired Unified-mode replacement-
                 // rule path. Like Chinese conversion, a mid-book rule
                 // change re-applies only on the next open.
-                let rules = await Self.fetchReplacementRules(
+                let rules = await MDReplacementRuleFetcher.rules(
                     container: modelContainer,
                     bookKey: viewModel.bookFingerprintKey
                 )
@@ -391,42 +391,5 @@ struct MDReaderContainerView: View {
         }
     }
 
-    // MARK: - Replacement rules (feature #54 WI-7)
-
-    /// Fetches the enabled `ContentReplacementRule` rows that apply to the
-    /// given book — global rules (`scopeKey` empty) plus rules scoped to
-    /// this book's fingerprint key — and maps them to the persistence-free
-    /// `ReplacementRuleDescriptor` the transform pipeline consumes.
-    ///
-    /// Runs the SwiftData fetch on a detached task with its own
-    /// `ModelContext` (the `@Model` rows are context-bound and not
-    /// `Sendable`; only the value-type descriptors cross back). Returns an
-    /// empty array when no container is available — an identity passthrough
-    /// in `MDFileLoader.load`. Mirrors the pre-#54 Unified-mode
-    /// `loadReplacementRules` fetch + scope filter.
-    private static func fetchReplacementRules(
-        container: ModelContainer?,
-        bookKey: String
-    ) async -> [ReplacementRuleDescriptor] {
-        guard let container else { return [] }
-        return await Task.detached {
-            let ctx = ModelContext(container)
-            let descriptor = FetchDescriptor<ContentReplacementRule>(
-                sortBy: [SortDescriptor(\.order)]
-            )
-            let allRules = (try? ctx.fetch(descriptor)) ?? []
-            return allRules
-                .filter { $0.enabled && ($0.scopeKey.isEmpty || $0.scopeKey == bookKey) }
-                .map {
-                    ReplacementRuleDescriptor(
-                        pattern: $0.pattern,
-                        replacement: $0.replacement,
-                        isRegex: $0.isRegex,
-                        enabled: $0.enabled,
-                        order: $0.order
-                    )
-                }
-        }.value
-    }
 }
 #endif
