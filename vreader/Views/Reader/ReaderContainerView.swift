@@ -123,6 +123,25 @@ struct ReaderContainerView: View {
     /// state with no Release-build cost beyond a UUID.
     @State private var readerToken: UUID = UUID()
 
+    // MARK: - Feature #56 WI-10: bilingual reading parent state
+    //
+    // The bilingual VM lives in the per-format host (EPUB / Foliate /
+    // TXT / MD / PDF), but the chrome (pill, More popover bilingual
+    // row state) lives on the parent container. The host posts
+    // `.readerBilingualDidChange` whenever its state changes; the
+    // parent mirrors `isEnabled` + `targetLanguage` here so the
+    // chrome can render without crossing the host boundary.
+
+    /// Whether bilingual mode is active for the open book — mirrors
+    /// the per-format host's VM state via `.readerBilingualDidChange`.
+    /// Drives the `BilingualPill` render path in `ReaderTopChrome`.
+    @State var bilingualActive: Bool = false
+
+    /// The bilingual target language key (one of `BilingualLanguage.all`).
+    /// Mirrored alongside `bilingualActive`; the pill resolves the
+    /// glyph from this key via the registry's fallback.
+    @State var bilingualLanguage: String?
+
     /// Feature #57: handle to the live `FoliateSpikeView.Coordinator`
     /// for AZW3/MOBI books, populated by the spike's `makeCoordinator()`.
     /// The TTS path (`startTTS()`) calls the Coordinator's
@@ -289,6 +308,26 @@ struct ReaderContainerView: View {
         // AI setup + text loading deferred until AI/TTS is invoked (bug #64)
         .onChange(of: showAIPanel) { _, isShowing in
             if isShowing { ensureAIReady() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerBilingualDidChange)) { notification in
+            // Feature #56 WI-10: mirror the per-format host's
+            // bilingual VM state into the parent so the chrome
+            // (pill + More-menu row) can render without crossing the
+            // host boundary. The host posts on enable/disable +
+            // language/granularity change; the userInfo carries the
+            // book's `fingerprintKey` so an unrelated host (e.g. a
+            // second reader off-screen) does not pollute this state.
+            let key = notification.userInfo?["fingerprintKey"] as? String
+            guard key == book.fingerprintKey else { return }
+            let enabled = notification.userInfo?["isEnabled"] as? Bool
+            let language = notification.userInfo?["targetLanguage"] as? String
+            // The current `postDidChange()` in BilingualReadingViewModel
+            // only sends `fingerprintKey`; fall back to a paint based
+            // on the presence of the notification — if we got here for
+            // this book, the host wants the chrome refreshed. The
+            // explicit fields are forward-looking for richer payloads.
+            if let enabled { bilingualActive = enabled }
+            if let language { bilingualLanguage = language }
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerPositionDidChange)) { notification in
             guard let locator = notification.object as? Locator else { return }

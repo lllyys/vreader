@@ -86,6 +86,12 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     let onLoadError: @MainActor (String) -> Void
     /// Called when the user selects text in the EPUB content.
     var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
+    /// Feature #56 WI-10: receives the `[{bid, text}]` payload posted
+    /// by `EPUBBilingualJS.bilingualEnumerateJS` after a chapter
+    /// loads. Optional — call sites that don't enable bilingual mode
+    /// simply leave it `nil` and the handler short-circuits inside
+    /// the coordinator.
+    var onBilingualEnumerate: (@MainActor ([BilingualBlock]) -> Void)?
     /// Called after a page finishes loading (for highlight restoration).
     /// The closure receives a JS evaluator that runs JavaScript on the WKWebView.
     var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?
@@ -171,6 +177,16 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         )
         userContentController.addUserScript(highlightScript)
 
+        // Feature #56 WI-10: register the `bilingualEnumerate`
+        // channel so the chapter-load enumerate JS can post its
+        // `[{bid, text}]` payload back to Swift. Idempotent for
+        // call sites that never run the enumerate JS — an unused
+        // handler costs only the message-handler registration.
+        userContentController.add(
+            weakHandler,
+            name: EPUBBilingualJS.enumerateMessageHandlerName
+        )
+
         config.userContentController = userContentController
         config.preferences.isElementFullscreenEnabled = false
 
@@ -198,6 +214,7 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.readerToken = readerToken
         #endif
         context.coordinator.onSelectionEvent = onSelectionEvent
+        context.coordinator.onBilingualEnumerate = onBilingualEnumerate
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
         context.coordinator.isPaged = isPaged
         context.coordinator.previousIsPaged = isPaged
@@ -222,6 +239,7 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.readerToken = readerToken
         #endif
         context.coordinator.onSelectionEvent = onSelectionEvent
+        context.coordinator.onBilingualEnumerate = onBilingualEnumerate
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
         context.coordinator.isPaged = isPaged
         context.coordinator.onPaginationReady = onPaginationReady

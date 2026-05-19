@@ -274,6 +274,13 @@ extension ReaderContainerView {
             title: book.title,
             bookmarked: false,
             moreActive: showMorePopover,
+            // Feature #56 WI-10: thread the bilingual VM's `isEnabled` +
+            // `targetLanguage` mirror through to the chrome so the
+            // `BilingualPill` renders when bilingual is on for this
+            // book. Mirror is updated by the `.readerBilingualDidChange`
+            // observer attached on `ReaderContainerView` itself.
+            bilingualActive: bilingualActive,
+            bilingualLanguage: bilingualLanguage,
             onBack: { dismiss() },
             onSearch: { showSearch = true },
             onBookmark: {
@@ -304,6 +311,20 @@ extension ReaderContainerView {
             // so they show the row. Same `BookFormat(...).capabilities`
             // lookup the reader settings panel uses (`ReaderContainerView`).
             formatCapabilities: BookFormat(rawValue: book.format.lowercased())?.capabilities,
+            // Feature #56 WI-10: the bilingual row's 3-way presentation
+            // and the conditional re-translate row both depend on the
+            // open book's bilingual state. The mirror `bilingualActive`
+            // + `bilingualLanguage` is the source — once we add
+            // AI-provider availability gating (WI-15), this resolves
+            // into `.unavailable` for unconfigured providers. Until
+            // then it's `.on(...)` / `.off`. The language fallback
+            // tracks `BilingualReadingViewModel.defaultTargetLanguage`
+            // so a freshly-enabled book with no override still paints
+            // the right target.
+            bilingualState: bilingualActive
+                ? .on(targetLanguage: bilingualLanguage
+                      ?? BilingualReadingViewModel.defaultTargetLanguage)
+                : .off,
             // The design anchors the popover just below the top chrome.
             // Chrome height = the Dynamic-Island inset + the ~52pt
             // button row; add a small gap so the notch tucks under the

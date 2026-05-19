@@ -21,6 +21,23 @@ extension EPUBHighlightBridge {
     (function() {
         var debounceTimer = null;
 
+        // Feature #56 WI-10 (R-EPUB-CFI): bilingual mode injects
+        // `<div data-vreader-decoration>` siblings after each
+        // translatable block. The XPath serializer counts
+        // `parent.childNodes` siblings; without skipping decoration
+        // nodes the index of every following sibling would shift by
+        // N once bilingual is on, and existing persisted highlights
+        // (feature #11) would mis-anchor on the next chapter load.
+        // The producer (selection-tracking, here) and the resolver
+        // (highlightAPIJS, below) BOTH apply this filter so the path
+        // serialized at selection time matches the path the
+        // resolver walks at restore time.
+        function isDecoration(node) {
+            return node && node.nodeType === 1
+                && node.hasAttribute
+                && node.hasAttribute('data-vreader-decoration');
+        }
+
         function getXPath(node) {
             if (!node || node.nodeType === 9) return '';
             if (node.nodeType === 3) {
@@ -28,8 +45,10 @@ extension EPUBHighlightBridge {
                 if (!parent) return '';
                 var textIndex = 0;
                 for (var i = 0; i < parent.childNodes.length; i++) {
-                    if (parent.childNodes[i] === node) break;
-                    if (parent.childNodes[i].nodeType === 3) textIndex++;
+                    var n = parent.childNodes[i];
+                    if (isDecoration(n)) continue;
+                    if (n === node) break;
+                    if (n.nodeType === 3) textIndex++;
                 }
                 return getXPath(parent) + '/text()[' + (textIndex + 1) + ']';
             }
@@ -39,6 +58,7 @@ extension EPUBHighlightBridge {
                 var sameTagSiblings = [];
                 for (var i = 0; i < parent.childNodes.length; i++) {
                     var sibling = parent.childNodes[i];
+                    if (isDecoration(sibling)) continue;
                     if (sibling.nodeType === 1 && sibling.tagName === node.tagName) {
                         sameTagSiblings.push(sibling);
                     }

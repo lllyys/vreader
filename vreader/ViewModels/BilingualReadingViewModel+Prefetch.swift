@@ -128,11 +128,21 @@ extension BilingualReadingViewModel {
     }
 
     /// Posts `.readerBilingualDidChange` for this book so each format renderer
-    /// re-injects / clears its interlinear translation.
+    /// re-injects / clears its interlinear translation. The userInfo
+    /// carries the book's fingerprintKey (observers filter by it),
+    /// the current `isEnabled`, and the current `targetLanguage` so
+    /// chrome-layer observers (the parent reader's pill mirror, More-
+    /// menu row state) can paint without crossing the host boundary.
+    /// The renderer-side observers use `isEnabled` to decide between
+    /// inject and clear.
     func postDidChange() {
         NotificationCenter.default.post(
             name: .readerBilingualDidChange, object: nil,
-            userInfo: ["fingerprintKey": bookFingerprintKey])
+            userInfo: [
+                "fingerprintKey": bookFingerprintKey,
+                "isEnabled": isEnabled,
+                "targetLanguage": targetLanguage
+            ])
     }
 
     // MARK: - Private — prefetch internals

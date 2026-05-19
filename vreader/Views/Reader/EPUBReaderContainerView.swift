@@ -85,6 +85,29 @@ struct EPUBReaderContainerView: View {
     /// for Photo with "Custom Background" off).
     @State private var photoBackgroundDataURL: URL?
 
+    // MARK: - Feature #56 WI-10: bilingual reading state
+
+    /// The bilingual VM for the open book — created lazily once
+    /// metadata has loaded so the spine list is available for the
+    /// `EPUBChapterTextProvider` adapter. Nil before that point.
+    @State var bilingualViewModel: BilingualReadingViewModel?
+
+    /// Bilingual orchestrator — pure host-side coordinator that
+    /// emits enumerate / inject / clear JS for the bridge. Always
+    /// constructed; emits no-op JS for clear / inject when the VM
+    /// is disabled.
+    @State var bilingualOrchestrator = EPUBBilingualOrchestrator()
+
+    /// Bilingual setup-sheet presentation flag mirrored from the VM's
+    /// `needsSetupSheet`. SwiftUI's `.sheet(isPresented:)` needs a
+    /// binding; the observer in `bilingualSurfaces` mirrors VM state
+    /// into this `@State` and back.
+    @State var showBilingualSetupSheet: Bool = false
+
+    /// Mutable bilingual setup-sheet state (target language + granularity)
+    /// — bound to the sheet's pickers. Confirm commits to the VM.
+    @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+
     /// Whether paged layout is active.
     private var isPaged: Bool {
         settingsStore?.epubLayout == .paged
@@ -346,6 +369,10 @@ struct EPUBReaderContainerView: View {
         .onChange(of: settingsStore?.theme) { _, _ in refreshPhotoBackgroundImage() }
         .onChange(of: settingsStore?.useCustomBackground) { _, _ in refreshPhotoBackgroundImage() }
         .onChange(of: settingsStore?.customBackgroundRevision) { _, _ in refreshPhotoBackgroundImage() }
+        // Feature #56 WI-10: bilingual reading wiring lives in a
+        // dedicated `ViewModifier` to keep this body under the
+        // compiler's type-inference budget.
+        .modifier(bilingualSurfacesModifier)
     }
 
     // MARK: - Subviews
@@ -489,6 +516,15 @@ struct EPUBReaderContainerView: View {
                 )
                 SelectionPopoverRequest.post(selection: info, requestToken: token)
             },
+            // Feature #56 WI-10: the bridge posts blocks parsed from
+            // the JS `bilingualEnumerate` channel. The orchestrator
+            // stores them; the VM prefetches translation for the
+            // current unit; on `.readerBilingualDidChange` the
+            // observer builds the inject JS and pushes it through
+            // `pendingHighlightJS`.
+            onBilingualEnumerate: { blocks in
+                handleBilingualBlocks(blocks)
+            },
             // Feature #64 WI-8: the EPUB highlight tap still posts
             // `.readerHighlightTapped` (from the JS `highlightTapHandler`
             // channel via `EPUBWebViewBridgeCoordinator.handleHighlightTapMessage`),
@@ -500,6 +536,23 @@ struct EPUBReaderContainerView: View {
             // `highlightActionPresenter` / `onHighlightTapAction`.
             onPageDidFinishLoad: { evaluateJS in
                 restoreHighlightsOnLoad(evaluateJS: evaluateJS)
+                // Feature #56 WI-10: re-enumerate translatable blocks
+                // on every chapter load so the orchestrator's block
+                // list matches the live DOM. Idempotent: re-stamping
+                // an already-stamped block keeps the existing
+                // `data-vreader-bid`.
+                //
+                // Codex Gate-4 round-3 finding [R3-1]: also gate on
+                // `!showBilingualSetupSheet` so a chapter load that
+                // happens WHILE the first-enable setup sheet is open
+                // (rare but possible — a notification-driven nav,
+                // or a re-render of the same chapter) does not
+                // enumerate ahead of the user's confirm. The
+                // confirm path pushes its own enumerate.
+                if bilingualViewModel?.isEnabled == true,
+                   !showBilingualSetupSheet {
+                    evaluateJS(bilingualOrchestrator.enumerateJS())
+                }
             },
             pendingJS: pendingHighlightJS,
             onPendingJSCompleted: {

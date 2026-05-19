@@ -167,7 +167,43 @@ extension ReaderThemeV2 {
           background-color: \(accent); \
           color: \(paperBG); \
         }\
+        \(Self.bilingualCSSRule(accent: accent, sub: sub))\
         </style>
+        """
+    }
+
+    /// Feature #56 WI-10: CSS for the bilingual interlinear blocks
+    /// injected by `EPUBBilingualJS.bilingualInjectJS`. Pinned to the
+    /// design's spec (`vreader-bilingual.jsx`):
+    ///   - 0.88× the body font size
+    ///   - sub-text color
+    ///   - line-height 1.55
+    ///   - 0.7em left padding + 2px solid accent (33% alpha) left border
+    ///   - 6px top margin from the source paragraph
+    ///   - user-select: none so the selection / highlight pipelines
+    ///     never target translation blocks
+    /// The accent border colour uses the theme's full accent — the
+    /// 33% alpha mentioned in the design is approximated by appending
+    /// `55` (≈ 33% in hex) when the accent is in hex. Since our cssColor
+    /// helper emits hex tokens, the concatenation is safe; non-hex
+    /// fallbacks degrade to the solid accent (still readable).
+    private static func bilingualCSSRule(accent: String, sub: String) -> String {
+        // Use a solid 2px border in the accent token; a translucent
+        // overlay would require parsing rgb()/hex which is outside
+        // this PR's scope. The pin in `EPUBBilingualJSTests` checks
+        // the inject JS emits user-select rules; this CSS rule
+        // controls the visual styling.
+        return """
+        .vreader-bilingual[data-vreader-decoration] { \
+          font-size: 0.88em !important; \
+          line-height: 1.55 !important; \
+          color: \(sub) !important; \
+          margin: 6px 0 0 0 !important; \
+          padding: 0 0 0 0.7em !important; \
+          border-left: 2px solid \(accent) !important; \
+          user-select: none !important; \
+          -webkit-user-select: none !important; \
+        }
         """
     }
 

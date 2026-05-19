@@ -60,6 +60,11 @@ extension EPUBWebViewBridge {
         #endif
         /// Callback for text selection events.
         var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
+        /// Feature #56 WI-10: receives the `[BilingualBlock]` parsed
+        /// from the JS `bilingualEnumerate` channel after a chapter
+        /// loads. `nil` for non-bilingual call sites; the message
+        /// handler short-circuits there.
+        var onBilingualEnumerate: (@MainActor ([BilingualBlock]) -> Void)?
         /// Callback to restore highlights after page loads.
         /// Provides a JS evaluator so the container can inject restore scripts.
         var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?
@@ -100,6 +105,10 @@ extension EPUBWebViewBridge {
                 handleHighlightTapMessage(message.body)
                 return
             }
+            if message.name == EPUBBilingualJS.enumerateMessageHandlerName {
+                handleBilingualEnumerateMessage(message.body)
+                return
+            }
             guard message.name == "progressHandler",
                   let progress = message.body as? Double else { return }
             Task { @MainActor in
@@ -125,6 +134,22 @@ extension EPUBWebViewBridge {
                 NotificationCenter.default.post(
                     name: .readerHighlightTapped, object: event
                 )
+            }
+        }
+
+        /// Feature #56 WI-10: parse the `[{bid, text}]` payload posted
+        /// by `EPUBBilingualJS.bilingualEnumerateJS` and forward the
+        /// `[BilingualBlock]` array to the bilingual VM via the
+        /// container's callback. Short-circuits if `onBilingualEnumerate`
+        /// is `nil` — the message handler is registered unconditionally
+        /// for every EPUB reader, so an active reader that never
+        /// invokes the enumerate JS will still receive (and drop) any
+        /// stray payload.
+        private func handleBilingualEnumerateMessage(_ body: Any) {
+            let blocks = EPUBBilingualPipeline.parseEnumerateMessage(body)
+            guard let callback = onBilingualEnumerate else { return }
+            Task { @MainActor in
+                callback(blocks)
             }
         }
 

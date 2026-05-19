@@ -45,7 +45,15 @@ struct EPUBChapterTextProvider: ChapterTextProviding {
         }
         do {
             let html = try await parser.contentForSpineItem(href: unit.value)
-            return EPUBTextExtractor.stripHTML(html)
+            // Feature #56 WI-10 — Codex Gate-4 audit finding [1]:
+            // preserve block boundaries with `\n\n` so the translation
+            // service's `ChapterSegmenter.paragraphs` produces one
+            // segment per DOM block matching what
+            // `EPUBBilingualJS.bilingualEnumerateJS` walks. The legacy
+            // `stripHTML(_:)` whitespace-collapses every boundary into
+            // a single space — fine for search indexing (the original
+            // consumer) but breaks the bilingual segment/block contract.
+            return EPUBTextExtractor.stripHTMLPreservingBlocks(html)
         } catch {
             throw ChapterTextProviderError.sourceUnavailable(unit)
         }
