@@ -31,7 +31,6 @@
 //   (ReaderHighlightTapEvent)
 
 import Foundation
-import CoreGraphics
 import OSLog
 
 /// View model for the unified cross-format highlight-action popover.
@@ -87,7 +86,7 @@ final class HighlightPopoverViewModel {
             presented = nil
             return
         }
-        presented = HighlightPopoverViewModel.content(
+        presented = HighlightPopoverPresenter.content(
             for: record, sourceRect: event.sourceRect, chapter: chapter
         )
     }
@@ -105,28 +104,8 @@ final class HighlightPopoverViewModel {
     /// mutated record is for a different highlight than the one on screen.
     func refreshPresented(with record: HighlightRecord) {
         guard let current = presented, current.id == record.highlightId else { return }
-        presented = HighlightPopoverViewModel.content(
+        presented = HighlightPopoverPresenter.content(
             for: record, sourceRect: current.sourceRect, chapter: current.chapter
-        )
-    }
-
-    /// Maps a `HighlightRecord` to a `HighlightPopoverContent`. WI-2 introduces
-    /// `HighlightPopoverPresenter` as the canonical mapping point; until then
-    /// this view model owns the mapping so WI-1 ships self-contained.
-    static func content(
-        for record: HighlightRecord,
-        sourceRect: CGRect,
-        chapter: String?
-    ) -> HighlightPopoverContent {
-        HighlightPopoverContent(
-            id: record.highlightId,
-            note: record.note,
-            highlightedText: record.selectedText,
-            colorName: record.color,
-            createdAt: record.createdAt,
-            chapter: chapter,
-            sourceRect: sourceRect,
-            anchor: record.anchor
         )
     }
 }
