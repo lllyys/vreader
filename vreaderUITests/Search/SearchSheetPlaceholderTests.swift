@@ -87,6 +87,11 @@ final class SearchSheetPlaceholderTests: XCTestCase {
         // below the 44 pt HIG touch-target minimum. The fix gives both
         // controls a >=44 pt tappable frame, so `.hitRegion` is now
         // covered by the audit (no longer excluded as tracked debt).
-        auditCurrentScreen(app: app)
+        //
+        // The search bar auto-focuses its field, raising the software
+        // keyboard; `ignoringKeyboardElements` skips Apple keyboard-
+        // internal audit gaps (e.g. `TUIPredictionViewCell`) so the
+        // audit stays honest for the app's own SearchBar elements.
+        auditCurrentScreen(app: app, ignoringKeyboardElements: true)
     }
 }
