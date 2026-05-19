@@ -7,7 +7,26 @@ import Foundation
 import CryptoKit
 @testable import vreader
 
-@Suite("SelectiveRestoreCoordinator — feature #47 WI-4b")
+// Bug #225: this suite was test-isolation-broken.
+// `preplant_partialSuccess_notifiesForLandedRowsOnly` and
+// `preplant_postsBookFileStateDidChange_perRow` capture `.bookFileStateDidChange`
+// posts through a `NotificationCenter` observer registered with `object: nil`,
+// and `restoreSelectively`'s preplant phase posts `.bookFileStateDidChange` per
+// row on the shared global center. Swift Testing runs the suite's `@Test`s in
+// parallel, so a sibling test's `restoreSelectively` posts polluted the
+// capturing test's `receivedKeys` with cross-fingerprint / duplicate keys,
+// breaking the per-row assertions.
+//
+// `.serialized` alone did NOT fix it — the suite mixes `@MainActor` and
+// non-isolated `@Test`s, and the observed pollution proved the suite's tests
+// still overlapped. The deterministic fix: the two capturing tests mint their
+// entries from `makeUniqueEPUBBytes()` (globally-unique fingerprintKeys) and
+// observe through `observePreplant(expectedKeys:)`, which records only posts
+// whose `fingerprintKey` is in the test's own key set. A sibling's posts carry
+// different keys and are dropped — so the capture is exact regardless of
+// parallel scheduling. `.serialized` is kept as documented intent + cheap
+// defense-in-depth (same trait the bug #213 `BookSourceHTTPClient` suite uses).
+@Suite("SelectiveRestoreCoordinator — feature #47 WI-4b", .serialized)
 struct SelectiveRestoreCoordinatorTests {
 
     // MARK: - Mocks
@@ -72,6 +91,21 @@ struct SelectiveRestoreCoordinatorTests {
 
     private static func makeEPUBBytes(seed: UInt8) -> Data {
         Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: seed, count: 1024)
+    }
+
+    /// Bug #225: EPUB bytes whose SHA — and therefore `fingerprintKey` — is
+    /// globally unique. The seed-based `makeEPUBBytes(seed:)` produces the
+    /// SAME key for the same seed across tests, so a sibling test's
+    /// `.bookFileStateDidChange` post can carry a key a capturing test also
+    /// expects. Tests that observe notifications mint their entries from
+    /// these unique bytes so no sibling can ever produce a colliding key,
+    /// making the observer's key-set filter exact regardless of Swift
+    /// Testing's parallel scheduling.
+    private static func makeUniqueEPUBBytes() -> Data {
+        var bytes = Data([0x50, 0x4B, 0x03, 0x04])
+        withUnsafeBytes(of: UUID().uuid) { bytes.append(contentsOf: $0) }
+        bytes.append(Data(repeating: 0xA5, count: 1024))
+        return bytes
     }
 
     /// Returns (coordinator, persistence, dataRestorer, blobReader).
@@ -297,6 +331,34 @@ struct SelectiveRestoreCoordinatorTests {
         var receivedKeys: [String] = []
     }
 
+    /// Bug #225: registers a `.bookFileStateDidChange` observer that records
+    /// ONLY posts whose `fingerprintKey` is in `expectedKeys`. The suite's
+    /// other tests post `.bookFileStateDidChange` on the shared global
+    /// `NotificationCenter`, and Swift Testing runs `@Test`s in parallel —
+    /// so without a per-test filter a sibling's posts pollute this test's
+    /// `receivedKeys`. The capturing tests mint their entries from
+    /// `makeUniqueEPUBBytes()`, so `expectedKeys` are globally unique and
+    /// no sibling can ever produce a colliding key — the filter is exact.
+    /// Returns the capture object plus the observer token; caller must
+    /// `removeObserver` in a `defer`.
+    @MainActor
+    private static func observePreplant(
+        expectedKeys: Set<String>
+    ) -> (capture: PreplantNotificationCapture, token: NSObjectProtocol) {
+        let capture = PreplantNotificationCapture()
+        let token = NotificationCenter.default.addObserver(
+            forName: .bookFileStateDidChange, object: nil, queue: .main
+        ) { n in
+            let key = n.userInfo?["fingerprintKey"] as? String
+            MainActor.assumeIsolated {
+                if let key, expectedKeys.contains(key) {
+                    capture.receivedKeys.append(key)
+                }
+            }
+        }
+        return (capture, token)
+    }
+
     // MARK: - Bug #119: partial-success preplant still notifies for landed rows
 
     @MainActor
@@ -311,12 +373,14 @@ struct SelectiveRestoreCoordinatorTests {
         // manifest where entry #2's fingerprintKey doesn't match its
         // canonical key (insertBook throws .invalidContent on it).
         let (coordinator, persistence, _, _) = try await Self.makeRig()
-        let goodA = Self.makeEntry(title: "A", bytes: Self.makeEPUBBytes(seed: 1))
-        let goodC = Self.makeEntry(title: "C", bytes: Self.makeEPUBBytes(seed: 3))
+        // Bug #225: unique bytes → globally-unique fingerprintKeys so a
+        // sibling test's posts cannot collide with this test's observer.
+        let goodA = Self.makeEntry(title: "A", bytes: Self.makeUniqueEPUBBytes())
+        let goodC = Self.makeEntry(title: "C", bytes: Self.makeUniqueEPUBBytes())
         // Entry B carries a fingerprintKey that doesn't match its
         // computed fingerprint — trips PersistenceError.invalidContent
         // inside insertBook.
-        let realB = Self.makeEntry(title: "B", bytes: Self.makeEPUBBytes(seed: 2))
+        let realB = Self.makeEntry(title: "B", bytes: Self.makeUniqueEPUBBytes())
         let badB = BackupLibraryEntry(
             fingerprintKey: "epub:0000000000000000000000000000000000000000000000000000000000000000:9999",
             format: realB.format,
@@ -330,16 +394,14 @@ struct SelectiveRestoreCoordinatorTests {
             blobPath: realB.blobPath
         )
 
-        let capture = PreplantNotificationCapture()
-        let token = NotificationCenter.default.addObserver(
-            forName: .bookFileStateDidChange, object: nil, queue: .main
-        ) { n in
-            let key = n.userInfo?["fingerprintKey"] as? String
-            MainActor.assumeIsolated {
-                if let key { capture.receivedKeys.append(key) }
-            }
-        }
-        defer { NotificationCenter.default.removeObserver(token) }
+        // Filter on every manifest key (not just goodA's): only goodA
+        // should land + notify, but including badB/goodC means a
+        // regression that wrongly notifies for B or C still surfaces.
+        let observed = Self.observePreplant(
+            expectedKeys: [goodA.fingerprintKey, badB.fingerprintKey, goodC.fingerprintKey]
+        )
+        let capture = observed.capture
+        defer { NotificationCenter.default.removeObserver(observed.token) }
 
         do {
             _ = try await coordinator.restoreSelectively(
@@ -377,21 +439,16 @@ struct SelectiveRestoreCoordinatorTests {
         // After the fix, every preplanted row posts .bookFileStateDidChange
         // so LibraryView's existing observer triggers a force-refresh.
         let (coordinator, _, _, _) = try await Self.makeRig()
+        // Bug #225: unique bytes → globally-unique fingerprintKeys so a
+        // sibling test's posts cannot collide with this test's observer.
         let entries = (0..<3).map { i in
-            Self.makeEntry(title: "B\(i)", bytes: Self.makeEPUBBytes(seed: UInt8(i)))
+            Self.makeEntry(title: "B\(i)", bytes: Self.makeUniqueEPUBBytes())
         }
         let expectedKeys = Set(entries.map(\.fingerprintKey))
 
-        let capture = PreplantNotificationCapture()
-        let token = NotificationCenter.default.addObserver(
-            forName: .bookFileStateDidChange, object: nil, queue: .main
-        ) { n in
-            let key = n.userInfo?["fingerprintKey"] as? String
-            MainActor.assumeIsolated {
-                if let key { capture.receivedKeys.append(key) }
-            }
-        }
-        defer { NotificationCenter.default.removeObserver(token) }
+        let observed = Self.observePreplant(expectedKeys: expectedKeys)
+        let capture = observed.capture
+        defer { NotificationCenter.default.removeObserver(observed.token) }
 
         _ = try await coordinator.restoreSelectively(
             manifest: entries,
@@ -404,6 +461,11 @@ struct SelectiveRestoreCoordinatorTests {
         // before we assert. addObserver delivers on the next runloop tick.
         try? await Task.sleep(nanoseconds: 100_000_000)
 
+        // Each preplanted row must post exactly once. The key-set filter in
+        // `observePreplant` already drops sibling-test pollution, so the
+        // cardinality check pins "one notification per row" — a regression
+        // that double-posts a row would slip past a bare Set comparison.
+        #expect(capture.receivedKeys.count == entries.count)
         #expect(Set(capture.receivedKeys) == expectedKeys)
     }
 }
