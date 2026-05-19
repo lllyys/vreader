@@ -22,8 +22,17 @@ import SwiftData
 
 private let log = Logger(subsystem: "com.vreader.app", category: "ReadingStats")
 
+/// The boundary the dashboard ViewModel depends on, so tests can inject a mock.
+protocol ReadingStatsAggregating: Sendable {
+    func snapshot(
+        window: ReadingStatsWindow,
+        sort: ReadingDashboardSort,
+        now: Date
+    ) async throws -> ReadingDashboardSnapshot
+}
+
 /// Aggregates `ReadingSession` rows into a `ReadingDashboardSnapshot`.
-actor ReadingStatsAggregator {
+actor ReadingStatsAggregator: ReadingStatsAggregating {
     private let modelContainer: ModelContainer
     private let calendarProvider: @Sendable () -> Calendar
 
