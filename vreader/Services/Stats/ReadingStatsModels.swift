@@ -1,0 +1,250 @@
+// Purpose: Value types for the reading-stats dashboard (feature #58).
+//
+// All types here are pure value types — no SwiftData, no @MainActor. They are
+// the DTOs that cross the ReadingStatsAggregator actor boundary and the inputs
+// the ReadingDashboardViewModel renders.
+//
+// Key decisions:
+// - No new SwiftData @Model — the dashboard is read-only over ReadingSession /
+//   ReadingStats; these structs are the value-typed projection of those rows.
+// - ReadingStatsWindow.dateInterval resolves the calendar PER CALL (passed in)
+//   so a long-lived aggregator picks up a timezone/DST change on the next snapshot.
+// - windowTotals is an ARRAY in canonical ReadingStatsWindow.allCases order
+//   (a dictionary has nondeterministic iteration; tests need a stable order).
+// - The per-book sort comparator is a pure static function so it is unit-tested
+//   independently of SwiftData.
+
+import Foundation
+
+// MARK: - Time Window
+
+/// The seven rolling time windows the dashboard aggregates over.
+/// Window set is fixed by the feature #58 row contract (divergence D2).
+enum ReadingStatsWindow: String, CaseIterable, Identifiable, Sendable {
+    case today
+    case last7Days
+    case last30Days
+    case last90Days
+    case last180Days
+    case last365Days
+    case allTime
+
+    var id: String { rawValue }
+
+    /// Short label for the window-selector pill bar.
+    var label: String {
+        switch self {
+        case .today: return "Today"
+        case .last7Days: return "7d"
+        case .last30Days: return "30d"
+        case .last90Days: return "90d"
+        case .last180Days: return "180d"
+        case .last365Days: return "365d"
+        case .allTime: return "All"
+        }
+    }
+
+    /// Number of rolling days for the `lastNDays` windows; nil for `today`/`allTime`.
+    private var rollingDays: Int? {
+        switch self {
+        case .last7Days: return 7
+        case .last30Days: return 30
+        case .last90Days: return 90
+        case .last180Days: return 180
+        case .last365Days: return 365
+        case .today, .allTime: return nil
+        }
+    }
+
+    /// The half-open `[start, now)` interval for this window, in the supplied
+    /// calendar/timezone.
+    ///
+    /// - `today` = local-midnight(now) ..< now.
+    /// - the rolling `Nd` windows = (now - N·86400s) ..< now.
+    /// - `allTime` returns `nil` (no lower bound — count everything).
+    func dateInterval(now: Date, calendar: Calendar) -> DateInterval? {
+        switch self {
+        case .allTime:
+            return nil
+        case .today:
+            let start = calendar.startOfDay(for: now)
+            return DateInterval(start: start, end: now)
+        case .last7Days, .last30Days, .last90Days, .last180Days, .last365Days:
+            guard let days = rollingDays else { return nil }
+            let start = now.addingTimeInterval(-Double(days) * 86_400)
+            return DateInterval(start: start, end: now)
+        }
+    }
+}
+
+// MARK: - Window Total
+
+/// Aggregate reading total for one window.
+struct WindowTotal: Sendable, Equatable {
+    let window: ReadingStatsWindow
+    let totalSeconds: Int
+    let sessionCount: Int
+}
+
+// MARK: - Per-Book Row
+
+/// One row of the per-book breakdown table.
+struct PerBookStatsRow: Sendable, Equatable, Identifiable {
+    /// == bookFingerprintKey.
+    let id: String
+    let bookFingerprintKey: String
+    /// Book title; "(deleted)" when no Book row exists for this key.
+    let title: String
+    /// True when reading sessions/stats exist but the Book row is gone.
+    let isDeleted: Bool
+    let readingSecondsInWindow: Int
+    /// 0 for a deleted book — its notes were cascade-deleted with the Book.
+    let notesCount: Int
+    /// 0 for a deleted book — same reason.
+    let highlightsCount: Int
+    let lastReadAt: Date?
+}
+
+extension PerBookStatsRow {
+    /// Pure sort comparator for the per-book table. Ties break by title
+    /// (case-insensitive ascending) so the order is deterministic regardless
+    /// of the requested field.
+    static func sorted(_ rows: [PerBookStatsRow], by sort: ReadingDashboardSort) -> [PerBookStatsRow] {
+        rows.sorted { lhs, rhs in
+            let ordered = compare(lhs, rhs, field: sort.field, ascending: sort.ascending)
+            if let ordered { return ordered }
+            // Tie-break: title, case-insensitive, always ascending.
+            let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+            if cmp != .orderedSame { return cmp == .orderedAscending }
+            return lhs.bookFingerprintKey < rhs.bookFingerprintKey
+        }
+    }
+
+    /// Returns true if `lhs` should sort before `rhs` for the given field, or
+    /// nil when the two are equal on that field (caller applies the tie-break).
+    private static func compare(
+        _ lhs: PerBookStatsRow, _ rhs: PerBookStatsRow,
+        field: ReadingDashboardSortField, ascending: Bool
+    ) -> Bool? {
+        switch field {
+        case .title:
+            let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+            if cmp == .orderedSame { return nil }
+            return ascending ? cmp == .orderedAscending : cmp == .orderedDescending
+        case .readingTime:
+            if lhs.readingSecondsInWindow == rhs.readingSecondsInWindow { return nil }
+            return ascending
+                ? lhs.readingSecondsInWindow < rhs.readingSecondsInWindow
+                : lhs.readingSecondsInWindow > rhs.readingSecondsInWindow
+        case .highlights:
+            if lhs.highlightsCount == rhs.highlightsCount { return nil }
+            return ascending
+                ? lhs.highlightsCount < rhs.highlightsCount
+                : lhs.highlightsCount > rhs.highlightsCount
+        case .notes:
+            if lhs.notesCount == rhs.notesCount { return nil }
+            return ascending
+                ? lhs.notesCount < rhs.notesCount
+                : lhs.notesCount > rhs.notesCount
+        }
+    }
+}
+
+// MARK: - Sort
+
+/// The four sortable per-book table columns (divergence D3 — matches the
+/// committed design's 4-column table and the row's acceptance criterion (c)).
+enum ReadingDashboardSortField: String, CaseIterable, Sendable, Codable {
+    case title
+    case readingTime
+    case highlights
+    case notes
+}
+
+/// The active dashboard sort — a field plus a direction. `Codable` so it can
+/// round-trip through `PreferenceStoring` as a compact string.
+///
+/// The custom inits live in an extension so the compiler still synthesizes
+/// both the memberwise init and `Codable` conformance for the struct body.
+struct ReadingDashboardSort: Sendable, Equatable, Codable {
+    var field: ReadingDashboardSortField
+    var ascending: Bool
+
+    static let `default` = ReadingDashboardSort(field: .readingTime, ascending: false)
+
+    /// Compact `"field:dir"` string for `PreferenceStoring` (e.g. "readingTime:desc").
+    var storageString: String {
+        "\(field.rawValue):\(ascending ? "asc" : "desc")"
+    }
+}
+
+extension ReadingDashboardSort {
+    /// Parses a `storageString`. Returns nil for any malformed input.
+    init?(storageString: String) {
+        let parts = storageString.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let field = ReadingDashboardSortField(rawValue: String(parts[0]))
+        else { return nil }
+        switch parts[1] {
+        case "asc": self.init(field: field, ascending: true)
+        case "desc": self.init(field: field, ascending: false)
+        default: return nil
+        }
+    }
+}
+
+// MARK: - Snapshot
+
+/// One immutable dashboard render.
+///
+/// Carries totals for ALL seven windows (cheap — seven small structs) so a
+/// window-pill tap need not re-hit the actor; the per-book table is computed
+/// for `activeWindow` only (the table is the expensive part).
+struct ReadingDashboardSnapshot: Sendable, Equatable {
+    /// All present windows, in canonical `ReadingStatsWindow.allCases` order.
+    let windowTotals: [WindowTotal]
+    let activeWindow: ReadingStatsWindow
+    /// Per-book rows for `activeWindow`, already sorted per the requested sort.
+    let perBook: [PerBookStatsRow]
+    let lifetimeTotalSeconds: Int
+    let trackingSince: Date?
+
+    /// Total for a window; a window absent from `windowTotals` returns a zeroed total.
+    func total(for window: ReadingStatsWindow) -> WindowTotal {
+        windowTotals.first { $0.window == window }
+            ?? WindowTotal(window: window, totalSeconds: 0, sessionCount: 0)
+    }
+}
+
+// MARK: - Actor-Boundary Records
+
+/// Value-typed projection of a `ReadingSession` @Model row — crosses the
+/// PersistenceActor boundary (never return @Model). Used by the WI-5 backup
+/// collector. `Codable` for the backup payload.
+struct ReadingSessionRecord: Sendable, Equatable, Codable {
+    let sessionId: UUID
+    /// == DocumentFingerprint.canonicalKey.
+    let bookFingerprintKey: String
+    let startedAt: Date
+    let endedAt: Date?
+    let durationSeconds: Int
+    let pagesRead: Int?
+    let wordsRead: Int?
+    let startLocator: Locator?
+    let endLocator: Locator?
+    let deviceId: String
+    let isRecovered: Bool
+}
+
+/// Value-typed projection of a `ReadingStats` @Model row.
+struct ReadingStatsRecord: Sendable, Equatable, Codable {
+    let bookFingerprintKey: String
+    let totalReadingSeconds: Int
+    let sessionCount: Int
+    let lastReadAt: Date?
+    let averagePagesPerHour: Double?
+    let averageWordsPerMinute: Double?
+    let totalPagesRead: Int?
+    let totalWordsRead: Int?
+    let longestSessionSeconds: Int
+}
