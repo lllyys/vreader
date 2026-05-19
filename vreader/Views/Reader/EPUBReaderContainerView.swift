@@ -402,7 +402,14 @@ struct EPUBReaderContainerView: View {
                 // off the stored theme — Paper / Sepia / Dark / OLED / Photo.
                 themeCSS: settingsStore.map {
                     $0.theme.epubOverrideCSS(
-                        fontSize: $0.typography.fontSize,
+                        // Feature #70 WI-3: route the EPUB body font size
+                        // through the calibrator's `.epub` target so EPUB
+                        // (CSS px in a WKWebView) renders at a size
+                        // perceptually consistent with TXT (the anchor) at
+                        // the same slider value. The calibrator clamps the
+                        // result to the 12...64 text band.
+                        fontSize: $0.calibrator.calibratedSize(
+                            forUnified: $0.typography.fontSize, target: .epub),
                         lineHeight: $0.typography.lineSpacing,
                         letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0,
                         fontFamily: $0.typography.fontFamily,
