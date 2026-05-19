@@ -1,6 +1,17 @@
 // Purpose: Tests for DictionaryLookup — word extraction, system dictionary lookup,
 // and action dispatching for Define/Translate on text selection.
 //
+// The suite is @MainActor (bug #221 / GH #849): `canLookUp` and
+// `viewController(for:)` touch UIKit — `dictionaryHasDefinition` and the
+// `UIReferenceLibraryViewController` initialiser are main-thread-only APIs, and
+// the production helpers are now `@MainActor` to match. Without `@MainActor` on
+// the suite, Swift Testing's parallel scheduler dispatches these tests onto a
+// background cooperative thread; `viewController(for:)` then constructs a
+// `UIViewController` off-main, UIKit's Main Thread Checker traps it
+// (`UI API called on a background thread: -[UIReferenceLibraryViewController
+// initWithTerm:]`), and the test host crashes intermittently — the flaky
+// full-suite crash that bug #221 tracked.
+//
 // @coordinates-with DictionaryLookup.swift, TXTBridgeShared.swift
 
 import Testing
@@ -8,6 +19,7 @@ import Foundation
 @testable import vreader
 
 @Suite("DictionaryLookup")
+@MainActor
 struct DictionaryLookupTests {
 
     // MARK: - extractWord: single word
@@ -127,10 +139,26 @@ struct DictionaryLookupTests {
     }
 
     // MARK: - viewController creation
+    //
+    // Bug #221 / GH #849: `viewController(for:)` constructs a
+    // `UIReferenceLibraryViewController` (a `UIViewController`). UIKit
+    // view-controller initialisers are main-thread-only; running this off-main
+    // trips UIKit's Main Thread Checker and crashes the test host. Two distinct
+    // guards prevent a recurrence:
+    //   1. `@MainActor` on `DictionaryLookup.viewController(for:)` (production)
+    //      protects EVERY call site — a synchronous non-`@MainActor` caller is
+    //      a Swift 6 compile error; an async caller must `await` (a safe hop).
+    //   2. `@MainActor` on this suite keeps these tests on the main thread, so
+    //      the historical off-main crash path is no longer reachable here.
+    // A runtime `Thread.isMainThread` check could assert neither — both are
+    // compile-time / isolation properties — so no such test is kept.
 
     @Test func viewController_createsForWord() {
-        let vc = DictionaryLookup.viewController(for: "hello")
-        #expect(vc != nil)
+        // A fresh `UIReferenceLibraryViewController` is returned per call —
+        // `viewController(for:)` does not cache or share instances.
+        let first = DictionaryLookup.viewController(for: "hello")
+        let second = DictionaryLookup.viewController(for: "hello")
+        #expect(first !== second)
     }
 
     // MARK: - defineMenuTitle

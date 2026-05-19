@@ -7,6 +7,14 @@
 // - extractWord splits on whitespace and returns the first non-empty token.
 // - canLookUp wraps UIReferenceLibraryViewController.dictionaryHasDefinition.
 // - Menu title constants for consistency across bridges.
+// - The two UIKit-touching members (`canLookUp`, `viewController(for:)`) are
+//   `@MainActor`: `UIReferenceLibraryViewController` is a `UIViewController`
+//   subclass, and both constructing it and calling `dictionaryHasDefinition`
+//   are main-thread-only UIKit APIs. Isolating them makes any off-main call a
+//   compile error rather than a runtime crash — bug #221 was a flaky test-host
+//   crash caused by `viewController(for:)` running on a background cooperative
+//   thread under Swift Testing's parallel scheduler. `extractWord` and the
+//   menu-title constants stay non-isolated — they touch no UIKit.
 //
 // @coordinates-with TXTBridgeShared.swift, ReaderNotifications.swift
 
@@ -24,8 +32,12 @@ enum DictionaryLookup {
 
     /// Check if the system dictionary can define a word.
     ///
+    /// `@MainActor`: `UIReferenceLibraryViewController.dictionaryHasDefinition`
+    /// is a UIKit main-thread-only API.
+    ///
     /// - Parameter word: The word to look up.
     /// - Returns: `true` if a definition is available, `false` otherwise.
+    @MainActor
     static func canLookUp(_ word: String) -> Bool {
         guard !word.isEmpty else { return false }
         return UIReferenceLibraryViewController.dictionaryHasDefinition(forTerm: word)
@@ -33,8 +45,13 @@ enum DictionaryLookup {
 
     /// Create a system dictionary view controller for a word.
     ///
+    /// `@MainActor`: constructs a `UIReferenceLibraryViewController`
+    /// (`UIViewController` subclass) — UIKit view-controller initialisers must
+    /// run on the main thread.
+    ///
     /// - Parameter word: The word to define.
     /// - Returns: A `UIReferenceLibraryViewController` displaying the definition.
+    @MainActor
     static func viewController(for word: String) -> UIReferenceLibraryViewController {
         UIReferenceLibraryViewController(term: word)
     }

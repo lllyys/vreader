@@ -90,6 +90,41 @@ import UIKit
         var s = makeStore(); s.backgroundOpacity = -0.5; #expect(s.backgroundOpacity >= 0.0)
         s.backgroundOpacity = 1.5; #expect(s.backgroundOpacity <= 1.0)
     }
+
+    // MARK: - Bug #222: autoPageTurnInterval must not recurse
+
+    /// Bug #222 / GH #882: a post-init assignment of an already in-range value
+    /// to `autoPageTurnInterval`. Pre-fix the property was a stored property
+    /// whose `didSet` re-assigned itself to clamp — under `@Observable` that
+    /// re-enters the synthesized setter unboundedly → stack overflow. This
+    /// test simply mutating the property post-init reproduces the crash
+    /// (post-init because Swift suppresses observers during `init`). Post-fix
+    /// the property is a `get`/`set` computed pair that clamps without
+    /// observer re-entry, so the assignment completes.
+    @Test func settingsStore_autoPageTurnInterval_inRangeAssignmentDoesNotRecurse() {
+        var s = makeStore()
+        s.autoPageTurnInterval = 10.0
+        #expect(s.autoPageTurnInterval == 10.0)
+        // A same-value re-assignment is the tightest recursion repro — pre-fix
+        // `max(1,min(60,10)) == 10` still re-fired the setter forever.
+        s.autoPageTurnInterval = 10.0
+        #expect(s.autoPageTurnInterval == 10.0)
+    }
+
+    @Test func settingsStore_clampsAutoPageTurnInterval() {
+        var s = makeStore()
+        s.autoPageTurnInterval = 0.5
+        #expect(s.autoPageTurnInterval == 1.0)
+        s.autoPageTurnInterval = 999.0
+        #expect(s.autoPageTurnInterval == 60.0)
+    }
+
+    @Test func settingsStore_persistsAutoPageTurnInterval() {
+        let n = "RSS-apti-\(UUID().uuidString)"; let d = UserDefaults(suiteName: n)!
+        var s1 = ReaderSettingsStore(defaults: d); s1.autoPageTurnInterval = 12.0
+        #expect(ReaderSettingsStore(defaults: d).autoPageTurnInterval == 12.0)
+        d.removePersistentDomain(forName: n)
+    }
     @Test func persistenceRoundTrip() {
         let n = "RSS-p-\(UUID().uuidString)"; let d = UserDefaults(suiteName: n)!
         var s1 = ReaderSettingsStore(defaults: d); s1.theme = .sepia; s1.typography.fontSize = 24

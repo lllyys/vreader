@@ -32,13 +32,23 @@ final class ReaderSettingsStore {
         didSet { guard !suppressPersistence else { return }; defaults.set(pageTurnAnimation.rawValue, forKey: Self.pageTurnAnimationKey) }
     }
     /// Interval in seconds between auto page turns (Issue 9). Clamped to 1...60.
+    ///
+    /// Bug #222: this is a computed `get`/`set` over `_autoPageTurnInterval`,
+    /// NOT a stored property with a clamping `didSet`. Under the `@Observable`
+    /// macro a `didSet` that re-assigns its own property recurses unboundedly
+    /// (the macro rewrites the property into a computed accessor over a backing
+    /// store, so the `didSet`'s self-assignment re-enters the synthesized
+    /// setter) → stack overflow. The `get`/`set` form clamps in `set` with no
+    /// observer re-entry — same pattern as `backgroundOpacity` below.
     var autoPageTurnInterval: TimeInterval {
-        didSet {
-            autoPageTurnInterval = max(1.0, min(60.0, autoPageTurnInterval))
+        get { _autoPageTurnInterval }
+        set {
+            _autoPageTurnInterval = max(1.0, min(60.0, newValue))
             guard !suppressPersistence else { return }
-            defaults.set(autoPageTurnInterval, forKey: Self.autoPageTurnIntervalKey)
+            defaults.set(_autoPageTurnInterval, forKey: Self.autoPageTurnIntervalKey)
         }
     }
+    private var _autoPageTurnInterval: TimeInterval
     /// Chinese Simplified/Traditional conversion direction (E04).
     var chineseConversion: ChineseConversionDirection {
         didSet { guard !suppressPersistence else { return }; defaults.set(chineseConversion.rawValue, forKey: Self.chineseConversionKey) }
@@ -72,7 +82,11 @@ final class ReaderSettingsStore {
         self.pageTurnAnimation = Self.loadPageTurnAnimation(defaults)
         self.chineseConversion = Self.loadChineseConversion(defaults)
         self.autoPageTurn = defaults.bool(forKey: Self.autoPageTurnKey)
-        self.autoPageTurnInterval = Self.loadAutoPageTurnInterval(defaults)
+        // Bug #222: assign the backing store directly (mirrors `_backgroundOpacity`
+        // below). `loadAutoPageTurnInterval` already clamps to 1...60, and
+        // `autoPageTurnInterval` is now a computed property — assigning it here
+        // would route through the clamping setter for no benefit.
+        self._autoPageTurnInterval = Self.loadAutoPageTurnInterval(defaults)
         self.useCustomBackground = defaults.bool(forKey: Self.useCustomBackgroundKey)
         self._backgroundOpacity = Self.loadBackgroundOpacity(defaults)
     }
