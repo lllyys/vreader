@@ -1,8 +1,8 @@
 ---
 branch: fix/issue-902-searchbar-touch-targets
 threadId: 019e3e77-213e-79f2-91fa-33b7786c25e7
-rounds: 2
-final_verdict: follow-up-recommended
+rounds: 3
+final_verdict: ship-as-is
 date: 2026-05-19
 ---
 
@@ -85,8 +85,47 @@ Confirmed:
 - VReader compliance: no concurrency / `@MainActor` regressions, file sizes
   small, follows local conventions.
 
+## Round 3 — keyboard-chrome test infrastructure (commit `dfc3f6e`)
+
+After round 2's sign-off, the test gate revealed both search-sheet
+accessibility UITests were **flaky** once `.hitRegion` was re-enabled.
+Root cause (captured via instrumented `performAccessibilityAudit`): the
+`SearchBar` auto-focuses its field → the software keyboard rises → the
+whole-app audit catches the keyboard's QuickType / predictive-text bar
+(`TUIPredictionViewCell`, "missing useful accessibility information") —
+an Apple keyboard-internal gap. Ground truth: offending element frame
+`(0, 539, 134, 44)`, keyboard frame `(0, 583, 402, 233)` — the QuickType
+strip sits flush *above* `app.keyboards`' own frame.
+
+Commit `dfc3f6e` adds an additive `ignoringKeyboardElements: Bool = false`
+parameter to `auditCurrentScreen` plus an `isSystemKeyboardChrome` helper
+(vertical-band test — strict containment misses the QuickType strip). The
+two search-sheet tests opt in; the other 20+ call sites are unaffected.
+
+Codex round-3 verdict on `dfc3f6e`:
+
+> No findings in `dfc3f6e`.
+
+Confirmed:
+- Additive parameter is non-breaking — existing call sites keep prior
+  behavior.
+- The classifier correctly tags the captured QuickType cell as keyboard
+  chrome.
+- It does **not** mask the #902 regression — the filter only ignores the
+  keyboard's bottom band; real sub-44 pt `searchTextField` /
+  `searchCancelButton` (which sit well above the keyboard) would still be
+  audited and fail `.hitRegion`.
+- The `60` pt QuickType-strip cap is a defensible upper bound; nil-keyboard
+  and empty-frame guards are correct.
+- VReader compliance fine — helper placement, docs, Swift, test scoping.
+
+Both search-sheet audit tests now pass deterministically (3/3 runs each,
+iPhone 17 Pro Simulator, iOS 26.5).
+
 ## Final verdict
 
-**follow-up-recommended.** #902 ships as-is. The sibling `searchClearButton`
-sub-44 pt touch target should be logged separately as its own bug / GH issue
-rather than expanded into this PR.
+**ship-as-is.** #902's three commits (`9c561d7` SearchBar 44 pt fix,
+`766cd79` audit log, `dfc3f6e` keyboard-chrome test infra) are clean. The
+sibling `searchClearButton` sub-44 pt touch target is logged separately as
+its own bug / GH issue (out of #902's named scope), per the round-1/2 scope
+decision above.
