@@ -18,24 +18,31 @@ struct ReplacementRulesView: View {
     @State private var showingAddSheet = false
     @State private var editingRule: ContentReplacementRule?
 
-    /// Bug #128 + bug #158: the only mitigation users see for the native-mode
-    /// no-op. After bug #158 capability-gated Unified mode away from TXT (its
-    /// renderer truncates content + drops chrome + blanks on toggle), the
-    /// banner now also names which formats actually have a working Unified
-    /// pipeline so a TXT user doesn't follow the "switch to Unified" hint
-    /// into a missing picker. Pinned as a static constant so
+    /// Bug #231 / GH #957 (post-feature-#54 rewrite). Feature #54 (WI-4)
+    /// removed the Native/Unified Reading Mode picker entirely, and (WI-7)
+    /// wired content replacement rules into the native Markdown reader via
+    /// `MDFileLoader`'s transform chain. The previous banner ("Switch from
+    /// the reader's Settings → Reading Mode") pointed users at a deleted
+    /// control and its "only when reading in Unified mode" premise was
+    /// stale for MD. The rewritten copy states the post-#54 reality: rules
+    /// apply automatically when reading Markdown today; EPUB / AZW3 / TXT
+    /// support is pending (feature #54 plan §4 Phase D and feature #42);
+    /// PDF is not supported. Pinned as a static constant so
     /// `ReplacementRulesViewBannerTests` can regression-guard the copy
-    /// without inspecting the view tree. Update the test in lockstep with any
-    /// copy change.
+    /// without inspecting the view tree. Update the test in lockstep with
+    /// any copy change.
     static let nativeModeBannerText =
-        "Rules apply only when reading in Unified mode (currently EPUB, MD, AZW3 — not TXT or PDF). Switch from the reader's Settings → Reading Mode."
+        "Rules apply automatically when reading Markdown files. Support for EPUB, AZW3, and TXT is coming in a later update; PDF is not supported."
 
     var body: some View {
         List {
-            // Bug #128: replacement rules currently apply only in Unified
-            // reading mode (the native TXT/MD pipeline doesn't go through
-            // the text-transform layer). Surface this here so users don't
-            // silently configure rules that won't apply.
+            // Bug #128 (original) + bug #231 (post-#54 rewrite): surface
+            // where replacement rules apply so users don't silently
+            // configure rules that won't take effect. Post-feature-#54,
+            // native Markdown applies rules automatically (WI-7 wired
+            // `MDFileLoader` through `ReplacementTransform`); EPUB / AZW3 /
+            // TXT support is pending Phase D / feature #42; PDF is not
+            // supported.
             Section {
                 Label {
                     Text(Self.nativeModeBannerText)
