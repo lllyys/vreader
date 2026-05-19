@@ -109,21 +109,24 @@ struct FormatCapabilities: OptionSet, Sendable, Hashable {
             return caps
 
         case .azw3:
-            // AZW3 / MOBI route through Foliate-js. `.tts` is **not** in
-            // this set despite the aspirational "full feature parity"
-            // (bug #176 / GH #602): `ReaderAICoordinator.loadBookTextContent`
-            // has no azw3/mobi case (falls through to nil), so
-            // `startTTS()`'s guard skips the AVSpeechSynthesizer call —
-            // user sees silent failure. `FoliateTTSAdapter` exists with
-            // JS-side hooks but is unwired in production. Until the
-            // Foliate-webview TTS wiring lands as a proper feature,
-            // hiding the speaker button via this gate matches the
-            // bug #156 / #157 / #158 cheap-path pattern (capability-gate
-            // out the broken affordance rather than ship a silent
-            // failure). Re-add `.tts` here when the production wire-up
-            // ships.
+            // AZW3 / MOBI route through Foliate-js. Feature #57 wired
+            // the production TTS path: `startTTS()` extracts the
+            // whole-book plain text from the live Foliate WKWebView via
+            // the `foliate-host.js` `extractPlainText` helper (a
+            // section-walk over `view.book.sections[].createDocument()`)
+            // and feeds it to the shared AVSpeechSynthesizer pipeline.
+            // `.tts` is therefore back in this set — reversing the
+            // bug #176 / GH #602 cap-gate that hid the speaker button
+            // while the path was unimplemented.
+            //
+            // NOTE: visual TTS sentence-highlight and auto-scroll do
+            // NOT render in the Foliate WKWebView — `TTSHighlightCoordinator`
+            // is TXT/MD-only and is never instantiated for Foliate.
+            // #57 delivers TTS *audio* + pause/resume/stop; a Foliate
+            // TTS-highlight overlay is a separate tracked feature (see
+            // feature #57 §7.1 and the row Notes).
             var caps: FormatCapabilities = [
-                .textSelection, .highlights,
+                .textSelection, .highlights, .tts,
                 .nativePagination, .toc, .annotations, .unifiedReflow,
             ]
             caps.formUnion(universal)
