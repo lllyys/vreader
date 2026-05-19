@@ -54,17 +54,6 @@ struct TXTTextViewBridge: UIViewRepresentable {
     /// Defaults to empty so existing callers stay source-compatible until
     /// they wire the lookup; in that case the chrome-toggle path remains.
     var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
-    /// Presenter that shows the inline edit/delete menu for a tapped
-    /// highlight (Feature #53 WI-2b). When nil, the coordinator only
-    /// posts `.readerHighlightTapped` for observers and does not present
-    /// a menu — keeps WI-2 dormancy as a fallback for callers that
-    /// haven't wired the presenter yet.
-    var highlightActionPresenter: (any HighlightActionPresenting)?
-    /// Callback invoked with the user's selected `HighlightTapAction`
-    /// after the presenter dismisses. Typically routes to
-    /// `HighlightCoordinator.handleTapAction(_:highlightID:)`. nil when
-    /// `highlightActionPresenter` is also nil.
-    var onHighlightTapAction: (@MainActor (HighlightTapAction, UUID) async -> Void)?
     /// Bug #154 / GH #443 (Codex audit): invoked when the bridge clears a
     /// *temporary* search/navigation highlight — the 3 s auto-clear timer
     /// fired, the user scrolled, or a new search posted `.searchHighlightClear`.
@@ -110,23 +99,12 @@ struct TXTTextViewBridge: UIViewRepresentable {
         tapRecognizer.delegate = context.coordinator
         textView.addGestureRecognizer(tapRecognizer)
 
-        // Feature #55 WI-6: long-press gesture re-homing feature #53's inline
-        // delete menu off the tap (the tap now opens the #55 note preview).
-        // The coordinator's `gestureRecognizerShouldBegin` runs the highlight
-        // hit-test up front, so this recognizer ONLY begins when the press
-        // lands on a persisted highlight — a long-press on plain body text
-        // never engages it and proceeds straight into UITextView's native
-        // text selection. When it DOES begin (highlight hit), the coordinator
-        // denies simultaneous recognition against the system selection
-        // long-press, so the highlight long-press opens only #53's menu.
-        // The `.name` lets the shared delegate identify this recognizer.
-        let highlightLongPress = UILongPressGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleHighlightLongPress)
-        )
-        highlightLongPress.name = TXTBridgeShared.highlightLongPressName
-        highlightLongPress.delegate = context.coordinator
-        textView.addGestureRecognizer(highlightLongPress)
+        // Feature #64 WI-6: the feature #53 highlight long-press gesture (which
+        // opened the bare delete `UIMenu`) is removed. A *tap* on a highlight
+        // now posts `.readerHighlightTapped`, which the unified
+        // highlight-action popover observes — its action row carries Delete.
+        // `handleContentTap` still runs the highlight hit-test + posts the
+        // notification.
 
         // Keep a weak ref for notification-driven highlight clear
         context.coordinator.activeTextView = textView
@@ -135,8 +113,6 @@ struct TXTTextViewBridge: UIViewRepresentable {
         context.coordinator.baseAttributedText = buildBaseAttributedText()
         context.coordinator.persistedHighlights = persistedHighlights
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
-        context.coordinator.highlightActionPresenter = highlightActionPresenter
-        context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         context.coordinator.lastAppliedText = text
         context.coordinator.lastAppliedAttrText = attributedText
@@ -221,11 +197,6 @@ struct TXTTextViewBridge: UIViewRepresentable {
         if context.coordinator.persistedHighlightLookup != persistedHighlightLookup {
             context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         }
-        // WI-2b: presenter + action callback are re-bound on every update
-        // — the container may swap them when the HighlightCoordinator's
-        // bookFingerprintKey changes (open a different book).
-        context.coordinator.highlightActionPresenter = highlightActionPresenter
-        context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         if highlightChanged {
             context.coordinator.currentHighlightRange = highlightRange
