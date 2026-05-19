@@ -740,6 +740,60 @@ final class RealDebugBridgeContextTests: XCTestCase {
         await fulfillment(of: [exp], timeout: 0.5)
     }
 
+    /// Feature #54 WI-6: the `readerReadingMode == "unified"` guard in
+    /// `open(...)` is removed (the Native/Unified mode is retired). With a
+    /// stale `readerReadingMode = "unified"` value still in UserDefaults,
+    /// `open(...)` with a VALID position must NOT early-throw — it proceeds
+    /// past the (now-removed) Step-3 guard and posts the open notification.
+    @MainActor
+    func test_open_withValidPosition_unifiedModeDefault_stillPostsNotification() async throws {
+        // A stale `readerReadingMode = "unified"` — pre-#54 this triggered
+        // the Step-3 unified-mode guard and an early throw.
+        defaults.set("unified", forKey: "readerReadingMode")
+
+        // A TXT book + a valid UTF-16 offset position.
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "7", count: 64),
+            fileByteCount: 2048,
+            format: .txt
+        )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "Unified-stale Openable",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+
+        let exp = expectation(description: "open notification posted past the removed unified-mode guard")
+        nonisolated(unsafe) var receivedKey: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook, object: nil, queue: .main
+        ) { notification in
+            receivedKey = notification.userInfo?["fingerprintKey"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        // `open` with a valid position runs Step 4 (post notification) then
+        // Step 5 (`awaitReader`, which times out with no reader) — run it
+        // detached so the test asserts on the notification, not the await.
+        let openTask = Task { try? await context.open(bookId: fp.canonicalKey, position: "42") }
+        await fulfillment(of: [exp], timeout: 3.0)
+        openTask.cancel()
+        // The notification fired — `open` got PAST the removed Step-3 guard.
+        XCTAssertEqual(receivedKey, fp.canonicalKey)
+    }
+
     // MARK: - settle / eval (active-reader registry)
 
     @MainActor

@@ -36,10 +36,6 @@ enum DebugBridgeContextError: Error, Equatable {
     /// Feature #49 WI-7b: position string didn't match the format's expected
     /// shape. Carries the format + raw position + a human-readable reason.
     case invalidPosition(format: String, position: String, reason: String)
-    /// Feature #49 WI-7b: opening at a specific position is only supported
-    /// in native-mode for now. Unified-renderer mode (TXT/MD/EPUB through
-    /// the unified text renderer) doesn't have a stable seek API yet.
-    case openPositionUnsupportedInUnifiedMode(format: String)
     /// Feature #49 WI-7b: awaitReader timed out waiting for a reader matching
     /// `fingerprintKey` to register after the open notification was posted.
     case openAwaitReaderTimeout(fingerprintKey: String)
@@ -162,29 +158,17 @@ final class RealDebugBridgeContext: DebugBridgeContext {
                     position: position,
                     reason: "Unknown book format."
                 )
-            } catch let DebugPositionResolverError.formatUnsupported(format) {
-                throw DebugBridgeContextError.openPositionUnsupportedInUnifiedMode(format: format)
             }
-
-            // Step 3: unified-mode guard (per v3 plan Round-2 audit fix #3).
-            // Native-mode has reader-host seek paths; unified-mode (the unified
-            // text renderer that may consolidate TXT/MD/EPUB) doesn't have a
-            // stable seek API. Reject early so verification flows fail loudly.
-            let store = ReaderSettingsStore(defaults: userDefaults)
-            if store.readingMode == .unified,
-               let format = BookFormat(rawValue: book.format) {
-                let caps = FormatCapabilities.capabilities(for: format)
-                // Only formats whose unified-mode path supports seek are exempt.
-                // Today: PDF stays native-only; TXT/MD/EPUB unified mode lacks
-                // seek; AZW3 only renders in native (Foliate spike).
-                _ = caps  // capability table currently has no seek bit; gate by mode alone.
-                throw DebugBridgeContextError.openPositionUnsupportedInUnifiedMode(format: book.format)
-            }
+            // Note: `DebugPositionResolver.resolve` handles every BookFormat
+            // directly and never throws `formatUnsupported`, so there is no
+            // `catch` arm for it. Feature #54 retired the Native/Unified
+            // reading mode, so there is also no longer a unified-mode seek
+            // guard here — every format takes its native seek path.
         } else {
             resolvedPosition = nil
         }
 
-        // Step 4: post notification — opens the reader. Library navigation
+        // Step 3: post notification — opens the reader. Library navigation
         // observes `.debugBridgeOpenBook` and pushes the matching book.
         NotificationCenter.default.post(
             name: .debugBridgeOpenBook,
@@ -193,7 +177,7 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         )
         log.info("open: posted notification for \(bookId, privacy: .public)")
 
-        // Step 5: when a position was supplied, await the reader to register
+        // Step 4: when a position was supplied, await the reader to register
         // and then dispatch the seek. The actual seek implementation lives in
         // per-format hosts (feature #50 WI-7b's host-side seekStrategy).
         // For now, we just resolve the await — host-side seek wiring is a

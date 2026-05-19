@@ -116,8 +116,6 @@ final class DebugBridge {
                 return "bridge.evalFailed: \(msg)"
             case .invalidPosition(let format, let position, let reason):
                 return "bridge.invalidPosition: \(format) \(position) — \(reason)"
-            case .openPositionUnsupportedInUnifiedMode(let format):
-                return "bridge.openPositionUnsupportedInUnifiedMode: \(format)"
             case .openAwaitReaderTimeout(let key):
                 return "bridge.openAwaitReaderTimeout: \(key)"
             }
