@@ -127,7 +127,11 @@ struct BilingualSetupSheet: View {
     let onConfirm: () -> Void
 
     /// Tap on the close button — host should dismiss WITHOUT
-    /// persisting. Tap on the system swipe-down also routes here.
+    /// persisting. The host's `.sheet(..., onDismiss:)` composition
+    /// should also route swipe-to-dismiss to the same closure so
+    /// every dismissal path is covered (the close button alone is
+    /// what this view wires); the WI-10..15 composition sites are
+    /// the right place to assert that on-dismiss contract.
     let onCancel: () -> Void
 
     /// Tap on the engine "Set up" / "Change…" button — host should
