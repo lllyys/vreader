@@ -15,7 +15,15 @@ extension ReaderContainerView {
     // MARK: - TTS Integration (WI-B03)
 
     /// Starts or stops TTS read-aloud. If currently speaking, stops.
-    /// Otherwise, loads text from the book file and starts speaking.
+    /// Otherwise sources the book text and starts speaking.
+    ///
+    /// `@MainActor` (feature #57): explicit so the AZW3/MOBI branch's
+    /// WKWebView touch (`extractPlainText()`, itself `@MainActor`) has
+    /// a stated, checkable isolation contract rather than relying on
+    /// SwiftUI `View` inference. Both call sites — the More-menu
+    /// "Read aloud" row and the DEBUG `.debugBridgeTTSCommand`
+    /// observer — are already main-actor contexts.
+    @MainActor
     func startTTS() {
         ensureAIReady()
         let ai = resolvedAICoordinator
@@ -24,26 +32,94 @@ extension ReaderContainerView {
             return
         }
 
-        // Use already-loaded text content if available
+        // Use already-loaded text content if available (any format).
         if let text = ai.loadedTextContent, !text.isEmpty {
-            let offset = ai.currentLocator?.charOffsetUTF16 ?? 0
-            withAnimation(.easeInOut(duration: 0.2)) {
-                ttsService.startSpeaking(text: text, fromOffset: offset)
-            }
-        } else {
-            // Trigger text loading and start TTS when ready
+            speakLoadedText(ai: ai)
+            return
+        }
+
+        switch TTSTextSource.source(for: resolvedBookFormat) {
+        case .foliateExtraction:
+            // Feature #57: AZW3/MOBI text comes from the Foliate
+            // WKWebView, not loadBookTextContent (which has no azw3
+            // case and returns nil).
+            startAZW3TTS(ai: ai)
+        case .fileLoad:
+            // TXT/MD/PDF/EPUB: unchanged file-path load.
             Task {
                 await ai.loadBookTextContent(
                     fileURL: resolvedFileURL,
                     format: book.format.lowercased()
                 )
                 if let text = ai.loadedTextContent, !text.isEmpty {
-                    let offset = ai.currentLocator?.charOffsetUTF16 ?? 0
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        ttsService.startSpeaking(text: text, fromOffset: offset)
-                    }
+                    speakLoadedText(ai: ai)
                 }
             }
+        }
+    }
+
+    /// Feature #57: speak `ai.loadedTextContent` from the current
+    /// position. Extracted so every text-ready path (cached, file-load,
+    /// AZW3 extraction) starts speech through one helper. `@MainActor`
+    /// inherited — called only from the `@MainActor` `startTTS()` /
+    /// `startAZW3TTS`.
+    @MainActor
+    private func speakLoadedText(ai: ReaderAICoordinator) {
+        guard let text = ai.loadedTextContent, !text.isEmpty else { return }
+        let offset = ai.currentLocator?.charOffsetUTF16 ?? 0
+        withAnimation(.easeInOut(duration: 0.2)) {
+            ttsService.startSpeaking(text: text, fromOffset: offset)
+        }
+    }
+
+    /// Feature #57 (round-2 Finding 1): AZW3/MOBI TTS start with an
+    /// explicit in-flight extraction gate. The whole-book
+    /// `extractPlainText()` section walk takes noticeable time; a rapid
+    /// second speaker tap before it finishes must NOT spawn a duplicate
+    /// walk or a duplicate `startSpeaking`. The host holds the
+    /// extraction `Task` in `@State azw3ExtractionTask`; a re-tap during
+    /// the walk is a no-op. `@MainActor` inherited (called only from
+    /// the `@MainActor` `startTTS()`).
+    ///
+    /// Three-layer idempotency: (1) re-tap while playing →
+    /// `startTTS()`'s `ttsService.state != .idle` early-return;
+    /// (2) re-tap during the first walk → the `azw3ExtractionTask`
+    /// in-flight gate here; (3) re-tap after a completed extraction →
+    /// the cached-`loadedTextContent` fast path in `startTTS()`.
+    @MainActor
+    private func startAZW3TTS(ai: ReaderAICoordinator) {
+        let inFlight = azw3ExtractionTask != nil
+        guard TTSTextSource.shouldStartExtraction(
+            extractionInFlight: inFlight,
+            cachedText: ai.loadedTextContent
+        ) else {
+            // Either a walk is already running (a rapid re-tap — the
+            // running task will start speech) or usable text is already
+            // cached. The cached case is handled by startTTS()'s
+            // fast path before reaching here; this guard is the
+            // in-flight no-op.
+            return
+        }
+
+        // `extractPlainText()` carries its own 12 s timeout (WI-1
+        // audit), so this Task always completes and the gate always
+        // clears — no separate timeout wrapper is needed here.
+        let task = Task { @MainActor () -> String? in
+            await foliateCoordinatorBox.coordinator?.extractPlainText()
+        }
+        azw3ExtractionTask = task
+
+        Task { @MainActor in
+            let text = await task.value
+            azw3ExtractionTask = nil
+            // Re-check state after the await: the user may have stopped
+            // TTS (debug-stop or reader dismiss), or another path may
+            // have set loadedTextContent, while the walk ran.
+            guard ttsService.state == .idle else { return }
+            guard ai.loadedTextContent == nil else { return }
+            guard let text, !text.isEmpty else { return }
+            ai.loadedTextContent = text
+            speakLoadedText(ai: ai)
         }
     }
 
@@ -54,8 +130,18 @@ extension ReaderContainerView {
         let ai = resolvedAICoordinator
         ai.setupIfNeeded()
         guard ai.loadedTextContent == nil else { return }
+        let format = book.format.lowercased()
+        // Feature #57: AZW3/MOBI text is extracted from the Foliate
+        // WKWebView on first speaker tap (startTTS()'s AZW3 branch),
+        // not loaded from the file here — `loadBookTextContent` has no
+        // azw3 case and would return nil. Skipping this avoids a dead
+        // detached task that would otherwise run concurrently with
+        // `extractPlainText()`. (AZW3/MOBI AI-context text is a
+        // separate pre-existing gap — feature #57 §10, out of scope.)
+        if TTSTextSource.source(for: resolvedBookFormat) == .foliateExtraction {
+            return
+        }
         Task {
-            let format = book.format.lowercased()
             if format == "txt" || format == "md" {
                 if let text = await contentCache.getText(for: resolvedFileURL, format: format) {
                     ai.loadedTextContent = text

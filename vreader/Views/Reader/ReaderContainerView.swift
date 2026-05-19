@@ -109,8 +109,23 @@ struct ReaderContainerView: View {
     /// The TTS path (`startTTS()`) calls the Coordinator's
     /// `extractPlainText()` through this box once the book has rendered.
     /// Holds the Coordinator `weak`, so this `@State` does not leak the
-    /// reader.
-    @State private var foliateCoordinatorBox = FoliateCoordinatorBox()
+    /// reader. `internal` (not `private`) because `startAZW3TTS` lives
+    /// in the `+Sheets.swift` extension — same reason as the sibling
+    /// `showSettings` / `showShareSheet` flags.
+    @State var foliateCoordinatorBox = FoliateCoordinatorBox()
+
+    /// Feature #57 (round-2 Finding 1): the in-flight AZW3/MOBI
+    /// extraction gate. The whole-book `extractPlainText()` section
+    /// walk takes noticeable time; a rapid second speaker tap before
+    /// it completes must not spawn a duplicate walk. `startAZW3TTS`
+    /// stores its extraction `Task` here while it runs and clears it
+    /// on completion; a re-tap with this non-nil is a no-op.
+    /// `Task<String?, Never>` — `extractPlainText()` is non-throwing
+    /// (its own 12 s timeout maps a hang to nil), so the gate always
+    /// clears. `@State`-owned per-reader handle, never a global.
+    /// `internal` for the `+Sheets.swift` extension (same reason as
+    /// `foliateCoordinatorBox` above).
+    @State var azw3ExtractionTask: Task<String?, Never>?
 
     #if DEBUG
     /// DebugBridge probe (feature #44). Registers on appear, unregisters on
