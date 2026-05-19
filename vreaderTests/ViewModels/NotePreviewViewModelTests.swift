@@ -24,12 +24,22 @@ private actor MockHighlightLookup: HighlightLookup {
     private var byID: [UUID: HighlightRecord] = [:]
     private var shouldThrow = false
 
+    /// When non-nil, every `highlight(...)` call only returns a seeded record
+    /// if the received `forBookWithKey` equals this — otherwise returns nil.
+    /// Lets a test prove the view model forwards its `bookFingerprintKey`.
+    private var expectedKey: String?
+    /// Every `forBookWithKey` value the view model passed, in call order.
+    private(set) var receivedKeys: [String] = []
+
     /// When set, the FIRST `highlight(...)` call awaits this gate before
     /// returning. Used to force out-of-order completion deterministically.
     private var firstCallGate: CheckedContinuation<Void, Never>?
     private var firstCallArmed = false
     private var firstCallSeen = false
     private var firstCallWaiter: CheckedContinuation<Void, Never>?
+    /// When true, the gated first call throws after being released — lets the
+    /// out-of-order tests exercise the stale-token guard on the throw path.
+    private var firstCallThrows = false
 
     func seed(_ record: HighlightRecord) {
         byID[record.highlightId] = record
@@ -39,10 +49,17 @@ private actor MockHighlightLookup: HighlightLookup {
         shouldThrow = value
     }
 
+    /// Require every lookup to receive exactly `key` as `forBookWithKey`.
+    func requireKey(_ key: String) {
+        expectedKey = key
+    }
+
     /// Arm the first-call gate. The first `highlight(...)` call will block
-    /// until `releaseFirstCall()` is invoked.
-    func armFirstCallGate() {
+    /// until `releaseFirstCall()` is invoked. When `throwsOnRelease` is true,
+    /// that gated call throws after release; otherwise it returns normally.
+    func armFirstCallGate(throwsOnRelease: Bool = false) {
         firstCallArmed = true
+        firstCallThrows = throwsOnRelease
     }
 
     /// Resume the gated first call.
@@ -58,14 +75,18 @@ private actor MockHighlightLookup: HighlightLookup {
     }
 
     func highlight(withID id: UUID, forBookWithKey key: String) async throws -> HighlightRecord? {
+        receivedKeys.append(key)
+        var throwAfterGate = false
         if firstCallArmed {
             firstCallArmed = false
             firstCallSeen = true
+            throwAfterGate = firstCallThrows
             firstCallWaiter?.resume()
             firstCallWaiter = nil
             await withCheckedContinuation { firstCallGate = $0 }
         }
-        if shouldThrow { throw NSError(domain: "test", code: 1) }
+        if throwAfterGate || shouldThrow { throw NSError(domain: "test", code: 1) }
+        if let expectedKey, key != expectedKey { return nil }
         return byID[id]
     }
 }
@@ -202,6 +223,78 @@ struct NotePreviewViewModelTests {
 
         #expect(vm.presented?.id == newer.highlightId)
         #expect(vm.presented?.note == "NEW note")
+    }
+
+    /// Stale-token guard on the THROW early-return path: an older tap whose
+    /// gated lookup THROWS after a newer tap published must not clear the
+    /// newer tap's result.
+    @Test func handleTap_outOfOrder_olderThrowingLookupDoesNotClearNewer() async {
+        let lookup = MockHighlightLookup()
+        let newer = makeRecord(note: "NEW note", fp: testFP)
+        await lookup.seed(newer)
+        let vm = NotePreviewViewModel(persistence: lookup, bookFingerprintKey: "book-1")
+
+        // Older tap's lookup is gated AND will throw on release.
+        await lookup.armFirstCallGate(throwsOnRelease: true)
+        let olderTask = Task { await vm.handleTap(tapEvent(for: UUID())) }
+        await lookup.awaitFirstCallEntered()
+
+        // Newer tap completes and publishes.
+        await vm.handleTap(tapEvent(for: newer.highlightId))
+        #expect(vm.presented?.id == newer.highlightId)
+
+        // Release the older tap — its lookup throws; the stale-token check in
+        // `catch` must stop it from clearing the newer card.
+        await lookup.releaseFirstCall()
+        await olderTask.value
+        #expect(vm.presented?.id == newer.highlightId)
+    }
+
+    /// Stale-token guard on the NIL early-return path: an older tap whose
+    /// gated lookup resolves to `nil` (deleted race) after a newer tap
+    /// published must not clear the newer tap's result.
+    @Test func handleTap_outOfOrder_olderNilLookupDoesNotClearNewer() async {
+        let lookup = MockHighlightLookup()
+        let newer = makeRecord(note: "NEW note", fp: testFP)
+        await lookup.seed(newer)
+        let vm = NotePreviewViewModel(persistence: lookup, bookFingerprintKey: "book-1")
+
+        // Older tap targets an UNSEEDED id → its gated lookup returns nil.
+        await lookup.armFirstCallGate()
+        let olderTask = Task { await vm.handleTap(tapEvent(for: UUID())) }
+        await lookup.awaitFirstCallEntered()
+
+        await vm.handleTap(tapEvent(for: newer.highlightId))
+        #expect(vm.presented?.id == newer.highlightId)
+
+        await lookup.releaseFirstCall()
+        await olderTask.value
+        #expect(vm.presented?.id == newer.highlightId)
+    }
+
+    /// The view model must forward its `bookFingerprintKey` into the lookup —
+    /// the scoping that prevents a tap from surfacing another book's highlight.
+    @Test func handleTap_forwardsBookFingerprintKeyToLookup() async {
+        let lookup = MockHighlightLookup()
+        let record = makeRecord(note: "scoped note", fp: testFP)
+        await lookup.seed(record)
+        // The mock only returns the record when the RIGHT key is passed.
+        await lookup.requireKey("the-open-book")
+
+        let rightVM = NotePreviewViewModel(
+            persistence: lookup, bookFingerprintKey: "the-open-book"
+        )
+        await rightVM.handleTap(tapEvent(for: record.highlightId))
+        #expect(rightVM.presented?.id == record.highlightId)
+        let keys = await lookup.receivedKeys
+        #expect(keys.last == "the-open-book")
+
+        // A view model scoped to a DIFFERENT book must not surface it.
+        let wrongVM = NotePreviewViewModel(
+            persistence: lookup, bookFingerprintKey: "some-other-book"
+        )
+        await wrongVM.handleTap(tapEvent(for: record.highlightId))
+        #expect(wrongVM.presented == nil)
     }
 
     /// A `handleTap` whose lookup is in flight when `dismiss()` is called must
