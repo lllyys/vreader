@@ -551,28 +551,20 @@ struct TXTReaderContainerView: View {
             },
             sourceText: { [viewModel] in viewModel.textContent },
             makeCurrentLocator: { [viewModel] in viewModel.makeLocator() },
-            onNavigate: { [viewModel, tocEntries] offset in
+            onNavigate: { [viewModel] offset in
                 // Bug #180 WI-6: in continuous mode every navigation target is
                 // a document-global offset — TOC tap, bookmark, search hit all
                 // resolve to a scroll offset. The chapter is derived afterward
                 // from where the scroll lands; no text swap.
                 if viewModel.isContinuousMode {
                     uiState.scrollToOffset = offset
-                } else if viewModel.chapterIndex != nil {
-                    // GH #30: TOC and chapters now use the same full-text decode,
-                    // so title matching is reliable. Fall back to offset for bookmarks/search.
-                    if let title = tocEntries.first(where: { $0.locator.charOffsetUTF16 == offset })?.title {
-                        Task {
-                            let matched = await viewModel.navigateToChapterByTitle(title)
-                            if !matched {
-                                await viewModel.navigateToGlobalOffset(offset)
-                            }
-                        }
-                    } else {
-                        Task { await viewModel.navigateToGlobalOffset(offset) }
-                    }
                 } else {
-                    viewModel.updateScrollPosition(charOffsetUTF16: offset)
+                    // Bug #234: a Paged-mode TOC tap resolves to its chapter by
+                    // the tapped entry's unique document-global offset, never by
+                    // a chapter-title string match — duplicate / empty TXT
+                    // chapter titles made the old title match land on the wrong
+                    // chapter.
+                    Task { await viewModel.navigateToTOCTap(globalOffsetUTF16: offset) }
                 }
             },
             hapticFeedback: HapticFeedbackProvider()
