@@ -61,7 +61,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 
 ### AI
 
-- **Summarization** — Section and chapter summaries via OpenAI-compatible API
+- **Summarization** — scoped summaries (Section / Chapter / Book-so-far) via OpenAI-compatible API
 - **Chat** — Multi-turn conversation with book context
 - **Translation** — Bilingual view (9 languages)
 - **General chat** — AI chat without book context
