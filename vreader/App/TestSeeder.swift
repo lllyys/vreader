@@ -443,6 +443,86 @@ enum TestSeeder {
         }
     }
 
+    /// Seeds a single real, openable AZW3 book — the bundled `mini-azw3.azw3`
+    /// (Project Gutenberg #1064, "The Masque of the Red Death").
+    ///
+    /// Bug #233 / GH #964: the XCUITest `launchApp(seed:)` helper had no
+    /// `TestSeedState` that opens a Foliate-rendered (AZW3/MOBI) book, which
+    /// blocked CU-free verification of feature #57 (AZW3/MOBI TTS). This is
+    /// the AZW3 equivalent of `seedMiniEPUB` (Bug #214 / GH #834): a single
+    /// openable AZW3 so a verification test can exercise the real Foliate
+    /// reader screen. The reader resolves the file by `fingerprintKey` (see
+    /// `ReaderContainerView.resolvedFileURL`), so the faked SHA-256 hash is
+    /// harmless — the path is derived from the canonical key, not re-hashed.
+    /// The hash literal is distinct from `seedMiniEPUB`'s so the two
+    /// fixtures never collide on `DocumentFingerprint.canonicalKey`.
+    static func seedMiniAZW3(persistence: PersistenceActor) async {
+        await clearAllBooks(persistence: persistence)
+
+        guard let bundleURL = Bundle.main.url(
+            forResource: "mini-azw3",
+            withExtension: "azw3",
+            subdirectory: "DebugFixtures"
+        ) else {
+            AppLogger.general.warning("mini-azw3.azw3 not found in DebugFixtures bundle")
+            return
+        }
+
+        guard let data = try? Data(contentsOf: bundleURL) else {
+            AppLogger.general.warning("failed to read mini-azw3.azw3 from bundle")
+            return
+        }
+
+        let hash = "00000000000000000000000000000000000000000000000000000000a2730001"
+        let fingerprint = DocumentFingerprint(
+            contentSHA256: hash,
+            fileByteCount: Int64(data.count),
+            format: .azw3
+        )
+
+        let booksDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedBooks", isDirectory: true)
+
+        // Bug #233 / GH #964 (Codex Gate-4 Medium): the backing-file writes
+        // are checked, not `try?`. If directory creation or the file write
+        // fails, return BEFORE inserting the record — otherwise the harness
+        // would see an AZW3 row with no backing file and the Foliate reader
+        // couldn't open it, recreating the exact "row exists but won't open"
+        // failure mode this seed is meant to avoid.
+        let safeName = fingerprint.canonicalKey.replacingOccurrences(of: ":", with: "_")
+        let filePath = booksDir.appendingPathComponent(safeName).appendingPathExtension("azw3")
+        do {
+            try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+            try data.write(to: filePath)
+        } catch {
+            AppLogger.general.warning("failed to write mini-azw3 backing file: \(error)")
+            return
+        }
+
+        let provenance = ImportProvenance(
+            source: .localCopy,
+            importedAt: Date(),
+            originalURLBookmarkData: nil
+        )
+        let record = BookRecord(
+            fingerprintKey: fingerprint.canonicalKey,
+            title: "Mini AZW3 Fixture",
+            author: "VReader Tests",
+            coverImagePath: nil,
+            fingerprint: fingerprint,
+            provenance: provenance,
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+
+        do {
+            _ = try await persistence.insertBook(record)
+        } catch {
+            AppLogger.general.warning("failed to seed mini-azw3: \(error)")
+        }
+    }
+
     /// Seeds two real-file TXT books for Feature #37's per-book-settings
     /// isolation test, which needs two distinct *openable* books. The
     /// `.books` seed's fixtures are metadata-only (no backing file) and

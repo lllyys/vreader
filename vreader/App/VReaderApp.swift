@@ -104,6 +104,7 @@ struct VReaderApp: App {
                     || config.seedMDTOC
                     || config.seedMDMultiPage
                     || config.seedEPUBFixture
+                    || config.seedAZW3Fixture
                     || config.seedKeepExisting
                 modelConfig = needsDiskBackedStore
                     ? ModelConfiguration()
@@ -200,6 +201,8 @@ struct VReaderApp: App {
                         await TestSeeder.seedMDMultiPage(persistence: persistence)
                     } else if seedConfig.seedEPUBFixture {
                         await TestSeeder.seedMiniEPUB(persistence: persistence)
+                    } else if seedConfig.seedAZW3Fixture {
+                        await TestSeeder.seedMiniAZW3(persistence: persistence)
                     } else if seedConfig.seedTwoBooks {
                         await TestSeeder.seedTwoBooks(persistence: persistence)
                     } else if seedConfig.seedBooks {
@@ -436,6 +439,13 @@ struct TestLaunchConfig: Sendable {
     /// real-file seed. Implies a disk-backed store (EPUB import + selective
     /// extraction touch the filesystem).
     let seedEPUBFixture: Bool
+    /// `--seed-azw3-fixture` — seed the bundled `mini-azw3.azw3` as a
+    /// single real, openable AZW3 book. Bug #233 / GH #964: the XCUITest
+    /// `launchApp(seed:)` helper had no way to open a Foliate-rendered
+    /// (AZW3/MOBI) book, which blocked CU-free verification of feature #57
+    /// (AZW3/MOBI TTS). Mirrors `seedEPUBFixture` — implies a disk-backed
+    /// store (AZW3 import touches the filesystem).
+    let seedAZW3Fixture: Bool
     let seedCorruptDB: Bool
     /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
     /// SwiftData store to remain. Used for terminate-then-relaunch tests
@@ -519,6 +529,7 @@ struct TestLaunchConfig: Sendable {
             seedMDMultiPage: args.contains("--seed-md-multi-page"),
             seedTwoBooks: args.contains("--seed-two-books"),
             seedEPUBFixture: args.contains("--seed-epub-fixture"),
+            seedAZW3Fixture: args.contains("--seed-azw3-fixture"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
@@ -543,6 +554,7 @@ struct TestLaunchConfig: Sendable {
         seedMDMultiPage: false,
         seedTwoBooks: false,
         seedEPUBFixture: false,
+        seedAZW3Fixture: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,
