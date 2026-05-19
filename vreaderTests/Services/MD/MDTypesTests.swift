@@ -118,6 +118,32 @@ struct MDTypesTests {
         c.textColor = .red
         #expect(a == c)
     }
+
+    @Test("MDRenderConfig equality includes accentColor (feature #68)")
+    func renderConfigAccentColorEquality() {
+        var a = MDRenderConfig(fontSize: 18, lineSpacing: 6)
+        a.accentColor = .red
+        var b = MDRenderConfig(fontSize: 18, lineSpacing: 6)
+        b.accentColor = .blue
+        #expect(a != b)
+
+        var c = MDRenderConfig(fontSize: 18, lineSpacing: 6)
+        c.accentColor = .red
+        #expect(a == c)
+    }
+
+    @Test("MDRenderConfig equality includes chapterHeadingColor (feature #68)")
+    func renderConfigChapterHeadingColorEquality() {
+        var a = MDRenderConfig(fontSize: 18, lineSpacing: 6)
+        a.chapterHeadingColor = .red
+        var b = MDRenderConfig(fontSize: 18, lineSpacing: 6)
+        b.chapterHeadingColor = .blue
+        #expect(a != b)
+
+        var c = MDRenderConfig(fontSize: 18, lineSpacing: 6)
+        c.chapterHeadingColor = .red
+        #expect(a == c)
+    }
     #endif
 
     // MARK: - MDParserError

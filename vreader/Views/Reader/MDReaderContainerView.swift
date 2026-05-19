@@ -113,8 +113,14 @@ struct MDReaderContainerView: View {
                 // source text before parsing. Live re-apply on toggle
                 // requires close+reopen (out of scope for the silent-
                 // noop fix; documented limitation).
+                // Feature #68: forward the theme-aware mdRenderConfig so
+                // the MD body colors AND the chapter-start drop-cap /
+                // leading-heading restyle pick up the active theme. MD has
+                // no live theme re-render path — these colors apply on the
+                // next open of the file (see MDReaderViewModel.open).
                 await viewModel.open(
                     url: fileURL,
+                    renderConfig: settingsStore?.mdRenderConfig ?? .default,
                     chineseConversion: settingsStore?.chineseConversion ?? .none
                 )
             }

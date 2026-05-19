@@ -71,6 +71,18 @@ struct MDRenderConfig: @unchecked Sendable, Equatable {
     /// a subtle elevated-surface tint that follows the active theme.
     /// Defaults to `.secondarySystemBackground` for backward compat.
     var codeBackgroundColor: UIColor = .secondarySystemBackground
+
+    /// Feature #68: drop-cap color for chapter-start typography. Used
+    /// only by `MDChapterStartDecorator`. Defaults to `.label` for
+    /// back-compat with non-decorated render paths (tests/previews).
+    /// The live reader sets this to `ReaderThemeV2.accentColor`.
+    var accentColor: UIColor = .label
+
+    /// Feature #68: chapter-heading color for chapter-start typography.
+    /// Used only by `MDChapterStartDecorator`'s leading-heading restyle.
+    /// Defaults to `.secondaryLabel`. The live reader sets this to
+    /// `ReaderThemeV2.subColor`.
+    var chapterHeadingColor: UIColor = .secondaryLabel
     #endif
 
     /// Creates a default render config.
@@ -83,6 +95,8 @@ struct MDRenderConfig: @unchecked Sendable, Equatable {
             && lhs.textColor == rhs.textColor
             && lhs.secondaryColor == rhs.secondaryColor
             && lhs.codeBackgroundColor == rhs.codeBackgroundColor
+            && lhs.accentColor == rhs.accentColor
+            && lhs.chapterHeadingColor == rhs.chapterHeadingColor
         #else
         return lhs.fontSize == rhs.fontSize && lhs.lineSpacing == rhs.lineSpacing
         #endif
