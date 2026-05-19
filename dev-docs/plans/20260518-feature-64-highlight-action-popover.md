@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-05-19** — feature #64 re-scoped to a unified cross-format highlight-action popover; see docs/features.md row #64 + needs-design #949. This plan will be rewritten once the design lands.
+
 # Feature #64 — Styled highlight-action popover (v2) — implementation plan
 
 > **Document version: v3.** The feature row title in `docs/features.md` is "Styled highlight-action popover (v2)" — the "(v2)" there is the *product* version (this is the v2 re-skin of feature #53's minimal popover). This planning **document** is now at **v3**, revised after the round-2 Gate-2 audit. The two version numbers are unrelated; do not conflate them.

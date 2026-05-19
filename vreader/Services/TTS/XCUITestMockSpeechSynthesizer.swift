@@ -13,18 +13,23 @@
 // - Owns an `AVSpeechSynthesizer` instance solely as a typing tag for
 //   the delegate callbacks. `speak()` is never called on it; no audio
 //   ever plays.
+// - The synthetic timeline is a single self-rescheduling tick rather
+//   than a batch of `DispatchQueue.main.asyncAfter` calls scheduled at
+//   speak() time. Each tick checks `isPaused`: when paused it reschedules
+//   itself WITHOUT advancing, so the willSpeakRange / didFinish sequence
+//   genuinely suspends — `pauseSpeaking()` holds the timeline and
+//   `continueSpeaking()` resumes it from the same slice. This lets
+//   XCUITest verification suites assert a real pause → resume → stop
+//   cycle (feature #26 Gate-5 verification) without the timeline racing
+//   to `didFinish` while the test is parked in the paused state.
 // - Uses DispatchQueue.main.asyncAfter instead of Task to avoid Swift 6
 //   Sendable-isolation issues with non-Sendable AVFoundation types
 //   crossing into a `Task @MainActor` body. SystemSpeechSynthesizer
 //   follows the same non-isolated pattern, so the protocol conformance
 //   shape stays consistent.
-// - A generation counter invalidates stale dispatched callbacks when
+// - A generation counter invalidates stale dispatched ticks when
 //   speak()/stopSpeaking() is called mid-sequence — newer generation
 //   short-circuits older blocks.
-// - `pauseSpeaking()` / `continueSpeaking()` flip flags but do NOT
-//   suspend the synthetic timeline. Feature 40/41 verification tests do
-//   not exercise pause/resume; a future WI extending mock coverage to
-//   pause/resume tests must add proper suspension here.
 //
 // Thread safety: all state mutations and delegate fires happen on the
 // main DispatchQueue. Property reads from other threads (e.g. a test
@@ -57,9 +62,33 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
     /// methods. Never has `speak()` called on it.
     private let probeSynth = AVSpeechSynthesizer()
 
+    /// The utterance currently being "spoken" — retained so that a
+    /// superseding `speak()` or a `stopSpeaking()` can fire `didCancel`
+    /// with the *actual* cancelled utterance rather than a stand-in,
+    /// matching real `AVSpeechSynthesizer` delegate semantics.
+    /// `nil` while idle.
+    private var currentUtterance: AVSpeechUtterance?
+
     /// Monotonically increments on each speak()/stopSpeaking() — older
-    /// dispatched closures check this and exit if no longer current.
+    /// dispatched ticks check this and exit if no longer current.
     private var generation: Int = 0
+
+    /// The cadence of one synthetic willSpeakRange slice. The unpaused
+    /// timeline runs for `tickInterval * maxSliceCount` ≈ 30 s before
+    /// the terminal didFinish — long enough for an XCUITest verification
+    /// suite to fire several DebugBridge snapshots, tap pause / resume,
+    /// and observe the offset advancing, all while the synthesizer is
+    /// still in the `.speaking` state. (The earlier 2.75 s timeline was
+    /// too short: a snapshot-polling assertion racing it could see the
+    /// state flip to `.idle` mid-test. The Feature 40 / 41 suites only
+    /// need the offset to *have advanced* and the state to be non-idle
+    /// shortly after start — both still hold with the longer timeline.)
+    private static let tickInterval: TimeInterval = 0.5
+
+    /// Number of synthetic willSpeakRange slices a `speak()` emits, when
+    /// the utterance has at least this many UTF-16 code units. Short
+    /// utterances emit fewer slices (one per code unit).
+    private static let maxSliceCount = 60
 
     // MARK: - SpeechSynthesizing
 
@@ -73,14 +102,19 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
 
         // If something was already speaking, cancel it first so the
         // first utterance's delegate sees didCancel before the second
-        // sees didStart. Matches real AVSpeechSynthesizer behavior.
-        if isSpeaking {
+        // sees didStart. Matches real AVSpeechSynthesizer behavior —
+        // including firing didCancel for the OUTGOING utterance, not the
+        // new one.
+        if isSpeaking || isPaused {
             generation += 1
-            delegateTarget?.speechSynthesizer?(probeSynth, didCancel: avUtterance)
+            let outgoing = currentUtterance ?? avUtterance
+            nonisolated(unsafe) let outgoingCapture = outgoing
+            delegateTarget?.speechSynthesizer?(probeSynth, didCancel: outgoingCapture)
         }
 
         isSpeaking = true
         isPaused = false
+        currentUtterance = avUtterance
         generation += 1
         let myGeneration = generation
 
@@ -90,6 +124,10 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
         // Swift 6 strict concurrency.
         nonisolated(unsafe) let utteranceCapture = avUtterance
 
+        let textLength = (avUtterance.speechString as NSString).length
+        let sliceCount = max(1, min(Self.maxSliceCount, textLength))
+        let sliceWidth = max(1, textLength / sliceCount)
+
         // Schedule didStart on the next runloop tick so the call returns
         // before any delegate fires (matches real synth behavior + lets
         // TTSService set state = .speaking before willSpeakRange lands).
@@ -98,36 +136,78 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
             self.delegateTarget?.speechSynthesizer?(self.probeSynth, didStart: utteranceCapture)
         }
 
-        // Schedule willSpeakRange callbacks across the utterance text in
-        // up to 10 slices. NSRange.location advances forward; tests can
-        // observe ttsOffsetUTF16 advancing via TTSService's existing
-        // willSpeakRange handler.
-        let textLength = (avUtterance.speechString as NSString).length
-        let sliceCount = max(1, min(10, textLength))
-        let sliceWidth = max(1, textLength / sliceCount)
+        // Drive the willSpeakRange + didFinish sequence via a single
+        // self-rescheduling tick. `scheduleTick` checks `isPaused` on
+        // every fire — a paused timeline reschedules without advancing,
+        // so the sequence genuinely suspends until `continueSpeaking()`.
+        scheduleTick(
+            sliceIndex: 0,
+            sliceCount: sliceCount,
+            sliceWidth: sliceWidth,
+            textLength: textLength,
+            generation: myGeneration,
+            utterance: utteranceCapture
+        )
+    }
 
-        for i in 0..<sliceCount {
-            // 250ms cadence — 10 slices finish ~2.5s after speak().
-            let delay = Double(i + 1) * 0.25
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.generation == myGeneration else { return }
-                let location = i * sliceWidth
+    /// Fires one synthetic willSpeakRange slice (or the terminal
+    /// didFinish) after `tickInterval`, then reschedules itself for the
+    /// next slice. While `isPaused` is true the tick reschedules WITHOUT
+    /// advancing `sliceIndex`, so the timeline holds at the current
+    /// position. A stale generation short-circuits the whole chain.
+    private func scheduleTick(
+        sliceIndex: Int,
+        sliceCount: Int,
+        sliceWidth: Int,
+        textLength: Int,
+        generation myGeneration: Int,
+        utterance: AVSpeechUtterance
+    ) {
+        // AVSpeechUtterance is not Sendable; the mock fires every
+        // delegate callback on the main queue, so the capture is safe.
+        nonisolated(unsafe) let utteranceCapture = utterance
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.tickInterval) { [weak self] in
+            guard let self, self.generation == myGeneration else { return }
+
+            // Paused: hold the timeline — reschedule the SAME slice.
+            if self.isPaused {
+                self.scheduleTick(
+                    sliceIndex: sliceIndex,
+                    sliceCount: sliceCount,
+                    sliceWidth: sliceWidth,
+                    textLength: textLength,
+                    generation: myGeneration,
+                    utterance: utteranceCapture
+                )
+                return
+            }
+
+            if sliceIndex < sliceCount {
+                // Fire this willSpeakRange slice. NSRange.location
+                // advances forward; tests observe ttsOffsetUTF16
+                // advancing via TTSService's willSpeakRange handler.
+                let location = sliceIndex * sliceWidth
                 let length = min(sliceWidth, max(0, textLength - location))
                 self.delegateTarget?.speechSynthesizer?(
                     self.probeSynth,
                     willSpeakRangeOfSpeechString: NSRange(location: location, length: length),
                     utterance: utteranceCapture
                 )
+                self.scheduleTick(
+                    sliceIndex: sliceIndex + 1,
+                    sliceCount: sliceCount,
+                    sliceWidth: sliceWidth,
+                    textLength: textLength,
+                    generation: myGeneration,
+                    utterance: utteranceCapture
+                )
+            } else {
+                // All slices consumed → terminal didFinish.
+                self.isSpeaking = false
+                self.isPaused = false
+                self.currentUtterance = nil
+                self.delegateTarget?.speechSynthesizer?(self.probeSynth, didFinish: utteranceCapture)
             }
-        }
-
-        // Schedule didFinish just after the last willSpeakRange.
-        let finishDelay = Double(sliceCount + 1) * 0.25
-        DispatchQueue.main.asyncAfter(deadline: .now() + finishDelay) { [weak self] in
-            guard let self, self.generation == myGeneration else { return }
-            self.isSpeaking = false
-            self.isPaused = false
-            self.delegateTarget?.speechSynthesizer?(self.probeSynth, didFinish: utteranceCapture)
         }
     }
 
@@ -136,7 +216,9 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
         guard isSpeaking else { return false }
         isPaused = true
         isSpeaking = false
-        // NOTE: does not suspend the synthetic timeline. See file header.
+        // The next scheduled tick observes `isPaused` and reschedules
+        // without advancing, so the synthetic timeline genuinely
+        // suspends here until `continueSpeaking()`.
         return true
     }
 
@@ -145,21 +227,29 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
         guard isPaused else { return false }
         isPaused = false
         isSpeaking = true
+        // The already-scheduled tick observes `isPaused == false` on its
+        // next fire and resumes advancing from the held slice.
         return true
     }
 
     @discardableResult
     func stopSpeaking() -> Bool {
-        // Invalidate any in-flight dispatched closures.
+        // Nothing in flight → no-op, matching real AVSpeechSynthesizer
+        // (`stopSpeaking(at:)` returns false and fires no delegate
+        // callback when the synthesizer is idle).
+        guard isSpeaking || isPaused else { return false }
+
+        // Invalidate any in-flight dispatched ticks.
         generation += 1
         isSpeaking = false
         isPaused = false
 
-        // Fire didCancel synchronously. Production didCancel handler
-        // (TTSService line 229-244) ignores the utterance parameter, so
-        // a placeholder is fine.
-        let placeholder = AVSpeechUtterance(string: "")
-        delegateTarget?.speechSynthesizer?(probeSynth, didCancel: placeholder)
+        // Fire didCancel synchronously for the actual in-flight
+        // utterance (faithful delegate semantics).
+        let cancelled = currentUtterance ?? AVSpeechUtterance(string: "")
+        currentUtterance = nil
+        nonisolated(unsafe) let cancelledCapture = cancelled
+        delegateTarget?.speechSynthesizer?(probeSynth, didCancel: cancelledCapture)
         return true
     }
 }

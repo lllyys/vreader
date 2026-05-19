@@ -12,7 +12,17 @@ final class DebugFixtureCatalogTests: XCTestCase {
 
     func test_all_returnsKnownFixtureNames() {
         let names = DebugFixtureCatalog.all().map { $0.name }
-        XCTAssertEqual(Set(names), ["war-and-peace", "mini-epub3", "mini-azw3"])
+        XCTAssertEqual(Set(names), ["war-and-peace", "mini-epub3", "mini-azw3", "mini-markdown"])
+    }
+
+    /// Feature #70 WI-4: the MD fixture added so the `.md` reader path is
+    /// automatable for the cross-format calibration acceptance pass.
+    func test_find_miniMarkdown_returnsMDFixture() throws {
+        let entry = try XCTUnwrap(DebugFixtureCatalog.find(name: "mini-markdown"))
+        XCTAssertEqual(entry.name, "mini-markdown")
+        XCTAssertEqual(entry.format, .md)
+        XCTAssertEqual(entry.resourceName, "mini-markdown")
+        XCTAssertEqual(entry.resourceExtension, "md")
     }
 
     func test_find_miniEpub3_returnsEPUBFixture() throws {

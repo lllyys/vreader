@@ -46,6 +46,12 @@ enum DebugFixtureCatalog {
         // one importer path; Foliate-js sniffs the magic bytes at runtime.
         // 128 KB compressed. Unblocks Foliate eval device-verification (bug #143).
         DebugFixture(name: "mini-azw3",     format: .azw3, resourceName: "mini-azw3",     resourceExtension: "azw3"),
+        // Feature #70 WI-4: a small synthetic Markdown fixture so the `.md`
+        // reader path is automatable — needed for feature #70's final
+        // 4-format (TXT/MD/EPUB/AZW3) calibration acceptance pass. The MD
+        // catalog had no entry before this; the `Format.md` case already
+        // existed.
+        DebugFixture(name: "mini-markdown", format: .md,   resourceName: "mini-markdown", resourceExtension: "md"),
     ]
 
     /// All catalog entries.

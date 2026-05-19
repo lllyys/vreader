@@ -71,6 +71,16 @@ final class ReaderSettingsStore {
     /// Used by `applyResolvedSettings` to avoid leaking per-book overrides into global defaults.
     private var suppressPersistence = false
     private let defaults: UserDefaults
+
+    /// Feature #70: maps the stored unified `typography.fontSize` to a
+    /// per-renderer concrete value so the same slider number renders at a
+    /// consistent perceived size across TXT/MD/EPUB/AZW3-MOBI. Stateless
+    /// `Sendable` value type with the shipped `.standard` profile. Exposed
+    /// `internal` (not `private`) so `EPUBReaderContainerView` (`.epub`
+    /// target) and `FoliateSpikeView` (`.foliate` target) can read it — the
+    /// EPUB and AZW3/MOBI paths build their CSS inside their container views,
+    /// not via this store's config accessors.
+    let calibrator = FontSizeCalibrator()
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.theme = Self.loadTheme(defaults)
@@ -192,8 +202,33 @@ final class ReaderSettingsStore {
     var uiBackgroundColor: UIColor { theme.backgroundColor }
     var uiTextColor: UIColor { theme.inkColor }
     var uiSecondaryTextColor: UIColor { theme.subColor }
+    /// Leading (point) for the *unified* font size — the anchor / preview
+    /// metric. `ReaderSettingsPanel`'s live-preview `Text` reads this
+    /// unchanged (feature #70 keeps the public signature stable). Renderer
+    /// configs use the per-target `calibratedLineSpacingPoints(for:)` below.
     var lineSpacingPoints: CGFloat { typography.fontSize * (typography.lineSpacing - 1.0) }
+    /// CJK inter-character spacing for the *unified* font size — the anchor /
+    /// preview metric, read unchanged by `ReaderSettingsPanel`. Renderer
+    /// configs use the per-target `calibratedCJKLetterSpacing(for:)` below.
     var cjkLetterSpacing: CGFloat { typography.cjkSpacing ? typography.fontSize * 0.05 : 0 }
+
+    /// Feature #70: leading (point) derived from a target's *calibrated* base
+    /// glyph size, so a calibrated body glyph gets a base-matched leading.
+    /// `lineSpacing` is a multiplier, so leading is `calibratedSize * (m - 1)`.
+    /// For `.txt` the multiplier is `1.0`, so this is numerically identical to
+    /// `lineSpacingPoints` — TXT leading is behavior-preserving.
+    private func calibratedLineSpacingPoints(for target: CalibrationTarget) -> CGFloat {
+        let size = calibrator.calibratedSize(forUnified: typography.fontSize, target: target)
+        return size * (typography.lineSpacing - 1.0)
+    }
+
+    /// Feature #70: CJK inter-character spacing derived from a target's
+    /// *calibrated* base glyph size (5% of it), so it tracks the calibrated
+    /// glyph. `0` when CJK spacing is disabled.
+    private func calibratedCJKLetterSpacing(for target: CalibrationTarget) -> CGFloat {
+        guard typography.cjkSpacing else { return 0 }
+        return calibrator.calibratedSize(forUnified: typography.fontSize, target: target) * 0.05
+    }
     #endif
     #if canImport(UIKit)
     var mdRenderConfig: MDRenderConfig {
@@ -203,9 +238,12 @@ final class ReaderSettingsStore {
         // Feature #68: accentColor / chapterHeadingColor thread the V2
         // accent + sub tokens through so the MD chapter-start drop-cap
         // and leading-heading restyle follow the active theme.
+        // Feature #70: MD font size + leading route through the calibrator's
+        // `.md` target so MD renders at a size perceptually consistent with
+        // TXT (the anchor) at the same slider value.
         MDRenderConfig(
-            fontSize: typography.fontSize,
-            lineSpacing: lineSpacingPoints,
+            fontSize: calibrator.calibratedSize(forUnified: typography.fontSize, target: .md),
+            lineSpacing: calibratedLineSpacingPoints(for: .md),
             textColor: uiTextColor,
             secondaryColor: theme.subColor,
             codeBackgroundColor: theme.paperColor,
@@ -214,8 +252,15 @@ final class ReaderSettingsStore {
         )
     }
     var txtViewConfig: TXTViewConfig {
-        var c = TXTViewConfig(); c.fontSize = typography.fontSize; c.lineSpacing = lineSpacingPoints
-        c.textColor = uiTextColor; c.backgroundColor = uiBackgroundColor; c.letterSpacing = cjkLetterSpacing
+        var c = TXTViewConfig()
+        // Feature #70: TXT font size + leading + CJK spacing route through the
+        // calibrator's `.txt` target. `.txt` is the calibration anchor
+        // (multiplier 1.0), so this re-anchors the system on the existing TXT
+        // appearance — behavior-preserving for TXT.
+        c.fontSize = calibrator.calibratedSize(forUnified: typography.fontSize, target: .txt)
+        c.lineSpacing = calibratedLineSpacingPoints(for: .txt)
+        c.textColor = uiTextColor; c.backgroundColor = uiBackgroundColor
+        c.letterSpacing = calibratedCJKLetterSpacing(for: .txt)
         // Feature #68: thread the V2 accent + sub tokens through so the
         // TXT chapter-start drop-cap (accent) and in-text heading restyle
         // (sub) follow the active theme.

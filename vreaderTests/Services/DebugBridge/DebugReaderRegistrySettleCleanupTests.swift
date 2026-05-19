@@ -24,9 +24,17 @@ import Foundation
 @Suite("DebugReaderRegistry settle cleanup — bug #141")
 struct DebugReaderRegistrySettleCleanupTests {
 
+    /// Each test gets its OWN isolated registry instance — not the
+    /// `DebugReaderRegistry.shared` singleton. Bug #227: Swift Testing runs
+    /// `@Test` methods in parallel, so when a test (e.g. `case11b`) kept a
+    /// `settleWaiter` suspended across a ~100ms window, a concurrent test's
+    /// `shared.reset()` wiped `settleWaiters` and resumed the waiter with a
+    /// spurious `.settleTimeout`. An isolated instance per test removes the
+    /// shared mutable state, making every case deterministic under
+    /// parallel execution. A fresh instance starts empty — no `reset()`
+    /// needed.
     private func makeRegistry() -> DebugReaderRegistry {
-        DebugReaderRegistry.shared.reset()
-        return DebugReaderRegistry.shared
+        DebugReaderRegistry.makeIsolatedForTests()
     }
 
     // MARK: - Case 6a: unregister clears settled state

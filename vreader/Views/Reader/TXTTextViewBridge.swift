@@ -93,6 +93,24 @@ struct TXTTextViewBridge: UIViewRepresentable {
         tapRecognizer.delegate = context.coordinator
         textView.addGestureRecognizer(tapRecognizer)
 
+        // Feature #55 WI-6: long-press gesture re-homing feature #53's inline
+        // delete menu off the tap (the tap now opens the #55 note preview).
+        // The coordinator's `gestureRecognizerShouldBegin` runs the highlight
+        // hit-test up front, so this recognizer ONLY begins when the press
+        // lands on a persisted highlight — a long-press on plain body text
+        // never engages it and proceeds straight into UITextView's native
+        // text selection. When it DOES begin (highlight hit), the coordinator
+        // denies simultaneous recognition against the system selection
+        // long-press, so the highlight long-press opens only #53's menu.
+        // The `.name` lets the shared delegate identify this recognizer.
+        let highlightLongPress = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleHighlightLongPress)
+        )
+        highlightLongPress.name = TXTBridgeShared.highlightLongPressName
+        highlightLongPress.delegate = context.coordinator
+        textView.addGestureRecognizer(highlightLongPress)
+
         // Keep a weak ref for notification-driven highlight clear
         context.coordinator.activeTextView = textView
 

@@ -67,4 +67,25 @@ enum NotePreviewPresenter {
         if noteLineCount > calloutMaxLines { return .sheet }
         return .callout
     }
+
+    /// The form to actually present, folding in one runtime fact `form(...)`
+    /// cannot know: whether a host `UIView` is available to anchor a callout.
+    /// `form(...)` may choose `.callout`, but if `hasHostView` is `false`
+    /// (the container's content view is not yet attached) the callout has
+    /// nowhere to anchor — so it degrades to `.sheet`. Pure, so the
+    /// host-fallback path is unit-tested without a SwiftUI render.
+    static func resolvedForm(
+        for content: NotePreviewContent,
+        isVoiceOverRunning: Bool,
+        noteLineCount: Int,
+        hasHostView: Bool
+    ) -> NotePreviewForm {
+        let base = form(
+            for: content,
+            isVoiceOverRunning: isVoiceOverRunning,
+            noteLineCount: noteLineCount
+        )
+        if base == .callout && !hasHostView { return .sheet }
+        return base
+    }
 }

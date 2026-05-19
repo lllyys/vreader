@@ -26,6 +26,19 @@ struct EPUBReaderContainerView: View {
     /// Bug #142: per-reader instance token paired with fingerprintKey.
     var readerToken: UUID?
 
+    /// Feature #70 WI-3: the EPUB body font size the container injects into
+    /// `epubOverrideCSS`, routed through the calibrator's `.epub` target so
+    /// EPUB (CSS px in a WKWebView) renders at a size perceptually consistent
+    /// with TXT (the calibration anchor) at the same slider value.
+    ///
+    /// Extracted as a pure static helper so the WI-3 routing seam is directly
+    /// unit-testable — a regression to the raw `typography.fontSize` is caught
+    /// here, not silently passed by a test that builds CSS directly.
+    static func calibratedEPUBFontSize(for store: ReaderSettingsStore) -> CGFloat {
+        store.calibrator.calibratedSize(
+            forUnified: store.typography.fontSize, target: .epub)
+    }
+
     /// OPF directory — spine hrefs are resolved relative to this.
     @State var resourceBase: URL?
     /// Extracted root directory — passed to WKWebView for file access.
@@ -310,6 +323,17 @@ struct EPUBReaderContainerView: View {
         .sheet(isPresented: $showNoteSheet) {
             noteInputSheet
         }
+        // Feature #55 WI-7: attach the tap-on-annotated-text note preview.
+        // EPUB highlight taps arrive from the JS `highlightTapHandler`
+        // channel; `EPUBWebViewBridgeCoordinator.handleHighlightTapMessage`
+        // posts `.readerHighlightTapped`, which `NotePreviewModifier`
+        // (attached here) observes to present the note preview. Inert in
+        // SwiftUI previews / test harnesses where `modelContainer` is nil.
+        .notePreviewPresenterIfAvailable(
+            modelContainer: modelContainer,
+            bookFingerprintKey: viewModel.bookFingerprintKey,
+            theme: settingsStore?.theme ?? .paper
+        )
         // Feature #60 WI-12 (#795): keep the Photo background-image data
         // URL fresh. Driven by theme + custom-background changes — never
         // by scroll — so the file read + base64 encode stays off the
@@ -391,7 +415,13 @@ struct EPUBReaderContainerView: View {
                 // off the stored theme — Paper / Sepia / Dark / OLED / Photo.
                 themeCSS: settingsStore.map {
                     $0.theme.epubOverrideCSS(
-                        fontSize: $0.typography.fontSize,
+                        // Feature #70 WI-3: route the EPUB body font size
+                        // through the calibrator's `.epub` target (see
+                        // `calibratedEPUBFontSize(for:)`) so EPUB (CSS px in
+                        // a WKWebView) renders at a size perceptually
+                        // consistent with TXT (the anchor) at the same
+                        // slider value. Clamped to the 12...64 text band.
+                        fontSize: Self.calibratedEPUBFontSize(for: $0),
                         lineHeight: $0.typography.lineSpacing,
                         letterSpacing: $0.typography.cjkSpacing ? $0.typography.fontSize * 0.05 / $0.typography.fontSize : 0,
                         fontFamily: $0.typography.fontFamily,
@@ -455,10 +485,12 @@ struct EPUBReaderContainerView: View {
                 )
                 SelectionPopoverRequest.post(selection: info, requestToken: token)
             },
-            highlightActionPresenter: UIKitHighlightActionPresenter(),
-            onHighlightTapAction: { [highlightCoordinator] action, id in
-                await highlightCoordinator?.handleTapAction(action, highlightID: id)
-            },
+            // Feature #55 WI-7: the EPUB highlight tap is re-homed to the
+            // #55 note preview (`NotePreviewModifier` on the container
+            // observes `.readerHighlightTapped`). The legacy #53 tap-time
+            // inline delete menu is dropped for EPUB v1 — so the bridge no
+            // longer takes a `highlightActionPresenter` / `onHighlightTapAction`.
+            // Highlight deletion stays reachable via the Annotations panel.
             onPageDidFinishLoad: { evaluateJS in
                 restoreHighlightsOnLoad(evaluateJS: evaluateJS)
             },

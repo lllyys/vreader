@@ -363,14 +363,51 @@ struct TXTReaderViewModelPositionTests {
 /// partway through. These tests pin the post: `updateScrollPosition` MUST
 /// emit `.readerPositionDidChange` with a Locator whose `charOffsetUTF16`
 /// matches the new (clamped) offset.
-@Suite("TXTReaderViewModel - Live Position Broadcast (bug #164)")
+///
+/// Bug #225: this suite was test-isolation-broken. `observeLocator()`
+/// registered a `NotificationCenter` observer with `object: nil`, and
+/// `broadcastPosition` posts `.readerPositionDidChange` on the shared global
+/// center with the `Locator` (not the VM) as object. Swift Testing runs the
+/// suite's `@Test`s in parallel, so a sibling test's `open()` /
+/// `updateScrollPosition` posts bled into every other test's observer —
+/// breaking both the `observer.count() == 1` assertion in
+/// `openSeedsRestoredPosition` (count → 5+) and, latently, the `capture()`
+/// assertions (a sibling's post overwriting the most-recent locator).
+///
+/// Fix: `observeLocator(for:)` filters captured posts by the posting
+/// `Locator`'s `bookFingerprint`, and every test mints its own unique
+/// fingerprint via `Self.uniqueFingerprint()`. A sibling test's posts carry
+/// a different fingerprint and are dropped by the filter, so each test's
+/// observer sees exactly — and only — its own VM's broadcasts. This is
+/// deterministic regardless of Swift Testing's parallel scheduling (it does
+/// not depend on `.serialized` serializing the suite). `.serialized` is kept
+/// as documented intent + cheap defense-in-depth.
+@Suite("TXTReaderViewModel - Live Position Broadcast (bug #164)", .serialized)
 @MainActor
 struct TXTReaderViewModelPositionBroadcastTests {
 
-    /// Captures the most-recent locator object posted on `.readerPositionDidChange`
-    /// AND counts how many times the notification fired during the lifetime
-    /// of the observer; tear down via the returned remove-closure (Swift
-    /// Testing has no XCTest-style teardown lambda).
+    /// Mints a fingerprint with a globally-unique SHA so each test's
+    /// broadcasts are distinguishable from every sibling's on the shared
+    /// `.readerPositionDidChange` bus. `DocumentFingerprint`'s memberwise
+    /// init does not validate the SHA, and `Locator` / `LocatorFactory`
+    /// only filter by it — never re-validate — so a UUID-derived SHA is
+    /// accepted exactly like the fixture `testFingerprint`.
+    private static func uniqueFingerprint() -> DocumentFingerprint {
+        let raw = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let sha = String((raw + raw).prefix(64))
+        return DocumentFingerprint(
+            contentSHA256: sha,
+            fileByteCount: 1000,
+            format: .txt
+        )
+    }
+
+    /// Captures the most-recent locator posted on `.readerPositionDidChange`
+    /// AND counts how many times the notification fired — but ONLY for posts
+    /// whose `Locator.bookFingerprint` matches `fingerprint`. The
+    /// fingerprint filter is what isolates one test from its parallel
+    /// siblings (bug #225). Tear down via the returned remove-closure
+    /// (Swift Testing has no XCTest-style teardown lambda).
     ///
     /// Round-1 audit fix [Low]: registered with `queue: nil` so delivery is
     /// synchronous on the posting thread. With a non-nil queue the post is
@@ -379,7 +416,9 @@ struct TXTReaderViewModelPositionBroadcastTests {
     ///
     /// Round-2 audit fix [Low]: also expose a fire-count so callers can
     /// pin "exactly N broadcasts" rather than just "at least one".
-    private static func observeLocator() -> (capture: () -> Locator?, count: () -> Int, remove: () -> Void) {
+    private static func observeLocator(
+        for fingerprint: DocumentFingerprint
+    ) -> (capture: () -> Locator?, count: () -> Int, remove: () -> Void) {
         nonisolated(unsafe) var captured: Locator?
         nonisolated(unsafe) var fired: Int = 0
         let token = NotificationCenter.default.addObserver(
@@ -387,7 +426,9 @@ struct TXTReaderViewModelPositionBroadcastTests {
             object: nil,
             queue: nil
         ) { notification in
-            captured = notification.object as? Locator
+            guard let locator = notification.object as? Locator,
+                  locator.bookFingerprint == fingerprint else { return }
+            captured = locator
             fired += 1
         }
         return (
@@ -399,10 +440,11 @@ struct TXTReaderViewModelPositionBroadcastTests {
 
     @Test("updateScrollPosition posts readerPositionDidChange with current locator")
     func postsNotificationOnPositionUpdate() async {
-        let (vm, _, _, _) = await makeViewModel()
+        let fingerprint = Self.uniqueFingerprint()
+        let (vm, _, _, _) = await makeViewModel(fingerprint: fingerprint)
         await vm.open(url: testURL)
 
-        let observer = Self.observeLocator()
+        let observer = Self.observeLocator(for: fingerprint)
         defer { observer.remove() }
 
         vm.updateScrollPosition(charOffsetUTF16: 17)
@@ -418,10 +460,11 @@ struct TXTReaderViewModelPositionBroadcastTests {
 
     @Test("clamped negative offset still broadcasts (offset==0)")
     func postsNotificationWithClampedNegative() async {
-        let (vm, _, _, _) = await makeViewModel()
+        let fingerprint = Self.uniqueFingerprint()
+        let (vm, _, _, _) = await makeViewModel(fingerprint: fingerprint)
         await vm.open(url: testURL)
 
-        let observer = Self.observeLocator()
+        let observer = Self.observeLocator(for: fingerprint)
         defer { observer.remove() }
 
         vm.updateScrollPosition(charOffsetUTF16: -50)
@@ -433,10 +476,11 @@ struct TXTReaderViewModelPositionBroadcastTests {
 
     @Test("clamped beyond-length offset broadcasts the clamped value")
     func postsNotificationWithClampedBeyondLength() async {
-        let (vm, _, _, _) = await makeViewModel()
+        let fingerprint = Self.uniqueFingerprint()
+        let (vm, _, _, _) = await makeViewModel(fingerprint: fingerprint)
         await vm.open(url: testURL)
 
-        let observer = Self.observeLocator()
+        let observer = Self.observeLocator(for: fingerprint)
         defer { observer.remove() }
 
         vm.updateScrollPosition(charOffsetUTF16: 999_999)
@@ -455,9 +499,10 @@ struct TXTReaderViewModelPositionBroadcastTests {
         // stays nil until the user scrolls past the suppress window —
         // meaning TTS started immediately after open would still resolve
         // offset 0.
+        let fingerprint = Self.uniqueFingerprint()
         let positionStore = MockPositionStore()
         guard let savedLocator = Locator.validated(
-            bookFingerprint: testFingerprint,
+            bookFingerprint: fingerprint,
             totalProgression: 0.5,
             charOffsetUTF16: 30
         ) else {
@@ -465,7 +510,7 @@ struct TXTReaderViewModelPositionBroadcastTests {
             return
         }
         await positionStore.seed(
-            bookFingerprintKey: testFingerprint.canonicalKey,
+            bookFingerprintKey: fingerprint.canonicalKey,
             locator: savedLocator
         )
         let service = MockTXTService()
@@ -478,7 +523,7 @@ struct TXTReaderViewModelPositionBroadcastTests {
             deviceId: "test-device"
         )
         let vm = TXTReaderViewModel(
-            bookFingerprint: testFingerprint,
+            bookFingerprint: fingerprint,
             txtService: service,
             positionStore: positionStore,
             sessionTracker: tracker,
@@ -486,7 +531,7 @@ struct TXTReaderViewModelPositionBroadcastTests {
             positionSaveDebounceNs: 2_000_000_000
         )
 
-        let observer = Self.observeLocator()
+        let observer = Self.observeLocator(for: fingerprint)
         defer { observer.remove() }
 
         await vm.open(url: testURL)
@@ -508,9 +553,10 @@ struct TXTReaderViewModelPositionBroadcastTests {
         // storm doesn't overwrite the freshly-restored offset). The position
         // broadcast must follow the same rule — otherwise the AI/TTS would
         // see the storm-zero positions instead of the restored offset.
+        let fingerprint = Self.uniqueFingerprint()
         let positionStore = MockPositionStore()
         guard let savedLocator = Locator.validated(
-            bookFingerprint: testFingerprint,
+            bookFingerprint: fingerprint,
             totalProgression: 0.5,
             charOffsetUTF16: 30
         ) else {
@@ -518,7 +564,7 @@ struct TXTReaderViewModelPositionBroadcastTests {
             return
         }
         await positionStore.seed(
-            bookFingerprintKey: testFingerprint.canonicalKey,
+            bookFingerprintKey: fingerprint.canonicalKey,
             locator: savedLocator
         )
         let service = MockTXTService()
@@ -531,7 +577,7 @@ struct TXTReaderViewModelPositionBroadcastTests {
             deviceId: "test-device"
         )
         let vm = TXTReaderViewModel(
-            bookFingerprint: testFingerprint,
+            bookFingerprint: fingerprint,
             txtService: service,
             positionStore: positionStore,
             sessionTracker: tracker,
@@ -540,7 +586,7 @@ struct TXTReaderViewModelPositionBroadcastTests {
         )
         await vm.open(url: testURL)
 
-        let observer = Self.observeLocator()
+        let observer = Self.observeLocator(for: fingerprint)
         defer { observer.remove() }
 
         // First updateScrollPosition during settle window with offset==0

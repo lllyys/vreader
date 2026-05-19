@@ -31,9 +31,20 @@ final class TTSService: NSObject {
     private(set) var currentOffsetUTF16: Int = 0
 
     /// Speech rate in AVSpeechUtterance range (0.0–1.0). Clamped on set.
-    var rate: Float = 0.5 {
-        didSet { rate = min(max(rate, 0.0), 1.0) }
+    ///
+    /// Bug #226 / GH #910: this is a computed `get`/`set` over `_rate`, NOT a
+    /// stored property with a clamping `didSet`. Under the `@Observable` macro
+    /// a `didSet` that re-assigns its own property recurses unboundedly (the
+    /// macro rewrites the property into a computed accessor over a backing
+    /// store, so the `didSet`'s self-assignment re-enters the synthesized
+    /// setter) → stack overflow. The `get`/`set` form clamps in `set` with no
+    /// observer re-entry — same pattern as `ReaderSettingsStore.backgroundOpacity`
+    /// and the Bug #222 fix for `ReaderSettingsStore.autoPageTurnInterval`.
+    var rate: Float {
+        get { _rate }
+        set { _rate = min(max(newValue, 0.0), 1.0) }
     }
+    private var _rate: Float = 0.5
 
     // MARK: - Private
 

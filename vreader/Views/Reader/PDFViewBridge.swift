@@ -92,6 +92,25 @@ struct PDFViewBridge: UIViewRepresentable {
         tapGesture.delegate = context.coordinator
         pdfView.addGestureRecognizer(tapGesture)
 
+        // Feature #55 WI-6: long-press gesture re-homing feature #53's inline
+        // delete menu off the tap (the tap now opens the #55 note preview).
+        // The coordinator's `gestureRecognizerShouldBegin` runs the highlight
+        // hit-test up front, so this recognizer ONLY begins when the press
+        // lands on a persisted highlight annotation — a long-press on plain
+        // page content never engages it and proceeds into PDFKit's native
+        // text selection. When it DOES begin, the coordinator denies
+        // simultaneous recognition against PDFKit's selection long-press, so
+        // the highlight long-press opens only #53's menu (and PDFKit never
+        // establishes a `currentSelection` for that press). The `.name`
+        // lets the coordinator's delegate identify this recognizer.
+        let highlightLongPress = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleHighlightLongPress(_:))
+        )
+        highlightLongPress.name = TXTBridgeShared.highlightLongPressName
+        highlightLongPress.delegate = context.coordinator
+        pdfView.addGestureRecognizer(highlightLongPress)
+
         // Observe page changes
         NotificationCenter.default.addObserver(
             context.coordinator,
@@ -429,65 +448,106 @@ struct PDFViewBridge: UIViewRepresentable {
                 return
             }
 
-            // Feature #53 WI-6: check whether the tap hit an existing
-            // highlight annotation before falling through to the chrome-
-            // toggle path. If it did, post `.readerHighlightTapped` with
-            // the highlight's UUID + the annotation's bounds in PDFView
-            // coords for popover anchoring, and DO NOT also fire
-            // `.readerContentTapped` (which would toggle chrome and steal
-            // focus from the inline-menu that the tap is supposed to open).
-            if let pdfView,
-               let renderer = highlightRenderer,
-               !renderer.annotationMap.isEmpty {
-                let location = gesture.location(in: pdfView)
-                if let page = pdfView.page(for: location, nearest: false) {
-                    let pagePoint = pdfView.convert(location, to: page)
-                    if let highlightID = PDFHighlightTapResolver.resolveHighlightID(
-                        atPagePoint: pagePoint,
-                        onPage: page,
-                        annotationMap: renderer.annotationMap
-                    ) {
-                        // Compute screen rect for popover anchoring: pick
-                        // the first annotation whose bounds contain the
-                        // tap, convert its bounds to PDFView coords.
-                        var sourceRect: CGRect = .zero
-                        if let annotations = renderer.annotationMap[highlightID],
-                           let hit = annotations.first(where: { $0.page === page && $0.bounds.contains(pagePoint) }) {
-                            sourceRect = pdfView.convert(hit.bounds, from: page)
-                        }
-                        let event = ReaderHighlightTapEvent(
-                            highlightID: highlightID,
-                            sourceRect: sourceRect
-                        )
-                        NotificationCenter.default.post(
-                            name: .readerHighlightTapped, object: event
-                        )
-                        // Present the inline menu (Delete Highlight) when
-                        // a presenter is wired. nil presenter keeps the
-                        // notification-only mode for previews/test harnesses.
-                        if let presenter = highlightActionPresenter,
-                           let onAction = onHighlightTapAction {
-                            presenter.present(for: event, in: pdfView) { action in
-                                guard let action else { return }
-                                Task { @MainActor in
-                                    await onAction(action, highlightID)
-                                }
-                            }
-                        }
-                        return
-                    }
-                }
+            // Feature #53 WI-6 + feature #55 WI-6: check whether the tap hit
+            // an existing highlight annotation before the chrome-toggle path.
+            // If it did, post `.readerHighlightTapped` (which opens the #55
+            // note preview via `NotePreviewModifier`) and DO NOT fire
+            // `.readerContentTapped`. Feature #55 makes a single tap open the
+            // note preview — the #53 delete menu is re-homed to
+            // `handleHighlightLongPress`.
+            if let event = resolveHighlightTapEvent(at: gesture.location(in: pdfView ?? UIView())) {
+                NotificationCenter.default.post(
+                    name: .readerHighlightTapped, object: event
+                )
+                return
             }
 
             NotificationCenter.default.post(name: .readerContentTapped, object: nil)
         }
 
-        // Allow tap gesture to fire alongside PDFView's internal gestures
+        /// Feature #55 WI-6: re-homes feature #53's inline delete menu from a
+        /// tap to a long-press for PDF (plan §2.7.2). Same hit-test, same
+        /// presenter, same `HighlightTapAction.delete` dispatch — only the
+        /// gesture moved. A tap now opens the #55 note preview.
+        @objc func handleHighlightLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began,
+                  let pdfView,
+                  pdfView.currentSelection == nil,
+                  let presenter = highlightActionPresenter,
+                  let onAction = onHighlightTapAction,
+                  let event = resolveHighlightTapEvent(at: gesture.location(in: pdfView))
+            else { return }
+            presenter.present(for: event, in: pdfView) { action in
+                guard let action else { return }
+                Task { @MainActor in
+                    await onAction(action, event.highlightID)
+                }
+            }
+        }
+
+        /// Resolves a point in `pdfView` coordinates to a `ReaderHighlightTapEvent`
+        /// when it lands on a persisted highlight annotation — the shared
+        /// hit-test for both the tap (chrome-toggle / #55 preview) and the
+        /// WI-6 long-press (#53 delete menu). Returns nil on a miss.
+        private func resolveHighlightTapEvent(at location: CGPoint) -> ReaderHighlightTapEvent? {
+            guard let pdfView,
+                  let renderer = highlightRenderer,
+                  !renderer.annotationMap.isEmpty,
+                  let page = pdfView.page(for: location, nearest: false)
+            else { return nil }
+            let pagePoint = pdfView.convert(location, to: page)
+            guard let highlightID = PDFHighlightTapResolver.resolveHighlightID(
+                atPagePoint: pagePoint,
+                onPage: page,
+                annotationMap: renderer.annotationMap
+            ) else { return nil }
+            // Screen rect for popover anchoring: the first annotation whose
+            // bounds contain the point, converted to PDFView coords.
+            var sourceRect: CGRect = .zero
+            if let annotations = renderer.annotationMap[highlightID],
+               let hit = annotations.first(where: {
+                   $0.page === page && $0.bounds.contains(pagePoint)
+               }) {
+                sourceRect = pdfView.convert(hit.bounds, from: page)
+            }
+            return ReaderHighlightTapEvent(highlightID: highlightID, sourceRect: sourceRect)
+        }
+
+        // Allow the tap gesture to fire alongside PDFView's internal
+        // gestures. Feature #55 WI-6: the highlight long-press is the
+        // exception — it is mutually exclusive with PDFKit's native
+        // text-selection long-press, so a long-press on a persisted
+        // highlight annotation opens ONLY #53's delete menu and PDFKit
+        // never establishes a `currentSelection` for that press.
         nonisolated func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            true
+            TXTBridgeShared.simultaneousRecognitionAllowed(for: gestureRecognizer.name)
+                && TXTBridgeShared.simultaneousRecognitionAllowed(
+                    for: otherGestureRecognizer.name)
+        }
+
+        /// Feature #55 WI-6: gates the highlight long-press recognizer with
+        /// the SAME hit-test the handler reuses, so it only *begins* when
+        /// the press lands on a persisted highlight annotation. A long-press
+        /// on plain page content never engages it — PDFKit's native
+        /// text-selection long-press proceeds undisturbed. Other recognizers
+        /// (the content-tap) keep UIKit's default begin behavior. Gating in
+        /// `shouldBegin` (rather than no-op'ing in the handler) is what
+        /// makes the highlight long-press win arbitration against PDFKit's
+        /// selection recognizer before any selection is established.
+        func gestureRecognizerShouldBegin(
+            _ gestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard gestureRecognizer.name == TXTBridgeShared.highlightLongPressName
+            else { return true }
+            guard let pdfView,
+                  pdfView.currentSelection == nil
+            else { return false }
+            return resolveHighlightTapEvent(
+                at: gestureRecognizer.location(in: pdfView)
+            ) != nil
         }
 
         deinit {

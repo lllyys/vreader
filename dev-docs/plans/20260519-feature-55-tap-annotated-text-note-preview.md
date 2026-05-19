@@ -420,9 +420,25 @@ Concretely:
   long-press. Acceptance: preview on tap; highlight delete still reachable
   via Open-in-panel → Highlights-tab swipe-delete.
 
+  **WI-7 implementation note (Gate-4 audit `019e3f25`, round 1):** the
+  panel swipe-delete fully preserves delete *for EPUB* — `EPUBReaderContainerView`
+  observes `.readerHighlightRemoved` and strips the WKWebView highlight via
+  `HighlightCoordinator.handleRemoval`. For **AZW3/MOBI (Foliate)** the
+  panel swipe-delete removes the highlight from persistence and the panel
+  list, but the *rendered Foliate overlay* is not stripped until the next
+  book reload — the panel posts `.readerHighlightRemoved` (UUID only) while
+  the Foliate JS strip needs the CFI, and the record is deleted before the
+  notification fires. This is a pre-existing gap (the panel path never
+  posted `.foliateRequestAnnotationJSDelete`) that WI-7 surfaces by removing
+  the tap-time delete; it is filed as **bug #228 / GH #938** and is NOT a
+  #55 acceptance blocker (criteria a/b/c are about the preview). The
+  `.foliateRequestAnnotationJSDelete` observer is kept as the reusable hook
+  for bug #228's fix.
+
 The auditor must confirm: tap→preview ships on all five formats; the #53
 long-press menu is correctly scoped to TXT/MD/PDF; and EPUB/Foliate delete
-is genuinely reachable via the panel in v1.
+is reachable via the panel in v1 (with the AZW3/MOBI overlay-strip caveat
+above tracked as bug #228).
 
 ### 2.8 — Edit + Open-in-panel handoffs (round-1 findings [1], [6]; round-2 finding [9])
 

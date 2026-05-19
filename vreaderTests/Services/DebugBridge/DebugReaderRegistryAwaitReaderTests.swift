@@ -37,9 +37,17 @@ struct DebugReaderRegistryAwaitReaderTests {
         }
     }
 
+    /// Each test gets its OWN isolated registry instance — not the
+    /// `DebugReaderRegistry.shared` singleton. Bug #228: Swift Testing runs
+    /// `@Test` methods in parallel, so a concurrent test's `shared.reset()`
+    /// resumes every pending `waiters` entry with `.awaitReaderTimeout` —
+    /// spuriously failing a sibling test suspended on `awaitReader`. (Same
+    /// defect class as bug #227, which isolated the sibling `settle` suites;
+    /// this is the `awaitReader`/`waiters` path.) An isolated instance per
+    /// test removes that shared mutable state. A fresh instance starts
+    /// empty — no `reset()` needed.
     private func makeRegistry() -> DebugReaderRegistry {
-        DebugReaderRegistry.shared.reset()
-        return DebugReaderRegistry.shared
+        DebugReaderRegistry.makeIsolatedForTests()
     }
 
     // MARK: - Case 1: fast path (reader already registered)
@@ -177,6 +185,56 @@ struct DebugReaderRegistryAwaitReaderTests {
         } catch {
             Issue.record("wrong error: \(error)")
         }
+    }
+
+    // MARK: - Bug #228: per-test registry isolation
+
+    /// Bug #228 — the parallel-test isolation defect this fix closes.
+    ///
+    /// Before the fix, `makeRegistry()` returned `DebugReaderRegistry.shared`.
+    /// Swift Testing runs `@Test` methods in parallel, so two test contexts
+    /// holding "their own" registry actually shared one mutable object: a
+    /// concurrent context's `reset()` resumes EVERY pending `waiters` entry
+    /// with `.awaitReaderTimeout`, spuriously failing a sibling test that
+    /// suspended on `awaitReader`. This test reproduces that interference
+    /// deterministically by standing up the two contexts itself: context B
+    /// suspends an `awaitReader` waiter; context A then calls `reset()`.
+    ///
+    /// Pre-fix (`makeRegistry()` → `.shared`): `registryA === registryB`, so
+    /// A's `reset()` cancels B's suspended waiter — B resolves with a
+    /// spurious `.awaitReaderTimeout` and the test fails.
+    ///
+    /// Post-fix (`makeRegistry()` → `makeIsolatedForTests()`): the two are
+    /// distinct instances, A's `reset()` cannot reach B's `waiters`, and B's
+    /// own `register(_:)` resolves its waiter with the real probe.
+    @Test func bug228_concurrentResetOnSiblingRegistry_doesNotCancelOwnWaiter() async throws {
+        let registryA = makeRegistry()
+        let registryB = makeRegistry()
+
+        // Structural guarantee: each test owns a distinct registry. This
+        // assertion alone fails on the pre-fix code (both are `.shared`).
+        #expect(registryA !== registryB)
+
+        let probeB = FakeProbe(fingerprintKey: "txt:bug228:4096")
+
+        // Background: mimic a concurrent sibling test calling `reset()` on
+        // ITS registry (A), then this test's own registry (B) registering
+        // the matching probe. With shared state, A's reset fires first and
+        // cancels B's waiter; with isolation, only B's register resolves it.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000) // 30ms — A first
+            registryA.reset()
+            try? await Task.sleep(nanoseconds: 30_000_000) // 60ms — then B
+            registryB.register(probeB)
+        }
+
+        let resolved = try await registryB.awaitReader(
+            fingerprintKey: "txt:bug228:4096",
+            timeout: 2.0
+        )
+        // Resolves with the real probe from B's register — NOT a spurious
+        // timeout from A's reset.
+        #expect(resolved.fingerprintKey == "txt:bug228:4096")
     }
 }
 

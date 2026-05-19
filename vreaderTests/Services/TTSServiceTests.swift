@@ -134,6 +134,25 @@ struct TTSServiceSpeedControlTests {
         service.startSpeaking(text: "Test text")
         #expect(mock.lastUtteranceRate == 0.75, "Utterance rate should match service rate")
     }
+
+    /// Bug #226 / GH #910: a post-init assignment of an already in-range value
+    /// to `rate`. Pre-fix `rate` was a stored property whose `didSet` re-assigned
+    /// itself to clamp — under `@Observable` that re-enters the synthesized setter
+    /// unboundedly → stack overflow / test-host crash. Mutating the property
+    /// post-init reproduces the crash (post-init because Swift suppresses
+    /// observers during `init`). Post-fix `rate` is a `get`/`set` computed pair
+    /// that clamps without observer re-entry, so the assignment completes.
+    /// Mirrors `ReaderSettingsStoreTests.settingsStore_autoPageTurnInterval_inRangeAssignmentDoesNotRecurse`.
+    @Test @MainActor
+    func speedControl_inRangeAssignmentDoesNotRecurse() async {
+        let service = TTSService(synthesizerFactory: { MockSpeechSynthesizer() })
+        service.rate = 0.5
+        #expect(service.rate == 0.5)
+        // A same-value re-assignment is the tightest recursion repro — pre-fix
+        // `min(max(0.5, 0.0), 1.0) == 0.5` still re-fired the setter forever.
+        service.rate = 0.5
+        #expect(service.rate == 0.5)
+    }
 }
 
 // MARK: - Position Tracking Tests

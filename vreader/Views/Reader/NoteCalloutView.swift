@@ -221,9 +221,9 @@ struct NoteCalloutView: View {
         // Design ships hardcoded #2a2724 (dark) / #fcf8f0 (light) for the
         // callout surface — a floating element distinct from reader chrome.
         if theme.isDark {
-            return Color(hexString: "#2a2724") ?? Color(theme.chromeColor)
+            return Color(readerHexString: "#2a2724") ?? Color(theme.chromeColor)
         } else {
-            return Color(hexString: "#fcf8f0") ?? Color(theme.chromeColor)
+            return Color(readerHexString: "#fcf8f0") ?? Color(theme.chromeColor)
         }
     }
 
@@ -249,18 +249,18 @@ struct NoteCalloutView: View {
         let normalized = storedColorName.lowercased()
         // Designed four — pinned to the committed design hex stops.
         if let named = NamedHighlightColor.from(storageString: normalized),
-           let color = Color(hexString: named.hex) {
+           let color = Color(readerHexString: named.hex) {
             return color
         }
         // Broader stored palette the design did not depict, mapped to a
         // faithful hue so a red/orange/purple highlight still gets its swatch.
         switch normalized {
-        case "red":    return Color(hexString: "#e08585") ?? .red
-        case "orange": return Color(hexString: "#e8a85a") ?? .orange
-        case "purple": return Color(hexString: "#b48ce8") ?? .purple
+        case "red":    return Color(readerHexString: "#e08585") ?? .red
+        case "orange": return Color(readerHexString: "#e8a85a") ?? .orange
+        case "purple": return Color(readerHexString: "#b48ce8") ?? .purple
         default:
             // Legacy hex / unknown / empty — fall back to the yellow swatch.
-            return Color(hexString: NamedHighlightColor.yellow.hex) ?? .yellow
+            return Color(readerHexString: NamedHighlightColor.yellow.hex) ?? .yellow
         }
     }
 
@@ -287,37 +287,4 @@ struct NoteCalloutView: View {
     }
 }
 
-// MARK: - Hex → SwiftUI Color (file-scoped helper)
-
-private extension Color {
-    /// Parses `#RRGGBB` / `#RRGGBBAA` into a `Color`. Returns nil for
-    /// malformed input. File-private — lift to a shared helper only when a
-    /// third call site appears (`SelectionPopoverView` has its own copy).
-    init?(hexString: String) {
-        var trimmed = hexString.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("#") { trimmed.removeFirst() }
-        guard trimmed.count == 6 || trimmed.count == 8,
-              let value = UInt32(trimmed, radix: 16) else {
-            return nil
-        }
-        let r, g, b, a: UInt32
-        if trimmed.count == 6 {
-            r = (value >> 16) & 0xff
-            g = (value >> 8) & 0xff
-            b = value & 0xff
-            a = 0xff
-        } else {
-            r = (value >> 24) & 0xff
-            g = (value >> 16) & 0xff
-            b = (value >> 8) & 0xff
-            a = value & 0xff
-        }
-        self = Color(
-            red: Double(r) / 255.0,
-            green: Double(g) / 255.0,
-            blue: Double(b) / 255.0,
-            opacity: Double(a) / 255.0
-        )
-    }
-}
 #endif

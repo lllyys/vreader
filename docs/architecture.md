@@ -151,6 +151,7 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `FoliateJSEscaper`                   | Pure functions             | Escapes/sanitizes strings for safe JS/CSS interpolation in Foliate bridge |
 | `ReaderSettingsStore`                | UserDefaults               | Global reader UI prefs: theme, typography, EPUB layout, auto-page-turn, page-turn animation, Chinese conversion, custom background |
 | `PerBookSettingsStore`               | Per-book JSON files        | Per-book overrides on top of `ReaderSettingsStore` (font/theme/spacing) |
+| `FontSizeCalibrator`                 | Pure value type            | Maps the stored unified font-size value to a per-renderer concrete value via `FontSizeCalibrationProfile` multipliers (`txt`/`md`/`epub`/`foliate`), so the same slider number renders at a consistent perceived size across reflow formats. TXT is the `1.0` anchor; result re-clamped to each renderer's legal band (`12...64` text, `8...72` Foliate). PDF is intentionally not a target. Feature #70 |
 | `KeychainService`                    | Keychain                   | Secure credential storage (used by `WebDAVProviderFactory`)               |
 | `BookSourcePipeline`                 | Actor + HTTP / rule engine | Search → BookInfo → TOC → Content scraping for Legado-style web novels    |
 | `SyncService`                        | CloudKit (feature-flagged) | Coordinates sync with `SyncConflictResolver`, tombstones, change tokens   |
