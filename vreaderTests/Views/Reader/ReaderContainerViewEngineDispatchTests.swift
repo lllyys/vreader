@@ -149,4 +149,39 @@ struct ReaderContainerViewEngineDispatchTests {
             "`unsupportedFormatView` must move into ReaderContainerView.swift — `engineReaderView`'s unknown-format path still uses it."
         )
     }
+
+    // MARK: - Source-level guard: each engine case maps to its host
+
+    /// The engine-resolution invariant above proves `ReaderEngine.resolve`
+    /// is correct, but a future mistake could keep `resolve` correct while
+    /// swapping the view cases in `engineReaderView`. This guard pins the
+    /// `engine case → host` wiring inside `engineReaderView` itself: each
+    /// `case .<engine>:` must be followed by the host its engine implies.
+    @Test func engineReaderViewMapsEachEngineCaseToItsHost() throws {
+        let source = try Self.loadSource("vreader/Views/Reader/ReaderContainerView.swift")
+        // (engine case, host the case must construct).
+        let wiring: [(caseLabel: String, host: String)] = [
+            ("case .textNative:",    "TXTReaderHost("),
+            ("case .markdownNative:", "MDReaderHost("),
+            ("case .epubWKWebView:", "EPUBReaderHost("),
+            ("case .pdfKit:",        "PDFReaderHost("),
+            ("case .foliateWeb:",    "FoliateSpikeView(")
+        ]
+        for (caseLabel, host) in wiring {
+            guard let caseIndex = source.range(of: caseLabel) else {
+                Issue.record("`engineReaderView` is missing `\(caseLabel)`")
+                continue
+            }
+            // The host construction must appear after this case label and
+            // before the next `case ` label (or the switch's close).
+            let afterCase = source[caseIndex.upperBound...]
+            let nextCase = afterCase.range(of: "\n            case .")
+            let caseBody = nextCase.map { String(afterCase[..<$0.lowerBound]) }
+                ?? String(afterCase.prefix(400))
+            #expect(
+                caseBody.contains(host),
+                "`engineReaderView` `\(caseLabel)` must construct `\(host)` — the engine-to-host wiring."
+            )
+        }
+    }
 }

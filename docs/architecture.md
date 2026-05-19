@@ -2,7 +2,7 @@
 
 ## Overview
 
-VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT, EPUB, AZW3/MOBI, PDF, and Markdown formats, each rendered by a format-specific native host (UIKit/WebView bridges) selected internally by `ReaderEngine` (feature #54 retired the user-visible Native/Unified toggle). AZW3/MOBI is rendered via Foliate-js inside a WKWebView. The `UnifiedTextRenderer` (TextKit 2 reflow) stack is retained in the codebase but no longer wired into the reader dispatch.
+VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT, EPUB, AZW3/MOBI, PDF, and Markdown formats, each rendered by a format-specific native host (UIKit/WebView bridges) selected internally by `ReaderEngine` (feature #54). AZW3/MOBI is rendered via Foliate-js inside a WKWebView. The `UnifiedTextRenderer` (TextKit 2 reflow) stack is retained in the codebase but no longer wired into the reader dispatch. (Feature #54 is in progress — the reader-settings Reading Mode picker UI is removed in a later work item.)
 
 ## System Diagram
 
@@ -50,8 +50,10 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 
 `ReaderContainerView.swift` routes to format-specific readers via
 `engineReaderView(fingerprint:)`, which switches on `ReaderEngine.resolve(format:)`
-— an internal per-format engine selector (feature #54). There is no
-user-visible reading-mode toggle.
+— an internal per-format engine selector (feature #54). The dispatch no
+longer consults a reading-mode preference. (The reader-settings Reading
+Mode picker UI is still present until a later feature-#54 work item removes
+it.)
 
 - `.textNative` → `TXTReaderHost`, `.markdownNative` → `MDReaderHost`,
   `.epubWKWebView` → `EPUBReaderHost`, `.pdfKit` → `PDFReaderHost`,

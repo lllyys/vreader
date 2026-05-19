@@ -35,7 +35,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 
 - **Multi-format** — EPUB, AZW3/MOBI (Kindle), PDF, TXT, Markdown in a single app
 - **AZW3/MOBI** — Kindle books via [Foliate-js](https://github.com/johnfactotum/foliate-js) engine (DRM-free only)
-- **Per-format native rendering** — each format renders with a purpose-built native engine (UIKit / WebView bridges), selected automatically — no rendering-mode toggle to configure
+- **Dual-mode engine** — Native (UIKit bridges) + Unified (TextKit 2 reflow) rendering
 - **Reading position** — Auto-saves scroll position, survives app kills and relaunches
 - **CJK encoding** — Auto-detect GBK, Big5, Shift-JIS, EUC-KR (8KB sample-based)
 - **Large file support** — Chunked UITableView for TXT files >500K characters
