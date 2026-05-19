@@ -78,9 +78,9 @@ Slot/button identity lives in `ReaderChromeButton.swift` (`ReaderTopChromeSlot` 
 
 #### Sheets (Feature #60 WI-10 — visual-identity-v2)
 
-The app sheets share `ReaderSheetChrome.swift` — a reusable wrapper matching the design's `Sheet` component: a theme-tinted surface (`ReaderThemeV2.sheetSurfaceColor`), an optional centred Source Serif 4 title bar with 50pt leading/trailing slots (a default circular close button fills the trailing slot when an `onClose` is given and no custom trailing view is), and a scrollable body. The slide-up animation + drag grabber come from SwiftUI's own `.sheet` + `.presentationDragIndicator(.visible)`; `ReaderSheetChrome` supplies only the title bar + surface tint. It wraps the Display sheet (`ReaderSettingsPanel`), the Annotations sheet (`AnnotationsPanelView`), the reader Book Details sheet (`BookDetailsSheet`, feature #61 — opened from More → Book details, with a trailing Share button in place of the default close), and the AI sheet (`AIReaderPanel`, `title: nil` + a custom sparkle header). `SettingsView` (App Settings) keeps an inner `NavigationStack` for its `NavigationLink` push destinations, with `ReaderSheetChrome` above it. The per-sheet section contract is pinned in `SheetSectionContract.swift` (`ReaderSheetKind`). Reader sheets pass the book's `ReaderThemeV2`; the App Settings sheet uses `.paper` (the Library is not theme-switchable).
+The app sheets share `ReaderSheetChrome.swift` — a reusable wrapper matching the design's `Sheet` component: a theme-tinted surface (`ReaderThemeV2.sheetSurfaceColor`), an optional centred Source Serif 4 title bar with 50pt leading/trailing slots (a default circular close button fills the trailing slot when an `onClose` is given and no custom trailing view is), and a scrollable body. The slide-up animation + drag grabber come from SwiftUI's own `.sheet` + `.presentationDragIndicator(.visible)`; `ReaderSheetChrome` supplies only the title bar + surface tint. It wraps the Display sheet (`ReaderSettingsPanel`), the two annotations sheets (`TOCSheet` + `HighlightsSheet`, feature #62 — see below), the reader Book Details sheet (`BookDetailsSheet`, feature #61 — opened from More → Book details, with a trailing Share button in place of the default close), and the AI sheet (`AIReaderPanel`, `title: nil` + a custom sparkle header). `SettingsView` (App Settings) keeps an inner `NavigationStack` for its `NavigationLink` push destinations, with `ReaderSheetChrome` above it. The per-sheet section contract is pinned in `SheetSectionContract.swift` (`ReaderSheetKind`). Reader sheets pass the book's `ReaderThemeV2`; the App Settings sheet uses `.paper` (the Library is not theme-switchable).
 
-`AnnotationsPanelView` is a pre-#60 unified 4-tab sheet (Contents / Bookmarks / Highlights / Notes); the design bundle depicts the TOC and highlights surfaces as two separate sheets, so WI-10 re-skinned the unified sheet's chrome only — splitting it to match the design's information architecture is tracked in GH #793 (`needs-design`).
+**Annotations sheets (feature #62 — annotations-panel split).** The pre-#62 unified 4-tab `AnnotationsPanelView` (Contents / Bookmarks / Highlights / Notes) is split into two job-focused sheets, each with one honest title: `TOCSheet` (book-titled — Contents + Bookmarks navigation tabs) and `HighlightsSheet` (titled "Annotations" — All / Highlights / Notes / Bookmarks review filters + a Share/export button). `ReaderContainerView` presents them via a single `.sheet(item: $annotationsRoute)` over the `AnnotationsSheetRoute` enum (`.toc(initialTab:)` / `.highlights(initialFilter:)`) — the Contents bottom-chrome button and the Notes button each map to one route; the two sheets are mutually exclusive by that optional. `HighlightsSheet`'s unified card stream interleaves highlight + standalone-note cards via `AnnotationStreamBuilder`. Both sheets' designed empty states use the shared `AnnotationsEmptyStateView` (custom SVG art). The legacy `HighlightListView` / `AnnotationListView` / `TOCListView` / `BookmarkListView` list views were removed by feature #62.
 
 `ReaderContainerView` drives `preferredColorScheme(_:)` from `ReaderThemeV2.preferredColorScheme` (`ReaderThemeV2+ColorScheme.swift`) so the status bar tints to match the theme — `.dark` for the Dark / OLED / Photo families, `.light` for Paper / Sepia.
 
@@ -133,7 +133,7 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `WebDAVServerProfileStore`           | `UserDefaults` / `KeychainService` | Actor-isolated list of saved WebDAV server profiles with one active selection (feature #52 WI-1). Profiles + active-id persist as `UserDefaults` JSON; per-profile passwords persist in Keychain. Atomic `loadSnapshot`, `upsert` / `remove` / `setActiveProfileID`, single-hop `updateIfExists`. Mirrors `ProviderProfileStore` (feature #50) for the AI multi-profile precedent |
 | `WebDAVProfileMigrator`              | `KeychainService` / `WebDAVServerProfileStore` | One-shot migrator that lifts pre-#52 flat-keychain credentials (`com.vreader.webdav.{serverURL,username,password}`) into a `"Default"` profile and sets it active. Idempotent on both axes (marker key + non-empty store). Feature #52 WI-2 |
 | `ReadingModeMigration`               | `UserDefaults` / per-book JSON files | One-shot **synchronous** launch migration retiring the Native/Unified reading mode (feature #54). Removes the `readerReadingMode` UserDefaults key and strips the `readingMode` field from per-book override JSON files (edited as raw `JSONSerialization` objects so other keys are semantically preserved). Synchronous-before-setup — the per-book JSON store has no actor, so a detached migration could race a panel save/restore. Idempotent |
-| `BackupDataCollector`                | `PersistenceActor`         | Serializes 9 versioned JSON sections (annotations, positions, settings, library-manifest, reading-history, …). `reading-history.json` (feature #58) carries `ReadingSession` + `ReadingStats`; the section bumped `kBackupCurrentSchemaVersion` to 2 |
+| `BackupDataCollector`                | `PersistenceActor`         | Serializes 8 versioned JSON sections (annotations, positions, settings, library-manifest, …) |
 | `BackupDataRestorer`                 | `PersistenceActor`         | Decodes + dedupes by UUID/profileKey; rejects future schema versions      |
 | `BlobPath`                           | —                          | Pure utility: `(format, sha256, byteCount)` ↔ `VReader/books/<format>/<sha>_<bytes>.<ext>` (feature #46) |
 | `BackupBlobStore` (protocol pair)    | —                          | Transport-neutral read (`BackupBlobReading`) + write (`BackupBlobWriting`) blob API |
@@ -181,14 +181,9 @@ SwiftData SchemaV6 entities:
 **Feature #46 — WebDAV materializing restore (data layer)**: backup ZIPs now carry an additional `library-manifest.json` section (one `BackupLibraryEntry` per book, including content-addressed `blobPath`). On `backup`, `WebDAVProvider` uploads each missing book blob atomically — `WebDAVBlobStore` PUTs to `VReader/uploads/tmp/<uuid>.part`, PROPFIND-verifies the size, then `MOVE`s into the canonical `VReader/books/<format>/<sha256>_<byteCount>.<ext>` path. Repeat backups skip already-published blobs via PROPFIND-by-size dedupe. On `restore`, when the manifest is present and a `BookImporter` is wired in (production: via `\.bookImporter` SwiftUI Environment), `BookFileMaterializer` downloads + verifies + imports each missing blob before metadata sections apply. v1-format backups (no manifest) restore as before — books silently skipped if missing locally. The 412 response from `MOVE Overwrite: F` is treated as "blob already converged" (content-addressing). 501 from `MOVE` raises `BackupBlobStoreError.serverCapabilityMissing` — no silent atomicity loss.
 
 Backup section JSONs (`vreader/Services/Backup/BackupSectionDTOs.swift`) are
-versioned via the `BackupVersionedEnvelope` protocol. The collector emits
-`kBackupCurrentSchemaVersion` (now `2`, bumped by feature #58 for the new
-`reading-history.json` section). Restore validates the envelope against the
-explicit accepted set `kBackupAcceptedSchemaVersions` (`{1, 2}`) — decoupled
-from the current constant so a version bump doesn't reject older backups (the
-pre-v2 section shapes are byte-identical between v1 and v2). A genuinely-newer
-archive (v3+) is absent from the set and still raises
-`BackupRestoreError.unsupportedSchemaVersion`.
+versioned via the `BackupVersionedEnvelope` protocol. Restore validates exact
+`schemaVersion == 1` and raises `BackupRestoreError.unsupportedSchemaVersion`
+on mismatch, so a future v2 archive can't silently apply on a v1 client.
 
 Key types:
 
@@ -211,8 +206,6 @@ All cross-component communication uses NotificationCenter:
 | `.readerHighlightRequested`    | `TextSelectionInfo`  | Bridge → Container                                      |
 | `.readerSelectionPopoverRequested` | `TextSelectionInfo` (object) | Bridge → `SelectionPopoverPresenterModifier` (Feature #60 WI-7c1). Bridges that have swapped to the popover suppress their legacy `UIMenu` and post this instead; the presenter mounts `SelectionPopoverView` (WI-7a) as a sheet and routes taps through `SelectionPopoverActionRouter` (WI-7b). |
 | `.readerHighlightRemoved`      | UUID string          | HighlightListVM → Container                             |
-| `.readerHighlightTapped`       | `ReaderHighlightTapEvent` (object) | Bridge → `HighlightPopoverModifier`. Posted on a tap that hits a persisted highlight; the modifier opens the unified highlight-action popover (feature #64). |
-| `.foliateRequestAnnotationJSCreate` / `JSDelete` | `{cfi, color?, fingerprintKey}` | `FoliateHighlightJSBridge` → `FoliateSpikeView.Coordinator` (evaluate the SVG-overlay create/remove JS on the live WKWebView — Foliate's renderer-less highlight repaint path). |
 | `.readerHighlightsDidImport`   | fingerprintKey       | Importer → format containers (refresh persisted highlights) |
 | `.readerDidClose`              | fingerprintKey       | ViewModel → LibraryView                                 |
 | `.readerAnnotationRequested`   | `TextSelectionInfo`  | Bridge → Container                                      |
@@ -221,15 +214,15 @@ All cross-component communication uses NotificationCenter:
 | `.searchHighlightClear`        | nil                  | SearchViewModel → Bridges                               |
 | `.readerPreviousPage`          | nil                  | TapZoneOverlay → Container                              |
 | `.readerNextPage`              | nil                  | TapZoneOverlay → Container                              |
-| `.readerOpenContents`          | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens annotations panel on the Contents tab) |
-| `.readerOpenNotes`             | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens annotations panel on the Highlights tab) |
+| `.readerOpenContents`          | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #62 — opens `TOCSheet` on the Contents tab) |
+| `.readerOpenNotes`             | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #62 — opens `HighlightsSheet` on the All filter) |
 | `.readerOpenDisplay`           | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens reader settings) |
 | `.readerOpenAI`                | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens the AI assistant when configured) |
 | `.readerMoreReadAloud`         | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — starts read-aloud / TTS) |
 | `.readerMoreToggleAutoTurn`    | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — flips `ReaderSettingsStore.autoPageTurn`) |
 | `.readerMoreBookDetails`       | nil                  | `ReaderMorePopover` → ReaderContainerView (opens the `BookDetailsSheet`, feature #61) |
 | `.readerMoreShareBook`         | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — presents the system share sheet for the book file) |
-| `.readerMoreExportAnnotations` | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #60 WI-6c — opens the annotations panel on the Highlights tab, which carries export) |
+| `.readerMoreExportAnnotations` | nil                  | `ReaderMorePopover` → ReaderContainerView (Feature #62 — opens `HighlightsSheet` on the Highlights filter, which carries the export button) |
 | `.epubFootnoteDetected`        | footnote ref         | EPUB bridge → Container (footnote popup)                |
 | `.bookFileStateDidChange`      | `["fingerprintKey","state"]` | LazyDownloadCoordinator (reconcile) → LibraryView (refresh row, feature #47) |
 | `.libraryRowTappedWhileNotLocal` | `["fingerprintKey","fileState"]` | LibraryView → BookDownloadSheet (future, #47 WI-6) |
@@ -260,46 +253,19 @@ Format-specific state remains in each container:
 | `TextHighlightRenderer` | TXT, MD   | Mutates `TextReaderUIState.persistedHighlightRanges`                                |
 | `EPUBHighlightRenderer` | EPUB      | Generates CSS Highlight API JS via `onInjectJS` callback                            |
 | `PDFHighlightRenderer`  | PDF       | Creates/removes `PDFAnnotation` objects; tracks `highlightId → [PDFAnnotation]` map |
-| _(no `HighlightRenderer` conformer)_ | AZW3/MOBI | `FoliateHighlightRenderer` is a static-method `struct` of JS builders; Foliate highlight visuals are driven by `NotificationCenter` messages keyed on CFI (`.foliateRequestAnnotationJSCreate` / `Delete`), observed inside `FoliateSpikeView.Coordinator`. |
+| _(none yet)_            | AZW3/MOBI | Selection capture + CFI anchoring landed; `FoliateHighlightRenderer` exists for SVG-overlay JS but is not yet wired as a `HighlightRenderer` adapter. AZW3 highlight create/restore are TODO/no-op placeholders today. |
 
-`HighlightCoordinator` orchestrates the highlight lifecycle for the `HighlightRenderer`-backed formats (TXT/MD/PDF/EPUB):
+`HighlightCoordinator` orchestrates the highlight lifecycle:
 
 - `create()` — persists via `HighlightPersisting`, then calls `renderer.apply()`
 - `handleRemoval()` — calls `renderer.remove()`, re-fetches, calls `renderer.restore()`
 - `restoreAll()` — fetches from persistence, calls `renderer.restore()`
 
-### Unified highlight-action popover (feature #64)
+Each container creates its format-specific renderer and coordinator:
 
-A tap on an existing highlight in **any** format opens one shared, styled
-SwiftUI popover (color swatch row, note editor, copy / share / delete) — the
-unified highlight-action popover. It supersedes feature #55's read-only note
-callout and feature #53's long-press delete `UIMenu` (both deleted in
-feature #64 WI-10).
-
-- **Trigger** — every reader bridge posts `.readerHighlightTapped` (a
-  `ReaderHighlightTapEvent` with the highlight UUID + a host-`UIView`-local
-  `sourceRect`) on a tap that hits a persisted highlight.
-- **`HighlightPopoverModifier`** — the `ViewModifier` attached to every
-  container via `unifiedHighlightPopoverPresenterIfAvailable(...)`. It observes
-  the notification, drives `HighlightPopoverViewModel` (record → presentation
-  content over the `HighlightLookup` boundary), and routes to either an
-  anchored card (`UIKitHighlightPopoverPresenter`, a `UIPopoverPresentationController`)
-  or a SwiftUI bottom sheet. `HighlightPopoverPresenter` is the pure
-  card-vs-sheet decision table.
-- **`HighlightMutating`** — the `@MainActor` protocol the popover's
-  `HighlightPopoverActionRouter` dispatches color / note / delete mutations
-  through (`changeColor` / `updateNote` / `deleteHighlight`, each returning a
-  typed `HighlightMutationOutcome`). `HighlightCoordinator` conforms for the
-  `HighlightRenderer`-backed formats; `FoliateHighlightMutator` is the Foliate
-  conformer — it has no renderer, so it composes `HighlightPersisting` (persist)
-  + `FoliateHighlightJSBridge` (CFI-keyed JS-overlay repaint).
-
-Each container creates its format-specific renderer + mutation boundary:
-
-- TXT/MD: `HighlightCoordinator` via `ReaderNotificationModifier`
-- EPUB: `HighlightCoordinator` (persistence + JS injection)
-- PDF: `HighlightCoordinator` + renderer with annotation map (fixes bug #87: highlight deletion)
-- AZW3/MOBI: `FoliateHighlightMutator` (no renderer — persistence + the CFI JS-notification bridge)
+- TXT/MD: via `ReaderNotificationModifier` (handles `readerHighlightRequested` / `readerHighlightRemoved`)
+- EPUB: coordinator for persistence, renderer for JS injection
+- PDF: coordinator + renderer with annotation map (fixes bug #87: highlight deletion)
 
 ## Key Design Patterns
 
@@ -336,8 +302,8 @@ vreader/
 ├── Views/
 │   ├── LibraryView.swift   # Library grid/list
 │   ├── Reader/             # Reader container, format containers, bridges
-│   ├── Bookmarks/          # BookmarkListView, TOCListView
-│   ├── Annotations/        # HighlightListView, AnnotationListView
+│   │   └── Annotations/    # TOCSheet, HighlightsSheet, AnnotationsSheetRoute (feature #62)
+│   ├── Annotations/        # AddNoteSheet, AnnotationEditSheet
 │   └── Settings/           # SettingsView, ReaderSettingsPanel
 ├── Services/
 │   ├── PersistenceActor.swift

@@ -11,7 +11,7 @@
 // .books here silently skipped both tests — Bug #219 / GH #844.
 //
 // @coordinates-with: EPUBReaderContainerView.swift, EPUBWebViewBridge.swift,
-//   HighlightCoordinator.swift, AnnotationsPanelView.swift
+//   HighlightCoordinator.swift, HighlightsSheet.swift
 
 import XCTest
 
@@ -94,16 +94,14 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
         )
         annotationsButton.tap()
 
-        // Panel appears
-        let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
-        XCTAssertTrue(panel.waitForExistence(timeout: 5), "Annotations panel should open")
+        // Feature #62: the Notes button opens `HighlightsSheet`.
+        let panel = app.otherElements[AccessibilityID.highlightsSheet]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5), "HighlightsSheet should open")
 
-        // Tap Highlights tab
-        let highlightsTab = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS[cd] 'Highlight'")
-        ).firstMatch
-        if highlightsTab.waitForExistence(timeout: 3) {
-            highlightsTab.tap()
+        // Select the Highlights filter chip.
+        let highlightsFilter = app.buttons[AccessibilityID.highlightsSheetFilterHighlights]
+        if highlightsFilter.waitForExistence(timeout: 3) {
+            highlightsFilter.tap()
         }
     }
 
@@ -151,17 +149,18 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
         // Open annotations panel to the Highlights tab
         openAnnotationsPanelHighlightsTab()
 
-        // Assert highlight was created (highlightEmptyState must be absent)
-        let emptyState = app.otherElements[AccessibilityID.highlightEmptyState]
+        // Assert highlight was created (the HighlightsSheet empty state
+        // must be absent)
+        let emptyState = app.otherElements[AccessibilityID.highlightsEmptyState]
         let notEmptyPredicate = NSPredicate(format: "exists == false")
         let gone = XCTNSPredicateExpectation(predicate: notEmptyPredicate, object: emptyState)
         XCTAssertEqual(
             XCTWaiter().wait(for: [gone], timeout: 5), .completed,
-            "highlightEmptyState should be absent after creating a highlight — highlight was not persisted"
+            "highlightsEmptyState should be absent after creating a highlight — highlight was not persisted"
         )
 
-        // Dismiss panel
-        let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
+        // Dismiss HighlightsSheet
+        let panel = app.otherElements[AccessibilityID.highlightsSheet]
         panel.swipeDown()
         _ = panel.waitForDisappearance(timeout: 3)
 
@@ -190,7 +189,7 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
         // Verify highlights still exist after reopen
         openAnnotationsPanelHighlightsTab()
 
-        let emptyState2 = app.otherElements[AccessibilityID.highlightEmptyState]
+        let emptyState2 = app.otherElements[AccessibilityID.highlightsEmptyState]
         let gone2 = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
             object: emptyState2
@@ -240,7 +239,7 @@ final class Feature11EPUBHighlightVerificationTests: XCTestCase {
 
         openAnnotationsPanelHighlightsTab()
 
-        let emptyState = app.otherElements[AccessibilityID.highlightEmptyState]
+        let emptyState = app.otherElements[AccessibilityID.highlightsEmptyState]
         let gone = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
             object: emptyState

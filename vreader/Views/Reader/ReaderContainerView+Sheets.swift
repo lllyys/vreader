@@ -172,16 +172,26 @@ extension ReaderContainerView {
         }
     }
 
-    /// Lazily builds TOC entries.
+    /// Lazily builds TOC entries. Idempotent — early-returns when
+    /// entries are already present. Feature #62: flips `tocDidLoad` once
+    /// the build resolves so `TOCSheet` can tell "this book ships no
+    /// TOC" apart from "the TOC is still loading".
     func ensureTOCReady() {
-        guard tocEntries.isEmpty,
-              let fingerprint = DocumentFingerprint(canonicalKey: book.fingerprintKey) else { return }
+        guard tocEntries.isEmpty else {
+            // TOC already built (e.g. by an earlier call) — the load is
+            // logically complete; mark it so `TOCSheet` won't withhold
+            // a genuine empty state.
+            tocDidLoad = true
+            return
+        }
+        guard let fingerprint = DocumentFingerprint(canonicalKey: book.fingerprintKey) else { return }
         Task {
             tocEntries = await ReaderTOCFactory.buildTOC(
                 format: book.format.lowercased(),
                 fileURL: resolvedFileURL,
                 fingerprint: fingerprint
             )
+            tocDidLoad = true
         }
     }
 
@@ -318,11 +328,12 @@ extension ReaderContainerView {
     /// `.bookDetails` to the dedicated Book Details sheet (the
     /// feature-#60 WI-6c interim opened the reader settings panel).
     ///
-    /// `.presentAnnotationsExport` opens the annotations panel on the
-    /// Highlights tab, which carries the existing export action — there
-    /// is no separate export-picker sheet.
+    /// `.presentAnnotationsExport` opens `HighlightsSheet` on the
+    /// Highlights filter, whose trailing slot carries the designed
+    /// export action — there is no separate export-picker sheet.
     func handleMoreMenuAction(_ row: ReaderMoreMenuRow) {
-        switch ReaderMoreMenuEffect(row: row) {
+        let effect = ReaderMoreMenuEffect(row: row)
+        switch effect {
         case .toggleReadAloud:
             startTTS()
         case .toggleAutoPageTurn:
@@ -335,8 +346,58 @@ extension ReaderContainerView {
         case .presentShareSheet:
             showShareSheet = true
         case .presentAnnotationsExport:
-            annotationsPanelInitialTab = .highlights
-            showAnnotationsPanel = true
+            // Feature #62: route to `HighlightsSheet` (Highlights
+            // filter) via the pure routing helper.
+            annotationsRoute = AnnotationsSheetRoute.route(forMoreMenuEffect: effect)
+        }
+    }
+
+    // MARK: - Annotations sheet (feature #62)
+
+    /// Builds the annotations sheet for a route — `TOCSheet` for a
+    /// `.toc` route, `HighlightsSheet` for a `.highlights` route. Held
+    /// here so `ReaderContainerView`'s `.sheet(item:)` closure stays
+    /// trivial (the `searchSheet` / `bookDetailsSheet` pattern).
+    @ViewBuilder
+    func annotationsSheet(for route: AnnotationsSheetRoute) -> some View {
+        switch route {
+        case .toc(let initialTab):
+            TOCSheet(
+                bookTitle: book.title,
+                bookFingerprintKey: book.fingerprintKey,
+                modelContainer: modelContext.container,
+                tocEntries: tocEntries,
+                tocDidLoad: tocDidLoad,
+                currentLocator: currentLocator,
+                theme: settingsStore.theme,
+                initialTab: initialTab,
+                onNavigate: { locator in
+                    NotificationCenter.default.post(
+                        name: .readerNavigateToLocator, object: locator
+                    )
+                },
+                onOpenSearch: {
+                    // Defer the search sheet to `annotationsRoute`'s
+                    // `.sheet(onDismiss:)` — TOCSheet must fully dismiss
+                    // first (sibling-sheet hand-off).
+                    openSearchAfterAnnotationsDismiss = true
+                },
+                onDismiss: { annotationsRoute = nil }
+            )
+        case .highlights(let initialFilter):
+            HighlightsSheet(
+                bookFingerprintKey: book.fingerprintKey,
+                modelContainer: modelContext.container,
+                tocEntries: tocEntries,
+                theme: settingsStore.theme,
+                initialFilter: initialFilter,
+                onNavigate: { locator in
+                    NotificationCenter.default.post(
+                        name: .readerNavigateToLocator, object: locator
+                    )
+                },
+                onDismiss: { annotationsRoute = nil }
+            )
         }
     }
 

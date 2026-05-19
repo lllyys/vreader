@@ -14,7 +14,10 @@
 // `TOCListView`'s `activeEntryIndex` matching logic, lifted here.
 //
 // Empty states use the shared `AnnotationsEmptyStateView` (WI-2) — the
-// Contents-empty state carries an "Open Search" CTA.
+// Contents-empty state carries an "Open Search" CTA. Both the Contents
+// and Bookmarks empty states are gated on a load-completed flag
+// (`tocDidLoad` / `bookmarksDidLoad`) so a tab tap during the
+// still-in-flight load shows a neutral body, never a false empty state.
 //
 // @coordinates-with: TOCSheetRows.swift, AnnotationsEmptyStateView.swift,
 //   AnnotationsEmptyStateArt.swift, AnnotationsSheetRoute.swift,
@@ -30,6 +33,11 @@ struct TOCSheet: View {
     let bookFingerprintKey: String
     let modelContainer: ModelContainer
     let tocEntries: [TOCEntry]
+    /// True once the host's eager TOC build has completed. The Contents
+    /// tab withholds its "No table of contents" empty state until this
+    /// is set, so a Contents tap during the build does not flash a
+    /// false empty state (mirrors `bookmarksDidLoad`).
+    let tocDidLoad: Bool
     let currentLocator: Locator?
     let theme: ReaderThemeV2
     /// Contents-empty CTA — opens the reader search sheet.
@@ -56,6 +64,7 @@ struct TOCSheet: View {
         bookFingerprintKey: String,
         modelContainer: ModelContainer,
         tocEntries: [TOCEntry],
+        tocDidLoad: Bool = true,
         currentLocator: Locator?,
         theme: ReaderThemeV2,
         initialTab: TOCSheetTab = .contents,
@@ -67,6 +76,7 @@ struct TOCSheet: View {
         self.bookFingerprintKey = bookFingerprintKey
         self.modelContainer = modelContainer
         self.tocEntries = tocEntries
+        self.tocDidLoad = tocDidLoad
         self.currentLocator = currentLocator
         self.theme = theme
         self.onNavigate = onNavigate
@@ -102,6 +112,11 @@ struct TOCSheet: View {
             bookmarkVM = vm
             bookmarksDidLoad = true
         }
+        // Root sheet identity — the migrated XCUITests query
+        // `app.otherElements["tocSheet"]` to detect, audit, and dismiss
+        // the sheet. Mirrors `HighlightsSheet`'s root identifier.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("tocSheet")
     }
 
     // MARK: - Segmented control
@@ -171,7 +186,13 @@ struct TOCSheet: View {
 
     @ViewBuilder
     private var contentsBody: some View {
-        if tocEntries.isEmpty {
+        if !tocEntries.isEmpty {
+            tocEntryList
+        } else if tocDidLoad {
+            // Empty state shown only once the host's TOC build has
+            // completed — a Contents tap during the build must not
+            // flash a false "No table of contents" (mirrors the
+            // bookmark `bookmarksDidLoad` gate).
             AnnotationsEmptyStateView(
                 theme: theme,
                 accessibilityIdentifier: "tocEmptyState",
@@ -183,22 +204,29 @@ struct TOCSheet: View {
                 onCTA: { onDismiss(); onOpenSearch() }
             )
         } else {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(tocEntries.enumerated()), id: \.element.id) { index, entry in
-                    TOCContentsRow(
-                        theme: theme,
-                        chapterOrdinal: index + 1,
-                        title: entry.title,
-                        page: Self.displayPage(entry.locator.page),
-                        isCurrent: index == activeEntryIndex,
-                        onTap: { onNavigate(entry.locator); onDismiss() }
-                    )
-                    .accessibilityIdentifier("tocRow-\(entry.id)")
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 14)
+            // Pre-load neutral body — the TOC build is in flight; the
+            // design shows no loading affordance.
+            Color.clear.frame(height: 1)
         }
+    }
+
+    @ViewBuilder
+    private var tocEntryList: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(Array(tocEntries.enumerated()), id: \.element.id) { index, entry in
+                TOCContentsRow(
+                    theme: theme,
+                    chapterOrdinal: index + 1,
+                    title: entry.title,
+                    page: Self.displayPage(entry.locator.page),
+                    isCurrent: index == activeEntryIndex,
+                    onTap: { onNavigate(entry.locator); onDismiss() }
+                )
+                .accessibilityIdentifier("tocRow-\(entry.id)")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 14)
     }
 
     // MARK: - Bookmarks body

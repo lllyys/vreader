@@ -21,7 +21,7 @@
 //   `SearchResultsGroupedList` as its footer slot).
 // - Error alert for search failures.
 // - `theme` is a presentation input (the feature #60 re-skin pattern,
-//   matching `AnnotationsPanelView`); defaulted to `.paper` so it is
+//   matching the reader sheets); defaulted to `.paper` so it is
 //   strictly additive — the three behavioral inputs are unchanged.
 //
 // @coordinates-with SearchViewModel.swift, SearchResultsGroupedList.swift,
@@ -78,7 +78,7 @@ struct SearchView: View {
         // `.accessibilityElement(children: .contain)` collapses the
         // subtree into one container element the identifier names — the
         // same Bug #209 root-cause-(C) fix used on `ReaderSettingsPanel`
-        // and `AnnotationsPanelView`.
+        // and the reader annotations sheets.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("searchView")
     }

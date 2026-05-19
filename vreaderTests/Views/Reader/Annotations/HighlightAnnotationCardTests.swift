@@ -118,4 +118,41 @@ struct HighlightAnnotationCardTests {
         card.invokeJumpForTesting()
         #expect(jumped == record.locator)
     }
+
+    // MARK: - HighlightSwatch — the full stored colour palette
+
+    /// The four designed colours resolve to the committed
+    /// `NamedHighlightColor` hex stops — pixel-identical to the JSX
+    /// `colorMap`.
+    @Test("HighlightSwatch resolves the four designed colours to the design hex stops")
+    func highlightSwatchDesignedColours() {
+        for named in NamedHighlightColor.allCases {
+            let expected = Color(readerHexString: named.hex)
+            #expect(HighlightSwatch.color(for: named.rawValue) == expected)
+        }
+    }
+
+    /// The broader stored palette (red/orange/purple) must NOT collapse
+    /// to yellow — a red highlight rendering with a yellow swatch is a
+    /// data-fidelity regression. Each resolves to a distinct hue.
+    @Test("HighlightSwatch maps the broader stored palette to distinct, non-yellow colours")
+    func highlightSwatchBroaderPalette() {
+        let yellow = HighlightSwatch.color(for: "yellow")
+        for name in ["red", "orange", "purple"] {
+            let resolved = HighlightSwatch.color(for: name)
+            #expect(resolved != yellow, "\(name) must not collapse to yellow")
+        }
+        // Case-insensitive — stored names may be capitalised.
+        #expect(HighlightSwatch.color(for: "RED") == HighlightSwatch.color(for: "red"))
+    }
+
+    /// Unknown / legacy-hex / empty colour names fall back to yellow —
+    /// never `.clear`, never a crash.
+    @Test("HighlightSwatch falls back to yellow for unknown colour names")
+    func highlightSwatchUnknownFallsBackToYellow() {
+        let yellow = HighlightSwatch.color(for: "yellow")
+        #expect(HighlightSwatch.color(for: "") == yellow)
+        #expect(HighlightSwatch.color(for: "#abcdef") == yellow)
+        #expect(HighlightSwatch.color(for: "chartreuse") == yellow)
+    }
 }

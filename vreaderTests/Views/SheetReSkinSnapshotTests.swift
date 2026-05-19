@@ -176,33 +176,39 @@ struct SheetReSkinSnapshotTests {
         }
     }
 
-    @Test("TOC view still builds re-skinned with entries")
-    func tocViewStillBuilds() {
-        let empty = TOCListView(
-            entries: [], currentLocator: nil, onNavigate: { _ in }
-        )
-        _ = empty.body
-        // And with a populated TOC (the active-row highlight path).
+    @Test("TOCSheet still builds re-skinned with entries")
+    func tocSheetStillBuilds() {
+        // Feature #62 split: the TOC surface is now `TOCSheet`
+        // (the legacy `TOCListView` was deleted in WI-5).
         let locator = Self.txtLocator(offset: 0)
-        let populated = TOCListView(
-            entries: [
-                TOCEntry(title: "Chapter 1", level: 0, locator: locator),
-            ],
+        let sheet = TOCSheet(
+            bookTitle: "Sample Book",
+            bookFingerprintKey: "txt:\(String(repeating: "0", count: 64)):0",
+            modelContainer: Self.inMemoryContainer(),
+            tocEntries: [TOCEntry(title: "Chapter 1", level: 0, locator: locator)],
             currentLocator: locator,
-            onNavigate: { _ in }
+            theme: .paper,
+            initialTab: .contents,
+            onNavigate: { _ in },
+            onOpenSearch: {},
+            onDismiss: {}
         )
-        _ = populated.body
+        _ = sheet.body
     }
 
-    @Test("Highlights view still builds re-skinned")
-    func highlightsViewStillBuilds() {
-        let vm = HighlightListViewModel(
-            bookFingerprintKey: "epub:abc:1024",
-            store: makeInMemoryPersistence(),
-            totalTextLengthUTF16: nil
+    @Test("HighlightsSheet still builds re-skinned")
+    func highlightsSheetStillBuilds() {
+        // Feature #62 split: the highlights surface is now
+        // `HighlightsSheet` (the legacy `HighlightListView` was deleted).
+        let sheet = HighlightsSheet(
+            bookFingerprintKey: "epub:\(String(repeating: "a", count: 64)):1024",
+            modelContainer: Self.inMemoryContainer(),
+            theme: .paper,
+            initialFilter: .all,
+            onNavigate: { _ in },
+            onDismiss: {}
         )
-        let view = HighlightListView(viewModel: vm, onNavigate: { _ in })
-        _ = view.body
+        _ = sheet.body
     }
 
     @Test("App Settings view still builds re-skinned")
@@ -242,14 +248,17 @@ struct SheetReSkinSnapshotTests {
 
     /// An in-memory PersistenceActor for view-model construction.
     private func makeInMemoryPersistence() -> PersistenceActor {
+        PersistenceActor(modelContainer: Self.inMemoryContainer())
+    }
+
+    /// An in-memory `ModelContainer` — SchemaV6 + in-memory config is
+    /// the test-isolation default documented in `.claude/rules/10-tdd.md`.
+    /// Feature #62's `TOCSheet` / `HighlightsSheet` take a container
+    /// directly (they construct their own view models internally).
+    static func inMemoryContainer() -> ModelContainer {
         let schema = Schema(SchemaV6.models)
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        // SchemaV6 + in-memory config is the test-isolation default
-        // documented in `.claude/rules/10-tdd.md`.
-        let container = try! ModelContainer(
-            for: schema, configurations: [config]
-        )
-        return PersistenceActor(modelContainer: container)
+        return try! ModelContainer(for: schema, configurations: [config])
     }
 
     /// Asserts a `UIColor` resolves to the given 8-bit RGB triple.

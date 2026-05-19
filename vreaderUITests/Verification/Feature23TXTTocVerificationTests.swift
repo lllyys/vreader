@@ -22,8 +22,7 @@
 //   stays loaded; we don't assert a specific scroll offset because the
 //   fixture is short and may be on a single page.
 //
-// @coordinates-with: TOCListView.swift, TXTTocRuleEngine.swift,
-//   AnnotationsPanelView.swift
+// @coordinates-with: TOCSheet.swift, TXTTocRuleEngine.swift
 
 import XCTest
 
@@ -42,25 +41,28 @@ final class Feature23TXTTocVerificationTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func openAnnotationsPanel() -> XCUIElement {
-        let button = app.buttons[AccessibilityID.readerAnnotationsButton]
+    /// Feature #62: the TOC moved to `TOCSheet`, opened by the
+    /// bottom-chrome Contents button.
+    private func openTOCSheet() -> XCUIElement {
+        let button = app.buttons[AccessibilityID.readerContentsButton]
         XCTAssertTrue(
             button.waitForHittable(timeout: 5),
-            "Reader annotations button should be hittable"
+            "Reader Contents button should be hittable"
         )
         button.tap()
 
-        let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
+        let panel = app.otherElements[AccessibilityID.tocSheet]
         XCTAssertTrue(
             panel.waitForExistence(timeout: 5),
-            "Annotations panel sheet should appear"
+            "TOC sheet should appear"
         )
         return panel
     }
 
     private func selectContentsTab(in panel: XCUIElement) {
-        // The "Contents" tab is the default but tap to make explicit.
-        let contentsTab = panel.buttons["Contents"]
+        // `TOCSheet` opens on the Contents tab; tap the segment to make
+        // it explicit.
+        let contentsTab = panel.buttons[AccessibilityID.tocSheetContentsTab]
         if contentsTab.exists, contentsTab.isHittable {
             contentsTab.tap()
         }
@@ -79,7 +81,7 @@ final class Feature23TXTTocVerificationTests: XCTestCase {
             "Reader should load"
         )
 
-        let panel = openAnnotationsPanel()
+        let panel = openTOCSheet()
         selectContentsTab(in: panel)
 
         let emptyState = panel.otherElements[AccessibilityID.tocEmptyState]
@@ -117,7 +119,7 @@ final class Feature23TXTTocVerificationTests: XCTestCase {
             "Reader should load"
         )
 
-        let panel = openAnnotationsPanel()
+        let panel = openTOCSheet()
         selectContentsTab(in: panel)
 
         let firstRow = panel.buttons.matching(

@@ -1,7 +1,9 @@
 // Purpose: Sheet for editing annotation content.
 // Provides TextEditor with Save/Cancel actions.
 //
-// @coordinates-with: AnnotationListView.swift
+// Note: feature #62 deleted the legacy `AnnotationListView` (its only
+// former caller). This sheet is retained un-wired — out of scope for
+// #62; a future note-edit affordance can adopt it.
 
 import SwiftUI
 

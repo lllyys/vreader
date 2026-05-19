@@ -45,12 +45,12 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 
 ### Annotations
 
-- **Bookmarks, highlights, notes** — Full CRUD across all five formats (TXT/MD/PDF/EPUB/AZW3)
+- **Bookmarks, highlights, notes** — Full CRUD for TXT/MD/PDF/EPUB; AZW3 in progress
 - **EPUB highlights** — CSS Highlight API with JS bridge + buffered delivery
-- **AZW3 highlights** — Selection capture + CFI anchoring with SVG-overlay rendering via the Foliate-js bridge
+- **AZW3 highlights** — Selection capture + CFI anchoring shipped; overlay restoration deferred to WI-7
 - **PDF highlights** — PDFAnnotation-based with selection detection
 - **TXT/MD highlights** — NSAttributedString with persistent rendering
-- **Tap-to-edit highlights** — Tapping an existing highlight in any format (TXT/MD/PDF/EPUB/AZW3) opens one unified highlight-action popover — change color, edit the note, copy, share, or delete
+- **Tap-to-preview notes** — Tapping an annotated highlight shows its note inline (read-only preview) across all five formats; a long-press opens the edit/delete menu on TXT/MD/PDF
 - **Export/import** — Markdown + JSON export, VReader JSON round-trip import
 
 ### Search & Navigation
@@ -143,8 +143,8 @@ vreader/
 ├── ViewModels/          # Library and per-format reader view models
 ├── Views/
 │   ├── Reader/          # Reader container, format bridges, chrome overlay
-│   ├── Bookmarks/       # BookmarkListView, TOCListView
-│   ├── Annotations/     # HighlightListView, AnnotationListView
+│   │   └── Annotations/ # TOCSheet, HighlightsSheet, AnnotationsSheetRoute
+│   ├── Annotations/     # AddNoteSheet, AnnotationEditSheet
 │   └── Settings/        # ReaderSettingsPanel, AI/TTS/WebDAV settings
 ├── Services/
 │   ├── TXT/, EPUB/, MD/ # Format-specific parsing and loading

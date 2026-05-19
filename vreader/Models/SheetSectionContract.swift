@@ -21,8 +21,8 @@
 // - **Foundation-only enum** — compiles in the test target without
 //   SwiftUI.
 //
-// @coordinates-with: ReaderSettingsPanel.swift, AnnotationsPanelView.swift,
-//   HighlightListView.swift, AIReaderPanel.swift, SettingsView.swift,
+// @coordinates-with: ReaderSettingsPanel.swift, TOCSheet.swift,
+//   HighlightsSheet.swift, AIReaderPanel.swift, SettingsView.swift,
 //   SheetReSkinSnapshotTests.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
 

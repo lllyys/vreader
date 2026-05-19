@@ -25,11 +25,33 @@ enum AccessibilityID {
     // strings move to the v2 contract.
     static let readerAnnotationsButton = "readerNotesButton"
     static let readerSettingsButton = "readerDisplayButton"
+    /// Feature #62: the bottom-chrome Contents button — opens `TOCSheet`.
+    /// (The Notes button — `readerAnnotationsButton` — opens
+    /// `HighlightsSheet`; before the #62 split both routed to one panel.)
+    static let readerContentsButton = "readerContentsButton"
 
     // MARK: - Sheets
     static let searchSheet = "searchSheet"
-    static let annotationsPanelSheet = "annotationsPanelSheet"
     static let readerSettingsPanel = "readerSettingsPanel"
+
+    // MARK: - Annotations sheets (feature #62 split)
+    // The unified `AnnotationsPanelView` (`annotationsPanelSheet`) was
+    // split into `TOCSheet` (Contents + Bookmarks) and `HighlightsSheet`
+    // (the All/Highlights/Notes/Bookmarks review surface). The reader
+    // bottom-chrome Contents button opens `tocSheet`; the Notes button
+    // opens `highlightsSheet`.
+    /// `TOCSheet`'s container element.
+    static let tocSheet = "tocSheet"
+    /// `HighlightsSheet`'s container element.
+    static let highlightsSheet = "highlightsSheet"
+    /// `TOCSheet`'s 2-tab segmented control.
+    static let tocSheetContentsTab = "tocSheetContentsTab"
+    static let tocSheetBookmarksTab = "tocSheetBookmarksTab"
+    /// `HighlightsSheet`'s four filter chips.
+    static let highlightsSheetFilterAll = "highlightsSheetFilterAll"
+    static let highlightsSheetFilterHighlights = "highlightsSheetFilterHighlights"
+    static let highlightsSheetFilterNotes = "highlightsSheetFilterNotes"
+    static let highlightsSheetFilterBookmarks = "highlightsSheetFilterBookmarks"
     /// Feature #60's `ReaderSheetChrome` close button (the `xmark` disc in
     /// the sheet's title bar). Bug #209 / GH #804: the re-skinned settings
     /// sheet wraps a scrollable `List`, so a content `swipeDown()` scrolls
@@ -101,10 +123,18 @@ enum AccessibilityID {
     static let loadMoreButton = "loadMoreButton"
 
     // MARK: - Annotations
+    // Empty-state identifiers — feature #62 re-homes `tocEmptyState` /
+    // `bookmarkEmptyState` onto `TOCSheet`'s `AnnotationsEmptyStateView`s
+    // and adds `highlightsEmptyState` (the unified HighlightsSheet empty
+    // state) + `highlightsBookmarksEmptyState` (its Bookmarks chip).
     static let bookmarkEmptyState = "bookmarkEmptyState"
     static let tocEmptyState = "tocEmptyState"
     static let highlightEmptyState = "highlightEmptyState"
     static let annotationEmptyState = "annotationEmptyState"
+    /// `HighlightsSheet`'s empty state (All / Highlights / Notes filters).
+    static let highlightsEmptyState = "highlightsEmptyState"
+    /// `HighlightsSheet`'s Bookmarks-filter empty state.
+    static let highlightsBookmarksEmptyState = "highlightsBookmarksEmptyState"
     static let annotationEditCancel = "annotationEditCancel"
     static let annotationEditSave = "annotationEditSave"
 
@@ -172,9 +202,12 @@ enum AccessibilityID {
     static let nativeTextPagedView = "nativeTextPagedView"
     static let readingProgressLabel = "readingProgressLabel"
 
-    // MARK: - Annotations import/export
+    // MARK: - Annotations export
+    // `HighlightsSheet` ships the designed Share/export button only —
+    // feature #62 / needs-design #963 defers the import affordance, so
+    // the legacy `annotationsImportButton` identifier is retired (no
+    // import button is rendered).
     static let annotationsExportButton = "annotationsExportButton"
-    static let annotationsImportButton = "annotationsImportButton"
 
     // MARK: - OPDS
     static let opdsEmptyState = "opdsEmptyState"
@@ -258,17 +291,40 @@ enum AccessibilityID {
         "bookmarkRow-\(id)"
     }
 
-    /// Individual TOC row. Format: "tocRow-{id}".
+    /// Individual TOC row — `TOCSheet`'s `TOCContentsRow`.
+    /// Format: "tocRow-{id}".
     static func tocRow(_ id: String) -> String {
         "tocRow-\(id)"
     }
 
-    /// Individual highlight row. Format: "highlightRow-{id}".
+    /// Individual bookmark row inside `TOCSheet`'s Bookmarks tab —
+    /// `TOCBookmarkRow`. Format: "tocBookmarkRow-{bookmarkId}".
+    static func tocBookmarkRow(_ id: String) -> String {
+        "tocBookmarkRow-\(id)"
+    }
+
+    /// Individual highlight card in `HighlightsSheet`'s unified stream —
+    /// `HighlightCardV3`. Format: "highlightCard-{highlightId}".
+    static func highlightCard(_ id: String) -> String {
+        "highlightCard-\(id)"
+    }
+
+    /// Individual standalone-note card in `HighlightsSheet`'s stream —
+    /// `StandaloneNoteCard`. Format: "standaloneNoteCard-{annotationId}".
+    static func standaloneNoteCard(_ id: String) -> String {
+        "standaloneNoteCard-\(id)"
+    }
+
+    /// Legacy individual highlight row — was `HighlightListView`'s row
+    /// (deleted in feature #62). Retained for any non-migrated caller;
+    /// new code uses `highlightCard(_:)`. Format: "highlightRow-{id}".
     static func highlightRow(_ id: String) -> String {
         "highlightRow-\(id)"
     }
 
-    /// Individual annotation row. Format: "annotationRow-{id}".
+    /// Legacy individual annotation row — was `AnnotationListView`'s row
+    /// (deleted in feature #62). New code uses `standaloneNoteCard(_:)`.
+    /// Format: "annotationRow-{id}".
     static func annotationRow(_ id: String) -> String {
         "annotationRow-\(id)"
     }

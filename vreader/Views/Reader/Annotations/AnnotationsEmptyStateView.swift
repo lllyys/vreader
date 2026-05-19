@@ -79,6 +79,12 @@ struct AnnotationsEmptyStateView: View {
             art
                 .frame(width: 96, height: 96)
                 .opacity(0.85)
+                // The art is a decorative SVG-path illustration — its
+                // shape "lines" can read as text to the accessibility
+                // audit's element-detection pass. Hide it: the empty
+                // state's meaning is the title + body copy below, which
+                // VoiceOver announces.
+                .accessibilityHidden(true)
 
             Text(title)
                 .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 18)))

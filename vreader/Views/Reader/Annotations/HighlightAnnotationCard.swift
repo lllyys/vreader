@@ -18,17 +18,37 @@
 
 import SwiftUI
 
-/// The design's highlight-colour → swatch-hex map
-/// (`vreader-notes-unified.jsx` `colorMap`). Unknown colour names fall
-/// back to yellow, exactly as the JSX `colorMap[h.color] || colorMap.yellow`.
+/// The highlight-colour → swatch-colour map for `HighlightsSheet`'s
+/// cards.
+///
+/// The committed #860 design (`vreader-notes-unified.jsx` `colorMap`)
+/// depicts four swatch colours (yellow/green/blue/pink) with exact hex
+/// stops. But the REAL stored highlight palette is broader —
+/// red/orange/purple are also valid stored colour names. Mapping every
+/// non-designed name to yellow would render a red/orange/purple
+/// highlight with the wrong swatch + rule colour, a visible
+/// data-fidelity regression. So this resolves the designed four to the
+/// committed `NamedHighlightColor` hex stops, and the broader three to
+/// their natural opaque hue — the same faithful-to-data strategy
+/// `NoteCalloutView.noteSwatchColor` already established (rule 51
+/// permits extending a designed swatch's data mapping). Unknown / empty
+/// / legacy-hex values fall back to yellow — never `.clear`, never a
+/// crash.
 enum HighlightSwatch {
     static func color(for name: String) -> Color {
-        switch name.lowercased() {
-        case "pink":  return Color(red: 0xe8 / 255, green: 0x8c / 255, blue: 0xa0 / 255)
-        case "green": return Color(red: 0x8c / 255, green: 0xc8 / 255, blue: 0x8c / 255)
-        case "blue":  return Color(red: 0x8c / 255, green: 0xb4 / 255, blue: 0xe8 / 255)
-        case "yellow": return Color(red: 0xf0 / 255, green: 0xd2 / 255, blue: 0x5a / 255)
-        default:      return Color(red: 0xf0 / 255, green: 0xd2 / 255, blue: 0x5a / 255)
+        let normalized = name.lowercased()
+        // Designed four — pinned to the committed design hex stops.
+        if let named = NamedHighlightColor.from(storageString: normalized),
+           let color = Color(readerHexString: named.hex) {
+            return color
+        }
+        // Broader stored palette the design did not depict.
+        switch normalized {
+        case "red":    return Color(readerHexString: "#e08585") ?? .red
+        case "orange": return Color(readerHexString: "#e8a85a") ?? .orange
+        case "purple": return Color(readerHexString: "#b48ce8") ?? .purple
+        default:
+            return Color(readerHexString: NamedHighlightColor.yellow.hex) ?? .yellow
         }
     }
 }

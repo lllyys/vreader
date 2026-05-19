@@ -104,6 +104,7 @@ final class TXTHighlightGestureVerificationTests: XCTestCase {
         //    A tap on the TXT text view TOGGLES chrome (postContentTappedNotification).
         //    Only tap if the chrome is currently hidden (annotations button absent from
         //    the view hierarchy). Tapping when chrome is already visible would hide it.
+        // Feature #62: the Notes bottom-chrome button opens `HighlightsSheet`.
         let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
         if !annotationsButton.waitForExistence(timeout: 2) {
             // Chrome was hidden — one tap reveals it.
@@ -111,27 +112,27 @@ final class TXTHighlightGestureVerificationTests: XCTestCase {
         }
         XCTAssertTrue(
             annotationsButton.waitForHittable(timeout: 10),
-            "Annotations button should be hittable (chrome visible)"
+            "Notes button should be hittable (chrome visible)"
         )
         annotationsButton.tap()
 
-        let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
+        let panel = app.otherElements[AccessibilityID.highlightsSheet]
         XCTAssertTrue(
             panel.waitForExistence(timeout: 5),
-            "Annotations panel should appear"
+            "HighlightsSheet should appear"
         )
 
-        // 8. Navigate to the Highlights tab
-        let highlightsTab = app.buttons["Highlights"]
+        // 8. Select the Highlights filter chip.
+        let highlightsFilter = app.buttons[AccessibilityID.highlightsSheetFilterHighlights]
         XCTAssertTrue(
-            highlightsTab.waitForExistence(timeout: 3),
-            "Highlights tab should exist in annotations panel"
+            highlightsFilter.waitForExistence(timeout: 3),
+            "Highlights filter chip should exist in HighlightsSheet"
         )
-        highlightsTab.tap()
+        highlightsFilter.tap()
 
         // 9. Verify the Highlights empty state is GONE — a highlight was persisted.
         // If the bug regresses: empty state would still be visible.
-        let emptyState = app.otherElements[AccessibilityID.highlightEmptyState]
+        let emptyState = app.otherElements[AccessibilityID.highlightsEmptyState]
         let emptyGonePredicate = NSPredicate(format: "exists == false")
         let emptyGoneExpect = XCTNSPredicateExpectation(predicate: emptyGonePredicate, object: emptyState)
         let result = XCTWaiter().wait(for: [emptyGoneExpect], timeout: 5)

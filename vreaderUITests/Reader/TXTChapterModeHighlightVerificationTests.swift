@@ -46,6 +46,8 @@ final class TXTChapterModeHighlightVerificationTests: XCTestCase {
         return XCTWaiter().wait(for: [expect], timeout: timeout) == .completed
     }
 
+    /// Feature #62: opens `HighlightsSheet` (Notes bottom-chrome button)
+    /// and selects the Highlights filter chip.
     private func openHighlightsTab() {
         let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
         if !annotationsButton.waitForExistence(timeout: 2) {
@@ -53,20 +55,20 @@ final class TXTChapterModeHighlightVerificationTests: XCTestCase {
         }
         XCTAssertTrue(
             annotationsButton.waitForHittable(timeout: 10),
-            "Annotations button should be hittable (chrome visible)"
+            "Notes button should be hittable (chrome visible)"
         )
         annotationsButton.tap()
 
-        let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
-        XCTAssertTrue(panel.waitForExistence(timeout: 5), "Annotations panel should appear")
+        let panel = app.otherElements[AccessibilityID.highlightsSheet]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5), "HighlightsSheet should appear")
 
-        let highlightsTab = app.buttons["Highlights"]
-        XCTAssertTrue(highlightsTab.waitForExistence(timeout: 3), "Highlights tab should exist")
-        highlightsTab.tap()
+        let highlightsFilter = app.buttons[AccessibilityID.highlightsSheetFilterHighlights]
+        XCTAssertTrue(highlightsFilter.waitForExistence(timeout: 3), "Highlights filter chip should exist")
+        highlightsFilter.tap()
     }
 
     private func assertHighlightPresent(file: StaticString = #filePath, line: UInt = #line) {
-        let emptyState = app.otherElements[AccessibilityID.highlightEmptyState]
+        let emptyState = app.otherElements[AccessibilityID.highlightsEmptyState]
         let gone = NSPredicate(format: "exists == false")
         let expect = XCTNSPredicateExpectation(predicate: gone, object: emptyState)
         let result = XCTWaiter().wait(for: [expect], timeout: 5)

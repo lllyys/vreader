@@ -130,6 +130,11 @@ struct HighlightsSheet: View {
     /// The designed Share/export button — `HighlightsSheetV3`'s trailing
     /// slot is exactly one Share button (round-2 finding 2). The import
     /// affordance is deferred to needs-design #963.
+    ///
+    /// The label is sized to a 44×44pt tap target via `.frame` +
+    /// `.contentShape` — the designed 16pt icon stays visually
+    /// unchanged, only the hit area meets the HIG / accessibility-audit
+    /// minimum (the bare 16pt glyph is otherwise an undersized target).
     @ViewBuilder
     private var exportButton: some View {
         Button {
@@ -138,6 +143,8 @@ struct HighlightsSheet: View {
             Image(systemName: "square.and.arrow.up")
                 .font(.system(size: 16, weight: .regular))
                 .foregroundStyle(Color(theme.accentColor))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel("Share annotations")
         .accessibilityIdentifier("annotationsExportButton")

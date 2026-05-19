@@ -126,8 +126,18 @@ extension TOCSheet {
     /// The lifted `activeEntryIndex` result, for the current-chapter test.
     var activeEntryIndexForTesting: Int? { activeEntryIndex }
 
-    /// True when the Contents body renders the empty state.
+    /// True when the Contents tab carries no TOC entries — distinct
+    /// from whether the empty *state* renders (that is also gated on
+    /// `tocDidLoad`; see `contentsEmptyStateShown`).
     var contentsIsEmpty: Bool { tocEntries.isEmpty }
+
+    /// True when the Contents body would render the "No table of
+    /// contents" empty state — i.e. the host's TOC build has completed
+    /// AND no entries exist. Before the build completes this is `false`
+    /// (a neutral body shows, not the empty state — Gate-4 finding).
+    var contentsEmptyStateShown: Bool {
+        tocDidLoad && tocEntries.isEmpty
+    }
 
     /// True when the Bookmarks body would render the empty state — i.e.
     /// the load has completed AND no bookmarks exist. Before the load

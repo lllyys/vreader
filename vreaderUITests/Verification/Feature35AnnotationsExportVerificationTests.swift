@@ -1,20 +1,24 @@
-// Purpose: Verification tests for Feature #35 — annotations export/import.
-// Confirms the Export and Import buttons exist in the annotations panel
-// toolbar and that the Export button is hittable. Live share-sheet
-// observation is XCUI-limited (system-presented activity views are
-// outside the app process), so this WI tests the trigger surface only.
+// Purpose: Verification tests for Feature #35 — annotations export.
+// Confirms the Export button exists in `HighlightsSheet`'s trailing
+// slot and is hittable. Live share-sheet observation is XCUI-limited
+// (system-presented activity views are outside the app process), so
+// this exercises the trigger surface only.
 //
-// Seed: .books (annotations panel is reachable regardless of content).
+// Feature #62: the annotations panel was split — the export action now
+// lives in `HighlightsSheet` (opened by the Notes bottom-chrome button).
+// The legacy Import button is GONE: the committed `HighlightsSheetV3`
+// design has no import affordance, so import is deferred to
+// needs-design #963. The former import-button test is replaced by an
+// assertion that no import button ships.
 //
-// Notes:
-// - XCUI cannot drive the OS document picker reliably, so the import
-//   button's hittable-presence is the verifiable contract (not the
-//   actual file-pick → parse flow).
-// - Export's share-sheet presence is asserted by waiting for any
-//   springboard-side activity sheet OR a system alert; if neither
-//   surfaces, that's a regression.
+// Seed: `.epubFixture` (`mini-epub3.epub`) — a real, openable EPUB.
+// `HighlightsSheet` opens from the reader Notes bottom-chrome button,
+// which only renders once a book's content loads; the `.books` seed
+// (metadata-only fixtures, no backing file — Bug #209 / #214) cannot
+// reach the chrome.
 //
-// @coordinates-with: AnnotationsPanelView.swift, AnnotationExporter.swift
+// @coordinates-with: HighlightsSheet.swift, HighlightsSheet+Export.swift,
+//   AnnotationExporter.swift, TestSeeder.swift, LaunchHelper.swift
 
 import XCTest
 
@@ -24,7 +28,7 @@ final class Feature35AnnotationsExportVerificationTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .books, resetPreferences: true)
+        app = launchApp(seed: .epubFixture, resetPreferences: true)
     }
 
     override func tearDownWithError() throws {
@@ -33,38 +37,63 @@ final class Feature35AnnotationsExportVerificationTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func openAnnotationsPanel() throws -> XCUIElement {
-        tapFirstBook(in: app)
+    /// Opens the seeded EPUB book and waits for the reader chrome. The
+    /// card tap is retried for the library `LazyVGrid` layout race.
+    @discardableResult
+    private func openSeededBook() -> Bool {
+        let card = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+        ).firstMatch
+        let row = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'bookRow_'")
+        ).firstMatch
+        let backButton = app.buttons[AccessibilityID.readerBackButton]
 
-        XCTAssertTrue(
-            app.buttons[AccessibilityID.readerBackButton].waitForExistence(timeout: 15),
-            "Reader should load"
-        )
+        for _ in 0..<3 {
+            if card.waitForExistence(timeout: 15) {
+                if card.waitForHittable(timeout: 8) || card.exists { card.tap() }
+            } else if row.waitForExistence(timeout: 3) {
+                if row.waitForHittable(timeout: 8) || row.exists { row.tap() }
+            }
+            if backButton.waitForExistence(timeout: 20) { return true }
+        }
+        return false
+    }
+
+    /// Feature #62: the export action moved to `HighlightsSheet`, opened
+    /// by the Notes bottom-chrome button. The chrome auto-hides on load;
+    /// a content tap reveals it so the Notes button becomes hittable.
+    private func openHighlightsSheet() throws -> XCUIElement {
+        XCTAssertTrue(openSeededBook(), "Seeded mini-epub3 EPUB should open into the reader")
 
         let button = app.buttons[AccessibilityID.readerAnnotationsButton]
-        guard button.waitForHittable(timeout: 5) else {
-            throw XCTSkip("Reader annotations button not present for this fixture/format")
+        if !button.waitForExistence(timeout: 3) {
+            app.tap()   // reveal the auto-hidden chrome
         }
+        XCTAssertTrue(
+            button.waitForHittable(timeout: 10),
+            "Reader Notes button should be hittable (chrome visible)"
+        )
         button.tap()
 
-        let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
+        let panel = app.otherElements[AccessibilityID.highlightsSheet]
         XCTAssertTrue(
             panel.waitForExistence(timeout: 5),
-            "Annotations panel sheet should appear"
+            "HighlightsSheet should appear"
         )
         return panel
     }
 
     // MARK: - Feature #35 Verification
 
-    /// Verifies the Export button exists in the annotations panel toolbar.
+    /// Verifies the Export button exists in `HighlightsSheet`'s trailing slot.
     func test_verify_feature_35_export_button_is_visible() throws {
-        let panel = try openAnnotationsPanel()
+        _ = try openHighlightsSheet()
 
-        let exportButton = panel.buttons[AccessibilityID.annotationsExportButton]
+        let exportButton = app.buttons[AccessibilityID.annotationsExportButton]
         XCTAssertTrue(
             exportButton.waitForExistence(timeout: 5),
-            "Export button should exist in annotations panel toolbar"
+            "Export button should exist in HighlightsSheet's trailing slot"
         )
 
         // The button should be hittable. Whether or not it actually has
@@ -75,19 +104,25 @@ final class Feature35AnnotationsExportVerificationTests: XCTestCase {
         )
     }
 
-    /// Verifies the Import button exists in the annotations panel toolbar.
-    func test_verify_feature_35_import_button_is_visible() throws {
-        let panel = try openAnnotationsPanel()
+    /// Verifies that NO import button ships — feature #62 / needs-design
+    /// #963 defers the import affordance; `HighlightsSheet` shows only
+    /// the designed Share/export button.
+    func test_verify_feature_35_no_import_button_pending_design_963() throws {
+        _ = try openHighlightsSheet()
 
-        let importButton = panel.buttons[AccessibilityID.annotationsImportButton]
+        // Confirm the export button IS present (sanity — the sheet
+        // loaded with its trailing affordance).
         XCTAssertTrue(
-            importButton.waitForExistence(timeout: 5),
-            "Import button should exist in annotations panel toolbar"
+            app.buttons[AccessibilityID.annotationsExportButton].waitForExistence(timeout: 5),
+            "Export button should exist"
         )
 
-        XCTAssertTrue(
-            importButton.isHittable,
-            "Import button should be hittable"
+        // The legacy `annotationsImportButton` identifier must NOT
+        // resolve — no import affordance ships pending needs-design #963.
+        let importButton = app.buttons["annotationsImportButton"]
+        XCTAssertFalse(
+            importButton.exists,
+            "No import button should ship — import is deferred to needs-design #963"
         )
     }
 }

@@ -8,7 +8,9 @@
 // - File URL resolved from fingerprintKey using the sandbox import convention.
 // - DocumentFingerprint parsed from the canonical key string.
 // - Format host views (TXTReaderHost, etc.) extracted to ReaderFormatHosts.swift (WI-004).
-// - AnnotationsPanelView extracted to AnnotationsPanelView.swift (WI-004).
+// - Annotations sheets: feature #62 split the unified panel into
+//   `TOCSheet` (Contents/Bookmarks) + `HighlightsSheet` (review),
+//   routed via `AnnotationsSheetRoute`.
 // - Custom chrome overlay (ReaderTopChrome) replaces system nav bar for stable content layout.
 // - TOC entries computed per format: EPUB from spine items, PDF from outline tree, TXT from Legado rules.
 // - Search sheet wired with SearchService, SearchViewModel, and SearchView.
@@ -24,7 +26,8 @@
 // - ThemeBackgroundView shown behind reader content when useCustomBackground is ON.
 //
 // @coordinates-with: ReaderTopChrome.swift, ReaderBottomChrome.swift, ReaderFormatHosts.swift,
-//   AnnotationsPanelView.swift, ReaderSettingsStore.swift, ReaderSettingsPanel.swift,
+//   TOCSheet.swift, HighlightsSheet.swift, AnnotationsSheetRoute.swift,
+//   ReaderSettingsStore.swift, ReaderSettingsPanel.swift,
 //   DocumentFingerprint.swift, SearchView.swift, ThemeBackgroundView.swift,
 //   ReaderAICoordinator.swift, ReaderSearchCoordinator.swift,
 //   ReaderUnifiedCoordinator.swift, ReaderTOCBuilder.swift
@@ -56,11 +59,20 @@ struct ReaderContainerView: View {
     /// `.sheet(onDismiss:)` once it has fully dismissed — presenting
     /// both in one state update can drop the second sheet.
     @State var exportAnnotationsAfterBookDetailsDismiss = false
-    @State var showAnnotationsPanel = false
-    /// Feature #60 WI-6b: which tab the annotations panel opens on —
-    /// the bottom chrome's Contents button opens `.toc`, Notes opens
-    /// `.highlights`.
-    @State var annotationsPanelInitialTab: AnnotationsPanelTab = .toc
+    /// Feature #62: `TOCSheet`'s Contents-empty "Open Search" CTA must
+    /// open the reader search sheet — but `TOCSheet` is itself a sheet,
+    /// so the search sheet is opened from `annotationsRoute`'s
+    /// `.sheet(onDismiss:)` once `TOCSheet` has fully dismissed (the same
+    /// sibling-sheet hand-off feature #61 established for Book Details).
+    @State var openSearchAfterAnnotationsDismiss = false
+    /// Feature #62: which annotations sheet the reader presents — `nil`
+    /// when none is up. Replaces the feature-#60 WI-6b
+    /// `showAnnotationsPanel` + `annotationsPanelInitialTab` pair: the
+    /// `TOCSheet` and `HighlightsSheet` are mutually exclusive, so one
+    /// optional route makes that a type invariant and carries the
+    /// initial tab/filter inline. Kept `internal` (not `private`) so the
+    /// More-menu router in `+Sheets.swift` can write it.
+    @State var annotationsRoute: AnnotationsSheetRoute?
     @State var showSearch = false
     /// Feature #60 WI-6c: whether the reader More-menu popover is
     /// presented. The `⋯` button in `ReaderTopChrome` toggles it; the
@@ -77,6 +89,13 @@ struct ReaderContainerView: View {
     @State private var isChromeVisible = true
     /// Computed TOC entries for the current book (format-specific).
     @State var tocEntries: [TOCEntry] = []
+    /// Feature #62: true once the eager `ensureTOCReady()` build has
+    /// completed. Passed into `TOCSheet` so its Contents tab does not
+    /// flash a false "No table of contents" empty state when the
+    /// Contents chrome button is tapped before the build resolves —
+    /// the same load-vs-emptiness distinction `TOCSheet` already makes
+    /// for bookmarks (`bookmarksDidLoad`).
+    @State var tocDidLoad = false
     /// TTS service for read-aloud feature (WI-B03).
     @State var ttsService = TTSService()
     /// Current reading position for TOC scroll-to-current.
@@ -198,12 +217,13 @@ struct ReaderContainerView: View {
         // complexity budget.
         .readerToolbarActionObservers(
             onContents: {
-                annotationsPanelInitialTab = .toc
-                showAnnotationsPanel = true
+                // Feature #62: Contents opens `TOCSheet`; Notes opens
+                // `HighlightsSheet` on the All filter — the design's
+                // bottom-chrome routing.
+                annotationsRoute = AnnotationsSheetRoute.route(forChromeButton: .contents)
             },
             onNotes: {
-                annotationsPanelInitialTab = .highlights
-                showAnnotationsPanel = true
+                annotationsRoute = AnnotationsSheetRoute.route(forChromeButton: .notes)
             },
             onDisplay: { showSettings = true },
             onAI: {
@@ -359,10 +379,17 @@ struct ReaderContainerView: View {
                 )
                 settingsStore.applyResolvedSettings(resolved)
             }
-            // Build TOC eagerly for TXT — needed for chapter progress bar (bug #31)
-            if resolvedBookFormat == .txt {
-                ensureTOCReady()
-            }
+            // Feature #62: build the TOC eagerly on reader load — for
+            // TXT it feeds the chapter progress bar (bug #31), and for
+            // every format it gets `tocEntries` populated before the
+            // user can reach the Contents chrome button. The eager
+            // build alone is best-effort (the build is async); the
+            // hard guarantee that `TOCSheet`'s "No table of contents"
+            // empty state means "this book ships no TOC" rather than
+            // "still loading" is the `tocDidLoad` flag passed into the
+            // sheet — it withholds the empty state until the build
+            // resolves. `ensureTOCReady()` is idempotent.
+            ensureTOCReady()
         }
         .sheet(isPresented: $showSettings) {
             ReaderSettingsPanel(
@@ -375,24 +402,21 @@ struct ReaderContainerView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showAnnotationsPanel) {
-            AnnotationsPanelView(
-                bookFingerprintKey: book.fingerprintKey,
-                modelContainer: modelContext.container,
-                tocEntries: tocEntries,
-                currentLocator: currentLocator,
-                theme: settingsStore.theme,
-                initialTab: annotationsPanelInitialTab,
-                onNavigate: { locator in
-                    NotificationCenter.default.post(
-                        name: .readerNavigateToLocator,
-                        object: locator
-                    )
-                },
-                onDismiss: {
-                    showAnnotationsPanel = false
-                }
-            )
+        // Feature #62: the annotations panel split — Contents/Bookmarks
+        // present `TOCSheet`, the review filters present `HighlightsSheet`.
+        // One `.sheet(item:)` over the `AnnotationsSheetRoute` replaces the
+        // legacy `.sheet(isPresented:)` over the unified `AnnotationsPanelView`.
+        .sheet(item: $annotationsRoute, onDismiss: {
+            // The TOCSheet "Open Search" CTA defers the search sheet to
+            // this dismiss handler — TOCSheet is itself a sheet, so
+            // presenting `showSearch` while it is up risks the
+            // double-sheet drop (the feature-#61 sibling-sheet pattern).
+            if openSearchAfterAnnotationsDismiss {
+                openSearchAfterAnnotationsDismiss = false
+                showSearch = true
+            }
+        }) { route in
+            annotationsSheet(for: route)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -412,14 +436,13 @@ struct ReaderContainerView: View {
         // `bookDetailsSheet` (ReaderContainerView+Sheets.swift) so the
         // body stays inside the type-checker's complexity budget.
         .sheet(isPresented: $showBookDetails, onDismiss: {
-            // Feature #61 WI-4: the "Export annotations…" row routes to
-            // the annotations panel — opened here, after Book Details
-            // has fully dismissed, because the two are sibling sheets
-            // sharing this view's presenter.
+            // Feature #61 WI-4 / #62: the "Export annotations…" row
+            // routes to `HighlightsSheet` (Highlights filter) — opened
+            // here, after Book Details has fully dismissed, because the
+            // two are sibling sheets sharing this view's presenter.
             if exportAnnotationsAfterBookDetailsDismiss {
                 exportAnnotationsAfterBookDetailsDismiss = false
-                annotationsPanelInitialTab = .highlights
-                showAnnotationsPanel = true
+                annotationsRoute = .highlights(initialFilter: .highlights)
             }
         }) {
             // Design `vreader-book-details.jsx` sizes the stacked sheet
@@ -433,10 +456,10 @@ struct ReaderContainerView: View {
         .onChange(of: showSearch) { _, isShowing in
             if isShowing { ensureSearchReady() }
         }
-        // TOC deferred until annotations panel opens (bug #64)
-        .onChange(of: showAnnotationsPanel) { _, isShowing in
-            if isShowing { ensureTOCReady() }
-        }
+        // Feature #62: the bug-#64 `.onChange(of: showAnnotationsPanel)`
+        // deferred-TOC call is dropped — `ensureTOCReady()` is now an
+        // eager preload in the reader-load `.task` above, so the TOC is
+        // ready before the Contents chrome button is reachable.
         // Feature #57: cancel an in-flight AZW3/MOBI TTS extraction
         // walk when the reader is dismissed, so a late completion can
         // never call `startSpeaking` after the reader has closed. The
@@ -681,9 +704,9 @@ struct ReaderContainerView: View {
                     ttsService: ttsService
                 )
             case .foliateWeb:
-                // Feature #64 WI-9: the AZW3/MOBI highlight tap opens the
-                // unified highlight-action popover (see
-                // `FoliateSpikeView+HighlightTap` / `FoliateHighlightMutator`).
+                // Feature #55 WI-7: `FoliateSpikeView` no longer takes a
+                // `highlightActionPresenter` — the AZW3/MOBI highlight tap is
+                // re-homed to the #55 note preview (see `FoliateSpikeView+HighlightTap`).
                 FoliateSpikeView(
                     bookURL: resolvedFileURL,
                     fingerprintKey: book.fingerprintKey,
