@@ -133,7 +133,7 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `WebDAVServerProfileStore`           | `UserDefaults` / `KeychainService` | Actor-isolated list of saved WebDAV server profiles with one active selection (feature #52 WI-1). Profiles + active-id persist as `UserDefaults` JSON; per-profile passwords persist in Keychain. Atomic `loadSnapshot`, `upsert` / `remove` / `setActiveProfileID`, single-hop `updateIfExists`. Mirrors `ProviderProfileStore` (feature #50) for the AI multi-profile precedent |
 | `WebDAVProfileMigrator`              | `KeychainService` / `WebDAVServerProfileStore` | One-shot migrator that lifts pre-#52 flat-keychain credentials (`com.vreader.webdav.{serverURL,username,password}`) into a `"Default"` profile and sets it active. Idempotent on both axes (marker key + non-empty store). Feature #52 WI-2 |
 | `ReadingModeMigration`               | `UserDefaults` / per-book JSON files | One-shot **synchronous** launch migration retiring the Native/Unified reading mode (feature #54). Removes the `readerReadingMode` UserDefaults key and strips the `readingMode` field from per-book override JSON files (edited as raw `JSONSerialization` objects so other keys are semantically preserved). Synchronous-before-setup — the per-book JSON store has no actor, so a detached migration could race a panel save/restore. Idempotent |
-| `BackupDataCollector`                | `PersistenceActor`         | Serializes 8 versioned JSON sections (annotations, positions, settings, library-manifest, …) |
+| `BackupDataCollector`                | `PersistenceActor`         | Serializes 9 versioned JSON sections (annotations, positions, settings, library-manifest, reading-history, …). `reading-history.json` (feature #58) carries `ReadingSession` + `ReadingStats`; the section bumped `kBackupCurrentSchemaVersion` to 2 |
 | `BackupDataRestorer`                 | `PersistenceActor`         | Decodes + dedupes by UUID/profileKey; rejects future schema versions      |
 | `BlobPath`                           | —                          | Pure utility: `(format, sha256, byteCount)` ↔ `VReader/books/<format>/<sha>_<bytes>.<ext>` (feature #46) |
 | `BackupBlobStore` (protocol pair)    | —                          | Transport-neutral read (`BackupBlobReading`) + write (`BackupBlobWriting`) blob API |
@@ -181,9 +181,14 @@ SwiftData SchemaV6 entities:
 **Feature #46 — WebDAV materializing restore (data layer)**: backup ZIPs now carry an additional `library-manifest.json` section (one `BackupLibraryEntry` per book, including content-addressed `blobPath`). On `backup`, `WebDAVProvider` uploads each missing book blob atomically — `WebDAVBlobStore` PUTs to `VReader/uploads/tmp/<uuid>.part`, PROPFIND-verifies the size, then `MOVE`s into the canonical `VReader/books/<format>/<sha256>_<byteCount>.<ext>` path. Repeat backups skip already-published blobs via PROPFIND-by-size dedupe. On `restore`, when the manifest is present and a `BookImporter` is wired in (production: via `\.bookImporter` SwiftUI Environment), `BookFileMaterializer` downloads + verifies + imports each missing blob before metadata sections apply. v1-format backups (no manifest) restore as before — books silently skipped if missing locally. The 412 response from `MOVE Overwrite: F` is treated as "blob already converged" (content-addressing). 501 from `MOVE` raises `BackupBlobStoreError.serverCapabilityMissing` — no silent atomicity loss.
 
 Backup section JSONs (`vreader/Services/Backup/BackupSectionDTOs.swift`) are
-versioned via the `BackupVersionedEnvelope` protocol. Restore validates exact
-`schemaVersion == 1` and raises `BackupRestoreError.unsupportedSchemaVersion`
-on mismatch, so a future v2 archive can't silently apply on a v1 client.
+versioned via the `BackupVersionedEnvelope` protocol. The collector emits
+`kBackupCurrentSchemaVersion` (now `2`, bumped by feature #58 for the new
+`reading-history.json` section). Restore validates the envelope against the
+explicit accepted set `kBackupAcceptedSchemaVersions` (`{1, 2}`) — decoupled
+from the current constant so a version bump doesn't reject older backups (the
+pre-v2 section shapes are byte-identical between v1 and v2). A genuinely-newer
+archive (v3+) is absent from the set and still raises
+`BackupRestoreError.unsupportedSchemaVersion`.
 
 Key types:
 
