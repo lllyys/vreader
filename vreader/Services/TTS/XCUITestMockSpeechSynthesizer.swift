@@ -62,6 +62,13 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
     /// methods. Never has `speak()` called on it.
     private let probeSynth = AVSpeechSynthesizer()
 
+    /// The utterance currently being "spoken" — retained so that a
+    /// superseding `speak()` or a `stopSpeaking()` can fire `didCancel`
+    /// with the *actual* cancelled utterance rather than a stand-in,
+    /// matching real `AVSpeechSynthesizer` delegate semantics.
+    /// `nil` while idle.
+    private var currentUtterance: AVSpeechUtterance?
+
     /// Monotonically increments on each speak()/stopSpeaking() — older
     /// dispatched ticks check this and exit if no longer current.
     private var generation: Int = 0
@@ -95,14 +102,19 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
 
         // If something was already speaking, cancel it first so the
         // first utterance's delegate sees didCancel before the second
-        // sees didStart. Matches real AVSpeechSynthesizer behavior.
+        // sees didStart. Matches real AVSpeechSynthesizer behavior —
+        // including firing didCancel for the OUTGOING utterance, not the
+        // new one.
         if isSpeaking || isPaused {
             generation += 1
-            delegateTarget?.speechSynthesizer?(probeSynth, didCancel: avUtterance)
+            let outgoing = currentUtterance ?? avUtterance
+            nonisolated(unsafe) let outgoingCapture = outgoing
+            delegateTarget?.speechSynthesizer?(probeSynth, didCancel: outgoingCapture)
         }
 
         isSpeaking = true
         isPaused = false
+        currentUtterance = avUtterance
         generation += 1
         let myGeneration = generation
 
@@ -193,6 +205,7 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
                 // All slices consumed → terminal didFinish.
                 self.isSpeaking = false
                 self.isPaused = false
+                self.currentUtterance = nil
                 self.delegateTarget?.speechSynthesizer?(self.probeSynth, didFinish: utteranceCapture)
             }
         }
@@ -221,16 +234,22 @@ final class XCUITestMockSpeechSynthesizer: NSObject, SpeechSynthesizing, @unchec
 
     @discardableResult
     func stopSpeaking() -> Bool {
+        // Nothing in flight → no-op, matching real AVSpeechSynthesizer
+        // (`stopSpeaking(at:)` returns false and fires no delegate
+        // callback when the synthesizer is idle).
+        guard isSpeaking || isPaused else { return false }
+
         // Invalidate any in-flight dispatched ticks.
         generation += 1
         isSpeaking = false
         isPaused = false
 
-        // Fire didCancel synchronously. Production didCancel handler
-        // (TTSService didCancel delegate method) ignores the utterance
-        // parameter, so a placeholder is fine.
-        let placeholder = AVSpeechUtterance(string: "")
-        delegateTarget?.speechSynthesizer?(probeSynth, didCancel: placeholder)
+        // Fire didCancel synchronously for the actual in-flight
+        // utterance (faithful delegate semantics).
+        let cancelled = currentUtterance ?? AVSpeechUtterance(string: "")
+        currentUtterance = nil
+        nonisolated(unsafe) let cancelledCapture = cancelled
+        delegateTarget?.speechSynthesizer?(probeSynth, didCancel: cancelledCapture)
         return true
     }
 }

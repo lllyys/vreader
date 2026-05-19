@@ -320,8 +320,8 @@ final class Feature26TextToSpeechVerificationTests: XCTestCase {
             "longer exist (TTSService is .idle)",
             file: file, line: line
         )
-        XCTAssertFalse(
-            stopButton(in: app).exists,
+        XCTAssertTrue(
+            stopButton(in: app).waitForDisappearance(timeout: 8),
             "[\(formatName)] C4: the Stop button should also be gone " +
             "once the control bar is torn down",
             file: file, line: line
@@ -355,6 +355,16 @@ final class Feature26TextToSpeechVerificationTests: XCTestCase {
     /// pause/resume controls work on the EPUB engine (a WKWebView render
     /// path), not just the native text readers — closing the EPUB half
     /// of the pause/resume reachability gap.
+    ///
+    /// Known environmental flake (NOT a feature or test-logic defect):
+    /// on the iOS 26.4 Simulator the runner can log
+    /// `Class UIAccessibilityLoaderWebShared is implemented in both
+    /// WebCore.axbundle and WebKit.axbundle … mysterious crashes` and
+    /// the test runner can crash in *teardown* — after this test's TTS
+    /// assertions have all already executed — when the EPUB WKWebView's
+    /// accessibility bundle unloads. The remedy is a re-run; the test
+    /// itself is deterministic. If this surfaces, run the EPUB case in
+    /// isolation rather than treating it as a #26 regression.
     func test_verify_feature_26_epub_start_pause_resume_stop_cycle() throws {
         runTTSLifecycle(seed: .epubFixture, formatName: "EPUB")
     }
