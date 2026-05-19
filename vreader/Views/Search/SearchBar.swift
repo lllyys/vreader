@@ -18,6 +18,9 @@
 //   helper makes that mutation testable without rendering.
 // - Geometry / palette from `ReaderThemeV2` tokens — design parity with
 //   the rest of the feature #60 v2 chrome.
+// - The text field and "Cancel" button each carry a >=44 pt `minHeight`
+//   tappable frame + rectangular content shape (Bug #224): SwiftUI sizes
+//   neither element to the HIG 44 pt touch-target minimum on its own.
 //
 // @coordinates-with: SearchView.swift, SearchViewModel.swift,
 //   ReaderThemeV2.swift,
@@ -65,6 +68,13 @@ struct SearchBar: View {
                 .autocorrectionDisabled()
                 .submitLabel(.search)
                 .focused($fieldFocused)
+                // Bug #224: SwiftUI sizes a `TextField`'s accessibility
+                // element to its ~19 pt text line — below the 44 pt HIG
+                // touch-target minimum. A >=44 pt tappable frame plus a
+                // rectangular content shape gives motor-impaired /
+                // Switch Control users a HIG-compliant target.
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("searchTextField")
 
             if !viewModel.query.isEmpty {
@@ -80,8 +90,11 @@ struct SearchBar: View {
                 .accessibilityIdentifier("searchClearButton")
             }
         }
+        // Bug #224: the field's height is governed by the `TextField`'s
+        // 44 pt `minHeight` tappable frame (HIG touch-target minimum).
+        // Vertical padding is therefore omitted — adding it would stack
+        // on top of the 44 pt and oversize the drawn field surface.
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(fieldFillColor))
@@ -94,6 +107,12 @@ struct SearchBar: View {
         Button("Cancel", action: onCancel)
             .font(.system(size: 14, weight: .medium))
             .foregroundStyle(Color(theme.accentColor))
+            // Bug #224: a bare text-label `Button` is not auto-expanded
+            // to 44 pt — its hit region collapses to the ~17 pt glyph
+            // box. A >=44 pt tappable frame plus a rectangular content
+            // shape meets the HIG touch-target minimum.
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
             .accessibilityIdentifier("searchCancelButton")
     }
 

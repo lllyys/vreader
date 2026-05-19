@@ -135,16 +135,12 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         XCTAssertTrue(searchSheet.waitForExistence(timeout: 5),
                       "Search sheet should appear")
 
-        // Bug #224 / GH #902: feature #63's `SearchBar` re-skin gives the
-        // `searchTextField` (~19 pt) and `searchCancelButton` (~17 pt)
-        // accessibility frames below the 44 pt HIG touch-target minimum,
-        // so the audit's `.hitRegion` check fails on the search sheet.
-        // That is a distinct product defect tracked in Bug #224 — not the
-        // Bug #223 `searchSheet`-container regression. `.hitRegion` is
-        // excluded here as tracked debt (mirroring
-        // `SearchSheetPlaceholderTests.testSearchSheetAccessibilityAudit`);
-        // drop this exclusion when Bug #224 lands.
-        auditCurrentScreen(app: app, excluding: .hitRegion)
+        // Bug #224 / GH #902: feature #63's `SearchBar` re-skin gave the
+        // `searchTextField` and `searchCancelButton` accessibility frames
+        // below the 44 pt HIG touch-target minimum. The fix gives both
+        // controls a >=44 pt tappable frame, so `.hitRegion` is now
+        // covered by the audit (no longer excluded as tracked debt).
+        auditCurrentScreen(app: app)
     }
 
     // MARK: - AI Consent Audit
