@@ -48,8 +48,22 @@ if ! echo "$COMMAND" | grep -qE '(^|[[:space:]])gh[[:space:]]+pr[[:space:]]+merg
     exit 0
 fi
 
-# Resolve repo root + current branch.
-REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+# Resolve repo root + current branch from the cwd of the `gh pr merge`
+# invocation — NOT $CLAUDE_PROJECT_DIR.
+#
+# A worktree-isolated agent runs `gh pr merge` from its own worktree,
+# but $CLAUDE_PROJECT_DIR points at the primary checkout. Keying off it
+# would read a sibling worktree's branch (and its audit log) and wrongly
+# block or pass the merge. The PreToolUse payload's `.cwd` is the
+# invocation's working directory; fall back to $(pwd), then
+# $CLAUDE_PROJECT_DIR, only if it is absent or invalid.
+HOOK_CWD="$(echo "$INPUT" | jq -r '.cwd // empty')"
+cd "${HOOK_CWD:-$(pwd)}" 2>/dev/null || cd "${CLAUDE_PROJECT_DIR:-$(pwd)}" 2>/dev/null || exit 0
+
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || [[ -z "$REPO_ROOT" ]]; then
+    # Not inside a git working tree — can't enforce, fail open.
+    exit 0
+fi
 cd "$REPO_ROOT"
 
 if ! BRANCH="$(git branch --show-current 2>/dev/null)" || [[ -z "$BRANCH" ]]; then
