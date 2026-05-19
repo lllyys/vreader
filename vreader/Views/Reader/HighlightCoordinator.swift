@@ -122,5 +122,102 @@ final class HighlightCoordinator {
             }
         }
     }
+
+    // MARK: - Feature #64 — unified highlight-action popover mutations
+
+    /// Feature #64 WI-3 — persists a new highlight color, then repaints the
+    /// rendered highlight via the format's `HighlightRenderer`.
+    ///
+    /// Returns a typed `HighlightMutationOutcome` so the popover presenter can
+    /// distinguish a deleted-record race (→ dismiss) from a generic failure
+    /// (→ keep the popover open, no local mutation). `PersistenceActor`
+    /// throws a distinct `PersistenceError.recordNotFound`.
+    ///
+    /// EPUB href-race (R1-4): when the renderer is chapter-scoped (the EPUB
+    /// renderer), its `currentChapterHref` is captured BEFORE the persistence
+    /// `await` and threaded into `restoreAll(forHref:)`.
+    /// `EPUBHighlightRenderer.restore` resolves `href ?? currentHref` and
+    /// `currentHref` is a mutable `var` — across the `await`, a racing
+    /// chapter-nav could mutate it and repaint the wrong chapter. Capturing it
+    /// up front is the Bug #103 immutable-href pattern. The capture goes
+    /// through `ChapterScopedHighlightRenderer`, not a concrete-type cast, so
+    /// it is unit-testable with a fake. Non-EPUB renderers (TXT/MD/PDF) are
+    /// not chapter-scoped — they ignore the href and get `forHref: nil`.
+    func changeColor(highlightID: UUID, to color: String) async -> HighlightMutationOutcome {
+        // Capture the chapter context at call time, before the await.
+        let capturedHref = (renderer as? any ChapterScopedHighlightRenderer)?.currentChapterHref
+
+        do {
+            try await persistence.updateHighlightColor(highlightId: highlightID, color: color)
+        } catch let error as PersistenceError {
+            if case .recordNotFound = error { return .notFound }
+            return .failed
+        } catch {
+            return .failed
+        }
+
+        // Re-fetch to get the persisted post-mutation state AND the records to
+        // repaint from. A fetch failure here is a generic failure (`.failed`),
+        // NOT a deleted-record race — only a successful fetch with no matching
+        // id means the record was concurrently deleted (R1-5).
+        let records: [HighlightRecord]
+        do {
+            records = try await persistence.fetchHighlights(forBookWithKey: bookFingerprintKey)
+        } catch {
+            return .failed
+        }
+        guard let record = records.first(where: { $0.highlightId == highlightID }) else {
+            return .notFound
+        }
+        // Repaint from the already-fetched records directly, so the repaint
+        // is not silently dropped by `restoreAll`'s own fetch (which swallows
+        // failures). The re-fetch above already carries the new color.
+        renderer.restore(records: records, forHref: capturedHref, using: nil)
+        return .success(record)
+    }
+
+    /// Feature #64 WI-3 — persists a note edit on a highlight. No
+    /// reader-surface repaint — the note is not drawn on the page, so the
+    /// only UI to refresh is the popover card itself (handled by the caller).
+    ///
+    /// A trimmed-empty draft (`nil` / `""` / all-whitespace) is normalized to
+    /// `nil` before persisting, so a note "cleared" to whitespace stores as no
+    /// note and the popover flips to the empty state. Returns the typed
+    /// outcome for the same reason as `changeColor`.
+    func updateNote(highlightID: UUID, note: String?) async -> HighlightMutationOutcome {
+        let normalized = HighlightCoordinator.normalizedNote(note)
+
+        do {
+            try await persistence.updateHighlightNote(highlightId: highlightID, note: normalized)
+        } catch let error as PersistenceError {
+            if case .recordNotFound = error { return .notFound }
+            return .failed
+        } catch {
+            return .failed
+        }
+
+        // Re-fetch to get the persisted post-mutation record. Same R1-5
+        // discipline as `changeColor`: a fetch throw is `.failed`; only a
+        // successful fetch with no match is `.notFound`.
+        let records: [HighlightRecord]
+        do {
+            records = try await persistence.fetchHighlights(forBookWithKey: bookFingerprintKey)
+        } catch {
+            return .failed
+        }
+        guard let record = records.first(where: { $0.highlightId == highlightID }) else {
+            return .notFound
+        }
+        return .success(record)
+    }
+
+    /// Normalizes a note draft: an all-whitespace (or empty / nil) draft
+    /// becomes `nil`; a non-empty draft is preserved verbatim (including its
+    /// own surrounding whitespace).
+    static func normalizedNote(_ note: String?) -> String? {
+        guard let note else { return nil }
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : note
+    }
 }
 #endif
