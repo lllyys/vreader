@@ -106,6 +106,61 @@ struct NotePreviewModifierTests {
         #expect(host.view != nil)
     }
 
+    // MARK: - resolvedForm (the modifier's routing decision)
+
+    @Test("resolvedForm picks callout for a short anchored note with a host view")
+    func resolvedFormCalloutForShortAnchoredWithHost() {
+        let form = NotePreviewPresenter.resolvedForm(
+            for: Self.content(note: "short"),
+            isVoiceOverRunning: false, noteLineCount: 1, hasHostView: true
+        )
+        #expect(form == .callout)
+    }
+
+    @Test("resolvedForm degrades a callout to the sheet when no host view")
+    func resolvedFormSheetWhenNoHostView() {
+        // form(...) would pick .callout (short note, anchored, no VoiceOver),
+        // but with no host UIView to anchor to it must degrade to .sheet.
+        let form = NotePreviewPresenter.resolvedForm(
+            for: Self.content(note: "short"),
+            isVoiceOverRunning: false, noteLineCount: 1, hasHostView: false
+        )
+        #expect(form == .sheet)
+    }
+
+    @Test("resolvedForm keeps the sheet when form already picks sheet, host or not")
+    func resolvedFormKeepsSheetRegardlessOfHost() {
+        // A long note → sheet — having a host view does not promote it to a callout.
+        let withHost = NotePreviewPresenter.resolvedForm(
+            for: Self.content(note: "long"),
+            isVoiceOverRunning: false, noteLineCount: 12, hasHostView: true
+        )
+        let withoutHost = NotePreviewPresenter.resolvedForm(
+            for: Self.content(note: "long"),
+            isVoiceOverRunning: false, noteLineCount: 12, hasHostView: false
+        )
+        #expect(withHost == .sheet)
+        #expect(withoutHost == .sheet)
+    }
+
+    @Test("resolvedForm keeps the sheet for VoiceOver even with a host view")
+    func resolvedFormVoiceOverStaysSheetWithHost() {
+        let form = NotePreviewPresenter.resolvedForm(
+            for: Self.content(note: "short"),
+            isVoiceOverRunning: true, noteLineCount: 1, hasHostView: true
+        )
+        #expect(form == .sheet)
+    }
+
+    @Test("resolvedForm keeps the sheet for a zero sourceRect even with a host view")
+    func resolvedFormZeroRectStaysSheetWithHost() {
+        let form = NotePreviewPresenter.resolvedForm(
+            for: Self.content(note: "short", rect: .zero),
+            isVoiceOverRunning: false, noteLineCount: 1, hasHostView: true
+        )
+        #expect(form == .sheet)
+    }
+
     // MARK: - NotePreviewPresenting protocol surface
 
     @MainActor
@@ -133,6 +188,17 @@ struct NotePreviewModifierTests {
         presenter.dismissCallout()
         #expect(fake.dismissCalloutCallCount == 1)
     }
+
+    @MainActor
+    @Test("dismissCallout(completion:) runs the completion")
+    func presentingProtocolDismissCompletionRuns() {
+        let fake = FakeNotePreviewPresenter()
+        let presenter: any NotePreviewPresenting = fake
+        var completionRan = false
+        presenter.dismissCallout(completion: { completionRan = true })
+        #expect(fake.dismissCalloutCallCount == 1)
+        #expect(completionRan)
+    }
 }
 
 // MARK: - Test double
@@ -156,7 +222,8 @@ private final class FakeNotePreviewPresenter: NotePreviewPresenting {
         lastContent = content
     }
 
-    func dismissCallout() {
+    func dismissCallout(completion: (@MainActor () -> Void)?) {
         dismissCalloutCallCount += 1
+        completion?()
     }
 }

@@ -174,9 +174,9 @@ struct NotePreviewSheetView: View {
 
     private var sheetBackground: Color {
         if theme.isDark {
-            return Color(sheetHexString: "#2a2724") ?? Color(theme.chromeColor)
+            return Color(readerHexString: "#2a2724") ?? Color(theme.chromeColor)
         } else {
-            return Color(sheetHexString: "#fcf8f0") ?? Color(theme.chromeColor)
+            return Color(readerHexString: "#fcf8f0") ?? Color(theme.chromeColor)
         }
     }
 
@@ -186,26 +186,6 @@ struct NotePreviewSheetView: View {
     /// empty-vs-note branch is unit-tested without a SwiftUI render.
     static func displayMode(for content: NotePreviewContent) -> NotePreviewSheetDisplayMode {
         content.isEmpty ? .empty : .note
-    }
-}
-
-// MARK: - Hex → SwiftUI Color (file-scoped helper)
-
-private extension Color {
-    /// Parses `#RRGGBB` into a `Color`. File-private — the callout has its
-    /// own copy; lifting to a shared helper is deferred until the duplication
-    /// genuinely hurts (only the dark/light card surface uses it here).
-    init?(sheetHexString hex: String) {
-        var trimmed = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("#") { trimmed.removeFirst() }
-        guard trimmed.count == 6, let value = UInt32(trimmed, radix: 16) else {
-            return nil
-        }
-        self = Color(
-            red: Double((value >> 16) & 0xff) / 255.0,
-            green: Double((value >> 8) & 0xff) / 255.0,
-            blue: Double(value & 0xff) / 255.0
-        )
     }
 }
 #endif

@@ -111,31 +111,42 @@ private struct NotePreviewModifier: ViewModifier {
     }
 
     /// Routes a freshly-published `NotePreviewContent` to the callout or the
-    /// sheet form. `nil` dismisses both.
+    /// sheet form. `nil` dismisses both. Every transition first tears down the
+    /// other form so two surfaces can never stack — and the `.callout`
+    /// presenter itself serializes a callout→callout replacement through its
+    /// own dismiss completion (`UIKitNotePreviewPresenter`).
     private func route(to content: NotePreviewContent?) {
         guard let content else {
             sheetContent = nil
             calloutPresenter.dismissCallout()
             return
         }
+        let host = hostViewProvider()
         let lineCount = NoteCalloutView.noteLineCount(for: content.note)
-        let form = NotePreviewPresenter.form(
+        // `resolvedForm` folds in the host-availability fact: a callout with
+        // no host UIView to anchor to degrades to the sheet (unit-tested).
+        let form = NotePreviewPresenter.resolvedForm(
             for: content,
             isVoiceOverRunning: UIAccessibility.isVoiceOverRunning,
-            noteLineCount: lineCount
+            noteLineCount: lineCount,
+            hasHostView: host != nil
         )
         switch form {
         case .sheet:
+            // Tear down any live callout before showing the sheet.
             calloutPresenter.dismissCallout()
             sheetContent = content
         case .callout:
-            sheetContent = nil
-            guard let host = hostViewProvider() else {
-                // No host view — fall back to the sheet form so the user
-                // still sees the note.
+            guard let host else {
+                // `resolvedForm` returns `.callout` only when `hasHostView`
+                // is true, so this is unreachable — but fall back safely.
+                calloutPresenter.dismissCallout()
                 sheetContent = content
                 return
             }
+            // Tear down the sheet (if showing), then present the callout.
+            // The presenter handles a callout→callout supersede internally.
+            sheetContent = nil
             calloutPresenter.presentCallout(
                 content,
                 theme: theme,
@@ -146,32 +157,35 @@ private struct NotePreviewModifier: ViewModifier {
         }
     }
 
-    /// Handles a handoff-row action (Share / Open-in-panel).
-    /// - Open-in-panel posts `.readerOpenNotes` — existing behavior, opens the
-    ///   Annotations panel's Highlights tab.
-    /// - Share presents the system share sheet (`UIActivityViewController`)
-    ///   with the note text. Uses the standard iOS share; no new design
-    ///   surface, no new notification. A note-less highlight has nothing to
-    ///   share, so Share is a no-op there (the empty-state callout has no
-    ///   handoff row anyway).
-    /// Then the preview dismisses.
+    /// Handles a handoff-row action (Share / Open-in-panel). Both follow-up
+    /// surfaces (the Annotations panel, the share sheet) must NOT be presented
+    /// while the note preview is still being dismissed — a modal collision
+    /// drops the follow-up. So the preview is dismissed first and the
+    /// side-effect runs only from the dismiss completion:
+    /// - Open-in-panel posts `.readerOpenNotes` (existing behavior — opens the
+    ///   Annotations panel's Highlights tab).
+    /// - Share presents the system `UIActivityViewController` with the note
+    ///   text. Standard iOS share — no new design surface, no new
+    ///   notification. A note-less highlight has nothing to share (and the
+    ///   empty-state callout has no handoff row anyway).
     private func handleHandoff(_ action: NoteCalloutAction, for content: NotePreviewContent) {
-        switch action {
-        case .openInPanel:
-            NotificationCenter.default.post(name: .readerOpenNotes, object: nil)
-            dismissAll()
-        case .share:
-            shareNote(content)
+        let host = hostViewProvider()
+        dismissPreview {
+            switch action {
+            case .openInPanel:
+                NotificationCenter.default.post(name: .readerOpenNotes, object: nil)
+            case .share:
+                Self.presentShareSheet(for: content, anchoredTo: host)
+            }
         }
     }
 
-    /// Presents the system share sheet with the note text, anchored to the
-    /// container's host view. The preview is dismissed first so the share
-    /// sheet is not presented from a controller that is mid-dismiss.
-    private func shareNote(_ content: NotePreviewContent) {
+    /// Presents the system share sheet with the note text. A no-op when there
+    /// is no note text or no host to anchor to.
+    private static func presentShareSheet(
+        for content: NotePreviewContent, anchoredTo host: UIView?
+    ) {
         let noteText = (content.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let host = hostViewProvider()
-        dismissAll()
         guard !noteText.isEmpty,
               let host,
               let presenter = host.nearestViewController else { return }
@@ -184,7 +198,27 @@ private struct NotePreviewModifier: ViewModifier {
         presenter.present(activity, animated: true)
     }
 
-    /// Clears every preview surface and the view model state.
+    /// Tears down whichever preview form is showing and runs `completion`
+    /// once the teardown finishes — so a follow-up surface is presented only
+    /// after the preview's dismissal has completed (no modal collision).
+    private func dismissPreview(then completion: @escaping @MainActor () -> Void) {
+        if sheetContent != nil {
+            // The `.sheet`'s `onDismiss` (`dismissAll`) runs the SwiftUI
+            // teardown; defer the follow-up one runloop turn so the sheet's
+            // dismissal animation has handed the controller back.
+            sheetContent = nil
+            viewModel.dismiss()
+            DispatchQueue.main.async { completion() }
+        } else {
+            // Callout form — the presenter's completion fires post-dismiss.
+            viewModel.dismiss()
+            calloutPresenter.dismissCallout(completion: completion)
+        }
+    }
+
+    /// Clears every preview surface and the view model state. Used by the
+    /// plain dismiss paths (× button, scrim tap, sheet drag-down) where no
+    /// follow-up surface needs to be presented.
     private func dismissAll() {
         sheetContent = nil
         calloutPresenter.dismissCallout()

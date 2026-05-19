@@ -251,6 +251,7 @@
 		37B8708ABD85D7635B98995F /* AIEditorContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EC7240FBC11713CD18A4812 /* AIEditorContextTests.swift */; };
 		381D47129E7564BFBE0B26EB /* ThemeBackgroundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21055A4DC487F0F56BA7C475 /* ThemeBackgroundTests.swift */; };
 		3821F3BE76B9BE588B9FA995 /* SearchHitToLocatorResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9102277C4126793229AEEB9 /* SearchHitToLocatorResolverTests.swift */; };
+		383B1C50C15197132A88DE90 /* Color+ReaderHex.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2280805065667E3AE55EC34 /* Color+ReaderHex.swift */; };
 		384E9916435C82876752D9D9 /* AIAssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A5928551FF9FBB8D2E87E6F /* AIAssistantView.swift */; };
 		38661CFAC1618DB7526ACB28 /* PersistenceActor+Highlights.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC517B8E3581F795DEDEC934 /* PersistenceActor+Highlights.swift */; };
 		38F1AB473618B5EB717D05DE /* ReadingTimeFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00FE0912FBC85E22DF8C637F /* ReadingTimeFormatter.swift */; };
@@ -1862,6 +1863,7 @@
 		C1455BB273A606F96B755C69 /* chapter_list_page2.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = chapter_list_page2.html; sourceTree = "<group>"; };
 		C1DE5531A63EA492C5D91BEE /* PersistenceActor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceActor.swift; sourceTree = "<group>"; };
 		C215281F33EFC48463EA8E24 /* VerificationDebugBridgeHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerificationDebugBridgeHelperTests.swift; sourceTree = "<group>"; };
+		C2280805065667E3AE55EC34 /* Color+ReaderHex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+ReaderHex.swift"; sourceTree = "<group>"; };
 		C24D5425530ABBE0DDA4758F /* TXTChunkedHighlightDeferredTimerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChunkedHighlightDeferredTimerTests.swift; sourceTree = "<group>"; };
 		C2780A3796872F31F1666DA7 /* ReaderTOCBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTOCBuilder.swift; sourceTree = "<group>"; };
 		C2997AAAB34DF84E64DC0DB4 /* MOBICoverExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBICoverExtractor.swift; sourceTree = "<group>"; };
@@ -3006,6 +3008,7 @@
 				DB61A191698AD787CC1CCB2F /* AISummaryScopeChipStrip.swift */,
 				F691E61DE6E713DE4FD47733 /* AISummaryTabView.swift */,
 				F59ACCAF30F5092968415855 /* AnnotationsPanelView.swift */,
+				C2280805065667E3AE55EC34 /* Color+ReaderHex.swift */,
 				FBD54F8887091F46753F09A4 /* DictionarySheet.swift */,
 				E28AEE54347E9EC752286A2A /* EPUBHighlightActions.swift */,
 				435C00E099B7F5D7A7821FDC /* EPUBHighlightBridge.swift */,
@@ -4771,6 +4774,7 @@
 				CD3F1CD3B0FD3B013D82E26D /* CloudKitClient.swift in Sources */,
 				479BBE7406AFCACEE1CA5EE3 /* CloudKitRecordMapper.swift in Sources */,
 				70DA481383CC5F3047D96E83 /* CollectionSidebar.swift in Sources */,
+				383B1C50C15197132A88DE90 /* Color+ReaderHex.swift in Sources */,
 				78A8B8FE91360F619F57DDB1 /* ContentHasher.swift in Sources */,
 				881677EB4D38D3439473606D /* ContentReplacementRule.swift in Sources */,
 				72BBA56325CAC43C8F4CC3EB /* ContentView.swift in Sources */,

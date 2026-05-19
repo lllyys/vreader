@@ -52,9 +52,16 @@ protocol NotePreviewPresenting: AnyObject {
         onDismiss: @escaping () -> Void
     )
 
-    /// Dismisses a currently-presented callout, if any. A no-op when nothing
-    /// is presented.
-    func dismissCallout()
+    /// Dismisses a currently-presented callout, if any. `completion` runs
+    /// after the dismissal finishes — or synchronously when nothing is
+    /// presented — so a caller can safely present a follow-up surface
+    /// (a share sheet, the Annotations panel) without a modal collision.
+    func dismissCallout(completion: (@MainActor () -> Void)?)
+}
+
+extension NotePreviewPresenting {
+    /// Dismiss with no completion — the common case.
+    func dismissCallout() { dismissCallout(completion: nil) }
 }
 
 /// `UIPopoverPresentationController`-based realization of `NotePreviewPresenting`.
@@ -77,10 +84,37 @@ final class UIKitNotePreviewPresenter: NSObject, NotePreviewPresenting {
         onAction: @escaping (NoteCalloutAction) -> Void,
         onDismiss: @escaping () -> Void
     ) {
-        // A superseding tap replaces any live callout — dismiss the old one
-        // first so two callouts can never stack.
-        dismissCallout()
+        // A superseding tap replaces any live callout. `dismiss(animated:)` is
+        // asynchronous — presenting the new popover immediately afterward
+        // would collide with the in-flight dismissal. So when a callout is
+        // already live, dismiss it and present the next one ONLY from the
+        // dismiss completion. When nothing is live, present straight away.
+        if let liveHost = presentedHost {
+            presentedHost = nil
+            popoverDelegate = nil
+            liveHost.dismiss(animated: true) { [weak self] in
+                self?.reallyPresentCallout(
+                    content, theme: theme, in: view,
+                    onAction: onAction, onDismiss: onDismiss
+                )
+            }
+        } else {
+            reallyPresentCallout(
+                content, theme: theme, in: view,
+                onAction: onAction, onDismiss: onDismiss
+            )
+        }
+    }
 
+    /// The actual present — called either directly (nothing was live) or from
+    /// a prior callout's dismiss completion (so no modal collision).
+    private func reallyPresentCallout(
+        _ content: NotePreviewContent,
+        theme: ReaderThemeV2,
+        in view: UIView,
+        onAction: @escaping (NoteCalloutAction) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
         guard let presenter = view.nearestViewController else {
             // No view-controller to present from — surface nothing rather
             // than crash. The modifier's sheet fallback still covers the user.
@@ -125,11 +159,16 @@ final class UIKitNotePreviewPresenter: NSObject, NotePreviewPresenting {
         presenter.present(host, animated: true)
     }
 
-    func dismissCallout() {
-        guard let host = presentedHost else { return }
+    func dismissCallout(completion: (@MainActor () -> Void)?) {
+        guard let host = presentedHost else {
+            // Nothing presented — run the completion synchronously so the
+            // caller's follow-up still fires.
+            completion?()
+            return
+        }
         presentedHost = nil
         popoverDelegate = nil
-        host.dismiss(animated: true)
+        host.dismiss(animated: true) { completion?() }
     }
 
     /// The callout's preferred content size. Width matches the design's
@@ -145,10 +184,16 @@ final class UIKitNotePreviewPresenter: NSObject, NotePreviewPresenting {
 ///
 /// `.none` adaptive style keeps a true anchored popover on iPhone; if a future
 /// device class genuinely cannot host one, UIKit still falls back gracefully.
+///
+/// Conformance is `nonisolated` because the SDK protocol is unannotated; the
+/// delegate methods land on the main thread at runtime, and the main-actor
+/// `onDismiss` closure is invoked via an explicit `MainActor.assumeIsolated`
+/// hop — mirroring `HighlightActionPresenter`'s documented pattern rather than
+/// relying on an unstated main-thread assumption.
 private final class PopoverDelegate: NSObject, UIPopoverPresentationControllerDelegate {
-    private let onDismiss: () -> Void
+    private let onDismiss: @MainActor () -> Void
 
-    init(onDismiss: @escaping () -> Void) {
+    init(onDismiss: @escaping @MainActor () -> Void) {
         self.onDismiss = onDismiss
     }
 
@@ -162,7 +207,10 @@ private final class PopoverDelegate: NSObject, UIPopoverPresentationControllerDe
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        onDismiss()
+        // This SDK callback is `nonisolated`; copy the main-actor closure into
+        // a Sendable local and hop explicitly before invoking it.
+        let onDismiss = self.onDismiss
+        MainActor.assumeIsolated { onDismiss() }
     }
 }
 
