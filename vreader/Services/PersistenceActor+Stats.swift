@@ -50,4 +50,59 @@ extension PersistenceActor {
         stats.lastReadAt = Date()
         try context.save()
     }
+
+    // MARK: - Read side (feature #58 WI-2)
+
+    /// Returns every `ReadingSession` row as a value-typed record.
+    ///
+    /// Used by the feature #58 WebDAV backup collector (WI-5). The reading-stats
+    /// dashboard aggregator does NOT consume this — it owns its own
+    /// `ModelContainer`/`ModelContext` pass so its snapshot stays internally
+    /// consistent. This exists so `collectReadingHistory` has a value-typed read
+    /// without the collector touching `@Model` rows directly.
+    func fetchAllReadingSessions() async throws -> [ReadingSessionRecord] {
+        let context = ModelContext(modelContainer)
+        let sessions = try context.fetch(FetchDescriptor<ReadingSession>())
+        return sessions.map { session in
+            ReadingSessionRecord(
+                sessionId: session.sessionId,
+                bookFingerprintKey: session.bookFingerprintKey,
+                startedAt: session.startedAt,
+                endedAt: session.endedAt,
+                durationSeconds: session.durationSeconds,
+                pagesRead: session.pagesRead,
+                wordsRead: session.wordsRead,
+                startLocator: session.startLocator,
+                endLocator: session.endLocator,
+                deviceId: session.deviceId,
+                isRecovered: session.isRecovered
+            )
+        }
+    }
+
+    /// Returns every `ReadingStats` row as a value-typed record.
+    ///
+    /// Deduplicates by `bookFingerprintKey` (first-wins), mirroring
+    /// `fetchAllLibraryBooks`'s duplicate-row data-integrity guard. Used by the
+    /// feature #58 WebDAV backup collector (WI-5).
+    func fetchAllReadingStats() async throws -> [ReadingStatsRecord] {
+        let context = ModelContext(modelContainer)
+        let rows = try context.fetch(FetchDescriptor<ReadingStats>())
+        var seen = Set<String>()
+        var records: [ReadingStatsRecord] = []
+        for stats in rows where seen.insert(stats.bookFingerprintKey).inserted {
+            records.append(ReadingStatsRecord(
+                bookFingerprintKey: stats.bookFingerprintKey,
+                totalReadingSeconds: stats.totalReadingSeconds,
+                sessionCount: stats.sessionCount,
+                lastReadAt: stats.lastReadAt,
+                averagePagesPerHour: stats.averagePagesPerHour,
+                averageWordsPerMinute: stats.averageWordsPerMinute,
+                totalPagesRead: stats.totalPagesRead,
+                totalWordsRead: stats.totalWordsRead,
+                longestSessionSeconds: stats.longestSessionSeconds
+            ))
+        }
+        return records
+    }
 }
