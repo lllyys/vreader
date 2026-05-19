@@ -96,6 +96,14 @@ extension Notification.Name {
     static let readerMoreBookDetails = Notification.Name("vreader.readerMoreBookDetails")
     static let readerMoreShareBook = Notification.Name("vreader.readerMoreShareBook")
     static let readerMoreExportAnnotations = Notification.Name("vreader.readerMoreExportAnnotations")
+    /// Feature #56 WI-7b: posted by `BilingualReadingViewModel` whenever the
+    /// bilingual state a renderer must react to changes — bilingual toggled
+    /// on/off, or a unit's translation became available (prefetch landed) or
+    /// was recorded unavailable (offline cache-miss). The `userInfo` carries
+    /// `["fingerprintKey": String]` so a renderer filters to its own book.
+    /// Each format renderer (WI-10..13) observes this to re-inject / clear
+    /// the interlinear translation for the affected unit.
+    static let readerBilingualDidChange = Notification.Name("vreader.reader.bilingualDidChange")
     /// Posted when a footnote link is detected in EPUB content (foliate-js).
     /// Object is [String: String] with "href" and "text" keys.
     static let epubFootnoteDetected = Notification.Name("vreader.epubFootnoteDetected")

@@ -1,11 +1,19 @@
 // Purpose: Owns bilingual-reading state for the open book (feature #56).
 //
-// WI-7a — the persistence/state CORE only: the per-book on/off toggle backed
-// by `PerBookSettings`, the target language + granularity, the per-unit
-// translation dictionary, and the first-enable setup-sheet flag. WI-7b adds
-// the behavioral layer (the `.readerPositionDidChange`-driven prefetch
-// trigger, epoch/cancellation, `.readerBilingualDidChange` posting, the
-// injected `ChapterTextProviding`).
+// WI-7a — the persistence/state CORE: the per-book on/off toggle backed by
+// `PerBookSettings`, the target language + granularity, the per-unit
+// translation dictionary, the first-enable setup-sheet flag.
+//
+// WI-7b — the behavioral layer: an injected `ChapterTextProviding` (the
+// format adapter resolving `Locator → TranslationUnitID`) and a
+// `ChapterPrefetching` seam (the translation fetch). `handlePositionChange`
+// derives the current unit from a position `Locator`, dedupes against
+// `lastTriggerUnit`, and on an actual unit change prefetches the current +
+// next unit. Epoch-guarded — a counter increments on disable / book-change /
+// unit-change; every prefetch `Task` captures its epoch and discards a
+// stale-epoch result. An offline cache-miss is recorded in `unavailableUnits`
+// (the silent-source-fallback — plan Decision 2, no invented affordance).
+// `.readerBilingualDidChange` is posted whenever a renderer must react.
 //
 // Key decisions:
 // - `@Observable @MainActor` like every reader view model.
@@ -15,11 +23,14 @@
 // - The setup sheet (design §2.2) is raised the FIRST time the user enables
 //   bilingual mode for a book; a book already enabled from a prior session
 //   (persistence loaded `isEnabled == true` at init) does NOT re-raise it.
-// - Disabling clears `translationsByUnit` (a re-enable re-fetches fresh).
+// - Disabling clears `translationsByUnit` + `unavailableUnits` and resets the
+//   trigger state (a re-enable re-fetches fresh).
+// - A transient provider failure (not offline) leaves the unit unfetched —
+//   NOT marked unavailable — so a later position change retries it.
 //
 // @coordinates-with: PerBookSettings.swift, TranslationUnitID.swift,
-//   ChapterTranslationService.swift,
-//   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-7a)
+//   ChapterTextProviding.swift, ChapterPrefetching.swift, ReaderNotifications.swift,
+//   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-7a, WI-7b)
 
 import Foundation
 import Observation
@@ -45,13 +56,52 @@ final class BilingualReadingViewModel {
     private(set) var granularity: TranslationGranularity
 
     /// Per-unit cached translations — `unit → [translated segment]`.
-    private(set) var translationsByUnit: [TranslationUnitID: [String]] = [:]
+    var translationsByUnit: [TranslationUnitID: [String]] = [:]
 
     /// `true` when the first-enable setup sheet should be presented.
     private(set) var needsSetupSheet: Bool = false
 
+    /// `true` while at least one prefetch `Task` is in flight.
+    var isFetching: Bool = false
+
+    /// Units whose translation could not be fetched because the device is
+    /// offline and the unit is not cached — the silent-source-fallback set
+    /// (plan Decision 2). A renderer shows source-only for these; a later
+    /// online prefetch clears the entry.
+    var unavailableUnits: Set<TranslationUnitID> = []
+
     /// Default bilingual target language (design §2.2).
     static let defaultTargetLanguage = "Chinese"
+
+    // MARK: - WI-7b behavioral state
+    //
+    // These are written by the prefetch trigger in the
+    // `BilingualReadingViewModel+Prefetch.swift` extension, so they cannot be
+    // `private` (Swift `private` is file-scoped). They are not part of the
+    // public surface — only the extension and this file touch them.
+
+    /// Resolves `Locator → TranslationUnitID` + supplies reading order. The
+    /// format host attaches the concrete adapter (Decision 2.6).
+    var textProvider: (any ChapterTextProviding)?
+
+    /// Translates a unit — the prefetch seam. Attached by the host.
+    var prefetcher: (any ChapterPrefetching)?
+
+    /// The unit the trigger last acted on — repeated position changes inside
+    /// the same unit are deduped against this.
+    var lastTriggerUnit: TranslationUnitID?
+
+    /// Units with a prefetch currently in flight — guards a double-fetch.
+    var inFlightUnits: Set<TranslationUnitID> = []
+
+    /// Monotonic guard; bumps on disable / book-change / unit-change. A
+    /// prefetch `Task` captures the epoch at launch and discards its result
+    /// if the epoch has since moved.
+    var epoch: Int = 0
+
+    /// In-flight prefetch tasks, so a test can await quiescence and a
+    /// reset can cancel them.
+    var prefetchTasks: [Task<Void, Never>] = []
 
     init(bookFingerprintKey: String, perBookBaseURL: URL) {
         self.bookFingerprintKey = bookFingerprintKey
@@ -69,7 +119,7 @@ final class BilingualReadingViewModel {
 
     /// Enables / disables bilingual mode for this book and persists the change.
     /// The first time it is enabled the setup sheet is raised; disabling clears
-    /// the per-unit translation cache.
+    /// the per-unit translation cache and resets the prefetch trigger state.
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else { return }
         if enabled && !hasBeenConfigured {
@@ -77,26 +127,30 @@ final class BilingualReadingViewModel {
         }
         isEnabled = enabled
         if !enabled {
-            translationsByUnit.removeAll()
+            resetTriggerState()
         }
         persist()
+        postDidChange()
     }
 
     /// Sets the target language and persists it.
     func setTargetLanguage(_ language: String) {
         guard language != targetLanguage else { return }
         targetLanguage = language
-        // A language change invalidates the cached translations.
-        translationsByUnit.removeAll()
+        // A language change invalidates the cached translations + the
+        // prefetch trigger state — re-fetch fresh for the new language.
+        resetTriggerState()
         persist()
+        postDidChange()
     }
 
     /// Sets the segmentation granularity and persists it.
     func setGranularity(_ newGranularity: TranslationGranularity) {
         guard newGranularity != granularity else { return }
         granularity = newGranularity
-        translationsByUnit.removeAll()
+        resetTriggerState()
         persist()
+        postDidChange()
     }
 
     // MARK: - Setup sheet
@@ -117,6 +171,12 @@ final class BilingualReadingViewModel {
     func setTranslations(_ segments: [String], for unit: TranslationUnitID) {
         translationsByUnit[unit] = segments
     }
+
+    // The WI-7b behavioral layer — `attachProvider`/`attachPrefetcher`, the
+    // `handlePositionChange` prefetch trigger, epoch/cancellation, and the
+    // `.readerBilingualDidChange` posting — lives in
+    // `BilingualReadingViewModel+Prefetch.swift` (keeps this file under the
+    // ~300-line budget, rule 50 §9).
 
     // MARK: - Private
 
