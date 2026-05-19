@@ -310,6 +310,17 @@ struct EPUBReaderContainerView: View {
         .sheet(isPresented: $showNoteSheet) {
             noteInputSheet
         }
+        // Feature #55 WI-7: attach the tap-on-annotated-text note preview.
+        // EPUB highlight taps arrive from the JS `highlightTapHandler`
+        // channel; `EPUBWebViewBridgeCoordinator.handleHighlightTapMessage`
+        // posts `.readerHighlightTapped`, which `NotePreviewModifier`
+        // (attached here) observes to present the note preview. Inert in
+        // SwiftUI previews / test harnesses where `modelContainer` is nil.
+        .notePreviewPresenterIfAvailable(
+            modelContainer: modelContainer,
+            bookFingerprintKey: viewModel.bookFingerprintKey,
+            theme: settingsStore?.theme ?? .paper
+        )
         // Feature #60 WI-12 (#795): keep the Photo background-image data
         // URL fresh. Driven by theme + custom-background changes — never
         // by scroll — so the file read + base64 encode stays off the
@@ -455,10 +466,12 @@ struct EPUBReaderContainerView: View {
                 )
                 SelectionPopoverRequest.post(selection: info, requestToken: token)
             },
-            highlightActionPresenter: UIKitHighlightActionPresenter(),
-            onHighlightTapAction: { [highlightCoordinator] action, id in
-                await highlightCoordinator?.handleTapAction(action, highlightID: id)
-            },
+            // Feature #55 WI-7: the EPUB highlight tap is re-homed to the
+            // #55 note preview (`NotePreviewModifier` on the container
+            // observes `.readerHighlightTapped`). The legacy #53 tap-time
+            // inline delete menu is dropped for EPUB v1 — so the bridge no
+            // longer takes a `highlightActionPresenter` / `onHighlightTapAction`.
+            // Highlight deletion stays reachable via the Annotations panel.
             onPageDidFinishLoad: { evaluateJS in
                 restoreHighlightsOnLoad(evaluateJS: evaluateJS)
             },

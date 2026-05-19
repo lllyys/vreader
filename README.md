@@ -50,6 +50,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 - **AZW3 highlights** — Selection capture + CFI anchoring shipped; overlay restoration deferred to WI-7
 - **PDF highlights** — PDFAnnotation-based with selection detection
 - **TXT/MD highlights** — NSAttributedString with persistent rendering
+- **Tap-to-preview notes** — Tapping an annotated highlight shows its note inline (read-only preview) across all five formats; a long-press opens the edit/delete menu on TXT/MD/PDF
 - **Export/import** — Markdown + JSON export, VReader JSON round-trip import
 
 ### Search & Navigation

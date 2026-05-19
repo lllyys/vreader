@@ -21,16 +21,11 @@ struct FoliateSpikeView: View {
     /// toggle (Scroll/Paged). Optional so legacy call sites (previews,
     /// tests) compile; nil resolves to scrolled via `FoliateLayoutFlowMapper`.
     var settingsStore: ReaderSettingsStore?
-    /// Bug #199 / GH #733: optional inline-menu presenter for tap-on-
-    /// highlight. When nil (preview / test harness), the menu skips —
-    /// `.readerHighlightTapped` still fires from WI-5 so other observers
-    /// (annotations panel, etc.) react.
-    var highlightActionPresenter: (any HighlightActionPresenting)?
     /// Feature #57: set in `makeCoordinator()` so the parent
     /// (`ReaderContainerView`) can request whole-book TTS text
     /// extraction once the book is ready. Optional → preview/test call
     /// sites stay source-compatible (same pattern as `fingerprintKey`,
-    /// `readerToken`, `settingsStore`, `highlightActionPresenter`).
+    /// `readerToken`, `settingsStore`).
     var coordinatorBox: FoliateCoordinatorBox?
 
     @State private var isBookReady = false
@@ -69,12 +64,21 @@ struct FoliateSpikeView: View {
                 }
             }
         }
-        .foliateHighlightTapHandler(
-            fingerprintKey: fingerprintKey,
-            presenter: highlightActionPresenter
-        )
+        .foliateHighlightTapHandler(fingerprintKey: fingerprintKey)
         .foliateSelectionHandler(fingerprintKey: fingerprintKey)
         .foliateHighlightRestoreHandler(fingerprintKey: fingerprintKey)
+        // Feature #55 WI-7: attach the tap-on-annotated-text note preview.
+        // `foliateHighlightTapHandler` posts `.readerHighlightTapped` when
+        // the user taps an AZW3/MOBI highlight; `NotePreviewModifier`
+        // (attached here) observes it to present the note preview. The
+        // Foliate event carries `sourceRect == .zero`, so the preview
+        // resolves to the bottom-sheet form. Inert in previews / test
+        // harnesses where the model container is unavailable.
+        .notePreviewPresenterIfAvailable(
+            modelContainer: modelContext.container,
+            bookFingerprintKey: fingerprintKey ?? "",
+            theme: settingsStore?.theme ?? .paper
+        )
         .onReceive(NotificationCenter.default.publisher(for: .readerBookmarkRequested)) { _ in
             guard let key = fingerprintKey,
                   let fp = DocumentFingerprint(canonicalKey: key) else { return }
@@ -266,15 +270,26 @@ extension FoliateSpikeView {
         #endif
 
         /// Bug #199 / GH #733: observer token for
-        /// `.foliateRequestAnnotationJSDelete`. The outer view posts this
-        /// after persistence delete fires; the Coordinator picks it up
-        /// (its `webView` is in scope) and evaluates
+        /// `.foliateRequestAnnotationJSDelete`. When a `.foliateRequestAnnotationJSDelete`
+        /// notification (carrying a `cfi`) is posted, the Coordinator picks
+        /// it up (its `webView` is in scope) and evaluates
         /// `readerAPI.deleteAnnotation` so the rendered annotation
-        /// disappears from the Foliate-js overlay without waiting for
-        /// the next book reopen. `nonisolated(unsafe)` mirrors the
-        /// TXT coordinator pattern — the Coordinator is effectively
-        /// `@MainActor`-isolated at use time but the deinit is
-        /// nonisolated, so the property cannot be MainActor-isolated.
+        /// disappears from the Foliate-js overlay without waiting for the
+        /// next book reopen.
+        ///
+        /// Feature #55 WI-7 removed the only former producer of this
+        /// notification (`FoliateHighlightTapHandlerModifier.performDelete`,
+        /// the now-dropped tap-time #53 delete). This observer is therefore
+        /// currently a **dormant hook**: it is kept — rather than removed —
+        /// because the panel-delete → AZW3/MOBI overlay-strip follow-up
+        /// (which needs a CFI plumbed through from `HighlightListViewModel`)
+        /// will re-use exactly this notification + observer. See the
+        /// separately-tracked bug for the overlay-strip gap.
+        ///
+        /// `nonisolated(unsafe)` mirrors the TXT coordinator pattern — the
+        /// Coordinator is effectively `@MainActor`-isolated at use time but
+        /// the deinit is nonisolated, so the property cannot be
+        /// MainActor-isolated.
         nonisolated(unsafe) private var foliateJSDeleteToken: NSObjectProtocol?
 
         /// Bug #201 / GH #739: sibling of `foliateJSDeleteToken` for

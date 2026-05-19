@@ -681,12 +681,14 @@ struct ReaderContainerView: View {
                     ttsService: ttsService
                 )
             case .foliateWeb:
+                // Feature #55 WI-7: `FoliateSpikeView` no longer takes a
+                // `highlightActionPresenter` — the AZW3/MOBI highlight tap is
+                // re-homed to the #55 note preview (see `FoliateSpikeView+HighlightTap`).
                 FoliateSpikeView(
                     bookURL: resolvedFileURL,
                     fingerprintKey: book.fingerprintKey,
                     readerToken: readerToken,
                     settingsStore: settingsStore,
-                    highlightActionPresenter: UIKitHighlightActionPresenter(),
                     coordinatorBox: foliateCoordinatorBox
                 )
             }

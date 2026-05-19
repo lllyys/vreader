@@ -60,15 +60,6 @@ extension EPUBWebViewBridge {
         #endif
         /// Callback for text selection events.
         var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
-        /// Feature #53 WI-4: presenter that shows the inline tap-on-
-        /// highlight menu when the user taps an existing highlight in the
-        /// EPUB WKWebView. When nil, only the `.readerHighlightTapped`
-        /// notification fires.
-        var highlightActionPresenter: (any HighlightActionPresenting)?
-        /// Feature #53 WI-4: callback that routes the user's chosen action
-        /// through the coordinator. When nil, the presenter's result has
-        /// nowhere to go and the menu acts as a discoverability cue only.
-        var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
         /// Callback to restore highlights after page loads.
         /// Provides a JS evaluator so the container can inject restore scripts.
         var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?
@@ -106,7 +97,7 @@ extension EPUBWebViewBridge {
                 return
             }
             if message.name == "highlightTapHandler" {
-                handleHighlightTapMessage(message.body, webView: message.webView)
+                handleHighlightTapMessage(message.body)
                 return
             }
             guard message.name == "progressHandler",
@@ -116,28 +107,28 @@ extension EPUBWebViewBridge {
             }
         }
 
-        /// Feature #53 WI-4: parse a `{id, rect}` payload from the
-        /// JS `highlightTapHandler` channel, post the cross-format
-        /// `.readerHighlightTapped` notification, and (when wired)
-        /// show the inline action menu + route the chosen action
-        /// through the coordinator's `onHighlightTapAction` callback.
-        private func handleHighlightTapMessage(_ body: Any, webView: WKWebView?) {
+        /// Feature #53 WI-4 / feature #55 WI-7: parse a `{id, rect}`
+        /// payload from the JS `highlightTapHandler` channel and post the
+        /// cross-format `.readerHighlightTapped` notification.
+        ///
+        /// Feature #55 WI-7 re-homes the EPUB tap: a tap on an annotated
+        /// highlight now opens the #55 note preview (`NotePreviewModifier`,
+        /// attached on `EPUBReaderContainerView`, observes
+        /// `.readerHighlightTapped`). The legacy #53 tap-time inline
+        /// delete menu is therefore dropped for EPUB v1 — highlight
+        /// deletion stays reachable via the Annotations panel's
+        /// Highlights tab (the note preview's "Open in panel" action
+        /// routes there). A native EPUB long-press → #53 menu is a
+        /// deferred follow-up (plan §9); EPUB has no native long-press
+        /// recognizer for a highlight, so unlike TXT/MD/PDF (WI-6) there
+        /// is no `present(...)` call to move.
+        private func handleHighlightTapMessage(_ body: Any) {
             guard let event = EPUBHighlightBridge.parseHighlightTapMessage(body)
             else { return }
             Task { @MainActor in
                 NotificationCenter.default.post(
                     name: .readerHighlightTapped, object: event
                 )
-                if let presenter = highlightActionPresenter,
-                   let onAction = onHighlightTapAction,
-                   let webView {
-                    presenter.present(for: event, in: webView) { action in
-                        guard let action else { return }
-                        Task { @MainActor in
-                            await onAction(action, event.highlightID)
-                        }
-                    }
-                }
             }
         }
 

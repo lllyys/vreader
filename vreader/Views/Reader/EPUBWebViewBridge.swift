@@ -86,14 +86,6 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     let onLoadError: @MainActor (String) -> Void
     /// Called when the user selects text in the EPUB content.
     var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
-    /// Feature #53 WI-4: inline tap-on-highlight menu presenter. When
-    /// nil, only the `.readerHighlightTapped` notification fires when
-    /// the user taps a highlight; the menu does not appear.
-    var highlightActionPresenter: (any HighlightActionPresenting)?
-    /// Feature #53 WI-4: action callback routed through the
-    /// HighlightCoordinator. When nil, the menu (if shown) has no
-    /// effect; this matches the dormant infra contract from WI-1.
-    var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
     /// Called after a page finishes loading (for highlight restoration).
     /// The closure receives a JS evaluator that runs JavaScript on the WKWebView.
     var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?
@@ -206,8 +198,6 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.readerToken = readerToken
         #endif
         context.coordinator.onSelectionEvent = onSelectionEvent
-        context.coordinator.highlightActionPresenter = highlightActionPresenter
-        context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
         context.coordinator.isPaged = isPaged
         context.coordinator.previousIsPaged = isPaged
@@ -232,8 +222,6 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.readerToken = readerToken
         #endif
         context.coordinator.onSelectionEvent = onSelectionEvent
-        context.coordinator.highlightActionPresenter = highlightActionPresenter
-        context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
         context.coordinator.isPaged = isPaged
         context.coordinator.onPaginationReady = onPaginationReady
