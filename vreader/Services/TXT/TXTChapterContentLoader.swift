@@ -65,6 +65,20 @@ actor TXTChapterContentLoader {
         return text
     }
 
+    /// Returns the whole decoded book text without slicing.
+    /// Bug #180 (continuous-scroll re-scoped fix): the continuous TXT surface
+    /// needs the entire book as one string to feed `TXTContinuousChunkBuilder`.
+    /// Reuses the same lazy full-file decode `loadChapter` uses, so the
+    /// continuous surface and the slicing path always agree on the text.
+    func fullDecodedText() throws -> String {
+        if fullText == nil {
+            fullText = (String(data: fileData, encoding: encoding)
+                ?? String(data: fileData, encoding: .utf8)
+                ?? "") as NSString
+        }
+        return (fullText as String?) ?? ""
+    }
+
     /// Preloads adjacent chapters (prev + next) in background.
     func preloadAdjacent(currentIndex: Int, chapters: [TXTChapter]) {
         for i in [currentIndex - 1, currentIndex + 1] {

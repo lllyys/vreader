@@ -16,18 +16,11 @@ extension TXTChunkedReaderBridge.Coordinator {
     func scrollToGlobalOffset(_ globalOffset: Int, in tableView: UITableView) {
         guard !chunkStartOffsets.isEmpty else { return }
 
-        // Binary search for the chunk containing globalOffset
-        var lo = 0, hi = chunkStartOffsets.count - 1
-        while lo < hi {
-            let mid = (lo + hi + 1) / 2
-            if chunkStartOffsets[mid] <= globalOffset {
-                lo = mid
-            } else {
-                hi = mid - 1
-            }
-        }
-        let chunkIndex = lo
-        guard chunkIndex < chunks.count else { return }
+        // Binary search for the chunk containing globalOffset — shared with the
+        // continuous-scroll restore path (Bug #180).
+        guard let chunkIndex = TXTChunkedReaderBridge.chunkIndex(
+            forGlobalOffset: globalOffset, chunkStartOffsets: chunkStartOffsets
+        ), chunkIndex < chunks.count else { return }
 
         // Compute intra-chunk fraction for sub-cell positioning
         let chunkStart = chunkStartOffsets[chunkIndex]

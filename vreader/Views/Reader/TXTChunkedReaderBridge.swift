@@ -59,8 +59,64 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     /// behaviour for callers not yet threaded through.
     var safeAreaTopInset: CGFloat = 0
 
+    /// Bug #180 (continuous-scroll re-scoped fix): chapter-awareness layer for
+    /// chaptered TXT rendered as one continuous surface. `nil` for the legacy
+    /// large-file (non-chaptered) caller — that path is unchanged. When
+    /// non-nil, `chunkStartOffsets` already ARE document-global offsets, so
+    /// the container derives the chapter from the reported scroll offset; the
+    /// bridge's offset math is identical either way.
+    var chapterOffsetIndex: TXTChapterOffsetIndex?
+
+    /// Bug #180: document-global UTF-16 offset to restore the scroll to on
+    /// first layout. Preferred over the fraction-based `restoreChunkIndex` /
+    /// `restoreIntraChunkOffset` for accurate cross-chapter restore. `nil`
+    /// leaves the table at the top (the legacy large-file caller passes
+    /// `restoreChunkIndex` instead and leaves this nil).
+    var restoreGlobalOffset: Int?
+
     func makeCoordinator() -> Coordinator {
         Coordinator(delegate: delegate)
+    }
+
+    // MARK: - Chunk Resolution (pure, testable)
+
+    /// Resolves a document-global UTF-16 offset to the index of the chunk
+    /// containing it. Binary search over `chunkStartOffsets`; clamps to
+    /// `[0, count-1]`. Returns `nil` for an empty offsets array.
+    /// Bug #180: shared by `restoreGlobalOffset` routing and
+    /// `scrollToGlobalOffset`; extracted as a pure static for unit testing.
+    static func chunkIndex(
+        forGlobalOffset globalOffset: Int, chunkStartOffsets: [Int]
+    ) -> Int? {
+        guard !chunkStartOffsets.isEmpty else { return nil }
+        var lo = 0
+        var hi = chunkStartOffsets.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if chunkStartOffsets[mid] <= globalOffset {
+                lo = mid
+            } else {
+                hi = mid - 1
+            }
+        }
+        return lo
+    }
+
+    /// Computes the intra-chunk fraction (0.0–1.0) of a document-global offset
+    /// within its chunk. Bug #180: extracted as a pure static for testing.
+    static func intraChunkFraction(
+        forGlobalOffset globalOffset: Int,
+        chunkIndex: Int,
+        chunkStartOffsets: [Int],
+        chunkUTF16Lengths: [Int]
+    ) -> CGFloat {
+        guard chunkIndex >= 0, chunkIndex < chunkStartOffsets.count,
+              chunkIndex < chunkUTF16Lengths.count else { return 0 }
+        let chunkStart = chunkStartOffsets[chunkIndex]
+        let chunkLen = chunkUTF16Lengths[chunkIndex]
+        guard chunkLen > 0 else { return 0 }
+        let local = CGFloat(globalOffset - chunkStart)
+        return max(0, min(1, local / CGFloat(chunkLen)))
     }
 
     func makeUIView(context: Context) -> UITableView {
@@ -101,7 +157,23 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         // Restore scroll position — asyncAfter allows SwiftUI to size the table view
         // before scrolling. In makeUIView the view has no frame yet.
         // The coordinator retries if the view still has no valid frame (bug #23).
-        if let chunkIdx = restoreChunkIndex, chunkIdx < chunks.count {
+        //
+        // Bug #180 (continuous-scroll re-scoped fix): when the container passes
+        // a document-global `restoreGlobalOffset` (continuous chaptered TXT),
+        // route it through `scrollToGlobalOffset` — which binary-searches the
+        // containing chunk and applies the intra-chunk fraction. This is
+        // accurate across chapter boundaries because chunk offsets and the
+        // restore offset live in the same document-global space. The
+        // fraction-based `restoreChunkIndex` path stays for the legacy
+        // large-file caller (mutually exclusive — that caller leaves
+        // `restoreGlobalOffset` nil).
+        if let globalOffset = restoreGlobalOffset, globalOffset > 0 {
+            let coordinator = context.coordinator
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak tableView] in
+                guard let tableView else { return }
+                coordinator.scrollToGlobalOffset(globalOffset, in: tableView)
+            }
+        } else if let chunkIdx = restoreChunkIndex, chunkIdx < chunks.count {
             let coordinator = context.coordinator
             let intraFraction = restoreIntraChunkOffset
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak tableView] in

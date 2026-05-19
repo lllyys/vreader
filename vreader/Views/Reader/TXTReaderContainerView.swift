@@ -89,6 +89,21 @@ struct TXTReaderContainerView: View {
         viewModel.chapterIndex != nil && viewModel.currentChapterText != nil
     }
 
+    /// Whether the ViewModel is rendering chaptered TXT as one continuous
+    /// scrollable surface (Bug #180 re-scoped fix). Drives the `body` branch.
+    private var isContinuousChaptered: Bool {
+        viewModel.isContinuousMode
+            && viewModel.continuousChunks != nil
+            && viewModel.continuousChunkStartOffsets != nil
+    }
+
+    /// Decides whether a chaptered TXT file opens as one continuous scroll
+    /// surface (Bug #180) or the legacy single-chapter Paged path.
+    /// Scroll layout (and the no-settings default) → continuous.
+    static func shouldOpenContinuous(epubLayout: EPUBLayoutPreference?) -> Bool {
+        epubLayout != .paged
+    }
+
     /// Composite key that triggers attributed string rebuild when text or config changes.
     /// Uses totalTextLengthUTF16 + totalWordCount (O(1)) instead of text.hashValue (O(n)).
     /// Includes theme colors so theme changes trigger rebuild (bug #29).
@@ -151,9 +166,18 @@ struct TXTReaderContainerView: View {
                 } else if let errorMessage = viewModel.errorMessage,
                           viewModel.textContent == nil && viewModel.currentChapterText == nil {
                     errorView(message: errorMessage)
+                } else if isContinuousChaptered,
+                          let chunks = viewModel.continuousChunks,
+                          let offsets = viewModel.continuousChunkStartOffsets {
+                    // Bug #180: chaptered TXT in Scroll layout renders as one
+                    // continuous scrollable surface (the chunked UITableView
+                    // fed the whole book). Chapter awareness is layered via
+                    // TXTChapterOffsetIndex; chapter boundaries are invisible
+                    // in the scroll flow.
+                    continuousChapteredReaderContent(chunks: chunks, offsets: offsets)
                 } else if let chapterText = viewModel.currentChapterText,
                           let attrStr = chapterAttrString {
-                    // Chapter-based display (WI-6) — fast path for files with detected chapters
+                    // Chapter-based display (WI-6) — Paged single-chapter path.
                     chapterReaderContent(text: chapterText, attributedText: attrStr)
                 } else if viewModel.currentChapterText != nil {
                     // Chapter text available but attributed string still building
@@ -253,10 +277,20 @@ struct TXTReaderContainerView: View {
         .task {
             // PERF: open already called by TXTReaderHost — skip if content loaded
             if viewModel.textContent == nil && viewModel.currentChapterText == nil {
-                await viewModel.openChapterBased(url: fileURL)
+                // Bug #180: chaptered TXT in Scroll layout opens as one
+                // continuous scrollable surface. Paged layout keeps the
+                // legacy single-chapter open path.
+                if Self.shouldOpenContinuous(epubLayout: settingsStore?.epubLayout) {
+                    await viewModel.openContinuous(url: fileURL)
+                } else {
+                    await viewModel.openChapterBased(url: fileURL)
+                }
             }
-            // GH #30: In chapter mode, capture LOCAL offset for within-chapter restore.
-            if viewModel.isChapterMode {
+            // Bug #180: continuous mode restores via a document-global offset.
+            // GH #30: chapter (Paged) mode captures LOCAL offset.
+            if viewModel.isContinuousMode {
+                initialRestoreOffset = viewModel.currentOffsetUTF16
+            } else if viewModel.isChapterMode {
                 initialRestoreOffset = viewModel.currentChapterLocalUTF16
             } else {
                 initialRestoreOffset = viewModel.currentOffsetUTF16
@@ -285,6 +319,11 @@ struct TXTReaderContainerView: View {
             }
         }
         .task(id: attrStringKey) {
+            // Bug #180: in continuous mode the chunked UITableView builds
+            // per-cell attributed strings lazily; no whole-document or
+            // per-chapter NSAttributedString is built here.
+            if viewModel.isContinuousMode { return }
+
             let config = settingsStore?.txtViewConfig ?? TXTViewConfig()
             let conversion = settingsStore?.chineseConversion ?? .none
 
@@ -477,6 +516,17 @@ struct TXTReaderContainerView: View {
             highlightPersistence: container.map { PersistenceActor(modelContainer: $0) } ?? NoOpHighlightStore(),
             annotationPersistence: container.map { PersistenceActor(modelContainer: $0) } ?? NoOpAnnotationStore(),
             locatorFactory: { [viewModel] fp, start, end, _ in
+                // Bug #180 WI-7: in continuous mode the bridge reports
+                // document-global selection offsets, so the locator is built
+                // with the global `txtRange` branch — no chapter-local hop.
+                if viewModel.isContinuousMode {
+                    return LocatorFactory.txtRange(
+                        fingerprint: fp,
+                        charRangeStartUTF16: start,
+                        charRangeEndUTF16: end,
+                        sourceText: viewModel.textContent
+                    )
+                }
                 let chapters = viewModel.chapterIndex?.chapters ?? []
                 let idx = viewModel.currentChapterIdx
                 let chapter = idx >= 0 && idx < chapters.count ? chapters[idx] : nil
@@ -492,7 +542,13 @@ struct TXTReaderContainerView: View {
             sourceText: { [viewModel] in viewModel.textContent },
             makeCurrentLocator: { [viewModel] in viewModel.makeLocator() },
             onNavigate: { [viewModel, tocEntries] offset in
-                if viewModel.chapterIndex != nil {
+                // Bug #180 WI-6: in continuous mode every navigation target is
+                // a document-global offset — TOC tap, bookmark, search hit all
+                // resolve to a scroll offset. The chapter is derived afterward
+                // from where the scroll lands; no text swap.
+                if viewModel.isContinuousMode {
+                    uiState.scrollToOffset = offset
+                } else if viewModel.chapterIndex != nil {
                     // GH #30: TOC and chapters now use the same full-text decode,
                     // so title matching is reliable. Fall back to offset for bookmarks/search.
                     if let title = tocEntries.first(where: { $0.locator.charOffsetUTF16 == offset })?.title {
@@ -679,6 +735,45 @@ struct TXTReaderContainerView: View {
         }
         .ignoresSafeArea(edges: .bottom)
         .accessibilityIdentifier("txtReaderChunkedContent")
+    }
+
+    // MARK: - Continuous Chaptered Content (Bug #180)
+
+    /// Renders chaptered TXT in Scroll layout as one continuous scrollable
+    /// surface — the chunked `UITableView` fed the whole book, with the
+    /// chapter-offset index layered for progress + chapter derivation.
+    ///
+    /// WI-7: highlights stay document-global end-to-end. The chunked bridge's
+    /// `chunkStartOffsets` ARE document-global, so persisted highlights /
+    /// lookup pass straight through with NO chapter-local translation — the
+    /// bridge's existing chunk-offset math handles cross-chunk (and therefore
+    /// cross-chapter) ranges.
+    @ViewBuilder
+    private func continuousChapteredReaderContent(
+        chunks: [String], offsets: [Int]
+    ) -> some View {
+        GeometryReader { proxy in
+            TXTChunkedReaderBridge(
+                chunks: chunks,
+                config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
+                delegate: viewModel,
+                chunkStartOffsets: offsets,
+                scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
+                highlightRange: uiState.highlightRange,
+                highlightIsTemporary: uiState.highlightIsTemporary,
+                persistedHighlights: uiState.persistedHighlightRanges,
+                persistedHighlightLookup: uiState.persistedHighlightLookup,
+                highlightActionPresenter: UIKitHighlightActionPresenter(),
+                onHighlightTapAction: { [highlightCoordinator] action, id in
+                    await highlightCoordinator?.handleTapAction(action, highlightID: id)
+                },
+                safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
+                chapterOffsetIndex: viewModel.chapterOffsetIndex,
+                restoreGlobalOffset: viewModel.continuousRestoreGlobalOffset
+            )
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .accessibilityIdentifier("txtReaderContinuousContent")
     }
 
     /// WI-1: Translates global highlight ranges to chapter-local for TXTTextViewBridge rendering.

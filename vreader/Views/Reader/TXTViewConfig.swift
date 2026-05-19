@@ -51,19 +51,5 @@ protocol TXTTextViewBridgeDelegate: AnyObject {
     func selectionDidChange(utf16Range: UTF16Range)
     /// Called when the visible scroll position changes. Offset is in UTF-16 units.
     func scrollPositionDidChange(topCharOffsetUTF16: Int)
-    /// Bug #180: user reached the bottom of the loaded chapter and the scroll
-    /// has settled there. ViewModels typically respond by advancing to the
-    /// next chapter (no-op when there is none). Default impl is empty so
-    /// callers other than TXTReaderViewModel stay unaffected.
-    func didScrollPastBottomBoundary()
-    /// Bug #180: user reached the top of the loaded chapter and the scroll
-    /// has settled there. ViewModels typically respond by going to the
-    /// previous chapter. Default impl is empty.
-    func didScrollPastTopBoundary()
-}
-
-extension TXTTextViewBridgeDelegate {
-    func didScrollPastBottomBoundary() {}
-    func didScrollPastTopBoundary() {}
 }
 #endif
