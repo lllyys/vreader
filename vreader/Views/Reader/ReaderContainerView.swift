@@ -437,6 +437,16 @@ struct ReaderContainerView: View {
         .onChange(of: showAnnotationsPanel) { _, isShowing in
             if isShowing { ensureTOCReady() }
         }
+        // Feature #57: cancel an in-flight AZW3/MOBI TTS extraction
+        // walk when the reader is dismissed, so a late completion can
+        // never call `startSpeaking` after the reader has closed. The
+        // post-await block in `startAZW3TTS` also re-checks
+        // `Task.isCancelled`, so cancellation here suppresses late
+        // speech even if the walk had already resolved.
+        .onDisappear {
+            azw3ExtractionTask?.cancel()
+            azw3ExtractionTask = nil
+        }
         #if DEBUG
         .onAppear {
             let probe = DebugReaderProbeAdapter(

@@ -111,10 +111,14 @@ extension ReaderContainerView {
 
         Task { @MainActor in
             let text = await task.value
+            // Reader dismissed while the walk ran → `.onDisappear`
+            // cancelled `task`; suppress late speech and skip clearing
+            // the gate (which `.onDisappear` already nil'd).
+            guard !task.isCancelled else { return }
             azw3ExtractionTask = nil
             // Re-check state after the await: the user may have stopped
-            // TTS (debug-stop or reader dismiss), or another path may
-            // have set loadedTextContent, while the walk ran.
+            // TTS (debug-stop), or another path may have set
+            // loadedTextContent, while the walk ran.
             guard ttsService.state == .idle else { return }
             guard ai.loadedTextContent == nil else { return }
             guard let text, !text.isEmpty else { return }
