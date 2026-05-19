@@ -83,6 +83,15 @@ extension ReaderThemeV2 {
             for: self, url: backgroundImageURL, outerBG: outerBG
         )
 
+        // Feature #68: chapter-start drop-cap. `body > p:first-of-type`
+        // (child combinator) targets the first top-level <p> directly
+        // under <body> — exactly one drop-cap for the common flat-<p>
+        // EPUB shape; a section-wrapped first <p> is safely missed (no
+        // wrong drop-cap). `accent` is the theme's oxblood token,
+        // already computed above. The book's own <h1>..<h6> rule is
+        // untouched — no VReader heading is injected (no duplicate).
+        let dropCapRule = Self.dropCapCSSRule(accent: accent)
+
         // The style-id is "vreader-theme" (not "-v2") because
         // `EPUBWebViewBridgeJS.injectThemeCSSJS` extracts the inner CSS
         // and reinserts it under the fixed id "vreader-theme" so a
@@ -132,6 +141,7 @@ extension ReaderThemeV2 {
         }\
         a:link { color: \(accent) !important; text-decoration: underline; }\
         a:visited { color: \(sub) !important; text-decoration: underline; }\
+        \(dropCapRule)\
         img, svg, video { \
           max-width: 100% !important; \
           height: auto !important; \
@@ -162,6 +172,31 @@ extension ReaderThemeV2 {
     }
 
     // MARK: - Helpers
+
+    /// Feature #68: builds the chapter-start drop-cap CSS rule appended
+    /// to the EPUB override blob. The selector `body > p:first-of-type::
+    /// first-letter` uses the child combinator so it matches the first
+    /// `<p>` that is a *direct* child of `<body>` — exactly one drop-cap
+    /// for the flat-top-level-`<p>` EPUB shape. A `<p>` nested inside a
+    /// section wrapper is not matched (a safe miss — no wrong drop-cap).
+    /// Declarations mirror the design (`vreader-reader.jsx:383-390`) and
+    /// the `ChapterStartTypography` constants; `accent` is the theme's
+    /// oxblood token.
+    private static func dropCapCSSRule(accent: String) -> String {
+        let serifStack = ReaderTypography.cssFontStack(for: .sourceSerif4)
+        return """
+        body > p:first-of-type::first-letter { \
+          font-family: \(serifStack) !important; \
+          font-size: \(ChapterStartTypography.dropCapCSSFontSizeEm) !important; \
+          font-weight: 600 !important; \
+          line-height: 0.85 !important; \
+          float: left !important; \
+          margin-right: 0.06em !important; \
+          margin-top: 0.05em !important; \
+          color: \(accent) !important; \
+        }
+        """
+    }
 
     /// Photo-only: emits the `html { background-image: ... }` rule when
     /// the caller supplied a URL. Returns an empty string for all other
