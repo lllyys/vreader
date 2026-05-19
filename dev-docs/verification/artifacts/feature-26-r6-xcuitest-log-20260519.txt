@@ -1,0 +1,270 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project vreader.xcodeproj -scheme vreader -destination "platform=iOS Simulator,id=61149F0E-DC18-4BE2-BB37-52659F1F4F62" -derivedDataPath /tmp/dd-f26-verify "-only-testing:vreaderUITests/Feature26TextToSpeechVerificationTests"
+
+2026-05-19 15:37:45.211774+0800 vreaderUITests-Runner[55271:21461489] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-05-19 15:37:45.850.
+Test Suite 'vreaderUITests.xctest' started at 2026-05-19 15:37:45.850.
+Test Suite 'Feature26TextToSpeechVerificationTests' started at 2026-05-19 15:37:45.850.
+Test Case '-[vreaderUITests.Feature26TextToSpeechVerificationTests test_verify_feature_26_epub_start_pause_resume_stop_cycle]' started.
+    t =     0.00s Start Test at 2026-05-19 15:37:45.851
+    t =     0.05s Set Up
+    t =     0.05s Open com.vreader.app
+    t =     0.05s     Launch com.vreader.app
+2026-05-19 15:37:46.081 xcodebuild[55257:21461092] [MT] IDELaunchParametersSnapshot: The operation couldn’t be completed. (DebuggerLLDB.DebuggerVersionStore.StoreError error 0.)
+2026-05-19 15:37:46.081 xcodebuild[55257:21461092] [MT] IDELaunchParametersSnapshot: no debugger version
+objc[55271]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_23E254a/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.4.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x10b1b8310) and /Library/Developer/CoreSimulator/Volumes/iOS_23E254a/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.4.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x10a154398). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+    t =     1.10s         Setting up automation session
+    t =     1.94s         Wait for com.vreader.app to idle
+    t =     3.49s Waiting 20.0s for Button (First Match) to exist
+    t =     4.50s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =     4.51s         Checking existence of `Button (First Match)`
+    t =     5.59s Checking `Expect predicate `isHittable == 1` for object Button (First Match)`
+    t =     5.59s     Find the Button (First Match)
+    t =     5.65s Tap "bookCard_epub:00000000000000000000000000000000000000000000000000000000e9b00001:2198" Button
+    t =     5.65s     Wait for com.vreader.app to idle
+    t =     5.65s     Find the "bookCard_epub:00000000000000000000000000000000000000000000000000000000e9b00001:2198" Button
+    t =     5.66s     Check for interrupting elements affecting "bookCard_epub:00000000000000000000000000000000000000000000000000000000e9b00001:2198" Button
+    t =     5.69s     Synthesize event
+    t =     5.98s     Wait for com.vreader.app to idle
+    t =     6.40s Waiting 30.0s for "readerBackButton" Button to exist
+    t =     7.43s     Checking `Expect predicate `existsNoRetry == 1` for object "readerBackButton" Button`
+    t =     7.43s         Checking existence of `"readerBackButton" Button`
+    t =     7.50s Waiting 5.0s for "readerMoreButton" Button to exist
+    t =     8.53s     Checking `Expect predicate `existsNoRetry == 1` for object "readerMoreButton" Button`
+    t =     8.53s         Checking existence of `"readerMoreButton" Button`
+    t =     9.59s Checking `Expect predicate `isHittable == 1` for object "readerMoreButton" Button`
+    t =     9.59s     Find the "readerMoreButton" Button
+    t =     9.64s Tap "readerMoreButton" Button
+    t =     9.64s     Wait for com.vreader.app to idle
+    t =     9.64s     Find the "readerMoreButton" Button
+    t =     9.66s     Check for interrupting elements affecting "readerMoreButton" Button
+    t =     9.67s     Synthesize event
+    t =     9.96s     Wait for com.vreader.app to idle
+    t =    10.99s Checking `Expect predicate `isHittable == 1` for object Button (First Match)`
+    t =    10.99s     Find the Button (First Match)
+    t =    11.02s Tap "readerMorePopover" Button
+    t =    11.02s     Wait for com.vreader.app to idle
+    t =    11.02s     Find the "readerMorePopover" Button
+    t =    11.03s     Check for interrupting elements affecting "readerMorePopover" Button
+    t =    11.05s     Synthesize event
+    t =    11.33s     Wait for com.vreader.app to idle
+    t =    11.33s Waiting 25.0s for Button (First Match) to exist
+    t =    12.35s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    12.36s         Checking existence of `Button (First Match)`
+    t =    12.38s Waiting 8.0s for Button (First Match) to exist
+    t =    13.39s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    13.39s         Checking existence of `Button (First Match)`
+    t =    13.41s Tap Button (First Match)
+    t =    13.41s     Wait for com.vreader.app to idle
+    t =    13.42s     Find the Button (First Match)
+    t =    13.43s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    13.44s     Synthesize event
+    t =    13.73s     Wait for com.vreader.app to idle
+    t =    13.73s Waiting 8.0s for Button (First Match) to exist
+    t =    14.75s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    14.76s         Checking existence of `Button (First Match)`
+    t =    14.78s Checking existence of `Button (First Match)`
+    t =    14.81s Tap Button (First Match)
+    t =    14.81s     Wait for com.vreader.app to idle
+    t =    14.81s     Find the Button (First Match)
+    t =    14.82s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    14.83s     Synthesize event
+    t =    15.12s     Wait for com.vreader.app to idle
+    t =    15.12s Waiting 8.0s for Button (First Match) to exist
+    t =    16.14s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    16.14s         Checking existence of `Button (First Match)`
+    t =    16.16s Waiting 8.0s for Button (First Match) to exist
+    t =    17.17s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    17.17s         Checking existence of `Button (First Match)`
+    t =    17.20s Tap Button (First Match)
+    t =    17.20s     Wait for com.vreader.app to idle
+    t =    17.20s     Find the Button (First Match)
+    t =    17.22s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    17.23s     Synthesize event
+    t =    17.52s     Wait for com.vreader.app to idle
+    t =    18.55s Checking `Expect predicate `exists == 0` for object Button (First Match)`
+    t =    18.55s     Checking existence of `Button (First Match)`
+    t =    18.59s Checking existence of `Button (First Match)`
+    t =    18.61s Tear Down
+Test Case '-[vreaderUITests.Feature26TextToSpeechVerificationTests test_verify_feature_26_epub_start_pause_resume_stop_cycle]' passed (18.838 seconds).
+Test Case '-[vreaderUITests.Feature26TextToSpeechVerificationTests test_verify_feature_26_md_start_pause_resume_stop_cycle]' started.
+    t =     0.00s Start Test at 2026-05-19 15:38:04.690
+    t =     0.03s Set Up
+    t =     0.03s Open com.vreader.app
+    t =     0.03s     Launch com.vreader.app
+    t =     0.03s         Terminate com.vreader.app:55327
+2026-05-19 15:38:05.777 xcodebuild[55257:21461092] [MT] IDELaunchParametersSnapshot: The operation couldn’t be completed. (DebuggerLLDB.DebuggerVersionStore.StoreError error 0.)
+2026-05-19 15:38:05.777 xcodebuild[55257:21461092] [MT] IDELaunchParametersSnapshot: no debugger version
+    t =     1.30s         Setting up automation session
+    t =     2.06s         Wait for com.vreader.app to idle
+    t =     3.39s Waiting 20.0s for Button (First Match) to exist
+    t =     4.42s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =     4.42s         Checking existence of `Button (First Match)`
+    t =     5.48s Checking `Expect predicate `isHittable == 1` for object Button (First Match)`
+    t =     5.48s     Find the Button (First Match)
+    t =     5.53s Tap "bookCard_md:0000000000000000000000000000000000000000000000000000000000c0c002:9231" Button
+    t =     5.53s     Wait for com.vreader.app to idle
+    t =     5.53s     Find the "bookCard_md:0000000000000000000000000000000000000000000000000000000000c0c002:9231" Button
+    t =     5.55s     Check for interrupting elements affecting "bookCard_md:0000000000000000000000000000000000000000000000000000000000c0c002:9231" Button
+    t =     5.56s     Synthesize event
+    t =     5.84s     Wait for com.vreader.app to idle
+    t =     6.21s Waiting 30.0s for "readerBackButton" Button to exist
+    t =     7.25s     Checking `Expect predicate `existsNoRetry == 1` for object "readerBackButton" Button`
+    t =     7.25s         Checking existence of `"readerBackButton" Button`
+    t =     7.30s Waiting 5.0s for "readerMoreButton" Button to exist
+    t =     8.32s     Checking `Expect predicate `existsNoRetry == 1` for object "readerMoreButton" Button`
+    t =     8.32s         Checking existence of `"readerMoreButton" Button`
+    t =     9.37s Checking `Expect predicate `isHittable == 1` for object "readerMoreButton" Button`
+    t =     9.37s     Find the "readerMoreButton" Button
+    t =     9.42s Tap "readerMoreButton" Button
+    t =     9.42s     Wait for com.vreader.app to idle
+    t =     9.42s     Find the "readerMoreButton" Button
+    t =     9.45s     Check for interrupting elements affecting "readerMoreButton" Button
+    t =     9.46s     Synthesize event
+    t =     9.75s     Wait for com.vreader.app to idle
+    t =    10.78s Checking `Expect predicate `isHittable == 1` for object Button (First Match)`
+    t =    10.78s     Find the Button (First Match)
+    t =    10.82s Tap "readerMorePopover" Button
+    t =    10.83s     Wait for com.vreader.app to idle
+    t =    10.83s     Find the "readerMorePopover" Button
+    t =    10.84s     Check for interrupting elements affecting "readerMorePopover" Button
+    t =    10.86s     Synthesize event
+    t =    11.14s     Wait for com.vreader.app to idle
+    t =    11.14s Waiting 25.0s for Button (First Match) to exist
+    t =    12.15s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    12.15s         Checking existence of `Button (First Match)`
+    t =    12.18s Waiting 8.0s for Button (First Match) to exist
+    t =    13.20s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    13.20s         Checking existence of `Button (First Match)`
+    t =    13.23s Tap Button (First Match)
+    t =    13.23s     Wait for com.vreader.app to idle
+    t =    13.23s     Find the Button (First Match)
+    t =    13.24s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    13.26s     Synthesize event
+    t =    13.54s     Wait for com.vreader.app to idle
+    t =    13.55s Waiting 8.0s for Button (First Match) to exist
+    t =    14.57s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    14.57s         Checking existence of `Button (First Match)`
+    t =    14.60s Checking existence of `Button (First Match)`
+    t =    14.63s Tap Button (First Match)
+    t =    14.63s     Wait for com.vreader.app to idle
+    t =    14.63s     Find the Button (First Match)
+    t =    14.64s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    14.65s     Synthesize event
+    t =    14.94s     Wait for com.vreader.app to idle
+    t =    14.94s Waiting 8.0s for Button (First Match) to exist
+    t =    15.97s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    15.97s         Checking existence of `Button (First Match)`
+    t =    15.99s Waiting 8.0s for Button (First Match) to exist
+    t =    17.00s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    17.00s         Checking existence of `Button (First Match)`
+    t =    17.03s Tap Button (First Match)
+    t =    17.03s     Wait for com.vreader.app to idle
+    t =    17.03s     Find the Button (First Match)
+    t =    17.05s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    17.06s     Synthesize event
+    t =    17.35s     Wait for com.vreader.app to idle
+    t =    18.37s Checking `Expect predicate `exists == 0` for object Button (First Match)`
+    t =    18.37s     Checking existence of `Button (First Match)`
+    t =    18.42s Checking existence of `Button (First Match)`
+    t =    18.45s Tear Down
+Test Case '-[vreaderUITests.Feature26TextToSpeechVerificationTests test_verify_feature_26_md_start_pause_resume_stop_cycle]' passed (18.676 seconds).
+Test Case '-[vreaderUITests.Feature26TextToSpeechVerificationTests test_verify_feature_26_txt_start_pause_resume_stop_cycle]' started.
+    t =     0.00s Start Test at 2026-05-19 15:38:23.366
+    t =     0.03s Set Up
+    t =     0.03s Open com.vreader.app
+    t =     0.03s     Launch com.vreader.app
+    t =     0.03s         Terminate com.vreader.app:55506
+2026-05-19 15:38:24.457 xcodebuild[55257:21461092] [MT] IDELaunchParametersSnapshot: The operation couldn’t be completed. (DebuggerLLDB.DebuggerVersionStore.StoreError error 0.)
+2026-05-19 15:38:24.457 xcodebuild[55257:21461092] [MT] IDELaunchParametersSnapshot: no debugger version
+    t =     1.30s         Setting up automation session
+    t =     2.08s         Wait for com.vreader.app to idle
+    t =     3.40s Waiting 20.0s for Button (First Match) to exist
+    t =     4.42s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =     4.42s         Checking existence of `Button (First Match)`
+    t =     5.50s Checking `Expect predicate `isHittable == 1` for object Button (First Match)`
+    t =     5.50s     Find the Button (First Match)
+    t =     5.55s Tap "bookCard_txt:0000000000000000000000000000000000000000000000000000000000beef01:1705" Button
+    t =     5.55s     Wait for com.vreader.app to idle
+    t =     5.55s     Find the "bookCard_txt:0000000000000000000000000000000000000000000000000000000000beef01:1705" Button
+    t =     5.57s     Check for interrupting elements affecting "bookCard_txt:0000000000000000000000000000000000000000000000000000000000beef01:1705" Button
+    t =     5.58s     Synthesize event
+    t =     5.86s     Wait for com.vreader.app to idle
+    t =     6.25s Waiting 30.0s for "readerBackButton" Button to exist
+    t =     7.26s     Checking `Expect predicate `existsNoRetry == 1` for object "readerBackButton" Button`
+    t =     7.26s         Checking existence of `"readerBackButton" Button`
+    t =     7.32s Waiting 5.0s for "readerMoreButton" Button to exist
+    t =     8.32s     Checking `Expect predicate `existsNoRetry == 1` for object "readerMoreButton" Button`
+    t =     8.32s         Checking existence of `"readerMoreButton" Button`
+    t =     9.37s Checking `Expect predicate `isHittable == 1` for object "readerMoreButton" Button`
+    t =     9.37s     Find the "readerMoreButton" Button
+    t =     9.42s Tap "readerMoreButton" Button
+    t =     9.42s     Wait for com.vreader.app to idle
+    t =     9.42s     Find the "readerMoreButton" Button
+    t =     9.44s     Check for interrupting elements affecting "readerMoreButton" Button
+    t =     9.45s     Synthesize event
+    t =     9.73s     Wait for com.vreader.app to idle
+    t =    10.75s Checking `Expect predicate `isHittable == 1` for object Button (First Match)`
+    t =    10.75s     Find the Button (First Match)
+    t =    10.79s Tap "readerMorePopover" Button
+    t =    10.79s     Wait for com.vreader.app to idle
+    t =    10.79s     Find the "readerMorePopover" Button
+    t =    10.81s     Check for interrupting elements affecting "readerMorePopover" Button
+    t =    10.82s     Synthesize event
+    t =    11.11s     Wait for com.vreader.app to idle
+    t =    11.11s Waiting 25.0s for Button (First Match) to exist
+    t =    12.12s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    12.12s         Checking existence of `Button (First Match)`
+    t =    12.15s Waiting 8.0s for Button (First Match) to exist
+    t =    13.17s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    13.17s         Checking existence of `Button (First Match)`
+    t =    13.20s Tap Button (First Match)
+    t =    13.20s     Wait for com.vreader.app to idle
+    t =    13.20s     Find the Button (First Match)
+    t =    13.22s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    13.23s     Synthesize event
+    t =    13.51s     Wait for com.vreader.app to idle
+    t =    13.51s Waiting 8.0s for Button (First Match) to exist
+    t =    14.52s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    14.52s         Checking existence of `Button (First Match)`
+    t =    14.53s Checking existence of `Button (First Match)`
+    t =    14.55s Tap Button (First Match)
+    t =    14.55s     Wait for com.vreader.app to idle
+    t =    14.55s     Find the Button (First Match)
+    t =    14.56s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    14.57s     Synthesize event
+    t =    14.86s     Wait for com.vreader.app to idle
+    t =    14.87s Waiting 8.0s for Button (First Match) to exist
+    t =    15.89s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    15.89s         Checking existence of `Button (First Match)`
+    t =    15.92s Waiting 8.0s for Button (First Match) to exist
+    t =    16.95s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    16.95s         Checking existence of `Button (First Match)`
+    t =    16.97s Tap Button (First Match)
+    t =    16.97s     Wait for com.vreader.app to idle
+    t =    16.97s     Find the Button (First Match)
+    t =    16.98s     Check for interrupting elements affecting "ttsControlBar" Button
+    t =    16.99s     Synthesize event
+    t =    17.28s     Wait for com.vreader.app to idle
+    t =    18.31s Checking `Expect predicate `exists == 0` for object Button (First Match)`
+    t =    18.31s     Checking existence of `Button (First Match)`
+    t =    18.36s Checking existence of `Button (First Match)`
+    t =    18.38s Tear Down
+Test Case '-[vreaderUITests.Feature26TextToSpeechVerificationTests test_verify_feature_26_txt_start_pause_resume_stop_cycle]' passed (18.604 seconds).
+Test Suite 'Feature26TextToSpeechVerificationTests' passed at 2026-05-19 15:38:41.970.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 56.118 (56.120) seconds
+Test Suite 'vreaderUITests.xctest' passed at 2026-05-19 15:38:41.971.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 56.118 (56.121) seconds
+Test Suite 'Selected tests' passed at 2026-05-19 15:38:41.972.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 56.118 (56.123) seconds
+2026-05-19 15:38:42.302 xcodebuild[55257:21461092] [MT] IDETestOperationsObserverDebug: 59.033 elapsed -- Testing started completed.
+2026-05-19 15:38:42.302 xcodebuild[55257:21461092] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-05-19 15:38:42.302 xcodebuild[55257:21461092] [MT] IDETestOperationsObserverDebug: 59.033 sec, +59.033 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/dd-f26-verify/Logs/Test/Test-vreader-2026.05.19_15-37-42-+0800.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started

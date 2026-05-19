@@ -44,7 +44,10 @@
         "Feature40TTSSentenceHighlightVerificationTests\/test_verify_feature_40_tts_state_reported_after_start()",
         "Feature40TTSSentenceHighlightVerificationTests\/test_verify_feature_40_tts_offset_advances_during_playback()",
         "Feature41TTSAutoScrollVerificationTests\/test_verify_feature_41_tts_control_bar_visible_during_playback()",
-        "Feature41TTSAutoScrollVerificationTests\/test_verify_feature_41_tts_autoscroll_position_advances()"
+        "Feature41TTSAutoScrollVerificationTests\/test_verify_feature_41_tts_autoscroll_position_advances()",
+        "Feature26TextToSpeechVerificationTests\/test_verify_feature_26_txt_start_pause_resume_stop_cycle()",
+        "Feature26TextToSpeechVerificationTests\/test_verify_feature_26_md_start_pause_resume_stop_cycle()",
+        "Feature26TextToSpeechVerificationTests\/test_verify_feature_26_epub_start_pause_resume_stop_cycle()"
       ],
       "target" : {
         "containerPath" : "container:vreader.xcodeproj",
