@@ -148,6 +148,75 @@ struct ReadingModeMigrationTests {
         #expect(after == originalData)
     }
 
+    /// The critical preservation contract: a per-book file carrying keys the
+    /// current `PerBookSettingsOverride` struct does NOT know (a future field,
+    /// a nested object, an array) must survive the migration with its decoded
+    /// content intact. This is the regression guard against someone switching
+    /// the migration to a typed `JSONDecoder`/`JSONEncoder` round-trip — that
+    /// would silently drop every unknown member and still pass the
+    /// already-known-fields tests above.
+    @Test func run_preservesUnknownTopLevelKeys_notJustStructFields() throws {
+        let env = makeEnvironment()
+        defer { cleanUp(env) }
+        try FileManager.default.createDirectory(at: env.baseURL, withIntermediateDirectories: true)
+        let fileURL = env.baseURL.appendingPathComponent("future.json")
+        let original: [String: Any] = [
+            "fontSize": 17.0,
+            "readingMode": "unified",
+            // Keys NOT on PerBookSettingsOverride — a typed round-trip drops these.
+            "futureScalar": "hello",
+            "futureFlag": true,
+            "futureNumber": 42,
+            "futureNested": ["a": 1, "b": ["x", "y"]],
+            "futureArray": [1, 2, 3]
+        ]
+        try JSONSerialization.data(withJSONObject: original).write(to: fileURL)
+
+        ReadingModeMigration.run(defaults: env.defaults, perBookBaseURL: env.baseURL)
+
+        let obj = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any]
+        )
+        // readingMode stripped; every other member — including the unknown
+        // ones — preserved with identical decoded content.
+        #expect(obj["readingMode"] == nil)
+        #expect((obj["fontSize"] as? NSNumber)?.doubleValue == 17.0)
+        #expect(obj["futureScalar"] as? String == "hello")
+        #expect(obj["futureFlag"] as? Bool == true)
+        #expect((obj["futureNumber"] as? NSNumber)?.intValue == 42)
+        let nested = try #require(obj["futureNested"] as? [String: Any])
+        #expect((nested["a"] as? NSNumber)?.intValue == 1)
+        #expect(nested["b"] as? [String] == ["x", "y"])
+        #expect((obj["futureArray"] as? [Any])?.count == 3)
+        // Original 7 keys minus readingMode == 6.
+        #expect(obj.count == 6)
+    }
+
+    /// Per-book file cleanup must be idempotent — after the first migration
+    /// pass strips `readingMode`, a second run finds no `readingMode` key and
+    /// must NOT rewrite the file (no needless write).
+    @Test func run_perBookFileCleanup_isIdempotent_noRewriteOnSecondRun() throws {
+        let env = makeEnvironment()
+        defer { cleanUp(env) }
+        try FileManager.default.createDirectory(at: env.baseURL, withIntermediateDirectories: true)
+        let fileURL = env.baseURL.appendingPathComponent("book.json")
+        try JSONSerialization.data(withJSONObject: ["fontSize": 15.0, "readingMode": "unified"]).write(to: fileURL)
+
+        // First run strips readingMode.
+        ReadingModeMigration.run(defaults: env.defaults, perBookBaseURL: env.baseURL)
+        let afterFirst = try Data(contentsOf: fileURL)
+
+        // Second run: no readingMode key remains → file must not be rewritten.
+        ReadingModeMigration.run(defaults: env.defaults, perBookBaseURL: env.baseURL)
+        let afterSecond = try Data(contentsOf: fileURL)
+
+        #expect(afterSecond == afterFirst)
+        // And it is still a valid, readingMode-free per-book file.
+        let obj = try JSONSerialization.jsonObject(with: afterSecond) as? [String: Any]
+        #expect(obj?["readingMode"] == nil)
+        #expect((obj?["fontSize"] as? NSNumber)?.doubleValue == 15.0)
+    }
+
     @Test func run_stripsReadingMode_acrossMultiplePerBookFiles() throws {
         let env = makeEnvironment()
         defer { cleanUp(env) }
