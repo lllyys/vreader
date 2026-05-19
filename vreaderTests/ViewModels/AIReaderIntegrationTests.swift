@@ -362,6 +362,7 @@ struct AIReaderIntegrationTests {
 // MARK: - AIReaderAvailability Tests
 
 @Suite("AIReaderAvailability")
+@MainActor
 struct AIReaderAvailabilityTests {
 
     @Test func availableWhenFlagEnabledAndKeyExistsAndConsentGranted() {
@@ -483,4 +484,45 @@ struct AIReaderAvailabilityTests {
 
         #expect(result == false)
     }
+
+    // MARK: - Bug #237: --enable-ai XCUITest override
+
+    #if DEBUG
+    @Test func availableWhenAITestOverrideForced() {
+        // Bug #237: the --enable-ai launch flag sets AITestOverride.forceAvailable
+        // so a CU-free XCUITest can reach the AI surfaces. With the override on,
+        // isAvailable returns true even though all three production gates fail
+        // (flag off, no key, no consent) — a headless test cannot satisfy them.
+        AITestOverride.forceAvailable = true
+        defer { AITestOverride.forceAvailable = false }
+
+        let flags = FeatureFlags(environment: .prod)          // aiAssistant OFF
+        let keychain = WI11TestHelpers.makeKeychainService()  // no API key
+
+        let result = AIReaderAvailability.isAvailable(
+            featureFlags: flags,
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false)
+        )
+
+        #expect(result == true, "Bug #237: --enable-ai override must force AI surfaces visible")
+    }
+
+    @Test func realGatesStillApplyWhenAITestOverrideOff() {
+        // The override is opt-in: with it off, the three production gates still
+        // decide. All three fail here, so isAvailable must return false.
+        AITestOverride.forceAvailable = false
+
+        let flags = FeatureFlags(environment: .prod)
+        let keychain = WI11TestHelpers.makeKeychainService()
+
+        let result = AIReaderAvailability.isAvailable(
+            featureFlags: flags,
+            keychainService: keychain,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false)
+        )
+
+        #expect(result == false, "Override off: real gates apply, all fail")
+    }
+    #endif
 }

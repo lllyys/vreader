@@ -185,6 +185,15 @@ struct VReaderApp: App {
                 // value in the same process doesn't leak.
                 TTSTestOverride.useMockSynthesizer = config.ttsTestMode
 
+                // Bug #237: the --enable-ai launch flag was parsed into
+                // config.enableAI but never consumed, so AI verification
+                // surfaces stayed unreachable in XCUITest. Forward it to
+                // AITestOverride so AIReaderAvailability.isAvailable can
+                // short-circuit the API-key + consent gates a headless
+                // test can't satisfy. Written unconditionally so a prior
+                // launch's value in the same process doesn't leak.
+                AITestOverride.forceAvailable = config.enableAI
+
                 let persistence = PersistenceActor(modelContainer: container)
                 let seedConfig = config
                 let semaphore = DispatchSemaphore(value: 0)
