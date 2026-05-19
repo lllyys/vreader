@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VReader — Highlight-note edit surface (#914)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&family=Inter:wght@300;400;500;600;700;800&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Serif+JP:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: #f0eee9;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .hide-scroll::-webkit-scrollbar { display: none; }
+  .hide-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+  button { font-family: inherit; }
+  button:focus { outline: none; }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes popIn {
+    from { transform: translate(-50%, -50%) scale(0.92); opacity: 0; }
+    to   { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* CJK serif fallback wiring — make sure the body stack lands somewhere
+     real on devices without Source Han Serif installed. */
+  .cjk { font-family: "Source Han Serif SC", "Songti SC", "Noto Serif SC", "Noto Serif JP", "Yu Mincho", "Source Serif 4", Georgia, serif; }
+</style>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" fill="#1a1815"/>
+    <rect x="32" y="40" width="136" height="92" rx="9" fill="#fcf8f0"/>
+    <rect x="44" y="56" width="50" height="3" rx="1.5" fill="#8c2f2f"/>
+    <rect x="44" y="68" width="112" height="3" rx="1.5" fill="#1d1a14" opacity="0.25"/>
+    <rect x="44" y="78" width="100" height="3" rx="1.5" fill="#1d1a14" opacity="0.25"/>
+    <rect x="44" y="88" width="108" height="3" rx="1.5" fill="#1d1a14" opacity="0.25"/>
+    <rect x="44" y="98" width="68" height="3" rx="1.5" fill="#1d1a14" opacity="0.25"/>
+    <rect x="120" y="116" width="36" height="10" rx="5" fill="#8c2f2f"/>
+    <rect x="32" y="140" width="136" height="36" rx="4" fill="#cfd2d8"/>
+    <text x="100" y="190" font-family="Inter, sans-serif" font-size="10" font-weight="700" fill="#d8d2c5" text-anchor="middle" letter-spacing="2">#914 NOTE EDIT</text>
+  </svg>
+</template>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Canvas + base components from the rest of the project -->
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="vreader-data.jsx"></script>
+<script type="text/babel" src="vreader-themes.jsx"></script>
+<script type="text/babel" src="vreader-icons.jsx"></script>
+<script type="text/babel" src="vreader-panels.jsx"></script>
+
+<!-- The new editor surface -->
+<script type="text/babel" src="vreader-note-editor.jsx"></script>
+
+<!-- Canvas artboards -->
+<script type="text/babel" src="note-editor-canvas-artboards.jsx"></script>
+
+<script type="text/babel">
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<NoteEditorCanvas/>);
+</script>
+</body>
+</html>
