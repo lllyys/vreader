@@ -287,6 +287,14 @@ struct ReadingTimeFormatterDurationTests {
         #expect(ReadingTimeFormatter.formatDuration(totalSeconds: -99_999) == "0m")
     }
 
+    @Test func extremeValuesStayStable() {
+        // Int.max seconds: only clamp + integer division — no overflow.
+        // Int.max / 60 / 60 = 2562047788015215 hours, remainder 30 minutes.
+        #expect(ReadingTimeFormatter.formatDuration(totalSeconds: .max) == "2562047788015215h 30m")
+        // Int.min clamps to 0 before any arithmetic.
+        #expect(ReadingTimeFormatter.formatDuration(totalSeconds: .min) == "0m")
+    }
+
     @Test func hasNoReadSuffix() {
         // formatDuration is the bare-duration variant — unlike formatReadingTime
         // it must NOT append " read".

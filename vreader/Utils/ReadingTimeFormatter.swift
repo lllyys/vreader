@@ -12,7 +12,9 @@
 
 import Foundation
 
-/// Formatting utilities for reading time and speed display in the library.
+/// Formatting utilities for reading time and speed display — used by the
+/// Library list rows (`formatReadingTime` / `formatSpeed` / `formatRelativeLastRead`)
+/// and the reading-stats dashboard (`formatDuration`, feature #58).
 enum ReadingTimeFormatter {
 
     // MARK: - Reading Time
