@@ -588,7 +588,6 @@ enum TestSeeder {
         // Reader (mirrors BackupSettingsKeys.all + tap zones)
         "readerTheme",
         "readerTypography",
-        "readerReadingMode",
         "readerUseCustomBackground",
         "readerBackgroundOpacity",
         "readerEPUBLayout",

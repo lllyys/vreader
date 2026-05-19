@@ -129,7 +129,6 @@ enum BackupSettingsKeys {
     static let all: [String] = [
         "readerTheme",
         "readerTypography",
-        "readerReadingMode",
         "readerUseCustomBackground",
         "readerBackgroundOpacity",
         "readerEPUBLayout",

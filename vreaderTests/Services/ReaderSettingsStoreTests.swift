@@ -156,7 +156,7 @@ import UIKit
             fontSize: s.typography.fontSize, fontName: s.typography.fontFamily.rawValue,
             lineSpacing: s.typography.lineSpacing,
             letterSpacing: s.typography.cjkSpacing ? s.typography.fontSize * 0.05 : 0,
-            themeName: "light", readingMode: s.readingMode.rawValue
+            themeName: "light"
         )
         s.applyResolvedSettings(resolvedAsLight)
         #expect(s.theme == .paper, "legacy per-book themeName 'light' migrates to .paper")
@@ -196,7 +196,7 @@ import UIKit
             fontName: defaultTypography.fontFamily.rawValue,
             lineSpacing: defaultTypography.lineSpacing,
             letterSpacing: 0,
-            themeName: s.theme.rawValue, readingMode: s.readingMode.rawValue
+            themeName: s.theme.rawValue
         )
         s.applyResolvedSettings(resolved)
         #expect(s.typography.fontSize == defaultTypography.fontSize + 8)
@@ -221,7 +221,7 @@ import UIKit
             fontSize: globalSize + 6, fontName: s.typography.fontFamily.rawValue,
             lineSpacing: s.typography.lineSpacing,
             letterSpacing: 0,
-            themeName: s.theme.rawValue, readingMode: s.readingMode.rawValue
+            themeName: s.theme.rawValue
         )
         s.applyResolvedSettings(resolved)
         #expect(s.typography.fontSize == globalSize + 6)

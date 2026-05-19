@@ -8,7 +8,6 @@ import UIKit
 final class ReaderSettingsStore {
     static let themeKey = "readerTheme"
     static let typographyKey = "readerTypography"
-    static let readingModeKey = "readerReadingMode"
     static let useCustomBackgroundKey = "readerUseCustomBackground"
     static let backgroundOpacityKey = "readerBackgroundOpacity"
     static let epubLayoutKey = "readerEPUBLayout"
@@ -23,7 +22,6 @@ final class ReaderSettingsStore {
     /// (`light` / `sepia` / `dark`) still decode via
     /// `ReaderThemeV2(legacyOrNew:)`.
     var theme: ReaderThemeV2 { didSet { guard !suppressPersistence else { return }; defaults.set(theme.rawValue, forKey: Self.themeKey) } }
-    var readingMode: ReadingMode { didSet { guard !suppressPersistence else { return }; defaults.set(readingMode.rawValue, forKey: Self.readingModeKey) } }
     var epubLayout: EPUBLayoutPreference { didSet { guard !suppressPersistence else { return }; defaults.set(epubLayout.rawValue, forKey: Self.epubLayoutKey) } }
     /// Whether auto page turning is enabled (Issue 9).
     var autoPageTurn: Bool { didSet { guard !suppressPersistence else { return }; defaults.set(autoPageTurn, forKey: Self.autoPageTurnKey) } }
@@ -76,7 +74,6 @@ final class ReaderSettingsStore {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.theme = Self.loadTheme(defaults)
-        self.readingMode = Self.loadReadingMode(defaults)
         self.typography = Self.loadTypography(defaults)
         self.epubLayout = Self.loadEPUBLayout(defaults)
         self.pageTurnAnimation = Self.loadPageTurnAnimation(defaults)
@@ -100,9 +97,6 @@ final class ReaderSettingsStore {
     /// unknown value falls back to `.default` (`.paper`).
     private static func loadTheme(_ defaults: UserDefaults) -> ReaderThemeV2 {
         ReaderThemeV2(legacyOrNew: defaults.string(forKey: themeKey))
-    }
-    private static func loadReadingMode(_ defaults: UserDefaults) -> ReadingMode {
-        ReadingMode(rawValue: defaults.string(forKey: readingModeKey) ?? "") ?? .native
     }
     private static func loadTypography(_ defaults: UserDefaults) -> TypographySettings {
         if let data = defaults.data(forKey: typographyKey),
@@ -141,8 +135,6 @@ final class ReaderSettingsStore {
         defer { suppressPersistence = false }
         let newTheme = Self.loadTheme(defaults)
         if theme != newTheme { theme = newTheme }
-        let newReadingMode = Self.loadReadingMode(defaults)
-        if readingMode != newReadingMode { readingMode = newReadingMode }
         // Codex audit fix: load typography unconditionally (with default
         // fallback when defaults has no entry) — same shape as init.
         // The previous version only assigned when defaults had a
@@ -176,7 +168,6 @@ final class ReaderSettingsStore {
         // (`light` → `.paper`) still applies, while an unknown / corrupt
         // value leaves the live theme untouched (no silent reset).
         if let t = ReaderThemeV2(recognized: resolved.themeName), t != theme { theme = t }
-        if let m = ReadingMode(rawValue: resolved.readingMode), m != readingMode { readingMode = m }
         if resolved.fontSize != typography.fontSize { typography.fontSize = resolved.fontSize }
         if resolved.lineSpacing != typography.lineSpacing { typography.lineSpacing = resolved.lineSpacing }
         if let f = ReaderFontFamily(rawValue: resolved.fontName), f != typography.fontFamily {

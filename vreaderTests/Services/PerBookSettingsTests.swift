@@ -38,7 +38,7 @@ struct PerBookSettingsTests {
         let key = "epub:aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb:5000"
         let override = PerBookSettingsOverride(
             fontSize: 24, fontName: "Georgia", lineSpacing: 1.8,
-            letterSpacing: 0.05, themeName: "sepia", readingMode: "native"
+            letterSpacing: 0.05, themeName: "sepia"
         )
         try PerBookSettingsStore.save(override, for: key, baseURL: dir)
         let restored = PerBookSettingsStore.settings(for: key, baseURL: dir)
@@ -83,7 +83,7 @@ struct PerBookSettingsTests {
     @Test func perBookSettings_codable_roundTrip() throws {
         let original = PerBookSettingsOverride(
             fontSize: 26, fontName: "Menlo", lineSpacing: 1.6,
-            letterSpacing: 0.03, themeName: "dark", readingMode: "unified"
+            letterSpacing: 0.03, themeName: "dark"
         )
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(PerBookSettingsOverride.self, from: data)
@@ -97,6 +97,31 @@ struct PerBookSettingsTests {
         #expect(decoded == original)
         #expect(decoded.fontSize == nil)
         #expect(decoded.fontName == nil)
+    }
+
+    /// Feature #54: a per-book override JSON written before #54 carries a
+    /// stray `readingMode` key. `Codable`'s synthesized `init(from:)`
+    /// ignores unknown keys, so it must decode cleanly into the trimmed
+    /// `PerBookSettingsOverride` — the known fields survive, the stray
+    /// key is dropped. (Also covers a backup blob restored AFTER the
+    /// launch migration ran — the migration re-run strips it next launch.)
+    @Test func perBookSettings_decodesOldJSON_withStrayReadingModeKey() throws {
+        let oldJSON = """
+        {
+          "fontSize": 21,
+          "fontName": "Georgia",
+          "lineSpacing": 1.7,
+          "themeName": "sepia",
+          "readingMode": "unified"
+        }
+        """
+        let decoded = try JSONDecoder().decode(
+            PerBookSettingsOverride.self, from: Data(oldJSON.utf8)
+        )
+        #expect(decoded.fontSize == 21)
+        #expect(decoded.fontName == "Georgia")
+        #expect(decoded.lineSpacing == 1.7)
+        #expect(decoded.themeName == "sepia")
     }
 
     // MARK: - Resolution Logic
@@ -146,10 +171,9 @@ struct PerBookSettingsTests {
         global.typography.lineSpacing = 1.4
         global.typography.fontFamily = .system
         global.theme = .paper
-        global.readingMode = .native
         let perBook = PerBookSettingsOverride(
             fontSize: 30, fontName: "serif", lineSpacing: 2.0,
-            letterSpacing: 0.1, themeName: "dark", readingMode: "unified"
+            letterSpacing: 0.1, themeName: "dark"
         )
         let resolved = PerBookSettingsStore.resolve(perBook: perBook, global: global)
         #expect(resolved.fontSize == 30)
@@ -157,7 +181,6 @@ struct PerBookSettingsTests {
         #expect(resolved.lineSpacing == 2.0)
         #expect(resolved.letterSpacing == 0.1)
         #expect(resolved.themeName == "dark")
-        #expect(resolved.readingMode == "unified")
     }
 
     // MARK: - Edge Cases
@@ -219,11 +242,10 @@ struct PerBookSettingsTests {
         store.typography.lineSpacing = 1.4
         store.typography.fontFamily = .system
         store.theme = .paper
-        store.readingMode = .native
 
         let resolved = ResolvedSettings(
             fontSize: 26, fontName: "serif", lineSpacing: 2.0,
-            letterSpacing: 0.1, themeName: "dark", readingMode: "unified"
+            letterSpacing: 0.1, themeName: "dark"
         )
         store.applyResolvedSettings(resolved)
 
@@ -231,7 +253,6 @@ struct PerBookSettingsTests {
         #expect(store.typography.fontFamily == .serif)
         #expect(store.typography.lineSpacing == 2.0)
         #expect(store.theme == .dark)
-        #expect(store.readingMode == .unified)
     }
 
     @Test @MainActor func applyResolvedSettings_doesNotPollutedUserDefaults() {
@@ -240,19 +261,13 @@ struct PerBookSettingsTests {
         let store = ReaderSettingsStore(defaults: defaults)
         store.typography.fontSize = 18
         store.theme = .paper
-        // Explicit set: ReaderSettingsStore only writes a key to UserDefaults
-        // when the property is explicitly assigned. The defaults assertion
-        // below ("readingMode is 'native' after apply") only makes sense if
-        // the test first writes "native" — otherwise the lookup returns nil
-        // and the assertion is meaningless.
-        store.readingMode = .native
 
-        // Verify global defaults are set to 18/light
+        // Verify global defaults are set to 18/paper
         #expect(defaults.double(forKey: ReaderSettingsStore.typographyKey) != 0 || defaults.data(forKey: ReaderSettingsStore.typographyKey) != nil)
 
         let resolved = ResolvedSettings(
             fontSize: 30, fontName: "serif", lineSpacing: 2.0,
-            letterSpacing: 0, themeName: "dark", readingMode: "unified"
+            letterSpacing: 0, themeName: "dark"
         )
         store.applyResolvedSettings(resolved)
 
@@ -264,18 +279,16 @@ struct PerBookSettingsTests {
         // Feature #60 WI-11: the global theme was set to `.paper`
         // (ReaderThemeV2), so the persisted rawValue is "paper".
         #expect(defaults.string(forKey: ReaderSettingsStore.themeKey) == "paper")
-        #expect(defaults.string(forKey: ReaderSettingsStore.readingModeKey) == "native")
     }
 
     @Test @MainActor func applyResolvedSettings_noopWhenAlreadyMatching() {
         let store = makeGlobalStore()
         store.typography.fontSize = 20
         store.theme = .sepia
-        store.readingMode = .native
 
         let resolved = ResolvedSettings(
             fontSize: 20, fontName: "system", lineSpacing: store.typography.lineSpacing,
-            letterSpacing: 0, themeName: "sepia", readingMode: "native"
+            letterSpacing: 0, themeName: "sepia"
         )
         store.applyResolvedSettings(resolved)
 
@@ -298,7 +311,7 @@ struct PerBookSettingsTests {
                 fontName: store.typography.fontFamily.rawValue,
                 lineSpacing: store.typography.lineSpacing,
                 letterSpacing: 0,
-                themeName: theme.rawValue, readingMode: store.readingMode.rawValue
+                themeName: theme.rawValue
             )
             store.applyResolvedSettings(resolved)
             #expect(store.theme == theme,
@@ -321,7 +334,7 @@ struct PerBookSettingsTests {
                 fontName: store.typography.fontFamily.rawValue,
                 lineSpacing: store.typography.lineSpacing,
                 letterSpacing: 0,
-                themeName: c.legacy, readingMode: store.readingMode.rawValue
+                themeName: c.legacy
             )
             store.applyResolvedSettings(resolved)
             #expect(store.theme == c.expected,
@@ -340,7 +353,7 @@ struct PerBookSettingsTests {
             fontName: store.typography.fontFamily.rawValue,
             lineSpacing: store.typography.lineSpacing,
             letterSpacing: 0,
-            themeName: "chartreuse", readingMode: store.readingMode.rawValue
+            themeName: "chartreuse"
         )
         store.applyResolvedSettings(resolved)
         #expect(store.theme == .dark,

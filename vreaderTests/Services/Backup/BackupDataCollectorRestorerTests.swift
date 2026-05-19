@@ -236,6 +236,48 @@ struct BackupCollectorRestorerSuite {
         #expect(defaultsB.string(forKey: "someUnrelatedAppKey") == nil)
     }
 
+    /// Feature #54 WI-5: `readerReadingMode` is no longer in
+    /// `BackupSettingsKeys.all` — new backups stop snapshotting the
+    /// retired key.
+    @Test func settingsKeys_doNotIncludeRetiredReadingModeKey() {
+        #expect(
+            !BackupSettingsKeys.all.contains("readerReadingMode"),
+            "feature #54 WI-5 removed `readerReadingMode` from BackupSettingsKeys.all"
+        )
+    }
+
+    /// Feature #54 WI-5: restoring an OLD backup whose settings section
+    /// still carries `readerReadingMode` must not crash — `restoreSettings`
+    /// is generic over the key list captured in the backup, so the orphan
+    /// key lands harmlessly in UserDefaults (the next launch's
+    /// `ReadingModeMigration.run` clears it; covered by
+    /// `ReadingModeMigrationTests`).
+    @Test func settingsRestore_oldBackupWithReadingMode_doesNotCrash() async throws {
+        let defaultsA = makeIsolatedDefaults(label: "oldRMA")
+        let defaultsB = makeIsolatedDefaults(label: "oldRMB")
+        // Simulate a pre-#54 backup source that still had the key set.
+        defaultsA.set("dark", forKey: "readerTheme")
+        defaultsA.set("unified", forKey: "readerReadingMode")
+
+        let persistence = try makePersistence()
+        let perBookDir = try makeTempDir(label: "old-rm")
+        let collector = BackupDataCollector(
+            persistence: persistence, defaults: defaultsA, perBookSettingsBaseURL: perBookDir
+        )
+        let data = try await collector.collectSettings()
+
+        let restorer = BackupDataRestorer(
+            persistence: persistence, defaults: defaultsB, perBookSettingsBaseURL: perBookDir
+        )
+        // Must not throw — restoreSettings is key-list-driven over the backup.
+        try await restorer.restoreSettings(from: data)
+        #expect(defaultsB.string(forKey: "readerTheme") == "dark")
+        // `readerReadingMode` is no longer collected (WI-5 removed it from
+        // `BackupSettingsKeys.all`), so a NEW backup of a pre-#54-style
+        // source does not carry it forward — it is simply absent.
+        #expect(defaultsB.string(forKey: "readerReadingMode") == nil)
+    }
+
     // MARK: - Annotations (highlights / bookmarks / notes)
 
     @Test func annotationsRoundTrip() async throws {
@@ -555,8 +597,7 @@ struct BackupCollectorRestorerSuite {
             fontName: "serif",
             lineSpacing: 1.8,
             letterSpacing: nil,
-            themeName: "sepia",
-            readingMode: nil
+            themeName: "sepia"
         )
         try PerBookSettingsStore.save(override, for: key, baseURL: perBookDirA)
 
@@ -581,7 +622,6 @@ struct BackupCollectorRestorerSuite {
         #expect(restored?.fontName == "serif")
         #expect(restored?.lineSpacing == 1.8)
         #expect(restored?.themeName == "sepia")
-        #expect(restored?.readingMode == nil)
     }
 
     // MARK: - Replacement Rules

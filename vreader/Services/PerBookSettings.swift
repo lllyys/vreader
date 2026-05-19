@@ -10,35 +10,36 @@
 // - File-based storage keeps per-book settings isolated from UserDefaults.
 //
 // @coordinates-with: ReaderSettingsStore.swift, ReaderTheme.swift,
-//   TypographySettings.swift, ReadingMode.swift, ReaderContainerView.swift
+//   TypographySettings.swift, ReaderContainerView.swift
 
 import Foundation
 
 // MARK: - Override Model
 
 /// Optional per-book overrides. nil fields inherit from global settings.
+///
+/// `Codable`'s synthesized `init(from:)` ignores unknown JSON keys, so an
+/// older per-book file that still carries a `readingMode` key (feature #54
+/// retired it) decodes harmlessly into this trimmed struct.
 struct PerBookSettingsOverride: Codable, Sendable, Equatable {
     var fontSize: CGFloat?
     var fontName: String?
     var lineSpacing: CGFloat?
     var letterSpacing: CGFloat?
     var themeName: String?
-    var readingMode: String?
 
     init(
         fontSize: CGFloat? = nil,
         fontName: String? = nil,
         lineSpacing: CGFloat? = nil,
         letterSpacing: CGFloat? = nil,
-        themeName: String? = nil,
-        readingMode: String? = nil
+        themeName: String? = nil
     ) {
         self.fontSize = fontSize
         self.fontName = fontName
         self.lineSpacing = lineSpacing
         self.letterSpacing = letterSpacing
         self.themeName = themeName
-        self.readingMode = readingMode
     }
 }
 
@@ -51,7 +52,6 @@ struct ResolvedSettings: Sendable, Equatable {
     let lineSpacing: CGFloat
     let letterSpacing: CGFloat
     let themeName: String
-    let readingMode: String
 }
 
 // MARK: - Store
@@ -101,8 +101,7 @@ enum PerBookSettingsStore {
                 fontName: globalFontName,
                 lineSpacing: global.typography.lineSpacing,
                 letterSpacing: globalLetterSpacing,
-                themeName: global.theme.rawValue,
-                readingMode: global.readingMode.rawValue
+                themeName: global.theme.rawValue
             )
         }
 
@@ -111,8 +110,7 @@ enum PerBookSettingsStore {
             fontName: perBook.fontName ?? globalFontName,
             lineSpacing: perBook.lineSpacing ?? global.typography.lineSpacing,
             letterSpacing: perBook.letterSpacing ?? globalLetterSpacing,
-            themeName: perBook.themeName ?? global.theme.rawValue,
-            readingMode: perBook.readingMode ?? global.readingMode.rawValue
+            themeName: perBook.themeName ?? global.theme.rawValue
         )
     }
 

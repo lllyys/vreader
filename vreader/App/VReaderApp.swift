@@ -129,6 +129,21 @@ struct VReaderApp: App {
             self.modelContainer = container
             self.initError = nil
 
+            // Feature #54 WI-5: one-shot migration retiring the
+            // Native/Unified reading mode — removes the
+            // `readerReadingMode` UserDefaults key and strips the
+            // `readingMode` field from per-book override JSON files.
+            // Run SYNCHRONOUSLY here, before the DebugBridge / any
+            // `ReaderSettingsStore` construction: the per-book JSON store
+            // has no actor/lock, so a detached migration could race a
+            // panel save or backup restore. At launch no reader is open
+            // and no panel is mounted, so the migration owns the
+            // per-book directory + UserDefaults. Idempotent.
+            ReadingModeMigration.run(
+                defaults: .standard,
+                perBookBaseURL: ReaderContainerView.perBookSettingsBaseURL
+            )
+
             #if DEBUG
             // Seed test data before creating the ViewModel to avoid race with LibraryView.loadBooks().
             // Uses Task.detached + semaphore to block init until seeding completes.
