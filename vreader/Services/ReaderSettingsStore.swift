@@ -209,12 +209,17 @@ final class ReaderSettingsStore {
         // Feature #60 WI-5: thread the V2 token surface through the
         // Markdown renderer so blockquotes and code-block backgrounds
         // pick up per-theme colors instead of platform defaults.
+        // Feature #68: accentColor / chapterHeadingColor thread the V2
+        // accent + sub tokens through so the MD chapter-start drop-cap
+        // and leading-heading restyle follow the active theme.
         MDRenderConfig(
             fontSize: typography.fontSize,
             lineSpacing: lineSpacingPoints,
             textColor: uiTextColor,
             secondaryColor: theme.subColor,
-            codeBackgroundColor: theme.paperColor
+            codeBackgroundColor: theme.paperColor,
+            accentColor: theme.accentColor,
+            chapterHeadingColor: theme.subColor
         )
     }
     var txtViewConfig: TXTViewConfig {

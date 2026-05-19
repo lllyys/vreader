@@ -16,9 +16,14 @@ final class MockMDParser: MDParserProtocol, @unchecked Sendable {
     /// Last text passed to parse.
     private(set) var lastParsedText: String?
 
+    /// Last config passed to parse (feature #68 — proves the renderConfig
+    /// plumbing reaches the parser instead of a hardcoded `.default`).
+    private(set) var lastParsedConfig: MDRenderConfig?
+
     func parse(text: String, config: MDRenderConfig) async -> MDDocumentInfo {
         parseCallCount += 1
         lastParsedText = text
+        lastParsedConfig = config
 
         if let info = documentInfoToReturn {
             return info

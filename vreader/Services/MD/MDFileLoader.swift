@@ -35,16 +35,22 @@ enum MDFileLoader {
     /// 1:1 UTF-16 for BMP CJK characters, so reading positions and
     /// highlights in source-text coordinates remain valid across a
     /// conversion change.
+    /// Feature #68: `renderConfig` (default `.default`) is forwarded to
+    /// `parser.parse` so the rendered attributed string picks up the
+    /// theme-aware colors. Replaces the previously-hardcoded
+    /// `MDRenderConfig.default`. Every existing call site that omits the
+    /// argument compiles and behaves exactly as before.
     static func load(
         url: URL,
         parser: any MDParserProtocol,
         positionStore: any ReadingPositionPersisting,
         bookFingerprintKey: String,
+        renderConfig: MDRenderConfig = .default,
         chineseConversion: ChineseConversionDirection = .none
     ) async throws -> MDLoadResult {
         // Stage 1: Read file, detect encoding, optionally apply Chinese
         // conversion, and parse on background thread.
-        let config = MDRenderConfig.default
+        let config = renderConfig
         let docInfo: MDDocumentInfo = try await Task.detached {
             let data = try Data(contentsOf: url)
             let result = try EncodingDetector.detect(data: data)

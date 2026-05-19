@@ -111,7 +111,20 @@ final class MDReaderViewModel {
     /// from the call site. Live re-apply on conversion-toggle is deferred
     /// (would require a close + reopen cycle); for now the conversion is
     /// applied at open time only.
-    func open(url: URL, chineseConversion: ChineseConversionDirection = .none) async {
+    ///
+    /// Feature #68: `renderConfig` (default `.default`) is forwarded to
+    /// `MDFileLoader.load` so the rendered attributed string picks up the
+    /// theme-aware body colors, and is also used to run
+    /// `MDChapterStartDecorator` over the result (drop-cap + leading-heading
+    /// restyle). Pass `settingsStore?.mdRenderConfig` from the call site.
+    /// MD has no live theme re-render path — the chapter-start colors apply
+    /// on the next open of the file, consistent with the Chinese-conversion
+    /// limitation above.
+    func open(
+        url: URL,
+        renderConfig: MDRenderConfig = .default,
+        chineseConversion: ChineseConversionDirection = .none
+    ) async {
         guard !isLoading else { return }
 
         // Guard against re-open
@@ -134,6 +147,7 @@ final class MDReaderViewModel {
                 parser: parser,
                 positionStore: positionStore,
                 bookFingerprintKey: bookFingerprintKey,
+                renderConfig: renderConfig,
                 chineseConversion: chineseConversion
             )
         } catch is CancellationError {
@@ -154,7 +168,20 @@ final class MDReaderViewModel {
         }
 
         renderedText = loadResult.documentInfo.renderedText
+        // Feature #68: apply the chapter-start typography (drop-cap +
+        // leading-heading restyle). The decorator only adds attributes —
+        // `renderedText` above stays the byte-identical undecorated
+        // string, so all UTF-16 offset math (positions/highlights/search)
+        // is unaffected.
+        #if canImport(UIKit)
+        renderedAttributedString = MDChapterStartDecorator.decorate(
+            loadResult.documentInfo.renderedAttributedString,
+            headings: loadResult.documentInfo.headings,
+            config: renderConfig
+        )
+        #else
         renderedAttributedString = loadResult.documentInfo.renderedAttributedString
+        #endif
         renderedTextLengthUTF16 = loadResult.documentInfo.renderedTextLengthUTF16
         currentOffsetUTF16 = loadResult.restoredOffsetUTF16
 
