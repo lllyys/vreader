@@ -98,6 +98,7 @@
 		13AA54A125EC714F17846B6B /* PageNavigatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 544A2F3FF8BBB1C08DDCE02D /* PageNavigatorTests.swift */; };
 		13EC9440F35FF01443E4FABF /* AnnotationAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B393E54ECE17C3DA3969EA4 /* AnnotationAnchorTests.swift */; };
 		1558B65D447DCD7705FE074C /* FoliateTTSAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C511C16F7FA93E91D703EE7 /* FoliateTTSAdapterTests.swift */; };
+		15A088563DCAA44A276CBC0A /* ChapterStartTypographyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98913241E6FA9EDD33571CB9 /* ChapterStartTypographyTests.swift */; };
 		15BC7FE6B105319B5709C4A9 /* GenerativeCoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F37CD153C986B71ECF9E65AB /* GenerativeCoverView.swift */; };
 		15C15DFE4818EDE663481250 /* MarkdownExportFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC38E517D1EE7098DCB96426 /* MarkdownExportFormatter.swift */; };
 		162BD09B52B59281D24750A2 /* MOBIMetadataParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87ECE13E023EB87748CF6B7B /* MOBIMetadataParserTests.swift */; };
@@ -542,6 +543,7 @@
 		84A03EDA45DB68CE01456609 /* SwiftDataSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B682E216B5A24055B696F0 /* SwiftDataSessionStore.swift */; };
 		85A21D4B6B18C0523D26375A /* HighlightPaintColorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1790A0CEB902B16952776EE4 /* HighlightPaintColorTests.swift */; };
 		85A712EBB7E4B4DF30EDEA13 /* VReaderAnnotationParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D036492CF6A9DB2DAFE010BC /* VReaderAnnotationParser.swift */; };
+		85C0767912F71AAE32E2335E /* ChapterStartTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FA36CFAC187DC7B25B7A920 /* ChapterStartTypography.swift */; };
 		85C11C4F2CA49FF77D34BBFB /* TXTBridgeSharedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AA8588621686E377D9D496 /* TXTBridgeSharedTests.swift */; };
 		860C6626A5AC805B4C622E70 /* EPUBFileLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5487566F93AB8376D1BD1F1B /* EPUBFileLoaderTests.swift */; };
 		863103455E8B23D20B97F192 /* EPUBHighlightRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3650C684EB90A5D7E2F8059A /* EPUBHighlightRenderer.swift */; };
@@ -1325,6 +1327,7 @@
 		4EE30F08BFCC54CF8598180F /* LaunchArgParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchArgParsingTests.swift; sourceTree = "<group>"; };
 		4F1348B555C6A2C90B03ED65 /* DebugBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBridge.swift; sourceTree = "<group>"; };
 		4F8AEC7D40405AE90840ABE4 /* HighlightRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightRenderer.swift; sourceTree = "<group>"; };
+		4FA36CFAC187DC7B25B7A920 /* ChapterStartTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterStartTypography.swift; sourceTree = "<group>"; };
 		4FE8B867BCF9BCDCF23941DB /* EPUBPreExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPreExtractorTests.swift; sourceTree = "<group>"; };
 		506F86FDA1498276D10E5E7B /* FoliateViewCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateViewCoordinator.swift; sourceTree = "<group>"; };
 		50AA77FDB19CB7EDA69418C8 /* ReaderUnifiedCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderUnifiedCoordinator.swift; sourceTree = "<group>"; };
@@ -1608,6 +1611,7 @@
 		982822FD76DDFB1EEE150FF0 /* ImportError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportError.swift; sourceTree = "<group>"; };
 		9844BEF447FBDBA15ADCEFAB /* TXTAttributedStringBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTAttributedStringBuilder.swift; sourceTree = "<group>"; };
 		98814DDDA2DB119CB5AA53A0 /* LegadoCompatibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegadoCompatibility.swift; sourceTree = "<group>"; };
+		98913241E6FA9EDD33571CB9 /* ChapterStartTypographyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterStartTypographyTests.swift; sourceTree = "<group>"; };
 		9893809AE39B5DF0233FEE42 /* ProviderProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderProfile.swift; sourceTree = "<group>"; };
 		995F86ACEA8D1CC36B0BC1A7 /* PagedModeBug82Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PagedModeBug82Tests.swift; sourceTree = "<group>"; };
 		99A5A212655DCE85CACDEC05 /* AnnotationImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationImporter.swift; sourceTree = "<group>"; };
@@ -3297,6 +3301,7 @@
 				319F6B718764EAF33C88ECC4 /* BookImporterNotificationTests.swift */,
 				5B8562BBBE45039B72EAF9E5 /* BookImporterOriginalExtensionTests.swift */,
 				C0FBDC41C60328ED4FB8A197 /* BookImporterTests.swift */,
+				98913241E6FA9EDD33571CB9 /* ChapterStartTypographyTests.swift */,
 				B442FC7A6A6ED344AB5C1FC9 /* CollectionPersistenceTests.swift */,
 				D6D8E56C3937A3FF796151EB /* CollectionTestHelper.swift */,
 				0616892213196BCF802266F8 /* ContentHasherTests.swift */,
@@ -3595,6 +3600,7 @@
 				593A77413CD93AEE33F15156 /* BookImporting.swift */,
 				A1A046B497B731C451670CED /* BookmarkPersisting.swift */,
 				7D04AA64724C4F9A15869C20 /* BookmarkRecord.swift */,
+				4FA36CFAC187DC7B25B7A920 /* ChapterStartTypography.swift */,
 				E5CB381B25E50D44505CAAB3 /* CustomCoverStore.swift */,
 				851277A5872045D4D935CE2B /* DictionaryLookup.swift */,
 				400D03ADE39639337E9993C5 /* FeatureFlags.swift */,
@@ -4127,6 +4133,7 @@
 				D58C1C22030A350773FCE33F /* ChangeTokenStoreTests.swift in Sources */,
 				48AC1E0108D690FE895D85BC /* ChapterCacheTests.swift in Sources */,
 				C618F3CA75B75B73513F8DE9 /* ChapterProgressCalculatorTests.swift in Sources */,
+				15A088563DCAA44A276CBC0A /* ChapterStartTypographyTests.swift in Sources */,
 				2DA32CDB11AE06DBCF3E97DE /* CloudKitRecordMapperTests.swift in Sources */,
 				E400E164FA809CC3AB0AC796 /* CollectionPersistenceTests.swift in Sources */,
 				3937725DB44FBDE74644583E /* CollectionTestHelper.swift in Sources */,
@@ -4564,6 +4571,7 @@
 				F27AD3A7527418A2667BE8B1 /* ChangeTokenStore.swift in Sources */,
 				73BD04AA03871D2C0AF2D3CA /* ChapterCache.swift in Sources */,
 				1C78AB9020A2E03A196FA6A1 /* ChapterProgressCalculator.swift in Sources */,
+				85C0767912F71AAE32E2335E /* ChapterStartTypography.swift in Sources */,
 				F51F7B9360A990E857FE1373 /* ChatMessage.swift in Sources */,
 				CD3F1CD3B0FD3B013D82E26D /* CloudKitClient.swift in Sources */,
 				479BBE7406AFCACEE1CA5EE3 /* CloudKitRecordMapper.swift in Sources */,
@@ -5094,13 +5102,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 465;
+				CURRENT_PROJECT_VERSION = 466;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.31.5;
+				MARKETING_VERSION = 3.31.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -5244,13 +5252,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 465;
+				CURRENT_PROJECT_VERSION = 466;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.31.5;
+				MARKETING_VERSION = 3.31.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
