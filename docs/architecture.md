@@ -165,6 +165,7 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `LibraryRefreshService`              | NotificationCenter         | Coalesces library refresh requests across views                           |
 | `FeatureFlags`                       | Static                     | Compile/runtime flag resolution (`SyncService` and others gate on it)     |
 | `DictionaryLookup`                   | UIKit                      | System dictionary + AI-translate hooks for selected text                  |
+| `ChapterTranslationStore`            | SwiftData (actor-isolated) | Persistent disk cache for feature #56 bilingual reading. Wraps its own `ModelContext` over the `ChapterTranslation` `@Model` (SchemaV7) — a separate actor from `PersistenceActor` so bulk translation writes during a global-translate run never block library reads. App-scoped `.shared` single instance (the `ProviderProfileStore.shared` precedent); idempotent `upsert` fetches by `lookupKey` and updates in place, never relying on the unique constraint to throw. Returns the value-type `ChapterTranslationRecord` DTO, never the `@Model`. The cache is derived, re-fetchable data — excluded from WebDAV backup |
 
 ### 6. Data Layer (`vreader/Models/`)
 
