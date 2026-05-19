@@ -132,6 +132,7 @@
 		1C78AB9020A2E03A196FA6A1 /* ChapterProgressCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 936C16A4F1B2B55E63922EE7 /* ChapterProgressCalculator.swift */; };
 		1C9B4E21A97013A7CC409925 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DAC8E20A001D7803A16AAD1 /* SearchView.swift */; };
 		1CB7C39AC6FE3B715D4B4305 /* V1toV2Migration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB16317C72EB6BBB61D77030 /* V1toV2Migration.swift */; };
+		1CE79EFAA809405FA4A0FA99 /* Feature64EPUBMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E89BEB1454E17061367313 /* Feature64EPUBMigrationTests.swift */; };
 		1D0B7D11E74A0E06F27A9F8B /* EPUBLayoutPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF348591A8246AA1524CD10 /* EPUBLayoutPreference.swift */; };
 		1D504D1EB7BAFF76A2B9F001 /* HighlightActionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FEF00B7A753219DC31C8AF7 /* HighlightActionPresenter.swift */; };
 		1D61E44D67F37555FDEA9B6C /* TXTFileLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B42D93C357CAAFB4261D93 /* TXTFileLoader.swift */; };
@@ -1984,6 +1985,7 @@
 		C2780A3796872F31F1666DA7 /* ReaderTOCBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTOCBuilder.swift; sourceTree = "<group>"; };
 		C2997AAAB34DF84E64DC0DB4 /* MOBICoverExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBICoverExtractor.swift; sourceTree = "<group>"; };
 		C2D49361893EE9956D6EC5DB /* TXTOffsetMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTOffsetMapper.swift; sourceTree = "<group>"; };
+		C2E89BEB1454E17061367313 /* Feature64EPUBMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feature64EPUBMigrationTests.swift; sourceTree = "<group>"; };
 		C3C15E361FF460BCE57B8675 /* EPUBParserProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBParserProtocol.swift; sourceTree = "<group>"; };
 		C3EF8CE8D52815CF5156953C /* WebDAVProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProvider.swift; sourceTree = "<group>"; };
 		C3F1695C0E7481CB3EA2B8A3 /* WebDAVBackupIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVBackupIntegrationTests.swift; sourceTree = "<group>"; };
@@ -2681,6 +2683,7 @@
 				003A86C3EF12A6B1DD4F5201 /* EPUBWebViewBridgeCoordinatorTests.swift */,
 				ABFBA14606BD14D14A8D5500 /* EPUBWebViewBridgeTests.swift */,
 				3422A641DD03B2ACCB6645EA /* Feature55WebHostWiringTests.swift */,
+				C2E89BEB1454E17061367313 /* Feature64EPUBMigrationTests.swift */,
 				62B304D30B717A1AB66C2A5B /* Feature64PDFMigrationTests.swift */,
 				1E4E3B1DC47242FC7A17BD69 /* Feature64TXTMDMigrationTests.swift */,
 				469B267E0D3DB05D1D8F530A /* FoliateHighlightJSBridgeTests.swift */,
@@ -4588,6 +4591,7 @@
 				E7493CC6D24CE5FD1922F9D0 /* ErrorMessageAuditorTests.swift in Sources */,
 				700CFFEC7C74E0532A0271F4 /* ExportTestFixtures.swift in Sources */,
 				5263D4201B4ABDDE4DF5FC14 /* Feature55WebHostWiringTests.swift in Sources */,
+				1CE79EFAA809405FA4A0FA99 /* Feature64EPUBMigrationTests.swift in Sources */,
 				49247074A9377434E7854644 /* Feature64PDFMigrationTests.swift in Sources */,
 				FE6F700872F797C727EECB85 /* Feature64TXTMDMigrationTests.swift in Sources */,
 				982FDBDA893DC7DA931711C7 /* FeatureFlagsTests.swift in Sources */,
