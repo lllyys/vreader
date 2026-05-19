@@ -71,19 +71,26 @@ struct ReaderMorePopoverTTSGateTests {
 
     @Test func allRows_visible_whenCapabilitiesNotSupplied() {
         // Backward compat: previews / older tests / call sites that do
-        // not supply `formatCapabilities` see every row — same default
-        // as the bug #156 / #158 gates (`nil` → show).
+        // not supply `formatCapabilities` see every non-conditional
+        // row — same default as the bug #156 / #158 gates (`nil` →
+        // show). Feature #56 WI-8: `.reTranslateChapter` is still
+        // gated on `bilingualOn` (default `false`) so it stays out
+        // of the default visible set.
         let rows = ReaderMoreMenuRow.visibleRows(for: nil)
-        #expect(rows == ReaderMoreMenuRow.allCases)
+        let expected = ReaderMoreMenuRow.allCases.filter { $0 != .reTranslateChapter }
+        #expect(rows == expected)
     }
 
     @Test func nonReadAloudRows_unaffected_byTTSGate() {
-        // The four non-TTS rows (Auto-turn / Book details / Share /
-        // Export) must survive the gate regardless of `.tts` — only the
-        // Read aloud row is capability-gated.
+        // The non-TTS rows (Auto-turn / Bilingual / Book details /
+        // Share / Export) must survive the gate regardless of `.tts`
+        // — only the Read aloud row is capability-gated.
+        // `.reTranslateChapter` is gated on bilingualOn, not TTS, so
+        // it's excluded from the loop.
         let caps = FormatCapabilities.capabilities(for: .pdf) // no `.tts`
         let rows = ReaderMoreMenuRow.visibleRows(for: caps)
-        for row in ReaderMoreMenuRow.allCases where row != .readAloud {
+        for row in ReaderMoreMenuRow.allCases
+        where row != .readAloud && row != .reTranslateChapter {
             #expect(
                 rows.contains(row),
                 "Expected \(row) to survive the TTS gate"
@@ -93,13 +100,22 @@ struct ReaderMorePopoverTTSGateTests {
 
     @Test func visibleRows_preserveDeclaredOrder() {
         // Filtering must not reorder rows — `ReaderMorePopover` draws its
-        // divider after `.autoTurnPages` by index, so order is a
-        // contract.
+        // divider after the runtime cluster anchor by index, so order
+        // is a contract.
+        //
+        // Feature #56 WI-8: the default `bilingualOn=false` hides
+        // `.reTranslateChapter`, so the visible set is `allCases`
+        // minus that row plus whatever the TTS gate filters out.
         let withTTS = ReaderMoreMenuRow.visibleRows(for: [.tts])
-        #expect(withTTS == ReaderMoreMenuRow.allCases)
+        let expectedWithTTS = ReaderMoreMenuRow.allCases.filter {
+            $0 != .reTranslateChapter
+        }
+        #expect(withTTS == expectedWithTTS)
 
         let withoutTTS = ReaderMoreMenuRow.visibleRows(for: [])
-        let expected = ReaderMoreMenuRow.allCases.filter { $0 != .readAloud }
+        let expected = ReaderMoreMenuRow.allCases.filter {
+            $0 != .readAloud && $0 != .reTranslateChapter
+        }
         #expect(withoutTTS == expected)
     }
 
@@ -156,7 +172,11 @@ struct ReaderMorePopoverTTSGateTests {
 
     @MainActor
     @Test func popover_resolvedRows_allRows_whenCapabilitiesNil() {
-        // The popover's `nil` default still renders every row.
-        #expect(makePopover(capabilities: nil).resolvedRows == ReaderMoreMenuRow.allCases)
+        // The popover's `nil` default renders every non-conditional
+        // row. Feature #56 WI-8: `.reTranslateChapter` is gated on
+        // bilingual state (`.off` by default in `makePopover`) so it
+        // stays out of the visible set.
+        let expected = ReaderMoreMenuRow.allCases.filter { $0 != .reTranslateChapter }
+        #expect(makePopover(capabilities: nil).resolvedRows == expected)
     }
 }

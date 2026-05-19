@@ -92,6 +92,11 @@ struct BookDetailsRouteTests {
     func everyRowResolvesToItsEffect() {
         #expect(ReaderMoreMenuEffect(row: .readAloud) == .toggleReadAloud)
         #expect(ReaderMoreMenuEffect(row: .autoTurnPages) == .toggleAutoPageTurn)
+        // Feature #56 WI-8: bilingual + re-translate rows resolve to
+        // their per-format-container effects (host action is owned by
+        // the BilingualReadingViewModel / ReTranslatePickerSheet).
+        #expect(ReaderMoreMenuEffect(row: .bilingual) == .toggleBilingual)
+        #expect(ReaderMoreMenuEffect(row: .reTranslateChapter) == .presentReTranslatePicker)
         #expect(ReaderMoreMenuEffect(row: .bookDetails) == .presentBookDetails)
         #expect(ReaderMoreMenuEffect(row: .shareBook) == .presentShareSheet)
         #expect(ReaderMoreMenuEffect(row: .exportAnnotations) == .presentAnnotationsExport)

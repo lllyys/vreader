@@ -89,10 +89,21 @@ extension Notification.Name {
     /// `.readerMoreToggleAutoTurn` flips `ReaderSettingsStore.autoPageTurn`
     /// (the only row with real backing state — the design draws it as
     /// a toggle). `.readerMoreBookDetails` opens the reader Book Details
-    /// sheet (`BookDetailsSheet`, feature #61). The design's Bilingual
-    /// row is deferred (GH #790) — no notification for it.
+    /// sheet (`BookDetailsSheet`, feature #61).
+    ///
+    /// Feature #56 WI-8 — the bilingual row returns (formerly deferred
+    /// under GH #790): `.readerMoreBilingual` is posted from the
+    /// bilingual row; host containers route it to the
+    /// `BilingualReadingViewModel.setEnabled(...)` toggle, except in
+    /// the `.unavailable` state where the host routes to AI Settings.
+    /// `.readerMoreReTranslateChapter` is posted from the conditional
+    /// re-translate row (design §#864); the host presents
+    /// `ReTranslatePickerSheet`. The re-translate row is only visible
+    /// when bilingual mode is on for the book.
     static let readerMoreReadAloud = Notification.Name("vreader.readerMoreReadAloud")
     static let readerMoreToggleAutoTurn = Notification.Name("vreader.readerMoreToggleAutoTurn")
+    static let readerMoreBilingual = Notification.Name("vreader.readerMoreBilingual")
+    static let readerMoreReTranslateChapter = Notification.Name("vreader.readerMoreReTranslateChapter")
     static let readerMoreBookDetails = Notification.Name("vreader.readerMoreBookDetails")
     static let readerMoreShareBook = Notification.Name("vreader.readerMoreShareBook")
     static let readerMoreExportAnnotations = Notification.Name("vreader.readerMoreExportAnnotations")

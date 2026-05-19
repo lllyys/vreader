@@ -341,6 +341,24 @@ extension ReaderContainerView {
             // `autoPageTurn` is live-applied by the paged TXT/MD
             // containers' `onChange` observers.
             settingsStore.autoPageTurn.toggle()
+        case .toggleBilingual:
+            // Feature #56 WI-8: the popover posts
+            // `.readerMoreBilingual`; the actual
+            // `BilingualReadingViewModel.setEnabled(...)` wiring lives
+            // in the per-format containers (WI-10..13). The
+            // `.unavailable` state's routing to AI Settings also lives
+            // there — the host VM is the source of truth for AI
+            // availability. This switch is intentionally a no-op so
+            // the popover dismisses cleanly while the row's
+            // notification reaches the per-format observer.
+            break
+        case .presentReTranslatePicker:
+            // Feature #56 WI-8: the popover posts
+            // `.readerMoreReTranslateChapter`; the `ReTranslatePickerSheet`
+            // presentation lives in the per-format containers
+            // (WI-15). This switch is a no-op for the same reason as
+            // `.toggleBilingual`.
+            break
         case .presentBookDetails:
             showBookDetails = true
         case .presentShareSheet:
