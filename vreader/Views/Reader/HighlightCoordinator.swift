@@ -20,6 +20,23 @@
 #if canImport(UIKit)
 import Foundation
 
+/// Feature #64 — the highlight-mutation boundary the unified highlight-action
+/// popover's router dispatches through. A protocol (not the concrete
+/// `HighlightCoordinator`) so `HighlightPopoverActionRouter` is unit-testable
+/// with a fake. `HighlightCoordinator` is the production conformer.
+@MainActor
+protocol HighlightMutating: AnyObject {
+    /// Persists a new color and repaints the rendered highlight.
+    func changeColor(highlightID: UUID, to color: String) async -> HighlightMutationOutcome
+    /// Persists a note edit (no reader-surface repaint).
+    func updateNote(highlightID: UUID, note: String?) async -> HighlightMutationOutcome
+    /// Deletes a highlight from persistence and clears its rendered visual.
+    /// Returns a typed outcome: `.success` (record carries the deleted
+    /// highlight), `.notFound` (already gone — a concurrent-deletion race),
+    /// `.failed` (a generic persistence error).
+    func deleteHighlight(highlightID: UUID) async -> HighlightMutationOutcome
+}
+
 /// Coordinates highlight create/delete/restore across persistence and rendering.
 @MainActor
 final class HighlightCoordinator {
@@ -219,5 +236,53 @@ final class HighlightCoordinator {
         let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : note
     }
+
+    /// Feature #64 WI-3/WI-4 — deletes a highlight from persistence and clears
+    /// its rendered visual via the `.readerHighlightRemoved` notification
+    /// (the existing Bug #78 visual-clear pipeline).
+    ///
+    /// Returns a typed `HighlightMutationOutcome` so the popover presenter
+    /// routes consistently with `changeColor` / `updateNote` (R1-5): the
+    /// record is fetched up front so a concurrent-deletion race is
+    /// `.notFound` (the popover dismisses) rather than collapsing into a
+    /// generic failure that wrongly keeps a stale surface open. A genuine
+    /// persistence error is `.failed` — the popover stays, no UI alert (the
+    /// same precedent as `handleTapAction`).
+    ///
+    /// This is the unified popover's `confirmDelete` path — it supersedes the
+    /// feature #53 `handleTapAction(.delete)` route (removed in WI-10).
+    func deleteHighlight(highlightID: UUID) async -> HighlightMutationOutcome {
+        // Fetch the record up front — both to return it on `.success` and to
+        // distinguish "already gone" (.notFound) from a fetch failure.
+        let records: [HighlightRecord]
+        do {
+            records = try await persistence.fetchHighlights(forBookWithKey: bookFingerprintKey)
+        } catch {
+            return .failed
+        }
+        guard let record = records.first(where: { $0.highlightId == highlightID }) else {
+            return .notFound
+        }
+        do {
+            try await persistence.removeHighlight(highlightId: highlightID)
+        } catch let error as PersistenceError {
+            if case .recordNotFound = error { return .notFound }
+            return .failed
+        } catch {
+            return .failed
+        }
+        NotificationCenter.default.post(
+            name: .readerHighlightRemoved,
+            object: highlightID.uuidString
+        )
+        return .success(record)
+    }
 }
+
+// MARK: - HighlightMutating (Feature #64)
+
+/// `HighlightCoordinator` is the production conformer of the popover's
+/// highlight-mutation boundary. `changeColor` / `updateNote` / `deleteHighlight`
+/// are already defined above — this declares the conformance.
+extension HighlightCoordinator: HighlightMutating {}
 #endif

@@ -125,7 +125,19 @@ private actor MutMockPersistence: HighlightPersisting {
         fatalError("unused in WI-3 mutation tests")
     }
 
-    func removeHighlight(highlightId: UUID) async throws {}
+    private(set) var removeCallCount = 0
+
+    func removeHighlight(highlightId: UUID) async throws {
+        switch mode {
+        case .recordNotFound:
+            throw PersistenceError.recordNotFound("Highlight \(highlightId)")
+        case .genericFailure:
+            throw NSError(domain: "test", code: 99)
+        case .success:
+            removeCallCount += 1
+            stored[highlightId] = nil
+        }
+    }
 
     func updateHighlightNote(highlightId: UUID, note: String?) async throws {
         switch mode {
@@ -417,6 +429,53 @@ struct HighlightCoordinatorMutationTests {
         // Whitespace is preserved on a non-empty note — only an all-whitespace
         // draft normalizes to nil.
         #expect(await persistence.lastNote == "  real note  ")
+    }
+
+    // MARK: deleteHighlight (Feature #64 WI-4)
+
+    @Test @MainActor func deleteHighlight_success_returnsSuccessAndRemoves() async {
+        let renderer = MutMockRenderer()
+        let persistence = MutMockPersistence()
+        let record = mutRecord()
+        await persistence.seed(record)
+        let coordinator = HighlightCoordinator(
+            renderer: renderer, persistence: persistence, bookFingerprintKey: "book-1"
+        )
+        let outcome = await coordinator.deleteHighlight(highlightID: record.highlightId)
+        guard case let .success(returned) = outcome else {
+            Issue.record("expected .success, got \(outcome)")
+            return
+        }
+        #expect(returned.highlightId == record.highlightId)
+        #expect(await persistence.removeCallCount == 1)
+    }
+
+    /// A delete on a highlight that no longer exists → `.notFound` (the
+    /// up-front fetch finds no matching record).
+    @Test @MainActor func deleteHighlight_recordGone_returnsNotFound() async {
+        let renderer = MutMockRenderer()
+        let persistence = MutMockPersistence()  // nothing seeded
+        let coordinator = HighlightCoordinator(
+            renderer: renderer, persistence: persistence, bookFingerprintKey: "book-1"
+        )
+        let outcome = await coordinator.deleteHighlight(highlightID: UUID())
+        #expect(outcome == .notFound)
+        #expect(await persistence.removeCallCount == 0)
+    }
+
+    /// A generic persistence failure on the remove call → `.failed`.
+    @Test @MainActor func deleteHighlight_removeThrowsGeneric_returnsFailed() async {
+        let renderer = MutMockRenderer()
+        let persistence = MutMockPersistence()
+        let record = mutRecord()
+        await persistence.seed(record)
+        await persistence.setMode(.genericFailure)
+        let coordinator = HighlightCoordinator(
+            renderer: renderer, persistence: persistence, bookFingerprintKey: "book-1"
+        )
+        // The up-front fetch also fails under .genericFailure → .failed.
+        let outcome = await coordinator.deleteHighlight(highlightID: record.highlightId)
+        #expect(outcome == .failed)
     }
 }
 #endif
