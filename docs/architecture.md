@@ -52,8 +52,11 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 `engineReaderView(fingerprint:)`, which switches on `ReaderEngine.resolve(format:)`
 — an internal per-format engine selector (feature #54). The dispatch no
 longer consults a reading-mode preference, and the reader-settings Reading
-Mode picker UI is gone. (The `readerReadingMode` UserDefaults key + the
-`ReadingMode` enum are removed in a later feature-#54 work item.)
+Mode picker UI is gone. The `readerReadingMode` UserDefaults key and the
+`ReadingMode` enum have been removed; `ReadingModeMigration` (run
+synchronously at launch from `VReaderApp`) clears the retired key from
+UserDefaults and strips the `readingMode` field from per-book override
+JSON files.
 
 - `.textNative` → `TXTReaderHost`, `.markdownNative` → `MDReaderHost`,
   `.epubWKWebView` → `EPUBReaderHost`, `.pdfKit` → `PDFReaderHost`,
