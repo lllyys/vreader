@@ -97,7 +97,7 @@ Each host owns its ViewModel lifecycle via `@State`:
 
 #### Unified Engine (retained, not dispatched)
 
-`ReaderUnifiedCoordinator` loads text + applies transforms (replacement rules, simp/trad); `UnifiedTextRenderer` displays with TextKit 2 pagination or scroll. Feature #54 removed the Native/Unified toggle, so this stack is **no longer reachable from the reader dispatch** — it is retained (a follow-up may consume it for bilingual reading, or delete it once provably orphaned).
+`ReaderUnifiedCoordinator` loads text + applies transforms (replacement rules, simp/trad); `UnifiedTextRenderer` displays with TextKit 2 pagination or scroll. Feature #54 removed the unified path from the reader dispatch, so this stack is **no longer reachable from reader dispatch** — it is retained (a follow-up may consume it for bilingual reading, or delete it once provably orphaned). The reader-settings Reading Mode picker UI is removed in a later feature-#54 work item.
 
 ### 4. Coordinator Layer (`vreader/Views/Reader/`)
 
