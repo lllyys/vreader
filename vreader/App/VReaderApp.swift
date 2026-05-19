@@ -130,6 +130,16 @@ struct VReaderApp: App {
             self.modelContainer = container
             self.initError = nil
 
+            // Feature #56 WI-2: wire the bilingual-reading translation cache
+            // (`ChapterTranslationStore.shared`) to the app's own
+            // `ModelContainer` — the same store file + migration/config
+            // selection. Self-building a second container would split-brain
+            // the cache when the app runs in-memory (UI tests). `configure`
+            // is actor-isolated, so it runs in a Task; bilingual mode is
+            // feature-flag-gated off and only reachable long after launch,
+            // so the store is configured well before any caller touches it.
+            Task { await ChapterTranslationStore.shared.configure(modelContainer: container) }
+
             // Feature #54 WI-5: one-shot migration retiring the
             // Native/Unified reading mode — removes the
             // `readerReadingMode` UserDefaults key and strips the
