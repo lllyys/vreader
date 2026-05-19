@@ -78,9 +78,22 @@ case "$BRANCH" in
 esac
 
 # Detect docs/meta-only PRs that don't need a code audit.
-# Fail open if the diff command itself fails (no upstream main, etc.).
+#
+# Diff against origin/main with a three-dot range (merge-base...HEAD),
+# NOT the local `main` ref. The local `main` ref is shared by every
+# worktree under one repo and is routinely stale — a two-dot
+# `git diff main..HEAD` from a worktree picks up Swift files from
+# OTHER PRs that merged into main after this branch forked, wrongly
+# flagging a docs-only PR as Swift-touching. `origin/main...HEAD`
+# (after a best-effort fetch) counts only the files THIS branch
+# changed since it diverged from origin/main.
+#
+# Fail open if the diff itself fails (offline, no upstream main, etc.).
 SWIFT_TOUCHED="no"
-if CHANGED="$(git diff main..HEAD --name-only 2>/dev/null)"; then
+git fetch origin main --quiet 2>/dev/null || true
+DIFF_BASE="origin/main"
+git rev-parse --verify --quiet origin/main >/dev/null 2>&1 || DIFF_BASE="main"
+if CHANGED="$(git diff "${DIFF_BASE}...HEAD" --name-only 2>/dev/null)"; then
     if echo "$CHANGED" | grep -qE '^(vreader/|vreaderTests/)'; then
         SWIFT_TOUCHED="yes"
     fi
