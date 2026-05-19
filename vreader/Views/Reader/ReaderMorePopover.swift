@@ -148,13 +148,14 @@ struct ReaderMorePopover: View {
         // format without a wired TTS path — PDF) and gate the
         // re-translate row on bilingual on/off before rendering. The
         // divider follows the runtime cluster boundary — last visible
-        // bilingual-cluster row.
+        // bilingual-cluster row, falling back defensively if both
+        // are filtered out.
         let rows = resolvedRows
         let dividerAnchor = ReaderMoreMenuRow.dividerAnchor(in: rows)
         return VStack(spacing: 0) {
             ForEach(rows, id: \.self) { row in
                 rowButton(row)
-                if row == dividerAnchor {
+                if let anchor = dividerAnchor, row == anchor {
                     divider
                 }
             }
@@ -286,9 +287,12 @@ struct ReaderMorePopover: View {
 
     /// Trailing accessory — driven by `ReaderMoreMenuRow.trailingControl`:
     /// an inline toggle switch for the toggle rows (Auto-turn,
-    /// Bilingual off/on), a chevron for tap rows (and the bilingual
-    /// `.unavailable` state, per design §2.3), nothing when the row
-    /// requests `.none`.
+    /// Bilingual off/on), a chevron for tap rows (including the
+    /// bilingual `.unavailable` state per design §2.3 — `trailingControl`
+    /// returns `.chevron` for that state, not `.none`). `.none`
+    /// renders no trailing accessory; no row currently uses it, but
+    /// the variant is preserved so the design's "no trailing control"
+    /// possibility remains expressible.
     @ViewBuilder
     private func trailingAccessory(for row: ReaderMoreMenuRow) -> some View {
         switch row.trailingControl(
@@ -302,13 +306,7 @@ struct ReaderMorePopover: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(Color(theme.subColor))
         case .none:
-            // Design §2.3: bilingual unavailable state draws a chevron
-            // to signal "tap to configure" — the row is disabled but
-            // tappable. `.none` for the toggle slot is paired with a
-            // chevron drawn here so the affordance stays visible.
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color(theme.subColor))
+            EmptyView()
         }
     }
 

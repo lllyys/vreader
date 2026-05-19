@@ -200,16 +200,17 @@ struct ReaderMoreMenuBilingualTests {
         #expect(control == .toggle(true))
     }
 
-    @Test("Bilingual.unavailable renders .none (no toggle) — chevron drawn separately")
+    @Test("Bilingual.unavailable renders a chevron (no toggle — tap-to-configure)")
     func bilingualUnavailableTrailing() {
         // Per design §2.3: "(no toggle)" + "Configure AI provider first
-        // + chevron". The sub-detail carries the chevron via the row's
-        // tap-row default; `trailingControl` returns `.none` for the
-        // toggle slot.
+        // + chevron". `trailingControl` returns `.chevron` for the
+        // unavailable state — the iOS-standard "Settings → Cellular
+        // when no SIM" pattern. The toggle slot is replaced by the
+        // tap-row chevron so the row reads as "tap to configure".
         let control = ReaderMoreMenuRow.bilingual.trailingControl(
             bilingualState: .unavailable, autoTurnOn: false
         )
-        #expect(control == .none)
+        #expect(control == .chevron)
     }
 
     @Test("Re-translate row renders a chevron (tap row)")
@@ -400,5 +401,72 @@ struct ReaderMorePopoverBilingualTests {
             #expect(popover.resolvedRows.contains(.bilingual),
                     "bilingual row missing for state \(state)")
         }
+    }
+
+    // MARK: - Defensive: dividerAnchor fallback
+
+    @Test func dividerAnchor_fallsBack_whenBothBilingualRowsHidden() {
+        // Future capability filter could hide both bilingual-cluster
+        // rows. The anchor must fall back to an actually-rendered
+        // row so the divider doesn't silently vanish.
+        let rows: [ReaderMoreMenuRow] = [.readAloud, .autoTurnPages,
+                                          .bookDetails, .shareBook, .exportAnnotations]
+        let anchor = ReaderMoreMenuRow.dividerAnchor(in: rows)
+        #expect(anchor != nil)
+        if let a = anchor {
+            #expect(rows.contains(a),
+                    "fallback anchor must be present in the visible rows")
+        }
+    }
+
+    @Test func dividerAnchor_isNil_whenRowsEmpty() {
+        // Empty input → nil. The popover renders nothing in this case.
+        #expect(ReaderMoreMenuRow.dividerAnchor(in: []) == nil)
+    }
+
+    // MARK: - Defensive: empty / whitespace target-language
+
+    @Test func bilingualOnSub_safeOn_whenTargetIsEmpty() {
+        let sub = ReaderMoreMenuRow.bilingual.subDetail(
+            ttsPlaying: false, autoTurnOn: false, autoTurnInterval: 30,
+            bilingualState: .on(targetLanguage: "")
+        )
+        // Falls back to a generic "On" label rather than "English ↔ ".
+        #expect(sub == "On")
+    }
+
+    @Test func bilingualOnSub_safeOn_whenTargetIsWhitespace() {
+        let sub = ReaderMoreMenuRow.bilingual.subDetail(
+            ttsPlaying: false, autoTurnOn: false, autoTurnInterval: 30,
+            bilingualState: .on(targetLanguage: "   \t  ")
+        )
+        #expect(sub == "On")
+    }
+
+    @Test func bilingualOnSub_trimsAndRendersCJKTarget() {
+        // A long CJK target language ("简体中文") is functional —
+        // SwiftUI truncates if necessary. Trimming whitespace doesn't
+        // change CJK content; the sub-detail renders the trimmed
+        // language verbatim.
+        let sub = ReaderMoreMenuRow.bilingual.subDetail(
+            ttsPlaying: false, autoTurnOn: false, autoTurnInterval: 30,
+            bilingualState: .on(targetLanguage: "  简体中文  ")
+        )
+        #expect(sub == "English \u{2194} 简体中文")
+    }
+
+    // MARK: - Observer wiring (regression for Gate 4 High finding)
+
+    @Test func actionObserverDispatches_bilingualNotification() async {
+        // Posting `.readerMoreBilingual` must surface in the host's
+        // `(ReaderMoreMenuRow) -> Void` funnel as `.bilingual`. The
+        // round-trip goes Notification → init?(notification:) → row.
+        // The observer modifier lives in `ReaderMorePopoverParts`;
+        // here we verify the funnel logic via the inverse initializer
+        // (the same path `ReaderMoreMenuActionObservers.dispatch`
+        // uses). A future regression that drops the inverse case
+        // would fail at runtime — this test pins it at compile time.
+        #expect(ReaderMoreMenuRow(notification: .readerMoreBilingual) == .bilingual)
+        #expect(ReaderMoreMenuRow(notification: .readerMoreReTranslateChapter) == .reTranslateChapter)
     }
 }

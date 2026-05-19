@@ -1,9 +1,10 @@
-// Purpose: Feature #60 WI-6c — supporting parts for the reader
-// More-menu popover: the inline toggle switch rendered in the
-// Auto-turn row, and the `ReaderMoreMenuActionObservers` modifier that
-// bundles the five More-menu notification observers for the host.
-// Split out of `ReaderMorePopover.swift` to keep both files under the
-// ~300-line guideline.
+// Purpose: Feature #60 WI-6c / Feature #56 WI-8 — supporting parts
+// for the reader More-menu popover: the inline toggle switch rendered
+// in the toggle rows (Auto-turn, Bilingual off/on), and the
+// `ReaderMoreMenuActionObservers` modifier that bundles every
+// More-menu notification observer for the host. Split out of
+// `ReaderMorePopover.swift` to keep both files under the ~300-line
+// guideline.
 //
 // @coordinates-with: ReaderMorePopover.swift, ReaderMoreMenuRow.swift,
 //   ReaderThemeV2.swift, ReaderContainerView+Sheets.swift,
@@ -49,17 +50,20 @@ struct ReaderMoreToggle: View {
 
 // MARK: - More-menu action observers
 
-/// Feature #60 WI-6c: bundles the five More-menu notification
-/// observers into a single modifier, mirroring `ReaderToolbarActionObservers`
-/// (WI-6b). `ReaderContainerView` applies it as one `.modifier(...)`
-/// rather than five chained `.onReceive`s — its `body` is already near
-/// the Swift type-checker's expression-complexity ceiling.
+/// Feature #60 WI-6c / Feature #56 WI-8: bundles every More-menu
+/// notification observer into a single modifier, mirroring
+/// `ReaderToolbarActionObservers` (WI-6b). `ReaderContainerView`
+/// applies it as one `.modifier(...)` rather than chained
+/// `.onReceive`s — its `body` is already near the Swift type-checker's
+/// expression-complexity ceiling.
 ///
 /// Each observer maps its notification back to the `ReaderMoreMenuRow`
 /// that posted it via `ReaderMoreMenuRow(notification:)` (the inverse
 /// of `.notification`) and hands the row to a single
 /// `(ReaderMoreMenuRow) -> Void` callback, so the host has one action
-/// funnel instead of five.
+/// funnel for the entire row set. WI-8 adds the bilingual +
+/// re-translate-chapter observers so the new rows route through the
+/// same funnel as the legacy five.
 struct ReaderMoreMenuActionObservers: ViewModifier {
     let onAction: (ReaderMoreMenuRow) -> Void
 
@@ -71,6 +75,8 @@ struct ReaderMoreMenuActionObservers: ViewModifier {
         content
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreReadAloud), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreToggleAutoTurn), perform: dispatch)
+            .onReceive(NotificationCenter.default.publisher(for: .readerMoreBilingual), perform: dispatch)
+            .onReceive(NotificationCenter.default.publisher(for: .readerMoreReTranslateChapter), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreBookDetails), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreShareBook), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreExportAnnotations), perform: dispatch)
@@ -86,8 +92,8 @@ struct ReaderMoreMenuActionObservers: ViewModifier {
 }
 
 extension View {
-    /// Attaches the five More-menu action observers (Feature #60
-    /// WI-6c). See `ReaderMoreMenuActionObservers`.
+    /// Attaches the More-menu action observers (Feature #60 WI-6c /
+    /// Feature #56 WI-8). See `ReaderMoreMenuActionObservers`.
     func readerMoreMenuActionObservers(
         onAction: @escaping (ReaderMoreMenuRow) -> Void
     ) -> some View {

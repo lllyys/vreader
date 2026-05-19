@@ -102,14 +102,28 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
     /// The runtime divider anchor — the LAST visible row of the
     /// bilingual cluster (Bilingual / Re-translate). Returns
     /// `.bilingual` when the re-translate row is hidden; returns
-    /// `.reTranslateChapter` when both rows are present. Falls back
-    /// to the static `dividerAfter` when neither is in `rows` (the
-    /// permissive default — never expected in production but keeps
-    /// the popover stable under unusual capability filters).
-    static func dividerAnchor(in rows: [ReaderMoreMenuRow]) -> ReaderMoreMenuRow {
+    /// `.reTranslateChapter` when both rows are present.
+    ///
+    /// Defensive fallback: when neither bilingual-cluster row is in
+    /// `rows` (a future capability filter that hides both — not
+    /// expected in production today since `.bilingual` is currently
+    /// never gated, but possible), the anchor falls back to the
+    /// nearest visible row preceding the bilingual cluster's
+    /// declared position. This keeps the divider visible — it always
+    /// trails a row that IS rendered — and preserves the
+    /// between-clusters semantic. Returns `nil` only when `rows`
+    /// is empty, in which case the popover renders no rows anyway.
+    static func dividerAnchor(in rows: [ReaderMoreMenuRow]) -> ReaderMoreMenuRow? {
         if rows.contains(.reTranslateChapter) { return .reTranslateChapter }
         if rows.contains(.bilingual)          { return .bilingual }
-        return dividerAfter
+        // Defensive: prefer the row immediately preceding the
+        // bilingual cluster's declared position, then walk back, then
+        // walk forward into the book-action cluster as a last resort.
+        let preferredFallbacks: [ReaderMoreMenuRow] = [
+            .autoTurnPages, .readAloud,
+            .bookDetails, .shareBook, .exportAnnotations
+        ]
+        return preferredFallbacks.first(where: rows.contains)
     }
 
     /// Notification posted on tap. `ReaderContainerView` observes all
@@ -231,9 +245,11 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
             case .on:
                 return .toggle(true)
             case .unavailable:
-                // Design §2.3: no toggle in the unavailable state. The
-                // popover draws the chevron via the tap-row default.
-                return .none
+                // Design §2.3: no toggle in the unavailable state.
+                // Render the standard tap-row chevron so the row
+                // signals "tap to configure" — the iOS-standard
+                // "Settings → Cellular when no SIM" pattern.
+                return .chevron
             }
         case .readAloud, .reTranslateChapter, .bookDetails, .shareBook, .exportAnnotations:
             return .chevron
@@ -330,7 +346,18 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
                 // More-menu sub-detail is the design-prescribed bidi
                 // pair regardless. Future refinement may thread the
                 // detected source language; the design copy doesn't.
-                return "English \u{2194} \(target)"
+                //
+                // Defensive: a drifted persisted target (empty /
+                // whitespace-only) would render "English ↔ " with
+                // trailing whitespace. Trim the target; when empty,
+                // fall back to a safe generic "On" label rather than
+                // producing malformed copy. Production callers (the
+                // bilingual VM) always carry a `BILINGUAL_LANGS`
+                // value, but per-book JSON drift / future migrations
+                // remain plausible.
+                let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { return "On" }
+                return "English \u{2194} \(trimmed)"
             case .unavailable:
                 return "Configure AI provider first"
             }
