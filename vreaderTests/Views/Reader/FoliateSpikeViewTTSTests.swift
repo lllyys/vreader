@@ -69,13 +69,26 @@ struct FoliateSpikeViewTTSTests {
                 "Feature #57: extractPlainText must return nil when the weak webView is gone — a dismissed reader must not crash")
     }
 
-    @Test("extractPlainText evaluates exactly the readerAPI.extractPlainText() literal (no interpolation, no injection surface)")
+    @Test("extractPlainText runs exactly the fixed readerAPI.extractPlainText() body (no interpolation, no injection surface)")
     func extractPlainText_evaluatesExactHelperScript() {
-        // The evaluated JS is a fixed literal — there is no string
-        // interpolation of book content or user input into it, so
-        // there is no JS-injection surface. Pinned so a refactor that
-        // accidentally interpolates is caught.
-        #expect(FoliateSpikeView.Coordinator.extractPlainTextScript == "readerAPI.extractPlainText()")
+        // The callAsyncJavaScript body is a fixed literal — there is no
+        // string interpolation of book content or user input into it,
+        // so there is no JS-injection surface. Pinned so a refactor
+        // that accidentally interpolates is caught. `callAsyncJavaScript`
+        // (not evaluateJavaScript) is used so the returned Promise is
+        // awaited — hence the `return await` form.
+        #expect(FoliateSpikeView.Coordinator.extractPlainTextScript
+                == "return await readerAPI.extractPlainText();")
+    }
+
+    @Test("extractPlainText carries a bounded timeout so a hung JS extraction cannot wedge a TTS caller")
+    func extractPlainText_hasBoundedTimeout() {
+        // A malformed Foliate section or a wedged WebKit render could
+        // leave callAsyncJavaScript suspended forever; the timeout is
+        // the defense so a downstream TTS caller can never hang.
+        #expect(FoliateSpikeView.Coordinator.extractPlainTextTimeout > .zero)
+        #expect(FoliateSpikeView.Coordinator.extractPlainTextTimeout <= .seconds(30),
+                "timeout must be short enough that a wedged extraction frees the caller promptly")
     }
 
     // MARK: - FoliateCoordinatorBox
