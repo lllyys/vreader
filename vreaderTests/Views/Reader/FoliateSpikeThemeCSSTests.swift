@@ -200,6 +200,27 @@ struct FoliateSpikeThemeCSSTests {
         #expect(js.contains("\\'"))
         #expect(js.contains("\\\\"))
     }
+
+    /// Gate-4 round-2 fix: the `layout-ready` message flips `isBookReady` and
+    /// keeps `currentThemeCSS` intact, so the handler's reconciliation
+    /// `setStyles` (which closes the post-init/pre-ready lost-update window)
+    /// has the freshest CSS to apply.
+    @Test func layoutReadyFlipsReadyAndPreservesThemeCSS() async {
+        let store = makeStore(fontSize: 36)
+        let css = FoliateSpikeView.themeCSS(for: store)
+        let coordinator = FoliateSpikeView.Coordinator(
+            initialLayoutFlow: "scrolled",
+            initialThemeCSS: css,
+            onBookReady: { _ in },
+            onError: { _ in }
+        )
+        #expect(coordinator.isBookReady == false)
+        await coordinator.handleMessage(name: "layout-ready", body: [:])
+        #expect(coordinator.isBookReady == true)
+        // `currentThemeCSS` survives the ready transition — the reconcile
+        // `setStyles` in the handler applies exactly this value.
+        #expect(coordinator.currentThemeCSS == css)
+    }
 }
 
 #endif

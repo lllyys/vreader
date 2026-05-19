@@ -539,6 +539,22 @@ extension FoliateSpikeView {
                 // `updateUIView` could push `setLayout` against a not-yet
                 // attached renderer.
                 isBookReady = true
+                // Feature #70 WI-4 (Gate-4 round-2 audit fix): reconcile the
+                // theme CSS exactly at the ready transition. The book-ready
+                // iife reads `window.__vreaderTargetThemeCSS` right after its
+                // `await readerAPI.init({})`; a font-size change landing in
+                // the narrow window between that read and this `isBookReady`
+                // flip would otherwise be lost — `updateUIView` still took
+                // the pre-ready (stash-only) branch, and no later SwiftUI
+                // diff is guaranteed because `currentThemeCSS` already holds
+                // the newest value. Force one `setStyles` of the freshest
+                // `currentThemeCSS` here so the latest calibrated size always
+                // lands. `setStyles` is idempotent, so a re-apply of the same
+                // CSS the iife already pushed is harmless.
+                if let css = currentThemeCSS {
+                    webView?.evaluateJavaScript(
+                        Coordinator.setStylesJS(forCSS: css), completionHandler: nil)
+                }
 
             case "tap":
                 // Bug #108: forward center-tap to the chrome-toggle
