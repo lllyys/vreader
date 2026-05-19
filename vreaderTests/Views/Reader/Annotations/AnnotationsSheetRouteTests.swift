@@ -186,4 +186,22 @@ struct AnnotationsSheetRouteTests {
                 == .highlights(initialFilter: .highlights)
         )
     }
+
+    // MARK: - Negative routes — non-annotations buttons / effects yield nil
+
+    @Test("Display and AI chrome buttons do not route to an annotations sheet")
+    func displayAndAIButtonsYieldNil() {
+        // Only Contents + Notes open an annotations sheet; Display / AI
+        // open their own surfaces. Pinned so future branch drift fails.
+        #expect(AnnotationsSheetRoute.route(forChromeButton: .display) == nil)
+        #expect(AnnotationsSheetRoute.route(forChromeButton: .ai) == nil)
+    }
+
+    @Test("Non-export More-menu effects do not route to an annotations sheet")
+    func nonExportMoreMenuEffectsYieldNil() {
+        #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .toggleReadAloud) == nil)
+        #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .toggleAutoPageTurn) == nil)
+        #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .presentBookDetails) == nil)
+        #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .presentShareSheet) == nil)
+    }
 }

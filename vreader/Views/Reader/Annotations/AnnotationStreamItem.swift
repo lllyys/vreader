@@ -58,4 +58,15 @@ enum AnnotationStreamItem: Equatable, Identifiable, Sendable {
             return record.note?.isEmpty == false
         }
     }
+
+    /// A stable per-kind rank. Used as the final tie-break in
+    /// `AnnotationStreamBuilder.stream` so the chronological merge is a
+    /// total order even when a highlight and a standalone note collide
+    /// on both `createdAt` and `id`.
+    var kindRank: Int {
+        switch self {
+        case .highlight:  return 0
+        case .standalone: return 1
+        }
+    }
 }

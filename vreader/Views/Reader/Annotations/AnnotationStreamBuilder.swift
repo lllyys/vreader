@@ -64,7 +64,13 @@ enum AnnotationStreamBuilder {
             if lhs.createdAt != rhs.createdAt {
                 return lhs.createdAt > rhs.createdAt   // newest-first
             }
-            return lhs.id.uuidString < rhs.id.uuidString   // stable tie-break
+            // Tie-break: id, then kind — a total order even in the
+            // pathological case where a highlight and a standalone note
+            // share both timestamp and UUID.
+            if lhs.id != rhs.id {
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            return lhs.kindRank < rhs.kindRank
         }
     }
 

@@ -115,14 +115,37 @@ struct AnnotationStreamBuilderTests {
         #expect(counts[.notes] == 1)       // only the "real"-note highlight
     }
 
-    @Test("counts: large set — no fixed cap")
+    @Test("counts + stream: large set — no fixed cap on either path")
     func countsLargeSet() {
-        let highlights = (0..<500).map { _ in makeHighlight() }
+        // 500 standalone annotations + 500 highlights of which 250 carry
+        // a note — guards both the count math AND stream() against a
+        // fixed cap / truncation bug (plan §5 large-set edge).
+        let highlights = (0..<500).map { i in
+            makeHighlight(note: i < 250 ? "note \(i)" : nil)
+        }
         let annotations = (0..<500).map { _ in makeAnnotation() }
         let counts = AnnotationStreamBuilder.counts(highlights: highlights, annotations: annotations)
         #expect(counts[.all] == 1000)
         #expect(counts[.highlights] == 500)
-        #expect(counts[.notes] == 500)
+        #expect(counts[.notes] == 750)   // 500 standalone + 250 annotated highlights
+
+        // stream() must not cap either — the .all union and a filtered
+        // stream both return their full record count.
+        #expect(
+            AnnotationStreamBuilder.stream(
+                highlights: highlights, annotations: annotations, filter: .all
+            ).count == 1000
+        )
+        #expect(
+            AnnotationStreamBuilder.stream(
+                highlights: highlights, annotations: annotations, filter: .highlights
+            ).count == 500
+        )
+        #expect(
+            AnnotationStreamBuilder.stream(
+                highlights: highlights, annotations: annotations, filter: .notes
+            ).count == 750
+        )
     }
 
     @Test("counts: CJK note text classifies correctly (byte-agnostic)")
@@ -221,19 +244,42 @@ struct AnnotationStreamBuilderTests {
         #expect(stream.first?.id == realNote.id)
     }
 
-    @Test("stream(.all): tie-break on equal createdAt is deterministic")
+    @Test("stream(.all): tie-break on equal createdAt is by id, not source order")
     func streamAllTieBreakDeterministic() {
-        // Two records with an identical timestamp must produce a stable
-        // order — sort tie-broken by id so the stream is deterministic.
+        // Three records sharing one timestamp. The tie-break must be the
+        // id's uuidString ascending — A < B < C — REGARDLESS of the
+        // order the records arrive in. Two seeds with reversed input
+        // must both produce [A, B, C], proving the order is id-driven,
+        // not incidental source ordering.
         let sameTime = Date(timeIntervalSince1970: 5_000)
         let idA = UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!
         let idB = UUID(uuidString: "00000000-0000-0000-0000-00000000000B")!
-        let h = makeHighlight(id: idA, createdAt: sameTime)
-        let a = makeAnnotation(id: idB, createdAt: sameTime)
-        let first = AnnotationStreamBuilder.stream(highlights: [h], annotations: [a], filter: .all)
-        let second = AnnotationStreamBuilder.stream(highlights: [h], annotations: [a], filter: .all)
-        #expect(first.map(\.id) == second.map(\.id))
-        #expect(first.count == 2)
+        let idC = UUID(uuidString: "00000000-0000-0000-0000-00000000000C")!
+        let hA = makeHighlight(id: idA, createdAt: sameTime)
+        let aB = makeAnnotation(id: idB, createdAt: sameTime)
+        let hC = makeHighlight(id: idC, createdAt: sameTime)
+
+        // Seed 1 — natural order.
+        let forward = AnnotationStreamBuilder.stream(
+            highlights: [hA, hC], annotations: [aB], filter: .all
+        )
+        #expect(forward.map(\.id) == [idA, idB, idC])
+
+        // Seed 2 — reversed input arrays. Same id-ascending result.
+        let reversed = AnnotationStreamBuilder.stream(
+            highlights: [hC, hA], annotations: [aB], filter: .all
+        )
+        #expect(reversed.map(\.id) == [idA, idB, idC])
+        #expect(forward.map(\.id) == reversed.map(\.id))
+    }
+
+    @Test("AnnotationStreamItem.kindRank — highlight ranks before standalone")
+    func streamItemKindRank() {
+        // The final tie-break in stream() — distinct ranks give a total
+        // order even when a highlight and a standalone collide on
+        // createdAt + id.
+        #expect(AnnotationStreamItem.highlight(makeHighlight()).kindRank
+                < AnnotationStreamItem.standalone(makeAnnotation()).kindRank)
     }
 
     // MARK: - AnnotationStreamItem
