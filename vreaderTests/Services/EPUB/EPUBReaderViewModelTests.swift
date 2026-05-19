@@ -95,6 +95,9 @@ extension MockEPUBParser {
     func setOpenError(_ error: EPUBParserError?) {
         openError = error
     }
+    func setSpineContent(_ content: [String: String]) {
+        spineContent = content
+    }
 }
 
 // MARK: - Open Lifecycle
