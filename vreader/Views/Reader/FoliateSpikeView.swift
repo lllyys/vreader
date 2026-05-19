@@ -292,13 +292,31 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         // Diffed independently of layout so a font-size-only change fires.
         if coordinator.currentThemeCSS != themeCSS {
             coordinator.currentThemeCSS = themeCSS
-            // Pre-ready: `setStyles` is a no-op before `readerAPI.init({})`
-            // resolves; the `book-ready` handler re-applies the seeded value
-            // post-init (belt-and-braces). Once ready, push immediately.
-            if coordinator.isBookReady, let css = themeCSS {
+            // ALWAYS stash the latest calibrated CSS into a JS-side global,
+            // exactly like the layout branch stashes `window.__vreaderTargetFlow`.
+            //
+            // Why the global (Gate-4 audit Medium fix): `setStyles` is a no-op
+            // before `readerAPI.init({})` resolves, so the pre-ready push must
+            // be deferred to the `book-ready` iife. But that iife snapshots
+            // its JS *before* `await readerAPI.init({})`; a font-size change
+            // landing during the init window would otherwise be lost — the
+            // iife would apply the stale snapshot, and no later `updateUIView`
+            // diff fires because `currentThemeCSS` already equals the newest
+            // value. Stashing into a JS-side global the iife reads AFTER its
+            // `await` closes that race: a mid-init change updates the global,
+            // and the resuming iife picks up the freshest value.
+            if let css = themeCSS {
                 let escaped = FoliateJSEscaper.escapeForJSString(css)
-                let js = "readerAPI.setStyles('\(escaped)');"
-                uiView.evaluateJavaScript(js, completionHandler: nil)
+                let stash = "window.__vreaderTargetThemeCSS = '\(escaped)';"
+                if coordinator.isBookReady {
+                    // Ready → stash AND apply immediately.
+                    let js = "\(stash) \(Coordinator.setStylesJS(forCSS: css))"
+                    uiView.evaluateJavaScript(js, completionHandler: nil)
+                } else {
+                    // Pre-ready → stash only; the `book-ready` iife applies it
+                    // post-init, reading the freshest stashed value.
+                    uiView.evaluateJavaScript(stash, completionHandler: nil)
+                }
             }
         }
     }
@@ -474,29 +492,40 @@ extension FoliateSpikeView {
                     // the iife reads the freshest value when init resumes.
                     //
                     // Feature #70 WI-4: the iife ALSO applies the calibrated
-                    // `setStyles` CSS after init resolves. `setStyles` is a
-                    // no-op before `readerAPI.init({})` — so `updateUIView`'s
-                    // pre-ready themeCSS branch deliberately does not push it;
-                    // this post-init apply is the belt-and-braces that
-                    // guarantees the initial calibrated font size lands. The
+                    // `setStyles` CSS after init resolves, reading the SAME
+                    // kind of JS-side global (`window.__vreaderTargetThemeCSS`).
+                    // `setStyles` is a no-op before `readerAPI.init({})` — so
+                    // `updateUIView`'s pre-ready themeCSS branch only stashes
+                    // into that global; this post-init apply reads it. Reading
+                    // the global AFTER the `await` (not snapshotting Swift's
+                    // `currentThemeCSS` before) closes the Gate-4-audit race:
+                    // a font-size change landing mid-init updates the global
+                    // and the resuming iife picks up the freshest value. The
                     // CSS is `FoliateJSEscaper.escapeForJSString`-escaped
                     // (rule 50 bridge safety).
                     let initialFlow = currentLayoutFlow
-                    let setStylesStatement: String
+                    let initialThemeCSSSeed: String
                     if let css = currentThemeCSS {
                         let escaped = FoliateJSEscaper.escapeForJSString(css)
-                        setStylesStatement = "readerAPI.setStyles('\(escaped)');"
+                        initialThemeCSSSeed = """
+                        if (typeof window.__vreaderTargetThemeCSS !== 'string') {
+                            window.__vreaderTargetThemeCSS = '\(escaped)';
+                        }
+                        """
                     } else {
-                        setStylesStatement = ""
+                        initialThemeCSSSeed = ""
                     }
                     let js = """
                     (async () => {
                         if (typeof window.__vreaderTargetFlow !== 'string') {
                             window.__vreaderTargetFlow = '\(initialFlow)';
                         }
+                        \(initialThemeCSSSeed)
                         await readerAPI.init({});
                         readerAPI.setLayout({flow: window.__vreaderTargetFlow});
-                        \(setStylesStatement)
+                        if (typeof window.__vreaderTargetThemeCSS === 'string') {
+                            readerAPI.setStyles(window.__vreaderTargetThemeCSS);
+                        }
                         post('layout-ready', {});
                     })();
                     """
@@ -671,6 +700,19 @@ extension FoliateSpikeView {
             })(); void 0;
             """
             webView?.evaluateJavaScript(js) { _, _ in }
+        }
+
+        // MARK: - Feature #70 WI-4: setStyles JS
+
+        /// Feature #70 WI-4: builds the `readerAPI.setStyles('<css>')` JS
+        /// call, with the CSS escaped via `FoliateJSEscaper.escapeForJSString`
+        /// (rule 50 bridge safety — the CSS could in principle contain a
+        /// single-quote or backslash that would break out of the JS string
+        /// literal). Pure + static so a unit test can assert the escaping
+        /// without a live WKWebView.
+        static func setStylesJS(forCSS css: String) -> String {
+            let escaped = FoliateJSEscaper.escapeForJSString(css)
+            return "readerAPI.setStyles('\(escaped)');"
         }
 
         // MARK: - Feature #57: TTS text extraction

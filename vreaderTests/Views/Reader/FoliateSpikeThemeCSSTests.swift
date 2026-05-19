@@ -146,6 +146,60 @@ struct FoliateSpikeThemeCSSTests {
         // calibrate to the same ratio (sub-pixel rounding aside).
         #expect(abs(foliateRatio - epubRatio) <= 0.5 / unified + 0.001)
     }
+
+    // MARK: - WI-4 bridge seam: Coordinator state + setStyles JS
+
+    /// The `Coordinator` seeds `currentThemeCSS` from `initialThemeCSS` so the
+    /// `book-ready` post-init iife can apply the initial calibrated CSS even
+    /// if no slider change ever fires (pre-ready belt-and-braces).
+    @Test func coordinatorSeedsCurrentThemeCSSFromInitialValue() {
+        let store = makeStore(fontSize: 28)
+        let css = FoliateSpikeView.themeCSS(for: store)
+        let coordinator = FoliateSpikeView.Coordinator(
+            initialLayoutFlow: "scrolled",
+            initialThemeCSS: css,
+            onBookReady: { _ in },
+            onError: { _ in }
+        )
+        #expect(coordinator.currentThemeCSS == css)
+    }
+
+    /// The default `initialThemeCSS` (omitted) leaves `currentThemeCSS` nil —
+    /// keeps existing `Coordinator` call sites source-compatible.
+    @Test func coordinatorCurrentThemeCSSDefaultsToNil() {
+        let coordinator = FoliateSpikeView.Coordinator(
+            initialLayoutFlow: "paginated",
+            onBookReady: { _ in },
+            onError: { _ in }
+        )
+        #expect(coordinator.currentThemeCSS == nil)
+    }
+
+    /// `Coordinator.setStylesJS(forCSS:)` builds a `readerAPI.setStyles('…')`
+    /// call with the CSS escaped via `FoliateJSEscaper` — the bridge-safety
+    /// seam for the `updateUIView` ready-path push.
+    @Test func setStylesJSBuildsEscapedCall() {
+        let store = makeStore(fontSize: 24)
+        let css = FoliateSpikeView.themeCSS(for: store)!
+        let js = FoliateSpikeView.Coordinator.setStylesJS(forCSS: css)
+        #expect(js.hasPrefix("readerAPI.setStyles('"))
+        #expect(js.hasSuffix("');"))
+        // The calibrated font size is inside the payload.
+        let calibrated = store.calibrator.calibratedFoliateSize(forUnified: 24)
+        #expect(js.contains("font-size: \(calibrated)px"))
+    }
+
+    /// `setStylesJS` escapes JS-string-breaking characters so a CSS string
+    /// with a single-quote / backslash cannot break out of the `setStyles('…')`
+    /// literal.
+    @Test func setStylesJSEscapesHostileCSS() {
+        let hostile = "body { font-family: 'x'; }\\evil"
+        let js = FoliateSpikeView.Coordinator.setStylesJS(forCSS: hostile)
+        // The raw unescaped single-quote must not appear bare inside the
+        // payload — it is escaped to \'.
+        #expect(js.contains("\\'"))
+        #expect(js.contains("\\\\"))
+    }
 }
 
 #endif
