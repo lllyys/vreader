@@ -31,6 +31,12 @@ struct FoliateSpikeView: View {
     @State private var isBookReady = false
     @State private var bookTitle = ""
     @State private var errorMessage: String?
+    /// Feature #64 WI-9: the Foliate `HighlightMutating` boundary for the
+    /// unified highlight-action popover. Built in `.task` (the model container
+    /// + fingerprintKey are available then). Foliate has no `HighlightRenderer`,
+    /// so this is `FoliateHighlightMutator` (persistence + JS bridge), not a
+    /// `HighlightCoordinator`. The attach helper is inert until it is non-nil.
+    @State private var highlightMutator: FoliateHighlightMutator?
     @Environment(\.modelContext) private var modelContext
 
     /// Feature #70 WI-4: the default unified font size used when no
@@ -101,18 +107,33 @@ struct FoliateSpikeView: View {
         .foliateHighlightTapHandler(fingerprintKey: fingerprintKey)
         .foliateSelectionHandler(fingerprintKey: fingerprintKey)
         .foliateHighlightRestoreHandler(fingerprintKey: fingerprintKey)
-        // Feature #55 WI-7: attach the tap-on-annotated-text note preview.
-        // `foliateHighlightTapHandler` posts `.readerHighlightTapped` when
-        // the user taps an AZW3/MOBI highlight; `NotePreviewModifier`
-        // (attached here) observes it to present the note preview. The
-        // Foliate event carries `sourceRect == .zero`, so the preview
-        // resolves to the bottom-sheet form. Inert in previews / test
-        // harnesses where the model container is unavailable.
-        .notePreviewPresenterIfAvailable(
+        // Feature #64 WI-9: a tap on a persisted AZW3/MOBI highlight opens the
+        // unified cross-format highlight-action popover (color / note / copy /
+        // share / delete) — superseding feature #55's read-only note preview.
+        // `foliateHighlightTapHandler` posts `.readerHighlightTapped` when the
+        // user taps a highlight; `HighlightPopoverModifier` (attached here)
+        // observes it. The Foliate event carries `sourceRect == .zero`, so the
+        // popover resolves to the bottom-sheet form. `mutating` is the
+        // `FoliateHighlightMutator` (Foliate has no `HighlightRenderer`, so it
+        // composes persistence + the JS-overlay bridge). Inert in previews /
+        // test harnesses where the mutator is nil.
+        .unifiedHighlightPopoverPresenterIfAvailable(
             modelContainer: modelContext.container,
             bookFingerprintKey: fingerprintKey ?? "",
+            mutating: highlightMutator,
             theme: settingsStore?.theme ?? .paper
         )
+        .task {
+            // Build the Foliate highlight-mutation boundary once. The
+            // `@State` flip makes SwiftUI recompute `body` and install the
+            // live popover modifier (the helper is inert while it is nil) —
+            // the same late-assignment pattern the native containers use.
+            guard highlightMutator == nil, let key = fingerprintKey else { return }
+            highlightMutator = FoliateHighlightMutator(
+                persistence: PersistenceActor(modelContainer: modelContext.container),
+                bookFingerprintKey: key
+            )
+        }
         .onReceive(NotificationCenter.default.publisher(for: .readerBookmarkRequested)) { _ in
             guard let key = fingerprintKey,
                   let fp = DocumentFingerprint(canonicalKey: key) else { return }
