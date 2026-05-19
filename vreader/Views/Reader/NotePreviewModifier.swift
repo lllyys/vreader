@@ -275,7 +275,9 @@ extension View {
     /// (via the UIKit presenter) or `NotePreviewSheetView` (via `.sheet`).
     ///
     /// `hostViewProvider` returns the container's content `UIView` — the
-    /// popover's anchor. WI-6/WI-7 wire this per format.
+    /// popover's anchor; returning `nil` makes the preview use the bottom-sheet
+    /// form (`NotePreviewPresenter.resolvedForm` degrades a callout with no
+    /// host).
     func notePreviewPresenter(
         viewModel: NotePreviewViewModel,
         theme: ReaderThemeV2,
@@ -289,6 +291,33 @@ extension View {
                 calloutPresenter: calloutPresenter,
                 hostViewProvider: hostViewProvider
             )
+        )
+    }
+
+    /// Feature #55 WI-6: container-friendly attach point. Builds the
+    /// `NotePreviewViewModel` from a `HighlightLookup` + the open book's
+    /// `fingerprintKey` — the reader containers have both in scope and would
+    /// otherwise hand-roll the view model. The modifier's `@State` keeps the
+    /// view model stable across renders.
+    ///
+    /// `hostViewProvider` defaults to `{ nil }` — the native containers
+    /// (TXT/MD/PDF) present the note preview via the bottom-sheet form in v1;
+    /// the anchored-callout-for-native enhancement (which needs a host-`UIView`
+    /// capture channel through the bridges) is a follow-up. Foliate likewise
+    /// has no anchor (`sourceRect == .zero`).
+    func notePreviewPresenter(
+        highlightLookup: any HighlightLookup,
+        bookFingerprintKey: String,
+        theme: ReaderThemeV2,
+        hostViewProvider: @escaping () -> UIView? = { nil }
+    ) -> some View {
+        notePreviewPresenter(
+            viewModel: NotePreviewViewModel(
+                persistence: highlightLookup,
+                bookFingerprintKey: bookFingerprintKey
+            ),
+            theme: theme,
+            hostViewProvider: hostViewProvider
         )
     }
 }

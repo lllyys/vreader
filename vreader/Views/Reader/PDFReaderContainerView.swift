@@ -132,6 +132,11 @@ struct PDFReaderContainerView: View {
                 bottomOverlay
             }
         }
+        .notePreviewPresenterIfAvailable(
+            modelContainer: modelContainer,
+            bookFingerprintKey: viewModel.bookFingerprintKey,
+            theme: settingsStore?.theme ?? .paper
+        )
         .task {
             viewModel.beginLoading()
         }

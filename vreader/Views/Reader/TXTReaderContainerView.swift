@@ -274,6 +274,11 @@ struct TXTReaderContainerView: View {
         // WI-7c3..7c5 attach the same modifier to the chunked TXT /
         // MD / EPUB containers.
         .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
+        .notePreviewPresenterIfAvailable(
+            modelContainer: modelContainer,
+            bookFingerprintKey: viewModel.bookFingerprintKey,
+            theme: settingsStore?.theme ?? .paper
+        )
         .task {
             // PERF: open already called by TXTReaderHost — skip if content loaded
             if viewModel.textContent == nil && viewModel.currentChapterText == nil {

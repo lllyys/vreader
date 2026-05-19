@@ -105,6 +105,11 @@ struct MDReaderContainerView: View {
         // observes the notification and shows the sheet, mirroring
         // the TXT container's attachment from WI-7c2.
         .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
+        .notePreviewPresenterIfAvailable(
+            modelContainer: modelContainer,
+            bookFingerprintKey: viewModel.bookFingerprintKey,
+            theme: settingsStore?.theme ?? .paper
+        )
         .task {
             // PERF: open already called by MDReaderHost
             if viewModel.renderedText == nil {
