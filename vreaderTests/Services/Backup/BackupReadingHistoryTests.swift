@@ -58,13 +58,15 @@ struct BackupReadingHistoryTests {
         _ container: ModelContainer, book: DocumentFingerprint,
         sessionId: UUID = UUID(), startedAt: Date, endedAt: Date? = nil,
         duration: Int = 600, pages: Int? = 10, words: Int? = 2000,
-        deviceId: String = "dev-1", isRecovered: Bool = false
+        deviceId: String = "dev-1", isRecovered: Bool = false,
+        startLocator: Locator? = nil, endLocator: Locator? = nil
     ) throws {
         let context = ModelContext(container)
         let s = ReadingSession(
             sessionId: sessionId, bookFingerprint: book, startedAt: startedAt,
             endedAt: endedAt, durationSeconds: duration, pagesRead: pages,
-            wordsRead: words, deviceId: deviceId, isRecovered: isRecovered
+            wordsRead: words, startLocator: startLocator, endLocator: endLocator,
+            deviceId: deviceId, isRecovered: isRecovered
         )
         context.insert(s)
         try context.save()
@@ -72,13 +74,17 @@ struct BackupReadingHistoryTests {
 
     private func seedStats(
         _ container: ModelContainer, book: DocumentFingerprint,
-        totalSeconds: Int = 3600, sessionCount: Int = 3, lastReadAt: Date?
+        totalSeconds: Int = 3600, sessionCount: Int = 3, lastReadAt: Date?,
+        avgPagesPerHour: Double? = nil, avgWordsPerMinute: Double? = nil,
+        totalPages: Int? = nil, totalWords: Int? = nil, longestSession: Int = 1800
     ) throws {
         let context = ModelContext(container)
         let stats = ReadingStats(
             bookFingerprint: book, totalReadingSeconds: totalSeconds,
             sessionCount: sessionCount, lastReadAt: lastReadAt,
-            longestSessionSeconds: 1800
+            averagePagesPerHour: avgPagesPerHour, averageWordsPerMinute: avgWordsPerMinute,
+            totalPagesRead: totalPages, totalWordsRead: totalWords,
+            longestSessionSeconds: longestSession
         )
         context.insert(stats)
         try context.save()
@@ -178,6 +184,93 @@ struct BackupReadingHistoryTests {
         #expect(r.lastReadAt == fixedLastRead)
         #expect(r.totalReadingSeconds == 7200)
         #expect(r.sessionCount == 9)
+    }
+
+    @Test func restoreRoundTripPreservesStartAndEndLocators() async throws {
+        // F2: BackupReadingSession carries the locators as JSON strings.
+        let source = try makeContainer()
+        let fp = fingerprint("locbook")
+        let startLoc = try #require(Locator.validated(bookFingerprint: fp, page: 3))
+        let endLoc = try #require(Locator.validated(bookFingerprint: fp, page: 17))
+        let id = UUID()
+        try seedSession(source, book: fp, sessionId: id,
+                        startedAt: Date(timeIntervalSince1970: 1_650_000_000),
+                        startLocator: startLoc, endLocator: endLoc)
+        let data = try await collector(source).collectReadingHistory()
+
+        let fresh = try makeContainer()
+        try await restorer(fresh).restoreReadingHistory(from: data)
+        let restored = try await PersistenceActor(modelContainer: fresh).fetchAllReadingSessions()
+        let r = try #require(restored.first)
+        #expect(r.startLocator?.page == 3)
+        #expect(r.endLocator?.page == 17)
+        #expect(r.startLocator?.bookFingerprint.canonicalKey == fp.canonicalKey)
+    }
+
+    @Test func malformedLocatorJSONDegradesToNilSessionStillRestores() async throws {
+        // A session whose locator JSON is garbage must still restore — only the
+        // locator is dropped (degrades to nil), not the whole session.
+        let fp = fingerprint("malformedloc")
+        let id = UUID()
+        let envelope = BackupReadingHistoryEnvelope(
+            schemaVersion: kBackupCurrentSchemaVersion,
+            sessions: [BackupReadingSession(
+                sessionId: id, bookFingerprintKey: fp.canonicalKey,
+                startedAt: Date(timeIntervalSince1970: 1_640_000_000), endedAt: nil,
+                durationSeconds: 450, pagesRead: 8, wordsRead: 1500,
+                startLocatorJSON: "{not valid locator json",
+                endLocatorJSON: "also garbage",
+                deviceId: "dev-m", isRecovered: false
+            )],
+            stats: []
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(envelope)
+
+        let fresh = try makeContainer()
+        try await restorer(fresh).restoreReadingHistory(from: data)
+        let restored = try await PersistenceActor(modelContainer: fresh).fetchAllReadingSessions()
+        #expect(restored.count == 1)
+        let r = try #require(restored.first)
+        #expect(r.sessionId == id)
+        #expect(r.durationSeconds == 450)
+        // Both locators degraded to nil — the session itself survived.
+        #expect(r.startLocator == nil)
+        #expect(r.endLocator == nil)
+    }
+
+    @Test func restoreReproducesEveryReadingStatsScalarVerbatim() async throws {
+        // F9: every ReadingStats scalar restores verbatim (not just lastReadAt).
+        let source = try makeContainer()
+        let fp = fingerprint("fullstats")
+        let lastRead = Date(timeIntervalSince1970: 1_450_000_000)
+        try seedStats(source, book: fp, totalSeconds: 12_345, sessionCount: 42,
+                      lastReadAt: lastRead, avgPagesPerHour: 33.5, avgWordsPerMinute: 215.0,
+                      totalPages: 410, totalWords: 88_000, longestSession: 4321)
+        let data = try await collector(source).collectReadingHistory()
+
+        let fresh = try makeContainer()
+        let r = restorer(fresh)
+        try await r.restoreReadingHistory(from: data)
+
+        func assertScalars(_ stats: ReadingStatsRecord) {
+            #expect(stats.totalReadingSeconds == 12_345)
+            #expect(stats.sessionCount == 42)
+            #expect(stats.lastReadAt == lastRead)
+            #expect(stats.averagePagesPerHour == 33.5)
+            #expect(stats.averageWordsPerMinute == 215.0)
+            #expect(stats.totalPagesRead == 410)
+            #expect(stats.totalWordsRead == 88_000)
+            #expect(stats.longestSessionSeconds == 4321)
+        }
+        let first = try await PersistenceActor(modelContainer: fresh).fetchAllReadingStats()
+        assertScalars(try #require(first.first))
+
+        // And again after a second restore — still verbatim, no recompute drift.
+        try await r.restoreReadingHistory(from: data)
+        let second = try await PersistenceActor(modelContainer: fresh).fetchAllReadingStats()
+        assertScalars(try #require(second.first))
     }
 
     // MARK: - Idempotency

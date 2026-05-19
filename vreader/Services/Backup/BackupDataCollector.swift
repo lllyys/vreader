@@ -232,11 +232,16 @@ final class BackupDataCollector: BackupDataCollecting, @unchecked Sendable {
     /// Feature #58 WI-5: emits `reading-history.json` carrying every
     /// `ReadingSession` and every `ReadingStats` row, so a restore reproduces
     /// reading history exactly. New in backup schema v2.
+    ///
+    /// The persistence fetches are NOT `try?`-swallowed: criterion (f) demands
+    /// an exact round-trip, so a read failure must fail the backup loudly
+    /// rather than silently emitting an empty section (which would discard the
+    /// user's entire reading history on the next restore).
     func collectReadingHistory() async throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
 
-        let sessionRecords = (try? await persistence.fetchAllReadingSessions()) ?? []
+        let sessionRecords = try await persistence.fetchAllReadingSessions()
         let sessions: [BackupReadingSession] = sessionRecords.map { record in
             BackupReadingSession(
                 sessionId: record.sessionId,
@@ -253,7 +258,7 @@ final class BackupDataCollector: BackupDataCollecting, @unchecked Sendable {
             )
         }
 
-        let statsRecords = (try? await persistence.fetchAllReadingStats()) ?? []
+        let statsRecords = try await persistence.fetchAllReadingStats()
         let stats: [BackupReadingStats] = statsRecords.map { record in
             BackupReadingStats(
                 bookFingerprintKey: record.bookFingerprintKey,
