@@ -15,7 +15,12 @@ final class ReaderSettingsPanelTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = launchApp(seed: .books)
+        // `.warAndPeace` is a real-file TXT fixture that opens into a
+        // working reader. The `.books` seed inserts metadata-only
+        // BookRecords with no backing file, so opening one fails with
+        // "The file could not be found" and the reader chrome never
+        // renders (Bug #209 / GH #804) — the panel is then unreachable.
+        app = launchApp(seed: .warAndPeace, resetPreferences: true)
     }
 
     override func tearDownWithError() throws {
