@@ -49,16 +49,6 @@ struct PDFViewBridge: UIViewRepresentable {
     /// The reader color theme — drives the PDF gutter background tint.
     /// Feature #60 WI-11: migrated from the legacy `ReaderTheme`.
     var theme: ReaderThemeV2?
-    /// Feature #53 WI-6: optional inline-menu presenter. When non-nil + a
-    /// highlight tap resolves, `handleTap` presents the menu anchored to
-    /// the tapped annotation's bounds. When nil, the bridge still posts
-    /// `.readerHighlightTapped` (any observer can react), but no menu
-    /// appears — keeps source compatibility for preview/test harnesses.
-    var highlightActionPresenter: (any HighlightActionPresenting)?
-    /// Feature #53 WI-6: callback invoked after the user picks an action
-    /// from the inline menu. The container routes this through
-    /// `HighlightCoordinator.handleTapAction` to persist the change.
-    var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
 
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
@@ -81,35 +71,17 @@ struct PDFViewBridge: UIViewRepresentable {
         context.coordinator.pdfView = pdfView
         context.coordinator.viewModel = viewModel
         context.coordinator.highlightRenderer = highlightRenderer
-        context.coordinator.highlightActionPresenter = highlightActionPresenter
-        context.coordinator.onHighlightTapAction = onHighlightTapAction
 
-        // Tap gesture for toolbar toggle (bug #32 — same pattern as TXT #21)
+        // Tap gesture for toolbar toggle (bug #32 — same pattern as TXT #21).
+        // Feature #64 WI-7: a tap that hits a persisted highlight annotation
+        // posts `.readerHighlightTapped` (the unified popover's trigger) via
+        // `handleTap` — see `Coordinator.handleTap`.
         let tapGesture = UITapGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.handleTap(_:))
         )
         tapGesture.delegate = context.coordinator
         pdfView.addGestureRecognizer(tapGesture)
-
-        // Feature #55 WI-6: long-press gesture re-homing feature #53's inline
-        // delete menu off the tap (the tap now opens the #55 note preview).
-        // The coordinator's `gestureRecognizerShouldBegin` runs the highlight
-        // hit-test up front, so this recognizer ONLY begins when the press
-        // lands on a persisted highlight annotation — a long-press on plain
-        // page content never engages it and proceeds into PDFKit's native
-        // text selection. When it DOES begin, the coordinator denies
-        // simultaneous recognition against PDFKit's selection long-press, so
-        // the highlight long-press opens only #53's menu (and PDFKit never
-        // establishes a `currentSelection` for that press). The `.name`
-        // lets the coordinator's delegate identify this recognizer.
-        let highlightLongPress = UILongPressGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleHighlightLongPress(_:))
-        )
-        highlightLongPress.name = TXTBridgeShared.highlightLongPressName
-        highlightLongPress.delegate = context.coordinator
-        pdfView.addGestureRecognizer(highlightLongPress)
 
         // Observe page changes
         NotificationCenter.default.addObserver(
@@ -145,14 +117,10 @@ struct PDFViewBridge: UIViewRepresentable {
             lastAppliedTheme: context.coordinator.lastAppliedTheme
         )
 
-        // Feature #53 WI-6: re-bind coordinator state on every update.
-        // `highlightCoordinator` is initialized later in PDFReaderContainerView's
-        // async `.task`, so the closure that captures it from makeUIView would
-        // see nil forever. Matches the TXT/EPUB pattern (TXTTextViewBridge:176,
-        // EPUBWebViewBridge:234) for the same reason.
+        // Re-bind the renderer on every update — `highlightRenderer` is owned
+        // by `PDFReaderContainerView` as `@State` and feeds the coordinator's
+        // tap hit-test (`resolveHighlightTapEvent`).
         context.coordinator.highlightRenderer = highlightRenderer
-        context.coordinator.highlightActionPresenter = highlightActionPresenter
-        context.coordinator.onHighlightTapAction = onHighlightTapAction
 
         // Handle password retry: if attempt ID changed, try unlocking
         if let password,
@@ -355,17 +323,12 @@ struct PDFViewBridge: UIViewRepresentable {
         /// re-applies `applyThemeBackground` when the user actually switched.
         /// Feature #60 WI-11: migrated from the legacy `ReaderTheme`.
         var lastAppliedTheme: ReaderThemeV2?
-        /// Feature #53 WI-6: weak reference to the renderer that owns the
-        /// `[UUID: [PDFAnnotation]]` map. handleTap consults this to detect
+        /// Feature #64 WI-7: weak reference to the renderer that owns the
+        /// `[UUID: [PDFAnnotation]]` map. `handleTap` consults this to detect
         /// taps on highlight annotations and post `.readerHighlightTapped`
-        /// before falling through to the chrome-toggle path.
+        /// (the unified popover's trigger) before falling through to the
+        /// chrome-toggle path.
         weak var highlightRenderer: PDFHighlightRenderer?
-        /// Feature #53 WI-6: inline-menu presenter, injected from
-        /// PDFReaderContainerView. nil means notification-only mode.
-        var highlightActionPresenter: (any HighlightActionPresenting)?
-        /// Feature #53 WI-6: action callback, routed through
-        /// HighlightCoordinator by the container.
-        var onHighlightTapAction: ((HighlightTapAction, UUID) async -> Void)?
         /// Cancellable work item for the selection auto-clear timer (Issue 7).
         /// Stored so a new search highlight can cancel the previous timer, preventing
         /// a stale timer from clearing the wrong selection.
@@ -448,13 +411,13 @@ struct PDFViewBridge: UIViewRepresentable {
                 return
             }
 
-            // Feature #53 WI-6 + feature #55 WI-6: check whether the tap hit
-            // an existing highlight annotation before the chrome-toggle path.
-            // If it did, post `.readerHighlightTapped` (which opens the #55
-            // note preview via `NotePreviewModifier`) and DO NOT fire
-            // `.readerContentTapped`. Feature #55 makes a single tap open the
-            // note preview — the #53 delete menu is re-homed to
-            // `handleHighlightLongPress`.
+            // Feature #64 WI-7: check whether the tap hit an existing
+            // highlight annotation before the chrome-toggle path. If it did,
+            // post `.readerHighlightTapped` (which the unified highlight-action
+            // popover observes via `HighlightPopoverModifier`) and DO NOT fire
+            // `.readerContentTapped`. WI-7 removed feature #53's long-press
+            // delete `UIMenu` and feature #55's read-only note preview — a tap
+            // now opens the unified popover.
             if let event = resolveHighlightTapEvent(at: gesture.location(in: pdfView ?? UIView())) {
                 NotificationCenter.default.post(
                     name: .readerHighlightTapped, object: event
@@ -465,30 +428,10 @@ struct PDFViewBridge: UIViewRepresentable {
             NotificationCenter.default.post(name: .readerContentTapped, object: nil)
         }
 
-        /// Feature #55 WI-6: re-homes feature #53's inline delete menu from a
-        /// tap to a long-press for PDF (plan §2.7.2). Same hit-test, same
-        /// presenter, same `HighlightTapAction.delete` dispatch — only the
-        /// gesture moved. A tap now opens the #55 note preview.
-        @objc func handleHighlightLongPress(_ gesture: UILongPressGestureRecognizer) {
-            guard gesture.state == .began,
-                  let pdfView,
-                  pdfView.currentSelection == nil,
-                  let presenter = highlightActionPresenter,
-                  let onAction = onHighlightTapAction,
-                  let event = resolveHighlightTapEvent(at: gesture.location(in: pdfView))
-            else { return }
-            presenter.present(for: event, in: pdfView) { action in
-                guard let action else { return }
-                Task { @MainActor in
-                    await onAction(action, event.highlightID)
-                }
-            }
-        }
-
         /// Resolves a point in `pdfView` coordinates to a `ReaderHighlightTapEvent`
-        /// when it lands on a persisted highlight annotation — the shared
-        /// hit-test for both the tap (chrome-toggle / #55 preview) and the
-        /// WI-6 long-press (#53 delete menu). Returns nil on a miss.
+        /// when it lands on a persisted highlight annotation — the hit-test
+        /// `handleTap` uses to post `.readerHighlightTapped` (the unified
+        /// popover's trigger). Returns nil on a miss.
         private func resolveHighlightTapEvent(at location: CGPoint) -> ReaderHighlightTapEvent? {
             guard let pdfView,
                   let renderer = highlightRenderer,
@@ -513,41 +456,16 @@ struct PDFViewBridge: UIViewRepresentable {
             return ReaderHighlightTapEvent(highlightID: highlightID, sourceRect: sourceRect)
         }
 
-        // Allow the tap gesture to fire alongside PDFView's internal
-        // gestures. Feature #55 WI-6: the highlight long-press is the
-        // exception — it is mutually exclusive with PDFKit's native
-        // text-selection long-press, so a long-press on a persisted
-        // highlight annotation opens ONLY #53's delete menu and PDFKit
-        // never establishes a `currentSelection` for that press.
+        // Bug #32: allow the chrome-toggle tap to fire alongside PDFView's
+        // internal gestures. Feature #64 WI-7 removed the highlight
+        // long-press recognizer (the unified popover is tap-triggered), so
+        // the tap is the only recognizer this coordinator owns — it always
+        // recognizes simultaneously with PDFKit's gestures.
         nonisolated func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            TXTBridgeShared.simultaneousRecognitionAllowed(for: gestureRecognizer.name)
-                && TXTBridgeShared.simultaneousRecognitionAllowed(
-                    for: otherGestureRecognizer.name)
-        }
-
-        /// Feature #55 WI-6: gates the highlight long-press recognizer with
-        /// the SAME hit-test the handler reuses, so it only *begins* when
-        /// the press lands on a persisted highlight annotation. A long-press
-        /// on plain page content never engages it — PDFKit's native
-        /// text-selection long-press proceeds undisturbed. Other recognizers
-        /// (the content-tap) keep UIKit's default begin behavior. Gating in
-        /// `shouldBegin` (rather than no-op'ing in the handler) is what
-        /// makes the highlight long-press win arbitration against PDFKit's
-        /// selection recognizer before any selection is established.
-        func gestureRecognizerShouldBegin(
-            _ gestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            guard gestureRecognizer.name == TXTBridgeShared.highlightLongPressName
-            else { return true }
-            guard let pdfView,
-                  pdfView.currentSelection == nil
-            else { return false }
-            return resolveHighlightTapEvent(
-                at: gestureRecognizer.location(in: pdfView)
-            ) != nil
+            true
         }
 
         deinit {
