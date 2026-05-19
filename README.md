@@ -78,9 +78,9 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 
 ### Text Processing
 
-- **TTS** — System (AVSpeechSynthesizer) + cloud HTTP TTS with playback controls
-- **TTS sentence highlight** — NLTokenizer-based sentence detection synced to speech position
-- **TTS auto-scroll** — Text view follows speech position in real-time
+- **TTS** — System (AVSpeechSynthesizer) + cloud HTTP TTS with playback controls; all five formats, including AZW3/MOBI (whole-book text extracted from the Foliate engine)
+- **TTS sentence highlight** — NLTokenizer-based sentence detection synced to speech position (TXT/MD)
+- **TTS auto-scroll** — Text view follows speech position in real-time (TXT/MD)
 - **Simp/Trad Chinese** — Toggle conversion via ICU (live re-apply without reloading)
 - **Content replacement** — Regex rules for text cleanup (live re-apply via source text storage)
 - **Reading time tracking** — Per-book session stats and speed calculations
