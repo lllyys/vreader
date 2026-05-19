@@ -2,9 +2,9 @@
 // Determines reader type from book format and provides shared chrome.
 //
 // Key decisions:
-// - Dispatches to format-specific reader based on BookFormat and ReadingMode.
-// - When readingMode == .unified: TXT/MD use UnifiedTextRenderer (WI-B04); EPUB shows placeholder.
-// - PDF always falls through to native (no .unifiedReflow capability).
+// - Dispatches to a format-specific reader host by `ReaderEngine.resolve(format:)`
+//   — an internal per-format engine selector (feature #54). There is no
+//   user-visible reading-mode toggle.
 // - File URL resolved from fingerprintKey using the sandbox import convention.
 // - DocumentFingerprint parsed from the canonical key string.
 // - Format host views (TXTReaderHost, etc.) extracted to ReaderFormatHosts.swift (WI-004).
@@ -80,8 +80,6 @@ struct ReaderContainerView: View {
     @State var tocEntries: [TOCEntry] = []
     /// TTS service for read-aloud feature (WI-B03).
     @State var ttsService = TTSService()
-    /// Reading progress for the unified renderer (WI-B04).
-    @State var unifiedReadingProgress: Double = 0
     /// Current reading position for TOC scroll-to-current.
     @State var currentLocator: Locator?
 
@@ -89,7 +87,6 @@ struct ReaderContainerView: View {
 
     @State var aiCoordinator: ReaderAICoordinator?
     @State var searchCoordinator = ReaderSearchCoordinator()
-    @State var unifiedCoordinator = ReaderUnifiedCoordinator()
     /// Feature #61 WI-4: drives the Book Details sheet's cover-replace
     /// PhotosPicker flow. Owned here (not inside `BookDetailsSheet`) so
     /// the pick survives the sheet's dismiss / re-present and its
@@ -98,8 +95,6 @@ struct ReaderContainerView: View {
 
     /// Shared content cache — loads book text once, shared across AI/search/TTS.
     @State var contentCache = BookContentCache()
-    /// Shared pagination cache for the unified renderer (B13).
-    @State var paginationCache = PaginationCache()
 
     /// Bug #142: per-reader instance token. Generated once per
     /// ReaderContainerView mount and threaded into both EPUB and Foliate
@@ -125,19 +120,11 @@ struct ReaderContainerView: View {
 
             Group {
                 if let fingerprint = DocumentFingerprint(canonicalKey: book.fingerprintKey) {
-                    // TODO: Phase B12 — EPUB classifier will set isComplexEPUB at runtime.
-                    // Currently BookFormat.capabilities always returns simple EPUB capabilities,
-                    // so complex EPUBs get .unifiedReflow when they shouldn't.
-                    // TXT/MD use UnifiedTextRenderer (WI-B04); EPUB unified shows placeholder.
-                    if settingsStore.readingMode == .unified
-                        && resolvedBookFormat.capabilities.contains(.unifiedReflow) {
-                        unifiedReaderView(fingerprint: fingerprint)
-                    } else {
-                        // Native mode: tap handling lives in each UIKit bridge
-                        // (UITapGestureRecognizer with shouldRecognizeSimultaneously).
-                        // Do NOT add a SwiftUI overlay — it blocks scroll gestures. (bug #70)
-                        nativeReaderView(fingerprint: fingerprint)
-                    }
+                    // Route by ReaderEngine (feature #54). Tap handling lives
+                    // in each UIKit bridge (UITapGestureRecognizer with
+                    // shouldRecognizeSimultaneously). Do NOT add a SwiftUI
+                    // overlay — it blocks scroll gestures. (bug #70)
+                    engineReaderView(fingerprint: fingerprint)
                 } else {
                     fingerprintErrorView
                 }
@@ -336,8 +323,8 @@ struct ReaderContainerView: View {
         }
         #endif
         // PERF: Single deferred .task for all non-critical setup.
-        // Per-book settings, search prep, and replacement rules all deferred
-        // to avoid contending with the format host's file-open .task.
+        // Per-book settings + TOC prep deferred to avoid contending with the
+        // format host's file-open .task.
         .task {
             // Per-book settings (bug #84) — fast file read, do first
             let perBook = PerBookSettingsStore.settings(
@@ -350,30 +337,10 @@ struct ReaderContainerView: View {
                 )
                 settingsStore.applyResolvedSettings(resolved)
             }
-            // Build TOC eagerly for TXT — needed for chapter progress bar in legacy mode (bug #31)
+            // Build TOC eagerly for TXT — needed for chapter progress bar (bug #31)
             if resolvedBookFormat == .txt {
                 ensureTOCReady()
             }
-            // Replacement rules (unified mode only).
-            // Bug #158 / GH #468: also gate on `.unifiedReflow` capability.
-            // Without this, a TXT book whose per-book / global preference
-            // still persists `readingMode == .unified` from before #158's
-            // capability removal would trigger the rule pipeline even
-            // though the dispatcher (line 102-103) routes the format to
-            // the native renderer where rules don't apply. Same shape as
-            // the dispatcher's own check — single source of truth for
-            // "does unified actually run for this format right now."
-            if settingsStore.readingMode == .unified
-                && resolvedBookFormat.capabilities.contains(.unifiedReflow) {
-                await loadReplacementRules()
-            }
-        }
-        .onChange(of: settingsStore.chineseConversion) { _, newDirection in
-            var transforms = unifiedCoordinator.activeTransforms.filter { !($0 is SimpTradTransform) }
-            if newDirection != .none {
-                transforms.append(SimpTradTransform(direction: newDirection))
-            }
-            unifiedCoordinator.activeTransforms = transforms
         }
         .sheet(isPresented: $showSettings) {
             ReaderSettingsPanel(
@@ -638,55 +605,91 @@ struct ReaderContainerView: View {
         #endif
     }()
 
-    /// Dispatches to the format-specific native reader.
+    // MARK: - Engine Dispatch
+
+    /// Dispatches to the format-specific reader host, selecting the host by
+    /// `ReaderEngine.resolve(format:)` (feature #54). For an unrecognized
+    /// format string, `resolvedBookFormat` falls back to `.txt`; the genuine
+    /// unknown-format case is the `else` of the `BookFormat(rawValue:)` guard.
     @ViewBuilder
-    func nativeReaderView(fingerprint: DocumentFingerprint) -> some View {
-        switch book.format.lowercased() {
-        case "epub":
-            EPUBReaderHost(
-                fileURL: resolvedFileURL,
-                fingerprint: fingerprint,
-                modelContainer: modelContext.container,
-                settingsStore: settingsStore,
-                ttsService: ttsService,
-                readerToken: readerToken
-            )
-        case "pdf":
-            PDFReaderHost(
-                fileURL: resolvedFileURL,
-                fingerprint: fingerprint,
-                modelContainer: modelContext.container,
-                ttsService: ttsService,
-                settingsStore: settingsStore
-            )
-        case "txt":
-            TXTReaderHost(
-                fileURL: resolvedFileURL,
-                fingerprint: fingerprint,
-                modelContainer: modelContext.container,
-                settingsStore: settingsStore,
-                ttsService: ttsService,
-                tocEntries: tocEntries
-            )
-        case "md":
-            MDReaderHost(
-                fileURL: resolvedFileURL,
-                fingerprint: fingerprint,
-                modelContainer: modelContext.container,
-                settingsStore: settingsStore,
-                ttsService: ttsService
-            )
-        case "azw3":
-            FoliateSpikeView(
-                bookURL: resolvedFileURL,
-                fingerprintKey: book.fingerprintKey,
-                readerToken: readerToken,
-                settingsStore: settingsStore,
-                highlightActionPresenter: UIKitHighlightActionPresenter()
-            )
-        default:
+    func engineReaderView(fingerprint: DocumentFingerprint) -> some View {
+        if let format = BookFormat(rawValue: book.format.lowercased()) {
+            switch ReaderEngine.resolve(format: format) {
+            case .epubWKWebView:
+                EPUBReaderHost(
+                    fileURL: resolvedFileURL,
+                    fingerprint: fingerprint,
+                    modelContainer: modelContext.container,
+                    settingsStore: settingsStore,
+                    ttsService: ttsService,
+                    readerToken: readerToken
+                )
+            case .pdfKit:
+                PDFReaderHost(
+                    fileURL: resolvedFileURL,
+                    fingerprint: fingerprint,
+                    modelContainer: modelContext.container,
+                    ttsService: ttsService,
+                    settingsStore: settingsStore
+                )
+            case .textNative:
+                TXTReaderHost(
+                    fileURL: resolvedFileURL,
+                    fingerprint: fingerprint,
+                    modelContainer: modelContext.container,
+                    settingsStore: settingsStore,
+                    ttsService: ttsService,
+                    tocEntries: tocEntries
+                )
+            case .markdownNative:
+                MDReaderHost(
+                    fileURL: resolvedFileURL,
+                    fingerprint: fingerprint,
+                    modelContainer: modelContext.container,
+                    settingsStore: settingsStore,
+                    ttsService: ttsService
+                )
+            case .foliateWeb:
+                FoliateSpikeView(
+                    bookURL: resolvedFileURL,
+                    fingerprintKey: book.fingerprintKey,
+                    readerToken: readerToken,
+                    settingsStore: settingsStore,
+                    highlightActionPresenter: UIKitHighlightActionPresenter()
+                )
+            }
+        } else {
             unsupportedFormatView(format: book.format.uppercased())
         }
+    }
+
+    // MARK: - Error / Unsupported Views
+
+    /// Shown when the book's `fingerprintKey` cannot be parsed into a
+    /// `DocumentFingerprint`.
+    var fingerprintErrorView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("Unable to open this book.")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityIdentifier("fingerprintErrorView")
+    }
+
+    /// Shown when the book's format string maps to no known `BookFormat`.
+    func unsupportedFormatView(format: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "doc.questionmark")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("\(format) reader coming soon")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityIdentifier("unsupportedFormatView")
     }
 }
 
