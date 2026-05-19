@@ -253,7 +253,7 @@ struct AISummaryTabViewTests {
     }
 
     /// Builds the tab view under test with a `.txt` locator + non-empty
-    /// context so `summarize` reaches the provider rather than the
+    /// full text so `summarize` reaches the provider rather than the
     /// empty-context error branch.
     private static func makeTabView(
         viewModel: AIAssistantViewModel
@@ -261,7 +261,8 @@ struct AISummaryTabViewTests {
         AISummaryTabView(
             viewModel: viewModel,
             locator: WI11TestHelpers.makeLocator(),
-            textContent: "Some text content for testing.",
+            fullTextContent: "Some text content for testing.",
+            chapterBounds: nil,
             format: .txt,
             theme: .paper,
             onShare: { _ in }
@@ -278,7 +279,10 @@ struct AISummaryTabViewTests {
 /// also resolves the `release()`-before-`sendRequest`-suspends ordering
 /// — `release()` records a flag that `gateOpen()` checks, so a release
 /// that lands first is not dropped.
-private actor GateState {
+///
+/// `internal` (not `private`) so `AISummaryTabViewScopeTests` (feature
+/// #69 WI-5) can reuse the same gate rather than duplicate it.
+actor GateState {
     private(set) var sendRequestCallCount = 0
     private var entered = false
     private var released = false
@@ -323,7 +327,10 @@ private actor GateState {
 /// state so the in-flight guard can be observed deterministically
 /// (no `Task.sleep`, no timing race). `awaitEntered()` resolves once
 /// the VM has actually reached the provider call.
-private final class GatedAIProvider: AIProvider, Sendable {
+///
+/// `internal` (not `private`) so `AISummaryTabViewScopeTests` (feature
+/// #69 WI-5) can reuse it for the scoped in-flight-guard tests.
+final class GatedAIProvider: AIProvider, Sendable {
     let providerName = "Gated"
     let stubbedResponseBox = ResponseBox()
     private let gate = GateState()

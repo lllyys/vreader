@@ -259,18 +259,37 @@ extension ReaderContainerView {
            let transVM = ai.translationViewModel,
            let chatVM = ai.chatViewModel,
            let fingerprint = DocumentFingerprint(canonicalKey: book.fingerprintKey) {
+            // Resolve the reading locator once — used both for the panel
+            // and for the feature-#69 Chapter-scope bounds. The AI sheet
+            // is modal, so this snapshot cannot go stale while it's open.
+            let resolvedLocator = ai.currentLocator ?? Locator(
+                bookFingerprint: fingerprint,
+                href: nil, progression: nil, totalProgression: nil, cfi: nil,
+                page: nil, charOffsetUTF16: nil,
+                charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+                textQuote: nil, textContextBefore: nil, textContextAfter: nil
+            )
+            // Feature #69: the FULL flattened book text (un-extracted).
+            // Empty when text loading has not finished — the extractor
+            // returns "" and the view model maps that to a context error.
+            let fullText = ai.loadedTextContent ?? ""
+            // Feature #69: the chapter span for the Chapter scope,
+            // resolved from the reader's existing TOC entries. A nil
+            // result (empty / non-char-offset-anchored TOC, e.g. EPUB)
+            // degrades Chapter to Section inside the extractor.
+            let chapterBounds = SummaryScopeResolver.chapterBounds(
+                for: resolvedLocator,
+                tocEntries: tocEntries,
+                totalTextLengthUTF16: fullText.utf16.count
+            )
             AIReaderPanel(
                 viewModel: aiVM,
                 translationViewModel: transVM,
                 chatViewModel: chatVM,
-                locator: ai.currentLocator ?? Locator(
-                    bookFingerprint: fingerprint,
-                    href: nil, progression: nil, totalProgression: nil, cfi: nil,
-                    page: nil, charOffsetUTF16: nil,
-                    charRangeStartUTF16: nil, charRangeEndUTF16: nil,
-                    textQuote: nil, textContextBefore: nil, textContextAfter: nil
-                ),
+                locator: resolvedLocator,
                 textContent: ai.currentTextContent,
+                fullTextContent: fullText,
+                chapterBounds: chapterBounds,
                 format: resolvedBookFormat,
                 onDismiss: { showAIPanel = false },
                 theme: settingsStore.theme,

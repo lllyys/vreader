@@ -59,8 +59,22 @@ struct AIReaderPanel: View {
     /// The current locator for context extraction.
     let locator: Locator
 
-    /// The full text content of the current section/page/chapter.
+    /// The section-window text content — used by the Chat / Translate
+    /// tabs (their context is the current section, unchanged by #69).
     let textContent: String
+
+    /// Feature #69: the FULL flattened book text — the Summarize tab's
+    /// source for scoped (Section / Chapter / Book-so-far) extraction.
+    /// Required (not optional / defaulted): a scoped summary must run on
+    /// the full book text, never a section snippet. The single caller
+    /// (`aiSheet`) passes `loadedTextContent ?? ""`; an empty value is a
+    /// clean context-error path inside the view model, not a silent
+    /// snippet fallback.
+    let fullTextContent: String
+
+    /// Feature #69: the chapter span containing the locator, for the
+    /// Summarize tab's Chapter scope. `nil` → Chapter degrades to Section.
+    let chapterBounds: ChapterBounds?
 
     /// The book format (determines context extraction strategy).
     let format: BookFormat
@@ -117,7 +131,10 @@ struct AIReaderPanel: View {
                     AISummaryTabView(
                         viewModel: viewModel,
                         locator: locator,
-                        textContent: textContent,
+                        // Feature #69: the Summarize tab scopes its
+                        // summary over the FULL book text (required).
+                        fullTextContent: fullTextContent,
+                        chapterBounds: chapterBounds,
                         format: format,
                         theme: theme,
                         onShare: { summaryShareItem = SummaryShareItem(text: $0) }

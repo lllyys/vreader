@@ -4,12 +4,13 @@
 // `featureDisabledView`/`consentRequiredView`), re-skinned to the v2
 // theme tokens and the design's summary card.
 //
+// Feature #69 WI-5 adds the scope chip strip (Section / Chapter /
+// Book so far) above the state body, wired to the scoped
+// AIContextExtractor. The suggested-questions list remains OMITTED
+// (carved out by feature #65 §2.2 — no question-generation service).
+//
 // Mirrors `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
-// — `SummaryView` (the summary card + states). The design's scope
-// chips (Section / Chapter / Book so far) and suggested-questions list
-// are OMITTED (plan §2.1, §2.2 — no scoped extraction, no
-// question-generation service); a follow-up feature carries the scope
-// behavior.
+// — `SummaryView`: the chip pill row + the summary card + states.
 //
 // State routing is exposed through the pure static `section(for:)`
 // mapper + the `SummarySection` enum (the `SearchView.contentState`
@@ -18,15 +19,14 @@
 //
 // @coordinates-with: AIReaderPanel.swift, AISummaryCard.swift,
 //   AIAssistantViewModel.swift, ReaderThemeV2.swift,
-//   ReaderTypography.swift,
+//   ReaderTypography.swift, SummaryScope.swift, ChapterBounds.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
 
 #if canImport(UIKit)
 import SwiftUI
 
 /// The re-skinned Summarize tab body — design `vreader-panels.jsx`
-/// `SummaryView` (summary card + states; scope chips and
-/// suggested-questions omitted, plan §2).
+/// `SummaryView`: the scope chip strip + the summary card + states.
 struct AISummaryTabView: View {
 
     /// The AI assistant view model (shared with the reader).
@@ -35,8 +35,15 @@ struct AISummaryTabView: View {
     /// The current locator for context extraction.
     let locator: Locator
 
-    /// The full text content of the current section/page/chapter.
-    let textContent: String
+    /// The FULL flattened book text — the source for scoped extraction
+    /// (Section / Chapter / Book-so-far). NOT a section snippet:
+    /// feeding a snippet would make Chapter / Book-so-far meaningless.
+    let fullTextContent: String
+
+    /// The chapter span containing the locator, for the Chapter scope.
+    /// `nil` (empty / non-char-offset-anchored TOC) → Chapter degrades
+    /// to Section in `AIContextExtractor`.
+    let chapterBounds: ChapterBounds?
 
     /// The book format (determines context extraction strategy).
     let format: BookFormat
@@ -79,6 +86,22 @@ struct AISummaryTabView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            // The scope chip strip sits above the state body so it shows
+            // in every state — matching the design `SummaryView`.
+            AISummaryScopeChipStrip(
+                scopes: scopeChips,
+                activeScope: activeScope,
+                theme: theme,
+                onSelect: selectScope
+            )
+            stateBody
+        }
+    }
+
+    /// The state-routed body, below the chip strip.
+    @ViewBuilder
+    private var stateBody: some View {
         switch Self.section(for: viewModel.state) {
         case .idle:            idleSection
         case .loading:         loadingSection
@@ -87,6 +110,36 @@ struct AISummaryTabView: View {
         case .featureDisabled: featureDisabledSection
         case .consentRequired: consentRequiredSection
         }
+    }
+
+    // MARK: - Scope chip strip wiring (feature #69 WI-5)
+
+    /// The three scope chips the AI Summarize tab can scope its summary
+    /// to — `[.section, .chapter, .bookSoFar]`, in design order.
+    /// `internal` so the chip-strip contract is unit-testable.
+    var scopeChips: [SummaryScope] { SummaryScope.allCases }
+
+    /// The currently-selected scope (drives which chip renders filled).
+    /// Mirrors `viewModel.selectedScope`.
+    var activeScope: SummaryScope { viewModel.selectedScope }
+
+    /// Whether `scope`'s chip should render in the active (filled) style.
+    func isScopeActive(_ scope: SummaryScope) -> Bool {
+        viewModel.selectedScope == scope
+    }
+
+    /// Selects a scope chip. Updates the view model's selection only —
+    /// it does NOT auto-run the summary (the user taps Summarize /
+    /// Regenerate). `internal` so the selection contract is testable.
+    func selectScope(_ scope: SummaryScope) {
+        viewModel.setScope(scope)
+    }
+
+    /// The accessibility identifier for a scope chip — re-exported from
+    /// `AISummaryScopeChipStrip` so tests and the XCUITest acceptance
+    /// pass have one stable reference point.
+    static func scopeChipIdentifier(_ scope: SummaryScope) -> String {
+        AISummaryScopeChipStrip.chipIdentifier(scope)
     }
 
     // MARK: - Sections
@@ -294,15 +347,16 @@ struct AISummaryTabView: View {
             break
         }
         Task {
-            // Feature #69 WI-4: summarize now takes the full book text +
-            // a scope. WI-5 threads the real `loadedTextContent` and the
-            // scope-chip selection here; until then this passes the
-            // existing section content as `fullText` with the default
-            // `.section` scope — byte-identical to the pre-#69 behavior.
+            // Feature #69 WI-5: summarize at the currently-selected scope
+            // chip, over the FULL flattened book text. `chapterBounds`
+            // bounds the Chapter scope; a nil bounds degrades Chapter to
+            // Section inside the extractor.
             await viewModel.summarize(
                 locator: locator,
-                fullText: textContent,
-                format: format
+                fullText: fullTextContent,
+                format: format,
+                scope: viewModel.selectedScope,
+                chapterBounds: chapterBounds
             )
         }
     }
