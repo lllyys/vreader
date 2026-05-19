@@ -45,6 +45,11 @@ final class ReadingDashboardViewModel {
     private let aggregator: any ReadingStatsAggregating
     private let preferenceStore: (any PreferenceStoring)?
 
+    /// Monotonic request counter. Each `refresh()` claims the next id; a result
+    /// is applied only if it is still the latest — so a slow earlier request
+    /// (e.g. an older window) can never overwrite a newer one's snapshot.
+    private var latestRequestID = 0
+
     /// `PreferenceStoring` key for the persisted dashboard sort.
     static let sortKey = "stats.dashboardSort"
 
@@ -88,13 +93,21 @@ final class ReadingDashboardViewModel {
     // MARK: - Private
 
     private func refresh() async {
+        latestRequestID += 1
+        let requestID = latestRequestID
+        let requestWindow = activeWindow
+        let requestSort = sort
         do {
             let result = try await aggregator.snapshot(
-                window: activeWindow, sort: sort, now: Date()
+                window: requestWindow, sort: requestSort, now: Date()
             )
+            // Drop the result if a newer refresh started while this one ran —
+            // a stale earlier request must not overwrite a fresher snapshot.
+            guard requestID == latestRequestID else { return }
             snapshot = result
             errorMessage = nil
         } catch {
+            guard requestID == latestRequestID else { return }
             log.error("dashboard snapshot failed: \(String(describing: error), privacy: .public)")
             snapshot = nil
             errorMessage = "Couldn't load reading stats. Pull to retry."

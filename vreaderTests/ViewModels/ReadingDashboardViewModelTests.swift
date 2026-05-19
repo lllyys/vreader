@@ -173,4 +173,68 @@ struct ReadingDashboardViewModelTests {
         #expect(vm.errorMessage == nil)
         #expect(vm.snapshot != nil)
     }
+
+    // MARK: - Out-of-order refresh (Codex WI-4 audit finding)
+
+    /// An aggregator where each call blocks on a per-call gate the test opens
+    /// explicitly — so the test controls completion ordering deterministically.
+    actor GatedAggregator: ReadingStatsAggregating {
+        private var gates: [ReadingStatsWindow: CheckedContinuation<Void, Never>] = [:]
+        private var pending: [ReadingStatsWindow: () -> Void] = [:]
+
+        /// Snapshots are keyed by window so the test can tell which one "won".
+        func snapshot(
+            window: ReadingStatsWindow, sort: ReadingDashboardSort, now: Date
+        ) async throws -> ReadingDashboardSnapshot {
+            // Block until the test releases this window's gate.
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                if let release = pending.removeValue(forKey: window) {
+                    // The test already asked to release this window — go now.
+                    cont.resume()
+                    release()
+                } else {
+                    gates[window] = cont
+                }
+            }
+            return ReadingDashboardSnapshot(
+                windowTotals: [WindowTotal(window: window, totalSeconds: 0, sessionCount: 0)],
+                activeWindow: window, perBook: [],
+                lifetimeTotalSeconds: window == .today ? 1 : 2, trackingSince: nil
+            )
+        }
+
+        /// Releases the blocked `snapshot` call for `window` (or arms a release
+        /// if the call hasn't reached the gate yet).
+        func release(_ window: ReadingStatsWindow) {
+            if let cont = gates.removeValue(forKey: window) {
+                cont.resume()
+            } else {
+                pending[window] = {}
+            }
+        }
+    }
+
+    @Test func staleRefreshDoesNotOverwriteANewerSnapshot() async {
+        let agg = GatedAggregator()
+        let vm = ReadingDashboardViewModel(aggregator: agg, preferenceStore: MockPreferenceStore())
+
+        // Request A (today) starts and blocks on its gate.
+        async let requestA: Void = vm.load()
+        // Give A a turn to reach the aggregator gate.
+        await Task.yield()
+
+        // Request B (last30Days) starts and blocks on its gate.
+        async let requestB: Void = vm.selectWindow(.last30Days)
+        await Task.yield()
+
+        // Release the NEWER request (B) first, then the older one (A).
+        await agg.release(.last30Days)
+        _ = await requestB
+        await agg.release(.today)
+        _ = await requestA
+
+        // The VM must keep B's snapshot — the stale A result is dropped.
+        #expect(vm.activeWindow == .last30Days)
+        #expect(vm.snapshot?.activeWindow == .last30Days)
+    }
 }
