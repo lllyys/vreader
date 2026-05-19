@@ -135,6 +135,55 @@ final class TXTReaderViewModel {
     /// Total chapter count (WI-6 overlay).
     var totalChapterCount: Int { chapterIndex?.count ?? 0 }
 
+    /// Feature #68: for the current chapter, the UTF-16 length of the
+    /// heading line that is part of `currentChapterText` (regex-detected
+    /// chapters), or 0 when the chapter is synthetic / "前言" / has no
+    /// leading heading line in its body. Drives `buildChapterStart`'s
+    /// `headingLineLength` argument.
+    ///
+    /// Pure render-time derivation — zero migration. `TXTChapter` carries
+    /// no `isSynthetic` flag (it is `Codable`-persisted), so this compares
+    /// the chapter text's first line, trimmed, to the chapter title,
+    /// trimmed. A regex-detected chapter's first body line IS the matched
+    /// heading line (the regex builder sets the chapter's UTF-16 start to
+    /// that line); the length returned excludes the trailing newline so
+    /// the restyle runs over the visible line only. Synthetic ("Chapter
+    /// N") and "前言" chapters return 0 because neither title appears
+    /// verbatim as the body's first line.
+    var currentChapterHeadingLineLength: Int {
+        Self.headingLineLength(
+            chapterText: currentChapterText, chapterTitle: currentChapterTitle
+        )
+    }
+
+    /// Pure derivation behind `currentChapterHeadingLineLength` —
+    /// extracted as a `static` so it is directly unit-testable without
+    /// constructing a fully-loaded chapter index (feature #68 WI-2).
+    ///
+    /// Returns the UTF-16 length of `chapterText`'s first line (excluding
+    /// the trailing newline) when that line, trimmed, equals
+    /// `chapterTitle` trimmed — i.e. the chapter is regex-detected and
+    /// its heading line is part of the body. Returns 0 otherwise:
+    /// synthetic ("Chapter N") and "前言" chapters never have their title
+    /// verbatim as the body's first line.
+    nonisolated static func headingLineLength(
+        chapterText: String?, chapterTitle: String?
+    ) -> Int {
+        guard let text = chapterText, !text.isEmpty,
+              let title = chapterTitle else { return 0 }
+        let nsText = text as NSString
+        let firstNewline = nsText.rangeOfCharacter(from: CharacterSet.newlines)
+        let firstLineLength = firstNewline.location == NSNotFound
+            ? nsText.length
+            : firstNewline.location
+        guard firstLineLength > 0 else { return 0 }
+        let firstLine = nsText.substring(to: firstLineLength)
+        let trimmedFirstLine = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty, trimmedFirstLine == trimmedTitle else { return 0 }
+        return firstLineLength
+    }
+
     /// Whether there is a next chapter (WI-6 overlay).
     var hasNextChapter: Bool { chapterIndex.map { currentChapterIdx < $0.count - 1 } ?? false }
 

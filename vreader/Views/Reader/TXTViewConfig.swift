@@ -18,6 +18,19 @@ struct TXTViewConfig: @unchecked Sendable {
     var letterSpacing: CGFloat = 0
     var textInset: UIEdgeInsets = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
 
+    /// Feature #68: drop-cap color for the chapter-start initial. Used
+    /// only by `TXTAttributedStringBuilder.buildChapterStart`. Defaults
+    /// to a near-black matching the `textColor` default so non-chapter
+    /// call sites (tests, previews) keep their existing render. The live
+    /// reader sets this to `ReaderThemeV2.accentColor` via the store.
+    var accentColor: UIColor = UIColor(red: 0.10, green: 0.10, blue: 0.10, alpha: 1.0)
+
+    /// Feature #68: in-text chapter-heading color. Used only by
+    /// `buildChapterStart`'s heading-restyle path (regex-detected
+    /// chapters). Defaults to a mid-gray for back-compat. The live reader
+    /// sets this to `ReaderThemeV2.subColor` via the store.
+    var chapterHeadingColor: UIColor = UIColor(white: 0.4, alpha: 1.0)
+
     /// Returns true if rendering-relevant fields match (excludes textInset).
     func renderingEquals(_ other: TXTViewConfig) -> Bool {
         fontSize == other.fontSize
@@ -26,6 +39,8 @@ struct TXTViewConfig: @unchecked Sendable {
             && textColor == other.textColor
             && backgroundColor == other.backgroundColor
             && letterSpacing == other.letterSpacing
+            && accentColor == other.accentColor
+            && chapterHeadingColor == other.chapterHeadingColor
     }
 }
 

@@ -103,12 +103,19 @@ struct TXTReaderContainerView: View {
             chIdx: viewModel.currentChapterIdx,
             chCount: viewModel.totalChapterCount,
             config: cfg,
-            chineseConversion: settingsStore?.chineseConversion ?? .none
+            chineseConversion: settingsStore?.chineseConversion ?? .none,
+            headingLineLength: viewModel.currentChapterHeadingLineLength
         )
     }
 
     /// Extracted for testability (feature #28 WI-A). Internal so
     /// `TXTReaderContainerViewChineseConversionTests` can call directly.
+    ///
+    /// Feature #68: `config.accentColor` / `config.chapterHeadingColor`
+    /// are hashed in so a theme switch that changes only those re-fires
+    /// the `.task(id:)` and rebuilds the chapter (live theme switching).
+    /// `headingLineLength` is included so two chapters that share an
+    /// index value across a re-open still rebuild.
     internal static func makeAttrStringKey(
         hasText: Bool,
         textLen: Int,
@@ -116,11 +123,14 @@ struct TXTReaderContainerView: View {
         chIdx: Int,
         chCount: Int,
         config: TXTViewConfig,
-        chineseConversion: ChineseConversionDirection
+        chineseConversion: ChineseConversionDirection,
+        headingLineLength: Int = 0
     ) -> String {
         let textColorHash = config.textColor.hash
         let bgColorHash = config.backgroundColor.hash
-        return "\(hasText)-\(textLen)-\(wordCount)-ch\(chIdx)/\(chCount)-\(config.fontSize)-\(config.fontName ?? "sys")-\(config.lineSpacing)-\(config.letterSpacing)-\(textColorHash)-\(bgColorHash)-\(chineseConversion.rawValue)"
+        let accentColorHash = config.accentColor.hash
+        let headingColorHash = config.chapterHeadingColor.hash
+        return "\(hasText)-\(textLen)-\(wordCount)-ch\(chIdx)/\(chCount)-\(config.fontSize)-\(config.fontName ?? "sys")-\(config.lineSpacing)-\(config.letterSpacing)-\(textColorHash)-\(bgColorHash)-\(accentColorHash)-\(headingColorHash)-hl\(headingLineLength)-\(chineseConversion.rawValue)"
     }
 
     var body: some View {
@@ -285,6 +295,12 @@ struct TXTReaderContainerView: View {
                 if isInitial { isBuildingInitialAttrString = true }
                 defer { if isInitial { isBuildingInitialAttrString = false } }
 
+                // Feature #68: chapter-based rendering applies the design's
+                // chapter-start typography (drop-cap + heading restyle).
+                // `buildChapterStart` only adds attributes — the string is
+                // byte-identical, so offsets stay valid. `headingLineLength`
+                // is 0 for synthetic / "前言" chapters (drop-cap only).
+                let headingLineLength = viewModel.currentChapterHeadingLineLength
                 if chapterText.utf16.count < 10_000 {
                     // Small chapter (<10KB UTF-16): build synchronously.
                     // SimpTradTransform is 1:1 UTF-16 for BMP CJK chars; offsetMap discarded —
@@ -292,16 +308,18 @@ struct TXTReaderContainerView: View {
                     let displayText = conversion != .none
                         ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
                         : chapterText
-                    chapterAttrString = TXTAttributedStringBuilder.build(
-                        text: displayText, config: config
+                    chapterAttrString = TXTAttributedStringBuilder.buildChapterStart(
+                        text: displayText, config: config,
+                        headingLineLength: headingLineLength
                     )
                 } else {
                     let wrapped = await Task.detached(priority: .userInitiated) {
                         let displayText = conversion != .none
                             ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
                             : chapterText
-                        return TXTAttributedStringBuilder.buildSendable(
-                            text: displayText, config: config
+                        return TXTAttributedStringBuilder.buildChapterStartSendable(
+                            text: displayText, config: config,
+                            headingLineLength: headingLineLength
                         )
                     }.value
                     guard !Task.isCancelled else { return }

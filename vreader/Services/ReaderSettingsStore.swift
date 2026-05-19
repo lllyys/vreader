@@ -206,6 +206,11 @@ final class ReaderSettingsStore {
     var txtViewConfig: TXTViewConfig {
         var c = TXTViewConfig(); c.fontSize = typography.fontSize; c.lineSpacing = lineSpacingPoints
         c.textColor = uiTextColor; c.backgroundColor = uiBackgroundColor; c.letterSpacing = cjkLetterSpacing
+        // Feature #68: thread the V2 accent + sub tokens through so the
+        // TXT chapter-start drop-cap (accent) and in-text heading restyle
+        // (sub) follow the active theme.
+        c.accentColor = theme.accentColor
+        c.chapterHeadingColor = theme.subColor
         // Resolve the TXT bridge's `fontName` via `ReaderTypography` so the
         // 5-case ReaderFontFamily (Feature #60 WI-1) is handled uniformly.
         // `.system` → nil (TextKit picks the system font); everything else
