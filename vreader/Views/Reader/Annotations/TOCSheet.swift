@@ -37,10 +37,19 @@ struct TOCSheet: View {
     let onNavigate: (Locator) -> Void
     let onDismiss: () -> Void
 
-    @State private var selectedTab: TOCSheetTab
+    // `@State` kept `internal` (not `private`) so `TOCSheet+Support.swift`
+    // — the helpers / badge counts / DEBUG hooks extension — can read it.
+    // Same cross-file-extension pattern `ReaderContainerView` uses for
+    // its `+Sheets.swift` split.
+    @State var selectedTab: TOCSheetTab
     /// Sheet-owned bookmark model — loaded in `.task` so the Bookmarks
     /// badge is live on appear regardless of the initial tab.
-    @State private var bookmarkVM: BookmarkListViewModel?
+    @State var bookmarkVM: BookmarkListViewModel?
+    /// True once the sheet-owned bookmark load has completed. Tracked
+    /// separately from emptiness so the Bookmarks tab does not flash a
+    /// false "No bookmarks yet" empty state on first paint while the
+    /// load is still in flight (Gate-4 finding).
+    @State var bookmarksDidLoad = false
 
     init(
         bookTitle: String,
@@ -91,6 +100,7 @@ struct TOCSheet: View {
             )
             await vm.loadBookmarks()
             bookmarkVM = vm
+            bookmarksDidLoad = true
         }
     }
 
@@ -179,7 +189,7 @@ struct TOCSheet: View {
                         theme: theme,
                         chapterOrdinal: index + 1,
                         title: entry.title,
-                        page: entry.locator.page,
+                        page: Self.displayPage(entry.locator.page),
                         isCurrent: index == activeEntryIndex,
                         onTap: { onNavigate(entry.locator); onDismiss() }
                     )
@@ -196,15 +206,7 @@ struct TOCSheet: View {
     @ViewBuilder
     private var bookmarksBody: some View {
         let bookmarks = bookmarkVM?.bookmarks ?? []
-        if bookmarks.isEmpty {
-            AnnotationsEmptyStateView(
-                theme: theme,
-                accessibilityIdentifier: "bookmarkEmptyState",
-                art: AnyView(EmptyBookmarkArt(theme: theme)),
-                title: "No bookmarks yet",
-                body: "Tap the bookmark icon in the top bar to save your place. Bookmarks let you jump back instantly."
-            )
-        } else {
+        if !bookmarks.isEmpty {
             LazyVStack(spacing: 0) {
                 ForEach(Array(bookmarks.enumerated()), id: \.element.id) { index, bookmark in
                     TOCBookmarkRow(
@@ -218,116 +220,26 @@ struct TOCSheet: View {
                 }
             }
             .padding(.horizontal, 18)
+        } else if bookmarksDidLoad {
+            // Empty state shown only once the sheet-owned load has
+            // completed — avoids flashing a false "No bookmarks yet" on
+            // first paint while the load is still in flight (Gate-4
+            // finding).
+            AnnotationsEmptyStateView(
+                theme: theme,
+                accessibilityIdentifier: "bookmarkEmptyState",
+                art: AnyView(EmptyBookmarkArt(theme: theme)),
+                title: "No bookmarks yet",
+                body: "Tap the bookmark icon in the top bar to save your place. Bookmarks let you jump back instantly."
+            )
+        } else {
+            // Pre-load neutral body — no empty state, no spinner (the
+            // bookmark fetch is a fast indexed query; the design shows
+            // no loading affordance).
+            Color.clear.frame(height: 1)
         }
     }
 
-    // MARK: - Bookmark display helpers
-
-    /// The 1-line italic preview — the bookmark title, the quoted text,
-    /// or a generic fallback.
-    private func bookmarkPreview(_ bookmark: BookmarkRecord) -> String {
-        if let title = bookmark.title, !title.isEmpty { return title }
-        if let quote = bookmark.locator.textQuote, !quote.isEmpty { return quote }
-        return "Bookmark"
-    }
-
-    /// The `· p. N · date` sub-line. Page is included only when the
-    /// locator carries one (degrades for EPUB/TXT).
-    private func bookmarkSubtitle(_ bookmark: BookmarkRecord) -> String {
-        var parts: [String] = []
-        if let page = bookmark.locator.page { parts.append("p. \(page + 1)") }
-        parts.append(Self.dateFormatter.string(from: bookmark.createdAt))
-        return parts.joined(separator: " · ")
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
-        return f
-    }()
-
-    // MARK: - Current-chapter matching (lifted from TOCListView)
-
-    /// Index of the active TOC entry for `currentLocator` — matched by
-    /// `charOffsetUTF16` (TXT/MD), `page` (PDF), or `href` (EPUB).
-    /// Picks the last entry at or before the current position. Lifted
-    /// verbatim from `TOCListView.activeEntryIndex` (the logic is
-    /// correct; only the row rendering is new — Gate-2 round-2 finding 1).
-    private var activeEntryIndex: Int? {
-        guard let loc = currentLocator else { return nil }
-
-        if let currentOffset = loc.charOffsetUTF16 {
-            var best: Int?
-            for (i, entry) in tocEntries.enumerated() {
-                if let o = entry.locator.charOffsetUTF16, o <= currentOffset { best = i }
-            }
-            return best
-        }
-        if let currentPage = loc.page {
-            var best: Int?
-            for (i, entry) in tocEntries.enumerated() {
-                if let p = entry.locator.page, p <= currentPage { best = i }
-            }
-            return best
-        }
-        if let currentHref = loc.href {
-            var best: Int?
-            for (i, entry) in tocEntries.enumerated() {
-                if entry.locator.href == currentHref { best = i }
-            }
-            return best
-        }
-        return nil
-    }
-
-    // MARK: - Badge counts
-
-    /// The Contents tab badge — the TOC entry count.
-    var contentsBadgeCount: Int { tocEntries.count }
-
-    /// The Bookmarks tab badge — the loaded bookmark count (0 before
-    /// the sheet-owned load resolves).
-    var bookmarksBadgeCount: Int { bookmarkVM?.bookmarks.count ?? 0 }
+    // Bookmark display helpers, current-chapter matching, badge counts,
+    // and the DEBUG testing hooks live in `TOCSheet+Support.swift`.
 }
-
-// MARK: - Testing hooks
-
-#if DEBUG
-extension TOCSheet {
-    /// The title `ReaderSheetChrome` is built with — the book title.
-    var sheetChromeTitleForTesting: String { bookTitle }
-
-    /// The seeded / currently-selected tab.
-    var selectedTabForTesting: TOCSheetTab { selectedTab }
-
-    /// The lifted `activeEntryIndex` result, for the current-chapter test.
-    var activeEntryIndexForTesting: Int? { activeEntryIndex }
-
-    /// True when the Contents body renders the empty state.
-    var contentsIsEmpty: Bool { tocEntries.isEmpty }
-
-    /// True when the Bookmarks body renders the empty state.
-    var bookmarksIsEmpty: Bool { (bookmarkVM?.bookmarks ?? []).isEmpty }
-
-    /// Runs the exact bookmark-load the sheet's `.task` runs and returns
-    /// the loaded count — for the Bookmarks-count-badge test. Returns the
-    /// count rather than mutating `@State` because `@State` is not
-    /// observable outside a render tree; the sheet's `.task` + render
-    /// path is what feeds the live badge in the app.
-    func loadBookmarkCountForTesting() async -> Int {
-        let vm = BookmarkListViewModel(
-            bookFingerprintKey: bookFingerprintKey,
-            store: PersistenceActor(modelContainer: modelContainer)
-        )
-        await vm.loadBookmarks()
-        return vm.bookmarks.count
-    }
-
-    /// Invokes the Contents-empty "Open Search" CTA — dismiss then search.
-    func invokeContentsEmptyCTAForTesting() {
-        onDismiss()
-        onOpenSearch()
-    }
-}
-#endif

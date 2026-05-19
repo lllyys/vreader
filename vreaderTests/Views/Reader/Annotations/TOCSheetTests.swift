@@ -183,16 +183,65 @@ struct TOCSheetTests {
         #expect(searchFired)
     }
 
-    @Test("Empty bookmarks renders the empty state")
-    func emptyBookmarksRendersEmptyState() {
+    @Test("Bookmarks empty state shows only after the load completes")
+    func bookmarksEmptyStateOnlyAfterLoad() async {
+        // Before the load resolves, the Bookmarks body must NOT be the
+        // empty state — a neutral body shows instead (no false "No
+        // bookmarks yet" flash on first paint, Gate-4 finding).
         let sheet = makeSheet(tocEntries: makeTOCEntries(3), initialTab: .bookmarks)
-        // No bookmarks loaded → the Bookmarks body is the empty state.
-        #expect(sheet.bookmarksIsEmpty)
+        #expect(sheet.bookmarksEmptyStateShown == false)
     }
 
     @Test("Non-empty TOC is not the empty state")
     func nonEmptyTOCNotEmptyState() {
         let sheet = makeSheet(tocEntries: makeTOCEntries(4))
         #expect(sheet.contentsIsEmpty == false)
+    }
+
+    // MARK: - displayPage — consistent 1-based numbering
+
+    @Test("displayPage normalizes a 0-based page to 1-based; nil degrades")
+    func displayPageNormalizes() {
+        // Locator.page is 0-based (PDF). Both TOCContentsRow and the
+        // bookmark sub-line route page through displayPage so the same
+        // physical page renders identically (Gate-4 finding).
+        #expect(TOCSheet.displayPage(0) == 1)
+        #expect(TOCSheet.displayPage(46) == 47)   // the design's "p. 47"
+        #expect(TOCSheet.displayPage(nil) == nil) // EPUB/TXT — no page
+    }
+
+    // MARK: - bookmark subtitle composition (chapter · p. N · date)
+
+    @Test("Bookmark subtitle includes the derived chapter for a page-based locator")
+    func bookmarkSubtitleIncludesChapter() {
+        // PDF-style TOC: 3 chapters at pages 0 / 10 / 20.
+        let pdfFP = wi9PDFFingerprint
+        let entries = [
+            TOCEntry(title: "Opening", level: 0, locator: makePDFLocator(fingerprint: pdfFP, page: 0)),
+            TOCEntry(title: "The Middle", level: 0, locator: makePDFLocator(fingerprint: pdfFP, page: 10)),
+            TOCEntry(title: "The End", level: 0, locator: makePDFLocator(fingerprint: pdfFP, page: 20)),
+        ]
+        let sheet = makeSheet(tocEntries: entries)
+        // A bookmark on page 12 is inside "The Middle"; display page 13.
+        let bm = makeBookmarkRecord(
+            locator: makePDFLocator(fingerprint: pdfFP, page: 12),
+            title: nil
+        )
+        let subtitle = sheet.bookmarkSubtitleForTesting(bm)
+        #expect(subtitle.contains("The Middle"))
+        #expect(subtitle.contains("p. 13"))
+    }
+
+    @Test("Bookmark subtitle degrades to date-only when no TOC and no page")
+    func bookmarkSubtitleDegrades() {
+        // EPUB locator (no page) + no TOC → only the date remains.
+        let sheet = makeSheet(tocEntries: [])
+        let bm = makeBookmarkRecord(
+            locator: makeEPUBLocator(href: "ch1.xhtml", progression: 0.3),
+            title: nil
+        )
+        let subtitle = sheet.bookmarkSubtitleForTesting(bm)
+        #expect(subtitle.contains("p. ") == false)   // no page component
+        #expect(subtitle.isEmpty == false)            // date still present
     }
 }

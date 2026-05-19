@@ -384,6 +384,7 @@
 		545CCE5FED3565C9BF15EF78 /* LocatorValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C87C165AFE78571456C14D1 /* LocatorValidationTests.swift */; };
 		5475FDB13471D68A8ACB1ADD /* LegadoRuleParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 515AB3C2D2185F41DAFD8D16 /* LegadoRuleParser.swift */; };
 		547FFE39E9DC4280100F850F /* BookDetailsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6D4D3FF162BE1661731AAA /* BookDetailsSheet.swift */; };
+		54AE686286BC92388C9F8B7D /* TOCSheet+Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DDE77F4975D2E9EA4B33D3B /* TOCSheet+Support.swift */; };
 		5572AED7041B6CFD3C93AB79 /* LazyDownloadDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 159BB4EBD79ECE6657D50EC1 /* LazyDownloadDelegate.swift */; };
 		5599E405840D204BE7FA8104 /* LibrarySortOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC606D4AF30DF956E04C13DF /* LibrarySortOrder.swift */; };
 		55E8CDBFFC9EC1C49EAC47EE /* DocumentFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D14A41185FFD87E278E66C /* DocumentFingerprint.swift */; };
@@ -1743,6 +1744,7 @@
 		8D1C2AB4E9DBE8437C7C8CF8 /* VerificationSettingsHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerificationSettingsHelper.swift; sourceTree = "<group>"; };
 		8D93AA422199A410F2161589 /* HighlightPopoverContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightPopoverContentTests.swift; sourceTree = "<group>"; };
 		8DB169F568633A25E157B4DE /* ReaderNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderNavigationTests.swift; sourceTree = "<group>"; };
+		8DDE77F4975D2E9EA4B33D3B /* TOCSheet+Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TOCSheet+Support.swift"; sourceTree = "<group>"; };
 		8E1D54FF8AE0329DA462E95B /* BookSourceReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookSourceReaderView.swift; sourceTree = "<group>"; };
 		8E509DAF691A7E473603452A /* ReplacementRulesViewBannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplacementRulesViewBannerTests.swift; sourceTree = "<group>"; };
 		8E6E8611E23F1BE57E84E732 /* TXTTextViewBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTTextViewBridgeTests.swift; sourceTree = "<group>"; };
@@ -4135,6 +4137,7 @@
 				6C930176EDA59BA6AE769B8C /* AnnotationStreamBuilder.swift */,
 				FCC8C2B2EE71211499AA0EE4 /* AnnotationStreamItem.swift */,
 				18C0D116641E412150E6C620 /* TOCSheet.swift */,
+				8DDE77F4975D2E9EA4B33D3B /* TOCSheet+Support.swift */,
 				80042D2F170FF72D3792F03E /* TOCSheetRows.swift */,
 			);
 			path = Annotations;
@@ -5326,6 +5329,7 @@
 				70C6F95011CBEC3AF8F1D44B /* TOCChapterProgress.swift in Sources */,
 				F827253851032F8D00E6A423 /* TOCListView.swift in Sources */,
 				C9CBB4436EA4DDE7757EA3F4 /* TOCProvider.swift in Sources */,
+				54AE686286BC92388C9F8B7D /* TOCSheet+Support.swift in Sources */,
 				6B57F2432F6C640D2D9A2CA7 /* TOCSheet.swift in Sources */,
 				3175AC389AA08324899106EC /* TOCSheetRows.swift in Sources */,
 				F3958B26AAD50F2152E03AEB /* TTSControlBar.swift in Sources */,
