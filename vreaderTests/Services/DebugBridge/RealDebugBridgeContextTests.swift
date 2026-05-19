@@ -747,6 +747,9 @@ final class RealDebugBridgeContextTests: XCTestCase {
     /// past the (now-removed) Step-3 guard and posts the open notification.
     @MainActor
     func test_open_withValidPosition_unifiedModeDefault_stillPostsNotification() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
         // A stale `readerReadingMode = "unified"` — pre-#54 this triggered
         // the Step-3 unified-mode guard and an early throw.
         defaults.set("unified", forKey: "readerReadingMode")
@@ -784,14 +787,21 @@ final class RealDebugBridgeContextTests: XCTestCase {
             importer: importer,
             userDefaults: defaults
         )
-        // `open` with a valid position runs Step 4 (post notification) then
-        // Step 5 (`awaitReader`, which times out with no reader) — run it
-        // detached so the test asserts on the notification, not the await.
-        let openTask = Task { try? await context.open(bookId: fp.canonicalKey, position: "42") }
+        // `open` with a valid position runs Step 3 (post notification) then
+        // Step 4 (`awaitReader`). Run `open` in a Task so the test can
+        // register a stub probe once the notification fires — that resumes
+        // `awaitReader` deterministically so `open` completes cleanly
+        // (no 10s timeout, no lingering waiter), and the test then joins it.
+        let openTask = Task { try await context.open(bookId: fp.canonicalKey, position: "42") }
         await fulfillment(of: [exp], timeout: 3.0)
-        openTask.cancel()
         // The notification fired — `open` got PAST the removed Step-3 guard.
         XCTAssertEqual(receivedKey, fp.canonicalKey)
+        // Resume Step 4's `awaitReader` by registering a matching probe.
+        DebugReaderRegistry.shared.register(
+            DebugReaderProbeAdapter(fingerprintKey: fp.canonicalKey, format: "txt")
+        )
+        // `open` now completes without throwing — Step 4's await resolved.
+        try await openTask.value
     }
 
     // MARK: - settle / eval (active-reader registry)
