@@ -124,5 +124,37 @@ struct ReaderThemeV2EPUBCSSCalibrationTests {
         }
     }
 
+    // MARK: - WI-3 routing seam (the actual EPUBReaderContainerView wiring)
+
+    /// `EPUBReaderContainerView.calibratedEPUBFontSize(for:)` is the pure
+    /// helper the container's `epubOverrideCSS` call site uses. It MUST
+    /// return the calibrator's `.epub` mapping of the store's unified font
+    /// size — a regression to the raw `typography.fontSize` is caught here.
+    @Test @MainActor func containerHelperRoutesThroughCalibratorEpubTarget() {
+        let store = ReaderSettingsStore(
+            defaults: UserDefaults(suiteName: "EPUBCSSCalibTests-\(UUID().uuidString)")!
+        )
+        for unified in [CGFloat(12), 18, 24, 40, 64] {
+            store.typography.fontSize = unified
+            let helperValue = EPUBReaderContainerView.calibratedEPUBFontSize(for: store)
+            let expected = store.calibrator.calibratedSize(forUnified: unified, target: .epub)
+            #expect(helperValue == expected)
+        }
+    }
+
+    /// The container helper's value is the *calibrated* value, NOT the raw
+    /// unified `typography.fontSize` — for a non-`1.0` `.epub` multiplier the
+    /// two differ.
+    @Test @MainActor func containerHelperValueDiffersFromRawUnified() {
+        let store = ReaderSettingsStore(
+            defaults: UserDefaults(suiteName: "EPUBCSSCalibTests-\(UUID().uuidString)")!
+        )
+        store.typography.fontSize = 24
+        let helperValue = EPUBReaderContainerView.calibratedEPUBFontSize(for: store)
+        // Shipped .epub multiplier is > 1.0.
+        #expect(helperValue != 24)
+        #expect(helperValue == store.calibrator.calibratedSize(forUnified: 24, target: .epub))
+    }
+
     #endif
 }
