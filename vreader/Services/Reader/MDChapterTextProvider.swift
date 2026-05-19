@@ -67,7 +67,12 @@ struct MDChapterTextProvider: ChapterTextProviding {
 
     func unit(containing locator: Locator) async -> TranslationUnitID? {
         guard !boundaries.isEmpty else { return nil }
-        let offset = locator.charOffsetUTF16 ?? 0
+        // A locator with no offset (e.g. start of book) resolves to unit 0; a
+        // negative offset predates the book's first unit and resolves to nil.
+        guard let offset = locator.charOffsetUTF16 else {
+            return TranslationUnitID(kind: .mdChapterIndex, value: "0")
+        }
+        guard offset >= 0 else { return nil }
         // Last chapter whose boundary is at or before the offset — clamps a
         // past-the-end offset to the final chapter.
         var matchIndex = 0

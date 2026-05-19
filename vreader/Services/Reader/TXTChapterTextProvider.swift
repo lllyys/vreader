@@ -63,8 +63,12 @@ struct TXTChapterTextProvider: ChapterTextProviding {
 
     func unit(containing locator: Locator) async -> TranslationUnitID? {
         guard !chapters.isEmpty else { return nil }
-        // A locator with no offset (e.g. start of book) resolves to unit 0.
-        let offset = locator.charOffsetUTF16 ?? 0
+        // A locator with no offset (e.g. start of book) resolves to unit 0; a
+        // negative offset predates the book's first unit and resolves to nil.
+        guard let offset = locator.charOffsetUTF16 else {
+            return TranslationUnitID(kind: .txtChapterIndex, value: String(chapters[0].index))
+        }
+        guard offset >= 0 else { return nil }
         // Find the last chapter whose start is at or before the offset —
         // clamps a past-the-end offset to the final chapter.
         var match = chapters[0]

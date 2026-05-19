@@ -2,9 +2,15 @@
 // `ChapterTextProviding` adapters (EPUB / TXT / MD / PDF). Each adapter is
 // exercised against an in-memory fixture book: `translationUnits()` returns
 // units in reading order, `sourceText(for:)` returns the unit's plain text,
-// an out-of-book unit throws, a zero-unit book returns `[]`, `unit(containing:)`
-// maps a mid-book locator to the right unit and returns `nil` for a pre-book
-// locator, and `unit(after:)` returns the next unit / `nil` at the last unit.
+// an out-of-book unit throws, a zero-unit book returns `[]`, and `unit(after:)`
+// returns the next unit / `nil` at the last unit.
+//
+// `unit(containing:)` boundary contract (plan Decision 2.6) is covered per
+// adapter: a mid-book locator maps to the right unit; a locator that predates
+// the book's first unit (empty book, negative offset, unknown EPUB href)
+// returns `nil`; a position past the last unit clamps to the last unit. UTF-16
+// slicing is checked with a CJK fixture so `NSString` math matches the
+// `charOffsetUTF16` semantics.
 //
 // EPUB units = spine documents (not TOC entries) — a multi-spine fixture proves
 // the unit is the spine doc.
@@ -220,6 +226,60 @@ struct ChapterTextProviderTests {
         #expect(unit == TranslationUnitID(kind: .txtChapterIndex, value: "2"))
     }
 
+    @Test func txtUnitContainingReturnsNilForNegativeOffset() async throws {
+        let adapter = makeTXTAdapter()
+        let fp = Self.fingerprint(.txt)
+        // A negative offset predates the book's first unit -> nil (not unit 0).
+        let locator = Locator(
+            bookFingerprint: fp, href: nil, progression: nil,
+            totalProgression: nil, cfi: nil, page: nil,
+            charOffsetUTF16: -5, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil
+        )
+        #expect(await adapter.unit(containing: locator) == nil)
+    }
+
+    @Test func txtUnitContainingNilOffsetResolvesToFirstUnit() async throws {
+        let adapter = makeTXTAdapter()
+        let fp = Self.fingerprint(.txt)
+        // No offset at all (e.g. start of book) -> unit 0.
+        let locator = Locator(
+            bookFingerprint: fp, href: nil, progression: nil,
+            totalProgression: nil, cfi: nil, page: nil,
+            charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil
+        )
+        #expect(await adapter.unit(containing: locator)
+            == TranslationUnitID(kind: .txtChapterIndex, value: "0"))
+    }
+
+    @Test func txtSourceTextSlicesCJKByUTF16Bounds() async throws {
+        // A CJK chapter: each Han character is 1 UTF-16 unit but >1 byte.
+        // Proves `sourceText` slices on UTF-16 offsets, not bytes.
+        let full = "第一章\n春眠不觉晓。\n" + "第二章\n处处闻啼鸟。"
+        var chapters = [
+            TXTChapter(index: 0, title: "第一章", startByte: 0,
+                       endByte: Int64(("第一章\n春眠不觉晓。\n" as NSString).length)),
+            TXTChapter(index: 1, title: "第二章", startByte: 0, endByte: 0),
+        ]
+        // Populate UTF-16 offsets by slicing the full text on UTF-16 boundaries.
+        let ch0Len = ("第一章\n春眠不觉晓。\n" as NSString).length
+        chapters[0] = TXTChapter(index: 0, title: "第一章", startByte: 0, endByte: 1,
+                                 globalStartUTF16: 0, textLengthUTF16: ch0Len)
+        chapters[1] = TXTChapter(
+            index: 1, title: "第二章", startByte: 1, endByte: 2,
+            globalStartUTF16: ch0Len,
+            textLengthUTF16: (full as NSString).length - ch0Len
+        )
+        let adapter = TXTChapterTextProvider(
+            fingerprint: Self.fingerprint(.txt), fullText: full, chapters: chapters
+        )
+        let chapter1 = try await adapter.sourceText(
+            for: TranslationUnitID(kind: .txtChapterIndex, value: "1")
+        )
+        #expect(chapter1 == "第二章\n处处闻啼鸟。")
+    }
+
     @Test func txtUnitAfterReturnsNextThenNil() async throws {
         let adapter = makeTXTAdapter()
         let next = await adapter.unit(
@@ -309,6 +369,32 @@ struct ChapterTextProviderTests {
         )
         let unit = await adapter.unit(containing: locator)
         #expect(unit == TranslationUnitID(kind: .mdChapterIndex, value: "2"))
+    }
+
+    @Test func mdUnitContainingReturnsNilForNegativeOffset() async throws {
+        let adapter = makeMDAdapter()
+        let fp = Self.fingerprint(.md)
+        // A negative offset predates the book's first unit -> nil (not unit 0).
+        let locator = Locator(
+            bookFingerprint: fp, href: nil, progression: nil,
+            totalProgression: nil, cfi: nil, page: nil,
+            charOffsetUTF16: -1, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil
+        )
+        #expect(await adapter.unit(containing: locator) == nil)
+    }
+
+    @Test func mdUnitContainingClampsPastEndToLastUnit() async throws {
+        let adapter = makeMDAdapter()
+        let fp = Self.fingerprint(.md)
+        let locator = Locator(
+            bookFingerprint: fp, href: nil, progression: nil,
+            totalProgression: nil, cfi: nil, page: nil,
+            charOffsetUTF16: 100_000, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil
+        )
+        #expect(await adapter.unit(containing: locator)
+            == TranslationUnitID(kind: .mdChapterIndex, value: "3"))
     }
 
     @Test func mdUnitAfterReturnsNextThenNil() async throws {
@@ -466,6 +552,59 @@ struct ChapterTextProviderTests {
         )
         let unit = await adapter.unit(containing: locator)
         #expect(unit == TranslationUnitID(kind: .pdfPageRange, value: "2-3"))
+    }
+
+    @Test func pdfUnitContainingClampsPastEndToLastUnit() async throws {
+        let url = try makePDFFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let adapter = PDFChapterTextProvider(
+            fingerprint: Self.fingerprint(.pdf), fileURL: url, pagesPerUnit: 2
+        )
+        let fp = Self.fingerprint(.pdf)
+        // Page 999 is past the last unit (4-4) -> clamps to the last unit.
+        let locator = Locator(
+            bookFingerprint: fp, href: nil, progression: nil,
+            totalProgression: nil, cfi: nil, page: 999,
+            charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil
+        )
+        #expect(await adapter.unit(containing: locator)
+            == TranslationUnitID(kind: .pdfPageRange, value: "4-4"))
+    }
+
+    @Test func pdfUnitContainingReturnsNilForNegativePage() async throws {
+        let url = try makePDFFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let adapter = PDFChapterTextProvider(
+            fingerprint: Self.fingerprint(.pdf), fileURL: url
+        )
+        let fp = Self.fingerprint(.pdf)
+        let locator = Locator(
+            bookFingerprint: fp, href: nil, progression: nil,
+            totalProgression: nil, cfi: nil, page: -1,
+            charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil
+        )
+        #expect(await adapter.unit(containing: locator) == nil)
+    }
+
+    @Test func pdfSourceTextForMalformedRangeStringThrows() async throws {
+        let url = try makePDFFixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let adapter = PDFChapterTextProvider(
+            fingerprint: Self.fingerprint(.pdf), fileURL: url
+        )
+        // An inverted ("5-2") and a non-numeric ("a-b") page-range value are
+        // both rejected — they decode to no valid range, so the unit is
+        // unknown.
+        let inverted = TranslationUnitID(kind: .pdfPageRange, value: "5-2")
+        await #expect(throws: ChapterTextProviderError.unknownUnit(inverted)) {
+            _ = try await adapter.sourceText(for: inverted)
+        }
+        let nonNumeric = TranslationUnitID(kind: .pdfPageRange, value: "a-b")
+        await #expect(throws: ChapterTextProviderError.unknownUnit(nonNumeric)) {
+            _ = try await adapter.sourceText(for: nonNumeric)
+        }
     }
 
     @Test func pdfUnitAfterReturnsNextThenNil() async throws {

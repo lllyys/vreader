@@ -66,8 +66,15 @@ struct PDFChapterTextProvider: ChapterTextProviding {
     }
 
     func unit(containing locator: Locator) async -> TranslationUnitID? {
+        // A negative page predates the book's first unit and resolves to nil.
         guard let page = locator.page, page >= 0 else { return nil }
-        guard let range = pageRanges().first(where: { $0.contains(page) }) else {
+        let ranges = pageRanges()
+        guard let last = ranges.last else { return nil }
+        // A page past the last unit clamps to the last unit (it is still
+        // inside a unit) — consistent with the TXT/MD adapters' boundary
+        // contract (plan Decision 2.6).
+        if page > last.upperBound { return TranslationUnitID(kind: .pdfPageRange, value: Self.encode(last)) }
+        guard let range = ranges.first(where: { $0.contains(page) }) else {
             return nil
         }
         return TranslationUnitID(kind: .pdfPageRange, value: Self.encode(range))
