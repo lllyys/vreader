@@ -75,6 +75,10 @@ extension TXTChunkedReaderBridge.Coordinator {
         // Store active highlight for re-application on cell reuse (bug #54)
         activeHighlightChunkIndex = chunkIndex
         activeHighlightLocalRange = localRange
+        // Bug #232 / GH #960: record temporary-vs-persistent so the
+        // new-search / user-scroll clear paths only dismiss temporary
+        // search/navigation highlights, never a persistent user-created one.
+        activeHighlightIsTemporary = isTemporary
 
         // Bug #99 cause #1: any prior pending-render auto-clear is
         // superseded by this new highlight. Always invalidate the
@@ -130,6 +134,61 @@ extension TXTChunkedReaderBridge.Coordinator {
         }
     }
 
+    /// Bug #232 / GH #960: clears the active **temporary** search/navigation
+    /// highlight when a non-timer dismiss path fires — a new search
+    /// (`.searchHighlightClear` notification) or a user-driven scroll. Gives
+    /// the chunked path parity with `TXTTextViewBridgeCoordinator`'s
+    /// `clearSearchHighlightIfTemporary`.
+    ///
+    /// When called with a `scrollView`, the clear only fires for scrolls the
+    /// user is actually driving (`isTracking || isDragging || isDecelerating`).
+    /// Programmatic scrolls — and the late `scrollViewDidScroll` callbacks the
+    /// table view dispatches well after `setContentOffset` returns — have all
+    /// three flags false, so they are correctly skipped (bug #99's canonical
+    /// signal).
+    ///
+    /// When called with `nil` (the `.searchHighlightClear` path), the clear is
+    /// unconditional.
+    ///
+    /// In all cases the clear is gated on there being a **temporary** active
+    /// highlight: a persistent user-created highlight must survive both a new
+    /// search and a user scroll, and a stray callback after the highlight
+    /// already cleared must not fire a redundant `onTemporaryHighlightCleared`.
+    /// On an actual clear it routes through `clearHighlight(in:)` (timer +
+    /// active-state reset), nils `lastHighlightRange` so the model and
+    /// coordinator clear in lockstep, and fires `onTemporaryHighlightCleared`
+    /// exactly once (bug #154 / GH #443 contract).
+    func clearTemporaryHighlightIfNeeded(scrollView: UIScrollView? = nil) {
+        if let scrollView,
+           !scrollView.isTracking,
+           !scrollView.isDragging,
+           !scrollView.isDecelerating {
+            return
+        }
+        // Only a temporary search/navigation highlight clears here. A
+        // persistent user-created highlight (`activeHighlightIsTemporary ==
+        // false`) survives; nothing showing (`activeHighlightChunkIndex ==
+        // nil`) is a no-op that must not fire the model-clear callback.
+        guard activeHighlightIsTemporary, activeHighlightChunkIndex != nil else { return }
+        if let tableView {
+            // Routes through `clearHighlight` for the visible-cell repaint +
+            // timer/active-state reset.
+            clearHighlight(in: tableView)
+        } else {
+            // No live table view to repaint (degenerate — a highlight is only
+            // ever applied with one in hand). Still reset coordinator state +
+            // the timer so nothing stale survives.
+            highlightClearTimer?.invalidate()
+            highlightClearTimer = nil
+            pendingAutoClearForChunk = nil
+            activeHighlightChunkIndex = nil
+            activeHighlightLocalRange = nil
+            activeHighlightIsTemporary = false
+        }
+        lastHighlightRange = nil
+        onTemporaryHighlightCleared?()
+    }
+
     /// Clears active highlight on visible cells via layout manager (bug #47 v12).
     /// NEVER modifies text storage — only updates highlight ranges for drawing.
     func clearHighlight(in tableView: UITableView) {
@@ -147,6 +206,9 @@ extension TXTChunkedReaderBridge.Coordinator {
         // re-apply the cleared highlight.
         activeHighlightChunkIndex = nil
         activeHighlightLocalRange = nil
+        // Bug #232 / GH #960: the active highlight is gone — reset the
+        // temporary flag so a future clear path doesn't act on stale state.
+        activeHighlightIsTemporary = false
         for cell in tableView.visibleCells {
             guard let chunkedCell = cell as? TXTChunkedReaderBridge.ChunkedTextCell else { continue }
             let chunkIndex = chunkedCell.textContentView.tag

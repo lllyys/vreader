@@ -10,7 +10,8 @@
 // - Supports restoring scroll position to a character offset on load.
 //
 // @coordinates-with: TXTChunkedHighlightHelper.swift, TXTTextChunker.swift,
-//   TXTAttributedStringBuilder.swift, TXTReaderContainerView.swift, TXTViewConfig.swift
+//   TXTAttributedStringBuilder.swift, TXTReaderContainerView.swift, TXTViewConfig.swift,
+//   ReaderNotifications.swift (observes .searchHighlightClear — bug #232 / GH #960)
 
 #if canImport(UIKit)
 import SwiftUI
@@ -161,6 +162,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         context.coordinator.delegate = delegate
+        // Bug #232 / GH #960: hand the coordinator a table-view handle so its
+        // `.searchHighlightClear` observer can route the clear.
+        context.coordinator.tableView = tableView
 
         // Tap gesture for toolbar toggle
         let tapRecognizer = UITapGestureRecognizer(
@@ -232,6 +236,10 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         context.coordinator.highlightActionPresenter = highlightActionPresenter
         context.coordinator.onHighlightTapAction = onHighlightTapAction
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
+        // Bug #232 / GH #960: keep the coordinator's table-view handle current
+        // so the `.searchHighlightClear` observer always routes to the live
+        // view.
+        context.coordinator.tableView = tableView
 
         // Bug #179: re-apply safe-area top inset on every update (rotation,
         // split-screen resize, etc. can change `proxy.safeAreaInsets.top`).
@@ -370,10 +378,34 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         /// auto-clear timer even if `lastHighlightRange` is unchanged.
         var lastHighlightNonce: Int = 0
 
-        /// Bug #154 / GH #443 (Codex audit): fired by the 3 s auto-clear timer
-        /// when a temporary highlight expires. The container wires it to nil
+        /// Bug #154 / GH #443 (Codex audit): fired whenever a temporary
+        /// search/navigation highlight is cleared — the 3 s auto-clear timer,
+        /// a user-driven scroll, or the `.searchHighlightClear` notification
+        /// (bug #232 / GH #960). The container wires it to nil
         /// `uiState.highlightRange` so model + coordinator clear in lockstep.
         var onTemporaryHighlightCleared: (@MainActor () -> Void)?
+
+        /// Whether the current active highlight is a temporary
+        /// search/navigation highlight (`true`) or a persistent user-created
+        /// one (`false`). Bug #232 / GH #960: only temporary highlights clear
+        /// on a new search or a user scroll — a persistent highlight must
+        /// survive both. Set by `applyHighlight(isTemporary:)`, reset by
+        /// `clearHighlight`. Mirrors the non-chunked coordinator, where the
+        /// temporary highlight lives in `currentHighlightRange` and persistent
+        /// ones live separately in `persistedHighlights`.
+        var activeHighlightIsTemporary = false
+
+        /// The table view this coordinator drives. Bug #232 / GH #960: the
+        /// `.searchHighlightClear` observer (registered in `init`) needs a
+        /// table-view handle to route the clear through. Set by
+        /// `makeUIView` / `updateUIView`. Weak — the table view owns the
+        /// coordinator via `UIViewRepresentable.Context`, not vice versa.
+        weak var tableView: UITableView?
+
+        /// Observation token for the `.searchHighlightClear` notification
+        /// (bug #232 / GH #960). `nonisolated(unsafe)` so `deinit` (which is
+        /// nonisolated) can read it for `removeObserver`.
+        nonisolated(unsafe) var highlightClearObserver: NSObjectProtocol?
 
         /// Timer to auto-clear highlight after a delay.
         /// Internal access needed by TXTChunkedHighlightHelper extension.
@@ -391,6 +423,34 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
         init(delegate: TXTTextViewBridgeDelegate?) {
             self.delegate = delegate
+            super.init()
+
+            // Bug #232 / GH #960: observe `.searchHighlightClear` so a new
+            // search dismisses a temporary search/navigation highlight
+            // immediately, matching the non-chunked `TXTTextViewBridge`
+            // coordinator. Pre-fix this `init` was bare and the chunked path
+            // cleared a temporary highlight ONLY via the 3 s auto-clear timer.
+            highlightClearObserver = NotificationCenter.default.addObserver(
+                forName: .searchHighlightClear, object: nil, queue: .main
+            ) { [weak self] _ in
+                // A new search is not a scroll — clear unconditionally
+                // (scrollView: nil), gated only on there being a temporary
+                // highlight to clear.
+                self?.clearTemporaryHighlightIfNeeded(scrollView: nil)
+            }
+        }
+
+        deinit {
+            // Coordinator is @MainActor-isolated via its UIKit delegate
+            // conformances; deinit is nonisolated. Use assumeIsolated to
+            // satisfy strict concurrency for non-Sendable property access.
+            MainActor.assumeIsolated {
+                if let observer = highlightClearObserver {
+                    NotificationCenter.default.removeObserver(observer)
+                }
+                highlightClearTimer?.invalidate()
+                highlightClearTimer = nil
+            }
         }
 
 
@@ -470,6 +530,14 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         // MARK: UITableViewDelegate
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            // Bug #232 / GH #960: clear a temporary search/navigation
+            // highlight when the user drives the scroll. The helper gates on
+            // `isTracking || isDragging || isDecelerating`, so programmatic
+            // scrolls (and the late layout-driven callbacks they dispatch)
+            // are correctly skipped. Runs before the throttle so a quick
+            // flick still dismisses the highlight.
+            clearTemporaryHighlightIfNeeded(scrollView: scrollView)
+
             let now = CACurrentMediaTime()
             guard now - lastScrollTime >= Self.scrollThrottleInterval else { return }
             lastScrollTime = now
@@ -481,7 +549,15 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         }
 
         func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-            if !decelerate { reportScrollPosition(scrollView) }
+            // Bug #232 / GH #960: also clear on a drag that ends without
+            // deceleration — the user has finished a scroll gesture, so a
+            // lingering temporary highlight should go. `isDragging` is still
+            // true inside this callback, so the helper's user-scroll guard
+            // passes.
+            if !decelerate {
+                clearTemporaryHighlightIfNeeded(scrollView: scrollView)
+                reportScrollPosition(scrollView)
+            }
         }
 
         // MARK: - Content Tap (Toolbar Toggle / Tap-on-Highlight)
