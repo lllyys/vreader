@@ -183,7 +183,11 @@ struct FoliateReaderContainerView: View {
                     lineHeight: Double(store.typography.lineSpacing),
                     fontFamily: nil,
                     textColor: Self.cssColor(store.theme.inkColor),
-                    backgroundColor: Self.cssColor(store.theme.backgroundColor)
+                    backgroundColor: Self.cssColor(store.theme.backgroundColor),
+                    // Feature #68: the chapter-start drop-cap accent for
+                    // AZW3/MOBI — the theme's oxblood token. Re-injected
+                    // on a live theme change with the rest of the blob.
+                    accentColor: Self.cssColor(store.theme.accentColor)
                 )
             },
             layoutFlow: FoliateLayoutFlowMapper.layoutFlow(for: settingsStore?.epubLayout),

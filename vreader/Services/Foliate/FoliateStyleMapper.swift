@@ -26,13 +26,17 @@ enum FoliateStyleMapper {
     ///   - fontFamily: Optional font family name. Omitted from CSS when nil or empty.
     ///   - textColor: Optional CSS color string (e.g. "#1a1a1a"). Omitted when nil.
     ///   - backgroundColor: Optional CSS color string (e.g. "#ffffff"). Omitted when nil.
+    ///   - accentColor: Optional CSS color string for the feature #68
+    ///     chapter-start drop-cap (`body > p:first-of-type::first-letter`).
+    ///     Omitted when nil/empty or when `sanitizeCSSColor` rejects it.
     /// - Returns: A CSS string suitable for Foliate-js setStyles().
     static func themeCSS(
         fontSize: Int,
         lineHeight: Double,
         fontFamily: String?,
         textColor: String?,
-        backgroundColor: String?
+        backgroundColor: String?,
+        accentColor: String? = nil
     ) -> String {
         let clampedSize = FoliateJSEscaper.clampFontSize(fontSize)
         let clampedHeight = FoliateJSEscaper.clampLineHeight(lineHeight)
@@ -55,6 +59,16 @@ enum FoliateStyleMapper {
         // Background color — omitted when nil or empty.
         if let bg = FoliateJSEscaper.sanitizeCSSColor(backgroundColor) {
             rules.append("body { background: \(bg) !important; }")
+        }
+
+        // Feature #68: chapter-start drop-cap. The accent is sanitized
+        // through `FoliateJSEscaper.sanitizeCSSColor` exactly like the
+        // other colors — a value with injection characters is rejected
+        // and the rule is omitted. `body > p:first-of-type` (child
+        // combinator) targets the first top-level <p> directly under
+        // <body>; a section-wrapped first <p> is safely missed.
+        if let accent = FoliateJSEscaper.sanitizeCSSColor(accentColor) {
+            rules.append(dropCapRule(accent: accent))
         }
 
         return rules.joined(separator: "\n")
@@ -86,5 +100,23 @@ enum FoliateStyleMapper {
     /// Format line height to one decimal place for consistent CSS output.
     private static func formatLineHeight(_ value: Double) -> String {
         String(format: "%.1f", value)
+    }
+
+    /// Feature #68: builds the chapter-start drop-cap rule for Foliate
+    /// `setStyles`. Same selector + declarations as the EPUB path
+    /// (`ReaderThemeV2+EPUBCSS.dropCapCSSRule`); `accent` has already
+    /// passed `FoliateJSEscaper.sanitizeCSSColor`. Every declaration
+    /// carries `!important`, matching this file's stated convention.
+    private static func dropCapRule(accent: String) -> String {
+        let serifStack = "'Source Serif 4', Georgia, 'Times New Roman', serif"
+        return "body > p:first-of-type::first-letter { "
+            + "font-family: \(serifStack) !important; "
+            + "font-size: \(ChapterStartTypography.dropCapCSSFontSizeEm) !important; "
+            + "font-weight: 600 !important; "
+            + "line-height: 0.85 !important; "
+            + "float: left !important; "
+            + "margin-right: 0.06em !important; "
+            + "margin-top: 0.05em !important; "
+            + "color: \(accent) !important; }"
     }
 }
