@@ -85,10 +85,10 @@ struct BackgroundIndexingCoordinatorTests {
             segmentBaseOffsets: nil
         )
 
-        // Wait for background processing to complete
-        try? await Task.sleep(for: .milliseconds(100))
+        // Bug #236: poll for background indexing to finish rather than a
+        // fixed sleep — the background task lags under CPU contention.
+        await pollUntil { await coordinator.indexingStatus(fingerprint: Self.fp1) == .indexed }
 
-        // After enqueue + processing, status should be indexed
         let status = await coordinator.indexingStatus(fingerprint: Self.fp1)
         #expect(status == .indexed)
     }
@@ -104,8 +104,9 @@ struct BackgroundIndexingCoordinatorTests {
             segmentBaseOffsets: nil
         )
 
-        // Wait for background processing to complete
-        try? await Task.sleep(for: .milliseconds(100))
+        // Bug #236: poll for the search service to be called rather than
+        // a fixed sleep — the background task lags under CPU contention.
+        await pollUntil { await mock.indexCallCount == 1 }
 
         let count = await mock.indexCallCount
         #expect(count == 1)
@@ -144,7 +145,8 @@ struct BackgroundIndexingCoordinatorTests {
             segmentBaseOffsets: nil
         )
 
-        try? await Task.sleep(for: .milliseconds(100))
+        // Bug #236: poll for background indexing to finish (load-safe).
+        await pollUntil { await coordinator.indexingStatus(fingerprint: Self.fp1) == .indexed }
 
         let status = await coordinator.indexingStatus(fingerprint: Self.fp1)
         #expect(status == .indexed)
@@ -162,7 +164,12 @@ struct BackgroundIndexingCoordinatorTests {
             segmentBaseOffsets: nil
         )
 
-        try? await Task.sleep(for: .milliseconds(100))
+        // Bug #236: poll for the indexing attempt to settle into .failed
+        // rather than a fixed sleep — the background task lags under load.
+        await pollUntil {
+            if case .failed = await coordinator.indexingStatus(fingerprint: Self.fp1) { return true }
+            return false
+        }
 
         let status = await coordinator.indexingStatus(fingerprint: Self.fp1)
         if case .failed = status {
@@ -192,7 +199,13 @@ struct BackgroundIndexingCoordinatorTests {
             segmentBaseOffsets: nil
         )
 
-        try? await Task.sleep(for: .milliseconds(200))
+        // Bug #236: poll for both books to finish indexing rather than a
+        // fixed sleep — the serial background queue lags under load.
+        await pollUntil {
+            let s1 = await coordinator.indexingStatus(fingerprint: Self.fp1)
+            let s2 = await coordinator.indexingStatus(fingerprint: Self.fp2)
+            return s1 == .indexed && s2 == .indexed
+        }
 
         let count = await mock.indexCallCount
         #expect(count == 2)
@@ -253,7 +266,9 @@ struct BackgroundIndexingCoordinatorTests {
             segmentBaseOffsets: nil
         )
 
-        try? await Task.sleep(for: .milliseconds(300))
+        // Bug #236: poll for indexing to finish rather than a fixed sleep
+        // — the 50 ms-delayed background work lags under CPU contention.
+        await pollUntil { await coordinator.indexingStatus(fingerprint: Self.fp1) == .indexed }
 
         // Should only index once (deduped), not twice
         let count = await mock.indexCallCount
@@ -274,7 +289,8 @@ struct BackgroundIndexingCoordinatorTests {
             segmentBaseOffsets: nil
         )
 
-        try? await Task.sleep(for: .milliseconds(100))
+        // Bug #236: poll for indexing to finish rather than a fixed sleep.
+        await pollUntil { await coordinator.indexingStatus(fingerprint: Self.fp1) == .indexed }
 
         let status = await coordinator.indexingStatus(fingerprint: Self.fp1)
         #expect(status == .indexed) // Empty units should still succeed
@@ -316,8 +332,9 @@ struct BackgroundIndexingCoordinatorTests {
             )
         } // `coordinator` strong reference released here
 
-        // Grace period for the detached background task to run.
-        try await Task.sleep(for: .milliseconds(300))
+        // Bug #236: poll for the detached background task to run rather
+        // than a fixed grace period — it lags under CPU contention.
+        await pollUntil { await mock.indexCallCount == 1 }
 
         // The mock should have been called even though the caller's
         // strong reference was dropped. If `processQueue` was scheduled

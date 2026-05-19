@@ -57,8 +57,9 @@ final class XCUITestMockSpeechSynthesizerTests {
         let utterance = AVSpeechUtterance(string: "Hello world.")
         mock.speak(utterance)
 
-        // didStart hops through Task @MainActor — give one runloop tick.
-        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        // Bug #236: wait for the actual didStart signal — the mock fires
+        // it via DispatchQueue.main.async, which lags under CPU contention.
+        await pollUntil { delegate.didStartCount == 1 }
         #expect(delegate.didStartCount == 1)
         #expect(delegate.lastUtteranceText == "Hello world.")
         #expect(mock.isSpeaking == true)
@@ -74,10 +75,12 @@ final class XCUITestMockSpeechSynthesizerTests {
         )
         mock.speak(utterance)
 
-        // Wait long enough for ≥2 callbacks at the synthetic cadence.
-        try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
+        // Bug #236: wait for ≥2 willSpeakRange callbacks to actually fire
+        // rather than guessing a fixed duration — the synthetic timeline
+        // runs on wall-clock dispatch that lags under CPU contention.
+        await pollUntil { delegate.willSpeakRangeCount >= 2 }
         #expect(delegate.willSpeakRangeCount >= 2,
-                "Expected ≥2 willSpeakRange callbacks within 1.5s, got \(delegate.willSpeakRangeCount)")
+                "Expected ≥2 willSpeakRange callbacks, got \(delegate.willSpeakRangeCount)")
     }
 
     @Test func speakCompletesWithDidFinish() async throws {
@@ -88,8 +91,12 @@ final class XCUITestMockSpeechSynthesizerTests {
         let utterance = AVSpeechUtterance(string: "Short.")
         mock.speak(utterance)
 
-        // Mock's full synthetic timeline finishes within ~3s for short text.
-        try await Task.sleep(nanoseconds: 3_500_000_000) // 3.5s
+        // Bug #236: the mock's synthetic timeline runs on wall-clock
+        // DispatchQueue.main.asyncAfter, which lags under CPU contention.
+        // Wait for the actual didFinish signal rather than guessing a
+        // fixed sleep duration (the old `Task.sleep(3.5s)` elapsed before
+        // the timeline reached didFinish under load → flaky).
+        await pollUntil { delegate.didFinishCount == 1 }
         #expect(delegate.didFinishCount == 1)
         #expect(delegate.didCancelCount == 0)
         #expect(mock.isSpeaking == false)
@@ -130,16 +137,26 @@ final class XCUITestMockSpeechSynthesizerTests {
         let first = AVSpeechUtterance(string: "First utterance text content.")
         mock.speak(first)
 
-        try await Task.sleep(nanoseconds: 300_000_000) // 300ms
+        // Bug #236: wait for the first utterance's didStart to actually
+        // land before the second speak(). The mock fires didStart via
+        // DispatchQueue.main.async behind a generation guard — a fixed
+        // sleep can elapse before it under CPU contention, and the second
+        // speak() would then bump the generation and short-circuit the
+        // still-pending first didStart (→ didStartCount stuck at 1).
+        await pollUntil { delegate.didStartCount == 1 }
 
         let second = AVSpeechUtterance(string: "Second utterance text content.")
         mock.speak(second)
 
-        // After second speak: first should have cancelled, second should be speaking.
-        try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+        // didCancel + isSpeaking flip synchronously inside speak(), so
+        // assert them immediately after the second speak() returns.
         #expect(delegate.didCancelCount >= 1, "First utterance should have been cancelled by second speak")
         #expect(mock.isSpeaking == true)
-        // didStart was called twice (once per utterance).
+
+        // The second utterance's didStart is delivered via
+        // DispatchQueue.main.async — wait for the actual signal rather
+        // than guessing a fixed duration.
+        await pollUntil { delegate.didStartCount == 2 }
         #expect(delegate.didStartCount == 2)
     }
 }
