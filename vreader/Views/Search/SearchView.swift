@@ -69,6 +69,17 @@ struct SearchView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+        // Bug #223 / GH #891: the feature-#63 v2 re-skin replaced this
+        // view's `NavigationStack` root with a plain `VStack`. Without an
+        // explicit container, SwiftUI propagates the identifier onto every
+        // leaf descendant (`Image`/`TextField`/`Button`/`StaticText`), so
+        // neither this `searchView` id nor the host's outer `searchSheet`
+        // id resolves as a queryable `app.otherElements` container.
+        // `.accessibilityElement(children: .contain)` collapses the
+        // subtree into one container element the identifier names — the
+        // same Bug #209 root-cause-(C) fix used on `ReaderSettingsPanel`
+        // and `AnnotationsPanelView`.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("searchView")
     }
 
