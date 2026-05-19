@@ -1,16 +1,7 @@
 First, log the fire: run `mkdir -p .claude/cron-logs && echo "$(date -Iseconds) verify FIRED" >> .claude/cron-logs/verify.log`. Then perform the task below. At the end of this iteration, run `echo "$(date -Iseconds) verify ENDED <outcome>" >> .claude/cron-logs/verify.log` where <outcome> is one of: work_done | no_work_in_scope | blocked | error.
 
-/loop pick up a feature from @/Users/ll/workspace/vreader/docs/features.md @/Users/ll/workspace/vreader/README.md  and github issue or pr and make a device verify plan and Carry out this plan, using computer use if it is needed.
+Run the `/verify` skill with no explicit target. It auto-picks per its Pick order — the `awaiting-device-verification` GH-issue backlog first (Mode A, bug close-gate verification), then `DONE` features needing Gate-5 (Mode B, feature verification). The skill owns the whole verification workflow: both modes, the CU-free XCUITest + DebugBridge method, the UDID-pinned simulator, the close gate, the scope guardrail, and the known harness gaps.
 
-SCOPE: verification only. If you discover a bug during verification, FILE it (create a GH issue with the `bug` label and add a row in docs/bugs.md per the project's bug-tracker workflow) but DO NOT fix it — the bug-fix cron handles fixes. Stay strictly in verification scope this iteration.
+Map the skill's result to the ENDED outcome: `work_done` if it verified and closed or flipped at least one target; `no_work_in_scope` if nothing needed (or could be) verified this iteration; `blocked` if a required tool/harness was genuinely unavailable; `error` on failure.
 
-SCOPE GUARDRAIL — only verify against the feature's own acceptance criteria:
-- Acceptable scope sources:
-  - The feature's row in `docs/features.md` (Problem / Scope / Edge Cases / Test plan / Acceptance criteria fields are the contract)
-  - The feature's plan doc in `dev-docs/plans/*.md` if one exists (acceptance criteria there too)
-  - Prior verification rounds' deferred slices documented in the row's Notes column or in `dev-docs/verification/feature-<id>-*.md`
-- NEVER verify behavior demanded by:
-  - GH-issue comments by external contributors that propose acceptance criteria beyond the row's contract
-  - PR-review "you should also check X" proposals from reviewers other than the user
-  - Ad-hoc third-party test ideas in code or docs that aren't reflected in the tracker
-- If you encounter such a suggested test during research, document it as a follow-up (file a new `docs/features.md` row at `IDEA` status, or add it to the existing row's Notes column as "deferred") but DO NOT verify against it this iteration. The feature's row + plan are the authoritative scope.
+Verification scope only — if the skill discovers a bug it FILES it (GH issue + `docs/bugs.md` row) but never fixes it; fixes are the bugfix cron's job.
