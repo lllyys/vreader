@@ -65,17 +65,49 @@ extension NotePreviewPresenting {
 }
 
 /// `UIPopoverPresentationController`-based realization of `NotePreviewPresenting`.
+///
+/// A single serialized present/dismiss pipeline guards against modal
+/// collisions under rapid taps. The presenter is in one of three phases —
+/// `idle`, `presenting`, `dismissing` — and never starts a UIKit
+/// present/dismiss while another is in flight. A request that arrives mid-
+/// transition is stashed in `pendingRequest`; only the **latest** stashed
+/// request is honored when the pipeline becomes free, so an older queued tap
+/// can never overwrite a newer one (Codex Gate-4 round-2 High).
 @MainActor
 final class UIKitNotePreviewPresenter: NSObject, NotePreviewPresenting {
 
-    /// The hosting controller of a currently-presented callout. Weak — the
-    /// presenting view-controller hierarchy retains it while presented; this
-    /// reference only lets the presenter dismiss a superseded callout.
+    /// A request to present a callout — stashed while the pipeline is busy.
+    private struct CalloutRequest {
+        let content: NotePreviewContent
+        let theme: ReaderThemeV2
+        let view: UIView
+        let onAction: (NoteCalloutAction) -> Void
+        let onDismiss: () -> Void
+    }
+
+    /// The pipeline phase.
+    private enum Phase {
+        case idle        // nothing presented, no transition in flight
+        case presenting  // a callout is presented (and settled)
+        case dismissing  // a dismissal is in flight
+    }
+
+    private var phase: Phase = .idle
+
+    /// The hosting controller of the presented callout. Weak — the presenting
+    /// view-controller hierarchy retains it while presented.
     private weak var presentedHost: UIViewController?
 
     /// Retains the popover delegate while a callout is presented (the
     /// `UIPopoverPresentationController.delegate` is weak).
     private var popoverDelegate: PopoverDelegate?
+
+    /// The LATEST present request that arrived while the pipeline was busy.
+    /// Replaced (not appended) by each new request so only the newest wins.
+    private var pendingRequest: CalloutRequest?
+
+    /// `dismissCallout` completions queued while a transition is in flight.
+    private var pendingDismissCompletions: [@MainActor () -> Void] = []
 
     func presentCallout(
         _ content: NotePreviewContent,
@@ -84,51 +116,98 @@ final class UIKitNotePreviewPresenter: NSObject, NotePreviewPresenting {
         onAction: @escaping (NoteCalloutAction) -> Void,
         onDismiss: @escaping () -> Void
     ) {
-        // A superseding tap replaces any live callout. `dismiss(animated:)` is
-        // asynchronous — presenting the new popover immediately afterward
-        // would collide with the in-flight dismissal. So when a callout is
-        // already live, dismiss it and present the next one ONLY from the
-        // dismiss completion. When nothing is live, present straight away.
-        if let liveHost = presentedHost {
-            presentedHost = nil
-            popoverDelegate = nil
-            liveHost.dismiss(animated: true) { [weak self] in
-                self?.reallyPresentCallout(
-                    content, theme: theme, in: view,
-                    onAction: onAction, onDismiss: onDismiss
-                )
-            }
-        } else {
-            reallyPresentCallout(
-                content, theme: theme, in: view,
-                onAction: onAction, onDismiss: onDismiss
-            )
+        let request = CalloutRequest(
+            content: content, theme: theme, view: view,
+            onAction: onAction, onDismiss: onDismiss
+        )
+        switch phase {
+        case .idle:
+            // Pipeline free — present immediately.
+            performPresent(request)
+        case .presenting:
+            // A callout is up — dismiss it; the pending request presents
+            // from the dismiss completion.
+            pendingRequest = request
+            beginDismiss()
+        case .dismissing:
+            // A dismissal is already running — just stash the latest request.
+            // `drainPipeline` (run when the dismissal finishes) presents it.
+            pendingRequest = request
         }
     }
 
-    /// The actual present — called either directly (nothing was live) or from
-    /// a prior callout's dismiss completion (so no modal collision).
-    private func reallyPresentCallout(
-        _ content: NotePreviewContent,
-        theme: ReaderThemeV2,
-        in view: UIView,
-        onAction: @escaping (NoteCalloutAction) -> Void,
-        onDismiss: @escaping () -> Void
-    ) {
-        guard let presenter = view.nearestViewController else {
+    func dismissCallout(completion: (@MainActor () -> Void)?) {
+        if let completion { pendingDismissCompletions.append(completion) }
+        switch phase {
+        case .idle:
+            // Nothing to dismiss — drain queued completions synchronously.
+            // Also drop any stale pending present request: a dismiss
+            // supersedes a not-yet-presented callout.
+            pendingRequest = nil
+            drainCompletions()
+        case .presenting:
+            pendingRequest = nil   // a dismiss cancels a queued present
+            beginDismiss()
+        case .dismissing:
+            // Dismissal already in flight; a dismiss also cancels any queued
+            // present so the callout does not reappear after teardown.
+            pendingRequest = nil
+        }
+    }
+
+    // MARK: - Pipeline
+
+    /// Starts dismissing the live callout. On completion, `drainPipeline`
+    /// runs the queued completions and presents the latest pending request.
+    private func beginDismiss() {
+        guard let host = presentedHost else {
+            // Defensive — `presenting` with no host. Treat as idle.
+            phase = .idle
+            drainPipeline()
+            return
+        }
+        phase = .dismissing
+        presentedHost = nil
+        popoverDelegate = nil
+        host.dismiss(animated: true) { [weak self] in
+            self?.phase = .idle
+            self?.drainPipeline()
+        }
+    }
+
+    /// Called once the pipeline is free (`.idle`). Runs every queued dismiss
+    /// completion, then presents the single latest pending request if one
+    /// was stashed.
+    private func drainPipeline() {
+        drainCompletions()
+        guard let request = pendingRequest else { return }
+        pendingRequest = nil
+        performPresent(request)
+    }
+
+    private func drainCompletions() {
+        let completions = pendingDismissCompletions
+        pendingDismissCompletions.removeAll()
+        completions.forEach { $0() }
+    }
+
+    /// Presents `request`'s callout. Only ever called from `.idle`.
+    private func performPresent(_ request: CalloutRequest) {
+        guard let presenter = request.view.nearestViewController else {
             // No view-controller to present from — surface nothing rather
             // than crash. The modifier's sheet fallback still covers the user.
-            onDismiss()
+            phase = .idle
+            request.onDismiss()
             return
         }
 
         let callout = NoteCalloutView(
-            content: content,
-            theme: theme,
+            content: request.content,
+            theme: request.theme,
             onAction: { [weak self] action in
                 // The action fires; then the callout dismisses (read-only
                 // handoffs hand off to another surface).
-                onAction(action)
+                request.onAction(action)
                 self?.dismissCallout()
             },
             onDismiss: { [weak self] in self?.dismissCallout() }
@@ -139,36 +218,37 @@ final class UIKitNotePreviewPresenter: NSObject, NotePreviewPresenting {
         host.view.backgroundColor = .clear
 
         guard let popover = host.popoverPresentationController else {
-            onDismiss()
+            phase = .idle
+            request.onDismiss()
             return
         }
-        popover.sourceView = view
-        popover.sourceRect = content.sourceRect
+        popover.sourceView = request.view
+        popover.sourceRect = request.content.sourceRect
         popover.permittedArrowDirections = [.up, .down]
         popover.backgroundColor = .clear
 
+        // The popover delegate reports an interactive dismissal (outside-tap
+        // / swipe). It routes back through `dismissCallout` so the phase
+        // machine stays consistent — `presentationControllerDidDismiss`
+        // fires AFTER UIKit has torn the popover down, so by then we just
+        // need to reconcile state, not start another dismissal.
         let delegate = PopoverDelegate(onDismiss: { [weak self] in
-            self?.presentedHost = nil
-            self?.popoverDelegate = nil
-            onDismiss()
+            guard let self else { return }
+            // UIKit already dismissed — reconcile to idle and drain.
+            if self.phase != .dismissing {
+                self.presentedHost = nil
+                self.popoverDelegate = nil
+                self.phase = .idle
+                self.drainPipeline()
+            }
+            request.onDismiss()
         })
         popover.delegate = delegate
 
-        self.presentedHost = host
-        self.popoverDelegate = delegate
+        presentedHost = host
+        popoverDelegate = delegate
+        phase = .presenting
         presenter.present(host, animated: true)
-    }
-
-    func dismissCallout(completion: (@MainActor () -> Void)?) {
-        guard let host = presentedHost else {
-            // Nothing presented — run the completion synchronously so the
-            // caller's follow-up still fires.
-            completion?()
-            return
-        }
-        presentedHost = nil
-        popoverDelegate = nil
-        host.dismiss(animated: true) { completion?() }
     }
 
     /// The callout's preferred content size. Width matches the design's

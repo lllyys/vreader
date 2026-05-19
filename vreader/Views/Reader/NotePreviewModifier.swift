@@ -75,6 +75,13 @@ private struct NotePreviewModifier: ViewModifier {
     /// presenter.
     @State private var sheetContent: NotePreviewContent?
 
+    /// An action to run AFTER the `.sheet` has finished dismissing — set by a
+    /// sheet-form handoff so the follow-up surface (the Annotations panel, the
+    /// share sheet) is presented only once the sheet's dismissal animation has
+    /// completed. Run from `.sheet`'s `onDismiss` — the real completion hook,
+    /// not a runloop guess (Codex Gate-4 round-2 High).
+    @State private var pendingPostDismissAction: (@MainActor () -> Void)?
+
     init(
         viewModel: NotePreviewViewModel,
         theme: ReaderThemeV2,
@@ -98,7 +105,7 @@ private struct NotePreviewModifier: ViewModifier {
             .onChange(of: viewModel.presented) { _, newValue in
                 route(to: newValue)
             }
-            .sheet(item: $sheetContent, onDismiss: { dismissAll() }) { content in
+            .sheet(item: $sheetContent, onDismiss: { runPendingPostDismissAction() }) { content in
                 NotePreviewSheetView(
                     content: content,
                     theme: theme,
@@ -108,6 +115,22 @@ private struct NotePreviewModifier: ViewModifier {
                 .presentationDetents([.fraction(0.42), .large])
                 .presentationDragIndicator(.visible)
             }
+    }
+
+    /// Runs (and clears) the stashed post-dismiss action. Called from the
+    /// `.sheet`'s `onDismiss` — by which point SwiftUI has fully dismissed the
+    /// sheet, so a follow-up surface can be presented with no modal collision.
+    /// On a plain dismiss (no handoff) the action is `nil` and this also
+    /// clears the view-model state.
+    private func runPendingPostDismissAction() {
+        let action = pendingPostDismissAction
+        pendingPostDismissAction = nil
+        if let action {
+            action()
+        } else {
+            // Plain sheet dismissal (drag-down, Done) — clear VM state.
+            viewModel.dismiss()
+        }
     }
 
     /// Routes a freshly-published `NotePreviewContent` to the callout or the
@@ -201,28 +224,45 @@ private struct NotePreviewModifier: ViewModifier {
     /// Tears down whichever preview form is showing and runs `completion`
     /// once the teardown finishes — so a follow-up surface is presented only
     /// after the preview's dismissal has completed (no modal collision).
+    ///
+    /// - Sheet form: stashes `completion` in `pendingPostDismissAction` and
+    ///   clears `sheetContent`. SwiftUI dismisses the sheet and fires
+    ///   `.sheet`'s `onDismiss`, which runs the stashed action — a real
+    ///   dismissal-completion hook, not a runloop guess.
+    /// - Callout form: `UIKitNotePreviewPresenter.dismissCallout(completion:)`
+    ///   already runs `completion` from the popover's real dismiss completion.
     private func dismissPreview(then completion: @escaping @MainActor () -> Void) {
+        viewModel.dismiss()
         if sheetContent != nil {
-            // The `.sheet`'s `onDismiss` (`dismissAll`) runs the SwiftUI
-            // teardown; defer the follow-up one runloop turn so the sheet's
-            // dismissal animation has handed the controller back.
+            // The completion runs from `.sheet`'s `onDismiss`. `viewModel`
+            // state is already cleared above; the stashed action wraps the
+            // caller's follow-up only (the `onDismiss` path sees a non-nil
+            // action and skips its own `viewModel.dismiss()`).
+            pendingPostDismissAction = completion
             sheetContent = nil
-            viewModel.dismiss()
-            DispatchQueue.main.async { completion() }
         } else {
             // Callout form — the presenter's completion fires post-dismiss.
-            viewModel.dismiss()
             calloutPresenter.dismissCallout(completion: completion)
         }
     }
 
     /// Clears every preview surface and the view model state. Used by the
-    /// plain dismiss paths (× button, scrim tap, sheet drag-down) where no
-    /// follow-up surface needs to be presented.
+    /// plain dismiss paths (× button, scrim tap, sheet drag-down, a `nil`
+    /// route) where no follow-up surface needs to be presented.
+    ///
+    /// For the sheet form, clearing `sheetContent` triggers `.sheet`'s
+    /// `onDismiss` → `runPendingPostDismissAction`, which (with no stashed
+    /// action) clears the view-model state itself — so this method does not
+    /// double-dismiss the view model on the sheet path.
     private func dismissAll() {
-        sheetContent = nil
-        calloutPresenter.dismissCallout()
-        viewModel.dismiss()
+        if sheetContent != nil {
+            // Sheet path — `onDismiss` will clear the VM. Just drop the sheet.
+            pendingPostDismissAction = nil
+            sheetContent = nil
+        } else {
+            calloutPresenter.dismissCallout()
+            viewModel.dismiss()
+        }
     }
 }
 
