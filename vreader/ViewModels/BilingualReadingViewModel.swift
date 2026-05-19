@@ -99,9 +99,21 @@ final class BilingualReadingViewModel {
     /// if the epoch has since moved.
     var epoch: Int = 0
 
-    /// In-flight prefetch tasks, so a test can await quiescence and a
-    /// reset can cancel them.
-    var prefetchTasks: [Task<Void, Never>] = []
+    /// Monotonic per-`handlePositionChange`-call counter. The trigger captures
+    /// it at entry and re-checks it after the `unit(after:)` suspension — only
+    /// the LATEST request proceeds, so two position changes interleaving
+    /// across the suspension cannot let the older one win.
+    var triggerRequestSeq: Int = 0
+
+    /// In-flight prefetch tasks keyed by unit, so a reset can cancel them, a
+    /// completed task removes its own entry (no unbounded growth), and a test
+    /// can await quiescence.
+    var prefetchTasks: [TranslationUnitID: Task<Void, Never>] = [:]
+
+    /// Cancelled-but-still-unwinding prefetch tasks, kept only so the
+    /// test-only `awaitPrefetchForTesting` can fully drain them after a
+    /// disable / unit-change cancels them out of `prefetchTasks`.
+    var cancelledPrefetchTasks: [Task<Void, Never>] = []
 
     init(bookFingerprintKey: String, perBookBaseURL: URL) {
         self.bookFingerprintKey = bookFingerprintKey

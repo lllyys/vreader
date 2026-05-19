@@ -11,6 +11,17 @@
 // from a superseded epoch is discarded. An offline cache-miss is recorded in
 // `unavailableUnits` (the silent-source-fallback — plan Decision 2).
 //
+// Key decisions (Codex audit round 1):
+// - `handlePositionChange` resolves the current + next unit **before**
+//   mutating `epoch` / `lastTriggerUnit`, so a disable / unit-change during
+//   the `unit(after:)` suspension cannot let a stale invocation start
+//   superseded-epoch prefetches.
+// - In-flight prefetch `Task`s are tracked in a `[TranslationUnitID: Task]`
+//   dictionary so `finishPrefetch` removes the completed entry (no unbounded
+//   growth) and `awaitPrefetchForTesting` awaits a stable snapshot.
+// - A transient provider failure clears `lastTriggerUnit` when it names the
+//   failed unit, so a later position change inside the same unit retries.
+//
 // @coordinates-with: BilingualReadingViewModel.swift, ChapterTextProviding.swift,
 //   ChapterPrefetching.swift, ReaderNotifications.swift,
 //   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-7b)
@@ -46,10 +57,30 @@ extension BilingualReadingViewModel {
     /// next unit. Repeated calls inside the same unit are no-ops.
     func handlePositionChange(_ locator: Locator) async {
         guard isEnabled, let provider = textProvider, prefetcher != nil else { return }
+        // Claim a monotonic request token — only the latest request proceeds.
+        triggerRequestSeq += 1
+        let requestToken = triggerRequestSeq
+
         guard let currentUnit = await provider.unit(containing: locator) else { return }
+        // After the `unit(containing:)` suspension: bail if a newer request
+        // has been claimed, or the VM was disabled.
+        guard isEnabled, requestToken == triggerRequestSeq else { return }
         // Dedupe: the position is still inside the unit the trigger last
         // acted on — nothing to do.
         guard currentUnit != lastTriggerUnit else { return }
+
+        // Resolve the next unit BEFORE mutating any trigger state — this call
+        // suspends, and a disable / another `handlePositionChange` during the
+        // suspension must not let this (now stale) invocation start prefetches.
+        let nextUnit = await provider.unit(after: currentUnit)
+
+        // Re-validate after the suspension: the VM must still be enabled AND
+        // this must still be the latest request. The request-token check
+        // (not just `currentUnit != lastTriggerUnit`) is what defeats the
+        // interleaving race — a newer request for a *different* unit bumped
+        // `triggerRequestSeq`, so the older invocation stops here even though
+        // its `currentUnit` differs from the newer `lastTriggerUnit`.
+        guard isEnabled, requestToken == triggerRequestSeq else { return }
 
         // A real unit change — bump the epoch and cancel the prior epoch's
         // in-flight prefetches before starting the new ones.
@@ -59,21 +90,27 @@ extension BilingualReadingViewModel {
 
         let currentEpoch = epoch
         var targets: [TranslationUnitID] = [currentUnit]
-        if let next = await provider.unit(after: currentUnit) {
-            targets.append(next)
-        }
+        if let nextUnit { targets.append(nextUnit) }
         for unit in targets {
             startPrefetch(unit: unit, epoch: currentEpoch)
         }
     }
 
-    /// Test-only: awaits every in-flight prefetch `Task` so a test can assert
-    /// deterministically after `handlePositionChange`.
+    /// Test-only: awaits every prefetch `Task` — both still-registered and
+    /// already-cancelled — so a test can assert deterministically after
+    /// `handlePositionChange`.
     func awaitPrefetchForTesting() async {
-        // Drain repeatedly — a prefetch could (in principle) spawn another.
-        while let task = prefetchTasks.first {
-            prefetchTasks.removeFirst()
-            await task.value
+        while !prefetchTasks.isEmpty || !cancelledPrefetchTasks.isEmpty {
+            let active = Array(prefetchTasks.values)
+            let cancelled = cancelledPrefetchTasks
+            cancelledPrefetchTasks.removeAll()
+            for task in cancelled { await task.value }
+            for task in active { await task.value }
+            // Drop finished+accounted active entries; loop if a new task
+            // appeared (or a new cancellation occurred) while awaiting.
+            for unit in prefetchTasks.keys where !inFlightUnits.contains(unit) {
+                prefetchTasks.removeValue(forKey: unit)
+            }
         }
     }
 
@@ -135,7 +172,7 @@ extension BilingualReadingViewModel {
             }
             await self?.finishPrefetch(unit: unit, epoch: launchEpoch, outcome: outcome)
         }
-        prefetchTasks.append(task)
+        prefetchTasks[unit] = task
     }
 
     /// Applies a prefetch result. A result whose epoch no longer matches the
@@ -144,6 +181,11 @@ extension BilingualReadingViewModel {
         unit: TranslationUnitID, epoch resultEpoch: Int, outcome: PrefetchOutcome
     ) {
         inFlightUnits.remove(unit)
+        // Only clear the task entry if it is still THIS task's — a newer
+        // prefetch for the same unit (a later epoch) may have replaced it.
+        if resultEpoch == epoch {
+            prefetchTasks.removeValue(forKey: unit)
+        }
         if inFlightUnits.isEmpty { isFetching = false }
         // Stale-epoch guard: discard a result from a superseded epoch.
         guard resultEpoch == epoch, isEnabled else { return }
@@ -158,14 +200,24 @@ extension BilingualReadingViewModel {
             postDidChange()
         case .cancelled, .failed:
             // Transient: leave the unit unfetched so a later position change
-            // is free to retry. Not marked unavailable.
-            break
+            // can retry. Clearing `lastTriggerUnit` when it names this unit
+            // means a subsequent position change *inside the same unit* is no
+            // longer deduped away — without this the unit would only retry
+            // after the reader leaves and re-enters it.
+            if lastTriggerUnit == unit {
+                lastTriggerUnit = nil
+            }
         }
     }
 
     /// Cancels every in-flight prefetch `Task` and clears the in-flight set.
+    /// Cancelled tasks move to `cancelledPrefetchTasks` so the test-only
+    /// `awaitPrefetchForTesting` can still drain them as they unwind.
     private func cancelInFlightPrefetches() {
-        for task in prefetchTasks { task.cancel() }
+        for task in prefetchTasks.values {
+            task.cancel()
+            cancelledPrefetchTasks.append(task)
+        }
         prefetchTasks.removeAll()
         inFlightUnits.removeAll()
         isFetching = false

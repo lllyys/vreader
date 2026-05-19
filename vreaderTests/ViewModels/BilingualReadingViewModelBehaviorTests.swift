@@ -48,6 +48,57 @@ struct BilingualReadingViewModelBehaviorTests {
         }
     }
 
+    /// A `ChapterTextProviding` whose FIRST `unit(after:)` call blocks until
+    /// `release()` is called; later calls return immediately. Lets a test
+    /// interleave a disable / a second `handlePositionChange` inside the
+    /// suspension the first `handlePositionChange` takes before it mutates
+    /// trigger state.
+    private actor SuspendingNextProvider: ChapterTextProviding {
+        nonisolated let units: [TranslationUnitID]
+        private var waiter: CheckedContinuation<Void, Never>?
+        private var released = false
+        private var firstCallSeen = false
+        private(set) var unitAfterCallCount = 0
+
+        init(units: [TranslationUnitID]) { self.units = units }
+
+        nonisolated func translationUnits() async throws -> [TranslationUnitID] { units }
+
+        nonisolated func sourceText(for unit: TranslationUnitID) async throws -> String {
+            "source for \(unit.value)"
+        }
+
+        nonisolated func unit(containing locator: Locator) async -> TranslationUnitID? {
+            guard !units.isEmpty, let offset = locator.charOffsetUTF16, offset >= 0
+            else { return nil }
+            return units[min(offset / 100, units.count - 1)]
+        }
+
+        func unit(after unit: TranslationUnitID) async -> TranslationUnitID? {
+            unitAfterCallCount += 1
+            // Only the FIRST call blocks (until released) — later calls (the
+            // interleaving second `handlePositionChange`) proceed immediately.
+            if !firstCallSeen {
+                firstCallSeen = true
+                if !released {
+                    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                        waiter = cont
+                    }
+                }
+            }
+            guard let index = units.firstIndex(of: unit), index + 1 < units.count
+            else { return nil }
+            return units[index + 1]
+        }
+
+        /// Releases the pending first `unit(after:)` call.
+        func release() {
+            released = true
+            waiter?.resume()
+            waiter = nil
+        }
+    }
+
     /// Records every prefetch call; returns canned segments or throws.
     private actor SpyPrefetcher: ChapterPrefetching {
         enum Outcome: Sendable { case segments([String]); case offline; case providerFailed }
@@ -55,11 +106,17 @@ struct BilingualReadingViewModelBehaviorTests {
         /// Optional delay so a test can interleave a second position change
         /// before the first prefetch resolves.
         private let delayNanos: UInt64
+        /// When > 0, the first N calls throw `providerFailed`; later calls
+        /// honor `outcome`. Lets a test drive a transient-failure-then-retry.
+        private var failFirstNCalls: Int
         private(set) var calls: [TranslationUnitID] = []
 
-        init(outcome: Outcome = .segments(["译文"]), delayNanos: UInt64 = 0) {
+        init(outcome: Outcome = .segments(["译文"]),
+             delayNanos: UInt64 = 0,
+             failFirstNCalls: Int = 0) {
             self.outcome = outcome
             self.delayNanos = delayNanos
+            self.failFirstNCalls = failFirstNCalls
         }
 
         func translatedSegments(
@@ -69,6 +126,10 @@ struct BilingualReadingViewModelBehaviorTests {
         ) async throws -> [String] {
             calls.append(unit)
             if delayNanos > 0 { try await Task.sleep(nanoseconds: delayNanos) }
+            if failFirstNCalls > 0 {
+                failFirstNCalls -= 1
+                throw ChapterTranslationError.providerFailed("transient")
+            }
             switch outcome {
             case .segments(let s): return s
             case .offline: throw ChapterTranslationError.offline
@@ -346,6 +407,118 @@ struct BilingualReadingViewModelBehaviorTests {
 
         // The current unit after the churn is ch2 — its translation landed.
         #expect(vm.translations(for: Self.threeUnits[2]) != nil)
+    }
+
+    // MARK: - Retry after transient failure (Codex audit round 1)
+
+    @Test func transientFailure_retriesOnNextPositionChangeInSameUnit() async throws {
+        // A transient provider failure must leave the unit retryable WITHOUT
+        // the reader having to leave and re-enter it — a later position
+        // change still inside the same unit re-triggers the prefetch.
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // First call to each unit fails transiently; the retry succeeds.
+        let prefetcher = SpyPrefetcher(
+            outcome: .segments(["译"]), failFirstNCalls: 1)
+        let vm = makeEnabledVM(
+            dir: dir, provider: StubProvider(units: Self.threeUnits), prefetcher: prefetcher)
+
+        // Position inside ch0 — prefetch fails transiently.
+        await vm.handlePositionChange(Self.locator(charOffset: 0))
+        await vm.awaitPrefetchForTesting()
+        #expect(vm.translations(for: Self.threeUnits[0]) == nil)
+
+        // A second position change STILL inside ch0 re-triggers the prefetch
+        // (the failed unit is no longer deduped away) — this time it succeeds.
+        await vm.handlePositionChange(Self.locator(charOffset: 50))
+        await vm.awaitPrefetchForTesting()
+        #expect(vm.translations(for: Self.threeUnits[0]) == ["译"])
+    }
+
+    // MARK: - Empty book
+
+    @Test func emptyBook_positionChangeIsNoOp() async throws {
+        // A book with zero units — `unit(containing:)` returns nil — must not
+        // crash or prefetch.
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let prefetcher = SpyPrefetcher()
+        let vm = makeEnabledVM(
+            dir: dir, provider: StubProvider(units: []), prefetcher: prefetcher)
+
+        await vm.handlePositionChange(Self.locator(charOffset: 0))
+        await vm.awaitPrefetchForTesting()
+        #expect(await prefetcher.callCount() == 0)
+        #expect(vm.translationsByUnit.isEmpty)
+    }
+
+    // MARK: - Stale-launch race (Codex audit round 1 — High)
+
+    @Test func disableDuringUnitAfterSuspension_doesNotStartStalePrefetch() async throws {
+        // `handlePositionChange` resolves `unit(after:)` (a suspension point)
+        // BEFORE mutating epoch/lastTriggerUnit. If the VM is disabled during
+        // that suspension, the now-stale invocation must NOT start prefetches.
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let prefetcher = SpyPrefetcher()
+        // A provider whose `unit(after:)` blocks until the test releases it.
+        let slowProvider = SuspendingNextProvider(units: Self.threeUnits)
+        let vm = BilingualReadingViewModel(
+            bookFingerprintKey: Self.bookKey, perBookBaseURL: dir)
+        vm.attachProvider(slowProvider)
+        vm.attachPrefetcher(prefetcher)
+        vm.setEnabled(true)
+        vm.dismissSetupSheet()
+
+        // Launch handlePositionChange; it will suspend inside `unit(after:)`.
+        let handling = Task { await vm.handlePositionChange(Self.locator(charOffset: 0)) }
+        // Give the task a moment to reach the suspension, then disable.
+        await Task.yield()
+        try await Task.sleep(nanoseconds: 20_000_000)
+        vm.setEnabled(false)
+        // Release `unit(after:)` so the stale invocation resumes.
+        await slowProvider.release()
+        await handling.value
+        await vm.awaitPrefetchForTesting()
+
+        // The stale invocation re-validated `isEnabled` after the suspension
+        // and started nothing.
+        #expect(await prefetcher.callCount() == 0)
+        #expect(vm.translationsByUnit.isEmpty)
+    }
+
+    @Test func interleavedPositionChanges_laterUnitWins_notTheStaleOlderOne() async throws {
+        // Codex audit round 2: two `handlePositionChange` calls interleave
+        // across the `unit(after:)` suspension. Call A (ch0) suspends; call B
+        // (ch2) resumes first and sets the trigger. When A resumes it must NOT
+        // start stale ch0 prefetches — the monotonic request token, not the
+        // unit comparison, defeats this (ch0 != ch2 alone would let A through).
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let prefetcher = SpyPrefetcher()
+        let slowProvider = SuspendingNextProvider(units: Self.threeUnits)
+        let vm = BilingualReadingViewModel(
+            bookFingerprintKey: Self.bookKey, perBookBaseURL: dir)
+        vm.attachProvider(slowProvider)
+        vm.attachPrefetcher(prefetcher)
+        vm.setEnabled(true)
+        vm.dismissSetupSheet()
+
+        // Call A — position inside ch0. Suspends in the first `unit(after:)`.
+        let callA = Task { await vm.handlePositionChange(Self.locator(charOffset: 0)) }
+        await Task.yield()
+        try await Task.sleep(nanoseconds: 20_000_000)
+        // Call B — position inside ch2. Its `unit(after:)` does not block.
+        await vm.handlePositionChange(Self.locator(charOffset: 250))
+        // Release A's suspended `unit(after:)`; A resumes — and must stop.
+        await slowProvider.release()
+        await callA.value
+        await vm.awaitPrefetchForTesting()
+
+        // B won: ch2 is translated. A's stale ch0/ch1 prefetches never ran.
+        #expect(vm.translations(for: Self.threeUnits[2]) != nil)
+        #expect(await prefetcher.callsFor(Self.threeUnits[0]) == 0)
+        #expect(await prefetcher.callsFor(Self.threeUnits[1]) == 0)
     }
 
     // MARK: - Notification
