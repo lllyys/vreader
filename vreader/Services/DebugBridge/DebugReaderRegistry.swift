@@ -254,6 +254,18 @@ final class DebugReaderRegistry {
 
     private init() {}
 
+    /// Test seam — construct an isolated registry instance that does NOT
+    /// share state with `shared`. Swift Testing runs `@Test` methods in
+    /// parallel; suites that exercised the singleton via `shared.reset()`
+    /// could have one test's `reset()` wipe another concurrently-suspended
+    /// test's `settleWaiters` (bug #227 — `awaitReaderSettled` resumed with
+    /// a spurious `.settleTimeout`). Each test taking its own instance
+    /// removes the shared mutable state entirely. Production code paths
+    /// always go through `shared`; this factory is only for tests.
+    static func makeIsolatedForTests() -> DebugReaderRegistry {
+        DebugReaderRegistry()
+    }
+
     /// The active reader, if any.
     var current: DebugReaderProbe? {
         activeReader as? DebugReaderProbe
