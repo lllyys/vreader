@@ -344,7 +344,8 @@ vreader/
 │   ├── Reader/             # Reader container, format containers, bridges
 │   │   └── Annotations/    # TOCSheet, HighlightsSheet, AnnotationsSheetRoute (feature #62)
 │   ├── Annotations/        # AddNoteSheet, AnnotationEditSheet
-│   └── Settings/           # SettingsView, ReaderSettingsPanel
+│   ├── Settings/           # SettingsView, ReaderSettingsPanel
+│   └── Stats/              # ReadingDashboardView, StatsTimeWindowBar, StatsPerBookTable (feature #58 WI-6a)
 ├── Services/
 │   ├── PersistenceActor.swift
 │   ├── TXT/                # TXTService, TXTFileLoader
