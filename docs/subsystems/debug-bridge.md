@@ -59,6 +59,7 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 | `eval`     | `bridge=<basename>`, `js=<base64>` | —                                     | Run JS in the active reader's webview; write result/error to `Caches/DebugBridge/eval-<bridge>.json`.                                                               |
 | `tts`      | `action=start\|stop`               | —                                     | Drive `TTSService` from outside the play-button tap (Feature #45 WI-4c-b). XCUITest's gesture path cannot reliably activate `AVSpeechSynthesizer`'s audio session, so verification tests fire this URL after opening a book. No-op when no reader is presented. |
 | `search`   | `query=<str>`                      | `index=<int>`                         | Drive the in-reader search sheet (Bug #238). Opens the search sheet, sets `SearchViewModel.query` to `query`, and — when `index` (0-indexed, ≥0) is supplied — taps result N once results arrive (re-fires `.readerNavigateToLocator` then dismisses the sheet, mirroring the real-user tap path). Used by the verify harness to reproduce search-result-tap repros (e.g. Bug #182 cross-chapter EPUB search highlight) CU-free. No-op when no reader is presented. |
+| `highlight`| `start=<int>`, `end=<int>`         | `color=<yellow\|pink\|green\|blue>`   | Create a highlight at UTF-16 range `[start, end)` in the active TXT/MD reader (Bug #237). Bypasses the long-press → SelectionPopoverView gesture path (XCUITest cannot synthesize it on iOS 26). The observer in the TXT/MD host builds a format-correct `Locator` via `LocatorFactory` (extracting `textQuote` + context from source) and calls `HighlightCoordinator.create(...)` — byte-identical to a gesture-created highlight at the same offsets (`canonicalHash` matches, so dedupe works correctly). EPUB / PDF / AZW3 don't register the observer; the URL is silently a no-op for them. |
 
 ### Parameter validation
 
@@ -69,6 +70,8 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 - `js`: standard base64 of UTF-8 source.
 - `query` (`search`): non-empty UTF-8 string. Percent-encode CJK / spaces / etc. before passing — `URLComponents` decodes it back before the parser sees it.
 - `index` (`search`): non-negative integer; rejected if empty, non-integer, or negative. Without `index`, the URL runs the query and leaves the sheet open.
+- `start` / `end` (`highlight`): non-negative integers with `end > start`. A zero-length range (`start == end`) is rejected — the user gesture path requires `selectedRange.length > 0` too.
+- `color` (`highlight`): one of `yellow` / `pink` / `green` / `blue` (the four `NamedHighlightColor` rawValues). Unknown or empty values rejected; omit the parameter to default to `yellow`.
 - Duplicate query keys throw `parse.invalidParam: <name>: duplicate parameter`.
 
 ## Output files
