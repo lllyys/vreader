@@ -18,21 +18,31 @@ struct ReadingDashboardViewModelTests {
         private(set) var callCount = 0
         private(set) var lastWindow: ReadingStatsWindow?
         private(set) var lastSort: ReadingDashboardSort?
+        private(set) var lastCustomRange: ReadingStatsCustomRange?
 
         func snapshot(
-            window: ReadingStatsWindow, sort: ReadingDashboardSort, now: Date
+            window: ReadingStatsWindow, sort: ReadingDashboardSort, now: Date,
+            customRange: ReadingStatsCustomRange?
         ) async throws -> ReadingDashboardSnapshot {
             callCount += 1
             lastWindow = window
             lastSort = sort
+            lastCustomRange = customRange
             if let errorToThrow { throw errorToThrow }
-            return snapshotToReturn ?? Self.emptySnapshot(activeWindow: window)
+            return snapshotToReturn ?? Self.emptySnapshot(activeWindow: window, customRange: customRange)
         }
 
-        static func emptySnapshot(activeWindow: ReadingStatsWindow) -> ReadingDashboardSnapshot {
-            ReadingDashboardSnapshot(
+        static func emptySnapshot(
+            activeWindow: ReadingStatsWindow,
+            customRange: ReadingStatsCustomRange? = nil
+        ) -> ReadingDashboardSnapshot {
+            let breakdown: CustomRangeBreakdown? = customRange.map {
+                CustomRangeBreakdown(range: $0, totalSeconds: 0, sessionCount: 0)
+            }
+            return ReadingDashboardSnapshot(
                 windowTotals: [], activeWindow: activeWindow, perBook: [],
-                lifetimeTotalSeconds: 0, trackingSince: nil
+                lifetimeTotalSeconds: 0, trackingSince: nil,
+                customRangeBreakdown: breakdown
             )
         }
     }
@@ -184,7 +194,8 @@ struct ReadingDashboardViewModelTests {
 
         /// Snapshots are keyed by window so the test can tell which one "won".
         func snapshot(
-            window: ReadingStatsWindow, sort: ReadingDashboardSort, now: Date
+            window: ReadingStatsWindow, sort: ReadingDashboardSort, now: Date,
+            customRange: ReadingStatsCustomRange?
         ) async throws -> ReadingDashboardSnapshot {
             // Block until the test releases this window's gate.
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -212,6 +223,105 @@ struct ReadingDashboardViewModelTests {
                 pending[window] = {}
             }
         }
+    }
+
+    // MARK: - Custom range (feature #58 WI-6b)
+
+    private func sampleRange() -> ReadingStatsCustomRange {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let start = cal.date(from: DateComponents(year: 2026, month: 5, day: 1))!
+        let end   = cal.date(from: DateComponents(year: 2026, month: 5, day: 15))!
+        return ReadingStatsCustomRange(start: start, end: end)
+    }
+
+    @Test func applyCustomRangeActivatesCustomMode() async {
+        let agg = MockAggregator()
+        let vm = ReadingDashboardViewModel(aggregator: agg, preferenceStore: MockPreferenceStore())
+        await vm.load()
+
+        #expect(vm.customRange == nil)
+        #expect(vm.isCustomActive == false)
+
+        let range = sampleRange()
+        await vm.applyCustomRange(range)
+
+        #expect(vm.customRange == range)
+        #expect(vm.isCustomActive == true)
+        // The aggregator was called WITH the customRange.
+        #expect(agg.lastCustomRange == range)
+    }
+
+    @Test func selectingAnEnumWindowExitsCustomMode() async {
+        let agg = MockAggregator()
+        let vm = ReadingDashboardViewModel(aggregator: agg, preferenceStore: MockPreferenceStore())
+        await vm.applyCustomRange(sampleRange())
+        #expect(vm.isCustomActive)
+
+        await vm.selectWindow(.last7Days)
+        #expect(vm.customRange == nil)
+        #expect(vm.activeWindow == .last7Days)
+        // The subsequent aggregator call had no custom range.
+        #expect(agg.lastCustomRange == nil)
+    }
+
+    @Test func clearCustomRangeExitsCustomMode() async {
+        let agg = MockAggregator()
+        let vm = ReadingDashboardViewModel(aggregator: agg, preferenceStore: MockPreferenceStore())
+        await vm.applyCustomRange(sampleRange())
+        #expect(vm.isCustomActive)
+
+        await vm.clearCustomRange()
+        #expect(vm.customRange == nil)
+        #expect(vm.isCustomActive == false)
+    }
+
+    @Test func clearCustomRangeWhenInactiveIsANoOp() async {
+        let agg = MockAggregator()
+        let vm = ReadingDashboardViewModel(aggregator: agg, preferenceStore: MockPreferenceStore())
+        await vm.load()
+        let calls = agg.callCount
+
+        await vm.clearCustomRange()
+        // The early-exit guard means no extra aggregator call when there
+        // was no Custom range to clear.
+        #expect(agg.callCount == calls)
+    }
+
+    @Test func customRangePersistsAcrossReinitialization() async {
+        let store = MockPreferenceStore()
+        let agg = MockAggregator()
+        let vm = ReadingDashboardViewModel(aggregator: agg, preferenceStore: store)
+        let range = sampleRange()
+        await vm.applyCustomRange(range)
+
+        // A fresh VM with the same store sees the range restored.
+        let vm2 = ReadingDashboardViewModel(aggregator: MockAggregator(), preferenceStore: store)
+        #expect(vm2.customRange == range)
+        #expect(vm2.isCustomActive == true)
+    }
+
+    @Test func selectingAnEnumWindowRemovesPersistedCustomRange() async {
+        let store = MockPreferenceStore()
+        let agg = MockAggregator()
+        let vm = ReadingDashboardViewModel(aggregator: agg, preferenceStore: store)
+        await vm.applyCustomRange(sampleRange())
+        #expect(store.string(forKey: ReadingDashboardViewModel.customRangeKey) != nil)
+
+        await vm.selectWindow(.last30Days)
+        #expect(store.string(forKey: ReadingDashboardViewModel.customRangeKey) == nil)
+    }
+
+    @Test func corruptStoredCustomRangeFallsBackToNil() {
+        let store = MockPreferenceStore()
+        store.setRaw("not-a-json-blob", forKey: ReadingDashboardViewModel.customRangeKey)
+        let vm = ReadingDashboardViewModel(aggregator: MockAggregator(), preferenceStore: store)
+        #expect(vm.customRange == nil)
+    }
+
+    @Test func isCustomPickerPresentedDefaultsToFalse() {
+        let vm = ReadingDashboardViewModel(aggregator: MockAggregator(), preferenceStore: MockPreferenceStore())
+        #expect(vm.isCustomPickerPresented == false)
     }
 
     @Test func staleRefreshDoesNotOverwriteANewerSnapshot() async {

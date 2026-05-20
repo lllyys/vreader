@@ -18,6 +18,16 @@ protocol PreferenceStoring: Sendable {
 
     /// Stores a string value for the given key.
     func set(_ value: String, forKey key: String)
+
+    /// Removes the stored value for the given key. No-op if absent.
+    func remove(forKey key: String)
+}
+
+extension PreferenceStoring {
+    /// Convenience: write a value when non-nil, otherwise remove the key.
+    func setOrRemove(_ value: String?, forKey key: String) {
+        if let value { set(value, forKey: key) } else { remove(forKey: key) }
+    }
 }
 
 /// Production implementation backed by UserDefaults.
@@ -35,6 +45,10 @@ final class UserDefaultsPreferenceStore: PreferenceStoring, @unchecked Sendable 
     func set(_ value: String, forKey key: String) {
         defaults.set(value, forKey: key)
     }
+
+    func remove(forKey key: String) {
+        defaults.removeObject(forKey: key)
+    }
 }
 
 /// In-memory implementation for testing.
@@ -47,6 +61,10 @@ final class MockPreferenceStore: PreferenceStoring, @unchecked Sendable {
 
     func set(_ value: String, forKey key: String) {
         storage[key] = value
+    }
+
+    func remove(forKey key: String) {
+        storage.removeValue(forKey: key)
     }
 
     /// Stores a raw string directly, useful for simulating corrupted data.

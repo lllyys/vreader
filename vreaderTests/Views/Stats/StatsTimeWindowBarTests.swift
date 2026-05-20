@@ -23,9 +23,29 @@ struct StatsTimeWindowBarTests {
     private func makeBar(
         value: ReadingStatsWindow = .today,
         theme: ReaderThemeV2 = .paper,
-        onChange: @escaping (ReadingStatsWindow) -> Void = { _ in }
+        customRange: ReadingStatsCustomRange? = nil,
+        onChange: @escaping (ReadingStatsWindow) -> Void = { _ in },
+        onCustomTap: @escaping () -> Void = {}
     ) -> StatsTimeWindowBar {
-        StatsTimeWindowBar(theme: theme, value: value, onChange: onChange)
+        StatsTimeWindowBar(
+            theme: theme, value: value, customRange: customRange,
+            onChange: onChange, onCustomTap: onCustomTap
+        )
+    }
+
+    /// Builds a deterministic Custom range for label tests.
+    private static func sampleRange() -> ReadingStatsCustomRange {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let start = cal.date(from: DateComponents(year: 2026, month: 5, day: 1))!
+        let end   = cal.date(from: DateComponents(year: 2026, month: 5, day: 15))!
+        return ReadingStatsCustomRange(start: start, end: end)
+    }
+
+    private static func utcCalendar() -> Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal
     }
 
     // MARK: - Builds
@@ -91,5 +111,53 @@ struct StatsTimeWindowBarTests {
             bar.selectWindowForTesting(window)
             #expect(lastPicked == window)
         }
+    }
+
+    // MARK: - Custom pill (WI-6b)
+
+    @Test func customPillRendersInactiveByDefault() {
+        let bar = makeBar(customRange: nil)
+        #expect(bar.isCustomPillActiveForTesting == false)
+        #expect(bar.customPillLabelForTesting(calendar: Self.utcCalendar()) == "Custom")
+    }
+
+    @Test func customPillTapInvokesOnCustomTap() {
+        var fireCount = 0
+        let bar = makeBar(onCustomTap: { fireCount += 1 })
+        bar.selectCustomForTesting()
+        #expect(fireCount == 1)
+    }
+
+    @Test func customPillActiveWhenRangeApplied() {
+        let bar = makeBar(customRange: Self.sampleRange())
+        #expect(bar.isCustomPillActiveForTesting == true)
+    }
+
+    @Test func customPillCarriesAppliedRangeSummary() {
+        let bar = makeBar(customRange: Self.sampleRange())
+        let label = bar.customPillLabelForTesting(calendar: Self.utcCalendar())
+        #expect(label == "Custom · May 1 – May 15")
+    }
+
+    @Test func customRangeActiveDeactivatesEnumPills() {
+        // When a Custom range is applied, no enum pill renders as active —
+        // the Custom pill owns the active state.
+        let bar = makeBar(value: .today, customRange: Self.sampleRange())
+        for window in ReadingStatsWindow.allCases {
+            #expect(!bar.isPillActiveForTesting(window))
+        }
+        #expect(bar.isCustomPillActiveForTesting == true)
+    }
+
+    @Test func customPillTapFiresEvenWhenAlreadyActive() {
+        // Tapping the Custom pill is the re-entry point to the picker — it
+        // must fire `onCustomTap` even when a range is already applied.
+        var fireCount = 0
+        let bar = makeBar(
+            customRange: Self.sampleRange(),
+            onCustomTap: { fireCount += 1 }
+        )
+        bar.selectCustomForTesting()
+        #expect(fireCount == 1)
     }
 }

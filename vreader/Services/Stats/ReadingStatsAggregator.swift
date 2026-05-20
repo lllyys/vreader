@@ -24,11 +24,33 @@ private let log = Logger(subsystem: "com.vreader.app", category: "ReadingStats")
 
 /// The boundary the dashboard ViewModel depends on, so tests can inject a mock.
 protocol ReadingStatsAggregating: Sendable {
+    /// Produces a dashboard snapshot for the given enum window + optional
+    /// custom range. When `customRange` is non-nil and valid, the snapshot's
+    /// `perBook` reflects the custom range and `customRangeBreakdown` carries
+    /// the range's total; the seven enum `windowTotals` are still populated
+    /// so the pill bar can render every window's total alongside the active
+    /// Custom pill.
+    ///
+    /// Feature #58 WI-6b — the `customRange` argument is purely additive; a
+    /// caller passing nil (the WI-1..WI-6a default path) gets the original
+    /// behaviour.
+    func snapshot(
+        window: ReadingStatsWindow,
+        sort: ReadingDashboardSort,
+        now: Date,
+        customRange: ReadingStatsCustomRange?
+    ) async throws -> ReadingDashboardSnapshot
+}
+
+extension ReadingStatsAggregating {
+    /// Backward-compatible no-customRange overload (the original WI-2 shape).
     func snapshot(
         window: ReadingStatsWindow,
         sort: ReadingDashboardSort,
         now: Date
-    ) async throws -> ReadingDashboardSnapshot
+    ) async throws -> ReadingDashboardSnapshot {
+        try await snapshot(window: window, sort: sort, now: now, customRange: nil)
+    }
 }
 
 /// Aggregates `ReadingSession` rows into a `ReadingDashboardSnapshot`.
@@ -51,13 +73,18 @@ actor ReadingStatsAggregator: ReadingStatsAggregating {
     /// Produces one consistent dashboard render.
     ///
     /// - Parameters:
-    ///   - window: which window the per-book table is computed for.
+    ///   - window: which enum window the per-book table is computed for (when
+    ///     `customRange` is nil or invalid).
     ///   - sort: the per-book table sort.
     ///   - now: the reference instant — injectable for deterministic tests.
+    ///   - customRange: optional user-picked range; when non-nil and valid, the
+    ///     `perBook` rows + `customRangeBreakdown` reflect this range and the
+    ///     `window` argument only sets `activeWindow` (the pill-bar state).
     func snapshot(
         window: ReadingStatsWindow,
         sort: ReadingDashboardSort,
-        now: Date
+        now: Date,
+        customRange: ReadingStatsCustomRange? = nil
     ) async throws -> ReadingDashboardSnapshot {
         let calendar = calendarProvider()
         let context = ModelContext(modelContainer)
@@ -75,22 +102,110 @@ actor ReadingStatsAggregator: ReadingStatsAggregating {
         }
 
         let windowTotals = computeWindowTotals(sessions: sessions, now: now, calendar: calendar)
-        let perBook = computePerBook(
-            sessions: sessions, bookByKey: bookByKey,
-            window: window, sort: sort, now: now, calendar: calendar
-        )
         let lifetimeTotalSeconds = sessions.reduce(0) { $0 + max(0, $1.durationSeconds) }
         let trackingSince = sessions.map(\.startedAt).min()
 
-        log.info("dashboard snapshot: \(sessions.count) sessions, \(perBook.count) books, window=\(window.rawValue, privacy: .public)")
+        // Decide whether the user-picked custom range supplants the enum window
+        // for the per-book table. An invalid range (start > end) is silently
+        // dropped — picker UI surfaces the error; the model returns a clean
+        // window-only snapshot (customRangeBreakdown=nil) so the dashboard
+        // doesn't render a stale Custom hero.
+        let activeCustom: ReadingStatsCustomRange? = {
+            guard let r = customRange, r.isValid(calendar: calendar) else { return nil }
+            return r
+        }()
+
+        let perBook: [PerBookStatsRow]
+        let customBreakdown: CustomRangeBreakdown?
+        if let custom = activeCustom {
+            perBook = computePerBookForCustom(
+                sessions: sessions, bookByKey: bookByKey,
+                range: custom, sort: sort, calendar: calendar
+            )
+            customBreakdown = computeCustomBreakdown(
+                sessions: sessions, range: custom, calendar: calendar
+            )
+        } else {
+            perBook = computePerBook(
+                sessions: sessions, bookByKey: bookByKey,
+                window: window, sort: sort, now: now, calendar: calendar
+            )
+            customBreakdown = nil
+        }
+
+        log.info("dashboard snapshot: \(sessions.count) sessions, \(perBook.count) books, window=\(window.rawValue, privacy: .public), custom=\(activeCustom != nil)")
 
         return ReadingDashboardSnapshot(
             windowTotals: windowTotals,
             activeWindow: window,
             perBook: perBook,
             lifetimeTotalSeconds: lifetimeTotalSeconds,
-            trackingSince: trackingSince
+            trackingSince: trackingSince,
+            customRangeBreakdown: customBreakdown
         )
+    }
+
+    // MARK: - Custom-range computations (WI-6b)
+
+    /// Sums durations of sessions whose `startedAt` lies inside the custom
+    /// range — matches the enum-window bucketing rule (sessions are
+    /// bucketed by start, not by overlap).
+    private func computeCustomBreakdown(
+        sessions: [ReadingSession],
+        range: ReadingStatsCustomRange,
+        calendar: Calendar
+    ) -> CustomRangeBreakdown {
+        var totalSeconds = 0
+        var sessionCount = 0
+        for session in sessions
+        where range.contains(session.startedAt, calendar: calendar) {
+            totalSeconds += max(0, session.durationSeconds)
+            sessionCount += 1
+        }
+        return CustomRangeBreakdown(
+            range: range, totalSeconds: totalSeconds, sessionCount: sessionCount
+        )
+    }
+
+    /// Per-book rows for a custom range. Mirrors `computePerBook` but uses the
+    /// range's `contains(_:calendar:)` instead of the enum window's predicate.
+    private func computePerBookForCustom(
+        sessions: [ReadingSession], bookByKey: [String: Book],
+        range: ReadingStatsCustomRange, sort: ReadingDashboardSort,
+        calendar: Calendar
+    ) -> [PerBookStatsRow] {
+        var sessionsByKey: [String: [ReadingSession]] = [:]
+        for session in sessions {
+            sessionsByKey[session.bookFingerprintKey, default: []].append(session)
+        }
+
+        let allKeys = Set(bookByKey.keys).union(sessionsByKey.keys)
+        let rows = allKeys.map { key -> PerBookStatsRow in
+            let bookSessions = sessionsByKey[key] ?? []
+            let inRangeSeconds = bookSessions
+                .filter { range.contains($0.startedAt, calendar: calendar) }
+                .reduce(0) { $0 + max(0, $1.durationSeconds) }
+            let lastReadAt = bookSessions
+                .map { $0.endedAt ?? $0.startedAt }
+                .max()
+            if let book = bookByKey[key] {
+                return PerBookStatsRow(
+                    id: key, bookFingerprintKey: key, title: book.title, isDeleted: false,
+                    readingSecondsInWindow: inRangeSeconds,
+                    notesCount: book.annotations.count,
+                    highlightsCount: book.highlights.count,
+                    lastReadAt: lastReadAt
+                )
+            } else {
+                return PerBookStatsRow(
+                    id: key, bookFingerprintKey: key, title: "(deleted)", isDeleted: true,
+                    readingSecondsInWindow: inRangeSeconds,
+                    notesCount: 0, highlightsCount: 0,
+                    lastReadAt: lastReadAt
+                )
+            }
+        }
+        return PerBookStatsRow.sorted(rows, by: sort)
     }
 
     // MARK: - Window totals

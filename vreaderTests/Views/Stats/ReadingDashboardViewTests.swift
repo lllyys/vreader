@@ -37,19 +37,24 @@ struct ReadingDashboardViewTests {
         }
 
         func snapshot(
-            window: ReadingStatsWindow, sort: ReadingDashboardSort, now: Date
+            window: ReadingStatsWindow, sort: ReadingDashboardSort, now: Date,
+            customRange: ReadingStatsCustomRange?
         ) async throws -> ReadingDashboardSnapshot {
             // Echo the requested window so the VM's selectWindow flow can
             // observe the active window change.
             let totals = snapshotToReturn.windowTotals.isEmpty
                 ? [WindowTotal(window: window, totalSeconds: 3600, sessionCount: 1)]
                 : snapshotToReturn.windowTotals
+            let breakdown: CustomRangeBreakdown? = customRange.map {
+                CustomRangeBreakdown(range: $0, totalSeconds: 1234, sessionCount: 5)
+            }
             return ReadingDashboardSnapshot(
                 windowTotals: totals,
                 activeWindow: window,
                 perBook: snapshotToReturn.perBook,
                 lifetimeTotalSeconds: snapshotToReturn.lifetimeTotalSeconds,
-                trackingSince: snapshotToReturn.trackingSince
+                trackingSince: snapshotToReturn.trackingSince,
+                customRangeBreakdown: breakdown
             )
         }
     }
@@ -182,5 +187,53 @@ struct ReadingDashboardViewTests {
         let (vm, _) = makeViewModel(snapshot: emptySnap)
         let view = makeView(viewModel: vm)
         _ = view.body
+    }
+
+    // MARK: - Custom range flow (WI-6b)
+
+    private static func sampleRange() -> ReadingStatsCustomRange {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let start = cal.date(from: DateComponents(year: 2026, month: 5, day: 1))!
+        let end   = cal.date(from: DateComponents(year: 2026, month: 5, day: 15))!
+        return ReadingStatsCustomRange(start: start, end: end)
+    }
+
+    @Test func customPillTapPresentsThePicker() async {
+        let (vm, _) = makeViewModel()
+        await vm.load()
+        let view = makeView(viewModel: vm)
+        #expect(vm.isCustomPickerPresented == false)
+
+        view.selectCustomForTesting()
+        #expect(vm.isCustomPickerPresented == true)
+    }
+
+    @Test func applyingCustomRangeRoutesThroughViewModel() async {
+        let (vm, _) = makeViewModel()
+        await vm.load()
+        let view = makeView(viewModel: vm)
+
+        view.applyCustomRangeForTesting(Self.sampleRange())
+        for _ in 0..<100 where vm.customRange == nil {
+            await Task.yield()
+        }
+        #expect(vm.customRange == Self.sampleRange())
+        #expect(vm.isCustomActive == true)
+    }
+
+    @Test func heroSwapsToCustomTotalWhenCustomActive() async {
+        let (vm, _) = makeViewModel()
+        await vm.load()
+
+        // Apply a custom range; the CannedAggregator returns 1234 for the
+        // custom breakdown on every snapshot call when customRange is non-nil.
+        await vm.applyCustomRange(Self.sampleRange())
+        let view = makeView(viewModel: vm)
+        // Hero now shows the custom breakdown's formatted duration, not the
+        // enum-window total. The CannedAggregator's customRangeBreakdown
+        // total is 1234s (= 20m, given the formatter floors sub-minutes).
+        let expected = ReadingTimeFormatter.formatDuration(totalSeconds: 1234)
+        #expect(view.heroDurationTextForTesting == expected)
     }
 }

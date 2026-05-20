@@ -1,7 +1,8 @@
-// Purpose: Feature #58 WI-6a — the design's `FullStatsDashboard`
+// Purpose: Feature #58 WI-6a/WI-6b — the design's `FullStatsDashboard`
 // (`vreader-profile-stats.jsx`). Wraps the dashboard in the shared
 // `ReaderSheetChrome` "Stats" sheet, composing the
 // `StatsTimeWindowBar` + hero serif total + `StatsPerBookTable`.
+// WI-6b adds the Custom pill / picker sheet wiring on top.
 //
 // Pinned to `dev-docs/designs/vreader-fidelity-v1/project/
 // vreader-profile-stats.jsx` (`FullStatsDashboard`).
@@ -61,9 +62,16 @@ struct ReadingDashboardView: View {
     // MARK: - Testing seams
 
     /// The hero's formatted duration string — what the user sees as the
-    /// big serif total. Zero when the snapshot is nil.
+    /// big serif total. When a Custom range is active, the hero shows
+    /// `customRangeBreakdown.totalSeconds`; otherwise the enum-window
+    /// total. Zero when the snapshot is nil.
     var heroDurationTextForTesting: String {
-        let totalSeconds = viewModel.snapshot?.total(for: viewModel.activeWindow).totalSeconds ?? 0
+        let totalSeconds: Int
+        if viewModel.customRange != nil {
+            totalSeconds = viewModel.snapshot?.customRangeBreakdown?.totalSeconds ?? 0
+        } else {
+            totalSeconds = viewModel.snapshot?.total(for: viewModel.activeWindow).totalSeconds ?? 0
+        }
         return ReadingTimeFormatter.formatDuration(totalSeconds: totalSeconds)
     }
 
@@ -75,6 +83,19 @@ struct ReadingDashboardView: View {
     /// Simulate a header tap on the per-book table.
     func selectSortForTesting(_ newSort: ReadingDashboardSort) {
         Task { await viewModel.selectSort(newSort) }
+    }
+
+    /// Simulate a Custom-pill tap — the view's bar wiring sets
+    /// `isCustomPickerPresented = true`. WI-6b feature #58.
+    func selectCustomForTesting() {
+        viewModel.isCustomPickerPresented = true
+    }
+
+    /// Apply a custom range as if the picker's Apply button were tapped.
+    /// Used by WI-6b tests; the production path routes through the picker
+    /// view's `onApply` closure.
+    func applyCustomRangeForTesting(_ range: ReadingStatsCustomRange) {
+        Task { await viewModel.applyCustomRange(range) }
     }
 
     // MARK: - Body
@@ -100,6 +121,24 @@ struct ReadingDashboardView: View {
                 await viewModel.load()
             }
         }
+        .sheet(isPresented: Binding(
+            get: { viewModel.isCustomPickerPresented },
+            set: { viewModel.isCustomPickerPresented = $0 }
+        )) {
+            StatsCustomRangePicker(
+                theme: theme,
+                existingRange: viewModel.customRange,
+                onApply: { range in
+                    viewModel.isCustomPickerPresented = false
+                    Task { await viewModel.applyCustomRange(range) }
+                },
+                onAllTimeSelected: {
+                    viewModel.isCustomPickerPresented = false
+                    Task { await viewModel.selectWindow(.allTime) }
+                },
+                onCancel: { viewModel.isCustomPickerPresented = false }
+            )
+        }
     }
 
     @ViewBuilder
@@ -109,9 +148,11 @@ struct ReadingDashboardView: View {
                 StatsTimeWindowBar(
                     theme: theme,
                     value: viewModel.activeWindow,
+                    customRange: viewModel.customRange,
                     onChange: { window in
                         Task { await viewModel.selectWindow(window) }
-                    }
+                    },
+                    onCustomTap: { viewModel.isCustomPickerPresented = true }
                 )
 
                 heroSection
@@ -141,7 +182,7 @@ struct ReadingDashboardView: View {
     private var heroSection: some View {
         let durationText = heroDurationTextForTesting
         VStack(alignment: .leading, spacing: 4) {
-            Text("Reading time, \(activeWindowSublabel)")
+            Text("Reading time, \(activeSublabel)")
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(0.8)
                 .textCase(.uppercase)
@@ -162,10 +203,12 @@ struct ReadingDashboardView: View {
     /// Subtitle copy under the hero — pinned to the design
     /// `FullStatsDashboard` (`vreader-profile-stats.jsx`):
     ///     `Reading time, {TIME_WINDOWS.label.toLowerCase()}`
-    /// i.e. the window pill's own label, lowercased. The result reads as
-    /// "Reading time, today" / "Reading time, 7d" / "Reading time, 30d"
-    /// / etc. — matching the design verbatim.
-    private var activeWindowSublabel: String {
-        viewModel.activeWindow.label.lowercased()
+    /// or, when Custom is active, the range summary (`May 1 – May 15`).
+    private var activeSublabel: String {
+        if let range = viewModel.customRange {
+            let summary = range.summaryLabel(calendar: .current)
+            return summary.isEmpty ? "custom range" : summary.lowercased()
+        }
+        return viewModel.activeWindow.label.lowercased()
     }
 }

@@ -18,14 +18,21 @@ import Foundation
 
 // MARK: - Time Window
 
-/// The seven rolling time windows the dashboard aggregates over.
+/// The seven time windows the dashboard aggregates over.
 /// Window set is fixed by the feature #58 row contract (divergence D2).
+///
+/// WI-6b: `last365Days` is now **calendar-YTD** (Jan 1 of the current
+/// year → now) per the D2-B resolution + design bundle label "Year".
+/// The case name retains the `last365Days` spelling so persisted strings
+/// (any future per-window prefs) don't need a migration; user-visible
+/// label is "Year".
 enum ReadingStatsWindow: String, CaseIterable, Identifiable, Sendable {
     case today
     case last7Days
     case last30Days
     case last90Days
     case last180Days
+    /// WI-6b: case name retained for prefs stability; semantic is calendar-YTD ("Year").
     case last365Days
     case allTime
 
@@ -39,20 +46,20 @@ enum ReadingStatsWindow: String, CaseIterable, Identifiable, Sendable {
         case .last30Days: return "30d"
         case .last90Days: return "90d"
         case .last180Days: return "180d"
-        case .last365Days: return "365d"
+        case .last365Days: return "Year"   // WI-6b: calendar-YTD label
         case .allTime: return "All"
         }
     }
 
-    /// Number of rolling days for the `lastNDays` windows; nil for `today`/`allTime`.
+    /// Number of rolling days for the pure rolling-N-days windows; nil for
+    /// `today` / `last365Days` (calendar-YTD) / `allTime`.
     private var rollingDays: Int? {
         switch self {
         case .last7Days: return 7
         case .last30Days: return 30
         case .last90Days: return 90
         case .last180Days: return 180
-        case .last365Days: return 365
-        case .today, .allTime: return nil
+        case .last365Days, .today, .allTime: return nil
         }
     }
 
@@ -60,7 +67,9 @@ enum ReadingStatsWindow: String, CaseIterable, Identifiable, Sendable {
     /// calendar/timezone.
     ///
     /// - `today` = local-midnight(now) ..< now.
-    /// - the rolling `Nd` windows = (now - N·86400s) ..< now.
+    /// - rolling `Nd` windows = (now - N·86400s) ..< now.
+    /// - `last365Days` ("Year", **calendar-YTD** post-WI-6b) =
+    ///   startOfYear(now) ..< now.
     /// - `allTime` returns `nil` (no lower bound — count everything).
     ///
     /// Callers MUST use `contains(_:now:calendar:)` for membership tests rather
@@ -73,7 +82,15 @@ enum ReadingStatsWindow: String, CaseIterable, Identifiable, Sendable {
         case .today:
             let start = calendar.startOfDay(for: now)
             return DateInterval(start: start, end: now)
-        case .last7Days, .last30Days, .last90Days, .last180Days, .last365Days:
+        case .last365Days:
+            // WI-6b: calendar-YTD ("Year") per D2-B + design. Jan 1 of the
+            // current year (resolved in `calendar`) → now.
+            var comps = calendar.dateComponents([.year], from: now)
+            comps.month = 1; comps.day = 1
+            comps.hour = 0; comps.minute = 0; comps.second = 0
+            let start = calendar.date(from: comps) ?? calendar.startOfDay(for: now)
+            return DateInterval(start: start, end: now)
+        case .last7Days, .last30Days, .last90Days, .last180Days:
             guard let days = rollingDays else { return nil }
             let start = now.addingTimeInterval(-Double(days) * 86_400)
             return DateInterval(start: start, end: now)
@@ -232,6 +249,19 @@ extension ReadingDashboardSort {
     }
 }
 
+// MARK: - Custom-range breakdown (feature #58 WI-6b)
+
+/// The per-snapshot result for a user-picked `ReadingStatsCustomRange`. Carries
+/// just the bare custom-window total — the `perBook` rows live on the parent
+/// `ReadingDashboardSnapshot` (and use the custom range's interval when this
+/// breakdown is non-nil). Kept compact because it sits next to the seven enum
+/// totals, not replacing them.
+struct CustomRangeBreakdown: Sendable, Equatable {
+    let range: ReadingStatsCustomRange
+    let totalSeconds: Int
+    let sessionCount: Int
+}
+
 // MARK: - Snapshot
 
 /// One immutable dashboard render.
@@ -239,6 +269,11 @@ extension ReadingDashboardSort {
 /// Carries totals for ALL seven windows (cheap — seven small structs) so a
 /// window-pill tap need not re-hit the actor; the per-book table is computed
 /// for `activeWindow` only (the table is the expensive part).
+///
+/// When `customRangeBreakdown` is non-nil the dashboard's hero + per-book
+/// table reflect the custom range; the seven `windowTotals` are still
+/// populated (the pill bar continues to show every enum window's total
+/// alongside the active Custom pill).
 ///
 /// The `windowTotals` invariant — exactly seven entries, one per
 /// `ReadingStatsWindow`, in canonical `allCases` order — is enforced BY THE
@@ -250,10 +285,14 @@ struct ReadingDashboardSnapshot: Sendable, Equatable {
     /// — guaranteed by `init`.
     let windowTotals: [WindowTotal]
     let activeWindow: ReadingStatsWindow
-    /// Per-book rows for `activeWindow`, already sorted per the requested sort.
+    /// Per-book rows for `activeWindow` (when `customRangeBreakdown` is nil) or
+    /// for the custom range (when non-nil), already sorted per the requested sort.
     let perBook: [PerBookStatsRow]
     let lifetimeTotalSeconds: Int
     let trackingSince: Date?
+    /// Set when the snapshot was requested with a `ReadingStatsCustomRange`;
+    /// nil otherwise. WI-6b feature #58.
+    let customRangeBreakdown: CustomRangeBreakdown?
 
     /// The sole initializer. `windowTotals` is NORMALIZED to exactly seven
     /// entries in canonical order regardless of what is passed: a missing
@@ -264,7 +303,8 @@ struct ReadingDashboardSnapshot: Sendable, Equatable {
         activeWindow: ReadingStatsWindow,
         perBook: [PerBookStatsRow],
         lifetimeTotalSeconds: Int,
-        trackingSince: Date?
+        trackingSince: Date?,
+        customRangeBreakdown: CustomRangeBreakdown? = nil
     ) {
         let byWindow = Dictionary(
             windowTotals.map { ($0.window, $0) },
@@ -277,6 +317,7 @@ struct ReadingDashboardSnapshot: Sendable, Equatable {
         self.perBook = perBook
         self.lifetimeTotalSeconds = lifetimeTotalSeconds
         self.trackingSince = trackingSince
+        self.customRangeBreakdown = customRangeBreakdown
     }
 
     /// Total for a window. Always present (the init guarantees all seven).

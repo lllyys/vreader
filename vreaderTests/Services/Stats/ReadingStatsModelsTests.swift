@@ -39,7 +39,6 @@ struct ReadingStatsWindowIntervalTests {
         (ReadingStatsWindow.last30Days, 30),
         (ReadingStatsWindow.last90Days, 90),
         (ReadingStatsWindow.last180Days, 180),
-        (ReadingStatsWindow.last365Days, 365),
     ])
     func rollingWindowsSpanNDays(_ window: ReadingStatsWindow, _ days: Int) {
         let cal = utcCalendar()
@@ -48,6 +47,36 @@ struct ReadingStatsWindowIntervalTests {
         #expect(unwrapped.end == now)
         let expectedStart = now.addingTimeInterval(-Double(days) * 86_400)
         #expect(abs(unwrapped.start.timeIntervalSince(expectedStart)) < 1.0)
+    }
+
+    /// WI-6b: `last365Days` semantic is calendar-YTD ("Year") — Jan 1 of the
+    /// current year (in the supplied calendar) → now. NOT a rolling 365-day window.
+    @Test func yearWindowAnchorsAtJanuary1OfCurrentYear() {
+        let cal = utcCalendar()
+        let interval = ReadingStatsWindow.last365Days.dateInterval(now: now, calendar: cal)
+        let unwrapped = try! #require(interval)
+        let jan1 = cal.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        #expect(unwrapped.start == jan1)
+        #expect(unwrapped.end == now)
+    }
+
+    @Test func yearWindowEndsBeforeStartForFirstDayOfYear() {
+        // For a `now` on Jan 1 00:00 UTC, the YTD range is essentially empty
+        // (startOfYear == now). Validate that `start == end` still doesn't crash
+        // — DateInterval allows zero duration.
+        let cal = utcCalendar()
+        let jan1Start = cal.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        let interval = try! #require(
+            ReadingStatsWindow.last365Days.dateInterval(now: jan1Start, calendar: cal)
+        )
+        #expect(interval.start == interval.end)
+        // contains() correctly excludes everything via half-open semantics.
+        #expect(
+            ReadingStatsWindow.last365Days.contains(
+                jan1Start.addingTimeInterval(-3600),
+                now: jan1Start, calendar: cal
+            ) == false
+        )
     }
 
     @Test func allTimeHasNoLowerBound() {
@@ -95,7 +124,7 @@ struct ReadingStatsWindowIntervalTests {
         #expect(ReadingStatsWindow.last30Days.label == "30d")
         #expect(ReadingStatsWindow.last90Days.label == "90d")
         #expect(ReadingStatsWindow.last180Days.label == "180d")
-        #expect(ReadingStatsWindow.last365Days.label == "365d")
+        #expect(ReadingStatsWindow.last365Days.label == "Year")
         #expect(ReadingStatsWindow.allTime.label == "All")
     }
 

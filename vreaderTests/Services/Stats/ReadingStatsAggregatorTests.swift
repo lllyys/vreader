@@ -341,9 +341,11 @@ struct ReadingStatsAggregatorTests {
         let fp = fingerprint("k")
         try seedBook(container, fp: fp, title: "Long History")
         let context = ModelContext(container)
+        // WI-6b: `last365Days` is now calendar-YTD ("Year"). `Self.now` is
+        // 2026-05-19; YTD = Jan 1 2026 → now (~138 days). Seed 1000 sessions
+        // spread within the last 100 days so every one lands inside YTD.
         for i in 0..<1000 {
-            // All within the last 365 days, 60s each.
-            let started = Self.now.addingTimeInterval(-Double(i % 300) * 86_400 - 3600)
+            let started = Self.now.addingTimeInterval(-Double(i % 100) * 86_400 - 3600)
             context.insert(ReadingSession(
                 bookFingerprint: fp, startedAt: started, durationSeconds: 60
             ))
@@ -353,11 +355,160 @@ struct ReadingStatsAggregatorTests {
         let snap = try await aggregator(container).snapshot(
             window: .last365Days, sort: .default, now: Self.now
         )
-        // 1000 sessions × 60s, all within 365d.
+        // 1000 sessions × 60s, all within the YTD ("Year") window.
         #expect(snap.total(for: .last365Days).totalSeconds == 60_000)
         #expect(snap.total(for: .last365Days).sessionCount == 1000)
         #expect(snap.lifetimeTotalSeconds == 60_000)
     }
+
+    /// WI-6b: a session anchored before Jan 1 of the current year is NOT
+    /// counted in `last365Days` ("Year") even if its start is within the
+    /// most recent 365 days.
+    @Test func yearWindowExcludesSessionsBeforeJanuary1() async throws {
+        let container = try makeContainer()
+        let fp = fingerprint("y")
+        try seedBook(container, fp: fp, title: "Crosses Year")
+        let cal = Self.utcCalendar()
+        // Session on Dec 15 2025 — within rolling-365d but BEFORE Jan 1 2026.
+        let dec15 = cal.date(from: DateComponents(year: 2025, month: 12, day: 15, hour: 12))!
+        try seedSession(container, book: fp, startedAt: dec15, durationSeconds: 500)
+        // Session on Feb 1 2026 — inside YTD.
+        let feb1 = cal.date(from: DateComponents(year: 2026, month: 2, day: 1, hour: 12))!
+        try seedSession(container, book: fp, startedAt: feb1, durationSeconds: 700)
+
+        let snap = try await aggregator(container).snapshot(
+            window: .last365Days, sort: .default, now: Self.now
+        )
+        // Only the Feb 1 session counts toward "Year"; the Dec 15 one is excluded.
+        #expect(snap.total(for: .last365Days).totalSeconds == 700)
+        #expect(snap.total(for: .last365Days).sessionCount == 1)
+        // allTime still counts both.
+        #expect(snap.total(for: .allTime).totalSeconds == 1200)
+    }
+
+    // MARK: - Custom range (feature #58 WI-6b)
+
+    @Test func customRangeProducesPerBookOverThatInterval() async throws {
+        let container = try makeContainer()
+        let fp = fingerprint("custom-a")
+        try seedBook(container, fp: fp, title: "Custom Book")
+        let cal = Self.utcCalendar()
+        // Now = 2026-05-19 14:30 UTC. Seed sessions on May 1, May 10, May 18.
+        let may1 = cal.date(from: DateComponents(year: 2026, month: 5, day: 1, hour: 12))!
+        let may10 = cal.date(from: DateComponents(year: 2026, month: 5, day: 10, hour: 12))!
+        let may18 = cal.date(from: DateComponents(year: 2026, month: 5, day: 18, hour: 12))!
+        try seedSession(container, book: fp, startedAt: may1, durationSeconds: 100)
+        try seedSession(container, book: fp, startedAt: may10, durationSeconds: 200)
+        try seedSession(container, book: fp, startedAt: may18, durationSeconds: 300)
+
+        // Custom range: May 1–May 15 → counts the May 1 and May 10 sessions
+        // (May 18 is outside). Explicit calendar so day triples match UTC.
+        let range = ReadingStatsCustomRange(
+            start: cal.date(from: DateComponents(year: 2026, month: 5, day: 1))!,
+            end:   cal.date(from: DateComponents(year: 2026, month: 5, day: 15))!,
+            calendar: cal
+        )
+        let snap = try await aggregator(container).snapshot(
+            window: .today, sort: .default, now: Self.now, customRange: range
+        )
+        // The custom-range total is 300s (100 + 200); the perBook row reflects it.
+        let custom = try #require(snap.customRangeBreakdown)
+        #expect(custom.totalSeconds == 300)
+        #expect(custom.sessionCount == 2)
+        #expect(snap.perBook.count == 1)
+        #expect(snap.perBook[0].readingSecondsInWindow == 300)
+    }
+
+    @Test func customRangeSingleDayPickup() async throws {
+        let container = try makeContainer()
+        let fp = fingerprint("custom-b")
+        try seedBook(container, fp: fp, title: "Single Day")
+        let cal = Self.utcCalendar()
+        let may10 = cal.date(from: DateComponents(year: 2026, month: 5, day: 10, hour: 12))!
+        let may11 = cal.date(from: DateComponents(year: 2026, month: 5, day: 11, hour: 12))!
+        try seedSession(container, book: fp, startedAt: may10, durationSeconds: 60)
+        try seedSession(container, book: fp, startedAt: may11, durationSeconds: 90)
+
+        let range = ReadingStatsCustomRange(
+            start: cal.date(from: DateComponents(year: 2026, month: 5, day: 10))!,
+            end:   cal.date(from: DateComponents(year: 2026, month: 5, day: 10))!,
+            calendar: cal
+        )
+        let snap = try await aggregator(container).snapshot(
+            window: .today, sort: .default, now: Self.now, customRange: range
+        )
+        let custom = try #require(snap.customRangeBreakdown)
+        // Single-day range = just May 10 → only the 60s session.
+        #expect(custom.totalSeconds == 60)
+        #expect(custom.sessionCount == 1)
+    }
+
+    @Test func customRangeYieldsZerosWhenEmpty() async throws {
+        let container = try makeContainer()
+        let fp = fingerprint("custom-c")
+        try seedBook(container, fp: fp, title: "Outside Range")
+        let cal = Self.utcCalendar()
+        // Session is on May 10, range is Apr 1–Apr 5 — no overlap.
+        try seedSession(container, book: fp,
+                        startedAt: cal.date(from: DateComponents(year: 2026, month: 5, day: 10, hour: 12))!,
+                        durationSeconds: 500)
+
+        let range = ReadingStatsCustomRange(
+            start: cal.date(from: DateComponents(year: 2026, month: 4, day: 1))!,
+            end:   cal.date(from: DateComponents(year: 2026, month: 4, day: 5))!,
+            calendar: cal
+        )
+        let snap = try await aggregator(container).snapshot(
+            window: .today, sort: .default, now: Self.now, customRange: range
+        )
+        let custom = try #require(snap.customRangeBreakdown)
+        #expect(custom.totalSeconds == 0)
+        #expect(custom.sessionCount == 0)
+        // perBook still shows the book row with 0s in this range.
+        #expect(snap.perBook.count == 1)
+        #expect(snap.perBook[0].readingSecondsInWindow == 0)
+    }
+
+    @Test func customRangeInvalidIntervalNoOps() async throws {
+        let container = try makeContainer()
+        let fp = fingerprint("custom-d")
+        try seedBook(container, fp: fp, title: "Invalid Range")
+        let cal = Self.utcCalendar()
+        try seedSession(container, book: fp,
+                        startedAt: cal.date(from: DateComponents(year: 2026, month: 5, day: 10, hour: 12))!,
+                        durationSeconds: 500)
+
+        // start AFTER end — invalid.
+        let range = ReadingStatsCustomRange(
+            start: cal.date(from: DateComponents(year: 2026, month: 5, day: 15))!,
+            end:   cal.date(from: DateComponents(year: 2026, month: 5, day: 1))!,
+            calendar: cal
+        )
+        let snap = try await aggregator(container).snapshot(
+            window: .today, sort: .default, now: Self.now, customRange: range
+        )
+        // An invalid range falls back to "no custom view" — the
+        // customRangeBreakdown is nil and perBook reflects the requested
+        // enum window (today), not the bogus range.
+        #expect(snap.customRangeBreakdown == nil)
+    }
+
+    @Test func customRangeIsNilWhenNotRequested() async throws {
+        let container = try makeContainer()
+        let fp = fingerprint("custom-e")
+        try seedBook(container, fp: fp, title: "Plain Window")
+        try seedSession(container, book: fp,
+                        startedAt: Self.now.addingTimeInterval(-3600), durationSeconds: 120)
+
+        // No customRange argument → backward-compat path.
+        let snap = try await aggregator(container).snapshot(
+            window: .today, sort: .default, now: Self.now
+        )
+        #expect(snap.customRangeBreakdown == nil)
+        #expect(snap.perBook[0].readingSecondsInWindow == 120)
+    }
+
+    // MARK: - Sort
 
     @Test func sortIsAppliedToPerBookTable() async throws {
         let container = try makeContainer()
