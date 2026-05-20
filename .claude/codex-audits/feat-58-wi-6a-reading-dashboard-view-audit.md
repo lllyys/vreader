@@ -1,6 +1,17 @@
+---
+branch: feat/58-wi-6a-reading-dashboard-view
+threadId: 019e452c-8f32-7ae3-bb3c-f5b647518de2
+rounds: 2
+final_verdict: ship-as-is
+date: 2026-05-20
+---
+
 # Gate-4 audit — feat/58-wi-6a-reading-dashboard-view
 
-**Verdict**: follow-up-recommended
+**Verdict (Round 1)**: follow-up-recommended
+**Verdict (Round 2 — final)**: ship-as-is
+
+**Round-1 verdict** (preserved for history):
 
 **Summary**: The WI-6a SwiftUI surface matches the plan’s composition: `ReadingDashboardView` composes `StatsTimeWindowBar` + a single hero total + `StatsPerBookTable`, with VM-owned async selection routed through `selectWindow` / `selectSort`. The diff cleanly omits both deferred items (no Custom range picker; no `last-read` column) and preserves the VM’s `latestRequestID` stale-result discipline.
 
