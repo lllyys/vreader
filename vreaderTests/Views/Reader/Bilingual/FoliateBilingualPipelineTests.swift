@@ -72,6 +72,68 @@ struct FoliateBilingualPipelineTests {
         #expect(blocks[0].bid == "b3")
     }
 
+    // MARK: - Per-section partitioning (Gate-4 audit H2)
+
+    @Test("parseEnumerateMessage captures the per-block sectionIndex")
+    func parseCapturesSectionIndex() {
+        let body: Any = [
+            ["bid": "b1", "text": "hello", "sectionIndex": 0],
+            ["bid": "b2", "text": "world", "sectionIndex": 1]
+        ]
+        let blocks = FoliateBilingualPipeline.parseEnumerateMessage(body)
+        #expect(blocks.count == 2)
+        #expect(blocks[0].sectionIndex == 0)
+        #expect(blocks[1].sectionIndex == 1)
+    }
+
+    @Test("parseEnumerateMessage tolerates blocks without a sectionIndex (older bundle)")
+    func parseTolerantOfMissingSectionIndex() {
+        let body: Any = [
+            ["bid": "b1", "text": "hello"],
+            ["bid": "b2", "text": "world"]
+        ]
+        let blocks = FoliateBilingualPipeline.parseEnumerateMessage(body)
+        #expect(blocks.count == 2)
+        #expect(blocks[0].sectionIndex == nil)
+        #expect(blocks[1].sectionIndex == nil)
+    }
+
+    @Test("blocks(_:forSection:) returns only the section's blocks")
+    func blocksForSectionFilters() {
+        let mixed = [
+            BilingualBlock(bid: "b1", text: "alpha", sectionIndex: 0),
+            BilingualBlock(bid: "b2", text: "beta",  sectionIndex: 0),
+            BilingualBlock(bid: "b3", text: "gamma", sectionIndex: 1),
+            BilingualBlock(bid: "b4", text: "delta", sectionIndex: 1)
+        ]
+        let scoped = FoliateBilingualPipeline.blocks(mixed, forSection: 1)
+        #expect(scoped.map(\.bid) == ["b3", "b4"])
+    }
+
+    @Test("blocks(_:forSection:) returns empty when section index has no matches")
+    func blocksForSectionNoMatch() {
+        let mixed = [
+            BilingualBlock(bid: "b1", text: "alpha", sectionIndex: 0),
+            BilingualBlock(bid: "b2", text: "beta",  sectionIndex: 1)
+        ]
+        let scoped = FoliateBilingualPipeline.blocks(mixed, forSection: 99)
+        #expect(scoped.isEmpty)
+    }
+
+    @Test("blocks(_:forSection:) falls back to all blocks when none are tagged")
+    func blocksForSectionFallbackUntagged() {
+        // Older JS bundle: no sectionIndex on any block. The pipeline
+        // should pass the unfiltered list through so the renderer
+        // still works against legacy payloads.
+        let untagged = [
+            BilingualBlock(bid: "b1", text: "alpha"),
+            BilingualBlock(bid: "b2", text: "beta")
+        ]
+        let scoped = FoliateBilingualPipeline.blocks(untagged, forSection: 7)
+        #expect(scoped.count == 2)
+        #expect(scoped.map(\.bid) == ["b1", "b2"])
+    }
+
     // MARK: - Translation lookup
 
     @Test("translationsByBid emits an empty map when no translations are cached")
@@ -129,5 +191,66 @@ struct FoliateBilingualPipelineTests {
         #expect(table["b1"] == "Bonjour")
         #expect(table["b2"] == "Monde")
         #expect(table["b3"] == nil)
+    }
+
+    // MARK: - parseEnumeratePayload — Round-3 audit fix
+
+    @Test("parseEnumeratePayload decodes the wrapped shape")
+    func parseEnumeratePayloadWrapped() {
+        let body: Any = [
+            "requestedSectionIndex": 3,
+            "blocks": [
+                ["bid": "b1", "text": "hello", "sectionIndex": 3]
+            ]
+        ]
+        let payload = FoliateBilingualPipeline.parseEnumeratePayload(body)
+        #expect(payload.requestedSectionIndex == 3)
+        #expect(payload.blocks.count == 1)
+        #expect(payload.blocks[0].sectionIndex == 3)
+    }
+
+    @Test("parseEnumeratePayload surfaces a scoped-empty enumerate")
+    func parseEnumeratePayloadScopedEmpty() {
+        // The host enumerated section 5 and found no translatable
+        // blocks. The container must be able to distinguish this
+        // from "no scope was requested" so it can clear stale
+        // per-section caches.
+        let body: Any = [
+            "requestedSectionIndex": 5,
+            "blocks": []
+        ]
+        let payload = FoliateBilingualPipeline.parseEnumeratePayload(body)
+        #expect(payload.requestedSectionIndex == 5)
+        #expect(payload.blocks.isEmpty)
+    }
+
+    @Test("parseEnumeratePayload accepts the legacy bare-array shape")
+    func parseEnumeratePayloadLegacyArray() {
+        // Older bundles deliver the bare-array form. The payload's
+        // `requestedSectionIndex` must be nil so callers know the
+        // empty-clear signal is not available.
+        let body: Any = [
+            ["bid": "b1", "text": "hello"]
+        ]
+        let payload = FoliateBilingualPipeline.parseEnumeratePayload(body)
+        #expect(payload.requestedSectionIndex == nil)
+        #expect(payload.blocks.count == 1)
+    }
+
+    @Test("parseEnumerateMessage still works against the wrapped shape")
+    func parseEnumerateMessageWrappedShapeUnwraps() {
+        // The non-payload API is used by tests + the existing
+        // observer plumbing — ensure it still returns the blocks
+        // when given the new wrapped shape.
+        let body: Any = [
+            "requestedSectionIndex": 1,
+            "blocks": [
+                ["bid": "b1", "text": "alpha", "sectionIndex": 1],
+                ["bid": "b2", "text": "beta",  "sectionIndex": 1]
+            ]
+        ]
+        let blocks = FoliateBilingualPipeline.parseEnumerateMessage(body)
+        #expect(blocks.count == 2)
+        #expect(blocks.map(\.bid) == ["b1", "b2"])
     }
 }

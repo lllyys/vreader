@@ -161,4 +161,49 @@ struct FoliateBilingualJSTests {
             "clear JS must call `readerAPI.bilingualClear()` — the clear walk runs on the Foliate host page over `view.renderer.getContents()` to reach every loaded section's DOM."
         )
     }
+
+    // MARK: - Per-section scoping (Gate-4 audit H2)
+
+    @Test("enumerate JS passes the targetSectionIndex argument to the host helper")
+    func enumerateJSScopesToSection() {
+        let scoped = FoliateBilingualJS.bilingualEnumerateJS(
+            targetSectionIndex: 3)
+        // The integer literal must appear in the readerAPI call so
+        // the host helper can scope its DOM walk.
+        #expect(
+            scoped.contains("bilingualEnumerate(3)"),
+            "scoped enumerate JS must call `readerAPI.bilingualEnumerate(3)` so the host helper walks only section 3's DOM."
+        )
+    }
+
+    @Test("enumerate JS without a section index emits the null fallback")
+    func enumerateJSUnscoped() {
+        let unscoped = FoliateBilingualJS.bilingualEnumerateJS()
+        #expect(
+            unscoped.contains("bilingualEnumerate(null)"),
+            "unscoped enumerate JS must call `readerAPI.bilingualEnumerate(null)` so the host helper falls back to every loaded section (the legacy / clear-path semantics)."
+        )
+    }
+
+    @Test("inject JS carries the targetSectionIndex argument in its payload")
+    func injectJSScopesToSection() {
+        let scoped = FoliateBilingualJS.bilingualInjectJS(
+            translationsByBid: ["b1": "Bonjour"],
+            targetSectionIndex: 5
+        )
+        #expect(
+            scoped.contains("targetSectionIndex: 5"),
+            "scoped inject JS must carry `targetSectionIndex: 5` so the host helper scopes its inject walk to one section's DOM."
+        )
+    }
+
+    @Test("clear JS passes the targetSectionIndex argument")
+    func clearJSScopesToSection() {
+        let scoped = FoliateBilingualJS.bilingualClearJS(
+            targetSectionIndex: 2)
+        #expect(
+            scoped.contains("bilingualClear(2)"),
+            "scoped clear JS must call `readerAPI.bilingualClear(2)` so the host helper scopes its clear walk to section 2."
+        )
+    }
 }

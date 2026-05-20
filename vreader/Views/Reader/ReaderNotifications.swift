@@ -220,6 +220,17 @@ extension Notification.Name {
     /// readers do not cross-fire.
     static let foliateSectionLoaded = Notification.Name("vreader.foliateSectionLoaded")
 
+    /// Feature #56 WI-11 (Gate-4 audit H1): posted by
+    /// `FoliateSpikeView.Coordinator` on every `relocate` event so
+    /// the bilingual container can update its current-section
+    /// tracking even when the position change does not load a new
+    /// section (page turn within an already-loaded section in
+    /// paginated mode). Carries
+    /// `userInfo = ["sectionIndex": Int, "tocHref": String?,
+    ///              "fingerprintKey": String]`. Filtered by
+    /// `fingerprintKey`.
+    static let foliateRelocated = Notification.Name("vreader.foliateRelocated")
+
     /// Feature #60 WI-7c1: posted by a reader bridge when the user
     /// finishes a long-press selection. The
     /// `SelectionPopoverPresenterModifier` observes this and presents

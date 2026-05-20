@@ -129,4 +129,110 @@ struct FoliateBilingualOrchestratorTests {
         orchestrator.updateBlocks([])
         #expect(orchestrator.currentBlocks.isEmpty)
     }
+
+    // MARK: - Per-section scoping (Gate-4 audit H2)
+
+    @Test("buildInjectJS scopes the bid map to the section's blocks")
+    func buildInjectJSScopesToSection() throws {
+        let orchestrator = FoliateBilingualOrchestrator()
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "alpha", sectionIndex: 0),
+            BilingualBlock(bid: "b2", text: "beta",  sectionIndex: 0),
+            BilingualBlock(bid: "b3", text: "gamma", sectionIndex: 1)
+        ])
+        // Request section 1: only b3 should appear in the inject JS.
+        let js = try #require(orchestrator.buildInjectJS(
+            translatedSegments: ["one"],
+            sectionIndex: 1
+        ))
+        #expect(js.contains("b3"))
+        #expect(!js.contains("'b1':"))
+        #expect(!js.contains("'b2':"))
+        // The emitted JS must carry the section-scope argument so
+        // the host helper does not walk section 0's DOM.
+        #expect(js.contains("targetSectionIndex: 1"))
+    }
+
+    // MARK: - Per-section block caches (Gate-4 round-2 audit fix)
+
+    @Test("updateBlocks(_:forSection:) preserves other sections' caches")
+    func perSectionUpdateIsolation() {
+        let orchestrator = FoliateBilingualOrchestrator()
+        // Section 0 loads first.
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "a1", text: "alpha", sectionIndex: 0),
+            BilingualBlock(bid: "a2", text: "beta",  sectionIndex: 0)
+        ], forSection: 0)
+        // Section 1 preloads later (adjacent, off-screen).
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "gamma", sectionIndex: 1)
+        ], forSection: 1)
+        // Section 0's cache must NOT have been clobbered.
+        #expect(orchestrator.blocksBySection[0]?.map(\.bid) == ["a1", "a2"])
+        #expect(orchestrator.blocksBySection[1]?.map(\.bid) == ["b1"])
+    }
+
+    @Test("inject can target a preloaded section after a different section loaded")
+    func injectAgainstPreloadedAdjacent() throws {
+        // Simulate the paginated-mode hazard: section 0 is current,
+        // section 1 preloads. The user later page-turns into 1.
+        let orchestrator = FoliateBilingualOrchestrator()
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "a1", text: "alpha", sectionIndex: 0),
+        ], forSection: 0)
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "gamma", sectionIndex: 1),
+            BilingualBlock(bid: "b2", text: "delta", sectionIndex: 1)
+        ], forSection: 1)
+        // Inject for the preloaded section 1 must surface b1/b2 — not a1.
+        let js = try #require(orchestrator.buildInjectJS(
+            translatedSegments: ["x", "y"], sectionIndex: 1
+        ))
+        #expect(js.contains("b1"))
+        #expect(js.contains("b2"))
+        #expect(!js.contains("'a1':"))
+    }
+
+    @Test("clearBlocks(forSection:) removes only that section's cache")
+    func clearBlocksPerSection() {
+        let orchestrator = FoliateBilingualOrchestrator()
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "a1", text: "alpha", sectionIndex: 0)
+        ], forSection: 0)
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "gamma", sectionIndex: 1)
+        ], forSection: 1)
+        orchestrator.clearBlocks(forSection: 0)
+        #expect(orchestrator.blocksBySection[0] == nil)
+        #expect(orchestrator.blocksBySection[1]?.count == 1)
+    }
+
+    @Test("buildInjectJS with no sectionIndex injects every block")
+    func buildInjectJSUnscoped() throws {
+        let orchestrator = FoliateBilingualOrchestrator()
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "alpha", sectionIndex: 0),
+            BilingualBlock(bid: "b2", text: "beta",  sectionIndex: 1)
+        ])
+        let js = try #require(orchestrator.buildInjectJS(
+            translatedSegments: ["one", "two"]
+        ))
+        #expect(js.contains("b1"))
+        #expect(js.contains("b2"))
+        // null targetSectionIndex falls back to walking every loaded section
+        #expect(js.contains("targetSectionIndex: null"))
+    }
+
+    @Test("buildInjectJS returns nil when no blocks match the section")
+    func buildInjectJSEmptyForUnknownSection() {
+        let orchestrator = FoliateBilingualOrchestrator()
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "alpha", sectionIndex: 0)
+        ])
+        let js = orchestrator.buildInjectJS(
+            translatedSegments: ["one"],
+            sectionIndex: 7
+        )
+        #expect(js == nil)
+    }
 }

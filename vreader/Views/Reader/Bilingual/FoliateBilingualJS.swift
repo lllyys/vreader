@@ -85,22 +85,41 @@ enum FoliateBilingualJS {
     /// DOM (via `view.renderer.getContents()`), stamps a stable
     /// `data-vreader-bid` on each translatable block (`p` / `li` /
     /// `blockquote` / `pre` / `dd` / `dt` — same set the EPUB
-    /// renderer enumerates), and posts an ordered `[{bid, text}]`
-    /// array back to Swift via the `bilingualEnumerate` channel.
+    /// renderer enumerates), and posts an ordered
+    /// `[{bid, text, sectionIndex}]` array back to Swift via the
+    /// `bilingualEnumerate` channel.
     ///
-    /// Stamping is idempotent — a block that already carries
-    /// `data-vreader-bid` keeps the existing id.
-    static func bilingualEnumerateJS() -> String {
+    /// Stamping is idempotent — a block that already carries a
+    /// trusted `^fb\d+$` `data-vreader-bid` keeps the existing id.
+    ///
+    /// Gate-4 audit finding H2: `targetSectionIndex`
+    /// scopes the enumerate to a single Foliate section so an
+    /// adjacent loaded section (paginated mode) is not walked. When
+    /// `nil`, every loaded section is enumerated and the Swift
+    /// pipeline partitions blocks by the per-block `sectionIndex`.
+    static func bilingualEnumerateJS(
+        targetSectionIndex: Int? = nil
+    ) -> String {
         // The actual DOM walk lives in `readerAPI.bilingualEnumerate`
         // on the Foliate host page. The Swift-side payload is a
         // single forward call wrapped in a try/catch so a missing
         // helper (e.g., on an older bundle) doesn't poison the JS
         // execution context.
-        """
+        //
+        // `targetSectionIndex` is interpolated as a JS literal
+        // (`null` or an integer) — never a user-supplied string —
+        // so no escape is required.
+        let arg: String
+        if let idx = targetSectionIndex {
+            arg = String(idx)
+        } else {
+            arg = "null"
+        }
+        return """
         (function() {
             try {
                 if (window.readerAPI && typeof readerAPI.bilingualEnumerate === 'function') {
-                    readerAPI.bilingualEnumerate();
+                    readerAPI.bilingualEnumerate(\(arg));
                 }
             } catch (e) {}
             try {
@@ -125,6 +144,14 @@ enum FoliateBilingualJS {
     /// map. The helper walks every loaded section's DOM, finds
     /// each block by id, and appends a styled `<div>` after it.
     ///
+    /// Gate-4 audit finding H2: pass
+    /// `targetSectionIndex` to scope the inject walk to one
+    /// section's DOM. With multiple sections loaded
+    /// simultaneously (paginated mode), an unscoped inject would
+    /// let one unit's translations leak into adjacent sections.
+    /// `nil` falls back to "every loaded section" for the disable
+    /// / clear paths.
+    ///
     /// Idempotent — an existing decoration sibling is replaced in
     /// place rather than re-appended, so a re-injection (chapter
     /// re-render, language change refetch) does NOT stack
@@ -134,7 +161,10 @@ enum FoliateBilingualJS {
     /// `FoliateJSEscaper.escapeForJSString` so a `'` or newline in a
     /// cached AI response cannot break out of the JS literal or
     /// inject markup.
-    static func bilingualInjectJS(translationsByBid: [String: String]) -> String {
+    static func bilingualInjectJS(
+        translationsByBid: [String: String],
+        targetSectionIndex: Int? = nil
+    ) -> String {
         var entries: [String] = []
         // Stable order: sort keys so the emitted JS is deterministic
         // and tests can compare full strings without flakes from
@@ -148,6 +178,12 @@ enum FoliateBilingualJS {
         }
         let table = entries.isEmpty ? "" : entries.joined(separator: ",\n") + "\n"
 
+        let sectionArg: String
+        if let idx = targetSectionIndex {
+            sectionArg = String(idx)
+        } else {
+            sectionArg = "null"
+        }
         return """
         (function() {
             // Build the translations table. Quoted literals — every
@@ -178,7 +214,12 @@ enum FoliateBilingualJS {
                         // (the WebKit content world honours `-webkit-
                         // user-select`; modern WebKit honours `user-
                         // select`).
-                        styleCssText: 'user-select: none; -webkit-user-select: none;'
+                        styleCssText: 'user-select: none; -webkit-user-select: none;',
+                        // Gate-4 audit finding H2:
+                        // section-scoped inject. `null` falls back
+                        // to "every loaded section" — used by the
+                        // clear path / older bundles.
+                        targetSectionIndex: \(sectionArg)
                     });
                 }
             } catch (e) {}
@@ -190,14 +231,28 @@ enum FoliateBilingualJS {
 
     /// JS that calls `readerAPI.bilingualClear()` on the Foliate
     /// host page. The helper enumerates every `vreader-bilingual`
-    /// node across every loaded section and removes it. Safe to
-    /// run multiple times — an empty NodeList is a no-op.
-    static func bilingualClearJS() -> String {
-        """
+    /// node and removes it. Safe to run multiple times — an empty
+    /// NodeList is a no-op.
+    ///
+    /// Gate-4 audit finding H2: pass
+    /// `targetSectionIndex` to scope the clear to one section
+    /// (used on a section advance — we only need to clear the
+    /// just-left section, not every loaded section). `nil` is the
+    /// safe default for disable / book close.
+    static func bilingualClearJS(
+        targetSectionIndex: Int? = nil
+    ) -> String {
+        let arg: String
+        if let idx = targetSectionIndex {
+            arg = String(idx)
+        } else {
+            arg = "null"
+        }
+        return """
         (function() {
             try {
                 if (window.readerAPI && typeof readerAPI.bilingualClear === 'function') {
-                    readerAPI.bilingualClear();
+                    readerAPI.bilingualClear(\(arg));
                 }
             } catch (e) {}
         })();

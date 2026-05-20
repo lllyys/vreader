@@ -725,27 +725,55 @@ extension FoliateSpikeView {
                     DebugReaderRegistry.shared.markReaderSettled(for: key, token: token)
                 }
                 #endif
+                // Feature #56 WI-11 (Gate-4 audit H1): forward
+                // relocate to the bilingual container so a page turn
+                // *within* an already-loaded section (no
+                // section-load fires) still updates the current-unit
+                // tracking. Without this forward, prefetch / inject
+                // could target a stale section after the user
+                // page-turned into a new section that was already
+                // pre-loaded in paginated mode.
+                if let key = self.fingerprintKey,
+                   let parsed = FoliateMessageParser.parseRelocate(body) {
+                    var userInfo: [AnyHashable: Any] = [
+                        "sectionIndex": parsed.sectionIndex,
+                        "fingerprintKey": key,
+                    ]
+                    if let href = parsed.tocHref {
+                        userInfo["tocHref"] = href
+                    }
+                    NotificationCenter.default.post(
+                        name: .foliateRelocated,
+                        object: nil,
+                        userInfo: userInfo
+                    )
+                }
 
             case "bilingualEnumerate":
-                // Feature #56 WI-11: forward the parsed
-                // `[BilingualBlock]` to the SwiftUI host via
+                // Feature #56 WI-11: forward the parsed payload to
+                // the SwiftUI host via
                 // `.foliateBilingualBlocksEnumerated`. Filtered by
                 // `fingerprintKey` so concurrent Foliate readers do
                 // not cross-fire (same pattern as `annotation-show`
                 // / `create-overlay`).
+                //
+                // Gate-4 round-3 audit fix: the
+                // payload now carries `requestedSectionIndex` so the
+                // container can call `clearBlocks(forSection:)` when
+                // a previously-populated section re-enumerates empty.
                 if let key = self.fingerprintKey {
-                    let blocks = FoliateBilingualPipeline.parseEnumerateMessage(body)
-                    // Encode to a Sendable wire payload — the
-                    // notification observer in the SwiftUI host
-                    // re-routes by fingerprintKey, so a `[BilingualBlock]`
-                    // value-type array is safe to ship via userInfo.
+                    let payload = FoliateBilingualPipeline.parseEnumeratePayload(body)
+                    var userInfo: [AnyHashable: Any] = [
+                        "blocks": payload.blocks,
+                        "fingerprintKey": key,
+                    ]
+                    if let req = payload.requestedSectionIndex {
+                        userInfo["requestedSectionIndex"] = req
+                    }
                     NotificationCenter.default.post(
                         name: .foliateBilingualBlocksEnumerated,
                         object: nil,
-                        userInfo: [
-                            "blocks": blocks,
-                            "fingerprintKey": key,
-                        ]
+                        userInfo: userInfo
                     )
                 }
 

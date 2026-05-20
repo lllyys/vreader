@@ -40,14 +40,32 @@
 
 import Foundation
 
-/// One translatable block discovered by `EPUBBilingualJS.bilingualEnumerateJS`.
-/// `bid` is the stable `data-vreader-bid` attribute the JS stamped
-/// on the block; `text` is the block's source content
-/// (whitespace-collapsed). The host translates by index — `bid` is
-/// the renderer's lookup key, `text` is for parity / debugging.
+/// One translatable block discovered by a renderer's
+/// `bilingualEnumerate` JS payload. `bid` is the stable
+/// `data-vreader-bid` attribute the JS stamped on the block; `text`
+/// is the block's source content (whitespace-collapsed). The host
+/// translates by index — `bid` is the renderer's lookup key, `text`
+/// is for parity / debugging.
+///
+/// Feature #56 WI-11 (Gate-4 audit finding H2): `sectionIndex` is
+/// populated only by the Foliate renderer (`-1` / `nil` for EPUB),
+/// because Foliate can keep multiple section docs loaded at the
+/// same time and an unscoped enumerate would let one section's
+/// blocks bleed into the adjacent section's translation map. The
+/// EPUB enumerate is per-spine-document and never has that hazard,
+/// so the field is optional and defaults to `nil`.
 struct BilingualBlock: Sendable, Equatable {
     let bid: String
     let text: String
+    /// Foliate-only: the section index the block came from. `nil`
+    /// for EPUB (one chapter document, no cross-section leakage).
+    let sectionIndex: Int?
+
+    init(bid: String, text: String, sectionIndex: Int? = nil) {
+        self.bid = bid
+        self.text = text
+        self.sectionIndex = sectionIndex
+    }
 }
 
 /// Pure glue between the EPUB JS enumerate channel and the bilingual

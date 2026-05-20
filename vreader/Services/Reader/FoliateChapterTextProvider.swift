@@ -50,9 +50,17 @@ actor FoliateChapterTextProvider: ChapterTextProviding {
     }
 
     func translationUnits() async throws -> [TranslationUnitID] {
-        if let cached = cachedUnits { return cached }
+        if let cached = cachedUnits, !cached.isEmpty { return cached }
         let units = await extractor.extractSections()
-        cachedUnits = units
+        // Gate-4 audit finding M1: never cache `[]`. The live
+        // extractor returns `[]` before the book has rendered
+        // (`Coordinator.isBookReady == false`); caching an empty
+        // result would permanently poison the provider for the rest
+        // of the reader session. Only cache a populated list — a
+        // pre-ready call is retried on the next lookup.
+        if !units.isEmpty {
+            cachedUnits = units
+        }
         return units
     }
 

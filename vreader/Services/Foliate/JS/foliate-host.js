@@ -312,12 +312,24 @@ window.readerAPI = {
         }
     },
 
-    // Feature #56 WI-11: walk the currently-rendered section DOM,
+    // Feature #56 WI-11: walk a specific section's rendered DOM,
     // stamp a stable `data-vreader-bid` attribute on each
     // translatable block (`p` / `li` / `blockquote` / `pre` / `dd`
-    // / `dt` — same set the EPUB renderer enumerates), and post the
-    // ordered `[{bid, text}]` payload back to Swift via the
-    // `bilingualEnumerate` channel.
+    // / `dt` — same set the EPUB renderer enumerates), and post
+    // an ordered `[{bid, text, sectionIndex}]` payload back to
+    // Swift via the `bilingualEnumerate` channel.
+    //
+    // Gate-4 audit finding H2: in paginated mode foliate-js can
+    // keep multiple section docs loaded simultaneously
+    // (`view.renderer.getContents()` returns `[{doc, index}]`
+    // for every retained section). Walking them all and posting
+    // one flat block list would let one unit's translation map
+    // spill into adjacent sections. We therefore (a) tag every
+    // emitted block with its section's `index`, and (b) accept
+    // an optional `targetSectionIndex` so the caller can scope
+    // the enumerate to one section. When omitted, every loaded
+    // section is enumerated and the Swift pipeline partitions
+    // by the per-block `sectionIndex`.
     //
     // The rendered DOM lives inside the section's iframe / shadow
     // root, reachable only via `view.renderer.getContents()`. A
@@ -326,20 +338,46 @@ window.readerAPI = {
     // shift the cache-key mapping. Decoration siblings carrying
     // `data-vreader-decoration` are skipped so a re-enumerate
     // never stamps a translation block.
-    bilingualEnumerate() {
+    //
+    // Gate-4 audit finding M2: an existing
+    // `data-vreader-bid` from third-party book HTML cannot be
+    // trusted — a hostile attribute value would break the
+    // attribute-selector lookup in `bilingualInject` and abort
+    // the whole pass. We re-stamp any pre-existing bid whose
+    // value does not match the trusted `^fb\d+$` shape so the
+    // selector is always over content we wrote.
+    bilingualEnumerate(targetSectionIndex) {
+        // Gate-4 round-3 audit fix: wrap the payload in
+        // `{requestedSectionIndex, blocks}` so the Swift container
+        // can call `clearBlocks(forSection:)` when an enumerate
+        // returns empty — a previously-populated section that
+        // re-enumerates to `[]` (re-render, failure) would otherwise
+        // leave a stale per-section cache. `null` means "no scope
+        // requested" — used by the legacy bulk-walk path.
+        const reqIdx = (targetSectionIndex == null) ? null : targetSectionIndex
         try {
             const contents = view.renderer?.getContents?.()
             if (!Array.isArray(contents) || contents.length === 0) {
-                post('bilingualEnumerate', [])
+                post('bilingualEnumerate', {
+                    requestedSectionIndex: reqIdx,
+                    blocks: [],
+                })
                 return
             }
             const BLOCK_TAGS = {
                 p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1,
             }
+            const TRUSTED_BID = /^fb\d+$/
             const out = []
             for (const entry of contents) {
                 const doc = entry?.doc
                 if (!doc) continue
+                const sectionIndex = (typeof entry.index === 'number')
+                    ? entry.index : -1
+                if (targetSectionIndex != null
+                    && sectionIndex !== targetSectionIndex) {
+                    continue
+                }
                 const all = doc.body
                     ? doc.body.getElementsByTagName('*')
                     : doc.getElementsByTagName('*')
@@ -355,29 +393,56 @@ window.readerAPI = {
                     txt = txt.replace(/\s+/g, ' ').trim()
                     if (!txt) continue
                     let bid = el.getAttribute('data-vreader-bid')
-                    if (!bid) {
+                    if (!bid || !TRUSTED_BID.test(bid)) {
                         seq += 1
                         bid = 'fb' + seq
                         el.setAttribute('data-vreader-bid', bid)
                     }
-                    out.push({ bid: bid, text: txt })
+                    out.push({
+                        bid: bid,
+                        text: txt,
+                        sectionIndex: sectionIndex,
+                    })
                 }
                 doc.__vreaderBilingualSeq = seq
             }
-            post('bilingualEnumerate', out)
+            post('bilingualEnumerate', {
+                requestedSectionIndex: reqIdx,
+                blocks: out,
+            })
         } catch (e) {
             console.warn('[foliate-host] bilingualEnumerate failed:', e)
-            post('bilingualEnumerate', [])
+            post('bilingualEnumerate', {
+                requestedSectionIndex: reqIdx,
+                blocks: [],
+            })
         }
     },
 
     // Feature #56 WI-11: inject a translation `<div>` after each
-    // stamped block in every loaded section's DOM. `opts` is the
+    // stamped block in a specific section's DOM. `opts` is the
     // payload `FoliateBilingualJS.bilingualInjectJS` emits:
     //
     //   { translations: {bid: text, ...},
     //     decorationAttribute, blockIDAttribute, blockClassName,
-    //     styleCssText }
+    //     styleCssText,
+    //     targetSectionIndex: Int | null }
+    //
+    // Gate-4 audit finding H2: scope the inject walk to the
+    // requested section. With multiple sections loaded
+    // simultaneously (paginated mode), an unscoped walk would
+    // let one unit's translations leak into adjacent sections.
+    // `targetSectionIndex == null` falls back to "every loaded
+    // section" (the original behaviour) so a future bulk-inject
+    // path stays open.
+    //
+    // Gate-4 audit finding M2: bid keys come from the (trusted)
+    // Swift Pipeline and were stamped by `bilingualEnumerate`'s
+    // re-stamping logic (any third-party value not matching
+    // `^fb\d+$` is overwritten before its bid enters the
+    // pipeline). Even so, we use `CSS.escape` defensively so the
+    // selector is always well-formed regardless of upstream
+    // contract changes.
     //
     // Idempotent: if a decoration sibling already exists for a
     // block, its `textContent` is replaced in place rather than a
@@ -390,18 +455,28 @@ window.readerAPI = {
             const CLS = opts?.blockClassName || 'vreader-bilingual'
             const STYLE = opts?.styleCssText ||
                 'user-select: none; -webkit-user-select: none;'
+            const targetSectionIndex = opts?.targetSectionIndex
 
             const contents = view.renderer?.getContents?.()
             if (!Array.isArray(contents) || contents.length === 0) return
+            const esc = (typeof CSS !== 'undefined' && CSS.escape)
+                ? CSS.escape
+                : (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&')
             for (const entry of contents) {
                 const doc = entry?.doc
                 if (!doc) continue
+                const sectionIndex = (typeof entry.index === 'number')
+                    ? entry.index : -1
+                if (targetSectionIndex != null
+                    && sectionIndex !== targetSectionIndex) {
+                    continue
+                }
                 for (const bid in translations) {
                     if (!Object.prototype.hasOwnProperty.call(translations, bid)) {
                         continue
                     }
                     const block = doc.querySelector(
-                        '[' + BID + '="' + bid + '"]'
+                        '[' + BID + '="' + esc(bid) + '"]'
                     )
                     if (!block) continue
                     const next = block.nextElementSibling
@@ -429,15 +504,22 @@ window.readerAPI = {
     },
 
     // Feature #56 WI-11: remove every `vreader-bilingual` node from
-    // every loaded section's DOM. Safe to run multiple times — an
-    // empty NodeList is a no-op.
-    bilingualClear() {
+    // loaded section DOMs. With `targetSectionIndex` omitted, walks
+    // every section (the safe default on disable / book close).
+    // Safe to run multiple times — an empty NodeList is a no-op.
+    bilingualClear(targetSectionIndex) {
         try {
             const contents = view.renderer?.getContents?.()
             if (!Array.isArray(contents) || contents.length === 0) return
             for (const entry of contents) {
                 const doc = entry?.doc
                 if (!doc) continue
+                const sectionIndex = (typeof entry.index === 'number')
+                    ? entry.index : -1
+                if (targetSectionIndex != null
+                    && sectionIndex !== targetSectionIndex) {
+                    continue
+                }
                 const nodes = doc.querySelectorAll(
                     '.vreader-bilingual[data-vreader-decoration]'
                 )

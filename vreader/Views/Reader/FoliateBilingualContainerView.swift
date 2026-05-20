@@ -73,8 +73,18 @@ struct FoliateBilingualContainerView: View {
 
     /// The active locator's section href — captured from the Foliate
     /// relocate notification. Used to resolve the current unit for
-    /// prefetch + inject.
+    /// prefetch + inject. We track the section index (stringified)
+    /// since `TranslationUnitID.Kind.foliateHref` carries the
+    /// integer-string id the JS host exposes.
     @State private var currentSectionHref: String?
+
+    /// The Foliate section index of the current page. Updated on
+    /// every relocate (Gate-4 audit H1) so a page turn
+    /// within an already-loaded section keeps the current unit in
+    /// sync. Drives the `targetSectionIndex` argument on the
+    /// orchestrator's enumerate / inject / clear JS so a unit's
+    /// translations never bleed into adjacent loaded sections.
+    @State private var currentSectionIndex: Int?
 
     var body: some View {
         FoliateSpikeView(
@@ -100,7 +110,14 @@ struct FoliateBilingualContainerView: View {
             let key = notification.userInfo?["fingerprintKey"] as? String
             guard key == fingerprintKey else { return }
             let blocks = (notification.userInfo?["blocks"] as? [BilingualBlock]) ?? []
-            handleEnumeratedBlocks(blocks)
+            // Gate-4 round-3 audit fix:
+            // `requestedSectionIndex` is present when the enumerate
+            // was scoped to one section. An empty blocks list for a
+            // scoped request signals "previously-populated section
+            // re-enumerated empty" — the container must clear that
+            // section's cache.
+            let requestedSection = notification.userInfo?["requestedSectionIndex"] as? Int
+            handleEnumeratedBlocks(blocks, requestedSection: requestedSection)
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .foliateSectionLoaded)
@@ -108,6 +125,13 @@ struct FoliateBilingualContainerView: View {
             guard let key = notification.userInfo?["fingerprintKey"] as? String,
                   key == fingerprintKey else { return }
             handleSectionLoaded(notification.userInfo)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .foliateRelocated)
+        ) { notification in
+            guard let key = notification.userInfo?["fingerprintKey"] as? String,
+                  key == fingerprintKey else { return }
+            handleRelocated(notification.userInfo)
         }
         .sheet(isPresented: $showBilingualSetupSheet) {
             BilingualSetupSheet(
@@ -176,7 +200,10 @@ struct FoliateBilingualContainerView: View {
             )
             showBilingualSetupSheet = true
         } else {
-            evalBilingualJS(bilingualOrchestrator.enumerateJS())
+            evalBilingualJS(
+                bilingualOrchestrator.enumerateJS(
+                    sectionIndex: currentSectionIndex)
+            )
         }
     }
 
@@ -192,9 +219,51 @@ struct FoliateBilingualContainerView: View {
     }
 
     /// Parsed `[BilingualBlock]` from the JS enumerate channel —
-    /// cache the blocks and ask the VM to prefetch the current unit.
-    private func handleEnumeratedBlocks(_ blocks: [BilingualBlock]) {
-        bilingualOrchestrator.updateBlocks(blocks)
+    /// partition by section index and store each section's blocks
+    /// in the orchestrator's per-section cache. Gate-4 round-2
+    /// audit fix: per-section storage means an adjacent preloaded
+    /// section (paginated mode) cannot clobber the active section's
+    /// block list. Only the active section drives the prefetch
+    /// trigger.
+    ///
+    /// Gate-4 round-3 audit fix:
+    /// `requestedSection` is non-nil when the JS enumerate was
+    /// scoped. An empty `blocks` for a scoped request means the
+    /// section re-enumerated empty (re-render, transient failure);
+    /// the matching per-section cache is cleared to avoid stale
+    /// bid leaks. An empty payload from an unscoped request (no
+    /// `requestedSection`) drops silently — we don't know which
+    /// section to clear.
+    private func handleEnumeratedBlocks(
+        _ blocks: [BilingualBlock],
+        requestedSection: Int? = nil
+    ) {
+        if blocks.isEmpty {
+            if let section = requestedSection {
+                // Round-3 fix: the JS enumerated this specific
+                // section and found no blocks. Clear any stale
+                // cache so a later inject for that section cannot
+                // resolve old bids.
+                bilingualOrchestrator.clearBlocks(forSection: section)
+            }
+            return
+        }
+        // Partition the parsed payload by section. Untagged blocks
+        // (older bundle / EPUB-style payload) bucket under `-1`.
+        let byIndex = Dictionary(grouping: blocks, by: { $0.sectionIndex ?? -1 })
+        for (sectionIndex, sectionBlocks) in byIndex {
+            bilingualOrchestrator.updateBlocks(
+                sectionBlocks, forSection: sectionIndex)
+        }
+        // Round-3 fix: a scoped enumerate may also need to drop
+        // an OLD section's cache. If the JS host walked one section
+        // and returned blocks tagged with a different index, the
+        // requested section was empty even though the response
+        // wasn't empty overall. This case is unusual but defensive.
+        if let section = requestedSection,
+           byIndex[section] == nil {
+            bilingualOrchestrator.clearBlocks(forSection: section)
+        }
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
         guard let locator = makeCurrentLocator() else { return }
         Task { await vm.handlePositionChange(locator) }
@@ -204,38 +273,100 @@ struct FoliateBilingualContainerView: View {
         injectIfCached()
     }
 
-    /// Foliate section-load — record the current section's index
-    /// (as a string, matching `TranslationUnitID.Kind.foliateHref`
-    /// semantics) so the next inject resolves to the right unit.
-    /// If bilingual is on and the setup sheet is not open, push an
-    /// enumerate so the orchestrator's block list matches the
-    /// freshly-rendered section.
+    /// Foliate section-load — a (possibly off-screen, preloaded)
+    /// section's DOM has just been rendered. Gate-4 round-2 audit
+    /// fix: this handler must NOT mutate the
+    /// canonical current-section state. In paginated mode, foliate-js
+    /// can fire section-load for an adjacent preloaded section
+    /// *before* the user relocates there; only `.foliateRelocated`
+    /// owns the "I'm on section N now" transition.
+    ///
+    /// What this handler does do is push an enumerate scoped to the
+    /// loaded section so the orchestrator's per-section block cache
+    /// gets populated for that section. When the user eventually
+    /// relocates to it, the inject path has the blocks ready.
     private func handleSectionLoaded(_ userInfo: [AnyHashable: Any]?) {
-        if let idx = userInfo?["sectionIndex"] as? Int {
-            currentSectionHref = String(idx)
+        guard let loadedIndex = userInfo?["sectionIndex"] as? Int else {
+            return
         }
         guard let vm = bilingualViewModel, vm.isEnabled,
               !showBilingualSetupSheet else { return }
-        evalBilingualJS(bilingualOrchestrator.enumerateJS())
+        evalBilingualJS(
+            bilingualOrchestrator.enumerateJS(
+                sectionIndex: loadedIndex)
+        )
+    }
+
+    /// Foliate relocate — fires for every position change including
+    /// page turns that stay within an already-loaded section. Gate-4
+    /// audit H1: update the current-section tracking here so a page
+    /// turn into an already-loaded next section refreshes the
+    /// prefetch / inject target. When the index actually changes,
+    /// also push a scoped enumerate of the now-current section so
+    /// the orchestrator's block cache reflects the live DOM.
+    ///
+    /// Gate-4 round-2 audit fix: this is the
+    /// SOLE owner of the canonical current-section state. The
+    /// `section-load` handler does NOT mutate it, because foliate-js
+    /// can fire `section-load` for an adjacent preloaded section
+    /// before the user relocates there.
+    ///
+    /// Note: we do NOT clear the just-left section's block cache.
+    /// In paginated mode the user often returns to recently-visited
+    /// sections (back-paging), and keeping the cache avoids a
+    /// re-enumerate round-trip. The orchestrator's per-section
+    /// cache only grows by section-load count, which is bounded by
+    /// the book length, so this is not a leak hazard.
+    private func handleRelocated(_ userInfo: [AnyHashable: Any]?) {
+        guard let nextIndex = userInfo?["sectionIndex"] as? Int else {
+            return
+        }
+        let previousIndex = currentSectionIndex
+        currentSectionHref = String(nextIndex)
+        currentSectionIndex = nextIndex
+
+        guard let vm = bilingualViewModel, vm.isEnabled,
+              !showBilingualSetupSheet else { return }
+
+        // The current rendered section's block list lives on the
+        // orchestrator already (a section-load fires before its
+        // relocate). What we need on a within-loaded-section page
+        // turn is to (a) ask the VM to prefetch the (possibly new)
+        // current unit + its next, and (b) push an inject scoped to
+        // the new section if translations are cached.
+        if previousIndex != nextIndex {
+            // The user moved into a new (already-loaded) section.
+            // Refresh enumerate so the block list reflects the new
+            // section's DOM — section-load may not fire when
+            // foliate-js had the section preloaded in paginated
+            // mode.
+            evalBilingualJS(
+                bilingualOrchestrator.enumerateJS(
+                    sectionIndex: nextIndex)
+            )
+        }
+        injectIfCached()
     }
 
     /// Build inject JS for the current unit's translations (if any
     /// are cached) and push it through the eval observer. No-op when
     /// the orchestrator has no blocks or the VM has no translations
-    /// for the current unit.
+    /// for the current unit. Gate-4 audit H2: scopes
+    /// to the current section index so an adjacent loaded section
+    /// (paginated mode) does not get this unit's translations.
     private func injectIfCached() {
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
         guard let locator = makeCurrentLocator() else { return }
-        Task {
-            guard let provider = await vm.textProvider,
+        let scopedIndex = currentSectionIndex
+        Task { @MainActor in
+            guard let provider = vm.textProvider,
                   let unit = await provider.unit(containing: locator),
-                  let segments = await vm.translations(for: unit) else { return }
-            await MainActor.run {
-                if let js = bilingualOrchestrator.buildInjectJS(
-                    translatedSegments: segments
-                ) {
-                    evalBilingualJS(js)
-                }
+                  let segments = vm.translations(for: unit) else { return }
+            if let js = bilingualOrchestrator.buildInjectJS(
+                translatedSegments: segments,
+                sectionIndex: scopedIndex
+            ) {
+                evalBilingualJS(js)
             }
         }
     }
@@ -249,7 +380,10 @@ struct FoliateBilingualContainerView: View {
         vm.setGranularity(bilingualSetupState.granularity)
         vm.dismissSetupSheet()
         showBilingualSetupSheet = false
-        evalBilingualJS(bilingualOrchestrator.enumerateJS())
+        evalBilingualJS(
+            bilingualOrchestrator.enumerateJS(
+                sectionIndex: currentSectionIndex)
+        )
     }
 
     /// Cancel path — dismiss the sheet and turn bilingual back off
