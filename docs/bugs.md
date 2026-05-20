@@ -54,6 +54,106 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
      All were FIXED in Summary but had not been archived per the
      "Move to archive on FIXED" rule. -->
 
+### Bug #244 — EPUB reader opens but content area is blank — no text rendered on tap-from-library (TODO 2026-05-20)
+
+> **Renumbered 243 → 244 on 2026-05-20** — concurrent parallel work
+> landed the DebugBridge `provider`-URL-family bug at #243 on `main`
+> (PR #1062 / GH #1057) while this user-triage row was being filed
+> at the same number. Per the #225/#226/#228 and #236→#239 collision
+> precedent, the established row keeps the number; this newcomer
+> renumbers. GH issue title updated #1065 from "Bug #243…" to
+> "Bug #244…" via `gh issue edit`.
+
+**Reported** by the user, 2026-05-20 (`/triage`): "can not open the epub books now".
+
+**Symptom**: Tapping an EPUB book in the library navigates to the
+reader screen (chrome / toolbar / chapter title visible) but the
+content area renders empty — no text appears where the chapter body
+should be. The reader is "open" in the navigation sense; it's just
+blank where content should render.
+
+**Scope (unconfirmed)**: User has only tested one EPUB. Could be:
+
+- All EPUBs (full regression on the EPUB load path) — most likely
+  given the volume of recent EPUB-path churn.
+- One specific EPUB (parser issue on a specific file) — less likely
+  but possible; e.g., a broken `package.opf` or a CSS class collision
+  that hides text on this title.
+
+**Repro (provisional, pending scope confirmation)**:
+
+1. Launch `vreader` on iPhone 17 Pro Simulator at v3.38.15 (HEAD =
+   `93a59c17` at the time of filing).
+2. Open the library.
+3. Tap any EPUB.
+4. Observe: chrome appears, content area blank.
+
+**Expected**: Chapter body text renders in the content area; tapping
+chrome toggles its visibility; chapter title and progress bar reflect
+the loaded book.
+
+**Actual**: Chrome appears, content area is empty / white / shows no
+text. (Specific colour / state pending screenshot.)
+
+**Likely cause — primary suspects in descending order**:
+
+1. **Feature #56 WI-10** (`2544fa2f`, 2026-05-20) — bilingual
+   interlinear renderer + R-EPUB-CFI fix. Touched the biggest surface
+   area in the EPUB load path: 53 lines in
+   `EPUBReaderContainerView.swift`, 18 in `EPUBWebViewBridge.swift`,
+   25 in `EPUBWebViewBridgeCoordinator.swift`, 24 in
+   `EPUBHighlightJS.swift`, plus a new 329-line
+   `EPUBReaderContainerView+Bilingual.swift` and `EPUBBilingualJS.swift`
+   /`Pipeline.swift`/`Orchestrator.swift` shipping new JS injection
+   into the same WebView. A new JS injection that runs unconditionally
+   on load (regardless of `bilingualOn`) and accidentally hides or
+   replaces the source content would produce this symptom.
+2. **Feature #62 WI-5** (`d17f6dfd`, 2026-05-19) — rewires the reader
+   chrome to `TOCSheet` + `HighlightsSheet` and deletes the legacy
+   panel. Chrome rewiring rarely blanks content but could break a
+   binding that drives the EPUB content load (e.g., `bookOpenToken`
+   propagation).
+3. **Feature #64 WI-8** (`2bab1d07`) and **WI-10** (`18bd553a`) —
+   migrated EPUB container to unified highlight popover; tore down the
+   superseded #55 / #53 highlight surfaces. Popover migration can
+   reorder content-injection JS; tear-down can delete a still-used
+   bridge.
+4. **Feature #54 WI-3** (`e30f769`) — routes reader dispatch by
+   `ReaderEngine`. We confirmed via code-read that
+   `ReaderEngine.resolve(.epub) == .epubWKWebView` is preserved and
+   the switch case still constructs `EPUBReaderHost`. So routing is
+   intact; the regression is in what the host does, not which host is
+   chosen.
+5. **Feature #491 WI-3** (`d37bcc1e`) — routes EPUB font size through
+   `FontSizeCalibrator`. Font sizing pipe; if the calibrator returns 0
+   for new books, text could be invisible. Less likely given other
+   formats reportedly work.
+
+**Fix direction**:
+
+1. **Confirm scope first** — try a fresh import (`mini-epub3` fixture
+   or Alice EPUB used in feature #21 round-2). If a fresh EPUB also
+   blanks, it's a load-path regression; if the user's specific book
+   blanks but `mini-epub3` works, it's a parser / specific-EPUB
+   compatibility bug.
+2. **Read the WKWebView via DebugBridge `eval`** — probe
+   `document.body.innerHTML.length` and `document.querySelectorAll('p').length`
+   to distinguish "content loaded but invisible" (CSS / theme /
+   visibility bug) from "content never loaded" (bridge / load-URL /
+   sandbox-URL mismatch).
+3. **Bisect** from HEAD backward across the suspect commits in the
+   order above. Stop at the first commit whose revert restores
+   content rendering.
+4. **Cross-check Foliate path** — AZW3/MOBI also goes through a
+   WKWebView host (`FoliateSpikeView`); confirm AZW3 still renders.
+   If AZW3 also blanks, the regression is in a shared WebView
+   primitive (e.g., `WKWebView` sandbox URL mismatch — see bug
+   `0a142f03` historical fix).
+
+**Verification harness**: After the fix lands, run the user's exact
+repro (open any EPUB → confirm text appears) on iPhone 17 Pro Sim AND
+on the user's device.
+
 ### Bug #239 — Paged layout: side-tap page-turn is dead across all native readers — feature #54 WI-3 deleted the `TapZoneOverlay` page-turn producer (TODO 2026-05-19)
 
 **Reported** by the user, 2026-05-19 (`/triage`): "turning paged is not working in txt, epub, azw3".
@@ -633,6 +733,7 @@ The scroll math (`attemptScrollRestore`, `scrollToMatchedOffset`) is unchanged �
 
 | #  | Summary                                                                                               | File/Area  | Severity | Status   | Notes                                                                                                                                                                                              |
 | -- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 244| EPUB reader opens but content area is blank — no text rendered on tap-from-library | Reader/EPUB | High | TODO | **Renumbered 243 → 244 on 2026-05-20** — concurrent parallel work landed the DebugBridge `provider`-URL-family bug at #243 on `main` (PR #1062 / GH #1057) while this user-triage row was being filed at the same number. Per the #225/#226/#228 and #236→#239 collision precedent, the established row keeps the number; this newcomer renumbers. GH issue title updated #1065 "Bug #243…" → "Bug #244…" via `gh issue edit`. **Filed 2026-05-20 (user triage — "can not open the epub books now")**. **Symptom**: tapping an EPUB in the library navigates to the reader (chrome visible) but the content area renders empty (no text). User has only tried one EPUB so all-vs-specific scope unconfirmed at filing time. **EPUB load-path was openable on v3.37.x and earlier (feature #11 VERIFIED, feature #21 VERIFIED, feature #54 WI-3 routed through `ReaderEngine.resolve(.epub) = .epubWKWebView` and the path still exists in `ReaderContainerView.engineReaderView`). Heavy churn in EPUB load surface between v3.37 → v3.38: feature #56 WI-10 (commit `2544fa2f` — bilingual interlinear renderer, 53 lines added to `EPUBReaderContainerView.swift`, 18 to `EPUBWebViewBridge.swift`, 25 to `EPUBWebViewBridgeCoordinator.swift`, 24 modified in `EPUBHighlightJS.swift`, new `EPUBReaderContainerView+Bilingual.swift` of 329 lines, R-EPUB-CFI fix), feature #62 WI-5 (`d17f6dfd` — rewire reader chrome to TOCSheet + HighlightsSheet, delete legacy panel), feature #64 WI-8 (`2bab1d07` — migrate EPUB container to unified highlight popover), feature #64 WI-10 (`18bd553a` — tear down superseded #55/#53 highlight surfaces), feature #491 WI-3 (`d37bcc1e` — route EPUB font size through `FontSizeCalibrator`). Primary suspect = #56 WI-10 by surface-area-touched count.** **Fix direction**: bisect from origin/main HEAD backward across feature #56 WI-10 / #62 WI-5 / #64 WI-8 / #64 WI-10 / #54 WI-3 against a known-openable EPUB fixture; reader chrome visible but content blank narrows to `EPUBWebViewBridge.loadEPUB` / `EPUBReaderContainerView.onReceive` lifecycle vs. the WKWebView's first content load (HTML payload empty? CSS theme hides text? bilingual JS injects before content arrives? overlay strip masks content?). Confirm scope (single EPUB vs all) by importing a fresh fixture (`mini-epub3` or Alice). **Severity High** — opening books is core app functionality; EPUB is a major format; regression hits every EPUB user. See Open Bug Details. GH: #1065 |
 | 239| Paged layout — side-tap page-turn is dead across all native readers (TXT / EPUB / AZW3 / MD / PDF); feature #54 WI-3 deleted the `TapZoneOverlay` page-turn producer | Reader/* | High | TODO | **Renumbered 236 → 239 on 2026-05-19** — GH #988 was filed concurrently as "Bug #236" and collided with the flaky-test bug already renumbered into #236 (commit `a312f00`); #237/#238 were also taken. Per the #225/#226/#228 collision precedent, this newcomer row takes the next free number (239); the flaky-test row keeps 236. GH #988 issue title updated to "Bug #239". **Filed 2026-05-19 (user triage — "turning paged is not working in txt, epub, azw3")**. Investigated via a read-only subagent: feature #54 WI-3 (commit `e30f769`) deleted `ReaderUnifiedDispatch.swift`, the ONLY mount of `.tapZoneOverlay(config:)`. `TapZoneOverlay` / `TapZoneDispatcher` is the **sole producer** of `.readerNextPage` / `.readerPreviousPage` (grep: zero `tapZoneOverlay(config` call sites remain) — so every native reader’s `onReceive(.readerNextPage)` observer is now dead and side-tap page-turn does nothing in Paged layout. Regression of VERIFIED feature #21 (paginated reading) + DONE feature #25 (configurable tap zones). AZW3 **swipe** still works (Foliate-js owns touch internally); EPUB Paged still renders (bug #171 FIXED). **TXT has a second, deeper layer** — `TXTReaderContainerView` has no paged renderer at all (`updatePaginationIfNeeded()` defined but never called; no `NativeTextPagedView` branch), so TXT "Paged" is single-chapter scroll regardless. Cross-ref bug #215 (MD-scoped instance — same root cause; its Cause-2 "no tap-zone overlay" IS this regression), bug #162 (FIXED — its "hide tap-zones config outside Unified mode" mitigation is now moot since #54 removed Unified mode). See Open Bug Details. GH: #988 |
 | 240| Feature11 + Feature64 verification XCUITests are stale post-feature-#60 chrome re-skin and don't use the new DebugBridge `vreader-debug://highlight?...` commands (GH #986 + GH #845, shipped 2026-05-20) | Tests/Reader | Medium | FIXED | **Filed 2026-05-20 by verify cron** during the post-#986/#845 verify batch. **Repro**: `xcodebuild test -only-testing:vreaderUITests/Feature11EPUBHighlightVerificationTests + -only-testing:vreaderUITests/Feature64TXTHighlightPopoverVerificationTests` against v3.38.6 fails — Feature11:146 "EPUB reader content should load after opening the seeded EPUB" (28s timeout) + Feature64:78 "Highlight action should appear in selection menu after long-press" (17s). Two compounding causes: (a) reader-loaded AX identifiers were renamed by feature-#60 visual-identity v2 re-skin; the tests check pre-re-skin identifiers; (b) the tests still drive XCUITest long-press gestures rather than the new `vreader-debug://highlight?start=<int>&end=<int>[&color=<name>]` DebugBridge command shipped today via PR #1047 (TXT/MD, GH #986) + PR #1048 (EPUB, GH #845) — XCUITest's long-press doesn't reliably trigger the UIMenu Highlight item on the EPUB WKWebView (the exact harness defect #986/#845 fixed by adding the CU-free command). **Fix direction**: test-modernization only — update both XCUITest files' reader-loaded gating to use current AX identifiers (cross-check `Feature26TextToSpeechVerificationTests` which works post-re-skin), then replace long-press gestures with the new DebugBridge `vreader-debug://highlight?start=<int>&end=<int>[&color=<name>]` command per the updated `docs/subsystems/debug-bridge.md`. Re-run; expect Feature #11 + Feature #64 verification to flip DONE → VERIFIED. No product code change. **Severity Medium** — verification tests are stale, not production; two feature VERIFIED flips (#11 EPUB highlight, #64 highlight popover) are gated on this fix. **FIXED 2026-05-20** — `Feature11EPUBHighlightVerificationTests`: replaced the stale `app.webViews.firstMatch` reader-loaded gate with `app.buttons[AccessibilityID.readerSettingsButton]`, the post-re-skin chrome signal `Feature11EPUBBottomChromeVerificationTests` uses successfully (the bottom chrome only mounts after `viewModel.metadata != nil && !viewModel.isLoading`, exactly the "EPUB reader content loaded" precondition). `Feature64TXTHighlightPopoverVerificationTests`: rewritten to drive highlight creation through `bridgeHelper.highlight(start: 40, end: 1500, color: nil)` instead of `pressCoord.press(forDuration: 1.5)`, with `bridgeHelper.settleApp(...)` settle gates around the bridge call so the highlight paint lands before the popover-opening tap at `dy: 0.20`. **Bug #240b — DebugBridge URL unreachable from sandboxed XCUITest runner**: investigation discovered `xcrun simctl openurl` inside the XCUITest runner exits 72 with stderr "Failed to load CoreSimulatorService — running with a sandbox profile" (NSPOSIXErrorDomain 61 "Connection refused"). The runner sandbox blocks the CoreSimulator XPC service, so the bridge URL never reaches the app from inside the runner. Both tests now probe bridge reachability with `XCTSkipUnless(bridgeReachable())` and skip with an explicit reason citing the sandbox limitation when the bridge channel is structurally unavailable — the cron's HOST-driven verification path (which invokes the same URLs from outside the sandbox) continues to exercise the full highlight pipeline as before. The reader-loaded chrome gate runs unconditionally and is the regression net for the feature-#60 re-skin half of the bug. Test suite result via `xcodebuild test -only-testing:vreaderUITests/Feature11... -only-testing:vreaderUITests/Feature64...`: PASSED (3 skipped, 0 failed). Full unit gate `xcodebuild test -only-testing:vreaderTests`: 6828 tests / 682 suites green in 37.1s. GH: #1049 |
 | 242| XCUITest runner sandbox blocks `xcrun simctl openurl` — host-side bridge driving is the only working path for DebugBridge commands from inside the test binary | Tests/DebugBridge | Medium | FIXED | **Filed 2026-05-20 by the bug #240 (`/fix-issue` GH #1049) run** as "Bug #240b" inside row 240's notes; promoted to its own row here. **Repro**: inside an XCUITest binary (e.g. `VerificationDebugBridgeHelper.openURL(...)`), invoke `xcrun simctl openurl booted vreader-debug://...`. The call exits 72 with stderr `Failed to load CoreSimulatorService — running with a sandbox profile` (NSPOSIXErrorDomain 61 "Connection refused"). The XCUITest runner sandbox does not have a path to the host's `CoreSimulatorService` XPC endpoint, so the URL never reaches the running app under test. The bridge URL handlers themselves work perfectly when invoked from outside the runner sandbox (e.g. the verify cron's host-side bash drivers); they cannot be reached from inside the test binary. **Impact**: The DebugBridge commands shipped 2026-05-20 (#976 `vreader-debug://search`, #986 TXT/MD `vreader-debug://highlight`, #845 EPUB `vreader-debug://highlight`) drive correctly via host-side scripts but not from `VerificationDebugBridgeHelper.openURL(...)` inside the test process. **Fix direction**: directions (1) + (3) per the GH body — (1) document the host-vs-runner split explicitly so future agents stop assuming the in-runner path works, and (3) accept the `XCTSkipUnless(bridgeReachable())` pattern PR #1053 introduced as the official in-runner workaround; bridge-driven verification flows go through host-side scripts. **Severity Medium** — the runner-side bridge driving genuinely can't work, but workarounds exist (`XCTSkipUnless` in-runner + host-driven scripts), so it's a documentation gap rather than a missing capability. **FIXED 2026-05-20** (this PR, branch `fix/issue-1054-debugbridge-xcuitest-sandbox-docs`): `docs/subsystems/debug-bridge.md` gained a "Driving the bridge from a verification flow" section that names the HOST-driven path (the primary, working path used by every verify cron driver under `dev-docs/verification/*`), the in-runner path via `VerificationDebugBridgeHelper.openURL(...)` (NSPOSIX 61 — does NOT work, sandbox blocks the XPC connection), and the `XCTSkipUnless(bridgeReachable())` pattern PR #1053 introduced; `docs/architecture.md` gained a one-line cross-reference so the constraint surfaces at the architecture level. No Swift code change — the constraint is structural to the XCUITest sandbox, and the workaround already shipped in #1053. GH: #1054 |
