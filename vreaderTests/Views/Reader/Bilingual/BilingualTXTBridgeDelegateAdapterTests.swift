@@ -88,6 +88,40 @@ struct BilingualTXTBridgeDelegateAdapterTests {
         #expect(recorder.lastScroll == 3)
     }
 
+    @Test("selection ending exactly at synthetic boundary preserves end-point")
+    func selectionEndAtSyntheticBoundary() {
+        let recorder = RecordingDelegate()
+        let segments: [BilingualDisplaySegmentMap.Segment] = [
+            .source(sourceRange: 0..<3, displayRange: 0..<3),
+            .synthetic(displayRange: 3..<6),
+            .source(sourceRange: 3..<6, displayRange: 6..<9)
+        ]
+        let map = BilingualDisplaySegmentMap(sourceLength: 6, segments: segments)
+        let adapter = BilingualTXTBridgeDelegateAdapter(wrapping: recorder, segmentMap: map)
+        // Selection 0..<3 (display) ends exactly at the synthetic block
+        // start. Source end-point should preserve to 3 (source end of
+        // the preceding source segment), NOT collapse to a caret.
+        adapter.selectionDidChange(utf16Range: UTF16Range(startUTF16: 0, endUTF16: 3))
+        #expect(recorder.lastSelection?.startUTF16 == 0)
+        #expect(recorder.lastSelection?.endUTF16 == 3)
+    }
+
+    @Test("selection ending at displayLength maps to sourceLength")
+    func selectionEndAtDisplayLength() {
+        let recorder = RecordingDelegate()
+        let segments: [BilingualDisplaySegmentMap.Segment] = [
+            .source(sourceRange: 0..<3, displayRange: 0..<3),
+            .synthetic(displayRange: 3..<6),
+            .source(sourceRange: 3..<6, displayRange: 6..<9)
+        ]
+        let map = BilingualDisplaySegmentMap(sourceLength: 6, segments: segments)
+        let adapter = BilingualTXTBridgeDelegateAdapter(wrapping: recorder, segmentMap: map)
+        // Selection 6..<9 (display, the last source segment in full).
+        adapter.selectionDidChange(utf16Range: UTF16Range(startUTF16: 6, endUTF16: 9))
+        #expect(recorder.lastSelection?.startUTF16 == 3)
+        #expect(recorder.lastSelection?.endUTF16 == 6)
+    }
+
     @Test("scroll past last source clamps to last source end")
     func scrollPastLastSource() {
         let recorder = RecordingDelegate()

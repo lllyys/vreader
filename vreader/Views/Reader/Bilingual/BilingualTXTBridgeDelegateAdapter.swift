@@ -58,19 +58,50 @@ final class BilingualTXTBridgeDelegateAdapter: NSObject, TXTTextViewBridgeDelega
         // inside a synthetic run has no source-domain analogue — drop it
         // (zero-length range at the projected location) so the VM does
         // not try to highlight the translation block.
-        let sourceStart = segmentMap.sourceOffset(forDisplayOffset: utf16Range.startUTF16)
-        let sourceEnd = segmentMap.sourceOffset(forDisplayOffset: utf16Range.endUTF16)
-        let routed: UTF16Range
-        if let start = sourceStart, let end = sourceEnd {
-            routed = UTF16Range(startUTF16: start, endUTF16: end)
-        } else if let start = sourceStart {
-            // End fell into a synthetic run — collapse to a caret at start.
-            routed = UTF16Range(startUTF16: start, endUTF16: start)
-        } else {
-            // Start fell into a synthetic run — drop the selection.
+        guard let start = segmentMap.sourceOffset(forDisplayOffset: utf16Range.startUTF16) else {
+            // Start in synthetic — drop the selection.
             return
         }
+        // Codex Gate-4 L1: the *exclusive* selection end at
+        // `endUTF16` may legitimately land at a synthetic-block start
+        // (the position AFTER the last source character in the
+        // preceding source segment). `sourceOffset(forDisplayOffset:)`
+        // returns nil there because synthetic-segment offsets have no
+        // source position. Use end-boundary semantics: if the end is
+        // at `displayLength`, map to `sourceLength`; otherwise project
+        // back to the end of the most recent source segment so the
+        // selection preserves its end-point instead of collapsing.
+        let endSource = Self.routeSelectionEnd(
+            displayOffset: utf16Range.endUTF16, start: start, map: segmentMap
+        )
+        let routed = UTF16Range(startUTF16: start, endUTF16: endSource)
         wrapped?.selectionDidChange(utf16Range: routed)
+    }
+
+    /// Maps the *exclusive* end of a selection back to source. End at a
+    /// synthetic-segment boundary → end of preceding source segment.
+    /// End at `displayLength` → `sourceLength`. End inside a synthetic
+    /// → end of nearest preceding source segment.
+    static func routeSelectionEnd(
+        displayOffset: Int, start: Int, map: BilingualDisplaySegmentMap
+    ) -> Int {
+        // At displayLength (selection extends to the rendered text's
+        // end) — return sourceLength.
+        if displayOffset >= map.displayLength { return map.sourceLength }
+        // Interior point — try direct mapping.
+        if let source = map.sourceOffset(forDisplayOffset: displayOffset) {
+            return source
+        }
+        // Inside a synthetic — return the source upperBound of the
+        // most recent preceding `.source` segment (boundary semantics).
+        var lastSourceEnd = start
+        for segment in map.segments {
+            if case let .source(sourceRange, displayRange) = segment {
+                if displayRange.lowerBound >= displayOffset { break }
+                lastSourceEnd = sourceRange.upperBound
+            }
+        }
+        return lastSourceEnd
     }
 
     func scrollPositionDidChange(topCharOffsetUTF16: Int) {

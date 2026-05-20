@@ -51,6 +51,15 @@ extension TXTTextViewBridge {
         var suppressScrollCallbacks = false
         var lastScrollToTarget: Int?
 
+        /// Feature #56 WI-12b: source↔display offset map for the
+        /// bridge. Used by selection-action notifications
+        /// (`TXTBridgeShared.postSelectionNotification`) to map
+        /// display-domain UITextView ranges into source-domain
+        /// `TextSelectionInfo` payloads. Default identity (bilingual
+        /// off) is a byte-identical pass-through.
+        var bilingualSegmentMap: BilingualDisplaySegmentMap =
+            BilingualDisplaySegmentMap.identity(sourceLength: 0)
+
         init(delegate: TXTTextViewBridgeDelegate?, config: TXTViewConfig = TXTViewConfig()) {
             self.delegate = delegate
             self.lastConfig = config
@@ -351,7 +360,8 @@ extension TXTTextViewBridge {
                 TXTBridgeShared.postSelectionNotification(
                     .readerSelectionPopoverRequested,
                     from: textView,
-                    range: range
+                    range: range,
+                    bilingualSegmentMap: bilingualSegmentMap
                 )
             }
             return UIMenu(children: [])

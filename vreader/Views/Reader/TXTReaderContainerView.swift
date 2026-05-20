@@ -706,6 +706,14 @@ struct TXTReaderContainerView: View {
             guard let raw = uiState.scrollToOffset ?? scrollToOffset else { return nil }
             return BilingualOffsetRouter.displayOffset(forSourceOffset: raw, map: bilingualSegmentMap)
         }()
+        // Codex Gate-4 H1: restore-offset is a source-domain position —
+        // route through the segment map so a reopen lands on the
+        // display position of the saved source paragraph rather than
+        // jumping to the same numeric offset (which lands wrong when a
+        // synthetic translation block precedes the saved position).
+        let bilingualRestore: Int? = initialRestoreOffset.map {
+            BilingualOffsetRouter.displayOffset(forSourceOffset: $0, map: bilingualSegmentMap)
+        }
         let bilingualTemp = Self.routeNSRange(uiState.highlightRange, map: bilingualSegmentMap)
         let bilingualPersisted = Self.routePersisted(uiState.persistedHighlightRanges, map: bilingualSegmentMap)
         let bilingualLookup = Self.routeLookup(uiState.persistedHighlightLookup, map: bilingualSegmentMap)
@@ -727,7 +735,7 @@ struct TXTReaderContainerView: View {
                 text: text,
                 attributedText: attributedText,
                 config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
-                restoreOffset: initialRestoreOffset,
+                restoreOffset: bilingualRestore,
                 scrollToOffset: bilingualScroll,
                 highlightRange: bilingualTemp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
@@ -746,7 +754,14 @@ struct TXTReaderContainerView: View {
                 // adapter back to source domain so the VM persists
                 // positions in document source coordinates. Off-mode
                 // returns nil and the VM is used directly.
-                delegate: bilingualBridgeDelegate ?? viewModel
+                delegate: bilingualBridgeDelegate ?? viewModel,
+                // Codex Gate-4 H2: selection-action notifications
+                // (Highlight / Note / Define / Translate) need
+                // routing from display-domain to source-domain. The
+                // bridge threads this map into TXTBridgeShared so
+                // every posted `TextSelectionInfo` carries source-
+                // domain offsets even with bilingual on.
+                bilingualSegmentMap: bilingualSegmentMap
             )
         }
         .ignoresSafeArea(edges: .bottom)
@@ -791,6 +806,12 @@ struct TXTReaderContainerView: View {
         let bilingualScroll = localScrollOffset.map {
             BilingualOffsetRouter.displayOffset(forSourceOffset: $0, map: bilingualSegmentMap)
         }
+        // Codex Gate-4 H1: restore-offset is also a source-domain
+        // position — route it through the segment map so reopen lands
+        // on the right paragraph in display coordinates.
+        let bilingualRestore: Int? = initialRestoreOffset.map {
+            BilingualOffsetRouter.displayOffset(forSourceOffset: $0, map: bilingualSegmentMap)
+        }
         let bilingualTemp = Self.routeNSRange(highlights.temp, map: bilingualSegmentMap)
         let bilingualPersisted = Self.routePersisted(highlights.persisted, map: bilingualSegmentMap)
         let bilingualLookup = Self.routeLookup(chapterLookup, map: bilingualSegmentMap)
@@ -806,7 +827,7 @@ struct TXTReaderContainerView: View {
                 text: text,
                 attributedText: attributedText,
                 config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
-                restoreOffset: initialRestoreOffset,
+                restoreOffset: bilingualRestore,
                 scrollToOffset: bilingualScroll,
                 highlightRange: bilingualTemp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
@@ -823,7 +844,8 @@ struct TXTReaderContainerView: View {
                 // Feature #56 WI-12b: see readerContent — route the
                 // bridge's display-domain delegate calls through the
                 // adapter when bilingual is on.
-                delegate: bilingualBridgeDelegate ?? viewModel
+                delegate: bilingualBridgeDelegate ?? viewModel,
+                bilingualSegmentMap: bilingualSegmentMap
             )
         }
         .ignoresSafeArea(edges: .bottom)

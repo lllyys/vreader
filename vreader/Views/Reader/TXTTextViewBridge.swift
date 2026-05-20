@@ -71,6 +71,15 @@ struct TXTTextViewBridge: UIViewRepresentable {
     /// `proxy.safeAreaInsets.top`.
     var safeAreaTopInset: CGFloat = 0
     weak var delegate: TXTTextViewBridgeDelegate?
+    /// Feature #56 WI-12b: source↔display offset map for bilingual
+    /// interlinear rendering. The bridge threads this into
+    /// `TXTBridgeShared.postSelectionNotification` so selection-action
+    /// notifications (Highlight / Note / Define / Translate) carry
+    /// source-domain offsets even when the rendered text contains
+    /// synthetic translation runs. Default identity = byte-identical
+    /// pass-through.
+    var bilingualSegmentMap: BilingualDisplaySegmentMap =
+        BilingualDisplaySegmentMap.identity(sourceLength: 0)
 
     func makeUIView(context: Context) -> UITextView {
         let textView = HighlightableTextView()
@@ -116,6 +125,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         context.coordinator.lastAppliedText = text
         context.coordinator.lastAppliedAttrText = attributedText
+        // Feature #56 WI-12b: initialize the bilingual segment map on
+        // first-creation; updateUIView keeps it in sync afterwards.
+        context.coordinator.bilingualSegmentMap = bilingualSegmentMap
         // Set highlights first so drawBackground has correct ranges during initial layout.
         Self.applyHighlights(to: textView, coordinator: context.coordinator)
         applySourceText(to: textView, coordinator: context.coordinator)
@@ -161,6 +173,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
     func updateUIView(_ textView: UITextView, context: Context) {
         // Keep delegate reference in sync (SwiftUI may recreate the struct)
         context.coordinator.delegate = delegate
+        // Feature #56 WI-12b: sync the bilingual segment map so the
+        // coordinator's selection-notification helpers route through it.
+        context.coordinator.bilingualSegmentMap = bilingualSegmentMap
 
         // Detect changes to source text, config, or highlights
         let configChanged = !context.coordinator.lastConfig.renderingEquals(config)
