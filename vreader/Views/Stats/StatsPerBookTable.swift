@@ -230,9 +230,15 @@ struct StatsPerBookTable: View {
         let weeks = days / 7
         if weeks < 5 { return "\(weeks)w" }
 
-        let months = days / 30
-        if months < 12 { return "\(months)mo" }
-
+        // Year boundary keyed on actual days, NOT `months >= 12` —
+        // `days / 30` for the 360..364d range floors to 12 even though
+        // `days / 365` floors to 0, producing the spurious "0y" token
+        // Codex Gate-4 round-2 flagged. Gate the year branch on the
+        // raw day count instead, so 360..364d stays in the months
+        // bucket and only ≥365d emits a "Ny" token.
+        if days < 365 {
+            return "\(days / 30)mo"
+        }
         return "\(days / 365)y"
     }
 

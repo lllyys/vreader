@@ -141,20 +141,26 @@ struct StatsPerBookTableTests {
         // inside the function body avoids the Test-macro overload's
         // tuple-array type-checker timeout in Swift 6.
         let cases: [(TimeInterval, String)] = [
-            (0,                       "0m"),  // exactly now
-            (30,                      "0m"),  // < 1m floors
-            (60,                      "1m"),  // 1m boundary
-            (59 * 60,                 "59m"), // upper minute
-            (3_600,                   "1h"),  // 1h boundary
-            (2 * 3_600,               "2h"),  // design `2h` token
-            (23 * 3_600,              "23h"), // upper hour
-            (86_400,                  "1d"),  // 1d boundary (NOT "Yesterday")
-            (3 * 86_400,              "3d"),  // design `3d` token
-            (6 * 86_400,              "6d"),  // upper days bucket
-            (7 * 86_400,              "1w"),  // 1w boundary
-            (5 * 7 * 86_400,          "1mo"), // > 5w hops to months
-            (60 * 86_400,             "2mo"), // ~2mo
-            (365 * 86_400,            "1y"),  // 1y boundary
+            (0,                       "0m"),    // exactly now
+            (30,                      "0m"),    // < 1m floors
+            (60,                      "1m"),    // 1m boundary
+            (59 * 60,                 "59m"),   // upper minute
+            (3_600,                   "1h"),    // 1h boundary
+            (2 * 3_600,               "2h"),    // design `2h` token
+            (23 * 3_600,              "23h"),   // upper hour
+            (86_400,                  "1d"),    // 1d boundary (NOT "Yesterday")
+            (3 * 86_400,              "3d"),    // design `3d` token
+            (6 * 86_400,              "6d"),    // upper days bucket
+            (7 * 86_400,              "1w"),    // 1w boundary
+            (5 * 7 * 86_400,          "1mo"),   // > 5w hops to months
+            (60 * 86_400,             "2mo"),   // ~2mo
+            // Year-boundary regression guard (Codex Gate-4 round-2 finding):
+            // the 360..364d range used to spuriously return "0y" because the
+            // year branch was gated on `months >= 12` instead of `days >= 365`.
+            (359 * 86_400,            "11mo"),  // just below 1y stays in months
+            (360 * 86_400,            "12mo"),  // 360d → still months, NOT "0y"
+            (364 * 86_400,            "12mo"),  // 364d → still months, NOT "0y"
+            (365 * 86_400,            "1y"),    // 1y boundary
         ]
         for (elapsed, expected) in cases {
             let date = now.addingTimeInterval(-elapsed)
