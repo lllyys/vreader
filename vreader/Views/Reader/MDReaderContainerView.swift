@@ -104,7 +104,12 @@ struct MDReaderContainerView: View {
                         )
                         uiState.scrollToOffset = charOffset
                     },
-                    leadingLabel: ScrollProgressHelper.percentageLabel(uiState.readingProgress),
+                    // Bug #215 / GH #837 — design §3.2: in paged mode the
+                    // chrome's leading label is the single source of truth
+                    // for the page count; the content-bottom indicator only
+                    // appears when chrome is hidden. Scroll mode keeps the
+                    // legacy percentage label (no page concept).
+                    leadingLabel: pagedLeadingLabel(),
                     trailingLabel: viewModel.sessionTimeDisplay ?? ""
                 )
             }
@@ -344,26 +349,91 @@ struct MDReaderContainerView: View {
         attributedString: NSAttributedString,
         navigator: NativeTextPageNavigator
     ) -> some View {
-        VStack(spacing: 0) {
-            NativeTextPagedView(
-                navigator: navigator,
-                fullText: attributedString.string,
-                fullAttributedText: attributedString,
-                config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
-                currentPage: uiState.pagedCurrentPage,
-                pageTurnAnimation: settingsStore?.pageTurnAnimation ?? .none
-            )
+        // Bug #215 / GH #837 — design: dev-docs/designs/vreader-fidelity-v1/
+        // project/design-notes/reader-navigation.md §3.
+        //
+        // §3.1 chrome-aware content inset: the bottom-of-screen chrome
+        // (`ReaderBottomChrome`) is an opaque overlay, not a sibling sized
+        // to take real estate. Without an explicit bottom padding the paged
+        // page renders UNDER the chrome and the last 1–2 lines + the page
+        // indicator are occluded ("clipped mid-line" symptom). The padding
+        // is chrome-aware: when chrome is visible we reserve roughly the
+        // chrome's height + the design's 8pt breath above its hairline rule;
+        // when chrome is hidden we leave only 56pt (the design's "no
+        // duplicate indicator" baseline) so the page extends to the edge.
+        //
+        // §3.2 de-duplicated page indicator: when chrome is visible, the
+        // chrome's leading label already surfaces the page count — hide the
+        // content-bottom indicator to avoid duplicating it. When chrome is
+        // hidden, show the indicator at the page edge in compact "X / Y"
+        // form (the design's preferred chrome-hidden format).
+        //
+        // GeometryReader threads the measured `NativeTextPagedView` box
+        // through `updatePagination` so pagination matches the renderer's
+        // actual size (Cause 1 in the bug doc: `UIScreen.main.bounds.size`
+        // packed too many glyphs per page; mis-sized pages truncated
+        // mid-line).
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                NativeTextPagedView(
+                    navigator: navigator,
+                    fullText: attributedString.string,
+                    fullAttributedText: attributedString,
+                    config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
+                    currentPage: uiState.pagedCurrentPage,
+                    pageTurnAnimation: settingsStore?.pageTurnAnimation ?? .none,
+                    layout: settingsStore?.epubLayout
+                )
 
-            if navigator.totalPages > 0 {
-                Text("Page \(uiState.pagedCurrentPage + 1) of \(navigator.totalPages)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 4)
-                    .accessibilityIdentifier("mdPageIndicator")
+                if navigator.totalPages > 0 && !isChromeVisible {
+                    Text("\(uiState.pagedCurrentPage + 1) / \(navigator.totalPages)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .padding(.bottom, 4)
+                        .accessibilityIdentifier("mdPageIndicator")
+                }
+            }
+            .padding(.bottom, Self.pagedBottomPadding(chromeVisible: isChromeVisible))
+            .onAppear {
+                updatePaginationIfNeeded(viewportSize: proxy.size)
+            }
+            .onChange(of: proxy.size) { _, newSize in
+                updatePaginationIfNeeded(viewportSize: newSize)
             }
         }
-        .ignoresSafeArea(edges: .bottom)
         .accessibilityIdentifier("mdReaderPagedContent")
+    }
+
+    /// Bug #215 / GH #837 — design §3.2: in paged mode the chrome's leading
+    /// label is the single source of truth for the page count
+    /// ("Page X of Y"); scroll mode keeps the legacy percentage label.
+    /// Falls back to the percentage when paged mode is on but the navigator
+    /// hasn't paginated yet (zero total pages) — the chrome stays
+    /// informative across the first-render transition rather than showing
+    /// a spurious "Page 1 of 0".
+    private func pagedLeadingLabel() -> String {
+        if isPagedMode, let nav = uiState.pageNavigator, nav.totalPages > 0 {
+            return "Page \(uiState.pagedCurrentPage + 1) of \(nav.totalPages)"
+        }
+        return ScrollProgressHelper.percentageLabel(uiState.readingProgress)
+    }
+
+    /// Bug #215 design §3.1: chrome-aware content inset.
+    /// - chrome visible → reserve `chromeHeight + 8` (the design's breath
+    ///   above the chrome's hairline rule). `ReaderBottomChrome`'s actual
+    ///   measured height varies per device safe-area; the bug doc reported
+    ///   ≈128pt on iPhone 17 Pro Sim. We use 128 as a deterministic baseline
+    ///   matching the design's measurement and add the 8pt breath. On home-
+    ///   indicator devices the bottom safe-area inset already extends the
+    ///   chrome higher; the same `+8` breath still applies, so the constant
+    ///   stays correct across device classes.
+    /// - chrome hidden → 56pt (the design's baseline) so the page extends
+    ///   close to the edge with room for the compact page indicator.
+    ///
+    /// Extracted `static` so a unit test can lock the formula without
+    /// touching the view hierarchy.
+    static func pagedBottomPadding(chromeVisible: Bool) -> CGFloat {
+        chromeVisible ? 128 + 8 : 56
     }
 
     @ViewBuilder
@@ -419,14 +489,34 @@ struct MDReaderContainerView: View {
 
     // MARK: - Paged Mode Helpers (B08, B10)
 
-    private func updatePaginationIfNeeded() {
-        uiState.updatePagination(
-            isPagedMode: isPagedMode,
-            attributedText: viewModel.renderedAttributedString,
-            initialRestoreOffset: initialRestoreOffset,
-            autoPageTurnEnabled: settingsStore?.autoPageTurn ?? false,
-            autoPageTurnInterval: settingsStore?.autoPageTurnInterval ?? 5.0
-        )
+    /// Bug #215 / GH #837: optional `viewportSize` threads the measured
+    /// `NativeTextPagedView` box from the `pagedReaderContent`'s
+    /// `GeometryReader` into the paginator. Callers without a measured size
+    /// (the `.task` block at first appearance, or the `.onChange(of:
+    /// epubLayout / font)` handlers) fall through to the default
+    /// `UIScreen.main.bounds.size` — a re-paginate fires from
+    /// `pagedReaderContent`'s `.onAppear` / `.onChange(of: proxy.size)`
+    /// the moment the GeometryReader measures, so the wrong-size paginate
+    /// is corrected within the same render cycle.
+    private func updatePaginationIfNeeded(viewportSize: CGSize? = nil) {
+        if let viewportSize {
+            uiState.updatePagination(
+                isPagedMode: isPagedMode,
+                attributedText: viewModel.renderedAttributedString,
+                initialRestoreOffset: initialRestoreOffset,
+                autoPageTurnEnabled: settingsStore?.autoPageTurn ?? false,
+                autoPageTurnInterval: settingsStore?.autoPageTurnInterval ?? 5.0,
+                viewportSize: viewportSize
+            )
+        } else {
+            uiState.updatePagination(
+                isPagedMode: isPagedMode,
+                attributedText: viewModel.renderedAttributedString,
+                initialRestoreOffset: initialRestoreOffset,
+                autoPageTurnEnabled: settingsStore?.autoPageTurn ?? false,
+                autoPageTurnInterval: settingsStore?.autoPageTurnInterval ?? 5.0
+            )
+        }
         if let offset = uiState.syncPagedState() {
             viewModel.updateScrollPosition(charOffsetUTF16: offset)
         }

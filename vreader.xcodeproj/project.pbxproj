@@ -516,6 +516,7 @@
 		65FC6B2A5172850AB0B7CA42 /* EPUBBilingualPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD58B3560B70B8E874D669C /* EPUBBilingualPipeline.swift */; };
 		65FDF3DF582C0F5E67305EED /* ReaderSettingsPanelReadingModeGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83246694DE80F5760F85506E /* ReaderSettingsPanelReadingModeGateTests.swift */; };
 		66BF815FA62FF51C7C0053ED /* ReaderContainerView+DebugBridgeSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52B46A5F229515020166A545 /* ReaderContainerView+DebugBridgeSearch.swift */; };
+		66D2DC1C52A9CFA24FBB7E1F /* NativeTextPagedViewSideTapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7456EC54564FFE74772E88E8 /* NativeTextPagedViewSideTapTests.swift */; };
 		670518F7C3A801758FDD673F /* BookTranslationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD7224616391A07142BD1979 /* BookTranslationCoordinatorTests.swift */; };
 		671D7F1B0A003041831E308E /* WebDAVSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BA6B74EE0E50E049C9BAC5C /* WebDAVSettingsView.swift */; };
 		672412B314F93503C6EC7BF9 /* BookSourcePipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62A3435893128F15D5FF2CF /* BookSourcePipelineTests.swift */; };
@@ -1864,6 +1865,7 @@
 		73B902CC4D30A1A392CFA4EA /* Feature11EPUBHighlightVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feature11EPUBHighlightVerificationTests.swift; sourceTree = "<group>"; };
 		74260B9D22ACF57F72090F9A /* TXTChapterModeHighlightVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterModeHighlightVerificationTests.swift; sourceTree = "<group>"; };
 		744CB6180C0CE88E75E124F3 /* ImportErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportErrorTests.swift; sourceTree = "<group>"; };
+		7456EC54564FFE74772E88E8 /* NativeTextPagedViewSideTapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTextPagedViewSideTapTests.swift; sourceTree = "<group>"; };
 		746091C5D6814B751FAA32B0 /* LegadoBookSourceDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegadoBookSourceDTO.swift; sourceTree = "<group>"; };
 		74BC81AA927F17D2572106F6 /* BookFormatIsSupportedExtensionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFormatIsSupportedExtensionTests.swift; sourceTree = "<group>"; };
 		759C78EC56C473977FA14017 /* SearchResultGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultGrouping.swift; sourceTree = "<group>"; };
@@ -3046,6 +3048,7 @@
 				6AA1E6FB5ADF99CF8CEB51FF /* HighlightPopoverPresenterTests.swift */,
 				69ECDAED09428E0C1CD6A724 /* HighlightRendererTests.swift */,
 				D5CE4AD339F8C68B973D9C88 /* NativeTextPagedIntegrationTests.swift */,
+				7456EC54564FFE74772E88E8 /* NativeTextPagedViewSideTapTests.swift */,
 				295669F5B358B6C7BE41952E /* NativeTextPaginatorTests.swift */,
 				995F86ACEA8D1CC36B0BC1A7 /* PagedModeBug82Tests.swift */,
 				CB7EBD49DAE8D5F5BC4C7207 /* PageTurnAnimatorTests.swift */,
@@ -5254,6 +5257,7 @@
 				0E6D4F9EF1765D5808B9EEBC /* NSUKVSBridgeTests.swift in Sources */,
 				BE69CE7675864C497ACFC999 /* NamedHighlightColorTests.swift in Sources */,
 				036A7AA1F02D9219384C777A /* NativeTextPagedIntegrationTests.swift in Sources */,
+				66D2DC1C52A9CFA24FBB7E1F /* NativeTextPagedViewSideTapTests.swift in Sources */,
 				4C5F7C805D7702035CEA5837 /* NativeTextPaginatorTests.swift in Sources */,
 				32C58BAAF2DB529049921D4D /* OPDSParserTests.swift in Sources */,
 				CBF9C34C3E23A55FD82B726D /* PDFAnnotationBridgeTests.swift in Sources */,
