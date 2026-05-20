@@ -26,6 +26,19 @@ targets:
           - "Services/EPUB/FoliateJS/overlayer.js"
           - "Services/EPUB/FoliateJS/text-walker.js"
           - "Services/EPUB/FoliateJS/tts.js"
+          # Bug #235 / GH #983 (2026-05-20): the locally-pinned esbuild
+          # toolchain lives under Services/Foliate/JS/. Its manifest
+          # (`package.json` / `package-lock.json`) is BUILD-time-only,
+          # and `node_modules/` is a dev-machine cache. Excluding them
+          # prevents (a) `node_modules/esbuild/package.json` colliding
+          # with the manifest as a duplicate `package.json` resource,
+          # and (b) the manifest from leaking into the shipped app.
+          - "Services/Foliate/JS/package.json"
+          - "Services/Foliate/JS/package-lock.json"
+          - "Services/Foliate/JS/node_modules/**"
+          # build-bundle.sh is also a dev/build tool, not a runtime
+          # asset; keep it out of the app bundle.
+          - "Services/Foliate/JS/build-bundle.sh"
           # Bug #111: DebugFixtures must NOT ship in Release. xcodegen `excludes`
           # is not per-build-config, so we strip the directory from the source
           # phase entirely and re-inject it via a Debug-only Run Script below.

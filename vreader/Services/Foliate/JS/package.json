@@ -1,0 +1,11 @@
+{
+  "name": "vreader-foliate-bundle",
+  "private": true,
+  "description": "Local toolchain pin for foliate-bundle.js. The bundle is the only JS artifact vreader ships; esbuild is the only build dependency. Pinning here (rather than at repo root) keeps the JS toolchain scope-local. Run `npm ci` once in this directory, then `bash build-bundle.sh` to rebuild the bundle reproducibly.",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.0"
+  }
+}

@@ -556,7 +556,22 @@ export class Paginator extends HTMLElement {
         this.#footer = this.#root.getElementById('footer')
 
         this.#observer.observe(this.#container)
-        this.#container.addEventListener('scroll', () => this.dispatchEvent(new Event('scroll')))
+        this.#container.addEventListener('scroll', () => {
+            this.dispatchEvent(new Event('scroll'))
+            // Bug #235 (GH #983): in scrolled mode, native scroll alone
+            // cannot cross section boundaries because the paginator
+            // loads one section at a time. Drive the boundary advance
+            // from the IMMEDIATE scroll listener — not the 250ms
+            // debounced one below — so the user gets a continuous flow
+            // the moment a scroll fling reaches the edge, instead of
+            // waiting a quarter-second after the gesture has already
+            // stopped. The #turnPage path owns its own re-entrancy
+            // lock (#locked), so 60Hz scroll events here collapse to a
+            // single section transition.
+            if (this.scrolled && !this.#justAnchored) {
+                this.#maybeCrossSectionBoundary()
+            }
+        })
         this.#container.addEventListener('scroll', debounce(() => {
             if (this.scrolled) {
                 if (this.#justAnchored) this.#justAnchored = false
@@ -1068,6 +1083,57 @@ export class Paginator extends HTMLElement {
         })
         if (shouldGo || !this.hasAttribute('animated')) await wait(100)
         this.#locked = false
+    }
+    // Bug #235 (GH #983): cross-section continuity for scrolled mode.
+    // Native scrolling alone cannot leave the current section because
+    // each section is rendered into a single iframe-backed #view; the
+    // user hits the section edge and stops. Detect that edge DURING
+    // the live scroll (called from the immediate scroll listener that
+    // fires every native scroll event, ~60Hz under a fling) and feed
+    // the result through the same #turnPage() pipeline that programmatic
+    // next()/prev() uses — so the user gets a continuous reading flow
+    // without any new chrome and without the quarter-second lag a
+    // post-settle debounce would impose. The separate 250ms-debounced
+    // listener still owns relocate / anchor maintenance (it calls
+    // #afterScroll('scroll') so other observers see the new offset).
+    //
+    // Gates:
+    //   * scrolled mode only — paged mode already advances sections via
+    //     #scrollNext / #scrollPrev's page-bound exhaustion path.
+    //   * not locked — #turnPage owns the transition lock; firing here
+    //     while another transition is in flight would double-advance
+    //     and drop the user's position.
+    //   * #view exists — guards against firing during teardown.
+    //   * adjacent section exists in the same direction — guards
+    //     against scrolling past the first/last chapter.
+    //
+    // Re-entrancy under fling: the immediate listener fires per scroll
+    // event. The first time atEnd/atStart resolves true, we call
+    // #turnPage(±1), which sets #locked=true synchronously (before its
+    // first await). Subsequent same-fling scroll events then short-
+    // circuit on `#locked`. The new section's programmatic
+    // scrollToAnchor sets #justAnchored=true, which the immediate
+    // listener checks before invoking this helper, so the post-load
+    // landing scroll events do not re-trigger a cross-section advance.
+    //
+    // Boundary epsilons mirror upstream Foliate's own asymmetric
+    // thresholds so this helper does not fire one frame earlier than
+    // #scrollPrev / #scrollNext would on the same input:
+    //   atEnd matches #scrollNext's "viewSize - end > 2" (2px slack
+    //     for sub-pixel residual after animated scrollTo).
+    //   atStart matches #scrollPrev's "start > 0" (no slack — start
+    //     is clamped at 0 by native scroll).
+    #maybeCrossSectionBoundary() {
+        if (!this.scrolled) return
+        if (this.#locked) return
+        if (!this.#view) return
+        const atEnd = this.viewSize - this.end <= 2
+        const atStart = this.start <= 0
+        if (atEnd && this.#adjacentIndex(1) != null) {
+            this.#turnPage(1)
+        } else if (atStart && this.#adjacentIndex(-1) != null) {
+            this.#turnPage(-1)
+        }
     }
     prev(distance) {
         return this.#turnPage(-1, distance)
