@@ -74,6 +74,59 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 - `color` (`highlight`): one of `yellow` / `pink` / `green` / `blue` (the four `NamedHighlightColor` rawValues). Unknown or empty values rejected; omit the parameter to default to `yellow`.
 - Duplicate query keys throw `parse.invalidParam: <name>: duplicate parameter`.
 
+## Driving the bridge from a verification flow
+
+The bridge can be driven from two places. They are NOT interchangeable — pick the right one for the surface you control.
+
+### HOST-driven (primary, works) — the verify cron pattern
+
+Every verification driver under `dev-docs/verification/<feature-or-bug>/` invokes `xcrun simctl openurl` from a host-side bash script (outside any iOS sandbox). The simulator host receives the URL, the app routes it via `.onOpenURL`, and the bridge runs. The DebugBridge commands shipped 2026-05-20 (`search`, TXT/MD/EPUB `highlight`) all work via this path. This is the canonical pattern — use it for new verification flows.
+
+```bash
+# Resolve the booted simulator UDID (host-side; no sandbox in the way).
+SIM_ID=$(xcrun simctl list devices booted | awk '/Booted/ {print $(NF-1); exit}' | tr -d '()')
+
+# Drive the bridge from the host. The simulator's CoreSimulatorService
+# accepts the openurl XPC call and forwards it into the app.
+xcrun simctl openurl "$SIM_ID" "vreader-debug://highlight?start=40&end=1500"
+
+# Read assertion state back from the app container — also host-side.
+DATA=$(xcrun simctl get_app_container "$SIM_ID" com.vreader.app data)
+cat "$DATA/Library/Caches/DebugBridge/state.json"
+```
+
+### In-runner via `VerificationDebugBridgeHelper.openURL(...)` — DOES NOT WORK (bug #1054)
+
+Calling `xcrun simctl openurl` from **inside** an XCUITest binary (e.g. via `VerificationDebugBridgeHelper.openURL(...)`) exits 72 with stderr:
+
+```
+Failed to load CoreSimulatorService — running with a sandbox profile
+NSPOSIXErrorDomain code 61 ("Connection refused")
+```
+
+The XCUITest runner sandbox does not have a path to the host's `CoreSimulatorService` XPC endpoint, so the URL never reaches the simulator host and the app never sees it. This is **structural to the XCUITest sandbox** — it is not a vreader-specific bug and there is no flag to flip. The bridge URL handlers themselves work; they just cannot be reached from inside the runner.
+
+This bit the F#11 / F#64 verification XCUITest modernization (PR #1053, GH #1049) when the new `vreader-debug://highlight?...` command was assumed callable in-runner — see bug #240 / bug #242 in `docs/bugs.md`.
+
+### `XCTSkipUnless(bridgeReachable())` — the in-runner workaround (PR #1053)
+
+When an XCUITest needs to assert something the bridge produces but the bridge can't be reached from inside the runner, the runner probes reachability up front and skips with an explicit reason:
+
+```swift
+// Inside an XCUITest method that depends on a vreader-debug:// URL.
+let bridge = VerificationDebugBridgeHelper(app: app)
+try XCTSkipUnless(
+    bridge.bridgeReachable(),
+    "vreader-debug:// is unreachable from the XCUITest runner sandbox " +
+    "(NSPOSIX 61). HOST-driven verification covers this assertion via " +
+    "the bash driver in dev-docs/verification/..."
+)
+```
+
+This preserves the regression net that the XCUITest provides for any non-bridge-dependent gate (e.g. accessibility identifiers, layout, navigation) while letting the host-driven layer carry the bridge-dependent assertions.
+
+**Choosing between the two paths**: if the assertion needs CoreSimulator (open a URL, write to the app container), use the HOST-driven path. If it's a UI / AX / layout assertion, the XCUITest in-runner path is fine. If it's both, do the bridge driving from the host driver and let the XCUITest assert only on what's observable through XCUITest's own API.
+
 ## Output files
 
 All output lives in the app container at `Library/Caches/DebugBridge/`. Read from the host via:
