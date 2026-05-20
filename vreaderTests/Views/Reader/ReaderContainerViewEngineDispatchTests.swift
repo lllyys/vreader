@@ -146,7 +146,75 @@ struct ReaderContainerViewEngineDispatchTests {
         let source = try Self.loadSource("vreader/Views/Reader/ReaderContainerView.swift")
         #expect(
             source.contains("unsupportedFormatView"),
-            "`unsupportedFormatView` must move into ReaderContainerView.swift — `engineReaderView`'s unknown-format path still uses it."
+            "`unsupportedFormatView` must remain defined in ReaderContainerView.swift. Bug #246 removed the only caller (the `if let BookFormat(rawValue: book.format.lowercased())` guard) by routing the dispatch off `fingerprint.format` directly, but the helper is retained for future surfaces — deleting it should be a deliberate follow-up commit, not a side effect of an unrelated change."
+        )
+    }
+
+    // MARK: - Source-level guard: dispatch reads canonical fingerprint format
+
+    /// Bug #246 / GH #1072: `engineReaderView` accepts a `fingerprint`
+    /// parameter parsed from `book.fingerprintKey` — which is structurally
+    /// `"{format}:{sha}:{bytes}"`, so `fingerprint.format` is the authoritative
+    /// canonical format for this book. The dispatch must read that field,
+    /// NOT the parallel `book.format` String (a derived `@Model` field that
+    /// is only set at `Book.init` from `fingerprint.format.rawValue` and is
+    /// never resynced — so a SwiftData migration / direct-write / restore
+    /// drift can leave `book.format` stale while `book.fingerprintKey`
+    /// stays canonical). The fingerprint's already been parsed by `body`'s
+    /// `DocumentFingerprint(canonicalKey:)` guard at the call site, so the
+    /// only way to introduce drift is to ignore the parameter and re-derive
+    /// from `book.format`.
+    @Test func engineDispatchReadsCanonicalFingerprintFormat() throws {
+        let source = try Self.loadSource("vreader/Views/Reader/ReaderContainerView.swift")
+        guard let entry = source.range(of: "func engineReaderView") else {
+            Issue.record("`engineReaderView` declaration not found")
+            return
+        }
+        // Inspect the body of `engineReaderView` from its declaration to the
+        // start of the NEXT sibling declaration. Codex Gate-4 round-2 fix:
+        // an earlier version used a fixed `prefix(1500)` slice and missed
+        // bytes when the function grew past that bound — a regression in
+        // the function tail would slip through. Round-3 fix: anchor the
+        // bound markers to top-level declaration forms (leading newline +
+        // indentation) so an inline comment or string mentioning the
+        // sibling name inside `engineReaderView` cannot accidentally cut
+        // the bound short.
+        let afterDecl = source[entry.upperBound...]
+        let cutMarkers = [
+            "\n    // MARK: - Error / Unsupported Views",
+            "\n    var fingerprintErrorView",
+            "\n    func unsupportedFormatView"
+        ]
+        var cutIndex: String.Index? = nil
+        for marker in cutMarkers {
+            if let r = afterDecl.range(of: marker) {
+                if cutIndex == nil || r.lowerBound < cutIndex! { cutIndex = r.lowerBound }
+            }
+        }
+        guard let endIndex = cutIndex else {
+            Issue.record("Could not bound `engineReaderView`'s body — none of the expected sibling-declaration anchors found (looked for indented `// MARK: - Error / Unsupported Views`, `var fingerprintErrorView`, `func unsupportedFormatView`). If the file's layout changed, update the anchors above.")
+            return
+        }
+        let bodyText = String(afterDecl[..<endIndex])
+        // Positive: the dispatch must explicitly call
+        // `ReaderEngine.resolve(format: fingerprint.format)` — pinning the
+        // exact dispatch expression (Codex Gate-4 round-1 fix; per-substring
+        // checks were too loose to catch an equivalent reintroduction via
+        // a helper / temporary / different normalization).
+        #expect(
+            bodyText.contains("ReaderEngine.resolve(format: fingerprint.format)"),
+            "Bug #246: `engineReaderView` must dispatch via `ReaderEngine.resolve(format: fingerprint.format)` — the `fingerprint` parameter (parsed once from the canonical key) is the single source of truth for routing. Reading any derived String column would re-introduce the drift class the canonical-key dispatch was added to prevent."
+        )
+        // Negative: NO read of `book.format` in this function — not via
+        // `.lowercased()`, not via a local copy, not as `book.format` bare.
+        // Drift between `book.format` (a derived `@Model` column) and
+        // `book.fingerprintKey` (the canonical structural key) is the
+        // precise failure mode the canonical-key dispatch eliminates;
+        // banning the column read in the dispatch body keeps the bar high
+        // against partial regressions that route through a temporary.
+        #expect(
+            !bodyText.contains("book.format"),
+            "Bug #246: `engineReaderView` must NOT read `book.format` for the dispatch decision — `fingerprint.format` is already a typed `BookFormat`, and routing off the derived String column re-opens the drift class (stale column survives a SwiftData migration / restore / direct-write that leaves the canonical `fingerprintKey` correct)."
         )
     }
 
