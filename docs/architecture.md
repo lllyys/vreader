@@ -250,8 +250,8 @@ All cross-component communication uses NotificationCenter:
 | `.readerDefineRequested`       | `TextSelectionInfo`  | Bridge → Container (dictionary)                         |
 | `.readerTranslateRequested`    | `TextSelectionInfo`  | Bridge → Container (AI translate)                       |
 | `.searchHighlightClear`        | nil                  | SearchViewModel → Bridges                               |
-| `.readerPreviousPage`          | nil                  | TapZoneOverlay → Container                              |
-| `.readerNextPage`              | nil                  | TapZoneOverlay → Container                              |
+| `.readerPreviousPage`          | nil                  | `ReaderTapZoneRouter` (left-zone tap in `.paged` layout) → format container's `onReceive` consumer. Bug #239 / GH #988 restored this producer after feature #54 WI-3 unmounted the legacy `TapZoneOverlay` overlay; native bridges' tap recognizers / WKWebView JS handlers now route through the router. |
+| `.readerNextPage`              | nil                  | `ReaderTapZoneRouter` (right-zone tap in `.paged` layout) → format container's `onReceive` consumer. Mirror of `.readerPreviousPage`. Foliate (AZW3/MOBI) additionally observes on the spike coordinator and evaluates `readerAPI.next();` against the live WKWebView. |
 | `.readerOpenContents`          | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #62 — opens `TOCSheet` on the Contents tab) |
 | `.readerOpenNotes`             | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #62 — opens `HighlightsSheet` on the All filter) |
 | `.readerOpenDisplay`           | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens reader settings) |
