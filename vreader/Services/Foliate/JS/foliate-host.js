@@ -108,7 +108,12 @@ view.addEventListener('external-link', e => {
     })
 }
 
-// Content tap (for toolbar toggle)
+// Content tap (chrome toggle + bug #239 side-tap page-turn). The body now
+// carries the tap's x-coordinate in viewport pixels and the viewport width so
+// the Swift FoliateSpikeView coordinator can route through
+// `ReaderTapZoneRouter` for paged-mode side-tap → next/prev page. Synthetic
+// clicks that lack `clientX` post the empty body (`{}`) and fall through to the
+// chrome-toggle path.
 view.addEventListener('load', e => {
     const doc = e.detail.doc
     doc.addEventListener('click', event => {
@@ -117,7 +122,15 @@ view.addEventListener('load', e => {
         // Ignore if text is selected
         const sel = doc.getSelection()
         if (sel && !sel.isCollapsed) return
-        post('tap', {})
+        const x = (typeof event.clientX === 'number') ? event.clientX : null
+        const w = doc.documentElement?.clientWidth
+            || (doc.defaultView && doc.defaultView.innerWidth)
+            || 0
+        if (x === null || !isFinite(x) || w <= 0) {
+            post('tap', {})
+            return
+        }
+        post('tap', { x: x, w: w })
     })
 })
 

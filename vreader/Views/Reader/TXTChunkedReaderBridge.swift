@@ -82,6 +82,14 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     /// `restoreChunkIndex` instead and leaves this nil).
     var restoreGlobalOffset: Int?
 
+    /// Bug #239 — current reader layout preference. Threaded through to the
+    /// coordinator on each `makeUIView` / `updateUIView` so the content-tap
+    /// handler can route side-zone taps to `.readerNextPage` /
+    /// `.readerPreviousPage` in `.paged` layout. In `.scroll` (the chunked
+    /// renderer's natural mode) every tap collapses to
+    /// `.readerContentTapped` per the legacy chrome-toggle contract.
+    var layout: EPUBLayoutPreference?
+
     func makeCoordinator() -> Coordinator {
         Coordinator(delegate: delegate)
     }
@@ -152,6 +160,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
         context.coordinator.delegate = delegate
+        // Bug #239 — seed the layout snapshot so the very first tap honors
+        // the current paged/scroll mode.
+        context.coordinator.pagedLayout = layout
         // Bug #232 / GH #960: hand the coordinator a table-view handle so its
         // `.searchHighlightClear` observer can route the clear.
         context.coordinator.tableView = tableView
@@ -212,6 +223,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         // tap posts `.readerHighlightTapped` for the unified popover.
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
         context.coordinator.onTemporaryHighlightCleared = onTemporaryHighlightCleared
+        // Bug #239 — keep the layout snapshot current so a user toggling
+        // Paged ↔ Scroll mid-session re-routes the next tap immediately.
+        context.coordinator.pagedLayout = layout
         // Bug #232 / GH #960: keep the coordinator's table-view handle current
         // so the `.searchHighlightClear` observer always routes to the live
         // view.
@@ -373,6 +387,16 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         /// `makeUIView` / `updateUIView`. Weak — the table view owns the
         /// coordinator via `UIViewRepresentable.Context`, not vice versa.
         weak var tableView: UITableView?
+
+        /// Bug #239 — current layout preference, mirrored from the bridge's
+        /// `layout` parameter on every `updateUIView`. The chunked TXT
+        /// content-tap handler consults this via `ReaderTapZoneRouter` so a
+        /// side-tap in `.paged` layout posts `.readerNextPage` /
+        /// `.readerPreviousPage` instead of toggling chrome. In `.scroll`
+        /// (the chunked TXT renderer's default mode, since its surface is
+        /// inherently scroll-based) every tap collapses to
+        /// `.readerContentTapped` — preserving the chrome-toggle behavior.
+        var pagedLayout: EPUBLayoutPreference?
 
         /// Observation token for the `.searchHighlightClear` notification
         /// (bug #232 / GH #960). `nonisolated(unsafe)` so `deinit` (which is
@@ -554,7 +578,21 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
                 )
                 return
             }
-            TXTBridgeShared.postContentTappedNotification()
+            // Bug #239 — restore side-tap → page-turn for the chunked TXT
+            // surface. Mirrors `TXTTextViewBridgeCoordinator.handleContentTap`:
+            // in `.paged` layout the router posts `.readerNextPage` /
+            // `.readerPreviousPage`; in `.scroll` / nil it collapses to
+            // `.readerContentTapped` (the legacy chrome-toggle).
+            if let tableView = gesture.view as? UITableView {
+                let location = gesture.location(in: tableView)
+                ReaderTapZoneRouter.dispatch(
+                    x: location.x,
+                    totalWidth: tableView.bounds.width,
+                    layout: pagedLayout
+                )
+            } else {
+                TXTBridgeShared.postContentTappedNotification()
+            }
         }
 
         // MARK: - Tap-on-Highlight Resolution

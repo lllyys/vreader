@@ -81,6 +81,14 @@ struct TXTTextViewBridge: UIViewRepresentable {
     var bilingualSegmentMap: BilingualDisplaySegmentMap =
         BilingualDisplaySegmentMap.identity(sourceLength: 0)
 
+    /// Bug #239 — current reader layout preference. When `.paged`, side-zone
+    /// taps in the coordinator's tap recognizer route to
+    /// `.readerNextPage` / `.readerPreviousPage` via `ReaderTapZoneRouter`.
+    /// In `.scroll` (and the safe `nil` default, used by clients that have
+    /// not yet been threaded), every tap collapses to `.readerContentTapped`
+    /// — preserving the legacy chrome-toggle behavior.
+    var layout: EPUBLayoutPreference?
+
     func makeUIView(context: Context) -> UITextView {
         let textView = HighlightableTextView()
         textView.isEditable = false
@@ -128,6 +136,10 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // Feature #56 WI-12b: initialize the bilingual segment map on
         // first-creation; updateUIView keeps it in sync afterwards.
         context.coordinator.bilingualSegmentMap = bilingualSegmentMap
+        // Bug #239 — initialize the coordinator's layout snapshot so the
+        // very first tap honors the current paged/scroll mode without
+        // needing a SwiftUI update pass.
+        context.coordinator.pagedLayout = layout
         // Set highlights first so drawBackground has correct ranges during initial layout.
         Self.applyHighlights(to: textView, coordinator: context.coordinator)
         applySourceText(to: textView, coordinator: context.coordinator)
@@ -176,6 +188,11 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // Feature #56 WI-12b: sync the bilingual segment map so the
         // coordinator's selection-notification helpers route through it.
         context.coordinator.bilingualSegmentMap = bilingualSegmentMap
+        // Bug #239 — keep the coordinator's layout snapshot current so a
+        // user toggling Paged ↔ Scroll mid-session immediately changes the
+        // tap-routing behavior on the next tap (without rebuilding the
+        // recognizer).
+        context.coordinator.pagedLayout = layout
 
         // Detect changes to source text, config, or highlights
         let configChanged = !context.coordinator.lastConfig.renderingEquals(config)

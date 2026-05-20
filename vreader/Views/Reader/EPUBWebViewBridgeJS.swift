@@ -152,12 +152,27 @@ extension EPUBWebViewBridge {
 
     // MARK: - JavaScript
 
-    /// Content tap tracking — sends message on non-link clicks for toolbar toggle.
+    /// Content tap tracking — sends message on non-link clicks for toolbar
+    /// toggle / side-tap page-turn. Bug #239: the message body now carries the
+    /// tap's x-coordinate in viewport pixels and the viewport width so the
+    /// Swift coordinator can route through `ReaderTapZoneRouter` (the side-tap
+    /// → `.readerNextPage` / `.readerPreviousPage` producer restored after
+    /// feature #54 WI-3 deleted the legacy `TapZoneOverlay` mount).
+    /// `clientX` is in CSS pixels relative to the viewport, which the JS
+    /// also measures via `document.documentElement.clientWidth`. Falls back
+    /// to a bare `'tap'` (legacy chrome-toggle) if `clientX` is missing
+    /// (synthetic click events from a11y, for example).
     static let contentTapTrackingJS = """
     (function() {
         document.addEventListener('click', function(e) {
             if (e.target.closest('a')) return;
-            window.webkit.messageHandlers.contentTapHandler.postMessage('tap');
+            var x = (typeof e.clientX === 'number') ? e.clientX : null;
+            var w = document.documentElement.clientWidth || window.innerWidth || 0;
+            if (x === null || !isFinite(x) || w <= 0) {
+                window.webkit.messageHandlers.contentTapHandler.postMessage('tap');
+                return;
+            }
+            window.webkit.messageHandlers.contentTapHandler.postMessage({ x: x, w: w });
         }, false);
     })();
     """

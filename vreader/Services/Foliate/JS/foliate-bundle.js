@@ -6611,7 +6611,13 @@ ${doc.querySelector("parsererror").innerText}`);
       if (event.target.closest("a[href]")) return;
       const sel = doc.getSelection();
       if (sel && !sel.isCollapsed) return;
-      post("tap", {});
+      const x3 = typeof event.clientX === "number" ? event.clientX : null;
+      const w2 = doc.documentElement?.clientWidth || doc.defaultView && doc.defaultView.innerWidth || 0;
+      if (x3 === null || !isFinite(x3) || w2 <= 0) {
+        post("tap", {});
+        return;
+      }
+      post("tap", { x: x3, w: w2 });
     });
   });
   var bookReady = false;

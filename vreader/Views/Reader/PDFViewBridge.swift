@@ -50,6 +50,13 @@ struct PDFViewBridge: UIViewRepresentable {
     /// Feature #60 WI-11: migrated from the legacy `ReaderTheme`.
     var theme: ReaderThemeV2?
 
+    /// Bug #239 — current reader layout preference. When `.paged`, the tap
+    /// recognizer's `handleTap` routes side-zone taps to `.readerNextPage` /
+    /// `.readerPreviousPage` via `ReaderTapZoneRouter`. In `.scroll` /
+    /// the safe `nil` default (the PDF default mode), every tap collapses
+    /// to `.readerContentTapped` — the legacy chrome-toggle behavior.
+    var layout: EPUBLayoutPreference?
+
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
         pdfView.autoScales = true
@@ -71,6 +78,9 @@ struct PDFViewBridge: UIViewRepresentable {
         context.coordinator.pdfView = pdfView
         context.coordinator.viewModel = viewModel
         context.coordinator.highlightRenderer = highlightRenderer
+        // Bug #239 — seed the layout snapshot so the first tap honors the
+        // current paged/scroll mode.
+        context.coordinator.pagedLayout = layout
 
         // Tap gesture for toolbar toggle (bug #32 — same pattern as TXT #21).
         // Feature #64 WI-7: a tap that hits a persisted highlight annotation
@@ -121,6 +131,9 @@ struct PDFViewBridge: UIViewRepresentable {
         // by `PDFReaderContainerView` as `@State` and feeds the coordinator's
         // tap hit-test (`resolveHighlightTapEvent`).
         context.coordinator.highlightRenderer = highlightRenderer
+        // Bug #239 — keep the layout snapshot current so a user toggling
+        // Paged ↔ Scroll mid-session re-routes the next tap immediately.
+        context.coordinator.pagedLayout = layout
 
         // Handle password retry: if attempt ID changed, try unlocking
         if let password,
@@ -334,6 +347,15 @@ struct PDFViewBridge: UIViewRepresentable {
         /// a stale timer from clearing the wrong selection.
         var clearSearchWorkItem: DispatchWorkItem?
 
+        /// Bug #239 — current layout preference, mirrored from the bridge's
+        /// `layout` parameter on every `makeUIView` / `updateUIView`. The
+        /// PDF tap handler consults this via `ReaderTapZoneRouter` so a
+        /// side-tap in `.paged` layout posts `.readerNextPage` /
+        /// `.readerPreviousPage` instead of toggling chrome. In `.scroll`
+        /// (PDFKit's `.singlePageContinuous` default) every tap collapses
+        /// to `.readerContentTapped`.
+        var pagedLayout: EPUBLayoutPreference?
+
         @objc func pageDidChange(_ notification: Notification) {
             guard let pdfView,
                   let currentPage = pdfView.currentPage,
@@ -425,7 +447,21 @@ struct PDFViewBridge: UIViewRepresentable {
                 return
             }
 
-            NotificationCenter.default.post(name: .readerContentTapped, object: nil)
+            // Bug #239 — route the content-tap through the tap-zone router
+            // so side-zone taps in Paged layout fire `.readerNextPage` /
+            // `.readerPreviousPage` (the producer feature #54 WI-3 deleted).
+            // In Scroll layout (or nil), the router collapses to
+            // `.readerContentTapped` — the legacy chrome-toggle behavior.
+            if let pdfView {
+                let location = gesture.location(in: pdfView)
+                ReaderTapZoneRouter.dispatch(
+                    x: location.x,
+                    totalWidth: pdfView.bounds.width,
+                    layout: pagedLayout
+                )
+            } else {
+                NotificationCenter.default.post(name: .readerContentTapped, object: nil)
+            }
         }
 
         /// Resolves a point in `pdfView` coordinates to a `ReaderHighlightTapEvent`

@@ -130,7 +130,31 @@ extension EPUBWebViewBridge {
             didReceive message: WKScriptMessage
         ) {
             if message.name == "contentTapHandler" {
-                NotificationCenter.default.post(name: .readerContentTapped, object: nil)
+                // Bug #239 — the JS `contentTapTrackingJS` now sends either a
+                // bare `'tap'` (synthetic clicks without coordinates) or a
+                // `{x, w}` dict carrying the click's viewport-x and the
+                // viewport width. In paged layout, side-tap zones route to
+                // `.readerNextPage` / `.readerPreviousPage` via
+                // `ReaderTapZoneRouter`; in scroll layout (or when only the
+                // bare `'tap'` is available), the router collapses to
+                // `.readerContentTapped` — the legacy chrome-toggle.
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if let dict = message.body as? [String: Any],
+                       let x = (dict["x"] as? NSNumber)?.doubleValue,
+                       let w = (dict["w"] as? NSNumber)?.doubleValue,
+                       w > 0 {
+                        ReaderTapZoneRouter.dispatch(
+                            x: CGFloat(x),
+                            totalWidth: CGFloat(w),
+                            layout: self.isPaged ? .paged : .scroll
+                        )
+                    } else {
+                        NotificationCenter.default.post(
+                            name: .readerContentTapped, object: nil
+                        )
+                    }
+                }
                 return
             }
             if message.name == "selectionChanged" {

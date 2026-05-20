@@ -151,6 +151,15 @@ struct FoliateBilingualContainerView: View {
                   key == fingerprintKey else { return }
             handleRelocated(notification.userInfo)
         }
+        // Bug #239 — paged-mode side-tap → page-turn for AZW3/MOBI.
+        // `ReaderTapZoneRouter` (fed by the foliate-host.js content-tap
+        // handler in `FoliateSpikeView`) posts `.readerNextPage` /
+        // `.readerPreviousPage`. The spike's coordinator observes those
+        // notifications directly and evaluates `readerAPI.next()` /
+        // `readerAPI.prev()` against the live `WKWebView` (scoped by
+        // `fingerprintKey` so a second open reader can't steal the call).
+        // Observers live on the coordinator — no extra wiring is needed
+        // here in the container.
         .sheet(isPresented: $showBilingualSetupSheet) {
             BilingualSetupSheet(
                 theme: settingsStore?.theme ?? .paper,

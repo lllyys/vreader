@@ -393,7 +393,13 @@ struct MDReaderContainerView: View {
                     uiState.highlightRange = nil
                 },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
-                delegate: viewModel
+                delegate: viewModel,
+                // Bug #239 — gate side-tap → page-turn dispatch in the
+                // bridge's tap recognizer on the current paged/scroll layout.
+                // MD scroll mode collapses to chrome-toggle; MD paged mode
+                // (when wired) produces `.readerNextPage` /
+                // `.readerPreviousPage`.
+                layout: settingsStore?.epubLayout
             )
         }
         .ignoresSafeArea(edges: .bottom)
