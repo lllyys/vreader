@@ -220,13 +220,24 @@ final class BookFileMaterializer: Sendable {
     /// back to `.alreadyLocal` because no new bytes transferred — the
     /// caller's "imported / already had it" accounting still reads
     /// correctly.
+    ///
+    /// Bug #247: pass `entry.title` as the importer's titleOverride so a
+    /// dedupe-hit (existing row) or new insert here surfaces the manifest
+    /// title rather than the canonical sandbox filename
+    /// (`<sha>_<bytes>.<ext>`). For filename-derived-title formats
+    /// (TXT, MD, PDF with empty Title metadata) the manifest title is
+    /// the only place the original book name survives the round-trip.
     private func reimportLocalFile(
         entry: BackupLibraryEntry,
         at localURL: URL
     ) async -> MaterializeResult {
         let importResult: ImportResult
         do {
-            importResult = try await importer.importFile(at: localURL, source: .restore)
+            importResult = try await importer.importFile(
+                at: localURL,
+                source: .restore,
+                titleOverride: entry.title
+            )
         } catch let error as ImportError {
             return MaterializeResult(entry: entry, outcome: .importFailed("\(error)"))
         } catch {

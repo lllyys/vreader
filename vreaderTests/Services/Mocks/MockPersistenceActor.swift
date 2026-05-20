@@ -65,6 +65,35 @@ actor MockPersistenceActor: BookPersisting {
         books[key] = book
     }
 
+    /// Count of updateBookTitle calls.
+    private(set) var updateBookTitleCallCount = 0
+
+    /// If set, updateBookTitle will throw this error.
+    var updateBookTitleError: (any Error)?
+
+    func updateBookTitle(fingerprintKey key: String, title: String, author: String?) async throws {
+        updateBookTitleCallCount += 1
+        if let error = updateBookTitleError { throw error }
+        guard var book = books[key] else {
+            throw ImportError.bookNotFound(key)
+        }
+        book = BookRecord(
+            fingerprintKey: book.fingerprintKey,
+            title: title,
+            author: author ?? book.author,
+            coverImagePath: book.coverImagePath,
+            fingerprint: book.fingerprint,
+            provenance: book.provenance,
+            detectedEncoding: book.detectedEncoding,
+            addedAt: book.addedAt,
+            originalExtension: book.originalExtension,
+            lastOpenedAt: book.lastOpenedAt,
+            fileState: book.fileState,
+            blobPath: book.blobPath
+        )
+        books[key] = book
+    }
+
     // MARK: - Test Helpers
 
     /// Returns the stored book for the given key, if any.
@@ -77,9 +106,11 @@ actor MockPersistenceActor: BookPersisting {
         books = [:]
         insertCallCount = 0
         replaceProvenanceCallCount = 0
+        updateBookTitleCallCount = 0
         insertError = nil
         findError = nil
         replaceProvenanceError = nil
+        updateBookTitleError = nil
     }
 
     /// Directly seeds a book for testing duplicate detection.

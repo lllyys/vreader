@@ -62,9 +62,19 @@ struct BookFileImportFinalizer: Sendable {
 
         // Import via the production importer (re-extracts metadata,
         // saves cover, fires indexing notification, applies dedupe).
+        //
+        // Bug #247: pass `entry.title` as titleOverride so restored
+        // books carry the manifest title rather than the SHA-prefixed
+        // temp filename (`restore_<sha>.<ext>`). The temp file's name
+        // is content-addressed, not user-friendly; the manifest is
+        // the source of truth for the original book name.
         let importResult: ImportResult
         do {
-            importResult = try await importer.importFile(at: localTempURL, source: .restore)
+            importResult = try await importer.importFile(
+                at: localTempURL,
+                source: .restore,
+                titleOverride: entry.title
+            )
         } catch let importErr as ImportError {
             return MaterializeResult(entry: entry, outcome: .importFailed("\(importErr)"))
         } catch {

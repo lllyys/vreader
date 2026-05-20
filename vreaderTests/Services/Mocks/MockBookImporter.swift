@@ -12,6 +12,11 @@ actor MockBookImporter: BookImporting {
     /// Sources that were passed to importFile, in call order.
     private(set) var importedSources: [ImportSource] = []
 
+    /// Title overrides that were passed to importFile, in call order.
+    /// Bug #247 tests use this to assert restore paths thread the
+    /// manifest's `BackupLibraryEntry.title` through to the importer.
+    private(set) var importedTitleOverrides: [String?] = []
+
     /// Per-URL error overrides. If a URL is in this map, importFile throws the error.
     private var errorsByURL: [URL: any Error] = [:]
 
@@ -23,17 +28,20 @@ actor MockBookImporter: BookImporting {
 
     nonisolated func importFile(
         at fileURL: URL,
-        source: ImportSource
+        source: ImportSource,
+        titleOverride: String?
     ) async throws -> ImportResult {
-        try await _importFile(at: fileURL, source: source)
+        try await _importFile(at: fileURL, source: source, titleOverride: titleOverride)
     }
 
     private func _importFile(
         at fileURL: URL,
-        source: ImportSource
+        source: ImportSource,
+        titleOverride: String?
     ) async throws -> ImportResult {
         importedURLs.append(fileURL)
         importedSources.append(source)
+        importedTitleOverrides.append(titleOverride)
 
         if let error = errorsByURL[fileURL] {
             throw error
@@ -61,9 +69,20 @@ actor MockBookImporter: BookImporting {
             importedAt: Date(),
             originalURLBookmarkData: nil
         )
+        // Honor the override (trimmed/empty-as-nil) so tests asserting
+        // result.title see the override-or-filename behavior the real
+        // BookImporter exhibits.
+        let trimmedOverride = titleOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle: String
+        if let override = trimmedOverride, !override.isEmpty {
+            resolvedTitle = override
+        } else {
+            resolvedTitle = fileURL.deletingPathExtension().lastPathComponent
+        }
         return ImportResult(
             fingerprintKey: key,
-            title: fileURL.deletingPathExtension().lastPathComponent,
+            title: resolvedTitle,
             author: nil,
             fingerprint: fingerprint,
             provenance: provenance,
@@ -88,6 +107,7 @@ actor MockBookImporter: BookImporting {
     func reset() {
         importedURLs = []
         importedSources = []
+        importedTitleOverrides = []
         errorsByURL = [:]
         defaultError = nil
         fixedResult = nil

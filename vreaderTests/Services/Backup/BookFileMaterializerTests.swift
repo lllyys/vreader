@@ -353,6 +353,148 @@ struct BookFileMaterializerTests {
         #expect(leftover.isEmpty)
     }
 
+    // MARK: - Bug #247: WebDAV restore preserves book titles from manifest
+
+    /// TXT files have no embedded title metadata, so `TXTMetadataExtractor`
+    /// derives the title from the on-disk filename. The materializer writes
+    /// the downloaded blob to a temp file named `restore_<sha256>.txt`, so
+    /// without a title override the persisted Book ends up with title
+    /// `restore_<sha256-hex>` — the bug the user reported on 2026-05-20.
+    ///
+    /// Fix: pass `entry.title` from the manifest as a `titleOverride` to
+    /// `BookImporter.importFile(...)`, which uses it for the persisted
+    /// title when non-empty. Manifest-as-source-of-truth (matches the
+    /// invariant `BackupSectionDTOs.swift:258-262`'s doc-comment names).
+    @Test func materialize_txtWithManifestTitle_preservesOriginalTitle() async throws {
+        let (materializer, blobReader, persistence, _, _) = try await Self.makeRig()
+        // Plain UTF-8 TXT bytes. The actual title is in the manifest;
+        // the on-disk filename will be `restore_<sha256>.txt`.
+        let txtBytes = "Chapter 1. War and Peace.\n".data(using: .utf8)!
+        let sha = Self.sha256Hex(txtBytes)
+        let bytes = Int64(txtBytes.count)
+        let originalTitle = "war-and-peace"
+        let entry = BackupLibraryEntry(
+            fingerprintKey: "txt:\(sha):\(bytes)",
+            format: BookFormat.txt.rawValue,
+            sha256: sha,
+            byteCount: bytes,
+            originalExtension: "txt",
+            title: originalTitle,
+            author: "Tolstoy",
+            addedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastOpenedAt: nil,
+            blobPath: BlobPath.make(format: .txt, sha256: sha, byteCount: bytes)
+        )
+        await blobReader.setBlob(txtBytes, at: entry.blobPath)
+
+        let results = await materializer.materialize([entry]) { _ in }
+        #expect(results.count == 1)
+        #expect(results[0].isSuccess)
+
+        let stored = try await persistence.findBook(byFingerprintKey: entry.fingerprintKey)
+        #expect(stored != nil)
+        // Bug #247: pre-fix this would equal `restore_<sha256>` (the temp
+        // filename TXTMetadataExtractor derived from). Post-fix the
+        // manifest title wins.
+        #expect(stored?.title == originalTitle)
+    }
+
+    /// MD files share the filename-derived-title behavior with TXT (see
+    /// `MDMetadataExtractor`). Identical bug surface, identical fix.
+    @Test func materialize_mdWithManifestTitle_preservesOriginalTitle() async throws {
+        let (materializer, blobReader, persistence, _, _) = try await Self.makeRig()
+        let mdBytes = "# Heading\n\nbody.\n".data(using: .utf8)!
+        let sha = Self.sha256Hex(mdBytes)
+        let bytes = Int64(mdBytes.count)
+        let originalTitle = "design-notes"
+        let entry = BackupLibraryEntry(
+            fingerprintKey: "md:\(sha):\(bytes)",
+            format: BookFormat.md.rawValue,
+            sha256: sha,
+            byteCount: bytes,
+            originalExtension: "md",
+            title: originalTitle,
+            author: nil,
+            addedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastOpenedAt: nil,
+            blobPath: BlobPath.make(format: .md, sha256: sha, byteCount: bytes)
+        )
+        await blobReader.setBlob(mdBytes, at: entry.blobPath)
+
+        let results = await materializer.materialize([entry]) { _ in }
+        #expect(results.count == 1)
+        #expect(results[0].isSuccess)
+
+        let stored = try await persistence.findBook(byFingerprintKey: entry.fingerprintKey)
+        #expect(stored?.title == originalTitle)
+    }
+
+    /// When the manifest carries a nil title (older backups, edge case),
+    /// fall back to the extractor's filename-derived title. The fix must
+    /// not regress this path. The book is still restored; the user just
+    /// keeps the SHA-prefixed title until they manually rename.
+    @Test func materialize_nilManifestTitle_fallsBackToExtractedTitle() async throws {
+        let (materializer, blobReader, persistence, _, _) = try await Self.makeRig()
+        let txtBytes = "Some body.\n".data(using: .utf8)!
+        let sha = Self.sha256Hex(txtBytes)
+        let bytes = Int64(txtBytes.count)
+        let entry = BackupLibraryEntry(
+            fingerprintKey: "txt:\(sha):\(bytes)",
+            format: BookFormat.txt.rawValue,
+            sha256: sha,
+            byteCount: bytes,
+            originalExtension: "txt",
+            title: nil,  // Older manifest with no title — pre-bug-#247 backups.
+            author: nil,
+            addedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastOpenedAt: nil,
+            blobPath: BlobPath.make(format: .txt, sha256: sha, byteCount: bytes)
+        )
+        await blobReader.setBlob(txtBytes, at: entry.blobPath)
+
+        let results = await materializer.materialize([entry]) { _ in }
+        #expect(results.count == 1)
+        #expect(results[0].isSuccess)
+
+        let stored = try await persistence.findBook(byFingerprintKey: entry.fingerprintKey)
+        // Falls back to TXTMetadataExtractor's filename-derived title.
+        // The book is still restored; just with the SHA-prefixed title.
+        #expect(stored?.title.hasPrefix("restore_") == true)
+    }
+
+    /// Whitespace-only or empty manifest titles must not silently override
+    /// — that would produce a Book with title `""` and break library row
+    /// display. Treat empty/whitespace as nil for override purposes.
+    @Test func materialize_whitespaceOnlyManifestTitle_doesNotOverride() async throws {
+        let (materializer, blobReader, persistence, _, _) = try await Self.makeRig()
+        let txtBytes = "Hello.\n".data(using: .utf8)!
+        let sha = Self.sha256Hex(txtBytes)
+        let bytes = Int64(txtBytes.count)
+        let entry = BackupLibraryEntry(
+            fingerprintKey: "txt:\(sha):\(bytes)",
+            format: BookFormat.txt.rawValue,
+            sha256: sha,
+            byteCount: bytes,
+            originalExtension: "txt",
+            title: "   \n\t  ",  // Pathological whitespace-only manifest title.
+            author: nil,
+            addedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastOpenedAt: nil,
+            blobPath: BlobPath.make(format: .txt, sha256: sha, byteCount: bytes)
+        )
+        await blobReader.setBlob(txtBytes, at: entry.blobPath)
+
+        let results = await materializer.materialize([entry]) { _ in }
+        #expect(results.count == 1)
+        #expect(results[0].isSuccess)
+
+        let stored = try await persistence.findBook(byFingerprintKey: entry.fingerprintKey)
+        // Whitespace-only override is ignored; extractor's title wins.
+        // The persisted title is the SHA-prefixed temp filename — not "".
+        #expect(stored?.title.isEmpty == false)
+        #expect(stored?.title.hasPrefix("restore_") == true)
+    }
+
     // MARK: - Classify
 
     @Test func classify_partitionsCorrectly() async throws {
