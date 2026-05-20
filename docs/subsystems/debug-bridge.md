@@ -58,6 +58,7 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 | `snapshot` | `dest=<basename>`                  | —                                     | Build a `DebugSnapshot` and write it to `Caches/DebugBridge/<dest>`.                                                                                                |
 | `eval`     | `bridge=<basename>`, `js=<base64>` | —                                     | Run JS in the active reader's webview; write result/error to `Caches/DebugBridge/eval-<bridge>.json`.                                                               |
 | `tts`      | `action=start\|stop`               | —                                     | Drive `TTSService` from outside the play-button tap (Feature #45 WI-4c-b). XCUITest's gesture path cannot reliably activate `AVSpeechSynthesizer`'s audio session, so verification tests fire this URL after opening a book. No-op when no reader is presented. |
+| `search`   | `query=<str>`                      | `index=<int>`                         | Drive the in-reader search sheet (Bug #238). Opens the search sheet, sets `SearchViewModel.query` to `query`, and — when `index` (0-indexed, ≥0) is supplied — taps result N once results arrive (re-fires `.readerNavigateToLocator` then dismisses the sheet, mirroring the real-user tap path). Used by the verify harness to reproduce search-result-tap repros (e.g. Bug #182 cross-chapter EPUB search highlight) CU-free. No-op when no reader is presented. |
 
 ### Parameter validation
 
@@ -66,6 +67,8 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 - `mode`: literal `dark` or `light`. Anything else throws `parse.invalidParam: mode`.
 - `fontSize`: integer.
 - `js`: standard base64 of UTF-8 source.
+- `query` (`search`): non-empty UTF-8 string. Percent-encode CJK / spaces / etc. before passing — `URLComponents` decodes it back before the parser sees it.
+- `index` (`search`): non-negative integer; rejected if empty, non-integer, or negative. Without `index`, the URL runs the query and leaves the sheet open.
 - Duplicate query keys throw `parse.invalidParam: <name>: duplicate parameter`.
 
 ## Output files
