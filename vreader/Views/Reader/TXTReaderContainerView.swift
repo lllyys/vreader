@@ -88,6 +88,26 @@ struct TXTReaderContainerView: View {
     @State var showBilingualSetupSheet: Bool = false
     @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
 
+    /// Feature #56 WI-12b: the current chapter's bilingual display segment
+    /// map. Identity when bilingual is off (the rendered string IS the
+    /// source string); a non-identity interleaved map when bilingual is on
+    /// and the current unit has cached translations. Every TXT display-
+    /// offset touchpoint (highlight ranges, scroll-to-offset, selection)
+    /// routes through this map via `BilingualOffsetRouter`. Defaults to
+    /// identity-zero so an off-mode container still has a well-defined
+    /// map for routing.
+    @State var bilingualSegmentMap: BilingualDisplaySegmentMap =
+        BilingualDisplaySegmentMap.identity(sourceLength: 0)
+
+    /// Feature #56 WI-12b: holds the delegate adapter (when bilingual is
+    /// on with a non-identity segment map) that maps display offsets the
+    /// bridge reports back to source offsets before forwarding to the
+    /// VM. Held here so its lifetime tracks the bridge's; recreated when
+    /// `bilingualSegmentMap` changes. `nil` (and the VM is used
+    /// directly) when bilingual is effectively off — preserves the
+    /// byte-identical pass-through.
+    @State var bilingualBridgeDelegate: BilingualTXTBridgeDelegateAdapter?
+
     /// Whether the loaded text exceeds the large file threshold.
     private var isLargeFile: Bool {
         viewModel.totalTextLengthUTF16 > Self.largeFileThreshold
@@ -118,6 +138,9 @@ struct TXTReaderContainerView: View {
     /// Includes theme colors so theme changes trigger rebuild (bug #29).
     /// Includes currentChapterIdx so chapter navigation triggers rebuild (WI-6).
     /// Includes chineseConversion so conversion changes trigger rebuild (feature #28 WI-A).
+    /// Feature #56 WI-12b: includes bilingual on/off + the current unit's
+    /// translation-count nonce so a bilingual toggle or fresh translation
+    /// landing fires a rebuild of the chapter attrString.
     private var attrStringKey: String {
         let cfg = settingsStore?.txtViewConfig ?? TXTViewConfig()
         return Self.makeAttrStringKey(
@@ -128,8 +151,23 @@ struct TXTReaderContainerView: View {
             chCount: viewModel.totalChapterCount,
             config: cfg,
             chineseConversion: settingsStore?.chineseConversion ?? .none,
-            headingLineLength: viewModel.currentChapterHeadingLineLength
+            headingLineLength: viewModel.currentChapterHeadingLineLength,
+            bilingualNonce: bilingualNonce
         )
+    }
+
+    /// Feature #56 WI-12b: a string that changes when bilingual on/off
+    /// flips or the current unit's translation count changes. Drives the
+    /// `attrStringKey` rebuild so the chapter attrString re-renders the
+    /// moment a prefetch lands.
+    private var bilingualNonce: String {
+        guard let vm = bilingualViewModel, vm.isEnabled else { return "off" }
+        // Look up the unit by current chapter index — matches the TXT
+        // adapter's identity.
+        let unitValue = String(viewModel.currentChapterIdx)
+        let unit = TranslationUnitID(kind: .txtChapterIndex, value: unitValue)
+        let count = vm.translations(for: unit)?.count ?? 0
+        return "on-\(unitValue)-\(count)"
     }
 
     /// Extracted for testability (feature #28 WI-A). Internal so
@@ -148,13 +186,14 @@ struct TXTReaderContainerView: View {
         chCount: Int,
         config: TXTViewConfig,
         chineseConversion: ChineseConversionDirection,
-        headingLineLength: Int = 0
+        headingLineLength: Int = 0,
+        bilingualNonce: String = "off"
     ) -> String {
         let textColorHash = config.textColor.hash
         let bgColorHash = config.backgroundColor.hash
         let accentColorHash = config.accentColor.hash
         let headingColorHash = config.chapterHeadingColor.hash
-        return "\(hasText)-\(textLen)-\(wordCount)-ch\(chIdx)/\(chCount)-\(config.fontSize)-\(config.fontName ?? "sys")-\(config.lineSpacing)-\(config.letterSpacing)-\(textColorHash)-\(bgColorHash)-\(accentColorHash)-\(headingColorHash)-hl\(headingLineLength)-\(chineseConversion.rawValue)"
+        return "\(hasText)-\(textLen)-\(wordCount)-ch\(chIdx)/\(chCount)-\(config.fontSize)-\(config.fontName ?? "sys")-\(config.lineSpacing)-\(config.letterSpacing)-\(textColorHash)-\(bgColorHash)-\(accentColorHash)-\(headingColorHash)-hl\(headingLineLength)-\(chineseConversion.rawValue)-bi\(bilingualNonce)"
     }
 
     var body: some View {
@@ -363,6 +402,7 @@ struct TXTReaderContainerView: View {
                 // byte-identical, so offsets stay valid. `headingLineLength`
                 // is 0 for synthetic / "前言" chapters (drop-cap only).
                 let headingLineLength = viewModel.currentChapterHeadingLineLength
+                let typographedAttrString: NSAttributedString
                 if chapterText.utf16.count < 10_000 {
                     // Small chapter (<10KB UTF-16): build synchronously.
                     // SimpTradTransform is 1:1 UTF-16 for BMP CJK chars; offsetMap discarded —
@@ -370,7 +410,7 @@ struct TXTReaderContainerView: View {
                     let displayText = conversion != .none
                         ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
                         : chapterText
-                    chapterAttrString = TXTAttributedStringBuilder.buildChapterStart(
+                    typographedAttrString = TXTAttributedStringBuilder.buildChapterStart(
                         text: displayText, config: config,
                         headingLineLength: headingLineLength
                     )
@@ -385,8 +425,33 @@ struct TXTReaderContainerView: View {
                         )
                     }.value
                     guard !Task.isCancelled else { return }
-                    chapterAttrString = wrapped.value
+                    typographedAttrString = wrapped.value
                 }
+
+                // Feature #56 WI-12b: when bilingual is on for this
+                // chapter (the VM has cached translations for the unit),
+                // interleave synthetic translation runs into the
+                // typographed attrString. The composer preserves the
+                // source-paragraph typography on each run; the resulting
+                // segment map routes every TXT display-offset touchpoint
+                // back to source via `BilingualOffsetRouter`. Off-mode is
+                // a byte-identical identity pass-through (the renderer +
+                // composer both short-circuit), so this branch is
+                // transparent when bilingual is off.
+                let unit = TranslationUnitID(
+                    kind: .txtChapterIndex,
+                    value: String(viewModel.currentChapterIdx)
+                )
+                let composed = BilingualDisplayPipeline.compose(
+                    sourceAttributed: typographedAttrString,
+                    unit: unit,
+                    viewModel: bilingualViewModel
+                )
+                chapterAttrString = composed.attributedString
+                bilingualSegmentMap = composed.segmentMap
+                bilingualBridgeDelegate = Self.makeBilingualDelegateIfNeeded(
+                    map: composed.segmentMap, wrapping: viewModel
+                )
                 return
             }
 
@@ -429,7 +494,27 @@ struct TXTReaderContainerView: View {
                     return TXTAttributedStringBuilder.buildSendable(text: text, config: config)
                 }.value
                 guard !Task.isCancelled else { return }
-                preparedAttrString = wrapped.value
+                // Feature #56 WI-12b: legacy small-file path. The
+                // current-chapter unit is derived from the TXT VM's
+                // chapter index; an absent index yields a nil unit and
+                // the pipeline returns the identity pass-through.
+                let unit: TranslationUnitID? = {
+                    guard viewModel.chapterIndex != nil else { return nil }
+                    return TranslationUnitID(
+                        kind: .txtChapterIndex,
+                        value: String(viewModel.currentChapterIdx)
+                    )
+                }()
+                let composed = BilingualDisplayPipeline.compose(
+                    sourceAttributed: wrapped.value,
+                    unit: unit,
+                    viewModel: bilingualViewModel
+                )
+                preparedAttrString = composed.attributedString
+                bilingualSegmentMap = composed.segmentMap
+                bilingualBridgeDelegate = Self.makeBilingualDelegateIfNeeded(
+                    map: composed.segmentMap, wrapping: viewModel
+                )
             }
         }
         .onDisappear {
@@ -614,6 +699,16 @@ struct TXTReaderContainerView: View {
 
     @ViewBuilder
     private func readerContent(text: String, attributedText: NSAttributedString) -> some View {
+        // Feature #56 WI-12b: route source-domain offsets through the
+        // bilingual segment map for the legacy small-file path. Identity
+        // map (bilingual off) is a byte-identical pass-through.
+        let bilingualScroll: Int? = {
+            guard let raw = uiState.scrollToOffset ?? scrollToOffset else { return nil }
+            return BilingualOffsetRouter.displayOffset(forSourceOffset: raw, map: bilingualSegmentMap)
+        }()
+        let bilingualTemp = Self.routeNSRange(uiState.highlightRange, map: bilingualSegmentMap)
+        let bilingualPersisted = Self.routePersisted(uiState.persistedHighlightRanges, map: bilingualSegmentMap)
+        let bilingualLookup = Self.routeLookup(uiState.persistedHighlightLookup, map: bilingualSegmentMap)
         // Bug #179: the bridge sums a top safe-area inset into
         // `textContainerInset.top` so the first line clears the Dynamic Island
         // / status bar. The parent `ReaderContainerView` applies
@@ -633,12 +728,12 @@ struct TXTReaderContainerView: View {
                 attributedText: attributedText,
                 config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
                 restoreOffset: initialRestoreOffset,
-                scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
-                highlightRange: uiState.highlightRange,
+                scrollToOffset: bilingualScroll,
+                highlightRange: bilingualTemp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 highlightNonce: uiState.highlightNonce,
-                persistedHighlights: uiState.persistedHighlightRanges,
-                persistedHighlightLookup: uiState.persistedHighlightLookup,
+                persistedHighlights: bilingualPersisted,
+                persistedHighlightLookup: bilingualLookup,
                 onTemporaryHighlightCleared: { [uiState] in
                     // Bug #154 / GH #443 (Codex audit): the bridge expired the
                     // temporary search highlight — drop it from the model too
@@ -646,7 +741,12 @@ struct TXTReaderContainerView: View {
                     uiState.highlightRange = nil
                 },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
-                delegate: viewModel
+                // Feature #56 WI-12b: when bilingual is on, route the
+                // bridge's display-domain delegate calls through the
+                // adapter back to source domain so the VM persists
+                // positions in document source coordinates. Off-mode
+                // returns nil and the VM is used directly.
+                delegate: bilingualBridgeDelegate ?? viewModel
             )
         }
         .ignoresSafeArea(edges: .bottom)
@@ -684,6 +784,16 @@ struct TXTReaderContainerView: View {
             chapterIndex: viewModel.currentChapterIdx,
             chapters: chapters
         )
+        // Feature #56 WI-12b: route every source-domain offset through
+        // `BilingualOffsetRouter` so the bridge receives display-domain
+        // offsets when bilingual is on. Identity-map mode (bilingual off)
+        // is a byte-identical pass-through.
+        let bilingualScroll = localScrollOffset.map {
+            BilingualOffsetRouter.displayOffset(forSourceOffset: $0, map: bilingualSegmentMap)
+        }
+        let bilingualTemp = Self.routeNSRange(highlights.temp, map: bilingualSegmentMap)
+        let bilingualPersisted = Self.routePersisted(highlights.persisted, map: bilingualSegmentMap)
+        let bilingualLookup = Self.routeLookup(chapterLookup, map: bilingualSegmentMap)
         // Bug #179: see readerContent above. The chapter-nav rebuild path
         // (REOPENED scenario B) was a primary repro for this — when
         // `chapterAttrString = nil` swaps to `loadingView` then back to the
@@ -697,12 +807,12 @@ struct TXTReaderContainerView: View {
                 attributedText: attributedText,
                 config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
                 restoreOffset: initialRestoreOffset,
-                scrollToOffset: localScrollOffset,
-                highlightRange: highlights.temp,
+                scrollToOffset: bilingualScroll,
+                highlightRange: bilingualTemp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 highlightNonce: uiState.highlightNonce,
-                persistedHighlights: highlights.persisted,
-                persistedHighlightLookup: chapterLookup,
+                persistedHighlights: bilingualPersisted,
+                persistedHighlightLookup: bilingualLookup,
                 onTemporaryHighlightCleared: { [uiState] in
                     // Bug #154 / GH #443 (Codex audit): the bridge expired the
                     // temporary search highlight — drop it from the model too
@@ -710,12 +820,22 @@ struct TXTReaderContainerView: View {
                     uiState.highlightRange = nil
                 },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
-                delegate: viewModel
+                // Feature #56 WI-12b: see readerContent — route the
+                // bridge's display-domain delegate calls through the
+                // adapter when bilingual is on.
+                delegate: bilingualBridgeDelegate ?? viewModel
             )
         }
         .ignoresSafeArea(edges: .bottom)
         .accessibilityIdentifier("txtReaderChapterContent")
     }
+
+    // MARK: - Bilingual offset routing helpers (Feature #56 WI-12b)
+    //
+    // The router/adapter/delegate helpers live in
+    // `TXTReaderContainerView+Bilingual.swift` to keep this file under
+    // the file-size budget (rule 50 §9). See that file for the routing
+    // functions called by the bridge-config sites above.
 
     // MARK: - Legacy Subviews
 

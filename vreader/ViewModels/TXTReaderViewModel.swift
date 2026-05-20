@@ -114,7 +114,10 @@ final class TXTReaderViewModel {
     /// Text content of the current chapter (replaces full textContent for display).
     private(set) var currentChapterText: String?
     /// Content loader for on-demand chapter access.
-    private var chapterContentLoader: TXTChapterContentLoader?
+    /// Exposed (read-only) so the chapter-paged-mode bilingual host can
+    /// build a `TXTLoaderBackedChapterTextProvider` without holding the
+    /// full book text in memory (feature #56 WI-12b).
+    private(set) var chapterContentLoader: TXTChapterContentLoader?
 
     /// Whether the VM is in chapter-based mode (vs legacy full-text mode).
     var isChapterMode: Bool { chapterIndex != nil }

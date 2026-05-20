@@ -89,34 +89,39 @@ extension TXTReaderContainerView {
     ///
     /// Where each TXT-VM mode lives on this axis:
     ///
-    /// | mode | `textContent` content | safe to construct? |
+    /// | mode | `textContent` content | provider type |
     /// |---|---|---|
-    /// | continuous (`isContinuousMode == true`) | full book | yes |
-    /// | legacy small-file (`isChapterMode == false`) | full book | yes |
-    /// | chapter-paged (`isChapterMode == true && isContinuousMode == false`) | current chapter only | NO |
+    /// | continuous (`isContinuousMode == true`) | full book | full-book slicer |
+    /// | legacy small-file (`isChapterMode == false`) | full book | full-book slicer |
+    /// | chapter-paged (`isChapterMode == true && isContinuousMode == false`) | current chapter only | loader-backed (WI-12b) |
     ///
-    /// Chapter-paged mode is deliberately disabled for WI-12a; the
-    /// follow-up WI-12b introduces a loader-backed text provider
-    /// that reads chapter text on demand from
-    /// `TXTChapterContentLoader`, so the chapter-paged path will be
-    /// enabled then.
+    /// Chapter-paged mode was deliberately disabled for WI-12a; WI-12b
+    /// introduces `TXTLoaderBackedChapterTextProvider` so the chapter-
+    /// paged path uses `TXTChapterContentLoader` to read each chapter on
+    /// demand, independent of what the VM holds in `textContent`.
     ///
-    /// Codex Gate-4 round-1 finding [H2] + round-2 follow-up: a
-    /// prior version of this helper guarded only on `textContent !=
-    /// nil`, but the TXT VM sets `textContent = chapterText` on
-    /// chapter navigation in chapter-paged mode (lines 376 and 561
-    /// of `TXTReaderViewModel.swift`). Slicing document-global
-    /// offsets out of that chapter-local string would corrupt every
-    /// non-open chapter. The fix is the explicit mode check below.
+    /// Codex Gate-4 round-1 finding [H2] + round-2 follow-up: the prior
+    /// version guarded only on `textContent != nil`, but the TXT VM
+    /// sets `textContent = chapterText` on chapter navigation in
+    /// chapter-paged mode. Slicing document-global offsets out of that
+    /// chapter-local string would corrupt every non-open chapter. The
+    /// WI-12b fix routes chapter-paged mode through the loader.
     static func makeTextProvider(
         viewModel: TXTReaderViewModel
-    ) -> TXTChapterTextProvider? {
+    ) -> (any ChapterTextProviding)? {
         guard let index = viewModel.chapterIndex,
               !index.chapters.isEmpty else { return nil }
-        // Reject chapter-paged mode — `textContent` is chapter-local.
+        // Chapter-paged mode: use the loader-backed adapter — independent
+        // of `textContent`'s chapter-local state.
         if viewModel.isChapterMode && !viewModel.isContinuousMode {
-            return nil
+            guard let loader = viewModel.chapterContentLoader else { return nil }
+            return TXTLoaderBackedChapterTextProvider(
+                fingerprint: viewModel.bookFingerprint,
+                chapters: index.chapters,
+                loader: loader
+            )
         }
+        // Continuous + legacy paths: `textContent` IS the full book.
         guard let fullText = viewModel.textContent else { return nil }
         return TXTChapterTextProvider(
             fingerprint: viewModel.bookFingerprint,
@@ -207,6 +212,52 @@ extension TXTReaderContainerView {
         vm.dismissSetupSheet()
         vm.setEnabled(false)
         showBilingualSetupSheet = false
+    }
+
+    // MARK: - Offset routing helpers (Feature #56 WI-12b)
+
+    /// Routes an `NSRange` of source UTF-16 offsets through the segment
+    /// map. A nil input returns nil; an identity map returns the input
+    /// unchanged (byte-identical pass-through).
+    static func routeNSRange(_ source: NSRange?,
+                             map: BilingualDisplaySegmentMap) -> NSRange? {
+        guard let source else { return nil }
+        return BilingualOffsetRouter.displayNSRange(forSourceNSRange: source, map: map)
+    }
+
+    /// Routes a list of persisted highlight ranges from source to display.
+    static func routePersisted(_ source: [PaintedHighlight],
+                               map: BilingualDisplaySegmentMap) -> [PaintedHighlight] {
+        source.map { highlight in
+            let routed = BilingualOffsetRouter.displayNSRange(
+                forSourceNSRange: highlight.range, map: map
+            )
+            return PaintedHighlight(range: routed, colorName: highlight.colorName)
+        }
+    }
+
+    /// Routes the UUID-keyed highlight lookup entries from source to display.
+    static func routeLookup(_ lookup: [PersistedHighlightLookupEntry],
+                            map: BilingualDisplaySegmentMap) -> [PersistedHighlightLookupEntry] {
+        lookup.map { entry in
+            let routed = BilingualOffsetRouter.displayNSRange(
+                forSourceNSRange: entry.range, map: map
+            )
+            return PersistedHighlightLookupEntry(id: entry.id, range: routed)
+        }
+    }
+
+    /// Builds the bridge delegate adapter when the segment map is
+    /// non-identity (bilingual is on with a cached translation). For
+    /// identity maps, returns nil so the container passes the VM as
+    /// the delegate directly — preserves the byte-identical
+    /// pass-through.
+    static func makeBilingualDelegateIfNeeded(
+        map: BilingualDisplaySegmentMap,
+        wrapping vm: TXTReaderViewModel
+    ) -> BilingualTXTBridgeDelegateAdapter? {
+        guard map.sourceLength != map.displayLength else { return nil }
+        return BilingualTXTBridgeDelegateAdapter(wrapping: vm, segmentMap: map)
     }
 
     /// SwiftUI modifier bundling all bilingual reading event hooks.
