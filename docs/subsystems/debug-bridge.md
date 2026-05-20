@@ -286,7 +286,7 @@ Error reporting comes in two flavors:
 
 | File                 | Possible `error` values                                                                |
 | -------------------- | -------------------------------------------------------------------------------------- |
-| `ready-<token>.json` | `"settle timeout"` (with `phase: "unknown"`), `"no active reader"` (bug #125 — also with `phase: "unknown"`; probe-shaped fields `fingerprintKey`/`format`/`position` are absent on this path) |
+| `ready-<token>.json` | `"settle timeout"` (with `phase: "unknown"`), `"no active reader"` (bug #125 — also with `phase: "unknown"`; probe-shaped fields `fingerprintKey`/`format`/`position` are absent on this path), `"webview not registered"` (bug #250 — EPUB/AZW3 probe settled but format-specific WebView slot is empty or stale-token at the registry; downstream `eval` / `highlight-create` would fail) |
 | `eval-<bridge>.json` | `"no active reader"`, `"eval unsupported for format: <fmt>"`, raw JS error description |
 
 For `settle` specifically: the no-active-reader case is reported via the sentinel file (`error: "no active reader"`), NOT via `snapshot.lastError`. `settle` does not throw on this path, so the bridge's `lastError` stays clear. Verification harnesses must poll `ready-<token>.json` regardless of reader state.
