@@ -100,6 +100,26 @@ struct VerificationDebugBridgeHelper {
         send(url)
     }
 
+    /// Fire `vreader-debug://highlight?start=<int>&end=<int>[&color=<name>]`
+    /// to create a highlight over a UTF-16 range in the active reader,
+    /// bypassing the long-press + selection-popover gesture path that
+    /// XCUITest cannot synthesize on iOS 26. The active reader's
+    /// format-specific observer (TXT/MD: PR #1047, EPUB: PR for Bug #220 /
+    /// GH #845) translates the offsets into a format-correct `Locator` +
+    /// optional `AnnotationAnchor` and persists via `HighlightCoordinator`.
+    /// Fire-and-observe: caller waits for the Highlights tab to reflect
+    /// the new entry (the `highlightsEmptyState` element should disappear).
+    /// No-op when no reader is presented.
+    func highlight(start: Int, end: Int, color: String? = nil) {
+        guard let url = DebugCommand.highlightURL(start: start, end: end, color: color) else {
+            XCTFail(
+                "VerificationDebugBridgeHelper: could not construct highlight URL for start=\(start) end=\(end)"
+            )
+            return
+        }
+        send(url)
+    }
+
     /// Read the snapshot JSON written by `vreader-debug://snapshot?dest=<dest>`.
     /// Returns the parsed dictionary, or nil if the file is absent or malformed.
     func readSnapshot(dest: String) -> [String: Any]? {
@@ -148,6 +168,21 @@ struct VerificationDebugBridgeHelper {
             c.scheme = "vreader-debug"
             c.host = "tts"
             c.queryItems = [URLQueryItem(name: "action", value: action)]
+            return c.url
+        }
+
+        static func highlightURL(start: Int, end: Int, color: String?) -> URL? {
+            var c = URLComponents()
+            c.scheme = "vreader-debug"
+            c.host = "highlight"
+            var items = [
+                URLQueryItem(name: "start", value: String(start)),
+                URLQueryItem(name: "end", value: String(end)),
+            ]
+            if let color {
+                items.append(URLQueryItem(name: "color", value: color))
+            }
+            c.queryItems = items
             return c.url
         }
     }

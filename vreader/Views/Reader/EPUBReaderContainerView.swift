@@ -373,6 +373,16 @@ struct EPUBReaderContainerView: View {
         // dedicated `ViewModifier` to keep this body under the
         // compiler's type-inference budget.
         .modifier(bilingualSurfacesModifier)
+        // Bug #220 / GH #845 — DebugBridge highlight-driver observer.
+        // DEBUG-only; attached inside the EPUB host (not the generic
+        // `ReaderContainerView`) so the orchestration can JS-walk the
+        // active WebView to map UTF-16 offsets to a real DOM
+        // `EPUBSerializedRange`, then persist via the same
+        // `HighlightCoordinator.create(...)` entry the gesture path
+        // uses. Format scoping mirrors the TXT/MD observers in
+        // PR #1047 — Release builds replace the modifier with an
+        // `EmptyModifier` so no DebugBridge symbols leak.
+        .modifier(debugBridgeHighlightObserverModifier)
     }
 
     // MARK: - Subviews
