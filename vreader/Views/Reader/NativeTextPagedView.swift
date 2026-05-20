@@ -97,12 +97,34 @@ struct NativeTextPagedView: UIViewRepresentable {
 /// Container UIView that holds a UITextView and supports page turn animations.
 @MainActor
 final class NativePagedContainer: UIView {
+    /// Bug #215 / GH #837: per-side `textContainerInset` on the paged
+    /// `UITextView`. Exposed as a static constant so the MD container can
+    /// subtract `2 × textInset` from the measured GeometryReader proxy
+    /// before paginating — pagination must compute pages for the textView's
+    /// usable interior (proxy − textContainerInset on both axes), not the
+    /// raw container size. Without parity the paginator packs more glyphs
+    /// per page than the renderer can display, and the last 1–2 lines get
+    /// clipped (Cause 1 in the bug doc).
+    static let textInset: CGFloat = 16
+
     let textView: UITextView = {
         let tv = UITextView()
         tv.isEditable = false
         tv.isSelectable = true
         tv.isScrollEnabled = false
-        tv.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        tv.textContainerInset = UIEdgeInsets(
+            top: NativePagedContainer.textInset,
+            left: NativePagedContainer.textInset,
+            bottom: NativePagedContainer.textInset,
+            right: NativePagedContainer.textInset
+        )
+        // Bug #215 / GH #837: match NativeTextPaginator's
+        // `lineFragmentPadding = 0` (NativeTextPaginator.swift:102). Without
+        // this parity each rendered line costs an extra ~5pt of horizontal
+        // padding the paginator does not account for; long lines reflow
+        // differently between paginator and renderer, drifting page
+        // boundaries.
+        tv.textContainer.lineFragmentPadding = 0
         tv.translatesAutoresizingMaskIntoConstraints = false
         return tv
     }()

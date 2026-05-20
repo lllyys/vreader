@@ -395,13 +395,64 @@ struct MDReaderContainerView: View {
             }
             .padding(.bottom, Self.pagedBottomPadding(chromeVisible: isChromeVisible))
             .onAppear {
-                updatePaginationIfNeeded(viewportSize: proxy.size)
+                updatePaginationIfNeeded(
+                    viewportSize: Self.paginatorViewportSize(
+                        proxy: proxy.size, chromeVisible: isChromeVisible
+                    )
+                )
             }
             .onChange(of: proxy.size) { _, newSize in
-                updatePaginationIfNeeded(viewportSize: newSize)
+                updatePaginationIfNeeded(
+                    viewportSize: Self.paginatorViewportSize(
+                        proxy: newSize, chromeVisible: isChromeVisible
+                    )
+                )
+            }
+            // Codex audit Round-1 High #2: chrome toggle changes the
+            // textView's usable height (the VStack's `.padding(.bottom, …)`
+            // resolves to a different value, the indicator appears, etc.).
+            // Re-paginate when chrome visibility flips so the page
+            // boundaries stay in sync with what the renderer actually
+            // displays.
+            .onChange(of: isChromeVisible) { _, newValue in
+                updatePaginationIfNeeded(
+                    viewportSize: Self.paginatorViewportSize(
+                        proxy: proxy.size, chromeVisible: newValue
+                    )
+                )
             }
         }
         .accessibilityIdentifier("mdReaderPagedContent")
+    }
+
+    /// Bug #215 / GH #837 — Codex audit Round-1 High #1: computes the
+    /// EFFECTIVE per-page viewport for the paginator, accounting for the
+    /// VStack's chrome-aware bottom padding, the page indicator's reserved
+    /// height when chrome is hidden, and the paged textView's
+    /// `textContainerInset` (16pt all sides). The paginator's
+    /// `NSTextContainer` is sized to match the renderer's interior text
+    /// box — pages computed at this size land exactly inside the rendered
+    /// textView with no mid-line truncation.
+    ///
+    /// Extracted `static` so the formula is unit-testable and lockable.
+    /// Width: `proxy.width - 2 × textInset` (horizontal inset is unchanged
+    /// by chrome / indicator). Height: `proxy.height - bottomPadding -
+    /// indicatorReserved - 2 × textInset`. `indicatorReserved` is 24pt
+    /// when chrome is hidden (the indicator's font.caption text + 4pt
+    /// bottom padding, ≈20pt total, rounded to 24 for safety) and 0pt
+    /// when chrome is visible (the indicator is hidden by `if !isChromeVisible`).
+    /// Clamped to a positive minimum so the paginator never receives a
+    /// degenerate size.
+    static func paginatorViewportSize(
+        proxy: CGSize,
+        chromeVisible: Bool
+    ) -> CGSize {
+        let bottomPad = pagedBottomPadding(chromeVisible: chromeVisible)
+        let indicatorHeight: CGFloat = chromeVisible ? 0 : 24
+        let inset = NativePagedContainer.textInset
+        let width = max(proxy.width - 2 * inset, 1)
+        let height = max(proxy.height - bottomPad - indicatorHeight - 2 * inset, 1)
+        return CGSize(width: width, height: height)
     }
 
     /// Bug #215 / GH #837 — design §3.2: in paged mode the chrome's leading
