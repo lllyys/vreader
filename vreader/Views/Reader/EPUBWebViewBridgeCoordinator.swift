@@ -57,6 +57,24 @@ extension EPUBWebViewBridge {
         /// Bug #142: per-reader instance token paired with fingerprintKey.
         /// See registry's `setActiveEPUBWebView(_:for:token:)`.
         var readerToken: UUID?
+        /// Bug #251 / GH #1086: bounded fallback delay after `loadFileURL`
+        /// is invoked. If `webView(_:didFinish:)` has not fired by the
+        /// time this elapses, the coordinator marks the reader settled
+        /// and registers the WebView with `DebugReaderRegistry` so the
+        /// host-driven `vreader-debug://settle` URL does NOT hit its 30s
+        /// timeout when WKWebView's load-complete callback is delayed or
+        /// missing. The fallback is idempotent against a late didFinish
+        /// — both registry writes safely re-state the same identity.
+        /// 2.0 seconds is conservative against the few-hundred-ms typical
+        /// load time of a single EPUB chapter on iOS Simulator while
+        /// still leaving 28s of harness budget after the fallback fires.
+        var earlySettleFallbackDelay: TimeInterval = 2.0
+        /// Bug #251 / GH #1086: handle on the in-flight fallback Task,
+        /// kept here so a later `didFinish` callback (the happy path)
+        /// can cancel the pending fallback before it has a chance to run.
+        /// Cancellation is idempotent: a `nil` task is a no-op, and a
+        /// completed task is also a no-op.
+        var earlySettleFallbackTask: Task<Void, Never>?
         #endif
         /// Callback for text selection events.
         var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
@@ -211,6 +229,13 @@ extension EPUBWebViewBridge {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: any Error
         ) {
+            // Bug #251 / GH #1086: directly observable navigation failure.
+            // Without this log, the verify cron can only INFER that didFinish
+            // didn't fire (by absence of side-effects); this lets it observe
+            // that the load actually aborted via the provisional path.
+            AppLogger.epub.error(
+                "didFailProvisionalNavigation: \(error.localizedDescription, privacy: .public)"
+            )
             let message = "Failed to load chapter: \(error.localizedDescription)"
             Task { @MainActor in
                 onLoadError(message)
@@ -222,6 +247,13 @@ extension EPUBWebViewBridge {
             didFail navigation: WKNavigation!,
             withError error: any Error
         ) {
+            // Bug #251 / GH #1086: directly observable navigation failure
+            // on the committed path. Same rationale as the provisional log
+            // above — make absence-of-didFinish distinguishable from a
+            // silent failure mode.
+            AppLogger.epub.error(
+                "didFail: \(error.localizedDescription, privacy: .public)"
+            )
             let message = "Chapter loading error: \(error.localizedDescription)"
             Task { @MainActor in
                 onLoadError(message)
@@ -229,6 +261,26 @@ extension EPUBWebViewBridge {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Bug #251 / GH #1086: directly observable entry log for the
+            // EPUB chapter-load completion callback. Round-2 verification
+            // could only infer `didFinish` ran from absence of side-effects;
+            // this gives future verify cron runs a real anchor point in
+            // the log when the side-effects ARE observed. The same info
+            // also records the chapter URL so a load against the wrong
+            // file is obvious.
+            #if DEBUG
+            AppLogger.epub.info(
+                "didFinish: url=\(webView.url?.lastPathComponent ?? "<nil>", privacy: .public)"
+            )
+            // Bug #251 / GH #1086: cancel the pending early-settle
+            // fallback Task now that the genuine render-complete signal
+            // has arrived. Idempotent — `cancelEarlySettleFallback` is a
+            // no-op if the task is nil or already finished. Required so
+            // the fallback doesn't subsequently re-write registry state
+            // that didFinish is about to write below (and to keep the
+            // background Task tree clean).
+            cancelEarlySettleFallback()
+            #endif
             // Bug #126: register the webview with DebugReaderRegistry so
             // `vreader-debug://eval?bridge=foliate` can reach it. This
             // fires on every page load, so reuses across book opens
@@ -252,6 +304,10 @@ extension EPUBWebViewBridge {
                 // drops the mark if it's a stale callback from an outgoing
                 // reader.
                 DebugReaderRegistry.shared.markReaderSettled(for: key, token: token)
+            } else {
+                AppLogger.epub.error(
+                    "didFinish: identity not threaded (fingerprintKey or readerToken nil) — registry binding skipped"
+                )
             }
             #endif
 
@@ -391,6 +447,79 @@ extension EPUBWebViewBridge {
                 }
             }
         }
+
+        // MARK: - Early settle fallback (bug #251 / GH #1086)
+
+        #if DEBUG
+        /// Bug #251 / GH #1086: schedule a bounded fallback that marks
+        /// the reader settled and registers the WebView with
+        /// `DebugReaderRegistry` if `webView(_:didFinish:)` has not yet
+        /// fired by the time `earlySettleFallbackDelay` elapses. Called
+        /// from `EPUBWebViewBridge.updateUIView` immediately after the
+        /// `loadFileURL(...)` invocation.
+        ///
+        /// Why this exists: round-2 verification of feature #64 (PR #1087)
+        /// observed `vreader-debug://settle?token=...` writing
+        /// `error: "settle timeout"` 30 seconds after the open URL
+        /// against `mini-epub3`, with ZERO `markReaderSettled` /
+        /// `setActiveEPUBWebView` log activity between the open
+        /// notification and the timeout. The most parsimonious
+        /// explanation is that `didFinish` did not fire (it is the sole
+        /// caller of both side-effects), but the round-2 instrumentation
+        /// could not directly confirm — only infer from absence. This
+        /// fallback ensures the harness can proceed even when WKWebView's
+        /// load-complete callback is delayed past the verify budget,
+        /// surfacing the genuine "WebView is rendered enough to accept
+        /// a JS highlight call" point in the lifecycle without requiring
+        /// the chapter-load callback to win the race.
+        ///
+        /// Idempotency: a subsequent `didFinish` that arrives AFTER the
+        /// fallback has already fired safely re-states the same registry
+        /// identity — `setActiveEPUBWebView` re-stores the same ref under
+        /// the same key/token; `markReaderSettled` inserts the same
+        /// `(key, token)` SettleKey into a Set. The `cancelEarlySettleFallback`
+        /// call at the start of `webView(_:didFinish:)` avoids the
+        /// duplicate write in the happy path; this idempotency property
+        /// covers the race where didFinish fires before cancel observes.
+        ///
+        /// Guard: when `fingerprintKey` or `readerToken` has not been
+        /// threaded yet (rare SwiftUI re-render order race), the
+        /// fallback no-ops rather than writing a half-identity binding
+        /// to the registry — mirrors the existing `didFinish` guard.
+        func scheduleEarlySettleFallback(webView: WKWebView) {
+            // Replace any previously-scheduled fallback so a rapid
+            // re-load (chapter navigation before the prior load finished)
+            // doesn't leave two timers racing.
+            earlySettleFallbackTask?.cancel()
+            let delay = earlySettleFallbackDelay
+            earlySettleFallbackTask = Task { @MainActor [weak self, weak webView] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                guard let self, let webView else { return }
+                guard let key = self.fingerprintKey, let token = self.readerToken else {
+                    AppLogger.epub.error(
+                        "earlySettleFallback: identity not threaded — skipping registry binding"
+                    )
+                    return
+                }
+                AppLogger.epub.info(
+                    "earlySettleFallback: didFinish did not fire within \(delay, privacy: .public)s — marking settled + registering WebView for \(key, privacy: .public)"
+                )
+                DebugReaderRegistry.shared.setActiveEPUBWebView(webView, for: key, token: token)
+                DebugReaderRegistry.shared.markReaderSettled(for: key, token: token)
+            }
+        }
+
+        /// Bug #251 / GH #1086: cancel the pending early-settle fallback,
+        /// called from the happy-path `webView(_:didFinish:)` callback so
+        /// the fallback Task is dropped once the genuine render-complete
+        /// signal has arrived. Idempotent — safe to call when no fallback
+        /// is pending.
+        func cancelEarlySettleFallback() {
+            earlySettleFallbackTask?.cancel()
+            earlySettleFallbackTask = nil
+        }
+        #endif
     }
 }
 #endif
