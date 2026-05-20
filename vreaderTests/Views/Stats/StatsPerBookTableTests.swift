@@ -124,6 +124,73 @@ struct StatsPerBookTableTests {
         #expect(table.rowsForTesting.count == 2)
     }
 
+    // MARK: - Last-read compact-token formatter (Codex Gate-4 round-1 follow-up)
+
+    /// Nil dates always render as the empty-marker glyph "—".
+    @Test func lastReadCellNilRendersAsEmptyMarker() {
+        #expect(StatsPerBookTable.lastReadCellText(for: nil) == "—")
+    }
+
+    /// The Alt-1 column is borderline-narrow; the formatter must emit the
+    /// compact tokens pinned to `stats-followups-artboards.jsx`'s
+    /// `ROWS_WITH_LASTREAD` (2h / 1d / 3d / 5w / …), NOT the verbose
+    /// Library-row strings ("Just now", "Yesterday", "12m ago", …).
+    @Test func lastReadCellEmitsCompactTokens() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        // [(elapsed seconds, expected compact token)] — keeping the table
+        // inside the function body avoids the Test-macro overload's
+        // tuple-array type-checker timeout in Swift 6.
+        let cases: [(TimeInterval, String)] = [
+            (0,                       "0m"),  // exactly now
+            (30,                      "0m"),  // < 1m floors
+            (60,                      "1m"),  // 1m boundary
+            (59 * 60,                 "59m"), // upper minute
+            (3_600,                   "1h"),  // 1h boundary
+            (2 * 3_600,               "2h"),  // design `2h` token
+            (23 * 3_600,              "23h"), // upper hour
+            (86_400,                  "1d"),  // 1d boundary (NOT "Yesterday")
+            (3 * 86_400,              "3d"),  // design `3d` token
+            (6 * 86_400,              "6d"),  // upper days bucket
+            (7 * 86_400,              "1w"),  // 1w boundary
+            (5 * 7 * 86_400,          "1mo"), // > 5w hops to months
+            (60 * 86_400,             "2mo"), // ~2mo
+            (365 * 86_400,            "1y"),  // 1y boundary
+        ]
+        for (elapsed, expected) in cases {
+            let date = now.addingTimeInterval(-elapsed)
+            let token = StatsPerBookTable.lastReadCellText(for: date, relativeTo: now)
+            #expect(token == expected, "elapsed=\(elapsed) → expected \(expected), got \(token)")
+        }
+    }
+
+    /// A future timestamp (clock skew between the session write and the
+    /// render) renders as "0m", not a negative count.
+    @Test func lastReadCellHandlesFutureDateAsZero() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let future = now.addingTimeInterval(3_600) // an hour in the future
+        #expect(StatsPerBookTable.lastReadCellText(for: future, relativeTo: now) == "0m")
+    }
+
+    /// The cell must NOT emit Library-row verbose strings — explicit
+    /// regression guard against accidentally swapping back to
+    /// `ReadingTimeFormatter.formatRelativeLastRead`.
+    @Test func lastReadCellNeverEmitsLibraryVerboseStrings() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let cases: [TimeInterval] = [
+            30,                  // would be "Just now"
+            86_400,              // would be "Yesterday"
+            12 * 60,             // would be "12m ago"
+            5 * 86_400,          // would be "5d ago"
+        ]
+        for elapsed in cases {
+            let token = StatsPerBookTable.lastReadCellText(for: now.addingTimeInterval(-elapsed), relativeTo: now)
+            #expect(!token.contains(" "),
+                    "compact token should be space-free; got \(token) for elapsed=\(elapsed)")
+            #expect(!token.contains("ago"),
+                    "compact token should not contain 'ago'; got \(token) for elapsed=\(elapsed)")
+        }
+    }
+
     // MARK: - Sort header tap behaviour
 
     /// Tapping a header for an inactive column makes it active in `desc`

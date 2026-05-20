@@ -192,19 +192,48 @@ struct StatsPerBookTable: View {
             Text(Self.lastReadCellText(for: row.lastReadAt))
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(Color(row.lastReadAt == nil ? theme.subColor : theme.inkColor))
+                .lineLimit(1)
                 .frame(width: 52, alignment: .trailing)
                 .accessibilityIdentifier("statsPerBookLastRead-\(row.bookFingerprintKey)")
         }
         .accessibilityIdentifier("statsPerBookRow-\(row.bookFingerprintKey)")
     }
 
-    /// Cell text for the `Last read` column. `nil` renders as "—" (the
-    /// design's empty marker for books with no recorded sessions); a
-    /// real date uses `ReadingTimeFormatter.formatRelativeLastRead` so
-    /// the wording matches the Library list rows.
+    /// Compact cell text for the `Last read` column — pinned to the design's
+    /// Alt-1 `PerBookTableAllFive` row tokens (`stats-followups-artboards.jsx`,
+    /// `ROWS_WITH_LASTREAD`): `2h`, `1d`, `3d`, `5w`, `8mo`, `2y`. Nil renders
+    /// as the empty marker `—`.
+    ///
+    /// Distinct from `ReadingTimeFormatter.formatRelativeLastRead` (which
+    /// produces verbose Library-row strings like "Just now", "Yesterday",
+    /// "12m ago") because the Alt-1 column is borderline-narrow at 402pt and
+    /// breaks at sub-360pt widths (design note in `stats-followups-artboards.jsx`).
+    /// Bucket boundaries match the Library formatter exactly so the two
+    /// surfaces stay in sync; only the rendering is shortened.
     static func lastReadCellText(for date: Date?, relativeTo now: Date = Date()) -> String {
         guard let date else { return "—" }
-        return ReadingTimeFormatter.formatRelativeLastRead(from: date, relativeTo: now)
+        let elapsed = now.timeIntervalSince(date)
+        // A future timestamp (clock skew between the position write and the
+        // render) is the same case the Library formatter treats as "Just now";
+        // here we shorten it to "0m" so the cell always fits.
+        if elapsed < 60 { return "0m" }
+
+        let minutes = Int(elapsed / 60)
+        if minutes < 60 { return "\(minutes)m" }
+
+        let hours = Int(elapsed / 3_600)
+        if hours < 24 { return "\(hours)h" }
+
+        let days = Int(elapsed / 86_400)
+        if days < 7 { return "\(days)d" }
+
+        let weeks = days / 7
+        if weeks < 5 { return "\(weeks)w" }
+
+        let months = days / 30
+        if months < 12 { return "\(months)mo" }
+
+        return "\(days / 365)y"
     }
 
     // MARK: - Sort math
