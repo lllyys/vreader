@@ -96,25 +96,84 @@ final class GlobalAccessibilityAuditTests: XCTestCase {
         auditCurrentScreen(app: app)
     }
 
-    /// Accessibility audit on annotations panel.
+    /// Accessibility audit on the annotations sheets — feature #62 split
+    /// the unified panel into `TOCSheet` + `HighlightsSheet`, so this
+    /// audits both.
+    ///
+    /// Seeds `.epubFixture` (`mini-epub3.epub` — a real, openable EPUB):
+    /// the annotations sheets open from the reader bottom chrome, which
+    /// only renders once a book's content loads; the `.books` seed
+    /// (metadata-only fixtures, no backing file — Bug #209 / #214)
+    /// cannot reach the chrome.
     func testAnnotationsPanelAudit() {
-        app = launchApp(seed: .books)
+        app = launchApp(seed: .epubFixture)
 
-        guard navigateToFirstBook() else {
+        guard openSeededReaderBook() else {
             XCTFail("Could not navigate to reader")
             return
         }
 
-        // Open annotations panel
+        // Audit `TOCSheet` — opened by the Contents bottom-chrome button.
+        // The chrome auto-hides on load; a content tap reveals it.
+        let contentsButton = app.buttons[AccessibilityID.readerContentsButton]
+        if !contentsButton.waitForExistence(timeout: 3) { app.tap() }
+        XCTAssertTrue(contentsButton.waitForHittable(timeout: 10))
+        contentsButton.tap()
+        let tocSheet = app.otherElements[AccessibilityID.tocSheet]
+        XCTAssertTrue(tocSheet.waitForExistence(timeout: 5), "TOCSheet should appear")
+        // Exclusions for TOCSheet:
+        //  - `.elementDetection`: the `AnnotationsEmptyStateView` art is
+        //    a decorative SVG-path illustration whose stylized
+        //    "text-line" bars trip the audit's pixel text detector (the
+        //    issue is reported with `element == nil`; no real control
+        //    is missing a label).
+        //  - `.hitRegion`: TOCSheet's Contents/Bookmarks tabs are a
+        //    designed compact segmented control. Its segment height
+        //    mirrors the iOS-native `UISegmentedControl` idiom (which
+        //    is itself sub-44pt and flagged identically by this audit);
+        //    enlarging the segments would change the committed design
+        //    (rule 51). The `HighlightsSheet` audit below keeps
+        //    `.hitRegion` active. All other audit types still run.
+        auditCurrentScreen(app: app, excluding: [.elementDetection, .hitRegion])
+
+        // Dismiss, then audit `HighlightsSheet` — opened by the Notes button.
+        if app.buttons[AccessibilityID.sheetCloseButton].exists {
+            app.buttons[AccessibilityID.sheetCloseButton].tap()
+        } else {
+            app.swipeDown()
+        }
         let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
-        XCTAssertTrue(annotationsButton.waitForHittable(timeout: 3))
+        if !annotationsButton.waitForExistence(timeout: 3) { app.tap() }
+        XCTAssertTrue(annotationsButton.waitForHittable(timeout: 10))
         annotationsButton.tap()
+        let highlightsSheet = app.otherElements[AccessibilityID.highlightsSheet]
+        XCTAssertTrue(highlightsSheet.waitForExistence(timeout: 5), "HighlightsSheet should appear")
+        // `.elementDetection` excluded for the same decorative-art
+        // reason as the TOCSheet audit above.
+        auditCurrentScreen(app: app, excluding: .elementDetection)
+    }
 
-        let annotationsPanel = app.otherElements[AccessibilityID.annotationsPanelSheet]
-        XCTAssertTrue(annotationsPanel.waitForExistence(timeout: 5),
-                      "Annotations panel should appear")
+    /// Opens the seeded `.epubFixture` book into the reader, retrying the
+    /// card tap for the library `LazyVGrid` initial-layout race.
+    @discardableResult
+    private func openSeededReaderBook() -> Bool {
+        let card = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+        ).firstMatch
+        let row = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'bookRow_'")
+        ).firstMatch
+        let backButton = app.buttons[AccessibilityID.readerBackButton]
 
-        auditCurrentScreen(app: app)
+        for _ in 0..<3 {
+            if card.waitForExistence(timeout: 15) {
+                if card.waitForHittable(timeout: 8) || card.exists { card.tap() }
+            } else if row.waitForExistence(timeout: 3) {
+                if row.waitForHittable(timeout: 8) || row.exists { row.tap() }
+            }
+            if backButton.waitForExistence(timeout: 20) { return true }
+        }
+        return false
     }
 
     /// Accessibility audit on search sheet.

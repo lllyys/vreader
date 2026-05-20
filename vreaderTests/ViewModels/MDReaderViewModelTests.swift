@@ -96,6 +96,29 @@ struct MDReaderViewModelOpenTests {
         #expect(parser.parseCallCount == 1)
     }
 
+    // Feature #56 WI-12: expose parsed headings so the bilingual host
+    // can construct an `MDChapterTextProvider`.
+    @Test("open populates headings; close clears them")
+    func openPopulatesHeadingsAndCloseClears() async {
+        let (vm, _, _, _) = await makeViewModel()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "headings_test_\(UUID().uuidString).md"
+        )
+        try! testMDSource.data(using: .utf8)!.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(vm.headings == nil)  // before open
+
+        await vm.open(url: url)
+        #expect(vm.headings != nil)
+        #expect(vm.headings?.count == 1)
+        #expect(vm.headings?.first?.text == "Title")
+        #expect(vm.headings?.first?.level == 1)
+
+        await vm.close()
+        #expect(vm.headings == nil)
+    }
+
     @Test("open starts reading session")
     func openStartsSession() async {
         let (vm, _, _, sessionStore) = await makeViewModel()

@@ -259,3 +259,81 @@ struct ReadingTimeFormatterRelativeTests {
             from: ago(800 * 86_400), relativeTo: now) == "2y ago")
     }
 }
+
+// MARK: - formatDuration (feature #58 WI-3)
+
+@Suite("ReadingTimeFormatter.formatDuration")
+struct ReadingTimeFormatterDurationTests {
+
+    @Test(arguments: [
+        (0,      "0m"),    // zero
+        (1,      "0m"),    // sub-minute floors to 0m
+        (59,     "0m"),    // still sub-minute
+        (60,     "1m"),    // exactly one minute
+        (90,     "1m"),    // 1m30s floors to 1m
+        (3_599,  "59m"),   // one second short of an hour
+        (3_600,  "1h 0m"), // exactly one hour
+        (5_400,  "1h 30m"),// 1h30m
+        (7_200,  "2h 0m"), // two hours
+        (90_000, "25h 0m"),// > 24h — no day rollup
+        (149_400, "41h 30m"),
+    ])
+    func formatsKnownDurations(_ seconds: Int, _ expected: String) {
+        #expect(ReadingTimeFormatter.formatDuration(totalSeconds: seconds) == expected)
+    }
+
+    @Test func negativeSecondsFloorToZero() {
+        #expect(ReadingTimeFormatter.formatDuration(totalSeconds: -1) == "0m")
+        #expect(ReadingTimeFormatter.formatDuration(totalSeconds: -99_999) == "0m")
+    }
+
+    @Test func extremeValuesStayStable() {
+        // Int.max seconds: only clamp + integer division — no overflow.
+        // Int.max / 60 / 60 = 2562047788015215 hours, remainder 30 minutes.
+        #expect(ReadingTimeFormatter.formatDuration(totalSeconds: .max) == "2562047788015215h 30m")
+        // Int.min clamps to 0 before any arithmetic.
+        #expect(ReadingTimeFormatter.formatDuration(totalSeconds: .min) == "0m")
+    }
+
+    @Test func hasNoReadSuffix() {
+        // formatDuration is the bare-duration variant — unlike formatReadingTime
+        // it must NOT append " read".
+        let result = ReadingTimeFormatter.formatDuration(totalSeconds: 3_600)
+        #expect(!result.contains("read"))
+    }
+
+    // MARK: - formatCompactHours (feature #67 WI-1)
+
+    @Test func compactHoursZeroSecondsIsZeroH() {
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 0) == "0h")
+    }
+
+    @Test func compactHoursSubHourIsLessThanOneH() {
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 30) == "<1h")
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 3_599) == "<1h")
+    }
+
+    @Test func compactHoursExactlyOneHour() {
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 3_600) == "1h")
+    }
+
+    @Test func compactHoursRoundsDownPartialHour() {
+        // 1h30m → "1h" (whole hours only, floored).
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 5_400) == "1h")
+    }
+
+    @Test func compactHoursDesignValue() {
+        // 41h30m (the design's "41h read this month" subline value).
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: 149_400) == "41h")
+    }
+
+    @Test func compactHoursNegativeFloorsToZeroH() {
+        #expect(ReadingTimeFormatter.formatCompactHours(totalSeconds: -100) == "0h")
+    }
+
+    @Test func compactHoursHasNoReadSuffix() {
+        // The card's subline supplies "read this month" itself.
+        let result = ReadingTimeFormatter.formatCompactHours(totalSeconds: 7_200)
+        #expect(!result.contains("read"))
+    }
+}

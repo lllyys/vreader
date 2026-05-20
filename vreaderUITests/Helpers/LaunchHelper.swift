@@ -39,6 +39,19 @@ enum TestSeedState {
     /// verification tests. Bug #214 / GH #834: the `.books` EPUB fixtures
     /// are metadata-only (no backing file) and never open.
     case epubFixture
+    /// Single real, openable AZW3 book (`mini-azw3.azw3`) — for Foliate
+    /// reader verification tests (AZW3/MOBI). Bug #233 / GH #964: there was
+    /// no `TestSeedState` that opens a Foliate-rendered book from the
+    /// standard `launchApp(seed:)` path, which blocked CU-free verification
+    /// of feature #57 (AZW3/MOBI TTS pause/resume).
+    ///
+    /// `TestSeedState` is a single enum value, so a launch picks exactly
+    /// one seed. The underlying app-side seed flags are independent
+    /// booleans resolved by `else if` precedence in `VReaderApp`; if a test
+    /// bypasses this enum and passes both `--seed-epub-fixture` and
+    /// `--seed-azw3-fixture` via `extraLaunchArguments`, EPUB wins (it is
+    /// checked first). Use this enum case to seed AZW3 unambiguously.
+    case azw3Fixture
     /// Keep existing database state (no seeding). For relaunch tests.
     case keepExisting
     /// Corrupted database (triggers init error screen).
@@ -55,6 +68,7 @@ enum TestSeedState {
         case .mdMultiPage: return "--seed-md-multi-page"
         case .twoBooks: return "--seed-two-books"
         case .epubFixture: return "--seed-epub-fixture"
+        case .azw3Fixture: return "--seed-azw3-fixture"
         case .keepExisting: return "--uitesting-no-seed"
         case .corruptDB: return "--seed-corrupt-db"
         }

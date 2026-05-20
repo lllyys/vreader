@@ -1,16 +1,17 @@
-// Purpose: Feature #60 WI-6c — pins the reader More-menu popover's
-// row → action/notification routing contract. `ReaderMorePopover`
-// renders these rows declaratively and `ReaderContainerView` observes
-// the posted notifications; a swapped mapping would silently open the
-// wrong surface, so the contract is pinned here before any SwiftUI
-// render path runs.
+// Purpose: Feature #60 WI-6c / Feature #56 WI-8 — pins the reader
+// More-menu popover's row → action/notification routing contract.
+// `ReaderMorePopover` renders these rows declaratively and
+// `ReaderContainerView` observes the posted notifications; a swapped
+// mapping would silently open the wrong surface, so the contract is
+// pinned here before any SwiftUI render path runs.
 //
 // Design source:
 // `dev-docs/designs/vreader-fidelity-v1/project/vreader-more.jsx`
-// + `design-notes/reader-search-and-more-menu.md` §2. The design
-// depicts six rows; WI-6c ships five — the Bilingual row is deferred
-// (GH #790, no backing toggle state). These tests pin the shipped
-// five-row contract.
+// + `design-notes/reader-search-and-more-menu.md` §2
+// + `design-notes/feature-60-followups.md` §2.3 (bilingual row's
+//   3-way Off / On / Unavailable presentation reinstated in WI-8)
+// + `design-notes/needs-design-issues.md` §#864 (per-chapter
+//   re-translate row, conditional on `bilingualOn`).
 //
 // @coordinates-with: ReaderMoreMenuRow.swift, ReaderMorePopover.swift,
 //   ReaderNotifications.swift
@@ -19,55 +20,64 @@ import Testing
 import Foundation
 @testable import vreader
 
-@Suite("Feature #60 WI-6c — ReaderMoreMenuRow contract")
+@Suite("Feature #60 WI-6c / Feature #56 WI-8 — ReaderMoreMenuRow contract")
 struct ReaderMoreMenuRowTests {
 
     // MARK: - Cardinality + order
 
-    @Test("Menu has exactly 5 rows (design's 6 minus deferred Bilingual)")
+    @Test("Menu enumerates the seven design rows (Bilingual + Re-translate reinstated)")
     func rowCount() {
-        #expect(ReaderMoreMenuRow.allCases.count == 5)
+        // WI-8 reinstates the Bilingual row (formerly deferred under
+        // GH #790) and adds the conditional Re-translate row. The
+        // declared enum carries both as cases; `visibleRows` gates
+        // Re-translate on bilingual on/off.
+        #expect(ReaderMoreMenuRow.allCases.count == 7)
     }
 
-    @Test("Row order matches the design bundle (vreader-more.jsx)")
+    @Test("Row order matches the design bundle (vreader-more.jsx + feature-60-followups §2.3)")
     func rowOrder() {
-        // Mirrors `vreader-more.jsx` top → bottom minus the deferred
-        // Bilingual row (GH #790): Read aloud / Auto-turn pages /
-        // (divider) / Book details / Share book / Export annotations.
+        // Top → bottom: Read aloud / Auto-turn pages / Bilingual mode /
+        // Re-translate chapter (conditional) / (divider) / Book details /
+        // Share book / Export annotations.
         #expect(ReaderMoreMenuRow.allCases == [
-            .readAloud, .autoTurnPages,
+            .readAloud, .autoTurnPages, .bilingual, .reTranslateChapter,
             .bookDetails, .shareBook, .exportAnnotations,
         ])
     }
 
-    @Test("Bilingual mode is not a shipped row (deferred — GH #790)")
-    func bilingualRowAbsent() {
-        // The design's Bilingual row has no backing toggle state;
-        // shipping it would be self-designed UI (rule 51). Pin its
-        // absence so a future re-add is a deliberate, tested change.
-        #expect(!ReaderMoreMenuRow.allCases.contains { $0.rawValue == "bilingualMode" })
+    @Test("Bilingual mode IS a shipped row (WI-8 reinstates it — formerly GH #790)")
+    func bilingualRowShipped() {
+        // The WI-6c "deferred" note is gone — design §2.3 lands the
+        // 3-way TrailingControl that gives the row real backing state.
+        // Pin its presence + raw value so a future regression that
+        // removes the case is a deliberate, tested change.
+        #expect(ReaderMoreMenuRow.allCases.contains(.bilingual))
+        #expect(ReaderMoreMenuRow.bilingual.rawValue == "bilingual")
     }
 
     // MARK: - Divider placement
 
-    @Test("Divider sits after Auto-turn pages (before Book details)")
+    @Test("Static divider anchor is Bilingual mode")
     func dividerPlacement() {
-        // The design draws one hairline divider between the
-        // reading-controls cluster and the book-action cluster. In the
-        // design it follows Bilingual; with that row deferred it
-        // follows Auto-turn — still the cluster boundary.
-        #expect(ReaderMoreMenuRow.dividerAfter == .autoTurnPages)
+        // The static `dividerAfter` is the canonical cluster boundary
+        // when the conditional re-translate row is hidden. When the
+        // re-translate row is visible, the runtime anchor slides one
+        // row down — covered by `ReaderMoreMenuBilingualTests`.
+        #expect(ReaderMoreMenuRow.dividerAfter == .bilingual)
     }
 
     // MARK: - Toggle vs tap rows
 
-    @Test("Auto-turn pages is the only toggle row")
+    @Test("Auto-turn pages is the only row reporting isToggle=true")
     func toggleRowIdentity() {
-        // `vreader-more.jsx` draws a ToggleSwitch on Auto-turn. It has
-        // real backing state (`ReaderSettingsStore.autoPageTurn`).
-        // Pin: exactly one toggle row, and it's Auto-turn.
+        // The legacy `isToggle` boolean is preserved for backward
+        // compat. Only Auto-turn returns `true` — the bilingual row's
+        // 3-way presentation (off-toggle / on-toggle / no-toggle when
+        // AI unavailable) is queried via `trailingControl(_:)` instead.
         #expect(ReaderMoreMenuRow.autoTurnPages.isToggle)
         #expect(!ReaderMoreMenuRow.readAloud.isToggle)
+        #expect(!ReaderMoreMenuRow.bilingual.isToggle)
+        #expect(!ReaderMoreMenuRow.reTranslateChapter.isToggle)
         #expect(!ReaderMoreMenuRow.bookDetails.isToggle)
         #expect(!ReaderMoreMenuRow.shareBook.isToggle)
         #expect(!ReaderMoreMenuRow.exportAnnotations.isToggle)

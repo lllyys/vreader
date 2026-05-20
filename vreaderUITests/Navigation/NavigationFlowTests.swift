@@ -37,6 +37,48 @@ final class NavigationFlowTests: XCTestCase {
         }
     }
 
+    /// Relaunches with the `.epubFixture` seed and opens the seeded book
+    /// into the reader. Feature #62: the annotations sheets open from the
+    /// reader bottom chrome, which only renders once a book's content
+    /// loads — the class-default `.books` seed's fixtures are
+    /// metadata-only (no backing file, "The file could not be found",
+    /// Bug #209 / #214), so the reader never finishes loading and the
+    /// chrome's Notes button never becomes hittable. The card tap is
+    /// retried for the library `LazyVGrid` initial-layout race.
+    @discardableResult
+    private func openSeededReaderBook() -> Bool {
+        app.terminate()
+        app = launchApp(seed: .epubFixture)
+
+        let card = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'bookCard_'")
+        ).firstMatch
+        let row = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'bookRow_'")
+        ).firstMatch
+        let backButton = app.buttons[AccessibilityID.readerBackButton]
+
+        for _ in 0..<3 {
+            if card.waitForExistence(timeout: 15) {
+                if card.waitForHittable(timeout: 8) || card.exists { card.tap() }
+            } else if row.waitForExistence(timeout: 3) {
+                if row.waitForHittable(timeout: 8) || row.exists { row.tap() }
+            }
+            if backButton.waitForExistence(timeout: 20) { return true }
+        }
+        return false
+    }
+
+    /// Reveals the auto-hidden reader chrome (a content tap toggles it
+    /// on) and returns the bottom-chrome button for `id`.
+    private func chromeButton(_ id: String) -> XCUIElement {
+        let button = app.buttons[id]
+        if !button.waitForExistence(timeout: 3) {
+            app.tap()
+        }
+        return button
+    }
+
     // MARK: - Library to Reader and Back
 
     /// Tap book -> verify reader appears -> tap back -> verify library returns.
@@ -92,23 +134,23 @@ final class NavigationFlowTests: XCTestCase {
 
     /// Reader -> tap annotations -> verify panel -> switch tab -> dismiss -> verify reader.
     func testReaderAnnotationsRoundTrip() throws {
-        XCTAssertTrue(navigateToFirstBook(), "Should navigate to reader")
+        XCTAssertTrue(openSeededReaderBook(), "Should navigate to reader")
 
-        // Open annotations panel
-        let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
-        XCTAssertTrue(annotationsButton.waitForHittable(timeout: 3),
-                      "Annotations button should be hittable")
+        // Feature #62: the Notes bottom-chrome button opens `HighlightsSheet`.
+        let annotationsButton = chromeButton(AccessibilityID.readerAnnotationsButton)
+        XCTAssertTrue(annotationsButton.waitForHittable(timeout: 10),
+                      "Notes button should be hittable")
         annotationsButton.tap()
 
-        // Verify annotations panel appears
-        let annotationsPanel = app.otherElements[AccessibilityID.annotationsPanelSheet]
+        // Verify HighlightsSheet appears
+        let annotationsPanel = app.otherElements[AccessibilityID.highlightsSheet]
         XCTAssertTrue(annotationsPanel.waitForExistence(timeout: 5),
-                      "Annotations panel should appear")
+                      "HighlightsSheet should appear")
 
-        // Switch to a different tab (e.g., Highlights)
-        let highlightsTab = app.buttons["Highlights"]
-        if highlightsTab.waitForExistence(timeout: 3) {
-            highlightsTab.tap()
+        // Switch to a different filter (e.g., Highlights)
+        let highlightsFilter = app.buttons[AccessibilityID.highlightsSheetFilterHighlights]
+        if highlightsFilter.waitForExistence(timeout: 3) {
+            highlightsFilter.tap()
         }
 
         // Dismiss by swiping down
@@ -124,12 +166,14 @@ final class NavigationFlowTests: XCTestCase {
 
     /// Library -> book -> settings -> dismiss -> annotations -> dismiss -> back -> library.
     func testFullNavigationRoundTrip() throws {
-        // Step 1: Library -> Reader
-        XCTAssertTrue(navigateToFirstBook(), "Should navigate to reader")
+        // Step 1: Library -> Reader (`.epubFixture` — the annotations
+        // sheet in Step 4 needs a real, openable book; see
+        // `openSeededReaderBook`).
+        XCTAssertTrue(openSeededReaderBook(), "Should navigate to reader")
 
         // Step 2: Reader -> Settings sheet
-        let settingsButton = app.buttons[AccessibilityID.readerSettingsButton]
-        XCTAssertTrue(settingsButton.waitForHittable(timeout: 3))
+        let settingsButton = chromeButton(AccessibilityID.readerSettingsButton)
+        XCTAssertTrue(settingsButton.waitForHittable(timeout: 10))
         settingsButton.tap()
 
         let settingsPanel = app.otherElements[AccessibilityID.readerSettingsPanel]
@@ -139,15 +183,15 @@ final class NavigationFlowTests: XCTestCase {
         // Step 3: Dismiss settings
         settingsPanel.swipeDown()
 
-        // Step 4: Reader -> Annotations panel
-        let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
-        XCTAssertTrue(annotationsButton.waitForHittable(timeout: 5),
-                      "Annotations button should be hittable after settings dismiss")
+        // Step 4: Reader -> HighlightsSheet (the Notes bottom-chrome button)
+        let annotationsButton = chromeButton(AccessibilityID.readerAnnotationsButton)
+        XCTAssertTrue(annotationsButton.waitForHittable(timeout: 10),
+                      "Notes button should be hittable after settings dismiss")
         annotationsButton.tap()
 
-        let annotationsPanel = app.otherElements[AccessibilityID.annotationsPanelSheet]
+        let annotationsPanel = app.otherElements[AccessibilityID.highlightsSheet]
         XCTAssertTrue(annotationsPanel.waitForExistence(timeout: 5),
-                      "Annotations panel should appear")
+                      "HighlightsSheet should appear")
 
         // Step 5: Dismiss annotations
         annotationsPanel.swipeDown()

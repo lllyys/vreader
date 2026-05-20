@@ -33,6 +33,11 @@ final class MDReaderViewModel {
     /// Total rendered text length in UTF-16 code units.
     private(set) var renderedTextLengthUTF16: Int = 0
 
+    /// Feature #56 WI-12 — heading list from the parsed MD document.
+    /// Used by `MDChapterTextProvider` (bilingual) to derive chapter
+    /// boundaries. `nil` until open completes; cleared on close.
+    private(set) var headings: [MDHeading]?
+
     /// Current scroll position as UTF-16 char offset.
     private(set) var currentOffsetUTF16: Int = 0
 
@@ -192,6 +197,7 @@ final class MDReaderViewModel {
         renderedAttributedString = loadResult.documentInfo.renderedAttributedString
         #endif
         renderedTextLengthUTF16 = loadResult.documentInfo.renderedTextLengthUTF16
+        headings = loadResult.documentInfo.headings
         currentOffsetUTF16 = loadResult.restoredOffsetUTF16
 
         // PERFORMANCE: Show content immediately — session/lastOpened are non-blocking
@@ -274,6 +280,7 @@ final class MDReaderViewModel {
         renderedText = nil
         renderedAttributedString = nil
         renderedTextLengthUTF16 = 0
+        headings = nil
         currentOffsetUTF16 = 0
         isOpenComplete = false
     }

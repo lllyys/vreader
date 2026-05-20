@@ -201,6 +201,11 @@ struct AnnotationsSheetRouteTests {
     func nonExportMoreMenuEffectsYieldNil() {
         #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .toggleReadAloud) == nil)
         #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .toggleAutoPageTurn) == nil)
+        // Feature #56 WI-8: the bilingual and re-translate effects
+        // belong to the per-format containers, not the annotations
+        // sheet.
+        #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .toggleBilingual) == nil)
+        #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .presentReTranslatePicker) == nil)
         #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .presentBookDetails) == nil)
         #expect(AnnotationsSheetRoute.route(forMoreMenuEffect: .presentShareSheet) == nil)
     }

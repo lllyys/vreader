@@ -75,6 +75,112 @@ struct EPUBTextExtractor: SearchTextExtractor {
 
     // MARK: - HTML Stripping
 
+    /// Strips HTML tags while preserving block boundaries as blank lines.
+    /// Used by feature #56 bilingual reading — the DOM enumerate JS keys
+    /// translation units to block elements (`<p>` / `<li>` /
+    /// `<blockquote>` / etc.), and the translation service segments via
+    /// `ChapterSegmenter.paragraphs` (blank-line-separated). Without
+    /// preserved boundaries the two produce different counts and the
+    /// inject path mis-maps translations onto blocks (Codex Gate-4 audit
+    /// finding [1]). This variant emits `\n\n` after every block-level
+    /// closing tag so the segmenter recovers N paragraphs matching N
+    /// enumerated DOM blocks. Search indexing keeps using the
+    /// whitespace-collapsing `stripHTML(_:)` below — different consumer,
+    /// different boundary contract.
+    static func stripHTMLPreservingBlocks(_ html: String) -> String {
+        guard !html.isEmpty else { return "" }
+
+        var text = html
+
+        // Remove <script>...</script> and <style>...</style> with content.
+        text = text.replacingOccurrences(
+            of: "<script[^>]*>[\\s\\S]*?</script>",
+            with: "",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "<style[^>]*>[\\s\\S]*?</style>",
+            with: "",
+            options: .regularExpression
+        )
+
+        // Codex Gate-4 round-2 finding [R2-1] (revisited in round 3):
+        // headings are intentionally NOT removed from the source text.
+        // Removing them globally drops content nested inside an
+        // enumerated block (e.g. `<blockquote><h2>Title</h2><p>...</p></blockquote>`
+        // would lose `Title` from the translation while the
+        // enumerator's `textContent` still includes it — silent text
+        // loss in the rendered translation). Keeping headings means
+        // a top-level `<h1>Title</h1><p>Body</p>` produces a single
+        // segment `"Title Body"` matching the single `<p>` enumerator
+        // block (textContent = `Body`); the translated segment is
+        // slightly longer than what the renderer paints under but
+        // there is no content loss. This is a known minor
+        // misalignment (Codex Gate-4 round-3) that a follow-up WI
+        // can address by switching translation input to the
+        // enumerated block texts directly. The exact-match contract
+        // is met for the common shape (no top-level headings); the
+        // less-common with-heading shape is approximate but never
+        // loses translation content.
+
+        // Replace block-level closing tags with `\n\n` to preserve block
+        // boundaries. The set must MATCH `EPUBBilingualJS.bilingualEnumerateJS`'s
+        // BLOCK_TAGS EXACTLY — otherwise the source segmenter produces a
+        // count different from the DOM enumerator, and the inject path
+        // misaligns translations onto blocks (Codex Gate-4 round-2
+        // finding [R2-1]). Specifically: headings (h1..h6), structural
+        // wrappers (section, article, header, footer, nav, aside),
+        // table cells, and div are NOT in BLOCK_TAGS, so we MUST NOT
+        // emit `\n\n` for them here — their content collapses into the
+        // surrounding paragraph or is dropped, matching what the
+        // enumerator sees. Structural wrappers like `<section>` contain
+        // <p> blocks; the trailing `</section>` boundary is irrelevant
+        // because the contained `</p>` already terminated the segment.
+        text = text.replacingOccurrences(
+            of: "</(?:p|li|blockquote|pre|dd|dt)>",
+            with: "\n\n",
+            options: .regularExpression
+        )
+
+        // Replace <br> and <br/> with a single newline. A `<br>` is a soft
+        // wrap inside a paragraph, not a block boundary; the segmenter's
+        // `\n\n+` split treats one newline as intra-paragraph.
+        text = text.replacingOccurrences(
+            of: "<br\\s*/?>",
+            with: "\n",
+            options: .regularExpression
+        )
+
+        // Strip remaining tags.
+        text = text.replacingOccurrences(
+            of: "<[^>]+>",
+            with: "",
+            options: .regularExpression
+        )
+
+        // Decode HTML entities.
+        text = decodeHTMLEntities(text)
+
+        // Collapse runs of three or more blank lines into exactly two
+        // (one blank-line separator) so the segmenter does not produce
+        // empty-string entries between blocks. Single newlines inside a
+        // paragraph are preserved.
+        text = text.replacingOccurrences(
+            of: "\\n{3,}",
+            with: "\n\n",
+            options: .regularExpression
+        )
+
+        // Collapse runs of tabs / spaces inside a single line.
+        text = text.replacingOccurrences(
+            of: "[ \\t]+",
+            with: " ",
+            options: .regularExpression
+        )
+
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Strips HTML tags and extracts plain text for search indexing.
     /// Not a full HTML parser — uses regex patterns sufficient for FTS indexing.
     static func stripHTML(_ html: String) -> String {

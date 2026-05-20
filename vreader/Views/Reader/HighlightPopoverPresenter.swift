@@ -8,9 +8,11 @@
 // (`HighlightPopoverModifier`, `UIKitHighlightPopoverPresenter`) is added in
 // WI-4 / WI-5 and lives alongside this type.
 //
-// Logic lifted verbatim from feature #55's `NotePreviewPresenter` (the
-// callout-vs-sheet split is the same decision table) — `NotePreviewPresenter`
-// is deleted in WI-10. A parity test fences the equivalence until then.
+// The callout-vs-sheet decision table was lifted verbatim from feature #55's
+// `NotePreviewPresenter` when this type was introduced; a parity test fenced
+// the equivalence through the WI-6..9 migration. Feature #64 WI-10 deleted
+// `NotePreviewPresenter` (and the parity test with it) — this is now the
+// single presenter.
 //
 // Key decisions:
 // - `content(for:sourceRect:chapter:)` is the single place a

@@ -30,8 +30,8 @@
 //   header (sparkle avatar) so it omits the standard title bar, exactly
 //   as the design's `AISheet` does.
 //
-// @coordinates-with: ReaderSettingsPanel.swift, TOCListView.swift,
-//   HighlightListView.swift, AIReaderPanel.swift, SettingsView.swift,
+// @coordinates-with: ReaderSettingsPanel.swift, TOCSheet.swift,
+//   HighlightsSheet.swift, AIReaderPanel.swift, SettingsView.swift,
 //   ReaderThemeV2.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
 

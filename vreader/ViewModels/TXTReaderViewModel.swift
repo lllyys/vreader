@@ -588,21 +588,6 @@ final class TXTReaderViewModel {
         }
     }
 
-    /// Navigates to the chapter matching a TOC entry title.
-    /// Returns true if a match was found. (GH #30)
-    @discardableResult
-    func navigateToChapterByTitle(_ title: String) async -> Bool {
-        guard let chIdx = chapterIndex else { return false }
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let idx = chIdx.chapters.firstIndex(where: {
-            $0.title.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
-        }) {
-            await navigateToChapter(idx)
-            return true
-        }
-        return false
-    }
-
     /// Navigates to the chapter containing the given global UTF-16 offset.
     /// If globalStartUTF16 is populated, uses exact match.
     /// Otherwise estimates chapter from byte-position ratio. (GH #30)
@@ -637,6 +622,25 @@ final class TXTReaderViewModel {
                 }
             }
             await navigateToChapter(targetIndex)
+        }
+    }
+
+    /// Navigates the reader in response to a Contents / TOC entry tap,
+    /// identified by the tapped entry's document-global UTF-16 `offset`.
+    ///
+    /// Bug #234: the chapter-mode (Paged) TOC tap previously resolved the
+    /// target chapter by matching the tapped entry's *title* string (the
+    /// removed `navigateToChapterByTitle`). Its `firstIndex(where: title ==)`
+    /// returned the *first* chapter sharing that title, so duplicate or
+    /// empty chapter titles — common in real TXT books — navigated to the
+    /// wrong chapter, and any title drift produced a silent no-op. A TOC
+    /// entry's global UTF-16 offset is unique per chapter, so resolving by
+    /// offset (`navigateToGlobalOffset`) is unambiguous.
+    func navigateToTOCTap(globalOffsetUTF16 offset: Int) async {
+        if chapterIndex != nil {
+            await navigateToGlobalOffset(offset)
+        } else {
+            updateScrollPosition(charOffsetUTF16: offset)
         }
     }
 

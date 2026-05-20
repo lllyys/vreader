@@ -100,6 +100,13 @@ final class BackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
         try await persistence.upsertBackupReplacementRules(envelope.rules)
     }
 
+    func restoreReadingHistory(from data: Data) async throws {
+        let envelope = try decodeAndValidate(
+            BackupReadingHistoryEnvelope.self, from: data, section: "reading-history"
+        )
+        try await persistence.restoreReadingHistory(envelope)
+    }
+
     // MARK: - Helpers
 
     private func decodeAndValidate<T: Decodable & BackupVersionedEnvelope>(
@@ -108,11 +115,13 @@ final class BackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(type, from: data)
-        // Only schema v1 exists today, so require an exact match. When v2
-        // ships, this becomes a switch + per-version migration; accepting
-        // anything `<= current` would silently pass v0 archives without the
-        // migrations they need.
-        guard envelope.schemaVersion == kBackupCurrentSchemaVersion else {
+        // Validate against the explicit accepted SET, not the single "current"
+        // constant: the v1↔v2 envelope shapes for the pre-v2 sections are
+        // identical (no field migration), so a v1 archive must still restore
+        // after the v2 bump. A genuinely-newer archive (v3+) is absent from the
+        // set and still throws — accepting anything `<= current` would silently
+        // pass a too-new archive without the handling it needs.
+        guard kBackupAcceptedSchemaVersions.contains(envelope.schemaVersion) else {
             throw BackupRestoreError.unsupportedSchemaVersion(
                 section: section,
                 actual: envelope.schemaVersion,

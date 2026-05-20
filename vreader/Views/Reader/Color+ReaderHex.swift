@@ -1,16 +1,17 @@
-// Purpose: Shared `Color(hexString:)` for the reader's design-bundle-driven
-// views.
+// Purpose: Shared `Color(readerHexString:)` for the reader's
+// design-bundle-driven views.
 //
 // The committed design bundles specify surface colors as `#RRGGBB` hex
-// literals. `SelectionPopoverView`, `NoteCalloutView`, and
-// `NotePreviewSheetView` each independently parsed those into `Color`. Per the
-// codebase convention ("lift to a shared helper when a third call site
-// appears" — the comment in `NoteCalloutView`), the third call site (WI-5's
-// `NotePreviewSheetView`) crosses that threshold, so the parser lives here
-// once.
+// literals. Multiple reader popover views each independently parsed those
+// into `Color`; per the codebase convention ("lift to a shared helper when a
+// third call site appears") the parser lives here once. Current callers are
+// `SelectionPopoverView` (the feature #60 selection popover) and the
+// feature #64 unified highlight-action popover's `HighlightActionCardSubviews`.
+// (Feature #64 WI-10: the original feature-#55 callers `NoteCalloutView` /
+// `NotePreviewSheetView` were deleted with the rest of the #55 note-preview
+// surface.)
 //
-// @coordinates-with: SelectionPopoverView.swift, NoteCalloutView.swift,
-//   NotePreviewSheetView.swift
+// @coordinates-with: SelectionPopoverView.swift, HighlightActionCardSubviews.swift
 
 #if canImport(UIKit)
 import SwiftUI

@@ -379,6 +379,93 @@ struct PerBookSettingsTests {
         #expect(global.theme == .photo)
     }
 
+    // MARK: - Bilingual fields (feature #56 WI-3)
+
+    @Test func bilingualFields_defaultToNil() {
+        let override = PerBookSettingsOverride()
+        #expect(override.bilingualEnabled == nil)
+        #expect(override.bilingualTargetLanguage == nil)
+        #expect(override.bilingualGranularity == nil)
+    }
+
+    @Test func bilingualFields_savedAndRestored() throws {
+        let dir = try makeTempDir()
+        defer { cleanUp(dir) }
+        let key = "epub:11aabb00112233445566778899aabbccddeeff00112233445566778899aabbcc:4096"
+        let override = PerBookSettingsOverride(
+            bilingualEnabled: true,
+            bilingualTargetLanguage: "Chinese",
+            bilingualGranularity: "paragraph"
+        )
+        try PerBookSettingsStore.save(override, for: key, baseURL: dir)
+        let restored = try #require(PerBookSettingsStore.settings(for: key, baseURL: dir))
+        #expect(restored.bilingualEnabled == true)
+        #expect(restored.bilingualTargetLanguage == "Chinese")
+        #expect(restored.bilingualGranularity == "paragraph")
+    }
+
+    @Test func bilingualFields_coexistWithTypographyOverrides() throws {
+        let dir = try makeTempDir()
+        defer { cleanUp(dir) }
+        let key = "epub:22aabb00112233445566778899aabbccddeeff00112233445566778899aabbcc:8192"
+        let override = PerBookSettingsOverride(
+            fontSize: 22, themeName: "dark",
+            bilingualEnabled: true, bilingualTargetLanguage: "Japanese",
+            bilingualGranularity: "sentence"
+        )
+        try PerBookSettingsStore.save(override, for: key, baseURL: dir)
+        let restored = try #require(PerBookSettingsStore.settings(for: key, baseURL: dir))
+        #expect(restored.fontSize == 22)
+        #expect(restored.themeName == "dark")
+        #expect(restored.bilingualEnabled == true)
+        #expect(restored.bilingualTargetLanguage == "Japanese")
+        #expect(restored.bilingualGranularity == "sentence")
+    }
+
+    @Test func olderJSON_withoutBilingualKeys_decodesWithNilBilingualFields() throws {
+        // A pre-#56 per-book file has no bilingual keys — the synthesized
+        // Codable init must decode it with nil bilingual fields (bilingual off).
+        let dir = try makeTempDir()
+        defer { cleanUp(dir) }
+        let key = "epub:33aabb00112233445566778899aabbccddeeff00112233445566778899aabbcc:2048"
+        let legacyJSON = #"{"fontSize":20,"fontName":"Georgia","themeName":"sepia"}"#
+        let fileURL = dir.appendingPathComponent(
+            key.replacingOccurrences(of: ":", with: "_") + ".json")
+        try Data(legacyJSON.utf8).write(to: fileURL)
+
+        let restored = try #require(PerBookSettingsStore.settings(for: key, baseURL: dir))
+        #expect(restored.fontSize == 20)
+        #expect(restored.themeName == "sepia")
+        #expect(restored.bilingualEnabled == nil)
+        #expect(restored.bilingualTargetLanguage == nil)
+        #expect(restored.bilingualGranularity == nil)
+    }
+
+    @Test @MainActor func resolve_isUnaffectedByBilingualFields() {
+        // The bilingual fields are NOT part of ResolvedSettings — adding them
+        // must not change typography resolution.
+        let global = makeGlobalStore()
+        global.typography.fontSize = 18
+        let withoutBilingual = PerBookSettingsOverride(fontSize: 25)
+        let withBilingual = PerBookSettingsOverride(
+            fontSize: 25, bilingualEnabled: true,
+            bilingualTargetLanguage: "Korean", bilingualGranularity: "paragraph")
+        let a = PerBookSettingsStore.resolve(perBook: withoutBilingual, global: global)
+        let b = PerBookSettingsStore.resolve(perBook: withBilingual, global: global)
+        #expect(a == b)
+        #expect(b.fontSize == 25)
+    }
+
+    @Test func bilingualFields_codableRoundTripsInMemory() throws {
+        let override = PerBookSettingsOverride(
+            bilingualEnabled: false,
+            bilingualTargetLanguage: "Arabic",
+            bilingualGranularity: "sentence")
+        let data = try JSONEncoder().encode(override)
+        let decoded = try JSONDecoder().decode(PerBookSettingsOverride.self, from: data)
+        #expect(decoded == override)
+    }
+
     // MARK: - Helpers
 
     @MainActor

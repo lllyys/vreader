@@ -229,6 +229,56 @@ final class BackupDataCollector: BackupDataCollecting, @unchecked Sendable {
         return try encode(envelope)
     }
 
+    /// Feature #58 WI-5: emits `reading-history.json` carrying every
+    /// `ReadingSession` and every `ReadingStats` row, so a restore reproduces
+    /// reading history exactly. New in backup schema v2.
+    ///
+    /// The persistence fetches are NOT `try?`-swallowed: criterion (f) demands
+    /// an exact round-trip, so a read failure must fail the backup loudly
+    /// rather than silently emitting an empty section (which would discard the
+    /// user's entire reading history on the next restore).
+    func collectReadingHistory() async throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+
+        let sessionRecords = try await persistence.fetchAllReadingSessions()
+        let sessions: [BackupReadingSession] = sessionRecords.map { record in
+            BackupReadingSession(
+                sessionId: record.sessionId,
+                bookFingerprintKey: record.bookFingerprintKey,
+                startedAt: record.startedAt,
+                endedAt: record.endedAt,
+                durationSeconds: record.durationSeconds,
+                pagesRead: record.pagesRead,
+                wordsRead: record.wordsRead,
+                startLocatorJSON: record.startLocator.flatMap { locatorJSON($0, encoder: encoder) },
+                endLocatorJSON: record.endLocator.flatMap { locatorJSON($0, encoder: encoder) },
+                deviceId: record.deviceId,
+                isRecovered: record.isRecovered
+            )
+        }
+
+        let statsRecords = try await persistence.fetchAllReadingStats()
+        let stats: [BackupReadingStats] = statsRecords.map { record in
+            BackupReadingStats(
+                bookFingerprintKey: record.bookFingerprintKey,
+                totalReadingSeconds: record.totalReadingSeconds,
+                sessionCount: record.sessionCount,
+                lastReadAt: record.lastReadAt,
+                averagePagesPerHour: record.averagePagesPerHour,
+                averageWordsPerMinute: record.averageWordsPerMinute,
+                totalPagesRead: record.totalPagesRead,
+                totalWordsRead: record.totalWordsRead,
+                longestSessionSeconds: record.longestSessionSeconds
+            )
+        }
+
+        let envelope = BackupReadingHistoryEnvelope(
+            schemaVersion: kBackupCurrentSchemaVersion, sessions: sessions, stats: stats
+        )
+        return try encode(envelope)
+    }
+
     // MARK: - Helpers
 
     private func encode<T: Encodable>(_ value: T) throws -> Data {

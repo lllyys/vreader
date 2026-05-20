@@ -18,17 +18,22 @@ struct ReaderChromeButtonContractTests {
 
     // MARK: - Top chrome slots
 
-    @Test("Top chrome has exactly 5 slots")
+    @Test("Top chrome has exactly 6 slots after feature #56 WI-9")
     func topChromeSlotCount() {
-        #expect(ReaderTopChromeSlot.allCases.count == 5)
+        // Feature #56 WI-9 inserts `.bilingualPill` between `.title`
+        // and `.search` (sits inside the title block per design).
+        #expect(ReaderTopChromeSlot.allCases.count == 6)
     }
 
     @Test("Top chrome slot order matches design bundle")
     func topChromeOrder() {
         // Mirrors `vreader-reader.jsx:ReaderTopChrome` + the #760
-        // design supplement: left → leading back · title (center,
-        // flex) · trailing search + bookmark + more.
-        #expect(ReaderTopChromeSlot.allCases == [.back, .title, .search, .bookmark, .more])
+        // design supplement + feature #56 WI-9: left → leading back
+        // · title (center, flex) · bilingual pill (inline with title
+        // when active) · trailing search + bookmark + more.
+        #expect(ReaderTopChromeSlot.allCases == [
+            .back, .title, .bilingualPill, .search, .bookmark, .more,
+        ])
     }
 
     // MARK: - Bottom chrome toolbar buttons
@@ -64,6 +69,7 @@ struct ReaderChromeButtonContractTests {
         // identifiers; pin them so renames surface here.
         #expect(ReaderTopChromeSlot.back.accessibilityIdentifier == "readerBackButton")
         #expect(ReaderTopChromeSlot.title.accessibilityIdentifier == "readerTitleLabel")
+        #expect(ReaderTopChromeSlot.bilingualPill.accessibilityIdentifier == "readerBilingualPill")
         #expect(ReaderTopChromeSlot.search.accessibilityIdentifier == "readerSearchButton")
         #expect(ReaderTopChromeSlot.bookmark.accessibilityIdentifier == "readerBookmarkButton")
         #expect(ReaderTopChromeSlot.more.accessibilityIdentifier == "readerMoreButton")

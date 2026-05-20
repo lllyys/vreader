@@ -1,15 +1,15 @@
 // Purpose: Pure hit-test helper that maps a tap's character index in a
-// UITextView to the highlight UUID painted at that location (Feature #53
-// WI-2 / GH #596). Used by TXT/MD reader-bridge coordinators on tap to
-// decide whether to fire `.readerHighlightTapped` (with the resolved UUID
-// for inline-menu presentation) or fall through to the existing
+// UITextView to the highlight UUID painted at that location. Used by TXT/MD
+// reader-bridge coordinators on tap to decide whether to fire
+// `.readerHighlightTapped` (with the resolved UUID — feature #64's unified
+// highlight-action popover observes it) or fall through to the existing
 // `.readerContentTapped` chrome-toggle path.
 //
 // Kept separate from the bridge coordinator so the resolution logic is
 // fully unit-testable without needing a live UITextView.
 //
 // @coordinates-with: TXTTextViewBridgeCoordinator.swift,
-//   TextReaderUIState.swift, HighlightActionPresenter.swift,
+//   TextReaderUIState.swift, HighlightPopoverModifier.swift,
 //   ReaderNotifications.swift
 
 import Foundation

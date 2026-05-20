@@ -28,18 +28,36 @@ struct PerBookSettingsOverride: Codable, Sendable, Equatable {
     var letterSpacing: CGFloat?
     var themeName: String?
 
+    /// Feature #56 — whether bilingual reading mode is on for this book.
+    /// `nil` (a pre-#56 file or a never-toggled book) means bilingual off.
+    var bilingualEnabled: Bool?
+
+    /// Feature #56 — the bilingual target language (one of `BILINGUAL_LANGS`,
+    /// e.g. `"Chinese"`). `nil` inherits the default.
+    var bilingualTargetLanguage: String?
+
+    /// Feature #56 — bilingual segmentation granularity (`"paragraph"` /
+    /// `"sentence"`). `nil` inherits the default.
+    var bilingualGranularity: String?
+
     init(
         fontSize: CGFloat? = nil,
         fontName: String? = nil,
         lineSpacing: CGFloat? = nil,
         letterSpacing: CGFloat? = nil,
-        themeName: String? = nil
+        themeName: String? = nil,
+        bilingualEnabled: Bool? = nil,
+        bilingualTargetLanguage: String? = nil,
+        bilingualGranularity: String? = nil
     ) {
         self.fontSize = fontSize
         self.fontName = fontName
         self.lineSpacing = lineSpacing
         self.letterSpacing = letterSpacing
         self.themeName = themeName
+        self.bilingualEnabled = bilingualEnabled
+        self.bilingualTargetLanguage = bilingualTargetLanguage
+        self.bilingualGranularity = bilingualGranularity
     }
 }
 

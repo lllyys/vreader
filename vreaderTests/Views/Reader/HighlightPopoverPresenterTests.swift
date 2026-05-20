@@ -5,9 +5,9 @@
 // Covers: `content(for:sourceRect:chapter:)` field mapping; `form` →
 // `.sheet` when VoiceOver / long note (boundary at exactly 6 and 7 lines) /
 // `sourceRect == .zero`; `.card` otherwise; `resolvedForm` degrades a
-// `.card` to `.sheet` when no host view; a parity fence — the same inputs
-// as `NotePreviewPresenter.resolvedForm` produce the matching form (a
-// regression fence until #55's presenter is deleted in WI-10).
+// `.card` to `.sheet` when no host view. (A parity fence against feature
+// #55's `NotePreviewPresenter` lived here through the WI-6..9 migration; it
+// was removed in WI-10 when that presenter was deleted.)
 
 import Testing
 import Foundation
@@ -172,44 +172,11 @@ struct HighlightPopoverPresenterTests {
         #expect(form == .sheet)
     }
 
-    // MARK: - Parity fence with NotePreviewPresenter (deleted in WI-10)
-
-    /// Until WI-10 deletes #55's presenter, this fence proves the unified
-    /// presenter's `resolvedForm` decision matches `NotePreviewPresenter`'s
-    /// for every combination of inputs — so the migration is behavior-
-    /// preserving on the form-selection axis.
-    @Test(arguments: [
-        (true,  0,  true),  (false, 0,  true),  (false, 7,  true),
-        (true,  3,  false), (false, 3,  false), (false, 6,  true),
-        (false, 6,  false), (false, 7,  false),
-    ])
-    func resolvedForm_parityWithNotePreviewPresenter(
-        _ voiceOver: Bool, _ lineCount: Int, _ hasHost: Bool
-    ) {
-        // Use a non-zero rect so the only sheet triggers are voiceOver /
-        // lineCount / hasHostView — the axes both presenters share.
-        let rect = CGRect(x: 0, y: 0, width: 10, height: 10)
-        let record = makeRecord()
-
-        let unifiedContent = HighlightPopoverPresenter.content(
-            for: record, sourceRect: rect, chapter: nil
-        )
-        let unified = HighlightPopoverPresenter.resolvedForm(
-            for: unifiedContent, isVoiceOverRunning: voiceOver,
-            noteLineCount: lineCount, hasHostView: hasHost
-        )
-
-        let legacyContent = NotePreviewPresenter.content(for: record, sourceRect: rect)
-        let legacy = NotePreviewPresenter.resolvedForm(
-            for: legacyContent, isVoiceOverRunning: voiceOver,
-            noteLineCount: lineCount, hasHostView: hasHost
-        )
-
-        // `.card`/`.callout` and `.sheet`/`.sheet` are the matching pairs.
-        let unifiedIsSheet = (unified == .sheet)
-        let legacyIsSheet = (legacy == .sheet)
-        #expect(unifiedIsSheet == legacyIsSheet)
-    }
+    // NOTE: the `resolvedForm` parity fence against feature #55's
+    // `NotePreviewPresenter` was removed here in feature #64 WI-10 — that
+    // presenter is deleted, so the cross-check can no longer run. The unified
+    // presenter's own `resolvedForm` axes (voiceOver / note-line-count /
+    // host-view) stay covered by the `resolvedForm_*` tests above.
 
     @Test func cardMaxNoteLines_isSix() {
         #expect(HighlightPopoverPresenter.cardMaxNoteLines == 6)

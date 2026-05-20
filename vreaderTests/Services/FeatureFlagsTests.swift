@@ -25,6 +25,26 @@ struct FeatureFlagsTests {
         #expect(flags.isEnabled(.searchIndexingVerboseLogs) == false)
     }
 
+    @Test func bilingualReadingDefaultOffInProd() {
+        // Ships dark (like aiAssistant) so it can be enabled progressively.
+        let flags = FeatureFlags(environment: .prod)
+        #expect(flags.isEnabled(.bilingualReading) == false)
+        #expect(flags.bilingualReading == false)
+    }
+
+    @Test func bilingualReadingDefaultOffInDevAndStaging() {
+        #expect(FeatureFlags(environment: .dev).bilingualReading == false)
+        #expect(FeatureFlags(environment: .staging).bilingualReading == false)
+    }
+
+    @Test func bilingualReadingHonorsRuntimeOverride() {
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .bilingualReading)
+        #expect(flags.bilingualReading == true)
+        flags.removeOverride(for: .bilingualReading)
+        #expect(flags.bilingualReading == false)
+    }
+
     // MARK: - Default Values in Dev
 
     @Test func aiAssistantDefaultOffInDev() {
@@ -121,10 +141,11 @@ struct FeatureFlagsTests {
     // MARK: - Flag Enum
 
     @Test func flagKeysAreExhaustive() {
-        #expect(FeatureFlagKey.allCases.count == 3)
+        #expect(FeatureFlagKey.allCases.count == 4)
         #expect(FeatureFlagKey.allCases.contains(.aiAssistant))
         #expect(FeatureFlagKey.allCases.contains(.sync))
         #expect(FeatureFlagKey.allCases.contains(.searchIndexingVerboseLogs))
+        #expect(FeatureFlagKey.allCases.contains(.bilingualReading))
     }
 
     // MARK: - Shared Singleton (Issue 1)

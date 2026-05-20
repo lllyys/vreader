@@ -143,8 +143,8 @@ vreader/
 ├── ViewModels/          # Library and per-format reader view models
 ├── Views/
 │   ├── Reader/          # Reader container, format bridges, chrome overlay
-│   ├── Bookmarks/       # BookmarkListView, TOCListView
-│   ├── Annotations/     # HighlightListView, AnnotationListView
+│   │   └── Annotations/ # TOCSheet, HighlightsSheet, AnnotationsSheetRoute
+│   ├── Annotations/     # AddNoteSheet, AnnotationEditSheet
 │   └── Settings/        # ReaderSettingsPanel, AI/TTS/WebDAV settings
 ├── Services/
 │   ├── TXT/, EPUB/, MD/ # Format-specific parsing and loading

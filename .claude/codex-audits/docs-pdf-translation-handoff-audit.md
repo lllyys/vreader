@@ -11,7 +11,7 @@ date: 2026-05-20
 Syncs the claude.ai/design "VReader PDF Translation Panel Canvas"
 handoff into the `dev-docs/designs/vreader-fidelity-v1/` bundle.
 Touches the design bundle, plus `project.yml` / `project.pbxproj`
-(version bump 3.36.21/536 → 3.36.22/537).
+(version bump 3.37.26/572 → 3.37.27/573 (rebased onto main)).
 
 **No Swift source files changed.** The audit-gate hook fires on
 `project.pbxproj` — false positive of the Swift-file heuristic. Manual
@@ -56,7 +56,7 @@ panel. This handoff commits that surface.
 4. **No Swift implemented** — design-delivery only. Building the PDF
    below-page panel is gated feature-#56 feature-workflow work;
    deliberately not in this PR.
-5. **Version bump** — 3.36.22 / build 537 (patch — docs / design-bundle
+5. **Version bump** — 3.37.27 / build 573 (patch — docs / design-bundle
    sync). `xcodegen generate` confirmed.
 
 ## Verdict

@@ -154,6 +154,70 @@ struct LaunchArgParsingTests {
         #expect(config.seedEmpty == false)
         #expect(config.seedWarAndPeace == false)
     }
+
+    // MARK: - Bug #233 / GH #964: --seed-azw3-fixture
+
+    @Test func seedAZW3FixtureDefaultsFalse() {
+        let config = TestLaunchConfig.parse(["--uitesting"])
+        #expect(config.seedAZW3Fixture == false)
+    }
+
+    @Test func seedAZW3FixtureParsedWhenFlagPresent() {
+        let config = TestLaunchConfig.parse([
+            "--uitesting", "--seed-azw3-fixture"
+        ])
+        #expect(config.seedAZW3Fixture == true)
+        #expect(config.isUITesting == true)
+    }
+
+    @Test func seedAZW3FixtureNoneConfigIsFalse() {
+        #expect(TestLaunchConfig.none.seedAZW3Fixture == false)
+    }
+
+    @Test func seedAZW3FixtureCoexistsWithOtherFlags() {
+        let config = TestLaunchConfig.parse([
+            "--uitesting",
+            "--seed-azw3-fixture",
+            "--reset-preferences"
+        ])
+        #expect(config.isUITesting == true)
+        #expect(config.seedAZW3Fixture == true)
+        #expect(config.seedResetPreferences == true)
+        // Mutually-exclusive seed flags stay false.
+        #expect(config.seedEmpty == false)
+        #expect(config.seedWarAndPeace == false)
+        #expect(config.seedEPUBFixture == false)
+    }
+
+    /// The AZW3 fixture seed flag and the EPUB fixture seed flag are
+    /// distinct args — parsing one must not set the other (regression
+    /// guard against a copy-paste `args.contains("--seed-epub-fixture")`
+    /// in the AZW3 branch).
+    @Test func seedAZW3FixtureIsIndependentOfSeedEPUBFixture() {
+        let azw3Only = TestLaunchConfig.parse(["--uitesting", "--seed-azw3-fixture"])
+        #expect(azw3Only.seedAZW3Fixture == true)
+        #expect(azw3Only.seedEPUBFixture == false)
+
+        let epubOnly = TestLaunchConfig.parse(["--uitesting", "--seed-epub-fixture"])
+        #expect(epubOnly.seedEPUBFixture == true)
+        #expect(epubOnly.seedAZW3Fixture == false)
+    }
+
+    /// `TestLaunchConfig.parse` sets independent booleans — passing BOTH
+    /// fixture flags sets both `true`. The conflict is resolved downstream:
+    /// `VReaderApp`'s seed dispatch chain checks `seedEPUBFixture` before
+    /// `seedAZW3Fixture` (`else if` order), so EPUB wins. The `TestSeedState`
+    /// enum makes this unreachable through the standard `launchApp(seed:)`
+    /// path (one enum value = one seed); this test pins the parser half of
+    /// the documented behavior. (Codex Gate-4 Low: make the conflict
+    /// behavior explicit, not silent.)
+    @Test func bothFixtureFlagsSetBothBooleans() {
+        let config = TestLaunchConfig.parse([
+            "--uitesting", "--seed-epub-fixture", "--seed-azw3-fixture"
+        ])
+        #expect(config.seedEPUBFixture == true)
+        #expect(config.seedAZW3Fixture == true)
+    }
 }
 
 #endif

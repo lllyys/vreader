@@ -15,13 +15,19 @@ import Foundation
 /// so the slot enum keeps the layout-order contract in one place.
 ///
 /// Layout order, left → right, per the #760 design supplement
-/// (`design-notes/reader-search-and-more-menu.md` §1):
-/// `← Library  |  Title  |  🔍 Search  📑 Bookmark  ⋯ More`. WI-6a
-/// shipped this enum before that supplement landed, so WI-6b adds
-/// `.search` here — it sits between `.title` and `.bookmark`.
+/// (`design-notes/reader-search-and-more-menu.md` §1) +
+/// feature #56 WI-9 (`vreader-bilingual.jsx`):
+/// `← Library  |  Title [↔ BilingualPill]  |  🔍 Search  📑 Bookmark  ⋯ More`.
+/// WI-6a shipped this enum, WI-6b added `.search`, feature #56 WI-9
+/// inserts `.bilingualPill` between `.title` and `.search` — sits
+/// inline with the title block per design.
 enum ReaderTopChromeSlot: String, CaseIterable, Equatable {
     case back
     case title
+    /// Feature #56 WI-9 — `EN ↔ <target>` pill, present only when
+    /// bilingual mode is on for the open book. The chrome's
+    /// `shouldShowBilingualPill(...)` gates the render path.
+    case bilingualPill
     case search
     case bookmark
     case more
@@ -33,11 +39,12 @@ enum ReaderTopChromeSlot: String, CaseIterable, Equatable {
     /// its search button, so no harness churn.
     var accessibilityIdentifier: String {
         switch self {
-        case .back:     return "readerBackButton"
-        case .title:    return "readerTitleLabel"
-        case .search:   return "readerSearchButton"
-        case .bookmark: return "readerBookmarkButton"
-        case .more:     return "readerMoreButton"
+        case .back:          return "readerBackButton"
+        case .title:         return "readerTitleLabel"
+        case .bilingualPill: return "readerBilingualPill"
+        case .search:        return "readerSearchButton"
+        case .bookmark:      return "readerBookmarkButton"
+        case .more:          return "readerMoreButton"
         }
     }
 }

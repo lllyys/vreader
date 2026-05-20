@@ -48,6 +48,7 @@ struct TOCSheetTests {
     private func makeSheet(
         bookTitle: String = "Pride and Prejudice",
         tocEntries: [TOCEntry] = [],
+        tocDidLoad: Bool = true,
         currentLocator: Locator? = nil,
         theme: ReaderThemeV2 = .paper,
         initialTab: TOCSheetTab = .contents,
@@ -60,6 +61,7 @@ struct TOCSheetTests {
             bookFingerprintKey: wi9EPUBFingerprint.canonicalKey,
             modelContainer: inMemoryContainer(),
             tocEntries: tocEntries,
+            tocDidLoad: tocDidLoad,
             currentLocator: currentLocator,
             theme: theme,
             initialTab: initialTab,
@@ -196,6 +198,26 @@ struct TOCSheetTests {
     func nonEmptyTOCNotEmptyState() {
         let sheet = makeSheet(tocEntries: makeTOCEntries(4))
         #expect(sheet.contentsIsEmpty == false)
+    }
+
+    @Test("Contents empty state shows only after the host TOC build completes")
+    func contentsEmptyStateOnlyAfterLoad() {
+        // Before the host's eager TOC build resolves, the Contents body
+        // must NOT be the "No table of contents" empty state — a Contents
+        // tap during the build would otherwise flash a false empty state
+        // for books whose TOC is merely still loading (Gate-4 finding).
+        let loading = makeSheet(tocEntries: [], tocDidLoad: false)
+        #expect(loading.contentsEmptyStateShown == false)
+        #expect(loading.contentsIsEmpty)   // no entries, but state withheld
+
+        // Once the build completes with no entries, the genuine empty
+        // state ("this book ships no TOC") renders.
+        let loaded = makeSheet(tocEntries: [], tocDidLoad: true)
+        #expect(loaded.contentsEmptyStateShown)
+
+        // A loaded TOC with entries is never the empty state regardless.
+        let withEntries = makeSheet(tocEntries: makeTOCEntries(3), tocDidLoad: true)
+        #expect(withEntries.contentsEmptyStateShown == false)
     }
 
     // MARK: - displayPage — consistent 1-based numbering

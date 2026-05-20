@@ -79,6 +79,15 @@ struct TXTReaderContainerView: View {
     @State var highlightCoordinator: HighlightCoordinator?
     @State var ttsHighlightCoordinator: TTSHighlightCoordinator?
 
+    // MARK: - Feature #56 WI-12: bilingual reading state
+    //
+    // Owned here so SwiftUI's lifecycle frees the VM on container
+    // teardown. The actual wiring (lazy init, setup-sheet, More-menu
+    // observer) lives in `TXTReaderContainerView+Bilingual.swift`.
+    @State var bilingualViewModel: BilingualReadingViewModel?
+    @State var showBilingualSetupSheet: Bool = false
+    @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+
     /// Whether the loaded text exceeds the large file threshold.
     private var isLargeFile: Bool {
         viewModel.totalTextLengthUTF16 > Self.largeFileThreshold
@@ -284,6 +293,10 @@ struct TXTReaderContainerView: View {
             mutating: highlightCoordinator,
             theme: settingsStore?.theme ?? .paper
         )
+        // Feature #56 WI-12: bilingual reading wiring lives in a
+        // separate extension to keep this file under the file-size
+        // budget (rule 50 §9).
+        .modifier(bilingualSurfacesModifier)
         .task {
             // PERF: open already called by TXTReaderHost — skip if content loaded
             if viewModel.textContent == nil && viewModel.currentChapterText == nil {
@@ -551,28 +564,20 @@ struct TXTReaderContainerView: View {
             },
             sourceText: { [viewModel] in viewModel.textContent },
             makeCurrentLocator: { [viewModel] in viewModel.makeLocator() },
-            onNavigate: { [viewModel, tocEntries] offset in
+            onNavigate: { [viewModel] offset in
                 // Bug #180 WI-6: in continuous mode every navigation target is
                 // a document-global offset — TOC tap, bookmark, search hit all
                 // resolve to a scroll offset. The chapter is derived afterward
                 // from where the scroll lands; no text swap.
                 if viewModel.isContinuousMode {
                     uiState.scrollToOffset = offset
-                } else if viewModel.chapterIndex != nil {
-                    // GH #30: TOC and chapters now use the same full-text decode,
-                    // so title matching is reliable. Fall back to offset for bookmarks/search.
-                    if let title = tocEntries.first(where: { $0.locator.charOffsetUTF16 == offset })?.title {
-                        Task {
-                            let matched = await viewModel.navigateToChapterByTitle(title)
-                            if !matched {
-                                await viewModel.navigateToGlobalOffset(offset)
-                            }
-                        }
-                    } else {
-                        Task { await viewModel.navigateToGlobalOffset(offset) }
-                    }
                 } else {
-                    viewModel.updateScrollPosition(charOffsetUTF16: offset)
+                    // Bug #234: a Paged-mode TOC tap resolves to its chapter by
+                    // the tapped entry's unique document-global offset, never by
+                    // a chapter-title string match — duplicate / empty TXT
+                    // chapter titles made the old title match land on the wrong
+                    // chapter.
+                    Task { await viewModel.navigateToTOCTap(globalOffsetUTF16: offset) }
                 }
             },
             hapticFeedback: HapticFeedbackProvider()

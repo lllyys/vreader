@@ -103,7 +103,11 @@ enum AnnotationsSheetRoute: Equatable, Hashable, Identifiable, Sendable {
         case .presentAnnotationsExport:
             return .highlights(initialFilter: .highlights)
         case .toggleReadAloud, .toggleAutoPageTurn,
+             .toggleBilingual, .presentReTranslatePicker,
              .presentBookDetails, .presentShareSheet:
+            // Feature #56 WI-8: bilingual and re-translate effects
+            // are owned by the per-format containers (the bilingual
+            // VM lives there); neither maps to the annotations sheet.
             return nil
         }
     }

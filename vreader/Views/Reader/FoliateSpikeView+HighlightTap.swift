@@ -10,20 +10,19 @@
 //      to the persisted highlight's UUID via `FoliateHighlightTapResolver`,
 //      and posts the cross-format `.readerHighlightTapped` event.
 //
-// Feature #55 WI-7: a tap on an annotated AZW3/MOBI highlight now opens the
-// #55 note preview — `NotePreviewModifier` (attached on `FoliateSpikeView`)
-// observes `.readerHighlightTapped`. The legacy #53 tap-time inline
-// delete menu is dropped for AZW3/MOBI v1. Highlight deletion is still
-// reachable from the Annotations panel's Highlights tab (the note preview's
-// "Open in panel" action routes there): the panel swipe-delete removes the
-// highlight from persistence and from the panel list. NOTE — the AZW3/MOBI
-// *rendered* annotation overlay is not stripped by the panel delete; it
-// refreshes on the next book reload. (The panel posts `.readerHighlightRemoved`,
-// which carries only the UUID; the Foliate JS strip needs the CFI, and the
-// record is already deleted by then — tracked as a separate bug.) AZW3/MOBI
-// has no native long-press recognizer for a web-rendered highlight, so —
-// unlike TXT/MD/PDF (WI-6) — there is no `present(...)` call to re-home onto
-// a long-press; a JS long-press → #53 menu is a deferred follow-up (plan §9).
+// Feature #64 WI-9: a tap on an annotated AZW3/MOBI highlight opens the
+// unified highlight-action popover — `HighlightPopoverModifier` (attached on
+// `FoliateSpikeView`) observes `.readerHighlightTapped`. The popover's delete
+// action routes through `FoliateHighlightMutator`, which posts the CFI-keyed
+// `.foliateRequestAnnotationJSDelete` so the rendered SVG overlay is stripped
+// immediately (the `FoliateHighlightJSBridge` path). AZW3/MOBI has no native
+// long-press recognizer for a web-rendered highlight, so — unlike the native
+// TXT/MD/PDF bridges — there was never a feature-#53 long-press `UIMenu` here
+// to remove. NOTE — a delete from the Annotations *panel* (not the popover)
+// still does not strip the live overlay: the panel posts
+// `.readerHighlightRemoved` carrying only the UUID, the Foliate JS strip needs
+// the CFI, and the record is already deleted by then; the overlay refreshes on
+// the next book reload (tracked as a separate bug).
 //
 // @coordinates-with: FoliateSpikeView.swift, FoliateHighlightTapResolver.swift,
 //   FoliateHighlightRenderer.swift, ReaderNotifications.swift,
@@ -64,11 +63,11 @@ struct FoliateHighlightTapHandlerModifier: ViewModifier {
                 guard let highlightID = FoliateHighlightTapResolver.resolveHighlightID(
                     forCFI: cfi, in: records
                 ) else { return }
-                // Feature #55 WI-7: `sourceRect` stays `.zero` — foliate-host.js
-                // does not forward the annotation's screen rect, so
-                // `NotePreviewPresenter` resolves the preview to the bottom-sheet
-                // form (no anchor needed). Rect-forwarding for a callout-anchored
-                // preview is a deferred follow-up (plan §9).
+                // `sourceRect` stays `.zero` — foliate-host.js does not
+                // forward the annotation's screen rect, so the unified
+                // popover's `resolvedForm` resolves to the bottom-sheet form
+                // (no anchor needed). Rect-forwarding for an anchored-card
+                // popover is a deferred follow-up.
                 let event = ReaderHighlightTapEvent(highlightID: highlightID, sourceRect: .zero)
                 NotificationCenter.default.post(name: .readerHighlightTapped, object: event)
             } catch {

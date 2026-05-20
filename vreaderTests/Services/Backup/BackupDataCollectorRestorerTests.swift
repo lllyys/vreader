@@ -698,7 +698,10 @@ struct BackupCollectorRestorerSuite {
 
     // MARK: - Schema version forward compat
 
-    @Test func collectorEmitsSchemaVersion1() async throws {
+    @Test func collectorEmitsCurrentSchemaVersion() async throws {
+        // Feature #58 WI-5 bumped kBackupCurrentSchemaVersion 1 → 2. The
+        // collector always emits the current version; the restorer accepts
+        // both 1 and 2 (kBackupAcceptedSchemaVersions).
         let persistence = try makePersistence()
         let collector = BackupDataCollector(
             persistence: persistence,
@@ -707,7 +710,26 @@ struct BackupCollectorRestorerSuite {
         )
         let data = try await collector.collectCollections()
         let envelope = try JSONDecoder().decode(BackupCollectionsEnvelope.self, from: data)
-        #expect(envelope.schemaVersion == 1)
+        #expect(envelope.schemaVersion == kBackupCurrentSchemaVersion)
+        #expect(envelope.schemaVersion == 2)
+    }
+
+    @Test func restorerAcceptsAV1Section() async throws {
+        // The v1↔v2 envelope shapes for the pre-#58 sections are byte-identical
+        // — a v1-tagged section must still restore after the v2 bump.
+        let v1Envelope = BackupCollectionsEnvelope(schemaVersion: 1, collections: [])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(v1Envelope)
+
+        let persistence = try makePersistence()
+        let restorer = BackupDataRestorer(
+            persistence: persistence,
+            defaults: makeIsolatedDefaults(label: "v1accept"),
+            perBookSettingsBaseURL: try makeTempDir(label: "v1accept")
+        )
+        // Must NOT throw — v1 is in kBackupAcceptedSchemaVersions.
+        try await restorer.restoreCollections(from: data)
     }
 
     @Test func restorerRejectsFutureSchemaVersion() async throws {

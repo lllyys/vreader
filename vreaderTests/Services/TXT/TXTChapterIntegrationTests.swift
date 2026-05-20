@@ -69,6 +69,54 @@ private func makeChapterOpenResult() -> TXTChapterOpenResult {
     )
 }
 
+/// Bug #234: a 3-chapter result whose chapters all carry the *same*
+/// title — the duplicate-title case that broke title-based TOC nav.
+/// Global UTF-16 offsets stay distinct (chapters are sequential).
+private func makeDuplicateTitleChapterResult() -> TXTChapterOpenResult {
+    let allText = ch1Text + ch2Text + ch3Text
+    let allData = Data(allText.utf8)
+    let ch1Len = Data(ch1Text.utf8).count
+    let ch2Len = Data(ch2Text.utf8).count
+
+    let ch1UTF16 = (ch1Text as NSString).length
+    let ch2UTF16 = (ch2Text as NSString).length
+    let ch3UTF16 = (ch3Text as NSString).length
+
+    // Every chapter shares this title — a title match cannot tell them apart.
+    let sharedTitle = "Chapter"
+    let chapters = [
+        TXTChapter(
+            index: 0, title: sharedTitle,
+            startByte: 0, endByte: Int64(ch1Len),
+            globalStartUTF16: 0, textLengthUTF16: ch1UTF16
+        ),
+        TXTChapter(
+            index: 1, title: sharedTitle,
+            startByte: Int64(ch1Len), endByte: Int64(ch1Len + ch2Len),
+            globalStartUTF16: ch1UTF16, textLengthUTF16: ch2UTF16
+        ),
+        TXTChapter(
+            index: 2, title: sharedTitle,
+            startByte: Int64(ch1Len + ch2Len), endByte: Int64(allData.count),
+            globalStartUTF16: ch1UTF16 + ch2UTF16, textLengthUTF16: ch3UTF16
+        ),
+    ]
+
+    let index = TXTChapterIndex(
+        chapters: chapters,
+        totalBytes: Int64(allData.count),
+        detectedEncoding: "UTF-8",
+        totalTextLengthUTF16: ch1UTF16 + ch2UTF16 + ch3UTF16
+    )
+    let loader = TXTChapterContentLoader(fileData: allData, encoding: .utf8)
+    return TXTChapterOpenResult(
+        chapterIndex: index,
+        contentLoader: loader,
+        fileByteCount: Int64(allData.count),
+        detectedEncoding: "UTF-8"
+    )
+}
+
 /// Builds a single-chapter TXTChapterOpenResult.
 private func makeSingleChapterResult() -> TXTChapterOpenResult {
     let text = "Only one chapter in this file."
@@ -573,41 +621,63 @@ struct TXTFileLoaderChapterTests {
 @MainActor
 struct GH30UnifiedChapterTests {
 
-    @Test("navigateToChapterByTitle finds correct chapter")
-    func titleMatchNavigation() async {
-        let result = makeChapterOpenResult()
+    // Bug #234: a Contents/TOC tap must navigate to the *tapped* chapter.
+    // The old path resolved the chapter by its title string
+    // (`navigateToChapterByTitle`), whose `firstIndex(where: title ==)`
+    // returned the first chapter sharing a title — so duplicate or empty
+    // chapter titles (common in real TXT books) navigated to the wrong
+    // chapter. `navigateToTOCTap` resolves by the tapped entry's unique
+    // document-global UTF-16 offset instead.
+
+    @Test("Bug #234: TOC tap on a duplicate-titled chapter lands on that chapter")
+    func tocTapDuplicateTitlesResolvesByOffset() async {
+        let result = makeDuplicateTitleChapterResult()
         let (vm, _, _) = await makeChapterVM(chapterResult: result)
         await vm.openChapterBased(url: chapterTestURL)
+        let chapters = vm.chapterIndex?.chapters ?? []
+        #expect(chapters.count == 3)
 
-        let matched = await vm.navigateToChapterByTitle("Chapter 2")
+        // Tap the 3rd chapter's TOC entry. A title match would land on
+        // chapter 0 (the first "Chapter"); offset resolution lands on 2.
+        await vm.navigateToTOCTap(globalOffsetUTF16: chapters[2].globalStartUTF16)
+        #expect(vm.currentChapterIdx == 2)
+        #expect(vm.currentChapterText == ch3Text)
 
-        #expect(matched == true)
+        // Tap the 2nd chapter's TOC entry.
+        await vm.navigateToTOCTap(globalOffsetUTF16: chapters[1].globalStartUTF16)
         #expect(vm.currentChapterIdx == 1)
         #expect(vm.currentChapterText == ch2Text)
     }
 
-    @Test("navigateToChapterByTitle trims whitespace")
-    func titleMatchWhitespace() async {
-        let result = makeChapterOpenResult()
+    @Test("Bug #234: TOC tap on the first chapter lands on chapter 0")
+    func tocTapFirstChapterLandsOnChapterZero() async {
+        let result = makeDuplicateTitleChapterResult()
         let (vm, _, _) = await makeChapterVM(chapterResult: result)
         await vm.openChapterBased(url: chapterTestURL)
+        let chapters = vm.chapterIndex?.chapters ?? []
 
-        let matched = await vm.navigateToChapterByTitle("  Chapter 3  \n")
-
-        #expect(matched == true)
+        // Move away first, then tap chapter 1's TOC entry (offset 0).
+        await vm.navigateToTOCTap(globalOffsetUTF16: chapters[2].globalStartUTF16)
         #expect(vm.currentChapterIdx == 2)
+        await vm.navigateToTOCTap(globalOffsetUTF16: 0)
+        #expect(vm.currentChapterIdx == 0)
+        #expect(vm.currentChapterText == ch1Text)
     }
 
-    @Test("navigateToChapterByTitle returns false for no match")
-    func titleMatchNoMatch() async {
+    @Test("Bug #234: TOC tap still resolves correctly with distinct titles")
+    func tocTapDistinctTitlesNavigatesCorrectly() async {
         let result = makeChapterOpenResult()
         let (vm, _, _) = await makeChapterVM(chapterResult: result)
         await vm.openChapterBased(url: chapterTestURL)
+        let chapters = vm.chapterIndex?.chapters ?? []
 
-        let matched = await vm.navigateToChapterByTitle("Nonexistent")
+        await vm.navigateToTOCTap(globalOffsetUTF16: chapters[1].globalStartUTF16)
+        #expect(vm.currentChapterIdx == 1)
+        #expect(vm.currentChapterText == ch2Text)
 
-        #expect(matched == false)
-        #expect(vm.currentChapterIdx == 0)
+        await vm.navigateToTOCTap(globalOffsetUTF16: chapters[2].globalStartUTF16)
+        #expect(vm.currentChapterIdx == 2)
+        #expect(vm.currentChapterText == ch3Text)
     }
 
     @Test("makeLocator includes txtchapter href in chapter mode")

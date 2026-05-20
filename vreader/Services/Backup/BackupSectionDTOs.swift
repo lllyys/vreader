@@ -8,8 +8,17 @@
 import Foundation
 
 /// All section JSONs share a `schemaVersion` field so future revs can branch on it.
-/// Currently only v1 is emitted.
-let kBackupCurrentSchemaVersion = 1
+///
+/// What the COLLECTOR emits. v2 (feature #58 WI-5) adds the `reading-history.json`
+/// section; the pre-v2 sections are byte-identical between v1 and v2 (only this
+/// integer differs — no field migration), so a v1 archive still restores.
+let kBackupCurrentSchemaVersion = 2
+
+/// What the RESTORER accepts. Decoupled from `kBackupCurrentSchemaVersion` so a
+/// version bump doesn't reject every older backup: the v1↔v2 envelope shapes for
+/// the pre-v2 sections are identical, so accepting v1 is sound. A genuinely-newer
+/// archive (v3+) is NOT in this set and still throws `unsupportedSchemaVersion`.
+let kBackupAcceptedSchemaVersions: Set<Int> = [1, 2]
 
 /// Common shape every section envelope honors so the restorer can validate
 /// `schemaVersion` without 7 special cases.
@@ -265,3 +274,9 @@ struct BackupLibraryEntry: Codable, Sendable, Equatable {
     /// `BlobPath.make(format:sha256:byteCount:)`.
     let blobPath: String
 }
+
+// MARK: - Reading History (feature #58 WI-5)
+
+// The `reading-history.json` section's DTOs — `BackupReadingHistoryEnvelope`,
+// `BackupReadingSession`, `BackupReadingStats` — live in `BackupReadingHistory.swift`
+// to keep this file under the ~300-line guideline. New in backup schema v2.

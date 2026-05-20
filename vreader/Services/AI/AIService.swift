@@ -184,4 +184,134 @@ actor AIService {
             )
         }
     }
+
+    // MARK: - Resolved-provider seam (feature #56 WI-5)
+    //
+    // `resolveProvider()` snapshots the active profile once *per request*.
+    // Chapter translation is a *multi-request* operation: it must use ONE
+    // consistent provider + credential + model for the whole operation, so
+    // these methods produce / consume a `ResolvedAIProviderConfig` snapshot
+    // taken once per operation. The credential is pinned in the config so a
+    // mid-operation Keychain rotation cannot straddle chunks; `model` is
+    // pinned so a re-translate model override applies for the whole operation
+    // without mutating the saved `ProviderProfile`.
+
+    /// Resolves the *active* provider into an immutable config snapshot.
+    /// Runs the feature-flag + consent gates, snapshots the active
+    /// `ProviderProfile`, and reads its Keychain key once — throwing
+    /// `featureDisabled` / `consentRequired` / `providerError` / `apiKeyMissing`
+    /// early so a long translation operation fails fast rather than mid-chunk.
+    func resolveActiveProviderConfig() async throws -> ResolvedAIProviderConfig {
+        guard featureFlags.aiAssistant else { throw AIError.featureDisabled }
+        guard consentManager.hasConsent else { throw AIError.consentRequired }
+
+        guard let snapshot = await profileStore.activeProfileSnapshot() else {
+            throw AIError.providerError("Configure a provider in Settings.")
+        }
+        return try config(from: snapshot, modelOverride: nil)
+    }
+
+    /// Resolves a *named* provider profile (not necessarily the active one)
+    /// into a config snapshot, applying an optional `modelOverride`. Used by
+    /// the re-translate flow's provider-override picker. Throws `providerError`
+    /// for an unknown `profileID` and `apiKeyMissing` with no stored key.
+    func resolveProviderConfig(
+        profileID: UUID,
+        modelOverride: String?
+    ) async throws -> ResolvedAIProviderConfig {
+        guard featureFlags.aiAssistant else { throw AIError.featureDisabled }
+        guard consentManager.hasConsent else { throw AIError.consentRequired }
+
+        let snapshot = await profileStore.loadSnapshot()
+        guard let profile = snapshot.profiles.first(where: { $0.id == profileID }) else {
+            throw AIError.providerError("The selected AI provider no longer exists.")
+        }
+        return try config(from: profile, modelOverride: modelOverride)
+    }
+
+    /// Sends a request through a pre-resolved `ResolvedAIProviderConfig`.
+    /// Runs the feature-flag + consent gates and builds the concrete provider
+    /// from the config — it does NOT re-snapshot the active profile (so a
+    /// chunked operation stays on one provider) and **deliberately does not
+    /// consult `AIResponseCache`**: `AIRequest.cacheKey` carries no provider
+    /// identity, so a config-pinned request could otherwise be served a
+    /// cross-provider cached response. Chapter translation has its own
+    /// provider-aware disk cache (`ChapterTranslation.lookupKey`).
+    func sendRequest(
+        _ request: AIRequest,
+        using config: ResolvedAIProviderConfig
+    ) async throws -> AIResponse {
+        guard featureFlags.aiAssistant else { throw AIError.featureDisabled }
+        guard consentManager.hasConsent else { throw AIError.consentRequired }
+
+        return try await providerInstance(for: config).sendRequest(request)
+    }
+
+    // MARK: - Resolved-config helpers
+
+    /// Builds a `ResolvedAIProviderConfig` from a profile snapshot, reading the
+    /// Keychain key once and applying an optional model override.
+    private func config(
+        from profile: ProviderProfile,
+        modelOverride: String?
+    ) throws -> ResolvedAIProviderConfig {
+        let storedKey = try keychainService.readAPIKey(forProfile: profile.id)
+        guard let apiKey = storedKey, !apiKey.isEmpty else {
+            throw AIError.apiKeyMissing
+        }
+        return ResolvedAIProviderConfig(
+            kind: profile.kind,
+            baseURL: profile.baseURL,
+            apiKey: apiKey,
+            model: modelOverride ?? profile.model,
+            maxTokens: profile.maxTokens
+        )
+    }
+
+    /// Builds the concrete provider for a resolved config, honoring the SAME
+    /// test-injection precedence as `resolveProvider()`:
+    /// `provider` (pre-built stub) → `providerFactory` (factory seam) →
+    /// production dispatch switch keyed on `config.kind`. For the factory
+    /// seam, the config is reflected back into a `ProviderProfile` so the
+    /// existing `(ProviderProfile, String) -> any AIProvider` factory shape
+    /// is reused (a test observes the resolved `model` / `apiKey` it carries).
+    private func providerInstance(for config: ResolvedAIProviderConfig) -> any AIProvider {
+        if let provider {
+            return provider
+        }
+        if let factory = providerFactory {
+            return factory(Self.profile(reflecting: config), config.apiKey)
+        }
+        switch config.kind {
+        case .openAICompatible:
+            return OpenAICompatibleProvider(
+                baseURL: config.baseURL,
+                apiKey: config.apiKey,
+                model: config.model
+            )
+        case .anthropicNative:
+            return AnthropicProvider(
+                baseURL: config.baseURL,
+                apiKey: config.apiKey,
+                model: config.model,
+                maxTokens: config.maxTokens
+            )
+        }
+    }
+
+    /// Reflects a resolved config back into a `ProviderProfile` for the
+    /// `providerFactory` test seam. The `id`/`name`/`temperature` fields are
+    /// synthesized (the config does not carry them and the factory only ever
+    /// uses `kind`/`baseURL`/`model`/`maxTokens` + the explicit `apiKey` arg).
+    private static func profile(reflecting config: ResolvedAIProviderConfig) -> ProviderProfile {
+        ProviderProfile(
+            id: UUID(),
+            name: "resolved-config",
+            kind: config.kind,
+            baseURL: config.baseURL,
+            model: config.model,
+            temperature: 0,
+            maxTokens: config.maxTokens
+        )
+    }
 }

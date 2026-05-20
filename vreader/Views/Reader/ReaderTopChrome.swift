@@ -1,22 +1,27 @@
 // Purpose: Feature #60 WI-6b — re-skinned top reader chrome. Floats
 // as an overlay above the reader content (no safe-area impact, same
-// as the legacy `ReaderChromeBar` it replaces).
+// as the legacy `ReaderChromeBar` it replaces). Feature #56 WI-9
+// extends it with an inline `BilingualPill` next to the title when
+// bilingual mode is on for the open book.
 //
 // Layout mirrors `dev-docs/designs/vreader-fidelity-v1/project/vreader-reader.jsx`
 // `ReaderTopChrome` + the #760 design supplement
-// (`design-notes/reader-search-and-more-menu.md`):
+// (`design-notes/reader-search-and-more-menu.md`) + feature #56 WI-9
+// (`vreader-bilingual.jsx`):
 //
-//   ← Library  |  Title (italic, centered)  |  🔍  📑  ⋯
+//   ← Library  |  Title [EN ↔ 中]  |  🔍  📑  ⋯
 //
 // The four shed actions (Contents / Notes / Display / AI) move to
 // `ReaderBottomChrome`. The ⋯ More button toggles the anchored
 // `ReaderMorePopover` (Feature #60 WI-6c) via its `onMore` closure;
-// `moreActive` draws the design's backdrop tint while it is open.
+// `moreActive` draws the design's backdrop tint while it is open. The
+// pill renders only when both `bilingualActive` is `true` AND a
+// language is resolved (`shouldShowBilingualPill`).
 //
 // @coordinates-with: ReaderBottomChrome.swift, ReaderChromeButton.swift,
 //   ReaderThemeV2.swift, ReaderSafeAreaResolver.swift,
 //   ReaderMorePopover.swift, ReaderContainerView+Sheets.swift
-//   (composition site)
+//   (composition site), BilingualPill.swift, BilingualLanguage.swift
 
 import SwiftUI
 
@@ -35,10 +40,48 @@ struct ReaderTopChrome: View {
     /// Whether the ⋯ More control is the active popover anchor — draws
     /// the 6 % backdrop tint from the design.
     let moreActive: Bool
+    /// Feature #56 WI-9 — whether bilingual reading mode is currently
+    /// on for the open book. Combined with `bilingualLanguage` via
+    /// `shouldShowBilingualPill(...)` to gate the pill render path.
+    let bilingualActive: Bool
+    /// Feature #56 WI-9 — the persisted target-language key from
+    /// `PerBookSettings.bilingualTargetLanguage`. `nil` (book never
+    /// configured / transient host state) suppresses the pill even
+    /// when `bilingualActive` is `true`.
+    let bilingualLanguage: String?
     let onBack: () -> Void
     let onSearch: () -> Void
     let onBookmark: () -> Void
     let onMore: () -> Void
+
+    /// Convenience initialiser keeping the pre-WI-9 call sites
+    /// (`bilingualActive` defaults to `false`, no pill rendered) so
+    /// callers that don't yet wire bilingual state compile without
+    /// edits. The full initialiser is preferred — synthesised default
+    /// keeps that to one call site (`ReaderContainerView+Sheets`).
+    init(
+        theme: ReaderThemeV2,
+        title: String,
+        bookmarked: Bool,
+        moreActive: Bool,
+        bilingualActive: Bool = false,
+        bilingualLanguage: String? = nil,
+        onBack: @escaping () -> Void,
+        onSearch: @escaping () -> Void,
+        onBookmark: @escaping () -> Void,
+        onMore: @escaping () -> Void
+    ) {
+        self.theme = theme
+        self.title = title
+        self.bookmarked = bookmarked
+        self.moreActive = moreActive
+        self.bilingualActive = bilingualActive
+        self.bilingualLanguage = bilingualLanguage
+        self.onBack = onBack
+        self.onSearch = onSearch
+        self.onBookmark = onBookmark
+        self.onMore = onMore
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,7 +93,7 @@ struct ReaderTopChrome: View {
 
             HStack(spacing: 0) {
                 backButton
-                titleLabel
+                titleWithPill
                     .frame(maxWidth: .infinity)
                 trailingButtons
             }
@@ -63,6 +106,31 @@ struct ReaderTopChrome: View {
 
             Spacer(minLength: 0)
         }
+    }
+
+    // MARK: - Bilingual pill helpers (Feature #56 WI-9)
+
+    /// Whether to render `BilingualPill` for these inputs. Pure +
+    /// static so tests pin the predicate without spinning up SwiftUI.
+    ///
+    /// Off → never render. On + nil language → never render
+    /// (transient host state — safer to suppress than draw an empty
+    /// pill). On + a key → render.
+    static func shouldShowBilingualPill(
+        bilingualActive: Bool,
+        bilingualLanguage: String?
+    ) -> Bool {
+        guard bilingualActive else { return false }
+        guard let key = bilingualLanguage, !key.isEmpty else { return false }
+        return true
+    }
+
+    /// Resolves a per-book persisted language key through the registry
+    /// fallback — the same fallback `BilingualPill` applies internally.
+    /// Exposed so a chrome consumer can mirror the displayed language
+    /// (e.g., XCUITest harnesses asserting the resolved key).
+    static func resolvedPillLanguage(for language: String) -> String {
+        BilingualLanguage.findOrDefault(key: language).key
     }
 
     // MARK: - Background
@@ -96,16 +164,31 @@ struct ReaderTopChrome: View {
 
     // MARK: - Title
 
-    private var titleLabel: some View {
-        Text(title)
-            .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 14)))
-            .fontWeight(.semibold)
-            .italic()
-            .foregroundStyle(Color(theme.inkColor))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.horizontal, 8)
-            .accessibilityIdentifier(ReaderTopChromeSlot.title.accessibilityIdentifier)
+    /// Title + (optional) bilingual pill. The pill sits inline with
+    /// the title text per design — `display: inline-flex` in the JSX
+    /// — so it consumes a slice of the title block's flexible width
+    /// rather than reserving a fixed lane.
+    private var titleWithPill: some View {
+        HStack(spacing: 0) {
+            Text(title)
+                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 14)))
+                .fontWeight(.semibold)
+                .italic()
+                .foregroundStyle(Color(theme.inkColor))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.horizontal, 8)
+                .accessibilityIdentifier(ReaderTopChromeSlot.title.accessibilityIdentifier)
+            if Self.shouldShowBilingualPill(
+                bilingualActive: bilingualActive,
+                bilingualLanguage: bilingualLanguage
+            ), let resolvedKey = bilingualLanguage {
+                BilingualPill(
+                    theme: theme,
+                    language: BilingualLanguage.findOrDefault(key: resolvedKey).key
+                )
+            }
+        }
     }
 
     // MARK: - Trailing icon buttons

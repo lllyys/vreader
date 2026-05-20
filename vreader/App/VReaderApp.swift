@@ -81,7 +81,7 @@ struct VReaderApp: App {
         #endif
 
         do {
-            let schema = Schema(SchemaV6.models)
+            let schema = Schema(SchemaV7.models)
 
             #if DEBUG
             // Use in-memory store for UI testing to ensure clean state
@@ -104,6 +104,7 @@ struct VReaderApp: App {
                     || config.seedMDTOC
                     || config.seedMDMultiPage
                     || config.seedEPUBFixture
+                    || config.seedAZW3Fixture
                     || config.seedKeepExisting
                 modelConfig = needsDiskBackedStore
                     ? ModelConfiguration()
@@ -128,6 +129,16 @@ struct VReaderApp: App {
             )
             self.modelContainer = container
             self.initError = nil
+
+            // Feature #56 WI-2: wire the bilingual-reading translation cache
+            // (`ChapterTranslationStore.shared`) to the app's own
+            // `ModelContainer` — the same store file + migration/config
+            // selection. Self-building a second container would split-brain
+            // the cache when the app runs in-memory (UI tests). `configure`
+            // is actor-isolated, so it runs in a Task; bilingual mode is
+            // feature-flag-gated off and only reachable long after launch,
+            // so the store is configured well before any caller touches it.
+            Task { await ChapterTranslationStore.shared.configure(modelContainer: container) }
 
             // Feature #54 WI-5: one-shot migration retiring the
             // Native/Unified reading mode — removes the
@@ -184,6 +195,15 @@ struct VReaderApp: App {
                 // value in the same process doesn't leak.
                 TTSTestOverride.useMockSynthesizer = config.ttsTestMode
 
+                // Bug #237: the --enable-ai launch flag was parsed into
+                // config.enableAI but never consumed, so AI verification
+                // surfaces stayed unreachable in XCUITest. Forward it to
+                // AITestOverride so AIReaderAvailability.isAvailable can
+                // short-circuit the API-key + consent gates a headless
+                // test can't satisfy. Written unconditionally so a prior
+                // launch's value in the same process doesn't leak.
+                AITestOverride.forceAvailable = config.enableAI
+
                 let persistence = PersistenceActor(modelContainer: container)
                 let seedConfig = config
                 let semaphore = DispatchSemaphore(value: 0)
@@ -200,6 +220,8 @@ struct VReaderApp: App {
                         await TestSeeder.seedMDMultiPage(persistence: persistence)
                     } else if seedConfig.seedEPUBFixture {
                         await TestSeeder.seedMiniEPUB(persistence: persistence)
+                    } else if seedConfig.seedAZW3Fixture {
+                        await TestSeeder.seedMiniAZW3(persistence: persistence)
                     } else if seedConfig.seedTwoBooks {
                         await TestSeeder.seedTwoBooks(persistence: persistence)
                     } else if seedConfig.seedBooks {
@@ -436,6 +458,13 @@ struct TestLaunchConfig: Sendable {
     /// real-file seed. Implies a disk-backed store (EPUB import + selective
     /// extraction touch the filesystem).
     let seedEPUBFixture: Bool
+    /// `--seed-azw3-fixture` — seed the bundled `mini-azw3.azw3` as a
+    /// single real, openable AZW3 book. Bug #233 / GH #964: the XCUITest
+    /// `launchApp(seed:)` helper had no way to open a Foliate-rendered
+    /// (AZW3/MOBI) book, which blocked CU-free verification of feature #57
+    /// (AZW3/MOBI TTS). Mirrors `seedEPUBFixture` — implies a disk-backed
+    /// store (AZW3 import touches the filesystem).
+    let seedAZW3Fixture: Bool
     let seedCorruptDB: Bool
     /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
     /// SwiftData store to remain. Used for terminate-then-relaunch tests
@@ -519,6 +548,7 @@ struct TestLaunchConfig: Sendable {
             seedMDMultiPage: args.contains("--seed-md-multi-page"),
             seedTwoBooks: args.contains("--seed-two-books"),
             seedEPUBFixture: args.contains("--seed-epub-fixture"),
+            seedAZW3Fixture: args.contains("--seed-azw3-fixture"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
@@ -543,6 +573,7 @@ struct TestLaunchConfig: Sendable {
         seedMDMultiPage: false,
         seedTwoBooks: false,
         seedEPUBFixture: false,
+        seedAZW3Fixture: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,

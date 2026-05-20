@@ -58,24 +58,26 @@ final class MDTOCVerificationTests: XCTestCase {
             "MD reader should load 'Test Markdown TOC' within timeout"
         )
 
-        // 3. Show chrome (may be auto-hidden after initial load)
-        let annotationsButton = app.buttons[AccessibilityID.readerAnnotationsButton]
-        if !annotationsButton.waitForExistence(timeout: 3) {
+        // 3. Show chrome (may be auto-hidden after initial load).
+        //    Feature #62: the TOC now lives in `TOCSheet`, opened by the
+        //    bottom-chrome Contents button.
+        let contentsButton = app.buttons[AccessibilityID.readerContentsButton]
+        if !contentsButton.waitForExistence(timeout: 3) {
             // Tap center of screen to toggle chrome visibility
             app.tap()
         }
         XCTAssertTrue(
-            annotationsButton.waitForHittable(timeout: 10),
-            "Annotations button should be hittable (reader chrome visible)"
+            contentsButton.waitForHittable(timeout: 10),
+            "Contents button should be hittable (reader chrome visible)"
         )
 
-        // 4. Open the annotations panel — default tab is Contents (TOC)
-        annotationsButton.tap()
+        // 4. Open the TOC sheet (`TOCSheet`) — opens on the Contents tab.
+        contentsButton.tap()
 
-        let panel = app.otherElements[AccessibilityID.annotationsPanelSheet]
+        let panel = app.otherElements[AccessibilityID.tocSheet]
         XCTAssertTrue(
             panel.waitForExistence(timeout: 5),
-            "Annotations panel should appear after tapping the annotations button"
+            "TOC sheet should appear after tapping the Contents button"
         )
 
         // 5. Verify TOC has entries — tocEmptyState must NOT exist

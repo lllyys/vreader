@@ -20,6 +20,7 @@ enum FeatureFlagKey: String, Sendable, CaseIterable {
     case aiAssistant
     case sync
     case searchIndexingVerboseLogs
+    case bilingualReading
 }
 
 /// Runtime feature flags with environment-based defaults, override support,
@@ -123,6 +124,9 @@ nonisolated final class FeatureFlags: Sendable {
     /// Whether verbose search indexing logs are enabled.
     var searchIndexingVerboseLogs: Bool { isEnabled(.searchIndexingVerboseLogs) }
 
+    /// Whether bilingual reading mode is enabled (feature #56).
+    var bilingualReading: Bool { isEnabled(.bilingualReading) }
+
     // MARK: - Override Management
 
     /// Sets a runtime override for a feature flag.
@@ -183,6 +187,9 @@ nonisolated final class FeatureFlags: Sendable {
             case .prod:
                 return false
             }
+        case .bilingualReading:
+            // Ships dark — enabled progressively via override (aiAssistant pattern).
+            return false
         }
     }
 }

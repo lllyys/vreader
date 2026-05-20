@@ -6709,6 +6709,251 @@ ${doc.querySelector("parsererror").innerText}`);
       }
       return parts.join("\n\n");
     },
+    // Feature #56 WI-11: per-section ordered identifiers for the
+    // bilingual translation cache. The unit identifier is the
+    // section's index (stringified). A stable index per render is
+    // sufficient — Foliate's `view.book.sections` ordering matches
+    // the rendered section order; the cache row is keyed by the
+    // book's fingerprintKey + this index + the prompt version, so a
+    // book reopen looks up the same cached chapter translations.
+    async bilingualSectionIDs() {
+      if (!bookReady || !currentBook?.sections) return [];
+      const ids = [];
+      for (let i3 = 0; i3 < currentBook.sections.length; i3++) {
+        const s3 = currentBook.sections[i3];
+        if (typeof s3?.createDocument !== "function") continue;
+        ids.push(String(i3));
+      }
+      return ids;
+    },
+    // Feature #56 WI-11: per-section source text for the bilingual
+    // translation pipeline. Mirrors `extractPlainText`'s
+    // `createDocument()` walk but for a single section, so the
+    // `FoliateChapterTextProvider` actor can fetch one unit at a
+    // time without re-walking the whole book.
+    //
+    // `unitID` is the stringified section index (matches what
+    // `bilingualSectionIDs` returns). Returns '' on any failure
+    // (missing section, parse error, empty body) — translation is
+    // a decoration, partial text is the right failure mode.
+    async bilingualSectionText(unitID) {
+      if (!bookReady || !currentBook?.sections) return "";
+      const idx = parseInt(unitID, 10);
+      if (isNaN(idx) || idx < 0 || idx >= currentBook.sections.length) {
+        return "";
+      }
+      const s3 = currentBook.sections[idx];
+      if (typeof s3?.createDocument !== "function") return "";
+      try {
+        const doc = await s3.createDocument();
+        return (doc?.body?.textContent ?? "").trim();
+      } catch (e3) {
+        console.warn("[foliate-host] bilingualSectionText section failed:", e3);
+        return "";
+      }
+    },
+    // Feature #56 WI-11: walk a specific section's rendered DOM,
+    // stamp a stable `data-vreader-bid` attribute on each
+    // translatable block (`p` / `li` / `blockquote` / `pre` / `dd`
+    // / `dt` — same set the EPUB renderer enumerates), and post
+    // an ordered `[{bid, text, sectionIndex}]` payload back to
+    // Swift via the `bilingualEnumerate` channel.
+    //
+    // Gate-4 audit finding H2: in paginated mode foliate-js can
+    // keep multiple section docs loaded simultaneously
+    // (`view.renderer.getContents()` returns `[{doc, index}]`
+    // for every retained section). Walking them all and posting
+    // one flat block list would let one unit's translation map
+    // spill into adjacent sections. We therefore (a) tag every
+    // emitted block with its section's `index`, and (b) accept
+    // an optional `targetSectionIndex` so the caller can scope
+    // the enumerate to one section. When omitted, every loaded
+    // section is enumerated and the Swift pipeline partitions
+    // by the per-block `sectionIndex`.
+    //
+    // The rendered DOM lives inside the section's iframe / shadow
+    // root, reachable only via `view.renderer.getContents()`. A
+    // re-enumerate after inject keeps existing `data-vreader-bid`
+    // values (idempotent stamp) so a section re-render does not
+    // shift the cache-key mapping. Decoration siblings carrying
+    // `data-vreader-decoration` are skipped so a re-enumerate
+    // never stamps a translation block.
+    //
+    // Gate-4 audit finding M2: an existing
+    // `data-vreader-bid` from third-party book HTML cannot be
+    // trusted — a hostile attribute value would break the
+    // attribute-selector lookup in `bilingualInject` and abort
+    // the whole pass. We re-stamp any pre-existing bid whose
+    // value does not match the trusted `^fb\d+$` shape so the
+    // selector is always over content we wrote.
+    bilingualEnumerate(targetSectionIndex) {
+      const reqIdx = targetSectionIndex == null ? null : targetSectionIndex;
+      try {
+        const contents = view.renderer?.getContents?.();
+        if (!Array.isArray(contents) || contents.length === 0) {
+          post("bilingualEnumerate", {
+            requestedSectionIndex: reqIdx,
+            blocks: []
+          });
+          return;
+        }
+        const BLOCK_TAGS = {
+          p: 1,
+          li: 1,
+          blockquote: 1,
+          pre: 1,
+          dd: 1,
+          dt: 1
+        };
+        const TRUSTED_BID = /^fb\d+$/;
+        const out = [];
+        for (const entry of contents) {
+          const doc = entry?.doc;
+          if (!doc) continue;
+          const sectionIndex = typeof entry.index === "number" ? entry.index : -1;
+          if (targetSectionIndex != null && sectionIndex !== targetSectionIndex) {
+            continue;
+          }
+          const all = doc.body ? doc.body.getElementsByTagName("*") : doc.getElementsByTagName("*");
+          let seq = doc.__vreaderBilingualSeq ?? 0;
+          for (let i3 = 0; i3 < all.length; i3++) {
+            const el = all[i3];
+            const tag = (el.localName || "").toLowerCase();
+            if (!BLOCK_TAGS[tag]) continue;
+            if (el.hasAttribute && el.hasAttribute("data-vreader-decoration")) {
+              continue;
+            }
+            let txt = el.textContent || "";
+            txt = txt.replace(/\s+/g, " ").trim();
+            if (!txt) continue;
+            let bid = el.getAttribute("data-vreader-bid");
+            if (!bid || !TRUSTED_BID.test(bid)) {
+              seq += 1;
+              bid = "fb" + seq;
+              el.setAttribute("data-vreader-bid", bid);
+            }
+            out.push({
+              bid,
+              text: txt,
+              sectionIndex
+            });
+          }
+          doc.__vreaderBilingualSeq = seq;
+        }
+        post("bilingualEnumerate", {
+          requestedSectionIndex: reqIdx,
+          blocks: out
+        });
+      } catch (e3) {
+        console.warn("[foliate-host] bilingualEnumerate failed:", e3);
+        post("bilingualEnumerate", {
+          requestedSectionIndex: reqIdx,
+          blocks: []
+        });
+      }
+    },
+    // Feature #56 WI-11: inject a translation `<div>` after each
+    // stamped block in a specific section's DOM. `opts` is the
+    // payload `FoliateBilingualJS.bilingualInjectJS` emits:
+    //
+    //   { translations: {bid: text, ...},
+    //     decorationAttribute, blockIDAttribute, blockClassName,
+    //     styleCssText,
+    //     targetSectionIndex: Int | null }
+    //
+    // Gate-4 audit finding H2: scope the inject walk to the
+    // requested section. With multiple sections loaded
+    // simultaneously (paginated mode), an unscoped walk would
+    // let one unit's translations leak into adjacent sections.
+    // `targetSectionIndex == null` falls back to "every loaded
+    // section" (the original behaviour) so a future bulk-inject
+    // path stays open.
+    //
+    // Gate-4 audit finding M2: bid keys come from the (trusted)
+    // Swift Pipeline and were stamped by `bilingualEnumerate`'s
+    // re-stamping logic (any third-party value not matching
+    // `^fb\d+$` is overwritten before its bid enters the
+    // pipeline). Even so, we use `CSS.escape` defensively so the
+    // selector is always well-formed regardless of upstream
+    // contract changes.
+    //
+    // Idempotent: if a decoration sibling already exists for a
+    // block, its `textContent` is replaced in place rather than a
+    // second sibling appended.
+    bilingualInject(opts) {
+      try {
+        const translations = opts?.translations || {};
+        const DECO = opts?.decorationAttribute || "data-vreader-decoration";
+        const BID = opts?.blockIDAttribute || "data-vreader-bid";
+        const CLS = opts?.blockClassName || "vreader-bilingual";
+        const STYLE = opts?.styleCssText || "user-select: none; -webkit-user-select: none;";
+        const targetSectionIndex = opts?.targetSectionIndex;
+        const contents = view.renderer?.getContents?.();
+        if (!Array.isArray(contents) || contents.length === 0) return;
+        const esc = typeof CSS !== "undefined" && CSS.escape ? CSS.escape : (s3) => String(s3).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+        for (const entry of contents) {
+          const doc = entry?.doc;
+          if (!doc) continue;
+          const sectionIndex = typeof entry.index === "number" ? entry.index : -1;
+          if (targetSectionIndex != null && sectionIndex !== targetSectionIndex) {
+            continue;
+          }
+          for (const bid in translations) {
+            if (!Object.prototype.hasOwnProperty.call(translations, bid)) {
+              continue;
+            }
+            const block = doc.querySelector(
+              "[" + BID + '="' + esc(bid) + '"]'
+            );
+            if (!block) continue;
+            const next = block.nextElementSibling;
+            if (next && next.hasAttribute && next.hasAttribute(DECO) && next.classList && next.classList.contains(CLS)) {
+              next.textContent = translations[bid];
+              continue;
+            }
+            const div = doc.createElement("div");
+            div.className = CLS;
+            div.setAttribute(DECO, "");
+            div.style.cssText = STYLE;
+            div.textContent = translations[bid];
+            if (block.parentNode) {
+              block.parentNode.insertBefore(div, block.nextSibling);
+            }
+          }
+        }
+      } catch (e3) {
+        console.warn("[foliate-host] bilingualInject failed:", e3);
+      }
+    },
+    // Feature #56 WI-11: remove every `vreader-bilingual` node from
+    // loaded section DOMs. With `targetSectionIndex` omitted, walks
+    // every section (the safe default on disable / book close).
+    // Safe to run multiple times — an empty NodeList is a no-op.
+    bilingualClear(targetSectionIndex) {
+      try {
+        const contents = view.renderer?.getContents?.();
+        if (!Array.isArray(contents) || contents.length === 0) return;
+        for (const entry of contents) {
+          const doc = entry?.doc;
+          if (!doc) continue;
+          const sectionIndex = typeof entry.index === "number" ? entry.index : -1;
+          if (targetSectionIndex != null && sectionIndex !== targetSectionIndex) {
+            continue;
+          }
+          const nodes = doc.querySelectorAll(
+            ".vreader-bilingual[data-vreader-decoration]"
+          );
+          for (let i3 = 0; i3 < nodes.length; i3++) {
+            const n3 = nodes[i3];
+            if (n3.parentNode) {
+              n3.parentNode.removeChild(n3);
+            }
+          }
+        }
+      } catch (e3) {
+        console.warn("[foliate-host] bilingualClear failed:", e3);
+      }
+    },
     // Cleanup
     close() {
       view.close();

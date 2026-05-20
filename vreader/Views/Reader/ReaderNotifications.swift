@@ -56,11 +56,14 @@ extension Notification.Name {
     /// Posted by reader bridges (TXT/MD/EPUB/Foliate/PDF) when the user
     /// taps an existing highlight in the content area.
     /// The notification's `object` is a `ReaderHighlightTapEvent` carrying
-    /// the highlight's UUID and a `sourceRect` in the coordinate space of
-    /// the same `UIView` the bridge later passes to
-    /// `HighlightActionPresenting.present(for:in:)` — see the doc on
-    /// `ReaderHighlightTapEvent.sourceRect` for the cross-bridge contract.
-    /// Feature #53 / GH #596.
+    /// the highlight's UUID and a `sourceRect`. Feature #64's
+    /// `HighlightPopoverModifier` observes this to open the unified
+    /// highlight-action popover anchored at `sourceRect` — see the doc on
+    /// `ReaderHighlightTapEvent.sourceRect` for the cross-bridge
+    /// coordinate-space contract. (Originally feature #53 / GH #596; the
+    /// feature-#53 long-press `UIMenu` was replaced by the unified popover and
+    /// torn down in feature #64 WI-10 — this notification is the surviving,
+    /// now tap-triggered, entry point.)
     static let readerHighlightTapped = Notification.Name("vreader.readerHighlightTapped")
     /// Posted after annotation import completes (bug #88).
     /// Reader containers observe this to re-render persisted highlights.
@@ -75,24 +78,56 @@ extension Notification.Name {
     static let readerOpenNotes = Notification.Name("vreader.readerOpenNotes")
     static let readerOpenDisplay = Notification.Name("vreader.readerOpenDisplay")
     static let readerOpenAI = Notification.Name("vreader.readerOpenAI")
-    /// Feature #60 WI-6c: posted by the reader More-menu popover
-    /// (`ReaderMorePopover`) when the user taps one of its five rows.
+    /// Feature #60 WI-6c / Feature #56 WI-8: posted by the reader
+    /// More-menu popover (`ReaderMorePopover`) when the user taps a row.
     /// `ReaderContainerView` observes these and runs the matching
     /// action. Posting (rather than threading closures through the
     /// shared `ReaderTopChrome` and per-format hosts) keeps the
     /// popover composable in one place. Each maps 1:1 from a
-    /// `ReaderMoreMenuRow` case via `ReaderMoreMenuRow.notification`.
+    /// `ReaderMoreMenuRow` case via `ReaderMoreMenuRow.notification`
+    /// — the declared row set may grow over time (WI-8 added two
+    /// rows; WI-15 may rename one); the inverse `init?(notification:)`
+    /// is the single source of truth for the round-trip.
     ///
     /// `.readerMoreToggleAutoTurn` flips `ReaderSettingsStore.autoPageTurn`
     /// (the only row with real backing state — the design draws it as
     /// a toggle). `.readerMoreBookDetails` opens the reader Book Details
-    /// sheet (`BookDetailsSheet`, feature #61). The design's Bilingual
-    /// row is deferred (GH #790) — no notification for it.
+    /// sheet (`BookDetailsSheet`, feature #61).
+    ///
+    /// Feature #56 WI-8 — the bilingual row returns (formerly deferred
+    /// under GH #790): `.readerMoreBilingual` is posted from the
+    /// bilingual row; host containers route it to the
+    /// `BilingualReadingViewModel.setEnabled(...)` toggle, except in
+    /// the `.unavailable` state where the host routes to AI Settings.
+    /// `.readerMoreReTranslateChapter` is posted from the conditional
+    /// re-translate row (design §#864); the host presents
+    /// `ReTranslatePickerSheet`. The re-translate row is only visible
+    /// when bilingual mode is on for the book.
     static let readerMoreReadAloud = Notification.Name("vreader.readerMoreReadAloud")
     static let readerMoreToggleAutoTurn = Notification.Name("vreader.readerMoreToggleAutoTurn")
+    static let readerMoreBilingual = Notification.Name("vreader.readerMoreBilingual")
+    static let readerMoreReTranslateChapter = Notification.Name("vreader.readerMoreReTranslateChapter")
+    /// Feature #56 WI-14 (declared in WI-8 per plan): posted by
+    /// `BookTranslationCoordinator` whenever a global-book-translation
+    /// run advances. A reader open on a book being translated observes
+    /// this to drive its `ReaderTranslateBanner` (progress / cancel).
+    /// `userInfo` carries `["fingerprintKey": String, "completed": Int,
+    /// "total": Int]`. Defined here so the contract is stable when
+    /// WI-14 lands the producer and reader-side consumer.
+    static let readerBookTranslationProgressDidChange = Notification.Name(
+        "vreader.reader.bookTranslationProgressDidChange"
+    )
     static let readerMoreBookDetails = Notification.Name("vreader.readerMoreBookDetails")
     static let readerMoreShareBook = Notification.Name("vreader.readerMoreShareBook")
     static let readerMoreExportAnnotations = Notification.Name("vreader.readerMoreExportAnnotations")
+    /// Feature #56 WI-7b: posted by `BilingualReadingViewModel` whenever the
+    /// bilingual state a renderer must react to changes — bilingual toggled
+    /// on/off, or a unit's translation became available (prefetch landed) or
+    /// was recorded unavailable (offline cache-miss). The `userInfo` carries
+    /// `["fingerprintKey": String]` so a renderer filters to its own book.
+    /// Each format renderer (WI-10..13) observes this to re-inject / clear
+    /// the interlinear translation for the affected unit.
+    static let readerBilingualDidChange = Notification.Name("vreader.reader.bilingualDidChange")
     /// Posted when a footnote link is detected in EPUB content (foliate-js).
     /// Object is [String: String] with "href" and "text" keys.
     static let epubFootnoteDetected = Notification.Name("vreader.epubFootnoteDetected")
@@ -150,6 +185,51 @@ extension Notification.Name {
     /// SwiftData but never re-paint on book reopen — the data
     /// layer is correct, only the visual restore fails.
     static let foliateOverlayReadyForSection = Notification.Name("vreader.foliateOverlayReadyForSection")
+
+    /// Feature #56 WI-11: posted by `FoliateSpikeView.Coordinator`
+    /// after parsing a `bilingualEnumerate` script-message payload.
+    /// Carries `userInfo = ["blocks": [BilingualBlock], "fingerprintKey": String]`.
+    /// The observer in `FoliateBilingualContainerView` resolves the
+    /// current unit via the bilingual VM and dispatches both the
+    /// translation prefetch and (if a cached translation exists)
+    /// the inject JS through the `foliateRequestBilingualEvalJS`
+    /// observer. Filtered by `fingerprintKey` so concurrent
+    /// AZW3/MOBI readers do not cross-fire.
+    static let foliateBilingualBlocksEnumerated = Notification.Name("vreader.foliateBilingualBlocksEnumerated")
+
+    /// Feature #56 WI-11: posted by the bilingual container to ask
+    /// the live `FoliateSpikeView.Coordinator` to evaluate a JS
+    /// payload (enumerate / inject / clear). Carries
+    /// `userInfo = ["js": String, "fingerprintKey": String]`. The
+    /// Coordinator's observer evaluates the JS against its live
+    /// `WKWebView`. Mirrors the
+    /// `.foliateRequestAnnotationJSCreate` /
+    /// `.foliateRequestAnnotationJSDelete` pattern so the seam
+    /// stays consistent across the highlight + bilingual surfaces.
+    /// Filtered by `fingerprintKey` so concurrent AZW3/MOBI
+    /// readers do not cross-fire.
+    static let foliateRequestBilingualEvalJS = Notification.Name("vreader.foliateRequestBilingualEvalJS")
+
+    /// Feature #56 WI-11: posted by `FoliateSpikeView.Coordinator`
+    /// when Foliate-js fires a `section-load` event (a new section
+    /// has been rendered into the DOM). Carries
+    /// `userInfo = ["sectionIndex": Int, "fingerprintKey": String]`.
+    /// The bilingual container observes this to refresh its
+    /// enumerate payload against the freshly-loaded section.
+    /// Filtered by `fingerprintKey` so concurrent AZW3/MOBI
+    /// readers do not cross-fire.
+    static let foliateSectionLoaded = Notification.Name("vreader.foliateSectionLoaded")
+
+    /// Feature #56 WI-11 (Gate-4 audit H1): posted by
+    /// `FoliateSpikeView.Coordinator` on every `relocate` event so
+    /// the bilingual container can update its current-section
+    /// tracking even when the position change does not load a new
+    /// section (page turn within an already-loaded section in
+    /// paginated mode). Carries
+    /// `userInfo = ["sectionIndex": Int, "tocHref": String?,
+    ///              "fingerprintKey": String]`. Filtered by
+    /// `fingerprintKey`.
+    static let foliateRelocated = Notification.Name("vreader.foliateRelocated")
 
     /// Feature #60 WI-7c1: posted by a reader bridge when the user
     /// finishes a long-press selection. The
@@ -211,14 +291,16 @@ struct PDFHighlightNotificationPayload {
     let color: String
 }
 
-/// Carries the tap event for an existing highlight (Feature #53).
-/// Posted via `.readerHighlightTapped` from any reader format's bridge.
+/// Carries the tap event for an existing highlight. Posted via
+/// `.readerHighlightTapped` from any reader format's bridge; observed by
+/// feature #64's `HighlightPopoverModifier` to open the unified
+/// highlight-action popover.
 ///
 /// **`sourceRect` coordinate-space contract (Bug #203 / GH #743)**: the rect
-/// must be in the coordinate space of the same `UIView` the bridge passes
-/// to `HighlightActionPresenting.present(for:in:)`. The presenter feeds it
-/// to `UIEditMenuConfiguration.sourcePoint`, which UIKit interprets in the
-/// interaction-view's coords. Per-bridge:
+/// must be in the coordinate space of the same `UIView` the bridge supplies
+/// as the popover's `hostViewProvider`. `UIKitHighlightPopoverPresenter` feeds
+/// it to `UIPopoverPresentationController.sourceRect`, which UIKit interprets
+/// in the host view's coords. Per-bridge:
 ///   - TXT (non-chunked): textView-local; presenter view is the textView.
 ///   - TXT chunked: tableView-local; presenter view is the tableView. The
 ///     chunked gesture wrapper converts textView-local rects from the
@@ -227,8 +309,9 @@ struct PDFHighlightNotificationPayload {
 ///     view is the webView.
 ///   - PDF: pdfView-local via `pdfView.convert(hit.bounds, from: page)`.
 ///   - Foliate (AZW3/MOBI): `.zero` (known follow-up — Foliate JS doesn't
-///     forward annotation rects yet); the menu anchors at view origin.
-/// Window-space rects (the pre-Bug-#203 contract) anchored the menu
+///     forward annotation rects yet); with no rect the unified popover
+///     resolves to its bottom-sheet form.
+/// Window-space rects (the pre-Bug-#203 contract) anchored the popover
 /// off-screen whenever the host UIView was offset within its window.
 struct ReaderHighlightTapEvent: Sendable, Equatable {
     let highlightID: UUID

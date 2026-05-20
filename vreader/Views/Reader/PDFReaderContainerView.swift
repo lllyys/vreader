@@ -98,11 +98,7 @@ struct PDFReaderContainerView: View {
                     pendingHighlightId: pendingHighlightId,
                     searchHighlightText: searchHighlightText,
                     highlightRenderer: highlightRenderer,
-                    theme: settingsStore?.theme,
-                    highlightActionPresenter: UIKitHighlightActionPresenter(),
-                    onHighlightTapAction: { [highlightCoordinator] action, id in
-                        await highlightCoordinator?.handleTapAction(action, highlightID: id)
-                    }
+                    theme: settingsStore?.theme
                 )
                 .ignoresSafeArea(edges: .bottom)
                 .accessibilityIdentifier("pdfReaderContent")
@@ -132,9 +128,15 @@ struct PDFReaderContainerView: View {
                 bottomOverlay
             }
         }
-        .notePreviewPresenterIfAvailable(
+        // Feature #64 WI-7: a tap on a persisted PDF highlight annotation
+        // opens the unified cross-format highlight-action popover (color /
+        // note / copy / share / delete) — superseding feature #55's note
+        // preview and feature #53's long-press delete `UIMenu`. `mutating`
+        // is the PDF `HighlightCoordinator`.
+        .unifiedHighlightPopoverPresenterIfAvailable(
             modelContainer: modelContainer,
             bookFingerprintKey: viewModel.bookFingerprintKey,
+            mutating: highlightCoordinator,
             theme: settingsStore?.theme ?? .paper
         )
         .task {
