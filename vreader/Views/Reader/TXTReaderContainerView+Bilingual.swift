@@ -179,6 +179,19 @@ extension TXTReaderContainerView {
             name: .readerBookTranslationTextProviderAvailable,
             object: textProvider,
             userInfo: ["fingerprintKey": viewModel.bookFingerprintKey])
+        // Bug #245 / GH #1070: if persistence loaded `isEnabled == true`
+        // (the user previously enabled bilingual for this book) AND the
+        // setup sheet is NOT needed (it's a re-open, not a first-enable),
+        // kick the initial `handlePositionChange` to warm the cache for
+        // the open chapter. Without this, TXT's in-memory
+        // `translationsByUnit` dict stays empty even when the disk cache
+        // already has rows for the open chapter, and the renderer falls
+        // back to source-only. Mirrors PDF's Gate-4 round-1 H1 fix.
+        if vm.isEnabled && !vm.needsSetupSheet {
+            Self.triggerBilingualPositionChange(
+                viewModel: vm, locator: viewModel.makeLocator()
+            )
+        }
     }
 
     /// Handle a `.readerMoreBilingual` notification — toggle the
@@ -200,6 +213,13 @@ extension TXTReaderContainerView {
                 granularity: vm.granularity
             )
             showBilingualSetupSheet = true
+        } else {
+            // Bug #245 / GH #1070: a subsequent enable on an already-
+            // configured book must warm the prefetch immediately so the
+            // open chapter's translations land. Mirrors the PDF path.
+            Self.triggerBilingualPositionChange(
+                viewModel: vm, locator: viewModel.makeLocator()
+            )
         }
     }
 
@@ -211,6 +231,11 @@ extension TXTReaderContainerView {
         vm.setGranularity(bilingualSetupState.granularity)
         vm.dismissSetupSheet()
         showBilingualSetupSheet = false
+        // Bug #245 / GH #1070: kick the initial prefetch for the open
+        // chapter now that language + granularity are committed.
+        Self.triggerBilingualPositionChange(
+            viewModel: vm, locator: viewModel.makeLocator()
+        )
     }
 
     /// Dismiss the setup sheet without persisting changes and turn
@@ -220,6 +245,33 @@ extension TXTReaderContainerView {
         vm.dismissSetupSheet()
         vm.setEnabled(false)
         showBilingualSetupSheet = false
+    }
+
+    // MARK: - Position-change trigger (Bug #245 / GH #1070)
+
+    /// Drive `vm.handlePositionChange(locator)` so the unit-aware
+    /// prefetch trigger fires for the open chapter. The prefetcher
+    /// looks up the disk cache via `ChapterTranslationService`, so a
+    /// disk-cache hit populates `translationsByUnit` for the open unit
+    /// (and the next one); the renderer then sees a non-empty
+    /// `translations(for:)` and interleaves the translation runs into
+    /// the source attrString.
+    ///
+    /// Without this trigger the in-memory dict stays empty even after
+    /// the disk cache fills, and the chapter renders English-only
+    /// regardless of how many `ZCHAPTERTRANSLATION` rows exist. EPUB /
+    /// Foliate / PDF wire equivalent helpers (see the corresponding
+    /// `+Bilingual` extensions); TXT was the missing path until this
+    /// fix.
+    ///
+    /// Idempotent on nil inputs and on a disabled VM — the underlying
+    /// `handlePositionChange` short-circuits when `isEnabled == false`
+    /// or no prefetcher is attached.
+    static func triggerBilingualPositionChange(
+        viewModel: BilingualReadingViewModel?, locator: Locator?
+    ) {
+        guard let viewModel, let locator else { return }
+        Task { await viewModel.handlePositionChange(locator) }
     }
 
     // MARK: - Offset routing helpers (Feature #56 WI-12b)
@@ -279,8 +331,20 @@ extension TXTReaderContainerView {
             bookFingerprintKey: viewModel.bookFingerprintKey,
             chapterIndexNonce: viewModel.chapterIndex?.count,
             textContentReady: viewModel.textContent != nil,
+            currentChapterIdxNonce: viewModel.currentChapterIdx,
             ensureViewModel: { ensureBilingualViewModel() },
             onMoreBilingualToggle: { handleMoreBilingualToggle() },
+            onPositionChanged: {
+                // Bug #245 / GH #1070: chapter navigation + scroll-driven
+                // position broadcasts drive the bilingual prefetch trigger.
+                // Without this wire the in-memory translationsByUnit dict
+                // never populates, and the renderer falls back to source-
+                // only even after the disk cache fills.
+                Self.triggerBilingualPositionChange(
+                    viewModel: bilingualViewModel,
+                    locator: viewModel.makeLocator()
+                )
+            },
             onReTranslateApplied: { unit, segments in
                 bilingualViewModel?.applyReTranslateResult(segments, for: unit)
             },
@@ -319,8 +383,19 @@ struct TXTBilingualSurfacesModifier: ViewModifier {
     let bookFingerprintKey: String
     let chapterIndexNonce: Int?
     let textContentReady: Bool
+    /// Bug #245 / GH #1070: chapter-navigation nonce. Mirror of
+    /// `PDFBilingualSurfacesModifier.currentPageIndexNonce` — fires
+    /// `onPositionChanged` so the open chapter's bilingual prefetch
+    /// kicks off as soon as the user navigates.
+    let currentChapterIdxNonce: Int
     let ensureViewModel: () -> Void
     let onMoreBilingualToggle: () -> Void
+    /// Bug #245 / GH #1070: drives `vm.handlePositionChange(locator)`
+    /// when chapter navigation or `.readerPositionDidChange` fires.
+    /// Without this, TXT's in-memory `translationsByUnit` dict never
+    /// populates and the renderer falls back to source-only despite
+    /// warm disk cache. Mirrors PDF's `onPositionChanged`.
+    let onPositionChanged: () -> Void
     /// Feature #56 WI-15: routes a re-translate result to the format's
     /// bilingual VM so the open chapter re-renders without waiting for the
     /// next prefetch trigger.
@@ -332,9 +407,13 @@ struct TXTBilingualSurfacesModifier: ViewModifier {
         content
             .onChange(of: chapterIndexNonce) { _, _ in ensureViewModel() }
             .onChange(of: textContentReady) { _, _ in ensureViewModel() }
+            .onChange(of: currentChapterIdxNonce) { _, _ in onPositionChanged() }
             .onReceive(
                 NotificationCenter.default.publisher(for: .readerMoreBilingual)
             ) { _ in onMoreBilingualToggle() }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .readerPositionDidChange)
+            ) { _ in onPositionChanged() }
             .onReceive(
                 NotificationCenter.default.publisher(for: .readerBilingualReTranslateApplied)
             ) { notification in
