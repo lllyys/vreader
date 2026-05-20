@@ -115,17 +115,28 @@ struct MDReaderContainerView: View {
             }
         }
         // Feature #60 WI-7c4: present `SelectionPopoverView` (WI-7a)
-        // when a long-press selection finishes in MD. MD renders via
-        // the shared `TXTTextViewBridge` whose coordinator's
+        // when a long-press selection finishes in MD. MD's SCROLL mode
+        // renders via the shared `TXTTextViewBridge` whose coordinator's
         // `editMenuForTextIn` was swapped to post
         // `.readerSelectionPopoverRequested` in WI-7c2; this modifier
-        // observes the notification and shows the sheet, mirroring
-        // the TXT container's attachment from WI-7c2.
+        // observes the notification and shows the sheet, mirroring the
+        // TXT container's attachment from WI-7c2. Bug #218 scope facet on
+        // Bug #215 (this file's row): MD's PAGED mode renders
+        // `NativeTextPagedView` (a plain `UITextView`, no `TXTTextViewBridge`
+        // and no editMenu swap), so the selection-popover producer is
+        // currently absent in paged MD and the iOS system edit menu shows
+        // instead. Tracked as the open paged-mode selection-popover facet
+        // on Bug #215 — separate fix scope.
         .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
         // Feature #64 WI-6: a tap on a highlight opens the unified
         // highlight-action popover — superseding feature #55's note preview
-        // and feature #53's long-press delete `UIMenu`. MD renders via the
-        // shared `TXTTextViewBridge`; `mutating` is the MD `HighlightCoordinator`.
+        // and feature #53's long-press delete `UIMenu`. MD's SCROLL mode
+        // routes through the shared `TXTTextViewBridge`'s tap recognizer,
+        // which posts `.readerHighlightTapped`. MD's PAGED mode (Bug #215
+        // wiring) routes the bridge-equivalent tap recognizer on
+        // `NativePagedContainer` through `ReaderTapZoneRouter` (page-turn
+        // / chrome-toggle, no highlight hit-test yet — same Bug #218 facet
+        // as the selection-popover producer above).
         .unifiedHighlightPopoverPresenterIfAvailable(
             modelContainer: modelContainer,
             bookFingerprintKey: viewModel.bookFingerprintKey,
