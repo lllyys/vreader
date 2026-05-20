@@ -124,6 +124,12 @@ struct FoliateBilingualContainerView: View {
         ) { notification in
             guard let key = notification.userInfo?["fingerprintKey"] as? String,
                   key == fingerprintKey else { return }
+            // Feature #56 WI-14: publish the Foliate text provider on
+            // section-load so the Book Details "Translate entire book…"
+            // entry point becomes reachable on normal book open (not
+            // only after the user toggles bilingual mode). Codex Gate-4
+            // round-2 H2 fix. Idempotent — host caches by fingerprintKey.
+            publishTranslateBookTextProviderIfReady()
             handleSectionLoaded(notification.userInfo)
         }
         .onReceive(
@@ -177,6 +183,23 @@ struct FoliateBilingualContainerView: View {
                 granularity: vm.granularity
             )
         }
+    }
+
+    /// Feature #56 WI-14: publishes the Foliate chapter-text provider
+    /// to the parent `ReaderContainerView` so the Book Details
+    /// translate-entire-book entry point can consume it. The Foliate
+    /// publish path needs to fire on normal book open (not only when
+    /// the user toggles bilingual mode), so this is invoked from the
+    /// `.foliateSectionLoaded` observer above. Idempotent — the host
+    /// caches by `fingerprintKey`, so repeating the post on every
+    /// section-load is cheap (Codex Gate-4 round-2 H2).
+    private func publishTranslateBookTextProviderIfReady() {
+        guard let extractor = coordinatorBox?.coordinator else { return }
+        let textProvider = FoliateChapterTextProvider(extractor: extractor)
+        NotificationCenter.default.post(
+            name: .readerBookTranslationTextProviderAvailable,
+            object: textProvider,
+            userInfo: ["fingerprintKey": fingerprintKey])
     }
 
     // MARK: - Event handlers

@@ -120,6 +120,15 @@ extension EPUBReaderContainerView {
                 granularity: vm.granularity
             )
         }
+        // Feature #56 WI-14: publish the EPUB chapter-text provider to
+        // the parent ReaderContainerView so the Book Details "Translate
+        // entire book…" entry point can consume it without bubbling
+        // per-format internals upwards. Sibling of the TXT/MD/Foliate
+        // publishers.
+        NotificationCenter.default.post(
+            name: .readerBookTranslationTextProviderAvailable,
+            object: textProvider,
+            userInfo: ["fingerprintKey": viewModel.bookFingerprintKey])
     }
 
     /// Process a parsed `[BilingualBlock]` from the JS enumerate

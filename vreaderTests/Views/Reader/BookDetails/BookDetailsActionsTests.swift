@@ -13,6 +13,7 @@
 
 import Testing
 import Foundation
+import SwiftData
 import UIKit
 @testable import vreader
 
@@ -55,8 +56,11 @@ struct BookDetailsActionsTests {
 
     // MARK: - Actions card composition
 
-    @Test("Actions card exposes exactly three rows in design order")
+    @Test("Actions card exposes exactly three rows in design order (no translate VM)")
     func actionRowsAreThreeInOrder() {
+        // Without a translate-book VM the Actions card holds exactly the
+        // three feature-#61 rows in design order. WI-14's translate row
+        // is opt-in (see `translateBookRowAppearsAtTopWhenViewModelInjected`).
         let sheet = makeSheet(makeItem())
         #expect(sheet.actionRows.map(\.kind) == [.cover, .share, .exportAnnotations])
     }
@@ -82,6 +86,42 @@ struct BookDetailsActionsTests {
         let export = sheet.actionRows.first { $0.kind == .exportAnnotations }
         #expect(export?.label == "Export annotations\u{2026}")
         #expect(export?.sublabel == "Markdown \u{00b7} JSON \u{00b7} VReader JSON")
+    }
+
+    // MARK: - Feature #56 WI-14 translate row
+
+    @Test("Translate-book row is inserted at the top of the Actions card when the VM is wired")
+    @MainActor
+    func translateBookRowAppearsAtTopWhenViewModelInjected() async throws {
+        let schema = Schema(SchemaV7.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        let store = ChapterTranslationStore(modelContainer: container)
+        let sender = MockTranslationSender(responses: [])
+        let service = ChapterTranslationService(
+            sender: sender, store: store, promptVersion: "v1")
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1")
+        let vm = BookTranslationViewModel(
+            bookFingerprintKey: "epub:test-fp", coordinator: coordinator)
+
+        var sheet = makeSheet(makeItem())
+        sheet.translateBookViewModel = vm
+        sheet.translateBookTargetLanguage = "Chinese"
+
+        #expect(sheet.actionRows.first?.kind == .translateBook)
+        #expect(sheet.actionRows.map(\.kind) ==
+            [.translateBook, .cover, .share, .exportAnnotations])
+        // Translate row's sublabel renders the target language.
+        let row = sheet.actionRows.first { $0.kind == .translateBook }
+        #expect(row?.label == "Translate entire book\u{2026}")
+        #expect(row?.sublabel?.contains("Chinese") == true)
+    }
+
+    @Test("Translate-book row is OMITTED when no view model is wired")
+    func translateBookRowOmittedWithoutViewModel() {
+        let sheet = makeSheet(makeItem())
+        #expect(sheet.actionRows.contains { $0.kind == .translateBook } == false)
     }
 
     // MARK: - Fingerprint copy

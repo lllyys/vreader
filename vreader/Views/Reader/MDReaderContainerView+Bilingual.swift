@@ -113,6 +113,14 @@ extension MDReaderContainerView {
         // Mirror the loaded-from-persistence state to the parent
         // container's chrome.
         vm.postDidChange()
+        // Feature #56 WI-14: publish the MD chapter-text provider to
+        // the parent ReaderContainerView so the Book Details translate-
+        // entire-book entry point can consume it. Sibling of the
+        // TXT/EPUB/Foliate publishers.
+        NotificationCenter.default.post(
+            name: .readerBookTranslationTextProviderAvailable,
+            object: textProvider,
+            userInfo: ["fingerprintKey": viewModel.bookFingerprintKey])
     }
 
     /// Handle a `.readerMoreBilingual` notification — toggle the

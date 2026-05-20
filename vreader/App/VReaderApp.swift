@@ -140,6 +140,27 @@ struct VReaderApp: App {
             // so the store is configured well before any caller touches it.
             Task { await ChapterTranslationStore.shared.configure(modelContainer: container) }
 
+            // Feature #56 WI-14: wire the global translate-entire-book
+            // coordinator (`BookTranslationCoordinator.shared`) with a
+            // service that consumes the same store + a per-app
+            // `AIService` (one per app — matches the bilingual prefetch
+            // construction pattern in `TXTReaderContainerView+Bilingual`
+            // et al). `promptVersion` is the canonical bilingual-v1
+            // value, kept aligned with chapter bilingual mode so cache
+            // rows are shared between chapter mode and whole-book mode.
+            Task {
+                let aiService = AIService(
+                    featureFlags: FeatureFlags.shared,
+                    consentManager: AIConsentManager(),
+                    keychainService: KeychainService(),
+                    profileStore: ProviderProfileStore.shared)
+                let service = ChapterTranslationService(
+                    sender: aiService,
+                    store: ChapterTranslationStore.shared,
+                    promptVersion: "bilingual-v1")
+                await BookTranslationCoordinator.shared.configure(service: service)
+            }
+
             // Feature #54 WI-5: one-shot migration retiring the
             // Native/Unified reading mode — removes the
             // `readerReadingMode` UserDefaults key and strips the

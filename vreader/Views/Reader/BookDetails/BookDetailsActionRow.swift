@@ -29,6 +29,9 @@ struct BookDetailsActionRow: View {
             case share
             /// Export the book's annotations.
             case exportAnnotations
+            /// Feature #56 WI-14 — translate every chapter through the
+            /// active AI provider and cache the results to disk.
+            case translateBook
         }
 
         /// Stable identity — one row per kind.

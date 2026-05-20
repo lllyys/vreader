@@ -112,10 +112,21 @@ extension Notification.Name {
     /// run advances. A reader open on a book being translated observes
     /// this to drive its `ReaderTranslateBanner` (progress / cancel).
     /// `userInfo` carries `["fingerprintKey": String, "completed": Int,
-    /// "total": Int]`. Defined here so the contract is stable when
-    /// WI-14 lands the producer and reader-side consumer.
+    /// "total": Int, "phase": String]`. Defined here so the contract is
+    /// stable when WI-14 lands the producer and reader-side consumer.
     static let readerBookTranslationProgressDidChange = Notification.Name(
         "vreader.reader.bookTranslationProgressDidChange"
+    )
+    /// Feature #56 WI-14: posted by the active per-format reader container
+    /// (TXT/MD/EPUB/PDF/Foliate) once its `ChapterTextProviding` adapter
+    /// is constructed. The host `ReaderContainerView` caches the provider
+    /// so the Book Details sheet can hand it to `BookTranslationViewModel`
+    /// without depending on per-format internals. `userInfo` carries
+    /// `["fingerprintKey": String]`; the provider itself is the
+    /// notification `object` (an `any ChapterTextProviding` reference).
+    /// Filtered by fingerprint so concurrent readers do not cross-wire.
+    static let readerBookTranslationTextProviderAvailable = Notification.Name(
+        "vreader.reader.bookTranslationTextProviderAvailable"
     )
     static let readerMoreBookDetails = Notification.Name("vreader.readerMoreBookDetails")
     static let readerMoreShareBook = Notification.Name("vreader.readerMoreShareBook")

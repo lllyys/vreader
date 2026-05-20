@@ -256,7 +256,17 @@ extension ReaderContainerView {
                 // not in the same update (which can drop the panel).
                 exportAnnotationsAfterBookDetailsDismiss = true
                 showBookDetails = false
-            }
+            },
+            // Feature #56 WI-14 — reader-side Book Details translate
+            // entry point. The VM is owned by ReaderContainerView so the
+            // confirm-alert / status-sheet handoff survives Book Details
+            // dismiss. When the host hasn't yet received the per-format
+            // text provider (`.readerBookTranslationTextProviderAvailable`),
+            // the BookDetailsSheet's nil-VM guard hides the row entirely
+            // rather than presenting a broken affordance.
+            translateBookViewModel: translateBookVM,
+            translateBookTextProvider: translateBookTextProvider,
+            translateBookTargetLanguage: "Chinese"
         )
     }
 

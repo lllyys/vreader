@@ -24,6 +24,14 @@ struct BookCardView: View {
     let book: LibraryBookItem
     /// Bumped by parent when custom cover changes, to force reload.
     var coverVersion: Int = 0
+    /// Feature #56 WI-14 — optional translate-entire-book progress for
+    /// this book. Drives `LibraryCardTranslateBadge` overlay (running
+    /// chip / translated check). Default `.idle` hides the overlay
+    /// entirely so cards stay visually identical for non-translated
+    /// books. The translate action itself lives on the LibraryView's
+    /// `bookContextMenu(for:)`, not inside the card — keeping the card
+    /// view itself purely presentational.
+    var translateProgress: BookTranslationProgress = .idle(total: 0)
 
     var body: some View {
         VStack(alignment: .leading, spacing: LibraryCardTokens.cardStackSpacing) {
@@ -39,6 +47,11 @@ struct BookCardView: View {
             // the in-cover strip while reading, the checkmark when done.
             .overlay { progressStrip }
             .overlay(alignment: .topTrailing) { finishedBadge }
+            // Feature #56 WI-14 — translate-status badge. Two visual
+            // states: bottom running chip, top-right translated check
+            // (per the design). Hidden when phase is .idle.
+            .overlay(alignment: .bottom) { translateRunningBadge }
+            .overlay(alignment: .topTrailing) { translateDoneBadge }
 
             // Title — Source Serif 4, 2-line clamp
             Text(book.title)
@@ -134,6 +147,28 @@ struct BookCardView: View {
                         - LibraryCardTokens.coverProgressStripBottomInset
                 )
             }
+        }
+    }
+
+    /// Feature #56 WI-14 — running translate-book chip pinned to the
+    /// bottom of the cover. Only renders while a job is in flight.
+    @ViewBuilder
+    private var translateRunningBadge: some View {
+        if translateProgress.phase == .running {
+            LibraryCardTranslateBadge(progress: translateProgress)
+                .padding(.horizontal, 6)
+                .padding(.bottom, 6)
+        }
+    }
+
+    /// Feature #56 WI-14 — translated check pinned to the cover's
+    /// top-right. Renders only when the book has a completed whole-
+    /// book translation.
+    @ViewBuilder
+    private var translateDoneBadge: some View {
+        if translateProgress.phase == .completed {
+            LibraryCardTranslateBadge(progress: translateProgress)
+                .padding(6)
         }
     }
 

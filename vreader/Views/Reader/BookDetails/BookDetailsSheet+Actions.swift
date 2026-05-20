@@ -35,6 +35,23 @@ extension BookDetailsSheet {
             showShareSheet = true
         case .exportAnnotations:
             onExportAnnotations()
+        case .translateBook:
+            // Feature #56 WI-14 — kick off the confirm flow. Provider
+            // label is resolved fresh inside the VM so a profile change
+            // between Book Details open and the translate tap is
+            // reflected in the alert copy (Codex Gate-4 medium finding).
+            guard let vm = translateBookViewModel,
+                  let provider = translateBookTextProvider else { return }
+            Task { @MainActor in
+                await vm.presentConfirm(
+                    textProvider: provider,
+                    targetLanguage: translateBookTargetLanguage,
+                    resolveProviderLabel: {
+                        guard let snapshot = await ProviderProfileStore.shared.activeProfileSnapshot()
+                        else { return nil }
+                        return "\(snapshot.kind.displayName) \u{00b7} \(snapshot.model)"
+                    })
+            }
         }
     }
 

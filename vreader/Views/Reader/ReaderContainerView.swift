@@ -83,6 +83,21 @@ struct ReaderContainerView: View {
     @State var showShareSheet = false
     @State var showAIPanel = false
     @State var aiInitialTab: AIReaderTab = .summarize
+    /// Feature #56 WI-14 — the host-owned translate-entire-book view
+    /// model + the resolved per-format text provider published by the
+    /// active reader container. Set lazily on the first Book Details
+    /// open. Lifetime tied to `ReaderContainerView` so a confirm-alert
+    /// → status-sheet → cancel handoff survives Book Details dismiss.
+    @State var translateBookVM: BookTranslationViewModel?
+    /// Latest text provider published by the active reader container.
+    /// TXT / EPUB / MD / Foliate containers post
+    /// `.readerBookTranslationTextProviderAvailable` with their provider
+    /// the moment it's ready (chapter index built, EPUB spine parsed,
+    /// etc.); the host caches it here. The provider config snapshot is
+    /// NOT cached — it's resolved fresh at confirm time so profile/model
+    /// changes between Book Details open and translate tap are picked
+    /// up (Codex Gate-4 medium finding).
+    @State var translateBookTextProvider: (any ChapterTextProviding)?
     @State private var showDictionary = false
     @State private var dictionaryWord: String = ""
     /// Controls whether the navigation bar chrome is visible. Tap content to toggle.
@@ -194,6 +209,27 @@ struct ReaderContainerView: View {
             if isChromeVisible {
                 readerChromeOverlay
                     .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // Feature #56 WI-14: reader-side translate-entire-book
+            // banner — appears when a global translate job is in flight
+            // for the open book. Tapping the banner body opens the
+            // status sheet; the trailing close pill presents the cancel
+            // confirmation. Anchored under the chrome.
+            if let vm = translateBookVM, vm.progress.isRunning {
+                VStack {
+                    Spacer().frame(height: 88)
+                    ReaderTranslateBanner(
+                        progress: vm.progress,
+                        targetLanguageLabel: "Chinese",
+                        theme: settingsStore.theme,
+                        onOpen: { vm.openStatusSheet() },
+                        onCancel: { vm.requestCancel() })
+                        .padding(.horizontal, 14)
+                    Spacer()
+                }
+                .transition(.opacity)
+                .allowsHitTesting(true)
             }
 
             // TTS control bar at the bottom (WI-B03)
@@ -328,6 +364,35 @@ struct ReaderContainerView: View {
             // explicit fields are forward-looking for richer payloads.
             if let enabled { bilingualActive = enabled }
             if let language { bilingualLanguage = language }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .readerBookTranslationTextProviderAvailable)) { notification in
+            // Feature #56 WI-14 — the active per-format reader container
+            // has constructed its ChapterTextProviding adapter and is
+            // publishing it to the host so the Book Details translate-
+            // book entry point can use it. Cache the provider for this
+            // book; the VM is constructed lazily so we don't pay the
+            // cost for users who never open Book Details. **Provider
+            // config is NOT resolved here** — a user may not tap the
+            // translate row for minutes, and the active profile could
+            // have changed in the meantime. We re-resolve at confirm
+            // time so the snapshot reflects the user's choices at the
+            // moment they commit (Codex Gate-4 medium-finding follow-up).
+            let key = notification.userInfo?["fingerprintKey"] as? String
+            guard key == book.fingerprintKey else { return }
+            guard let provider = notification.object as? (any ChapterTextProviding) else { return }
+            translateBookTextProvider = provider
+            if translateBookVM == nil {
+                let vm = BookTranslationViewModel(
+                    bookFingerprintKey: book.fingerprintKey,
+                    coordinator: BookTranslationCoordinator.shared)
+                translateBookVM = vm
+                // Reader-side observation — keeps `ReaderTranslateBanner`
+                // in sync regardless of whether Book Details is open.
+                // Without this the banner only updated while the Book
+                // Details overlay was mounted (Codex Gate-4 round-2 H1).
+                Task { @MainActor in await vm.startObserving() }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerPositionDidChange)) { notification in
             guard let locator = notification.object as? Locator else { return }

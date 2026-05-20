@@ -171,6 +171,14 @@ extension TXTReaderContainerView {
         // notification the parent observes to repaint the pill /
         // More-menu row.
         vm.postDidChange()
+        // Feature #56 WI-14: publish the same text provider to the
+        // parent ReaderContainerView so the Book Details sheet's
+        // "Translate entire book…" row can consume it without bubbling
+        // the per-format VM upwards.
+        NotificationCenter.default.post(
+            name: .readerBookTranslationTextProviderAvailable,
+            object: textProvider,
+            userInfo: ["fingerprintKey": viewModel.bookFingerprintKey])
     }
 
     /// Handle a `.readerMoreBilingual` notification — toggle the

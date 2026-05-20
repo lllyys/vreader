@@ -44,6 +44,19 @@ struct BookDetailsSheet: View {
     /// annotations panel on its Highlights tab (the export affordance
     /// lives there; no separate export sheet — same as the More-menu).
     let onExportAnnotations: () -> Void
+    /// Feature #56 WI-14 — optional translate-book host. When `nil`, the
+    /// Actions card omits the "Translate entire book…" row entirely.
+    /// Hosted from `ReaderContainerView+Sheets.swift` so a single VM
+    /// + coordinator pair survives sheet dismiss / re-present and tracks
+    /// the same book consistently across the library card and reader.
+    var translateBookViewModel: BookTranslationViewModel? = nil
+    /// Source text + target language hooks for the translate-book flow.
+    /// Injected by the host so this sheet remains decoupled from the
+    /// per-format text providers. Provider config is resolved fresh at
+    /// confirm time by `BookDetailsSheet+Translate` — no need to thread
+    /// a stale snapshot.
+    var translateBookTextProvider: (any ChapterTextProviding)? = nil
+    var translateBookTargetLanguage: String = "Chinese"
 
     /// Presents the system share sheet for the book file — driven by
     /// the title-bar Share button, the "Share book…" action row, and
@@ -77,21 +90,31 @@ struct BookDetailsSheet: View {
     }
 
     /// The Actions card's rows, in design order. The cover row's label
-    /// tracks `hasCover`. Exposed for `BookDetailsActionsTests`.
+    /// tracks `hasCover`. Exposed for `BookDetailsActionsTests`. The
+    /// `.translateBook` row is omitted when the host does not provide a
+    /// translate VM (e.g. AI is not configured or the format has no
+    /// chapter-text provider) — it lives at the top of the card when
+    /// present, per the WI-14 design.
     var actionRows: [BookDetailsActionRow.Model] {
-        [
-            .init(
-                kind: .cover, systemImage: "pencil",
-                label: viewModel.hasCover ? "Replace cover\u{2026}" : "Add cover\u{2026}",
-                sublabel: nil),
-            .init(
-                kind: .share, systemImage: "square.and.arrow.up",
-                label: "Share book\u{2026}", sublabel: nil),
-            .init(
-                kind: .exportAnnotations, systemImage: "arrow.down.doc",
-                label: "Export annotations\u{2026}",
-                sublabel: "Markdown \u{00b7} JSON \u{00b7} VReader JSON"),
-        ]
+        var rows: [BookDetailsActionRow.Model] = []
+        if translateBookViewModel != nil {
+            rows.append(.init(
+                kind: .translateBook, systemImage: "character.bubble",
+                label: "Translate entire book\u{2026}",
+                sublabel: "Pre-translate every chapter to \(translateBookTargetLanguage)"))
+        }
+        rows.append(.init(
+            kind: .cover, systemImage: "pencil",
+            label: viewModel.hasCover ? "Replace cover\u{2026}" : "Add cover\u{2026}",
+            sublabel: nil))
+        rows.append(.init(
+            kind: .share, systemImage: "square.and.arrow.up",
+            label: "Share book\u{2026}", sublabel: nil))
+        rows.append(.init(
+            kind: .exportAnnotations, systemImage: "arrow.down.doc",
+            label: "Export annotations\u{2026}",
+            sublabel: "Markdown \u{00b7} JSON \u{00b7} VReader JSON"))
+        return rows
     }
 
     // MARK: - Body
@@ -114,6 +137,10 @@ struct BookDetailsSheet: View {
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(book: book)
         }
+        // WI-14 — translate-book confirm / cancel / status overlays.
+        // No-ops when no VM is wired (the rows above are also omitted).
+        .modifier(TranslateBookOverlayModifier(
+            bookTitle: viewModel.title, theme: theme, sheet: self))
     }
 
     // MARK: - Header
@@ -216,61 +243,8 @@ struct BookDetailsSheet: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Cards
-
-    /// The Metadata card body — rows separated by hairline dividers.
-    private var metadataCard: some View {
-        let rows = metadataRows
-        return ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-            BookDetailsMetadataRow(model: row, theme: theme, onAccessory: {
-                if let accessory = row.accessory { handleAccessory(accessory) }
-            })
-            if index < rows.count - 1 {
-                rowDivider
-            }
-        }
-    }
-
-    /// The Actions card body — rows separated by hairline dividers.
-    private var actionCard: some View {
-        let rows = actionRows
-        return ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-            BookDetailsActionRow(model: row, theme: theme, onTap: {
-                handleAction(row.kind)
-            })
-            if index < rows.count - 1 {
-                rowDivider
-            }
-        }
-    }
-
-    // MARK: - Section scaffolding
-
-    /// A labelled section: an uppercase tracked label above a rounded
-    /// card. Mirrors the design's `SectionLabel` + 14pt-radius card.
-    private func section(
-        label: String, @ViewBuilder content: () -> some View
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label.uppercased())
-                .font(.system(size: 12, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(Color(theme.subColor))
-            VStack(spacing: 0) { content() }
-                .background(cardBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Hairline row divider — design's `0.5px solid t.rule` borderBottom.
-    private var rowDivider: some View {
-        Color(theme.ruleColor).frame(height: 0.5)
-    }
-
-    /// Card surface fill — design `t.isDark ? rgba(255,255,255,0.04) : #fff`.
-    private var cardBackground: Color {
-        theme.isDark ? Color.white.opacity(0.04) : Color.white
-    }
+    // Card rendering (`metadataCard`, `actionCard`, `section`,
+    // `rowDivider`, `cardBackground`) lives in `BookDetailsSheet+Cards.swift`
+    // so this file stays under the rule-50 ~300-line guideline.
 }
 #endif

@@ -41,7 +41,11 @@ extension LibraryView {
                 Button {
                     openBook(book)
                 } label: {
-                    BookCardView(book: book, coverVersion: coverPickCoordinator.coverVersion)
+                    BookCardView(
+                        book: book,
+                        coverVersion: coverPickCoordinator.coverVersion,
+                        translateProgress: translationProgressByBook[book.fingerprintKey]
+                            ?? .idle(total: 0))
                 }
                 .buttonStyle(.plain)
                 .contextMenu {

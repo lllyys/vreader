@@ -76,6 +76,14 @@ struct LibraryView: View {
     /// picker state plus a coverVersion counter the card / row / rail
     /// views observe. Not `private` — `LibraryView+Body.swift` reads it.
     @State var coverPickCoordinator = CoverPickCoordinator()
+    /// Feature #56 WI-14 — per-book translate-entire-book progress
+    /// snapshots mirrored from `BookTranslationCoordinator.shared` via
+    /// `.readerBookTranslationProgressDidChange`. Drives the optional
+    /// `LibraryCardTranslateBadge` overlay on each `BookCardView`.
+    /// Cards without an entry render with the default `.idle` progress
+    /// (badge hidden) so existing rows stay visually identical for
+    /// books that haven't been translated.
+    @State var translationProgressByBook: [String: BookTranslationProgress] = [:]
     /// Tracks NavigationStack path so the library chrome can hide during push transitions.
     @State private var navigationPath = NavigationPath()
     /// Set before appending to navigationPath so the chrome hides before the push animation starts (bug #72).
@@ -129,6 +137,22 @@ struct LibraryView: View {
                     isSearchVisible = false
                     searchQuery = ""
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(
+                for: .readerBookTranslationProgressDidChange)) { notification in
+                // Feature #56 WI-14 — mirror translate-entire-book
+                // progress so each library card's
+                // `LibraryCardTranslateBadge` overlay reflects the live
+                // job state. Filter by `fingerprintKey`; a notification
+                // missing the key (defensive) is ignored.
+                guard let key = notification.userInfo?["fingerprintKey"] as? String,
+                      let completed = notification.userInfo?["completed"] as? Int,
+                      let total = notification.userInfo?["total"] as? Int,
+                      let phaseRaw = notification.userInfo?["phase"] as? String,
+                      let phase = BookTranslationProgress.Phase(rawValue: phaseRaw)
+                else { return }
+                translationProgressByBook[key] = BookTranslationProgress(
+                    phase: phase, completed: completed, total: total)
             }
             .modifier(LibraryViewObservers(
                 viewModel: viewModel,
