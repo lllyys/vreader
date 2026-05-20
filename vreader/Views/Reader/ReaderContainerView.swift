@@ -743,10 +743,9 @@ struct ReaderContainerView: View {
                     ttsService: ttsService
                 )
             case .foliateWeb:
-                // Feature #55 WI-7: `FoliateSpikeView` no longer takes a
-                // `highlightActionPresenter` — the AZW3/MOBI highlight tap is
-                // re-homed to the #55 note preview (see `FoliateSpikeView+HighlightTap`).
-                FoliateSpikeView(
+                // Feature #56 WI-11: wraps the live AZW3/MOBI spike
+                // in the bilingual container.
+                FoliateBilingualContainerView(
                     bookURL: resolvedFileURL,
                     fingerprintKey: book.fingerprintKey,
                     readerToken: readerToken,

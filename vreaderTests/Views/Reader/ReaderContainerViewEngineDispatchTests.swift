@@ -165,7 +165,11 @@ struct ReaderContainerViewEngineDispatchTests {
             ("case .markdownNative:", "MDReaderHost("),
             ("case .epubWKWebView:", "EPUBReaderHost("),
             ("case .pdfKit:",        "PDFReaderHost("),
-            ("case .foliateWeb:",    "FoliateSpikeView(")
+            // Feature #56 WI-11: the `.foliateWeb` dispatch now wraps
+            // `FoliateSpikeView` inside `FoliateBilingualContainerView`
+            // so the bilingual VM / orchestrator / setup-sheet wiring
+            // applies without modifying the spike itself.
+            ("case .foliateWeb:",    "FoliateBilingualContainerView(")
         ]
         for (caseLabel, host) in wiring {
             guard let caseIndex = source.range(of: caseLabel) else {

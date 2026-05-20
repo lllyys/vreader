@@ -267,6 +267,192 @@ window.readerAPI = {
         return parts.join('\n\n')
     },
 
+    // Feature #56 WI-11: per-section ordered identifiers for the
+    // bilingual translation cache. The unit identifier is the
+    // section's index (stringified). A stable index per render is
+    // sufficient — Foliate's `view.book.sections` ordering matches
+    // the rendered section order; the cache row is keyed by the
+    // book's fingerprintKey + this index + the prompt version, so a
+    // book reopen looks up the same cached chapter translations.
+    async bilingualSectionIDs() {
+        if (!bookReady || !currentBook?.sections) return []
+        const ids = []
+        for (let i = 0; i < currentBook.sections.length; i++) {
+            const s = currentBook.sections[i]
+            if (typeof s?.createDocument !== 'function') continue
+            ids.push(String(i))
+        }
+        return ids
+    },
+
+    // Feature #56 WI-11: per-section source text for the bilingual
+    // translation pipeline. Mirrors `extractPlainText`'s
+    // `createDocument()` walk but for a single section, so the
+    // `FoliateChapterTextProvider` actor can fetch one unit at a
+    // time without re-walking the whole book.
+    //
+    // `unitID` is the stringified section index (matches what
+    // `bilingualSectionIDs` returns). Returns '' on any failure
+    // (missing section, parse error, empty body) — translation is
+    // a decoration, partial text is the right failure mode.
+    async bilingualSectionText(unitID) {
+        if (!bookReady || !currentBook?.sections) return ''
+        const idx = parseInt(unitID, 10)
+        if (isNaN(idx) || idx < 0 || idx >= currentBook.sections.length) {
+            return ''
+        }
+        const s = currentBook.sections[idx]
+        if (typeof s?.createDocument !== 'function') return ''
+        try {
+            const doc = await s.createDocument()
+            return (doc?.body?.textContent ?? '').trim()
+        } catch (e) {
+            console.warn('[foliate-host] bilingualSectionText section failed:', e)
+            return ''
+        }
+    },
+
+    // Feature #56 WI-11: walk the currently-rendered section DOM,
+    // stamp a stable `data-vreader-bid` attribute on each
+    // translatable block (`p` / `li` / `blockquote` / `pre` / `dd`
+    // / `dt` — same set the EPUB renderer enumerates), and post the
+    // ordered `[{bid, text}]` payload back to Swift via the
+    // `bilingualEnumerate` channel.
+    //
+    // The rendered DOM lives inside the section's iframe / shadow
+    // root, reachable only via `view.renderer.getContents()`. A
+    // re-enumerate after inject keeps existing `data-vreader-bid`
+    // values (idempotent stamp) so a section re-render does not
+    // shift the cache-key mapping. Decoration siblings carrying
+    // `data-vreader-decoration` are skipped so a re-enumerate
+    // never stamps a translation block.
+    bilingualEnumerate() {
+        try {
+            const contents = view.renderer?.getContents?.()
+            if (!Array.isArray(contents) || contents.length === 0) {
+                post('bilingualEnumerate', [])
+                return
+            }
+            const BLOCK_TAGS = {
+                p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1,
+            }
+            const out = []
+            for (const entry of contents) {
+                const doc = entry?.doc
+                if (!doc) continue
+                const all = doc.body
+                    ? doc.body.getElementsByTagName('*')
+                    : doc.getElementsByTagName('*')
+                let seq = (doc.__vreaderBilingualSeq ?? 0)
+                for (let i = 0; i < all.length; i++) {
+                    const el = all[i]
+                    const tag = (el.localName || '').toLowerCase()
+                    if (!BLOCK_TAGS[tag]) continue
+                    if (el.hasAttribute && el.hasAttribute('data-vreader-decoration')) {
+                        continue
+                    }
+                    let txt = el.textContent || ''
+                    txt = txt.replace(/\s+/g, ' ').trim()
+                    if (!txt) continue
+                    let bid = el.getAttribute('data-vreader-bid')
+                    if (!bid) {
+                        seq += 1
+                        bid = 'fb' + seq
+                        el.setAttribute('data-vreader-bid', bid)
+                    }
+                    out.push({ bid: bid, text: txt })
+                }
+                doc.__vreaderBilingualSeq = seq
+            }
+            post('bilingualEnumerate', out)
+        } catch (e) {
+            console.warn('[foliate-host] bilingualEnumerate failed:', e)
+            post('bilingualEnumerate', [])
+        }
+    },
+
+    // Feature #56 WI-11: inject a translation `<div>` after each
+    // stamped block in every loaded section's DOM. `opts` is the
+    // payload `FoliateBilingualJS.bilingualInjectJS` emits:
+    //
+    //   { translations: {bid: text, ...},
+    //     decorationAttribute, blockIDAttribute, blockClassName,
+    //     styleCssText }
+    //
+    // Idempotent: if a decoration sibling already exists for a
+    // block, its `textContent` is replaced in place rather than a
+    // second sibling appended.
+    bilingualInject(opts) {
+        try {
+            const translations = opts?.translations || {}
+            const DECO = opts?.decorationAttribute || 'data-vreader-decoration'
+            const BID = opts?.blockIDAttribute || 'data-vreader-bid'
+            const CLS = opts?.blockClassName || 'vreader-bilingual'
+            const STYLE = opts?.styleCssText ||
+                'user-select: none; -webkit-user-select: none;'
+
+            const contents = view.renderer?.getContents?.()
+            if (!Array.isArray(contents) || contents.length === 0) return
+            for (const entry of contents) {
+                const doc = entry?.doc
+                if (!doc) continue
+                for (const bid in translations) {
+                    if (!Object.prototype.hasOwnProperty.call(translations, bid)) {
+                        continue
+                    }
+                    const block = doc.querySelector(
+                        '[' + BID + '="' + bid + '"]'
+                    )
+                    if (!block) continue
+                    const next = block.nextElementSibling
+                    if (next
+                        && next.hasAttribute
+                        && next.hasAttribute(DECO)
+                        && next.classList
+                        && next.classList.contains(CLS)) {
+                        next.textContent = translations[bid]
+                        continue
+                    }
+                    const div = doc.createElement('div')
+                    div.className = CLS
+                    div.setAttribute(DECO, '')
+                    div.style.cssText = STYLE
+                    div.textContent = translations[bid]
+                    if (block.parentNode) {
+                        block.parentNode.insertBefore(div, block.nextSibling)
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[foliate-host] bilingualInject failed:', e)
+        }
+    },
+
+    // Feature #56 WI-11: remove every `vreader-bilingual` node from
+    // every loaded section's DOM. Safe to run multiple times — an
+    // empty NodeList is a no-op.
+    bilingualClear() {
+        try {
+            const contents = view.renderer?.getContents?.()
+            if (!Array.isArray(contents) || contents.length === 0) return
+            for (const entry of contents) {
+                const doc = entry?.doc
+                if (!doc) continue
+                const nodes = doc.querySelectorAll(
+                    '.vreader-bilingual[data-vreader-decoration]'
+                )
+                for (let i = 0; i < nodes.length; i++) {
+                    const n = nodes[i]
+                    if (n.parentNode) {
+                        n.parentNode.removeChild(n)
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[foliate-host] bilingualClear failed:', e)
+        }
+    },
+
     // Cleanup
     close() {
         view.close()

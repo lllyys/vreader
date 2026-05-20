@@ -221,6 +221,14 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
             // evaluates (the iife's Promise creation), not when the
             // awaited init resolves.
             "layout-ready",
+            // Feature #56 WI-11: AZW3/MOBI bilingual enumerate
+            // channel. `readerAPI.bilingualEnumerate()` posts an
+            // ordered `[{bid, text}]` array after stamping each
+            // translatable block in the current section's rendered
+            // DOM. Handled in the Coordinator's `handleMessage`
+            // switch and forwarded to the SwiftUI layer via
+            // `.foliateBilingualBlocksEnumerated`.
+            "bilingualEnumerate",
         ] {
             config.userContentController.add(WeakScriptMessageHandler(coordinator), name: name)
         }
@@ -409,6 +417,14 @@ extension FoliateSpikeView {
         /// WebView so the rendered annotation appears immediately.
         nonisolated(unsafe) private var foliateJSCreateToken: NSObjectProtocol?
 
+        /// Feature #56 WI-11: observer for
+        /// `.foliateRequestBilingualEvalJS`. The bilingual container
+        /// posts arbitrary JS payloads (enumerate / inject / clear)
+        /// scoped by fingerprintKey; this observer evaluates them
+        /// against the live `WKWebView`. Same lifecycle / queue
+        /// pattern as the highlight observers above.
+        nonisolated(unsafe) private var foliateBilingualEvalToken: NSObjectProtocol?
+
         init(initialLayoutFlow: String,
              initialThemeCSS: String? = nil,
              onBookReady: @escaping @MainActor (String) -> Void,
@@ -459,6 +475,24 @@ extension FoliateSpikeView {
                     self.webView?.evaluateJavaScript(js, completionHandler: nil)
                 }
             }
+            // Feature #56 WI-11: the bilingual container posts arbitrary
+            // JS payloads (enumerate / inject / clear) here. Same queue
+            // (`.main`) + `MainActor.assumeIsolated` pattern as the
+            // sibling create/delete observers.
+            self.foliateBilingualEvalToken = NotificationCenter.default.addObserver(
+                forName: .foliateRequestBilingualEvalJS,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let info = notification.userInfo,
+                      let js = info["js"] as? String, !js.isEmpty,
+                      let key = info["fingerprintKey"] as? String,
+                      key == self.fingerprintKey else { return }
+                MainActor.assumeIsolated {
+                    self.webView?.evaluateJavaScript(js, completionHandler: nil)
+                }
+            }
         }
 
         deinit {
@@ -466,6 +500,9 @@ extension FoliateSpikeView {
                 NotificationCenter.default.removeObserver(token)
             }
             if let token = foliateJSCreateToken {
+                NotificationCenter.default.removeObserver(token)
+            }
+            if let token = foliateBilingualEvalToken {
                 NotificationCenter.default.removeObserver(token)
             }
         }
@@ -688,6 +725,50 @@ extension FoliateSpikeView {
                     DebugReaderRegistry.shared.markReaderSettled(for: key, token: token)
                 }
                 #endif
+
+            case "bilingualEnumerate":
+                // Feature #56 WI-11: forward the parsed
+                // `[BilingualBlock]` to the SwiftUI host via
+                // `.foliateBilingualBlocksEnumerated`. Filtered by
+                // `fingerprintKey` so concurrent Foliate readers do
+                // not cross-fire (same pattern as `annotation-show`
+                // / `create-overlay`).
+                if let key = self.fingerprintKey {
+                    let blocks = FoliateBilingualPipeline.parseEnumerateMessage(body)
+                    // Encode to a Sendable wire payload — the
+                    // notification observer in the SwiftUI host
+                    // re-routes by fingerprintKey, so a `[BilingualBlock]`
+                    // value-type array is safe to ship via userInfo.
+                    NotificationCenter.default.post(
+                        name: .foliateBilingualBlocksEnumerated,
+                        object: nil,
+                        userInfo: [
+                            "blocks": blocks,
+                            "fingerprintKey": key,
+                        ]
+                    )
+                }
+
+            case "section-load":
+                // Feature #56 WI-11: forward to the SwiftUI host so
+                // the bilingual container can refresh its enumerate
+                // payload against the freshly-loaded section. The
+                // outer view filters by fingerprintKey and posts an
+                // enumerate JS payload back via
+                // `.foliateRequestBilingualEvalJS`. Pre-WI-11 this
+                // case dropped silently.
+                if let key = self.fingerprintKey,
+                   let dict = body as? [String: Any],
+                   let index = dict["index"] as? Int {
+                    NotificationCenter.default.post(
+                        name: .foliateSectionLoaded,
+                        object: nil,
+                        userInfo: [
+                            "sectionIndex": index,
+                            "fingerprintKey": key,
+                        ]
+                    )
+                }
 
             default:
                 break
