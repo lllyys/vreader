@@ -53,15 +53,15 @@ final class LibraryViewModel { ... }
 
 `vreader/Views/Reader/ReaderContainerView.swift` is the dispatcher. Format hosts it routes to:
 
-| Host              | Format            | Renderer                                                         |
-| ----------------- | ----------------- | ---------------------------------------------------------------- |
-| `TXTReaderHost`   | `.txt`            | `UITextView` (TextKit 1) or chunked `UITableView` (>500K UTF-16) |
-| `MDReaderHost`    | `.md`             | `UITextView` with Markdown attributed string                     |
-| `EPUBReaderHost`  | `.epub`           | `EPUBWebViewBridge` (custom WKWebView + JS)                      |
-| `FoliateSpikeView`| `.azw3`, `.mobi`  | `FoliateViewBridge` (WKWebView + Foliate-js bundle)              |
-| `PDFReaderHost`   | `.pdf`            | `PDFView` (PDFKit)                                               |
+| Host                             | Format            | Renderer                                                         |
+| -------------------------------- | ----------------- | ---------------------------------------------------------------- |
+| `TXTReaderHost`                  | `.txt`            | `UITextView` (TextKit 1) or chunked `UITableView` (>500K UTF-16) |
+| `MDReaderHost`                   | `.md`             | `UITextView` with Markdown attributed string                     |
+| `EPUBReaderHost`                 | `.epub`           | `EPUBWebViewBridge` (custom WKWebView + JS)                      |
+| `FoliateBilingualContainerView`  | `.azw3` (incl. `.azw`/`.mobi`/`.prc`) | wraps `FoliateSpikeView` (WKWebView + Foliate-js bundle) + the bilingual VM / orchestrator / setup-sheet (feature #56 WI-11) |
+| `PDFReaderHost`                  | `.pdf`            | `PDFView` (PDFKit)                                               |
 
-Note: AZW3/MOBI uses `FoliateSpikeView` (the spike landed first; the host structure may converge with the others later).
+Note: AZW3/MOBI used to route directly to `FoliateSpikeView`. Feature #56 WI-11 added `FoliateBilingualContainerView` as a wrapper between the dispatcher and the spike so the bilingual VM / orchestrator / setup-sheet wiring applies without modifying the spike itself; non-bilingual paths see no runtime overhead beyond an idle notification observer. Bug #246 / GH #1072 separately hardened the dispatch to read `fingerprint.format` (the canonical `BookFormat` parsed from `book.fingerprintKey`) rather than `book.format` (the parallel String `@Model` column).
 
 **Bridge convention:** UIKit views (`UITextView`, `WKWebView`, `PDFView`) wrap in `UIViewRepresentable`. A `Coordinator` class handles delegate callbacks, gestures, and JS messages.
 
