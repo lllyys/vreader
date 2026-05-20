@@ -286,7 +286,7 @@ leaves — that *is* the natural decomposition.
 | `vreader/Views/Reader/Bilingual/FoliateBilingualJS.swift` | The AZW3/MOBI counterpart — JS that runs inside the Foliate reader context. Same enumerate/inject/clear contract; reached via a new `FoliateMessageParser` message kind + a `FoliateSpikeView.Coordinator` send method (the live Foliate path — see the `FoliateSpikeView` modified-file row), not `EPUBWebViewBridge.pendingJS`. |
 | `vreader/Services/Reader/BilingualDisplaySegmentMap.swift` | `struct BilingualDisplaySegmentMap: Sendable, Equatable` — the TXT/MD source↔display segment map (Decision 1, Tier B). Records ordered display ranges each tagged `.source(sourceRange: Range<Int>)` or `.synthetic` (a translation block). API: `func sourceOffset(forDisplayOffset:) -> Int?` (nil for synthetic), `func displayOffset(forSourceOffset:) -> Int`, `static var identity: ...` constructor producing a 1:1 pass-through map for the bilingual-off path. Pure → exhaustively unit-testable. |
 | `vreader/Views/Reader/Bilingual/BilingualTextRenderer.swift` | TXT/MD interlinear builder — takes the unit's source `NSAttributedString` + segmentation + the unit's `translatedSegments: [String]` (looked up from the VM's `translationsByUnit` by `TranslationUnitID`) and produces (a) the interleaved display `NSAttributedString` (source paragraph runs + synthetic translation runs at `0.88×`, `sub` color) and (b) the matching `BilingualDisplaySegmentMap`. Used by both `TXTReaderContainerView` and `MDReaderContainerView`. |
-| `vreader/Views/Reader/Bilingual/PDFBilingualPanel.swift` | **`BLOCKED: needs-design`** (Decision 2). The PDF per-page below-page translation panel. File listed for surface-area completeness; not built in Gate 3 until a design bundle lands. |
+| `vreader/Views/Reader/Bilingual/PDFBilingualPanel.swift` | **DESIGN LANDED 2026-05-20** via PR #1037 / commit `cc5e619` (resolves #1023). SwiftUI view rendering the PDF below-page translation panel — design's split-layout A1..A8. Five visual states (`PDFBilingualPanelState`: `.default([String])` / `.loading` / `.offline` / `.empty` / `.collapsed`) + ergonomic header (lang-glyph chip + "Page N" subtitle + chevron toggle). Pure SwiftUI sub-view; receives `ReaderThemeV2` + a typed state + a collapse callback; no `WKWebView`, no `UITextView` hooks. Body section heights tuned to the design's `splitPanelH = 260pt` (expanded) / `38pt` (collapsed). |
 | `vreader/Views/Reader/TranslateBook/TranslateBookActionRow.swift` | The Book-Details "Translate entire book…" action row — `TranslateBookActionRow` in `vreader-translate-book.jsx` (idle / running / paused / translated states). |
 | `vreader/Views/Reader/TranslateBook/TranslateBookConfirmAlert.swift` | The confirm alert with chapter count + token/cost/time estimate + a "Change provider" path — `TranslateBookConfirmAlert`. |
 | `vreader/Views/Reader/TranslateBook/TranslateStatusSheet.swift` | The per-chapter status sheet (queued/translating/done/failed list, throughput, ETA, cancel CTA) — `TranslateStatusSheet` + `ChapterStatusRow`. |
@@ -315,7 +315,8 @@ leaves — that *is* the natural decomposition.
 | `vreader/Views/Reader/FoliateSpikeView.swift` (+ its `Coordinator`) + `FoliateMessageParser.swift` + `Services/Foliate/JS/foliate-bundle.js` | AZW3/MOBI counterpart. **Gate-2 round-1 High correction**: the live AZW3/MOBI reader dispatch in `ReaderContainerView` (`.foliateWeb` case) renders **`FoliateSpikeView`** — `FoliateReaderContainerView`/`FoliateReaderHost` is not the live path (verified). The bilingual wiring therefore targets `FoliateSpikeView` + its `Coordinator` (which already owns the WKWebView and the whole-book `extractPlainText()` seam). `foliate-bundle.js` gains: (a) per-section text extraction (for `FoliateChapterTextProvider`), (b) enumerate/inject/clear JS in the reader context; `FoliateMessageParser` gains the new message kinds; `FoliateSpikeView` owns a `BilingualReadingViewModel`. |
 | `vreader/Views/Reader/TXTReaderContainerView.swift` + `TXTReaderContainerView`'s chunked-table path | Consume `BilingualTextRenderer` output; route every display-offset touchpoint (selection, search/highlight nav, persisted-highlight hit-test, TTS highlight + auto-scroll) through `BilingualDisplaySegmentMap`; pass-through identity map when bilingual off. |
 | `vreader/Views/Reader/MDReaderContainerView.swift` | Same as TXT — paged-MD path consumes `BilingualTextRenderer` + `BilingualDisplaySegmentMap`. |
-| `vreader/Views/Reader/PDFReaderContainerView.swift` | **`BLOCKED: needs-design`** — owns the `PDFBilingualPanel` once designed. Listed for completeness. |
+| `vreader/Views/Reader/PDFReaderContainerView.swift` | Adds `@State var bilingualViewModel: BilingualReadingViewModel?`, `@State var showBilingualSetupSheet: Bool`, `@State var bilingualSetupState: BilingualSetupSheetState`, `@State var bilingualPanelCollapsed: Bool` (per-book panel collapse, defaults `false`). The panel attaches via SwiftUI's **`.safeAreaInset(edge: .bottom)`** modifier on the bridge — this is the canonical SwiftUI seam for "reserve N points at the bottom that another view owns" and PDFKit's `PDFView.autoScales = true` reflows to the new available height automatically without manual `bottom:` math (Gate-2 v5 round-1 H3 — the previous `bottom: chrome+260/38` math assumed a fixed `56pt` chrome height when `ReaderBottomChrome`'s height is actually dynamic). The bottom chrome (the existing overlay) stays untouched — it floats over the bridge as before, so the panel's `.safeAreaInset` reserves space below the chrome's overlay rectangle; this is consistent with how `ReaderBottomChrome` is layered today (`.ignoresSafeArea(edges: .bottom)` on the bridge is kept; the chrome overlay sits inside the safe-area). Mirrors the TXT/MD/EPUB host pattern: an `+Bilingual` extension file owns the `ensureBilingualViewModel()` / `handleMoreBilingualToggle()` / `confirmBilingualSetup()` / `cancelBilingualSetup()` helpers and the `bilingualSurfacesModifier` (the modifier bundles `.onChange(of: viewModel.totalPages)` → ensureViewModel; `.onReceive(.readerMoreBilingual)` → toggle; `.onReceive(.readerBilingualDidChange)` → re-render trigger; `.sheet($showBilingualSetupSheet)` → setup sheet). |
+| `vreader/Views/Reader/PDFReaderContainerView+Bilingual.swift` | NEW host extension — same shape as `TXTReaderContainerView+Bilingual.swift` / `EPUBReaderContainerView+Bilingual.swift`. Constructs `BilingualReadingViewModel` lazily (gated on `viewModel.isDocumentLoaded` + `viewModel.totalPages > 0`), builds the prefetcher with `Self.makePrefetcher(...)`, wires the `PDFChapterTextProvider` (shipped WI-2.5), presents the setup sheet on first-enable, and exposes a `bilingualSurfacesModifier`. |
 | `vreader/Views/Reader/BookDetails/BookDetailsActionRow.swift` + `BookDetailsSheet+Actions.swift` + `BookDetailsSheet.swift` | Add `BookDetailsActionRow.Model.Kind.translateBook`; render the `TranslateBookActionRow`; `handleAction(.translateBook)` presents `TranslateBookConfirmAlert`. (Verified: `BookDetailsActionRow.Model.Kind` is a `String` enum with `cover`/`share`/`exportAnnotations` — additive.) |
 | `vreader/Views/BookCardView.swift` | Add the long-press `contextMenu` "Translate entire book…" entry + render `LibraryCardTranslateBadge` overlay when a job is running/done for that book. |
 | `vreader/Views/Bookmarks/TOCListView.swift` | Add the `ChapterReTranslateSwipeAction` trailing swipe action on chapter rows (design §4 secondary path), gated on bilingual mode being on. |
@@ -459,7 +460,7 @@ render WIs are independent behavioral leaves.
 | WI-11 | AZW3/MOBI interlinear — `FoliateBilingualJS` + `foliate-bundle.js` per-section extraction **and** enumerate/inject/clear JS + `FoliateMessageParser` message kinds + `FoliateSpikeView` (the live path) wiring | behavioral | L |
 | WI-12a | TXT/MD interlinear **foundational** — `BilingualDisplaySegmentMap` (pure value type) + `BilingualTextRenderer` (pure interlinear builder) + TXT/MD host wiring (lazy `BilingualReadingViewModel` construction, `BilingualSetupSheet` first-enable presentation, `.readerMoreBilingual` toggle observer, chrome-pill mirror). No live render injection yet — the renderer + map are foundational and consumed by WI-12b. | behavioral | M |
 | WI-12b | TXT/MD interlinear **live render** — TXT/MD container consumption of `BilingualTextRenderer` output into `preparedAttrString` / `chapterAttrString` / continuous-chaptered chunks, and offset-routing every TXT/MD display-offset touchpoint (selection / search-highlight nav / persisted-highlight hit-test / TTS auto-scroll) through `BilingualDisplaySegmentMap`. Identity pass-through when bilingual off. Includes the loader-backed fallback for chapter-paged mode whose lazy `textContent` made WI-12a's provider construction conditional. | behavioral | L |
-| WI-13 | **`BLOCKED: needs-design`** — PDF below-page translation **panel** only (`PDFBilingualPanel` + `PDFReaderContainerView` wiring). `PDFChapterTextProvider` is NOT here — it is foundational and lands complete in WI-2.5. WI-13 does not enter Gate 3 until a design bundle lands; a `Design needed:` GH issue is filed. | behavioral | M |
+| WI-13 | **Design landed 2026-05-20 via PR #1037 (commit `cc5e619`) — `needs-design` block on #1023 LIFTED.** PDF below-page translation **panel** only (`PDFBilingualPanel.swift` + `PDFReaderContainerView+Bilingual.swift` host extension). The split-layout (canonical A) of `vreader-pdf-translation.jsx` — persistent below-page panel, 5 visual states (default / loading / offline / empty / collapsed). `PDFChapterTextProvider` is NOT here — it is foundational and lands complete in WI-2.5. See WI-13 detail subsection below. | behavioral | M |
 | WI-14 | Global book translation — `BookTranslationCoordinator` actor + `BookTranslationViewModel` + `TranslateBookActionRow`/`ConfirmAlert`/`StatusSheet`/`CancelAlert` + `ReaderTranslateBanner` + `LibraryCardTranslateBadge` + Book-Details / library-card / reader wiring | behavioral | L |
 | WI-15 | Per-chapter re-translation — `ChapterReTranslateViewModel` + `ReTranslatePickerSheet`/`ReTranslateProgress` + `ChapterReTranslateSwipeAction` in `TOCListView` + wiring the More-menu re-translate row to the picker — **final WI** | behavioral | L |
 
@@ -485,8 +486,7 @@ Notes:
   `TranslationUnitID` from the position `Locator` via its injected
   `ChapterTextProviding`; WI-10..13 only *supply* the concrete adapter, so
   WI-7b is fully unit-testable with a mock provider before any format WI lands.
-- **WI-13 (PDF)** carries a hard `needs-design` block (Decision 2) — sequenced
-  so the other 15 WIs proceed and merge while the PDF design is produced.
+- **WI-13 (PDF)** — design landed **2026-05-20** via PR #1037 / commit `cc5e619` (resolves #1023). The committed bundle is `dev-docs/designs/vreader-fidelity-v1/project/vreader-pdf-translation.jsx` + `pdf-translation-artboards.jsx` + the canvas HTML. **Block lifted; WI-13 is now Gate-3-ready.** Detailed signatures in the "WI-13 detail" subsection below.
 - **Parallelism** (rule 48): WI-10 / WI-11 / WI-12 are mutually independent
   (different format containers, disjoint files) — eligible for parallel Gate-3
   execution, one writer per file. WI-14 and WI-15 both touch the More popover /
@@ -502,7 +502,143 @@ Notes:
   + the independent per-format leaves *is* the natural decomposition; the
   feature ships as a sequence of small PRs, not one mega-PR.
 
-## Test catalogue
+### WI-13 detail (added v5 — design landed)
+
+**Surface:** `dev-docs/designs/vreader-fidelity-v1/project/vreader-pdf-translation.jsx` (PR #1037, commit `cc5e619`). Canonical layout is **Variant A — split layout** (canvas picks A1 default; B sheet variant is the rejected alternative). PDF reader frame is split into:
+
+1. Top reader chrome (existing) — unchanged.
+2. PDF page region (existing `PDFViewBridge`) — the panel attaches via SwiftUI's `.safeAreaInset(edge: .bottom)` modifier on the bridge, so the bridge's effective drawing area shrinks by the panel's height when bilingual is on (`260pt` expanded / `38pt` collapsed) and reverts to full when bilingual is off. PDFKit's `PDFView.autoScales = true` reflows the page rendering for the new height automatically; no manual `bottom:` math (Gate-2 v5 round-1 H3 — manual bottom math would have miscalculated against the dynamic `ReaderBottomChrome` overlay height).
+3. **NEW** below-page `PDFBilingualPanel` (`260pt` expanded / `38pt` collapsed; `borderTop` hairline `rule` color; `panelBg` = `rgba(20,14,4,0.025)` on light / `rgba(255,255,255,0.025)` on dark — a 2.5%-alpha overlay so the panel reads as a sub-surface within the same tonal family). The panel is the view passed to `.safeAreaInset(edge: .bottom) { PDFBilingualPanel(...) }`.
+4. Bottom chrome (existing `ReaderBottomChrome` overlay) — unchanged; floats inside the safe area as it does today.
+
+**Files added (this WI):**
+
+- `vreader/Views/Reader/Bilingual/PDFBilingualPanel.swift` — pure SwiftUI sub-view, theme-driven. Public API:
+
+  ```swift
+  enum PDFBilingualPanelState: Equatable {
+      case off                              // bilingual disabled — host renders nothing
+      case loading                          // unit prefetch in flight
+      case translated(segments: [String])   // default — body shows translation paragraphs
+      case offline                          // ChapterTranslationError.offline
+      case empty                            // page has no extractable source text
+  }
+
+  struct PDFBilingualPanel: View {
+      let state: PDFBilingualPanelState
+      let theme: ReaderThemeV2
+      let targetLanguage: String
+      let pageLabel: String                 // "Page N" / "Pages M-N"
+      let isCollapsed: Bool
+      let onToggleCollapsed: () -> Void
+      let onRetry: () -> Void               // offline-state retry CTA
+      let onOpenAITab: () -> Void           // offline-state "Open AI tab" fallback CTA
+      var body: some View { /* design-driven layout */ }
+  }
+  ```
+
+  Internals follow the design: header `HStack` (lang glyph chip + page label + status suffix + flexible spacer + chevron button); body switches on `state` to render translation paragraphs / shimmer skeleton / offline affordance / empty message. The retry button posts `.readerBilingualRetry` (NEW notification, see "Modified files"); the "Open AI tab" button posts `.readerOpenAITranslate` (NEW notification, see "Modified files" + Decision 5) — no fallback, no NoOp. Both notifications are added in this WI.
+
+- `vreader/Views/Reader/PDFReaderContainerView+Bilingual.swift` — host extension owning the bilingual VM lifecycle, the `PDFChapterTextProvider` build, the prefetcher build (mirrors TXT/EPUB `makePrefetcher`), the setup-sheet presentation, and the SwiftUI modifier `bilingualSurfacesModifier`. Mirrors `TXTReaderContainerView+Bilingual.swift` structurally (and stays under 300 LOC). **`PDFChapterTextProvider`'s constructor needs the `DocumentFingerprint` + the PDF file URL.** Currently `PDFReaderViewModel.bookFingerprint` is `private` and the file URL lives on `PDFReaderContainerView`, not the VM (Gate-2 v5 round-1 M2 verified). Resolution: promote `PDFReaderViewModel.bookFingerprint` from `private let` to **`let`** (one-line visibility flip, mirrors `TXTReaderViewModel.bookFingerprint` and `MDReaderViewModel.bookFingerprint` which already do this) — then the host extension reads `viewModel.bookFingerprint` and `fileURL` from the container's own `let fileURL: URL` property. `makeCurrentLocator()` on `PDFReaderViewModel` is non-optional (returns `Locator`, not `Locator?` — unlike EPUB's), so the host extension passes its result straight to `handlePositionChange(_:)` without an `if let` guard.
+
+- `vreader/Views/Reader/Bilingual/PDFBilingualPanelState.swift` — pure derivation. A pure function `panelState(viewModel: BilingualReadingViewModel?, currentPage: Int, pagesPerUnit: Int, totalPages: Int) -> PDFBilingualPanelState`. The function derives the current `TranslationUnitID` **synchronously** from `currentPage` + `pagesPerUnit` (mirrors `PDFChapterTextProvider.pageRanges` arithmetic — `startPage = (currentPage / pagesPerUnit) * pagesPerUnit`, `endPage = min(startPage + pagesPerUnit - 1, totalPages - 1)`, encoded `"start-end"`). It **does not** read `vm.lastTriggerUnit` (Gate-2 v5 round-1 H1 — `lastTriggerUnit` updates only after `handlePositionChange` settles, so during a page-turn-in-flight window the panel would briefly render the previous page's translation). Branches:
+  1. Returns `.off` if `viewModel == nil` || `!viewModel.isEnabled`.
+  2. Returns `.empty` if `totalPages <= 0` (empty PDF — no units at all).
+  3. Compute `unit` from `currentPage` + `pagesPerUnit` synchronously.
+  4. If `vm.translationsByUnit[unit]` is non-nil AND non-empty → `.translated(segments)` (Gate-2 v5 round-1 M1 — empty-after-fetch is `.empty`, not `.translated([])`).
+  5. If `vm.translationsByUnit[unit]` is non-nil AND empty → `.empty` (PDF page had no extractable source text; fetch returned `[]`).
+  6. If `vm.unavailableUnits.contains(unit)` → `.offline`.
+  7. If `vm.inFlightUnits.contains(unit)` || `vm.isFetching` → `.loading`.
+  8. Else → `.loading` (initial-prefetch about to fire; same paint as "settled in-flight").
+
+  **Tests are exhaustive** for this pure derivation — every branch + boundary (empty PDF, single-page PDF, currentPage == 0, currentPage == totalPages - 1, currentPage out of range, `pagesPerUnit > 1` boundary at unit edge).
+
+**Files modified (this WI):**
+
+- `vreader/Views/Reader/PDFReaderContainerView.swift` (already documented in the Modified files table above).
+
+- `vreader/Views/Reader/ReaderNotifications.swift` — add `.readerBilingualRetry` (the offline-state retry CTA → host calls `vm.retryUnit(currentUnit)`, unit-scoped). Add `.readerOpenAITranslate` (Gate-2 v5 round-1 M3 — the offline-panel "Open AI tab" affordance; observed by `ReaderContainerView` to set `aiInitialTab = .translate` then `showAIPanel = true`). Names namespaced `vreader.reader.bilingualRetry` and `vreader.reader.openAITranslate`. No payload on either.
+
+- `vreader/ViewModels/PDFReaderViewModel.swift` — promote `bookFingerprint` from `private let` to **`let`** (mirrors `TXTReaderViewModel.bookFingerprint` and `MDReaderViewModel.bookFingerprint` which are already non-private `let`s — Gate-2 v5 round-1 M2 verified). One-line visibility flip; no behavior change. The `fileURL` is already on the container, not the VM.
+
+- `vreader/Views/Reader/ReaderContainerView.swift` — add an `.onReceive(.readerOpenAITranslate)` observer that gates on `resolvedAICoordinator.isAIAvailable` (matches the `.readerTranslateRequested` defense-in-depth precedent), then `aiInitialTab = .translate` + `showAIPanel = true`. No `TextSelectionInfo` payload — this opens the AI Translate tab cold for the "Open AI tab" offline affordance.
+
+**Decisions specific to this WI:**
+
+1. **No interlinear injection.** PDF is fixed-layout — page glyphs are immutable. The panel is the entire user-visible bilingual surface for PDF. (Recorded already as Decision 2 / Decision 1 Tier C — re-confirmed.)
+
+2. **Panel is conditional on the VM, not on a global toggle.** The VM owns `isEnabled`; the panel hides when off. The chrome-pill mirror (already in `ReaderTopChrome` via WI-9) paints PDF the same as the other formats.
+
+3. **Collapsed strip persistence is per-book, not per-app.** The collapsed state lives on the PDF container's `@State var bilingualPanelCollapsed: Bool`, defaulting to `false`. It survives chapter / page changes within one open session but resets on book re-open. Future enhancement: persist via `PerBookSettingsOverride.bilingualPanelCollapsed: Bool?` (deferred — NOT in WI-13 scope).
+
+4. **Retry affordance — UNIT-SCOPED, not global** (Gate-2 v5 round-1 H2). Per-design: tap "Retry" → host calls a new `BilingualReadingViewModel.retryUnit(_:)` method on the current unit. The method does **NOT** call `resetTriggerState()` (that would wipe `translationsByUnit`, `unavailableUnits`, and `lastTriggerUnit` for the **whole** book — H2 catch). Exact semantics:
+
+   ```swift
+   /// Retry a unit's translation fetch. Designed for the offline-state CTA —
+   /// where `unavailableUnits.contains(unit)` is true and no task for that
+   /// unit should still be in flight (the .offline state is set by
+   /// `finishPrefetch` AFTER the task completes; see Gate-2 v5 round-2 M2).
+   /// As a belt-and-braces guard, cancel any in-flight task for the unit
+   /// before re-launching.
+   ///
+   /// Removes the unit from `unavailableUnits`, clears `lastTriggerUnit` if it
+   /// equals the retried unit (so the next position change is not deduped),
+   /// bumps the epoch, then schedules a fresh prefetch via the same
+   /// `startPrefetch` seam handlePositionChange uses. The rest of the cache
+   /// (other units' translations, other unavailable entries) is untouched.
+   func retryUnit(_ unit: TranslationUnitID) {
+       guard isEnabled, prefetcher != nil else { return }
+       // Belt-and-braces: cancel any prior in-flight task for this unit.
+       // In practice the offline state is post-finishPrefetch so the task
+       // map is already empty for this unit; the guard is cheap.
+       if let priorTask = prefetchTasks.removeValue(forKey: unit) {
+           priorTask.cancel()
+           cancelledPrefetchTasks.append(priorTask)
+       }
+       inFlightUnits.remove(unit)
+       unavailableUnits.remove(unit)
+       if lastTriggerUnit == unit { lastTriggerUnit = nil }
+       epoch += 1
+       startPrefetch(unit: unit, epoch: epoch)
+   }
+   ```
+
+   The `startPrefetch` symbol is currently `private` in `BilingualReadingViewModel+Prefetch.swift`; `retryUnit(_:)` lives in the same extension so it can call `startPrefetch` directly. Exhaustive unit test covers: (a) removes only the named unit from `unavailableUnits`, (b) leaves other units' cached translations intact, (c) re-triggers the prefetch for the named unit, (d) no-op when not enabled or no prefetcher, (e) Gate-2 v5 round-2 M2 — when an unusual in-flight task exists for the unit (e.g. a race between prefetch start and the user tapping retry), cancels it before launching the fresh one.
+
+5. **"Open AI tab" affordance — extend the existing `.readerOpenAI` seam, do NOT add a no-op fallback** (Gate-2 v5 round-1 M3). The codebase has `.readerOpenAI` (opens AI sheet, default tab `.summarize`) and `.readerTranslateRequested` (opens AI sheet on `.translate` tab — payload is a `TextSelectionInfo`, not suitable for "open Translate without a selection"). There is **no** notification matching the offline-state's "open AI Translate tab with no selection" intent. Resolution: add a new `Notification.Name.readerOpenAITranslate` to `ReaderNotifications.swift` (no payload), observed by `ReaderContainerView`: on receipt set `aiInitialTab = .translate` then `showAIPanel = true`, gated on `resolvedAICoordinator.isAIAvailable` per the `.readerTranslateRequested` precedent. The offline-panel "Open AI tab" button posts this notification. **Dismiss-only fallback is explicitly rejected** — a non-functional affordance violates rule 51.
+
+6. **Loading-state UX.** Three shimmer bars per the design — pure SwiftUI `LinearGradient` + `phase` animation (no UIViewRepresentable). Animation is `repeatForever(autoreverses: false)` with a 1.4s cycle, cubic-bezier easing matched to the design's `cubic-bezier(0.32, 0.72, 0, 1)` where SwiftUI's `easeInOut` is a close approximation.
+
+7. **State derivation is synchronous + pure** (Gate-2 v5 round-1 H1 + round-2 H1 — final). `PDFBilingualPanelState.panelState(...)` derives the current unit synchronously from `currentPage` + `pagesPerUnit` (mirrors `PDFChapterTextProvider.pageRanges` arithmetic). It does **not** consult `vm.lastTriggerUnit` — the VM-tracked "last unit the prefetch trigger acted on" lags page changes by one async hop and would flash stale content. The prefetch trigger continues to run on `.readerPositionDidChange` from the host (so caches still warm for the current + next unit); the panel just reads the resulting `translationsByUnit` / `unavailableUnits` / `inFlightUnits` indexed by the panel's own synchronous unit, not the VM's lagging `lastTriggerUnit`. See `PDFBilingualPanelState.swift`'s docstring for the exact derivation contract.
+
+**Tests added (this WI):**
+
+- `PDFBilingualPanelStateTests` (Swift Testing, parameterized) — covers all 7 derivation branches × {with-VM, without-VM} × {currentPage in range, currentPage out of range, currentPage past last unit}. Includes the empty-PDF case (`totalPages == 0`) and the single-page PDF case. The pure derivation is what makes the panel's behavior testable without a live PDFKit document.
+
+- `PDFBilingualPanelTests` (Swift Testing) — view-construction tests:
+  - State `.translated([...])` produces an accessibility-identifier path including `pdfBilingualPanel.translated`.
+  - `.loading` includes `pdfBilingualPanel.loading` and `.empty` includes `pdfBilingualPanel.empty`.
+  - `.offline` includes `pdfBilingualPanel.offline` plus a retry-button identifier `pdfBilingualPanelRetryButton`.
+  - The lang-glyph chip renders the correct script glyph for Chinese / Japanese / Spanish / (fallback for an unknown language).
+  - The chevron button is collapse-only / expand-only depending on `isCollapsed`.
+
+- `BilingualReadingViewModelTests` (extend) — one new test for `retryUnit(_:)`: removes the unit from `unavailableUnits`, clears its `lastTriggerUnit`-dedupe, calling it without an attached provider is a no-op (no crash).
+
+**Tests NOT added (this WI):**
+
+- No `PDFChapterTextProviderTests` change — covered exhaustively in WI-2.5 (`ChapterTextProviderTests` already covers PDF).
+- No new `BilingualReadingViewModel+Prefetch` test — `handlePositionChange` is already tested in WI-7b; the new `retryUnit` is a single small method that piggybacks on the existing prefetch trigger.
+- No new `ReaderMoreMenuRow` test — the bilingual More-menu row is already PDF-compatible via WI-8 (it doesn't gate on format).
+- No new `ReaderTopChrome` test — the pill mirror is format-agnostic via WI-9.
+
+**WI-13 surface gating ("do not extend"):**
+
+- WI-13 does NOT touch `BookTranslation*` (WI-14's surface) — that's the parallel agent's write set.
+- WI-13 does NOT touch `BookCardView.swift` (WI-14's surface).
+- WI-13 does NOT touch `BilingualDisplayPipeline.swift` / `BilingualTextRenderer.swift` (text-formats only — PDF doesn't reflow).
+- WI-13 does NOT change `BilingualReadingViewModel`'s public surface beyond adding `retryUnit(_:)` as a small extension. No new VM fields, no new VM init parameters.
+
+
 
 | Test file | Covers |
 |---|---|
@@ -767,6 +903,23 @@ chapter that re-renders mid-translation does not double-inject.
     `BilingualReadingViewModel` row now states locator→unit resolution goes
     through the injected `ChapterTextProviding.unit(containing:)` /
     `unit(after:)` — the single N6 seam.
+- **v5 (2026-05-20)** — WI-13 design-block LIFTED. PR #1037 (commit `cc5e619`) committed the PDF translation-panel design bundle resolving #1023. This revision (a) flips the WI-13 row from `BLOCKED: needs-design` to Gate-3-ready, (b) flips the `PDFBilingualPanel.swift` and `PDFReaderContainerView.swift` Surface-area rows from BLOCKED to specified, (c) adds a `vreader/Views/Reader/PDFReaderContainerView+Bilingual.swift` row + a `vreader/Views/Reader/Bilingual/PDFBilingualPanelState.swift` row to the Added/Modified files tables (host extension + pure state derivation), (d) adds the new `.readerBilingualRetry` + `.readerOpenAITranslate` notifications to `ReaderNotifications.swift`'s Modified-files row, (e) adds the "WI-13 detail" subsection with file-by-file signatures, decisions, and tests, (f) adds `PDFBilingualPanelStateTests` + `PDFBilingualPanelTests` to the Test catalogue and notes the `BilingualReadingViewModelTests` extension for `retryUnit(_:)`. **No change to any other WI's surface or sequencing** — WI-13 is independent of the parallel WI-14 (no overlapping write set). Author: feature workflow agent.
+
+  - **Gate 2 — v5 audit, 2 rounds against Codex thread `019e4342-71b3-7930-8ff0-b356e1e7d529`. CLEAN.**
+    - Round 1: 6 findings — 3 High + 3 Medium. All real.
+      - H1 (current-unit derivation): `PDFBilingualPanelState` was deriving from `vm.lastTriggerUnit`, which lags page changes by one async hop and would flash stale translations during page-turn-in-flight. Fixed: derivation now reads `currentPage` + `pagesPerUnit` synchronously, mirroring `PDFChapterTextProvider.pageRanges` arithmetic.
+      - H2 (retry semantics): the planned `retryUnit(_:)` called `resetTriggerState()`, which would wipe the whole-book cache. Fixed: scoped removal — `unavailableUnits.remove(unit)` + clear `lastTriggerUnit` only if it equals the retried unit + bump epoch + `startPrefetch`.
+      - H3 (layout assumptions): plan used `bottom: chrome+260/38` manual math against a `ReaderBottomChrome` whose height is dynamic, not fixed `56pt`, and the bridge is `.ignoresSafeArea(edges: .bottom)`. Fixed: panel attaches via SwiftUI's `.safeAreaInset(edge: .bottom)` modifier, PDFKit's `autoScales = true` reflows automatically.
+      - M1 (`.empty` definition): keying `.empty` on `unit == nil` was wrong — `PDFChapterTextProvider.unit(containing:)` clamps past-last pages to the last unit and only returns nil for empty-book / negative page. Fixed: `.empty` is now "totalPages <= 0" OR "cached translations list is empty after fetch".
+      - M2 (PDFReaderViewModel access): `bookFingerprint` is `private`. Fixed: promote to `let` (mirrors TXT/MD); `fileURL` sources from the container. `makeCurrentLocator()` is non-optional — no `if let` guard.
+      - M3 (.readerOpenAITab): notification doesn't exist; only `.readerOpenAI` (no tab payload) and `.readerTranslateRequested` (needs `TextSelectionInfo`). Fixed: add new `.readerOpenAITranslate` notification + `ReaderContainerView` observer (gates on `resolvedAICoordinator.isAIAvailable`, sets `aiInitialTab = .translate` + `showAIPanel = true`).
+    - Round 2: 4 residual findings — 2 High + 2 Medium. All correct — all my round-1 edits hadn't fully propagated through the whole subsection.
+      - H1 (Decision 7 contradiction): Decision 7 still said "the panel reads `vm.lastTriggerUnit`". Fixed: rewrote to match the new synchronous derivation.
+      - H2 (`.readerOpenAITab` residual): Internals paragraph still said "posts `.readerOpenAITab` if it already exists, otherwise dismisses with a NoOp". Fixed: now says "posts `.readerOpenAITranslate` — no fallback, no NoOp".
+      - M1 (H3 surface description residual): "Surface" intro still described `bottom: 56 / chrome+260 / chrome+38` math. Fixed: rewrote to describe `.safeAreaInset(edge: .bottom)`.
+      - M2 (retryUnit in-flight cancellation): no explicit guard against an in-flight task for the same unit (a rare race). Fixed: `retryUnit(_:)` now cancels any in-flight task for the unit before launching the fresh one; test case (e) covers this.
+    - Round 3: Codex confirms all 4 round-2 findings are resolved cleanly. v5 is Gate-2-clean within its narrow scope.
+
   - **Gate 2 status — round cap reached, disposition = fix-and-accept.**
     Three audit rounds are the rule-47 / feature-workflow maximum. The finding
     count converged monotonically (9 → 7 → 2) and round-3's two findings were
