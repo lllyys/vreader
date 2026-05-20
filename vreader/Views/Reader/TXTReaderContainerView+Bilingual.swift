@@ -79,41 +79,45 @@ extension TXTReaderContainerView {
     }
 
     /// Build the TXT chapter-text adapter from the VM's chapter index
-    /// + full text. Returns `nil` until BOTH the index is populated
-    /// AND the VM has the full book in `textContent` — chapter-paged
-    /// mode loads chapter text per navigation and does NOT populate
-    /// `textContent` (its slices are local), so the provider cannot
-    /// safely slice document-global offsets in that mode.
+    /// + full book text. Returns `nil` until BOTH the index is
+    /// populated AND the VM holds the **full book** in `textContent`.
     ///
-    /// Continuous-mode TXT and the legacy small-file path both
-    /// populate `textContent` with the whole book, so the provider
-    /// constructs fine for them.
+    /// `TXTChapterTextProvider` slices by document-global UTF-16
+    /// offsets, so it MUST be backed by full-book text — chapter-
+    /// local slices would yield wrong source for every chapter except
+    /// the open one.
     ///
-    /// Codex Gate-4 round-1 finding [H2]: a prior version of this
-    /// helper fell back to `nil` only on `chapterIndex == nil`, then
-    /// supplied a chapter-local `textContent` to
-    /// `TXTChapterTextProvider`. `TXTChapterTextProvider` slices by
-    /// document-global UTF-16 offsets — that would yield wrong
-    /// source text for every chapter except (sometimes) the open
-    /// one. The fix is to require the full book text up front; the
-    /// follow-up render-injection slice extends the provider with a
-    /// loader-backed fallback for chapter-paged mode.
+    /// Where each TXT-VM mode lives on this axis:
+    ///
+    /// | mode | `textContent` content | safe to construct? |
+    /// |---|---|---|
+    /// | continuous (`isContinuousMode == true`) | full book | yes |
+    /// | legacy small-file (`isChapterMode == false`) | full book | yes |
+    /// | chapter-paged (`isChapterMode == true && isContinuousMode == false`) | current chapter only | NO |
+    ///
+    /// Chapter-paged mode is deliberately disabled for WI-12a; the
+    /// follow-up WI-12b introduces a loader-backed text provider
+    /// that reads chapter text on demand from
+    /// `TXTChapterContentLoader`, so the chapter-paged path will be
+    /// enabled then.
+    ///
+    /// Codex Gate-4 round-1 finding [H2] + round-2 follow-up: a
+    /// prior version of this helper guarded only on `textContent !=
+    /// nil`, but the TXT VM sets `textContent = chapterText` on
+    /// chapter navigation in chapter-paged mode (lines 376 and 561
+    /// of `TXTReaderViewModel.swift`). Slicing document-global
+    /// offsets out of that chapter-local string would corrupt every
+    /// non-open chapter. The fix is the explicit mode check below.
     static func makeTextProvider(
         viewModel: TXTReaderViewModel
     ) -> TXTChapterTextProvider? {
         guard let index = viewModel.chapterIndex,
               !index.chapters.isEmpty else { return nil }
-        guard let fullText = viewModel.textContent else {
-            // Chapter-paged mode loads chapter text per navigation
-            // and does not populate `textContent`. The VM cannot
-            // construct here without the full book text. The
-            // follow-up slice that wires the live render-injection
-            // resolves this by introducing a loader-backed text
-            // provider; for WI-12a (foundational) the VM lazily
-            // re-attempts construction as the container's
-            // `textContent` state changes via `onChange`.
+        // Reject chapter-paged mode — `textContent` is chapter-local.
+        if viewModel.isChapterMode && !viewModel.isContinuousMode {
             return nil
         }
+        guard let fullText = viewModel.textContent else { return nil }
         return TXTChapterTextProvider(
             fingerprint: viewModel.bookFingerprint,
             fullText: fullText,
