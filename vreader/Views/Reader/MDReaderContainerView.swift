@@ -42,7 +42,11 @@ struct MDReaderContainerView: View {
 
     @State private var uiState = TextReaderUIState()
     @State private var highlightRenderer: TextHighlightRenderer?
-    @State private var highlightCoordinator: HighlightCoordinator?
+    // Bug #237 (DEBUG): `internal` (was `private`) so the
+    // `+DebugBridgeHighlight` extension can read the coordinator when
+    // dispatching `vreader-debug://highlight`. Production gesture path
+    // also reads it via `ReaderNotificationModifier` (same file).
+    @State var highlightCoordinator: HighlightCoordinator?
     /// TTS sentence highlighting + auto-scroll coordinator (features #40, #41).
     @State private var ttsHighlightCoordinator: TTSHighlightCoordinator?
 
@@ -127,6 +131,12 @@ struct MDReaderContainerView: View {
         // separate extension to keep this file under the file-size
         // budget (rule 50 §9).
         .modifier(bilingualSurfacesModifier)
+        // Bug #237 — DebugBridge highlight-driver observer. DEBUG-only;
+        // attached inside the MD host so the helper can build MD-shaped
+        // Locators via LocatorFactory.mdRange and re-paint atomically via
+        // HighlightCoordinator.create — the gesture path's full posture.
+        // Audit Round-1 High #1 / #2 fix.
+        .modifier(debugBridgeHighlightObserverModifier)
         .task {
             // PERF: open already called by MDReaderHost
             if viewModel.renderedText == nil {

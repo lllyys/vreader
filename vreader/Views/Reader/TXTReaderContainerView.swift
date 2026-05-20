@@ -336,6 +336,12 @@ struct TXTReaderContainerView: View {
         // separate extension to keep this file under the file-size
         // budget (rule 50 §9).
         .modifier(bilingualSurfacesModifier)
+        // Bug #237 — DebugBridge highlight-driver observer. DEBUG-only;
+        // attached inside the TXT host (not the generic ReaderContainerView)
+        // so the helper can build TXT-shaped Locators via LocatorFactory
+        // and re-paint atomically via HighlightCoordinator.create — the
+        // gesture path's full posture. Audit Round-1 High #1 / #2 fix.
+        .modifier(debugBridgeHighlightObserverModifier)
         .task {
             // PERF: open already called by TXTReaderHost — skip if content loaded
             if viewModel.textContent == nil && viewModel.currentChapterText == nil {
