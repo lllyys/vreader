@@ -1,0 +1,321 @@
+// Purpose: Tests for ChapterReTranslateViewModel — the @MainActor UI-facing
+// state for the per-chapter re-translation flow (feature #56 WI-15).
+//
+// Covers acceptance criteria (e) "per-chapter re-translate clears old cache
+// and fetches fresh" and (f) "provider override for re-translate does not
+// change the global active provider".
+//
+// @coordinates-with: ChapterReTranslateViewModel.swift,
+//   ChapterTranslationStore.swift, ChapterTranslationService.swift,
+//   AIService.swift,
+//   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-15)
+
+import Testing
+import Foundation
+import SwiftData
+@testable import vreader
+
+@MainActor
+@Suite("ChapterReTranslateViewModel")
+struct ChapterReTranslateViewModelTests {
+
+    private static let bookKey = "epub:fp-rt-tests"
+    private static let promptVersion = "v1"
+    private static let initialProfileID = UUID(uuidString: "AAAAAAAA-0000-0000-0000-000000000001")!
+    private static let overrideProfileID = UUID(uuidString: "BBBBBBBB-0000-0000-0000-000000000002")!
+
+    private static func unit(_ value: String = "ch6") -> TranslationUnitID {
+        TranslationUnitID(kind: .epubHref, value: value)
+    }
+
+    private static func makeStore() throws -> ChapterTranslationStore {
+        let schema = Schema(SchemaV7.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        return ChapterTranslationStore(modelContainer: container)
+    }
+
+    private static func makeConfig(model: String = "gpt-test") -> ResolvedAIProviderConfig {
+        ResolvedAIProviderConfig(
+            kind: .openAICompatible,
+            baseURL: URL(string: "https://api.test.example.com")!,
+            apiKey: "sk-test", model: model, maxTokens: 4096)
+    }
+
+    private static func seedCache(
+        _ store: ChapterTranslationStore,
+        bookKey: String = bookKey,
+        unit: TranslationUnitID,
+        profileID: UUID,
+        segments: [String]
+    ) async throws {
+        try await store.upsert(ChapterTranslationRecord(
+            bookFingerprintKey: bookKey,
+            unitStorageKey: unit.storageKey,
+            targetLanguage: "Chinese",
+            providerProfileID: profileID,
+            promptVersion: promptVersion,
+            translatedSegments: segments,
+            sourceParagraphCount: segments.count))
+    }
+
+    /// Records the calls a VM makes through the AIService seam — captures the
+    /// (profileID, modelOverride) the picker resolved, and returns a canned
+    /// config so the VM never reaches the network.
+    actor MockProviderResolver: RetranslateProviderResolving {
+        private(set) var calls: [(profileID: UUID, modelOverride: String?)] = []
+        private let result: Result<ResolvedAIProviderConfig, Error>
+
+        init(result: Result<ResolvedAIProviderConfig, Error>) { self.result = result }
+
+        func resolveProviderConfig(
+            profileID: UUID, modelOverride: String?
+        ) async throws -> ResolvedAIProviderConfig {
+            calls.append((profileID, modelOverride))
+            return try result.get()
+        }
+    }
+
+    /// Records the calls the VM makes into the translation service — captures
+    /// the style + config so a test can prove the picker's selection actually
+    /// flows down to translation.
+    actor MockTranslationRunner: ChapterReTranslating {
+        private(set) var calls: [(unit: TranslationUnitID, style: TranslationStyle, providerProfileID: UUID, model: String)] = []
+        private let result: Result<ChapterTranslationResult, Error>
+
+        init(result: Result<ChapterTranslationResult, Error>) { self.result = result }
+
+        func translateForRetranslate(
+            bookFingerprintKey: String,
+            unit: TranslationUnitID,
+            sourceText: String,
+            targetLanguage: String,
+            providerProfileID: UUID,
+            config: ResolvedAIProviderConfig,
+            style: TranslationStyle,
+            granularity: TranslationGranularity
+        ) async throws -> ChapterTranslationResult {
+            calls.append((unit, style, providerProfileID, config.model))
+            return try result.get()
+        }
+    }
+
+    private static func makeVM(
+        bookKey: String = bookKey,
+        store: ChapterTranslationStore,
+        resolver: MockProviderResolver,
+        runner: MockTranslationRunner,
+        sourceText: String = "Source paragraph one.\n\nSource paragraph two."
+    ) -> ChapterReTranslateViewModel {
+        ChapterReTranslateViewModel(
+            bookFingerprintKey: bookKey,
+            promptVersion: promptVersion,
+            initialProviderProfileID: initialProfileID,
+            initialModel: "initial-model",
+            resolver: resolver,
+            runner: runner,
+            store: store,
+            sourceTextProvider: { _ in sourceText })  // implicit async, returns immediately
+    }
+
+    // MARK: - Initial state
+
+    @Test func initialState_isDismissed_andHasInitialSelection() async throws {
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新译文"], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+        #expect(vm.sheetState == .dismissed)
+        #expect(vm.selection.providerProfileID == Self.initialProfileID)
+        #expect(vm.selection.style == .natural)
+    }
+
+    // MARK: - Picker presentation
+
+    @Test func presentPicker_movesToPickerState_andCarriesUnitContext() async throws {
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新译文"], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit("ch6"), unitTitle: "Chapter 6", targetLanguage: "Chinese")
+
+        #expect(vm.sheetState == .picker)
+        #expect(vm.unit == Self.unit("ch6"))
+        #expect(vm.unitTitle == "Chapter 6")
+        #expect(vm.targetLanguage == "Chinese")
+    }
+
+    @Test func dismiss_clearsSheetState() async throws {
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新译文"], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        vm.dismiss()
+        #expect(vm.sheetState == .dismissed)
+    }
+
+    // MARK: - Submit — happy path
+
+    @Test func submit_clearsCacheForThatUnit_andCallsTranslate() async throws {
+        let store = try Self.makeStore()
+        let unit = Self.unit("ch6")
+        // Seed the cache for this exact (book, unit, target, profile,
+        // promptVersion). The VM must DELETE this row before triggering the
+        // re-translate.
+        try await Self.seedCache(
+            store, unit: unit, profileID: Self.initialProfileID,
+            segments: ["旧译文"])
+
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig(model: "override-model")))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新译文一", "新译文二"], fromCache: false)))
+
+        var translationsApplied: [TranslationUnitID: [String]] = [:]
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+        vm.onTranslationApplied = { unit, segments in
+            translationsApplied[unit] = segments
+        }
+
+        vm.presentPicker(unit: unit, unitTitle: "Chapter 6", targetLanguage: "Chinese")
+        vm.updateSelection { selection in
+            selection.providerProfileID = Self.overrideProfileID
+            selection.model = "override-model"
+            selection.style = .literary
+        }
+        await vm.submit()
+
+        // Cache row deleted for the ORIGINAL profile/key (initialProfileID).
+        let cachedKey = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: Self.bookKey,
+            unitStorageKey: unit.storageKey,
+            targetLanguage: "Chinese",
+            providerProfileID: Self.initialProfileID,
+            promptVersion: Self.promptVersion)
+        let cached = await store.translation(forKey: cachedKey)
+        #expect(cached == nil)
+
+        // Resolver was called with the OVERRIDE profile + model — picker
+        // selection actually flows through.
+        let resolverCalls = await resolver.calls
+        #expect(resolverCalls.count == 1)
+        #expect(resolverCalls.first?.profileID == Self.overrideProfileID)
+        #expect(resolverCalls.first?.modelOverride == "override-model")
+
+        // Runner was called with the picker's style.
+        let runnerCalls = await runner.calls
+        #expect(runnerCalls.count == 1)
+        #expect(runnerCalls.first?.style == .literary)
+        #expect(runnerCalls.first?.providerProfileID == Self.overrideProfileID)
+        #expect(runnerCalls.first?.model == "override-model")
+
+        // Result flowed back through the host callback.
+        #expect(translationsApplied[unit] == ["新译文一", "新译文二"])
+        // Sheet ended at .complete after success.
+        #expect(vm.sheetState == .complete)
+        #expect(vm.lastError == nil)
+    }
+
+    // MARK: - Default selection — no override
+
+    @Test func submit_withInitialSelection_usesInitialProfileAndModel() async throws {
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig(model: "initial-model")))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新译文"], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        let resolverCalls = await resolver.calls
+        #expect(resolverCalls.first?.profileID == Self.initialProfileID)
+        // initialModel was set; modelOverride was sent through.
+        #expect(resolverCalls.first?.modelOverride == "initial-model")
+    }
+
+    // MARK: - Error path
+
+    @Test func submit_runnerFails_setsErrorState() async throws {
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .failure(
+            ChapterTranslationError.providerFailed("upstream offline")))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        #expect(vm.sheetState == .picker)
+        #expect(vm.lastError?.contains("upstream offline") == true)
+    }
+
+    @Test func submit_resolverFails_setsErrorState() async throws {
+        struct StubError: Error { let message: String }
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .failure(StubError(message: "no-keychain")))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: [], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        #expect(vm.sheetState == .picker)
+        // Runner was NOT called when resolver failed.
+        let runnerCalls = await runner.calls
+        #expect(runnerCalls.isEmpty)
+        #expect(vm.lastError != nil)
+    }
+
+    // MARK: - Empty source text
+
+    @Test func submit_emptySource_doesNotCallTranslate_andDismisses() async throws {
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: [], fromCache: false)))
+        let vm = Self.makeVM(
+            store: store, resolver: resolver, runner: runner, sourceText: "")
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        // No translation work for an empty unit — sheet completes without
+        // sending a request.
+        let runnerCalls = await runner.calls
+        #expect(runnerCalls.isEmpty)
+        // The host gets a no-op callback (no translations to apply).
+        #expect(vm.sheetState == .complete)
+    }
+
+    // MARK: - Provider override does not mutate ProviderProfileStore
+
+    @Test func submit_overrideProvider_doesNotMutateProfileStoreActiveID() async throws {
+        // The picker selection is local to the VM — the resolver call carries
+        // the chosen profile, but the VM never touches `ProviderProfileStore`'s
+        // active id setter. Test by spying on the resolver's call shape (only
+        // the override-resolver path is exercised — `setActiveProfileID` is
+        // never invoked since we don't even hand the store in).
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新"], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        vm.updateSelection { $0.providerProfileID = Self.overrideProfileID }
+        await vm.submit()
+
+        // The VM has no hook into ProviderProfileStore — confirm only by
+        // asserting the override flowed through the resolver shape (the only
+        // seam touching profiles), which the prior test already covered.
+        let calls = await resolver.calls
+        #expect(calls.first?.profileID == Self.overrideProfileID)
+    }
+}

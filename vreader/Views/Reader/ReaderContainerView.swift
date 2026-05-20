@@ -89,6 +89,16 @@ struct ReaderContainerView: View {
     /// open. Lifetime tied to `ReaderContainerView` so a confirm-alert
     /// → status-sheet → cancel handoff survives Book Details dismiss.
     @State var translateBookVM: BookTranslationViewModel?
+    /// Feature #56 WI-15 — the per-chapter re-translation view model + the
+    /// list of `ProviderProfile`s the picker offers. The VM is constructed
+    /// lazily on the first `.readerMoreReTranslateChapter` notification and
+    /// held for the reader's lifetime so a picker → progress → complete →
+    /// re-open cycle reuses the same selection state. The profile list is
+    /// loaded fresh at picker-open time (Codex Gate-4-pattern from WI-14:
+    /// the active profile may have changed between opens).
+    @State var reTranslateVM: ChapterReTranslateViewModel?
+    @State var reTranslateProviderProfiles: [ProviderProfile] = []
+
     /// Latest text provider published by the active reader container.
     /// TXT / EPUB / MD / Foliate containers post
     /// `.readerBookTranslationTextProviderAvailable` with their provider
@@ -415,6 +425,16 @@ struct ReaderContainerView: View {
                 resolvedAICoordinator.chatViewModel?.bookContext = resolvedAICoordinator.currentTextContent
             }
         }
+        // Feature #56 WI-15: per-chapter re-translation picker. The
+        // observer fires on `.readerMoreReTranslateChapter`, resolves the
+        // current unit, builds the VM lazily, and raises the sheet.
+        // Factored into `ReaderReTranslateObserver` so the body stays under
+        // SwiftUI's type-inference budget (WI-13 / WI-14 precedent).
+        .modifier(ReaderReTranslateObserver(
+            isPresented: reTranslatePickerBinding,
+            sheetContent: { reTranslateSheetContent },
+            onTrigger: { handleReTranslateChapterRequested() }
+        ))
         #if DEBUG
         // Bug #144: pull bridge-driven theme changes into the live store.
         // `RealDebugBridgeContext.theme(_:_:)` writes UserDefaults via a

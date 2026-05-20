@@ -153,6 +153,13 @@ extension Notification.Name {
     /// sets `aiInitialTab = .translate` + `showAIPanel = true`. No
     /// payload — opens the AI Translate tab without a selection.
     static let readerOpenAITranslate = Notification.Name("vreader.reader.openAITranslate")
+    /// Feature #56 WI-15: posted by `ChapterReTranslateViewModel` when a
+    /// re-translation succeeds. The active per-format reader container
+    /// observes (matched by `["fingerprintKey": String]`), updates its
+    /// `BilingualReadingViewModel.translationsByUnit[unit] = segments`,
+    /// and re-renders the affected unit. Payload:
+    /// `["fingerprintKey": String, "unit": TranslationUnitID, "segments": [String]]`.
+    static let readerBilingualReTranslateApplied = Notification.Name("vreader.reader.bilingualReTranslateApplied")
     /// Posted when a footnote link is detected in EPUB content (foliate-js).
     /// Object is [String: String] with "href" and "text" keys.
     static let epubFootnoteDetected = Notification.Name("vreader.epubFootnoteDetected")

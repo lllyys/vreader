@@ -281,6 +281,9 @@ extension TXTReaderContainerView {
             textContentReady: viewModel.textContent != nil,
             ensureViewModel: { ensureBilingualViewModel() },
             onMoreBilingualToggle: { handleMoreBilingualToggle() },
+            onReTranslateApplied: { unit, segments in
+                bilingualViewModel?.applyReTranslateResult(segments, for: unit)
+            },
             showSetupSheet: $showBilingualSetupSheet,
             sheetView: { AnyView(bilingualSetupSheetView) }
         )
@@ -318,6 +321,10 @@ struct TXTBilingualSurfacesModifier: ViewModifier {
     let textContentReady: Bool
     let ensureViewModel: () -> Void
     let onMoreBilingualToggle: () -> Void
+    /// Feature #56 WI-15: routes a re-translate result to the format's
+    /// bilingual VM so the open chapter re-renders without waiting for the
+    /// next prefetch trigger.
+    let onReTranslateApplied: (TranslationUnitID, [String]) -> Void
     @Binding var showSetupSheet: Bool
     let sheetView: () -> AnyView
 
@@ -328,6 +335,16 @@ struct TXTBilingualSurfacesModifier: ViewModifier {
             .onReceive(
                 NotificationCenter.default.publisher(for: .readerMoreBilingual)
             ) { _ in onMoreBilingualToggle() }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .readerBilingualReTranslateApplied)
+            ) { notification in
+                guard let info = notification.userInfo,
+                      info["fingerprintKey"] as? String == bookFingerprintKey,
+                      let unit = info["unit"] as? TranslationUnitID,
+                      let segments = info["segments"] as? [String]
+                else { return }
+                onReTranslateApplied(unit, segments)
+            }
             .sheet(isPresented: $showSetupSheet) { sheetView() }
     }
 }

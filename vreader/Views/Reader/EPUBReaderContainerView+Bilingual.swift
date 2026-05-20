@@ -277,6 +277,9 @@ extension EPUBReaderContainerView {
             ensureViewModel: { ensureBilingualViewModel() },
             onMoreBilingualToggle: { handleMoreBilingualToggle() },
             onBilingualDidChange: { handleBilingualDidChange() },
+            onReTranslateApplied: { unit, segments in
+                bilingualViewModel?.applyReTranslateResult(segments, for: unit)
+            },
             showSetupSheet: $showBilingualSetupSheet,
             sheetView: { AnyView(bilingualSetupSheetView) }
         )
@@ -316,6 +319,10 @@ struct EPUBBilingualSurfacesModifier: ViewModifier {
     let ensureViewModel: () -> Void
     let onMoreBilingualToggle: () -> Void
     let onBilingualDidChange: () -> Void
+    /// Feature #56 WI-15: routes a re-translate result to the format's
+    /// bilingual VM so the open chapter re-renders without waiting for the
+    /// next prefetch trigger.
+    let onReTranslateApplied: (TranslationUnitID, [String]) -> Void
     @Binding var showSetupSheet: Bool
     let sheetView: () -> AnyView
 
@@ -331,6 +338,16 @@ struct EPUBBilingualSurfacesModifier: ViewModifier {
                 let key = notification.userInfo?["fingerprintKey"] as? String
                 guard key == bookFingerprintKey else { return }
                 onBilingualDidChange()
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .readerBilingualReTranslateApplied)
+            ) { notification in
+                guard let info = notification.userInfo,
+                      info["fingerprintKey"] as? String == bookFingerprintKey,
+                      let unit = info["unit"] as? TranslationUnitID,
+                      let segments = info["segments"] as? [String]
+                else { return }
+                onReTranslateApplied(unit, segments)
             }
             .sheet(isPresented: $showSetupSheet) { sheetView() }
     }

@@ -184,6 +184,23 @@ final class BilingualReadingViewModel {
         translationsByUnit[unit] = segments
     }
 
+    /// Apply re-translation segments produced by `ChapterReTranslateViewModel`
+    /// (WI-15). Updates the in-memory cache, clears the unit from
+    /// `inFlightUnits` so a follow-up prefetch trigger sees the unit as
+    /// available, and posts `.readerBilingualDidChange` so the active
+    /// per-format renderer re-renders with the fresh segments.
+    ///
+    /// The re-translate flow already wrote the new translation to
+    /// `ChapterTranslationStore` (via `ChapterTranslationService.translate`),
+    /// so this only refreshes the VM's local state — the next prefetch /
+    /// reopen will hit the new cache row.
+    func applyReTranslateResult(_ segments: [String], for unit: TranslationUnitID) {
+        translationsByUnit[unit] = segments
+        inFlightUnits.remove(unit)
+        unavailableUnits.remove(unit)
+        postDidChange()
+    }
+
     // The WI-7b behavioral layer — `attachProvider`/`attachPrefetcher`, the
     // `handlePositionChange` prefetch trigger, epoch/cancellation, and the
     // `.readerBilingualDidChange` posting — lives in

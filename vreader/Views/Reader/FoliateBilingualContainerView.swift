@@ -104,6 +104,18 @@ struct FoliateBilingualContainerView: View {
             guard key == fingerprintKey else { return }
             handleBilingualDidChange()
         }
+        // Feature #56 WI-15: a re-translate result for this book —
+        // refresh the VM's in-memory cache so the open chapter re-renders.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .readerBilingualReTranslateApplied)
+        ) { notification in
+            guard let info = notification.userInfo,
+                  info["fingerprintKey"] as? String == fingerprintKey,
+                  let unit = info["unit"] as? TranslationUnitID,
+                  let segments = info["segments"] as? [String]
+            else { return }
+            bilingualViewModel?.applyReTranslateResult(segments, for: unit)
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: .foliateBilingualBlocksEnumerated)
         ) { notification in
