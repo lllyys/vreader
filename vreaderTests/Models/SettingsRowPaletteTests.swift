@@ -1,7 +1,8 @@
 // Purpose: Tests for SettingsRowPalette — the design data pinning each
 // Settings-sheet row's brand color + SF Symbol against the committed
 // design bundle (`vreader-panels.jsx` `SettingsSheet` `Row`). Feature
-// #67 WI-2.
+// #67 WI-2 introduced the six core-group specs; WI-5 adds the AI
+// group's `aiProvider` row (the only AI row depicted in the design).
 
 import Testing
 import Foundation
@@ -121,5 +122,44 @@ struct SettingsRowPaletteTests {
         #expect(high.r == 255)
         #expect(high.g == 0)
         #expect(high.b == 255)
+    }
+
+    // MARK: - AI group (WI-5)
+
+    /// The AI rows WI-5 adds. Currently only one — `aiProvider` —
+    /// because the design bundle (`vreader-panels.jsx` line 869) only
+    /// depicts the AI provider row. The AI Assistant + Data & Privacy
+    /// toggle rows are not in the palette: per rule 51 their visual
+    /// treatment must come from a committed design, not an invented one.
+    private var aiSpecs: [SettingsRowSpec] {
+        [SettingsRowPalette.aiProvider]
+    }
+
+    @Test func aiProvider_hasNonEmptySymbolName_andResolves() {
+        for spec in aiSpecs {
+            #expect(!spec.symbolName.isEmpty, "symbolName for \(spec.paletteKey)")
+            #expect(UIImage(systemName: spec.symbolName) != nil,
+                    "\(spec.symbolName) is a real SF Symbol")
+        }
+    }
+
+    @Test func aiProvider_paletteKey_isPinned() {
+        #expect(SettingsRowPalette.aiProvider.paletteKey == "aiProvider")
+    }
+
+    @Test func aiProvider_pinsItsDesignSymbol_andHex() {
+        // `vreader-panels.jsx:869` — `Icons.Sparkle` `#8c2f2f`.
+        #expect(SettingsRowPalette.aiProvider.symbolName == "sparkles")
+        #expect(SettingsRowPalette.aiProvider.background ==
+                RGBComponents(r: 0x8c, g: 0x2f, b: 0x2f))
+    }
+
+    @Test func aiProvider_isDistinct_fromEveryCoreSpec() {
+        for core in coreSpecs {
+            #expect(SettingsRowPalette.aiProvider != core,
+                    "aiProvider must not collide with \(core.paletteKey)")
+            #expect(SettingsRowPalette.aiProvider.paletteKey != core.paletteKey,
+                    "no palette-key collision with \(core.paletteKey)")
+        }
     }
 }

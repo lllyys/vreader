@@ -115,4 +115,19 @@ enum SettingsRowPalette {
         symbolName: "note.text",
         background: RGBComponents(r: 0x99, g: 0x99, b: 0x99)
     )
+
+    // MARK: - AI group (WI-5)
+
+    /// AI Provider — the design's `Icons.Sparkle` glyph + `#8c2f2f`
+    /// (`vreader-panels.jsx` line 869 — the ONLY AI row depicted in the
+    /// committed design). The AI Assistant + Data & Privacy toggle rows
+    /// are NOT in this enum: the design bundle does not depict them, so
+    /// per rule 51 they stay on their existing plain-`Toggle` chrome
+    /// pending a `needs-design` follow-up. The shipped sheet renders
+    /// only this `aiProvider` palette key for the AI section in WI-5.
+    static let aiProvider = SettingsRowSpec(
+        paletteKey: "aiProvider",
+        symbolName: "sparkles",
+        background: RGBComponents(r: 0x8c, g: 0x2f, b: 0x2f)
+    )
 }
