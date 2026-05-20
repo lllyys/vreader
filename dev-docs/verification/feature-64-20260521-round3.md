@@ -2,7 +2,7 @@
 kind: feature
 id: 64
 status_target: VERIFIED
-commit_sha: 6f7f576140a593248c25e4e21e1693fe560e4629
+commit_sha: 080834199ce76af60e01d6ed608cd3f0bd5b29cb
 app_version: 3.38.27 (build 602)
 date: 2026-05-21
 verifier: claude
