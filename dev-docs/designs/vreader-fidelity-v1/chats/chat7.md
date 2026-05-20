@@ -118,3 +118,64 @@ done？
 
 Yep — done. Canvas is live at **VReader PDF Translation Panel Canvas.html** with sections A (split, canonical), B (peek-sheet, alternative), and C (anatomy detail), covering all four states (default / loading / offline+retry / empty) plus collapsed and theme variants.
 
+## User
+
+https://github.com/lllyys/vreader/issues/1024
+
+## Assistant
+
+_[tool: read_file]_
+
+_[tool: grep]_
+
+_[tool: read_file]_
+
+_[tool: web_fetch]_
+
+_[tool: snip]_
+
+_[tool: update_todos]_
+
+_[tool: web_fetch]_
+
+Now I understand — **#1024 is the EPUB/reflowable inline offline state**, distinct from the PDF below-page panel I built for #1023. This one lives *inside* the paragraph-interlinear flow (`BilingualPageContent` in `vreader-bilingual.jsx`).
+
+Key constraints from the issue:
+- Must fit paragraph-interlinear layout without breaking source/translation rhythm
+- Must cover offline+uncached, retry affordance, **distinct from loading**
+
+Let me snip the prior #1023 work to make room and build.
+
+_[tool: write_file]_
+
+Reading the existing renderer, the translation block has a distinctive shell — left accent border (`borderLeft: 2px solid {accent}55`), indented padding, 88% font, sub color. The offline placeholder needs to **preserve that shell** so the rhythm continues; only its content changes.
+
+Committing to three approaches:
+- **A — Ghost placeholder + page banner (canonical)**: per-paragraph shell stays, content is a dim dashed bar (no per-paragraph copy); banner up top with retry. No copy repetition across N paragraphs.
+- **B — Inline italic copy**: explicit "Translation cached when online" inside each translation slot. Noisier but more explicit.
+- **C — Source-only collapse + banner**: translation slot vanishes; banner alone explains. Cleanest, but loses the bilingual rhythm.
+
+Plus a distinct **loading** state (shimmer bars in the slot) so users learn the difference.Now the artboards. I'll build a phone frame around the renderer with the existing reader chrome (top bar with title + bilingual pill, bottom progress).
+
+_[tool: write_file]_
+
+_[tool: write_file]_
+
+_[tool: done]_
+
+_[tool: fork_verifier_agent]_
+
+Built **VReader Bilingual Offline Canvas.html** for #1024.
+
+**System:** Every state preserves the existing translation block's shell (left accent border + indent + sub color) so the source/translation rhythm continues even when the translation is unavailable. Only the *content* of the slot varies.
+
+**Sections:**
+- **A — Ghost placeholder (canonical)**: dim dashed bar in the slot, glyph on first-of-page only, page banner carries copy once. 5 artboards: offline + retry / online / no-banner / dark / sepia+JP.
+- **B — Inline italic copy (alternative)**: explicit per-paragraph text. 3 artboards.
+- **C — Source-only collapse (rejected, for comparison)**: 2 artboards including the silent shipped fallback.
+- **L — Loading**: shimmer bars in the same shell, distinct from ghost. 3 artboards including a mixed cached/loading/offline page.
+- **M — Partial cache**: 2 artboards showing the ratio banner ("3 of 9 cached").
+- **D — Slot anatomy** + **Banner detail**: true-size side-by-side of every variant in paper + dark.
+
+Post-its recommend **A**. The banner has three distinct states (offline / partial / online+retry) — Retry CTA only appears once reachability returns, so users aren't tempted to spam it offline.
+
