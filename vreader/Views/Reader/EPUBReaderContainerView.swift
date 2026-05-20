@@ -198,15 +198,19 @@ struct EPUBReaderContainerView: View {
             await task.value
         }
         .onDisappear {
+            // Bug #252 / GH #1089: only cancel the in-flight `openTask`
+            // here — the `viewModel.close()` lifecycle moved to
+            // `EPUBReaderHost.onDisappear` so a transient SwiftUI
+            // re-mount of THIS container does not close the parser
+            // out from under the new mount (the host's `@State`
+            // viewModel + parser are shared across container instances).
+            // Without this split, the disappearing instance's close
+            // races the appearing instance's `parser.resourceBaseURL()`
+            // and the appearing instance fails with `.notOpen`,
+            // surfacing as "Failed to resolve book resources." with
+            // zero EPUB log activity in the DebugBridge settle window.
             openTask?.cancel()
             openTask = nil
-            let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
-            Task {
-                await viewModel.close()
-                if bgTaskID != .invalid {
-                    UIApplication.shared.endBackgroundTask(bgTaskID)
-                }
-            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {

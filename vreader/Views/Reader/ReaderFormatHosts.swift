@@ -9,6 +9,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// Owns TXTReaderViewModel lifecycle via @State.
 struct TXTReaderHost: View {
@@ -125,6 +126,16 @@ struct MDReaderHost: View {
 }
 
 /// Owns EPUBReaderViewModel lifecycle via @State.
+///
+/// Bug #252 / GH #1089: the close lifecycle (`viewModel.close()` ending
+/// the reading session AND closing the EPUB parser) is owned by the
+/// host's `.onDisappear`, NOT by the inner `EPUBReaderContainerView`.
+/// The viewModel + parser are `@State` here, so they outlive transient
+/// re-mounts of the inner container; closing them on the inner's
+/// disappear races the inner's next mount and the new mount fails with
+/// `.notOpen` against the parser. Tying the close to the resource owner
+/// (this host) makes the lifecycle correct: the close fires only when
+/// the host genuinely leaves the hierarchy (navigation pop).
 struct EPUBReaderHost: View {
     let fileURL: URL
     let fingerprint: DocumentFingerprint
@@ -173,6 +184,26 @@ struct EPUBReaderHost: View {
                 sessionTracker: tracker,
                 deviceId: ReaderContainerView.deviceId
             )
+        }
+        .onDisappear {
+            // Bug #252 / GH #1089: host-level close lifecycle. The
+            // inner `EPUBReaderContainerView.onDisappear` only cancels
+            // its in-flight `openTask`; the parser/viewModel close
+            // happens here so a transient inner re-mount does not
+            // close the shared parser out from under the next mount.
+            // Fires only when this host leaves the hierarchy (nav
+            // pop) — exactly when ending the reading session +
+            // closing the parser is the right behavior.
+            guard let viewModel else { return }
+            let bgTaskID = UIApplication.shared.beginBackgroundTask(
+                expirationHandler: nil
+            )
+            Task {
+                await viewModel.close()
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                }
+            }
         }
     }
 }
