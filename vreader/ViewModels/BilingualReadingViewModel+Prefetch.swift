@@ -114,6 +114,39 @@ extension BilingualReadingViewModel {
         }
     }
 
+    // MARK: - Unit-scoped retry (Feature #56 WI-13)
+
+    /// Retry one unit's translation fetch. Designed for the PDF
+    /// offline-state CTA — and reusable by any future per-format
+    /// retry affordance — when the user wants a single offline unit
+    /// re-fetched without nuking the rest of the book's cache.
+    ///
+    /// Removes the unit from `unavailableUnits`, clears
+    /// `lastTriggerUnit` only if it equals the retried unit (so the
+    /// next position change is not deduped), bumps the epoch, then
+    /// schedules a fresh prefetch via the same `startPrefetch` seam
+    /// `handlePositionChange` uses. Other units' translations and
+    /// other unavailable entries are untouched.
+    ///
+    /// Belt-and-braces: if an in-flight task already exists for the
+    /// retried unit (a rare race between the prefetch starting and
+    /// the user tapping Retry), cancel it before launching the
+    /// fresh one — Gate-2 v5 round-2 M2.
+    ///
+    /// No-op when bilingual is disabled or no prefetcher is attached.
+    func retryUnit(_ unit: TranslationUnitID) {
+        guard isEnabled, prefetcher != nil else { return }
+        if let priorTask = prefetchTasks.removeValue(forKey: unit) {
+            priorTask.cancel()
+            cancelledPrefetchTasks.append(priorTask)
+        }
+        inFlightUnits.remove(unit)
+        unavailableUnits.remove(unit)
+        if lastTriggerUnit == unit { lastTriggerUnit = nil }
+        epoch += 1
+        startPrefetch(unit: unit, epoch: epoch)
+    }
+
     // MARK: - Reset + notification (called from the main file's toggle setters)
 
     /// Clears the per-unit translation cache + the unavailable set + the

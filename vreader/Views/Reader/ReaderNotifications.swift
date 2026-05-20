@@ -139,6 +139,20 @@ extension Notification.Name {
     /// Each format renderer (WI-10..13) observes this to re-inject / clear
     /// the interlinear translation for the affected unit.
     static let readerBilingualDidChange = Notification.Name("vreader.reader.bilingualDidChange")
+    /// Feature #56 WI-13: posted by the PDF below-page bilingual panel's
+    /// offline-state Retry button. The PDF host observes and calls
+    /// `BilingualReadingViewModel.retryUnit(currentUnit)` to refetch
+    /// only the offline page's translation (NOT the whole-book
+    /// `resetTriggerState()` — Gate-2 v5 round-1 H2). No payload.
+    static let readerBilingualRetry = Notification.Name("vreader.reader.bilingualRetry")
+    /// Feature #56 WI-13: posted by the PDF below-page bilingual panel's
+    /// offline-state "Open AI tab" button (also reusable by future
+    /// affordances). `ReaderContainerView` observes, gates on
+    /// `resolvedAICoordinator.isAIAvailable` (matches the
+    /// `.readerTranslateRequested` defense-in-depth precedent), and
+    /// sets `aiInitialTab = .translate` + `showAIPanel = true`. No
+    /// payload — opens the AI Translate tab without a selection.
+    static let readerOpenAITranslate = Notification.Name("vreader.reader.openAITranslate")
     /// Posted when a footnote link is detected in EPUB content (foliate-js).
     /// Object is [String: String] with "href" and "text" keys.
     static let epubFootnoteDetected = Notification.Name("vreader.epubFootnoteDetected")

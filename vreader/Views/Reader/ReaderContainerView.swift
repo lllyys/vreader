@@ -341,6 +341,19 @@ struct ReaderContainerView: View {
         .sheet(isPresented: $showDictionary) {
             DictionarySheet(word: dictionaryWord)
         }
+        // Feature #56 WI-13: PDF below-page bilingual panel's
+        // offline-state "Open AI tab" button posts
+        // `.readerOpenAITranslate` to open the AI sheet on the
+        // `.translate` tab without a selection. Routed through a
+        // dedicated `ViewModifier` so the body stays under SwiftUI's
+        // type-inference budget after WI-14's additions.
+        .modifier(ReaderOpenAITranslateObserver(
+            isAIAvailable: resolvedAICoordinator.isAIAvailable,
+            translationViewModel: resolvedAICoordinator.translationViewModel,
+            ensureAIReady: { ensureAIReady() },
+            setInitialTab: { aiInitialTab = $0 },
+            setShowAIPanel: { showAIPanel = $0 }
+        ))
         // AI setup + text loading deferred until AI/TTS is invoked (bug #64)
         .onChange(of: showAIPanel) { _, isShowing in
             if isShowing { ensureAIReady() }
@@ -850,6 +863,41 @@ struct ReaderContainerView: View {
                 .foregroundStyle(.secondary)
         }
         .accessibilityIdentifier("unsupportedFormatView")
+    }
+}
+
+/// Feature #56 WI-13: dedicated `ViewModifier` for the
+/// `.readerOpenAITranslate` notification. The PDF below-page bilingual
+/// panel's offline-state "Open AI tab" button posts this; the
+/// container resets stale Translate-tab state and opens the AI sheet
+/// on the `.translate` tab without a selection. Factored out of
+/// `ReaderContainerView.body` so the body stays under SwiftUI's
+/// type-inference budget after WI-14's translate-book additions.
+private struct ReaderOpenAITranslateObserver: ViewModifier {
+    let isAIAvailable: Bool
+    let translationViewModel: AITranslationViewModel?
+    let ensureAIReady: () -> Void
+    let setInitialTab: (AIReaderTab) -> Void
+    let setShowAIPanel: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.onReceive(
+            NotificationCenter.default.publisher(for: .readerOpenAITranslate)
+        ) { _ in
+            // Gated on AI availability (matches the
+            // `.readerTranslateRequested` defense-in-depth precedent).
+            guard isAIAvailable else { return }
+            ensureAIReady()
+            // Gate-4 round-1 M1: clear stale Translate-tab state
+            // before opening cold — `.readerTranslateRequested`
+            // overwrites `originalText` with a fresh selection, but
+            // the no-selection path here would leave the prior
+            // selection's text + result visible. Reset the
+            // translation VM to its idle state.
+            translationViewModel?.reset()
+            setInitialTab(.translate)
+            setShowAIPanel(true)
+        }
     }
 }
 

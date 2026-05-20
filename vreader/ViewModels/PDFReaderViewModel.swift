@@ -74,7 +74,13 @@ final class PDFReaderViewModel {
 
     // MARK: - Dependencies
 
-    private let bookFingerprint: DocumentFingerprint
+    /// Feature #56 WI-13: promoted from `private let` to `let` so the
+    /// PDF bilingual host extension can build a `PDFChapterTextProvider`
+    /// (which needs the `DocumentFingerprint`). Mirrors
+    /// `TXTReaderViewModel.bookFingerprint` and
+    /// `MDReaderViewModel.bookFingerprint`, which are already
+    /// non-private `let`s.
+    let bookFingerprint: DocumentFingerprint
     let bookFingerprintKey: String
     let lifecycle: ReaderLifecycleHelper
     private let positionStore: any ReadingPositionPersisting

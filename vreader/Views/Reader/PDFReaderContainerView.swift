@@ -72,6 +72,23 @@ struct PDFReaderContainerView: View {
     /// Page navigator for tap zone integration (WI-B09).
     @State private var pageNavigator = PDFPageNavigator()
 
+    // MARK: - Feature #56 WI-13: bilingual reading state
+    //
+    // The PDF below-page bilingual translation panel — the entire
+    // user-visible bilingual surface for PDF (PDF can't reflow page
+    // glyphs, so the interlinear renderer used by EPUB/Foliate/TXT/MD
+    // doesn't apply). State threading mirrors TXT/MD/EPUB containers.
+    //
+    // The actual lifecycle, helpers, and `.safeAreaInset` panel
+    // composition live in `PDFReaderContainerView+Bilingual.swift`.
+
+    @State var bilingualViewModel: BilingualReadingViewModel?
+    @State var showBilingualSetupSheet: Bool = false
+    @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+    /// Per-session collapsed presentation of the panel — false means
+    /// the body is visible. Resets on book re-open (not persisted).
+    @State var bilingualPanelCollapsed: Bool = false
+
     var body: some View {
         ZStack {
             // Bug #214 / GH #834: scope `pdfReaderContainer` to the PDF
@@ -104,6 +121,12 @@ struct PDFReaderContainerView: View {
                 .accessibilityIdentifier("pdfReaderContent")
             }
             .accessibilityIdentifier("pdfReaderContainer")
+            // Feature #56 WI-13: PDF below-page bilingual translation panel.
+            // PDFKit's `autoScales = true` reflows the page rendering for
+            // the new available height automatically.
+            .safeAreaInset(edge: .bottom) {
+                bilingualPanelInset
+            }
 
             // Overlays on top of the bridge — separate ZStack siblings so
             // `pdfReaderContainer` does not propagate onto their own
@@ -300,6 +323,10 @@ struct PDFReaderContainerView: View {
         .sheet(isPresented: $showNoteSheet) {
             pdfNoteInputSheet
         }
+        // Feature #56 WI-13: lazy bilingual VM construction, More-menu
+        // toggle observer, retry / open-AI-tab observers, setup-sheet
+        // presentation. See `PDFReaderContainerView+Bilingual.swift`.
+        .modifier(bilingualSurfacesModifier)
     }
 
 }
