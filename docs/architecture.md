@@ -127,7 +127,7 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 | `TTSService`                         | AVSpeechSynthesizer + HTTP | Read aloud with controls                                                  |
 | `BookContentCache`                   | In-memory                  | Text cache for AI context loading (TXT/MD only)                           |
 | `PreferenceStore`                    | UserDefaults               | Sort order, view mode persistence                                         |
-| `ReadingStatsAggregator`             | SwiftData (actor-isolated) | Reading-stats dashboard aggregator (feature #58). Sweeps `ReadingSession` + `Book` rows in one `ModelContext` pass and returns a `ReadingDashboardSnapshot` — per-window totals (today / 7d / 30d / 90d / 180d / 365d / all) + per-book breakdown. Derives every number from session rows, never from `ReadingStats`, so a stale stats cache cannot desync the dashboard. Holds a `@Sendable () -> Calendar` provider so window boundaries follow timezone/DST changes |
+| `ReadingStatsAggregator`             | SwiftData (actor-isolated) | Reading-stats dashboard aggregator (feature #58). Sweeps `ReadingSession` + `Book` rows in one `ModelContext` pass and returns a `ReadingDashboardSnapshot` — per-window totals (today / 7d / 30d / 90d / 180d / 365d / all) + per-book breakdown. Derives every number from session rows, never from `ReadingStats`, so a stale stats cache cannot desync the dashboard. Holds a `@Sendable () -> Calendar` provider so window boundaries follow timezone/DST changes. **WI-6b**: `snapshot(window:sort:now:customRange:)` accepts an optional user-picked `ReadingStatsCustomRange` (calendar-day-inclusive `[start, end]`); when non-nil, the snapshot's `perBook` + `customRangeBreakdown` reflect that range while the seven enum totals stay populated for the pill bar |
 | `CustomCoverStore`                   | JPEG files                 | Custom book cover images                                                  |
 | `WebDAVClient`                       | HTTP                       | Low-level WebDAV transport (PROPFIND/PUT/GET/DELETE/MKCOL/MOVE)           |
 | `WebDAVProvider`                     | `WebDAVClient`             | `BackupProvider` impl — backup/restore/list/delete over a WebDAV server   |
@@ -345,7 +345,7 @@ vreader/
 │   │   └── Annotations/    # TOCSheet, HighlightsSheet, AnnotationsSheetRoute (feature #62)
 │   ├── Annotations/        # AddNoteSheet, AnnotationEditSheet
 │   ├── Settings/           # SettingsView, ReaderSettingsPanel
-│   └── Stats/              # ReadingDashboardView, StatsTimeWindowBar, StatsPerBookTable (feature #58 WI-6a)
+│   └── Stats/              # ReadingDashboardView, StatsTimeWindowBar, StatsPerBookTable (feature #58 WI-6a); StatsCustomRangePicker + state (WI-6b)
 ├── Services/
 │   ├── PersistenceActor.swift
 │   ├── TXT/                # TXTService, TXTFileLoader
