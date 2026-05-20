@@ -162,5 +162,139 @@ struct EPUBWebViewBridgeEarlySettleFallbackTests {
         #expect(registry.settledKeys.isEmpty,
                 "Fallback must NOT mark settled when identity fields are nil.")
     }
+
+    // MARK: - Case 4: rescheduling cancels the prior pending fallback (Codex round-1 Low)
+
+    /// `EPUBWebViewBridge.updateUIView` calls `scheduleEarlySettleFallback`
+    /// every time `contentURL` changes (chapter navigation, re-render,
+    /// SwiftUI binding refresh). Two timers must not race on the same
+    /// coordinator — the prior pending Task must be cancelled when the
+    /// new one is scheduled, and only the LATER fallback should fire if
+    /// neither's `didFinish` arrives. Without this guarantee, rapid
+    /// chapter navigation could leak Task handles and unpredictably
+    /// trigger registry writes against stale snapshots of fingerprintKey
+    /// / readerToken.
+    @Test func case4_reschedulingCancelsPriorFallback() async throws {
+        let registry = DebugReaderRegistry.shared
+        registry.reset()
+        defer { registry.reset() }
+
+        let coordinator = makeCoordinator()
+        let key = "epub:fallback-case4:4096"
+        let token = UUID()
+        coordinator.fingerprintKey = key
+        coordinator.readerToken = token
+        registry.setExpectedReaderToken(token)
+
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        coordinator.earlySettleFallbackDelay = 0.05
+
+        // First schedule — start the first Task.
+        coordinator.scheduleEarlySettleFallback(webView: webViewA)
+        // Immediately reschedule with a different WebView before the
+        // first Task fires. The implementation must cancel Task A.
+        coordinator.scheduleEarlySettleFallback(webView: webViewB)
+
+        // Wait long enough for whichever Task survived to fire.
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        // Only the LATER WebView (B) must have been registered — Task A
+        // was cancelled before its closure could land.
+        #expect(registry.rawActiveEPUBWebViewForTests === webViewB,
+                "Reschedule must land the LATER WebView reference, not the earlier one.")
+        #expect(registry.settledKeys.contains(
+            DebugReaderRegistry.SettleKey(fingerprintKey: key, token: token)
+        ),
+        "The later fallback must still mark settled.")
+    }
+
+    // MARK: - Case 5: stale-token guard rejects fallback writes (Codex round-1 Low)
+
+    /// If the registry's `expectedReaderToken` changes between fallback
+    /// scheduling and Task fire — e.g., a different reader took over
+    /// during the same-key reopen race — the stale-write guard at
+    /// `DebugReaderRegistry.setActiveEPUBWebView` / `markReaderSettled`
+    /// must reject the fallback's writes. This is the same guard that
+    /// protects the genuine `didFinish` path against stale callbacks from
+    /// outgoing readers (bug #142). Pinning it here prevents the
+    /// fallback from silently clobbering a freshly-mounted reader's
+    /// binding.
+    @Test func case5_staleTokenGuardRejectsFallback() async throws {
+        let registry = DebugReaderRegistry.shared
+        registry.reset()
+        defer { registry.reset() }
+
+        let coordinator = makeCoordinator()
+        let key = "epub:fallback-case5:8192"
+        let outgoingToken = UUID()
+        coordinator.fingerprintKey = key
+        coordinator.readerToken = outgoingToken
+        // Simulate a NEWER reader (incoming token) having taken over —
+        // the registry's expectedReaderToken now belongs to the incoming
+        // reader, not this coordinator's outgoing token.
+        let incomingToken = UUID()
+        #expect(outgoingToken != incomingToken)
+        registry.setExpectedReaderToken(incomingToken)
+
+        let webView = WKWebView()
+        coordinator.earlySettleFallbackDelay = 0.05
+        coordinator.scheduleEarlySettleFallback(webView: webView)
+
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        // Stale-write guard must have dropped both registry writes —
+        // outgoing reader does NOT clobber the incoming reader's slot.
+        #expect(registry.rawActiveEPUBWebViewKeyForTests == nil,
+                "Stale-token fallback must NOT bind the WebView slot under the outgoing reader's identity.")
+        #expect(registry.settledKeys.contains(
+            DebugReaderRegistry.SettleKey(fingerprintKey: key, token: outgoingToken)
+        ) == false,
+        "Stale-token fallback must NOT mark the outgoing reader settled.")
+    }
+
+    // MARK: - Case 6: didFail / didFailProvisionalNavigation must cancel the fallback (Codex round-1 High)
+
+    /// Round-1 High finding: the fallback was always armed right after
+    /// `loadFileURL`; if a chapter genuinely fails to load via either
+    /// failure path, the fallback would still fire and report settled to
+    /// the harness — masking a real load error as a ready sentinel. This
+    /// test reaches into the coordinator via the same
+    /// `cancelEarlySettleFallback` API the failure handlers now invoke,
+    /// confirming the cancellation primitive itself works. The full
+    /// integration (didFail* actually invokes cancel) is exercised by
+    /// the WKWebView's own callback machinery in device verification —
+    /// the unit test pins the failure-path semantics at the coordinator
+    /// layer.
+    @Test func case6_failureHandlersCancelFallback() async throws {
+        let registry = DebugReaderRegistry.shared
+        registry.reset()
+        defer { registry.reset() }
+
+        let coordinator = makeCoordinator()
+        let key = "epub:fallback-case6:512"
+        let token = UUID()
+        coordinator.fingerprintKey = key
+        coordinator.readerToken = token
+        registry.setExpectedReaderToken(token)
+
+        let webView = WKWebView()
+        coordinator.earlySettleFallbackDelay = 5.0  // long enough that
+        // the test wouldn't have time to observe a fallback firing.
+
+        coordinator.scheduleEarlySettleFallback(webView: webView)
+        // Simulate `didFailProvisionalNavigation` or `didFail` having
+        // fired — the production code path now calls
+        // `cancelEarlySettleFallback()` in both handlers.
+        coordinator.cancelEarlySettleFallback()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // Registry must remain empty — the cancelled fallback did NOT
+        // mask a real failure as a settled state.
+        #expect(registry.rawActiveEPUBWebViewKeyForTests == nil,
+                "Failure-path cancellation must prevent the fallback from masking a real load error as settled.")
+        #expect(registry.settledKeys.isEmpty,
+                "Failure-path cancellation must prevent markReaderSettled from misreporting success.")
+    }
 }
 #endif

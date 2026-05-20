@@ -103,6 +103,28 @@ extension EPUBWebViewBridge {
             self.onLoadError = onLoadError
         }
 
+        #if DEBUG
+        deinit {
+            // Bug #251 / GH #1086 (Codex round-1 Low): when the Coordinator
+            // is dismantled before the early-settle fallback fires (the
+            // reader was dismissed within the 2s budget), the in-flight
+            // Task must be cancelled — otherwise it can still run after
+            // `DebugReaderRegistry.unregister` cleared `expectedReaderToken`
+            // to nil, and the stale-write guard (which only rejects
+            // mismatched NON-nil expected tokens) would let the fallback
+            // re-populate the registry slot for a now-dead reader. The
+            // weak-WebView capture in the Task body already short-circuits
+            // when the WebView is deallocated, but the WebView may briefly
+            // outlive the Coordinator's deinit (UIKit dismantle order), so
+            // belt + suspenders.
+            //
+            // `Task.cancel()` is nonisolated and safe to call from deinit
+            // regardless of the Coordinator's actor isolation.
+            earlySettleFallbackTask?.cancel()
+            earlySettleFallbackTask = nil
+        }
+        #endif
+
         func userContentController(
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
@@ -236,6 +258,19 @@ extension EPUBWebViewBridge {
             AppLogger.epub.error(
                 "didFailProvisionalNavigation: \(error.localizedDescription, privacy: .public)"
             )
+            #if DEBUG
+            // Bug #251 / GH #1086 (Codex round-1 High): the early-settle
+            // fallback was always armed right after `loadFileURL`; if a
+            // chapter genuinely fails to load via the provisional path,
+            // we must NOT let the fallback subsequently report settled
+            // to the harness — that would mask a real load error as a
+            // ready sentinel and unblock downstream debug actions against
+            // a broken/empty render. Cancel the pending fallback Task
+            // here so the harness sees the timeout (or the explicit
+            // `onLoadError` path that surfaces `webViewError` in the
+            // container) instead of a false-positive success.
+            cancelEarlySettleFallback()
+            #endif
             let message = "Failed to load chapter: \(error.localizedDescription)"
             Task { @MainActor in
                 onLoadError(message)
@@ -254,6 +289,13 @@ extension EPUBWebViewBridge {
             AppLogger.epub.error(
                 "didFail: \(error.localizedDescription, privacy: .public)"
             )
+            #if DEBUG
+            // Bug #251 / GH #1086 (Codex round-1 High): same as
+            // `didFailProvisionalNavigation` above — cancel the
+            // early-settle fallback so a committed-but-failed navigation
+            // doesn't get false-positive-settled by the timer.
+            cancelEarlySettleFallback()
+            #endif
             let message = "Chapter loading error: \(error.localizedDescription)"
             Task { @MainActor in
                 onLoadError(message)
