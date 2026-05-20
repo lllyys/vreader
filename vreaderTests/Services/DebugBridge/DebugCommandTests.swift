@@ -756,6 +756,396 @@ final class DebugCommandTests: XCTestCase {
         let cmd = try DebugCommand.parse(url)
         XCTAssertEqual(cmd, .highlight(startUTF16: 4_999_999, endUTF16: 5_000_000, color: nil))
     }
+
+    // MARK: - provider (Bug #243 — verification harness AI-provider-setup)
+    //
+    // `vreader-debug://provider?action=add&name=<n>&kind=<openAICompatible|anthropicNative>&endpoint=<URL>&apiKey=<k>[&model=<m>][&active=true]`
+    // (plus `remove&name=<n>` and `clear`) lets the harness configure an AI
+    // provider without driving Settings → AI through CU. Unlocks autonomous
+    // AI-feature verification (Feature #56 / #65 / #69, Bug #93) regardless
+    // of CU availability.
+
+    func test_parse_providerAdd_returnsAddAction() throws {
+        let endpoint = "https://openrouter.ai/api/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OpenRouter&kind=openAICompatible&endpoint=\(endpoint)&apiKey=sk-test-key&active=true"
+        )!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(
+            cmd,
+            .provider(action: .add(
+                name: "OpenRouter",
+                kind: .openAICompatible,
+                endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+                apiKey: "sk-test-key",
+                model: nil,
+                active: true
+            ))
+        )
+    }
+
+    func test_parse_providerAddWithModel_returnsAddActionWithModel() throws {
+        // Optional `model=` lets a verification flow pin a specific model
+        // (otherwise the handler falls back to `kind.defaultModel`).
+        let endpoint = "https://openrouter.ai/api/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k&model=mistralai%2Fmistral-7b-instruct"
+        )!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(
+            cmd,
+            .provider(action: .add(
+                name: "OR",
+                kind: .openAICompatible,
+                endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+                apiKey: "k",
+                model: "mistralai/mistral-7b-instruct",
+                active: false
+            ))
+        )
+    }
+
+    func test_parse_providerAddWithoutActive_defaultsToFalse() throws {
+        // Omitting `active=` defaults to false (parser default); the handler
+        // separately auto-promotes to active when no active is set, mirroring
+        // AISettingsViewModel.addProfile.
+        let endpoint = "https://api.openai.com/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=Local&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k"
+        )!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(
+            cmd,
+            .provider(action: .add(
+                name: "Local",
+                kind: .openAICompatible,
+                endpoint: URL(string: "https://api.openai.com/v1")!,
+                apiKey: "k",
+                model: nil,
+                active: false
+            ))
+        )
+    }
+
+    func test_parse_providerAddAnthropic_returnsAnthropicKind() throws {
+        let endpoint = "https://api.anthropic.com".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=Claude&kind=anthropicNative&endpoint=\(endpoint)&apiKey=sk-ant"
+        )!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(
+            cmd,
+            .provider(action: .add(
+                name: "Claude",
+                kind: .anthropicNative,
+                endpoint: URL(string: "https://api.anthropic.com")!,
+                apiKey: "sk-ant",
+                model: nil,
+                active: false
+            ))
+        )
+    }
+
+    func test_parse_providerRemove_returnsRemoveAction() throws {
+        let url = URL(string: "vreader-debug://provider?action=remove&name=OpenRouter")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .provider(action: .remove(name: "OpenRouter")))
+    }
+
+    func test_parse_providerClear_returnsClearAction() throws {
+        // `clear` requires no other parameters (it wipes all profiles).
+        let url = URL(string: "vreader-debug://provider?action=clear")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .provider(action: .clear))
+    }
+
+    func test_parse_providerNameWithSpaces_decodesPercentEncoded() throws {
+        // Display names may contain spaces or punctuation (e.g. "Local Llama").
+        // URLComponents decodes percent-encoded values before the parser sees
+        // them, so the handler gets the original display name back.
+        let endpoint = "https://localhost:11434/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=Local%20Llama&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k"
+        )!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(
+            cmd,
+            .provider(action: .add(
+                name: "Local Llama",
+                kind: .openAICompatible,
+                endpoint: URL(string: "https://localhost:11434/v1")!,
+                apiKey: "k",
+                model: nil,
+                active: false
+            ))
+        )
+    }
+
+    func test_parse_providerMissingAction_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://provider")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
+
+    func test_parse_providerUnknownAction_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://provider?action=delete")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
+
+    func test_parse_providerAddMissingName_throwsMissingParam() {
+        let endpoint = "https://api.openai.com/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "name")
+        }
+    }
+
+    func test_parse_providerAddMissingKind_throwsMissingParam() {
+        let endpoint = "https://api.openai.com/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&endpoint=\(endpoint)&apiKey=k"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "kind")
+        }
+    }
+
+    func test_parse_providerAddUnknownKind_throwsInvalidParam() {
+        let endpoint = "https://api.openai.com/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=unsupportedKind&endpoint=\(endpoint)&apiKey=k"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "kind")
+        }
+    }
+
+    func test_parse_providerAddMissingEndpoint_throwsMissingParam() {
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&apiKey=k"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "endpoint")
+        }
+    }
+
+    func test_parse_providerAddInvalidEndpointURL_throwsInvalidParam() {
+        // `endpoint=` (empty value after percent-decoding) is rejected. The
+        // handler depends on a parseable URL; deferring this to runtime would
+        // silently insert a profile that can't be used.
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=&apiKey=k"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "endpoint")
+        }
+    }
+
+    func test_parse_providerAddMalformedEndpoint_throwsInvalidParam() {
+        // A scheme-less / opaque string isn't a valid base URL for an HTTP
+        // API. Surface this at the parser before the handler insert/save.
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=not%20a%20url&apiKey=k"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "endpoint")
+        }
+    }
+
+    func test_parse_providerAddOpaqueEndpoint_throwsInvalidParam() {
+        // `https:foo` is a parseable URL with scheme "https" but NO host —
+        // opaque. Round-1 Codex audit: such forms must be rejected at parse
+        // because the runtime providers would reject them anyway.
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=https%3Afoo&apiKey=k"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "endpoint")
+        }
+    }
+
+    func test_parse_providerAddHTTPNonLocalhostEndpoint_throwsInvalidParam() {
+        // `http://example.com` is rejected. Only HTTPS is allowed for non-
+        // localhost endpoints (mirrors `AISettingsViewModel.validateBaseURL`).
+        let endpoint = "http://example.com".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "endpoint")
+        }
+    }
+
+    func test_parse_providerAddHTTPLocalhostEndpoint_isAccepted() throws {
+        // `http://localhost:11434/v1` is allowed for Ollama / LM Studio style
+        // local providers. Mirrors `validateBaseURL`'s localhost exception.
+        let endpoint = "http://localhost:11434/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=Local&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k"
+        )!
+        let cmd = try DebugCommand.parse(url)
+        guard case .provider(.add(_, _, let parsedEndpoint, _, _, _)) = cmd else {
+            XCTFail("expected .provider(.add), got \(cmd)")
+            return
+        }
+        XCTAssertEqual(parsedEndpoint, URL(string: "http://localhost:11434/v1")!)
+    }
+
+    func test_parse_providerAddHTTP127LoopbackEndpoint_isAccepted() throws {
+        let endpoint = "http://127.0.0.1:8080".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=Loopback&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k"
+        )!
+        let cmd = try DebugCommand.parse(url)
+        guard case .provider(.add(_, _, let parsedEndpoint, _, _, _)) = cmd else {
+            XCTFail("expected .provider(.add), got \(cmd)")
+            return
+        }
+        XCTAssertEqual(parsedEndpoint, URL(string: "http://127.0.0.1:8080")!)
+    }
+
+    func test_parse_providerAddMissingAPIKey_throwsMissingParam() {
+        let endpoint = "https://api.openai.com/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=\(endpoint)"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "apiKey")
+        }
+    }
+
+    func test_parse_providerAddInvalidActive_throwsInvalidParam() {
+        // `active=` must be exactly `true` or `false` (the rawValue of a Bool).
+        // Anything else is a caller bug; collapsing onto false would mask it.
+        let endpoint = "https://api.openai.com/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        let url = URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k&active=maybe"
+        )!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "active")
+        }
+    }
+
+    func test_parse_providerRemoveMissingName_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://provider?action=remove")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "name")
+        }
+    }
+
+    func test_parse_providerDuplicateAction_throwsInvalidParam() {
+        // Duplicate keys are rejected by the parser's queryParams helper.
+        let url = URL(string: "vreader-debug://provider?action=clear&action=remove")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
+
+    func test_parse_providerAllKinds_accepted() throws {
+        // Both ProviderActionKind cases must parse. Verifies the URL grammar
+        // covers everything the in-app `ProviderKind` enum surfaces.
+        let endpoint = "https://example.com".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        for kindRaw in ["openAICompatible", "anthropicNative"] {
+            let url = URL(string:
+                "vreader-debug://provider?action=add&name=X&kind=\(kindRaw)&endpoint=\(endpoint)&apiKey=k"
+            )!
+            let cmd = try DebugCommand.parse(url)
+            guard case .provider(.add(_, let parsedKind, _, _, _, _)) = cmd else {
+                XCTFail("expected .provider(.add), got \(cmd) for kind=\(kindRaw)")
+                continue
+            }
+            XCTAssertEqual(parsedKind.rawValue, kindRaw)
+        }
+    }
 }
 
 #endif

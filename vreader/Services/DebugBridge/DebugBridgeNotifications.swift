@@ -96,6 +96,15 @@ extension Notification.Name {
     ///   bridge command included the `color=` parameter; observers fall
     ///   back to `"yellow"` when absent.
     static let debugBridgeHighlightCommand = Notification.Name("vreader.debugBridge.highlightCommand")
+
+    // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
+    // notification. The handler mutates `ProviderProfileStore` directly and
+    // the store posts `.providerProfilesDidChange` itself; any in-app picker
+    // / settings VM subscribed to that notification picks up the change
+    // without a separate bridge layer. Adding a duplicate
+    // `.debugBridgeProviderCommand` would couple Settings-side observers to
+    // a DEBUG-only symbol — strictly worse than reusing the existing
+    // production-grade notification.
 }
 
 #endif

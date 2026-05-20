@@ -1294,6 +1294,297 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertEqual(receivedColor, "blue")
         XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
     }
+
+    // MARK: - provider (Bug #243 — verification harness AI-provider-setup)
+    //
+    // RealDebugBridgeContext.provider mutates a ProviderProfileStore and a
+    // KeychainService. To keep tests isolated, both are injected via the
+    // context init; each test uses a unique UserDefaults suite (for the
+    // store) + a unique Keychain `serviceIdentifier` (for the keychain).
+
+    /// Build a provider-handling context with isolated store + keychain. The
+    /// returned store and keychain are the same instances injected — tests
+    /// read profiles/keys back through them to assert on side effects.
+    @MainActor
+    private func makeProviderContext() async -> (
+        context: RealDebugBridgeContext,
+        store: ProviderProfileStore,
+        keychain: KeychainService,
+        teardownSuite: String
+    ) {
+        let suite = "DebugBridgeProviderTests-\(UUID().uuidString)"
+        let suiteDefaults = UserDefaults(suiteName: suite)!
+        let prefs = UserDefaultsPreferenceStore(defaults: suiteDefaults)
+        let keychain = KeychainService(
+            serviceIdentifier: "com.vreader.debugBridgeProviderTests.\(UUID().uuidString)"
+        )
+        // Pass a no-op migrator so the actor doesn't drag legacy AIConfiguration
+        // bits across the boundary in tests.
+        let store = ProviderProfileStore(
+            preferences: prefs,
+            migrator: NoOpProviderProfileMigrator(),
+            keychain: keychain
+        )
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            providerStore: store,
+            keychain: keychain
+        )
+        return (context, store, keychain, suite)
+    }
+
+    @MainActor
+    func test_provider_addInsertsProfile_andSavesKeyToKeychain() async throws {
+        let (context, store, keychain, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        try await context.provider(action: .add(
+            name: "OpenRouter",
+            kind: .openAICompatible,
+            endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+            apiKey: "sk-or-secret",
+            model: nil,
+            active: false
+        ))
+
+        let profiles = await store.loadAll()
+        XCTAssertEqual(profiles.count, 1)
+        let profile = try XCTUnwrap(profiles.first)
+        XCTAssertEqual(profile.name, "OpenRouter")
+        XCTAssertEqual(profile.kind, .openAICompatible)
+        XCTAssertEqual(profile.baseURL, URL(string: "https://openrouter.ai/api/v1")!)
+        // Defaults from ProviderKind.defaultModel when `model` is nil
+        XCTAssertEqual(profile.model, ProviderKind.openAICompatible.defaultModel)
+
+        // Key is stored under the per-profile keychain account
+        let storedKey = try keychain.readAPIKey(forProfile: profile.id)
+        XCTAssertEqual(storedKey, "sk-or-secret")
+
+        // active=false explicitly → handler still auto-promotes to active
+        // when no profile was active before (mirrors AISettingsViewModel
+        // .addProfile behavior so the harness can omit `active=` on the
+        // first add).
+        let active = await store.activeProfile()
+        XCTAssertEqual(active?.id, profile.id, "first profile is auto-active")
+    }
+
+    @MainActor
+    func test_provider_addWithModel_usesProvidedModel() async throws {
+        let (context, store, _, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        try await context.provider(action: .add(
+            name: "OR",
+            kind: .openAICompatible,
+            endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+            apiKey: "k",
+            model: "mistralai/mistral-7b-instruct",
+            active: false
+        ))
+
+        let profiles = await store.loadAll()
+        let profile = try XCTUnwrap(profiles.first)
+        XCTAssertEqual(profile.model, "mistralai/mistral-7b-instruct")
+    }
+
+    @MainActor
+    func test_provider_addActiveTrue_setsActive() async throws {
+        // active=true explicitly → handler sets it as the active profile even
+        // when another profile is already active (lets the harness flip the
+        // active selection between profiles by re-adding).
+        let (context, store, _, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        try await context.provider(action: .add(
+            name: "First",
+            kind: .openAICompatible,
+            endpoint: URL(string: "https://api.openai.com/v1")!,
+            apiKey: "k1",
+            model: nil,
+            active: false  // first → auto-active by handler
+        ))
+        try await context.provider(action: .add(
+            name: "Second",
+            kind: .anthropicNative,
+            endpoint: URL(string: "https://api.anthropic.com")!,
+            apiKey: "k2",
+            model: nil,
+            active: true   // explicit → switch active
+        ))
+
+        let active = await store.activeProfile()
+        XCTAssertEqual(active?.name, "Second")
+    }
+
+    @MainActor
+    func test_provider_removeDeletesProfileByName_andDeletesKey() async throws {
+        let (context, store, keychain, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        try await context.provider(action: .add(
+            name: "OR",
+            kind: .openAICompatible,
+            endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+            apiKey: "k",
+            model: nil,
+            active: false
+        ))
+        let loaded = await store.loadAll()
+        let addedID = try XCTUnwrap(loaded.first?.id)
+
+        try await context.provider(action: .remove(name: "OR"))
+
+        let after = await store.loadAll()
+        XCTAssertEqual(after.count, 0, "remove must delete the profile from the store")
+        let storedKey = try keychain.readAPIKey(forProfile: addedID)
+        XCTAssertNil(storedKey, "remove must also delete the per-profile keychain entry")
+    }
+
+    @MainActor
+    func test_provider_removeUnknownName_isNoOp() async throws {
+        // Removing a name that doesn't exist is a no-op (idempotent). Mirrors
+        // ProviderProfileStore.remove(id:) — passing an unknown id is also
+        // a no-op there.
+        let (context, store, _, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        try await context.provider(action: .remove(name: "DoesNotExist"))
+
+        let profiles = await store.loadAll()
+        XCTAssertEqual(profiles.count, 0)
+    }
+
+    @MainActor
+    func test_provider_clearWipesAllProfiles_andAllKeys() async throws {
+        let (context, store, keychain, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        try await context.provider(action: .add(
+            name: "A", kind: .openAICompatible,
+            endpoint: URL(string: "https://api.openai.com/v1")!,
+            apiKey: "ka", model: nil, active: false
+        ))
+        try await context.provider(action: .add(
+            name: "B", kind: .anthropicNative,
+            endpoint: URL(string: "https://api.anthropic.com")!,
+            apiKey: "kb", model: nil, active: true
+        ))
+        let ids = (await store.loadAll()).map(\.id)
+        XCTAssertEqual(ids.count, 2)
+
+        try await context.provider(action: .clear)
+
+        let after = await store.loadAll()
+        XCTAssertEqual(after.count, 0, "clear must remove every profile")
+        let activeAfter = await store.activeProfile()
+        XCTAssertNil(activeAfter, "clear must drop the active selection")
+        for id in ids {
+            let key = try keychain.readAPIKey(forProfile: id)
+            XCTAssertNil(key, "clear must delete every per-profile keychain entry; id=\(id)")
+        }
+    }
+
+    @MainActor
+    func test_provider_addTwiceWithSameName_reusesUUID_andUpdatesFields() async throws {
+        // Round-1 Codex audit Medium fix: re-running an `add` URL with the
+        // same display name must be idempotent — same UUID, replaced fields,
+        // no duplicate. Otherwise `remove(name:)` becomes non-deterministic.
+        let (context, store, keychain, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        try await context.provider(action: .add(
+            name: "OR",
+            kind: .openAICompatible,
+            endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+            apiKey: "key-v1",
+            model: nil,
+            active: false
+        ))
+        let first = await store.loadAll()
+        let firstID = try XCTUnwrap(first.first?.id)
+
+        try await context.provider(action: .add(
+            name: "OR",
+            kind: .openAICompatible,
+            endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+            apiKey: "key-v2",
+            model: "mistralai/mistral-7b-instruct",
+            active: false
+        ))
+
+        let profiles = await store.loadAll()
+        XCTAssertEqual(profiles.count, 1, "second add with same name must NOT duplicate")
+        XCTAssertEqual(profiles.first?.id, firstID, "second add must reuse the existing UUID")
+        XCTAssertEqual(profiles.first?.model, "mistralai/mistral-7b-instruct", "second add must update fields")
+
+        // Key was overwritten under the same per-profile account.
+        let key = try keychain.readAPIKey(forProfile: firstID)
+        XCTAssertEqual(key, "key-v2")
+    }
+
+    @MainActor
+    func test_provider_addTrimsAPIKeyWhitespace() async throws {
+        // Round-1 Codex audit Low fix: a host-side quoting accident can
+        // leave `\n` / spaces in the apiKey. Trim to match
+        // `AISettingsViewModel.addProfile`.
+        let (context, store, keychain, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+
+        try await context.provider(action: .add(
+            name: "OR",
+            kind: .openAICompatible,
+            endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+            apiKey: "  sk-trim-me  \n",
+            model: nil,
+            active: false
+        ))
+
+        let loaded = await store.loadAll()
+        let id = try XCTUnwrap(loaded.first?.id)
+        let key = try keychain.readAPIKey(forProfile: id)
+        XCTAssertEqual(key, "sk-trim-me", "key must be trimmed before save")
+    }
+
+    @MainActor
+    func test_provider_endToEndThroughBridge_addProfileFromURL() async throws {
+        // End-to-end: URL → DebugBridge.handle → RealDebugBridgeContext.provider.
+        // Verifies the parser → dispatcher → handler → store chain is wired
+        // and that the bridge clears `lastError` on success.
+        let (context, store, _, suite) = await makeProviderContext()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        let bridge = DebugBridge(context: context)
+
+        let endpoint = "https://openrouter.ai/api/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        await bridge.handle(URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k"
+        )!)
+
+        let profiles = await store.loadAll()
+        XCTAssertEqual(profiles.count, 1)
+        XCTAssertEqual(profiles.first?.name, "OR")
+        XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
+    }
+}
+
+/// Test-only no-op migrator: skips the AIConfiguration legacy lift so the
+/// provider tests run against a clean ProviderProfileStore. The default
+/// migrator reads global AIConfiguration UserDefaults keys which would
+/// couple test isolation to whatever the host process happens to have
+/// set there.
+private struct NoOpProviderProfileMigrator: ProviderProfileMigrating {
+    func migrateIfNeeded(
+        preferences: any PreferenceStoring,
+        keychain: KeychainService
+    ) {
+        // Mark the flag set so ensureMigrated() flips its in-memory bit and
+        // never retries (matches the default migrator's success-path side
+        // effect on a clean state). Key matches
+        // DefaultProviderProfileMigrator.migrationFlagKey.
+        preferences.set("true", forKey: "com.vreader.ai.providerProfiles.migrated")
+    }
 }
 
 /// Probe whose awaitSettle always throws settleTimeout. Lets the timeout

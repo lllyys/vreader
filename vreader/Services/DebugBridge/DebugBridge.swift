@@ -46,6 +46,15 @@ protocol DebugBridgeContext {
     /// a Locator + persists the highlight + re-paints. If no reader is
     /// loaded, the action is a no-op (matches `tts` / `search`).
     func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws
+    /// Bug #243 — configure an AI provider profile programmatically.
+    /// `add` inserts a new `ProviderProfile`, saves its API key to the
+    /// per-profile Keychain account, and optionally sets it active.
+    /// `remove` deletes the profile with the given display name (and its
+    /// keychain entry). `clear` wipes every profile + every keychain
+    /// entry. Mutations propagate through `ProviderProfileStore`'s usual
+    /// `.providerProfilesDidChange` notification, so any in-app picker
+    /// resyncs without an additional bridge-level notification.
+    func provider(action: DebugCommand.ProviderAction) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -163,6 +172,8 @@ final class DebugBridge {
             try await context.search(query: query, index: index)
         case .highlight(let start, let end, let color):
             try await context.highlight(startUTF16: start, endUTF16: end, color: color)
+        case .provider(let action):
+            try await context.provider(action: action)
         }
     }
 }

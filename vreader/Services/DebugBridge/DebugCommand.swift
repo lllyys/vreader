@@ -40,6 +40,22 @@ import Foundation
 ///   non-negative. `color` is optional; one of `NamedHighlightColor`'s four
 ///   rawValues (`yellow` / `pink` / `green` / `blue`). No-op when no reader
 ///   is presented.
+/// - `provider?action=add&name=<n>&kind=<k>&endpoint=<url>&apiKey=<k>[&model=<m>][&active=<bool>]`
+///   — add an AI provider profile to `ProviderProfileStore` and save its
+///   API key to Keychain (Bug #243 verification harness). The harness uses
+///   this to configure an AI provider without driving Settings → AI through
+///   CU, unlocking autonomous AI-feature verification (Feature #56 / #65 /
+///   #69, Bug #93) regardless of CU availability. `kind` is one of
+///   `openAICompatible` / `anthropicNative`; `endpoint` is the base URL;
+///   `model` is optional (defaults to `kind.defaultModel`); `active=true`
+///   sets this profile as active. The handler additionally auto-promotes
+///   the first added profile to active so a single `add` URL leaves the
+///   harness in a usable state.
+/// - `provider?action=remove&name=<n>` — remove the profile with display
+///   name `<n>` (case-sensitive). Deletes its per-profile Keychain entry
+///   too. Idempotent — removing an unknown name is a no-op.
+/// - `provider?action=clear` — wipe every profile + every per-profile
+///   Keychain entry + clear active selection. Idempotent.
 enum DebugCommand: Equatable {
     case reset
     case seed(fixture: String)
@@ -51,6 +67,7 @@ enum DebugCommand: Equatable {
     case tts(action: String)
     case search(query: String, index: Int?)
     case highlight(startUTF16: Int, endUTF16: Int, color: String?)
+    case provider(action: ProviderAction)
 
     /// Reader theme selector for the `theme` command.
     ///
@@ -65,6 +82,33 @@ enum DebugCommand: Equatable {
         case sepia
         case oled
         case photo
+    }
+
+    /// Local URL-grammar selector for the `provider?kind=…` parameter.
+    /// The handler maps this 1:1 to the in-app `ProviderKind` enum.
+    /// Kept local (mirroring `ThemeMode`) so this file stays a pure
+    /// value-type parser with no AI-feature imports.
+    enum ProviderActionKind: String, Equatable, CaseIterable {
+        case openAICompatible
+        case anthropicNative
+    }
+
+    /// Discriminated action carried by `provider`. `add` carries every
+    /// field needed to materialize a `ProviderProfile` plus an `active`
+    /// flag (`true` → set as active on insert). `remove` keys on display
+    /// name (the harness produces names; UUIDs aren't useful at the URL
+    /// boundary). `clear` wipes every profile.
+    enum ProviderAction: Equatable {
+        case add(
+            name: String,
+            kind: ProviderActionKind,
+            endpoint: URL,
+            apiKey: String,
+            model: String?,
+            active: Bool
+        )
+        case remove(name: String)
+        case clear
     }
 }
 
@@ -274,6 +318,95 @@ extension DebugCommand {
                 color = nil
             }
             return .highlight(startUTF16: parsedStart, endUTF16: parsedEnd, color: color)
+
+        case "provider":
+            // Bug #243: verification harness AI-provider-setup. Three sub-actions:
+            // - add: insert a new profile + save its API key. Carries every
+            //   field needed to materialize a ProviderProfile.
+            // - remove: delete the profile with the given display name + drop
+            //   its keychain entry. Idempotent.
+            // - clear: wipe every profile + every keychain entry + clear active.
+            //
+            // The parser validates the URL grammar (which params are required
+            // for which action). The handler does the actual store/keychain
+            // mutations.
+            let actionRaw = try requireParam("action", in: params)
+            switch actionRaw {
+            case "add":
+                let name = try requireParam("name", in: params)
+                let kindRaw = try requireParam("kind", in: params)
+                guard let kind = ProviderActionKind(rawValue: kindRaw) else {
+                    let valid = ProviderActionKind.allCases.map(\.rawValue).joined(separator: "|")
+                    throw DebugCommandError.invalidParam(
+                        "kind",
+                        reason: "expected \(valid), got \(kindRaw)"
+                    )
+                }
+                let endpointRaw = try requireParam("endpoint", in: params)
+                // Mirror the production add-provider preflight (see
+                // `AISettingsViewModel.validateBaseURL`): require a parseable
+                // URL with a `host` (rejects opaque forms like `https:foo`),
+                // and require `https` except for localhost loopback
+                // (`http://localhost` / `http://127.0.0.1`). Stops the harness
+                // from inserting profiles the runtime providers would reject.
+                // Round-1 Codex audit Medium finding.
+                guard let endpoint = URL(string: endpointRaw),
+                      let scheme = endpoint.scheme?.lowercased(),
+                      let host = endpoint.host?.lowercased(), !host.isEmpty else {
+                    throw DebugCommandError.invalidParam(
+                        "endpoint",
+                        reason: "expected absolute http(s) URL with a host, got \(endpointRaw)"
+                    )
+                }
+                let isLocalhost = host == "localhost" || host == "127.0.0.1"
+                if scheme != "https" && !(scheme == "http" && isLocalhost) {
+                    throw DebugCommandError.invalidParam(
+                        "endpoint",
+                        reason: "expected https (or http for localhost/127.0.0.1), got \(scheme)://\(host)"
+                    )
+                }
+                let apiKey = try requireParam("apiKey", in: params)
+                let model = nonEmpty(params["model"])
+                let active: Bool
+                if let rawActive = params["active"] {
+                    guard !rawActive.isEmpty else {
+                        throw DebugCommandError.invalidParam(
+                            "active",
+                            reason: "expected true|false, got empty value"
+                        )
+                    }
+                    guard let parsedBool = Bool(rawActive) else {
+                        throw DebugCommandError.invalidParam(
+                            "active",
+                            reason: "expected true|false, got \(rawActive)"
+                        )
+                    }
+                    active = parsedBool
+                } else {
+                    active = false
+                }
+                return .provider(action: .add(
+                    name: name,
+                    kind: kind,
+                    endpoint: endpoint,
+                    apiKey: apiKey,
+                    model: model,
+                    active: active
+                ))
+
+            case "remove":
+                let name = try requireParam("name", in: params)
+                return .provider(action: .remove(name: name))
+
+            case "clear":
+                return .provider(action: .clear)
+
+            default:
+                throw DebugCommandError.invalidParam(
+                    "action",
+                    reason: "expected add|remove|clear, got \(actionRaw)"
+                )
+            }
 
         default:
             throw DebugCommandError.unknownCommand(host)

@@ -15,6 +15,7 @@
 //   - settle — RealDebugBridgeContext+Settle.swift
 //   - snapshot — RealDebugBridgeContext+Snapshot.swift
 //   - eval — RealDebugBridgeContext+Eval.swift
+//   - provider — RealDebugBridgeContext+Provider.swift (Bug #243)
 
 #if DEBUG
 
@@ -57,6 +58,17 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// tests inject a unique suite to avoid polluting global state. Internal
     /// so the +Snapshot extension can read it.
     let userDefaults: UserDefaults
+    /// AI provider profile store. Defaults to the app-scoped singleton
+    /// `ProviderProfileStore.shared` so the `provider` command mutates the
+    /// same state Settings → AI reads. Tests inject a per-test instance with
+    /// an isolated UserDefaults suite + no-op migrator. Internal so the
+    /// `+Provider` extension can reach it.
+    let providerStore: ProviderProfileStore
+    /// Keychain for per-profile API keys (Bug #243). Internal so the
+    /// `+Provider` extension can use it. Defaults to the production
+    /// service identifier; tests inject a unique identifier per test to
+    /// keep keys isolated.
+    let keychain: KeychainService
     /// Internal so extension files (Settle/Snapshot/Eval) can log under the
     /// same category — keeps log lines indistinguishable from pre-split.
     let log = Logger(subsystem: "com.vreader.app", category: "DebugBridge")
@@ -65,12 +77,16 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         persistence: PersistenceActor,
         importer: BookImporting,
         fixtureBundle: Bundle = .main,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        providerStore: ProviderProfileStore = .shared,
+        keychain: KeychainService = KeychainService()
     ) {
         self.persistence = persistence
         self.importer = importer
         self.fixtureBundle = fixtureBundle
         self.userDefaults = userDefaults
+        self.providerStore = providerStore
+        self.keychain = keychain
     }
 
     /// Wipe every book from the library. Idempotent — succeeds on an empty
@@ -243,6 +259,7 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     // settle/settleWithTimeout/settleTimeoutSeconds → +Settle.swift
     // snapshot/snapshotsDirectory → +Snapshot.swift
     // eval → +Eval.swift
+    // provider → +Provider.swift
 
     /// Feature #45 WI-4c-b — drive TTS from outside the active reader.
     ///

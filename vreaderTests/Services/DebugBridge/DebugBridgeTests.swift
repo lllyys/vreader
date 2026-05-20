@@ -73,6 +73,51 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_providerAddURL_callsProviderHandlerWithAddAction() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        let endpoint = "https://openrouter.ai/api/v1".addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        )!
+        await bridge.handle(URL(string:
+            "vreader-debug://provider?action=add&name=OR&kind=openAICompatible&endpoint=\(endpoint)&apiKey=k&active=true"
+        )!)
+
+        XCTAssertEqual(
+            context.calls,
+            [.provider(action: .add(
+                name: "OR",
+                kind: .openAICompatible,
+                endpoint: URL(string: "https://openrouter.ai/api/v1")!,
+                apiKey: "k",
+                model: nil,
+                active: true
+            ))]
+        )
+    }
+
+    @MainActor
+    func test_handle_providerRemoveURL_callsProviderHandlerWithRemoveAction() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://provider?action=remove&name=OR")!)
+
+        XCTAssertEqual(context.calls, [.provider(action: .remove(name: "OR"))])
+    }
+
+    @MainActor
+    func test_handle_providerClearURL_callsProviderHandlerWithClearAction() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://provider?action=clear")!)
+
+        XCTAssertEqual(context.calls, [.provider(action: .clear)])
+    }
+
+    @MainActor
     func test_handle_unknownCommand_recordsParseErrorWithoutCallingHandlers() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -229,6 +274,17 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws {
         await record("highlight:\(startUTF16):\(endUTF16):\(color ?? "nil")")
     }
+    func provider(action: DebugCommand.ProviderAction) async throws {
+        await record("provider:\(actionTag(action))")
+    }
+
+    private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
+        switch action {
+        case .add(let name, _, _, _, _, _): return "add:\(name)"
+        case .remove(let name): return "remove:\(name)"
+        case .clear: return "clear"
+        }
+    }
 }
 
 // MARK: - Recorder
@@ -249,6 +305,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case tts(action: String)
         case search(query: String, index: Int?)
         case highlight(startUTF16: Int, endUTF16: Int, color: String?)
+        case provider(action: DebugCommand.ProviderAction)
     }
 
     private(set) var calls: [Call] = []
@@ -274,6 +331,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws {
         calls.append(.highlight(startUTF16: startUTF16, endUTF16: endUTF16, color: color))
+    }
+    func provider(action: DebugCommand.ProviderAction) async throws {
+        calls.append(.provider(action: action))
     }
 }
 
