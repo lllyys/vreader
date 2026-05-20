@@ -46,6 +46,14 @@ struct MDReaderContainerView: View {
     /// TTS sentence highlighting + auto-scroll coordinator (features #40, #41).
     @State private var ttsHighlightCoordinator: TTSHighlightCoordinator?
 
+    // MARK: - Feature #56 WI-12: bilingual reading state
+    //
+    // Owned here so SwiftUI's lifecycle frees the VM on container
+    // teardown. The wiring lives in `MDReaderContainerView+Bilingual.swift`.
+    @State var bilingualViewModel: BilingualReadingViewModel?
+    @State var showBilingualSetupSheet: Bool = false
+    @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+
     /// Whether paged mode is active.
     private var isPagedMode: Bool {
         settingsStore?.epubLayout == .paged
@@ -115,6 +123,10 @@ struct MDReaderContainerView: View {
             mutating: highlightCoordinator,
             theme: settingsStore?.theme ?? .paper
         )
+        // Feature #56 WI-12: bilingual reading wiring lives in a
+        // separate extension to keep this file under the file-size
+        // budget (rule 50 §9).
+        .modifier(bilingualSurfacesModifier)
         .task {
             // PERF: open already called by MDReaderHost
             if viewModel.renderedText == nil {
