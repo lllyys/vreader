@@ -220,4 +220,61 @@ struct PerBookStatsRowSortTests {
         let sorted = PerBookStatsRow.sorted([], by: ReadingDashboardSort.default)
         #expect(sorted.isEmpty)
     }
+
+    // MARK: - last-read sort (WI-6c — GH #1059 D3-B follow-up)
+
+    /// Sorting by last-read descending puts the most-recently-read book first.
+    /// Nil rows (no recorded sessions) sort to the bottom regardless of
+    /// direction — pinned to the design's `PerBookTableV2`:
+    ///     `if (a.lastReadAt === null && b.lastReadAt !== null) return 1;`
+    @Test func sortsByLastReadDescendingNewestFirst() {
+        let sorted = PerBookStatsRow.sorted(sample, by: ReadingDashboardSort(field: .lastRead, ascending: false))
+        // sample: a=200 (newest live), b=100 (older), c=nil (deleted/no sessions)
+        // desc: newest first → a, b ; nil row sinks to the bottom.
+        #expect(sorted.map(\.bookFingerprintKey) == ["a", "b", "c"])
+    }
+
+    /// Ascending puts the oldest-read first; nil rows STILL sink to the
+    /// bottom (per the design's "nil sorts to bottom regardless of dir").
+    @Test func sortsByLastReadAscendingOldestFirstButNilsStillSinkToBottom() {
+        let sorted = PerBookStatsRow.sorted(sample, by: ReadingDashboardSort(field: .lastRead, ascending: true))
+        // asc: oldest first → b, a ; nil row c still at the bottom.
+        #expect(sorted.map(\.bookFingerprintKey) == ["b", "a", "c"])
+    }
+
+    /// Multiple nil rows stay in stable title order at the bottom.
+    @Test func multipleNilLastReadRowsClusterAtTheBottomInTitleOrder() {
+        let rows = [
+            row(key: "a", title: "Charlie", seconds: 0, notes: 0, highlights: 0, lastRead: Date(timeIntervalSince1970: 100)),
+            row(key: "b", title: "Beta",    seconds: 0, notes: 0, highlights: 0, lastRead: nil),
+            row(key: "c", title: "alpha",   seconds: 0, notes: 0, highlights: 0, lastRead: nil),
+        ]
+        let sorted = PerBookStatsRow.sorted(rows, by: ReadingDashboardSort(field: .lastRead, ascending: false))
+        // Live row first, then the two nil rows tie-broken by title (a-i).
+        #expect(sorted.map(\.bookFingerprintKey) == ["a", "c", "b"])
+    }
+
+    /// Equal `lastReadAt` ties break by title (the standard tie-break).
+    @Test func tiesBreakByTitleWhenLastReadIsEqual() {
+        let tiedAt = Date(timeIntervalSince1970: 500)
+        let rows = [
+            row(key: "x", title: "Zebra", seconds: 0, notes: 0, highlights: 0, lastRead: tiedAt),
+            row(key: "y", title: "apple", seconds: 0, notes: 0, highlights: 0, lastRead: tiedAt),
+            row(key: "z", title: "mango", seconds: 0, notes: 0, highlights: 0, lastRead: tiedAt),
+        ]
+        let sorted = PerBookStatsRow.sorted(rows, by: ReadingDashboardSort(field: .lastRead, ascending: false))
+        // All equal → tie-break by title ascending, case-insensitive.
+        #expect(sorted.map(\.title) == ["apple", "mango", "Zebra"])
+    }
+
+    /// All-nil input falls through cleanly to the title tie-break.
+    @Test func allNilLastReadFallsThroughToTitleTieBreak() {
+        let rows = [
+            row(key: "x", title: "Charlie", seconds: 0, notes: 0, highlights: 0, lastRead: nil),
+            row(key: "y", title: "alpha",   seconds: 0, notes: 0, highlights: 0, lastRead: nil),
+            row(key: "z", title: "Beta",    seconds: 0, notes: 0, highlights: 0, lastRead: nil),
+        ]
+        let sorted = PerBookStatsRow.sorted(rows, by: ReadingDashboardSort(field: .lastRead, ascending: false))
+        #expect(sorted.map(\.title) == ["alpha", "Beta", "Charlie"])
+    }
 }

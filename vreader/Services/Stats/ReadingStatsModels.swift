@@ -163,19 +163,41 @@ extension PerBookStatsRow {
             return ascending
                 ? lhs.notesCount < rhs.notesCount
                 : lhs.notesCount > rhs.notesCount
+        case .lastRead:
+            // Nil rows sink to the bottom regardless of direction — pinned to
+            // `stats-followups-artboards.jsx`'s `PerBookTableV2`:
+            //   `if (a.lastReadAt === null && b.lastReadAt !== null) return 1;`
+            // A book with no recorded sessions is always last; it never floats
+            // to the top of a desc/asc sort by being treated as a very-old or
+            // very-new date.
+            switch (lhs.lastReadAt, rhs.lastReadAt) {
+            case (nil, nil):
+                return nil
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
+            case let (l?, r?):
+                if l == r { return nil }
+                return ascending ? l < r : l > r
+            }
         }
     }
 }
 
 // MARK: - Sort
 
-/// The four sortable per-book table columns (divergence D3 — matches the
-/// committed design's 4-column table and the row's acceptance criterion (c)).
+/// The five sortable per-book table columns.
+///
+/// The first four columns match the committed `SortablePerBookTable` design;
+/// `lastRead` is the WI-6c addition (GH #1059 D3-B follow-up, design source
+/// `stats-followups-artboards.jsx`'s `PerBookTableAllFive` variant).
 enum ReadingDashboardSortField: String, CaseIterable, Sendable, Codable {
     case title
     case readingTime
     case highlights
     case notes
+    case lastRead
 }
 
 /// The active dashboard sort — a field plus a direction. `Codable` so it can

@@ -7,9 +7,10 @@
 // direction or switch the active column, and the rows expose their
 // fingerprint key for sort-output verification.
 //
-// Per the D3-B resolution (GH #665 2026-05-20), the 5th `last-read`
-// column is DEFERRED to WI-6c (blocked on GH #1059 needs-design). The
-// table therefore exposes 4 columns only.
+// WI-6c adds the 5th `Last read` column (Alt-1 variant from
+// `stats-followups-artboards.jsx`'s `PerBookTableAllFive`) — sortable
+// header-tap pattern matching the existing 4 columns. Nil cells render
+// as "—" and sink to the bottom of any lastRead sort.
 
 import Testing
 import SwiftUI
@@ -24,12 +25,13 @@ struct StatsPerBookTableTests {
 
     private func row(
         _ key: String, title: String, seconds: Int,
-        highlights: Int = 0, notes: Int = 0
+        highlights: Int = 0, notes: Int = 0,
+        lastRead: Date? = nil
     ) -> PerBookStatsRow {
         PerBookStatsRow(
             id: key, bookFingerprintKey: key, title: title, isDeleted: false,
             readingSecondsInWindow: seconds, notesCount: notes,
-            highlightsCount: highlights, lastReadAt: nil
+            highlightsCount: highlights, lastReadAt: lastRead
         )
     }
 
@@ -64,23 +66,62 @@ struct StatsPerBookTableTests {
         }
     }
 
-    // MARK: - Column set (D3-B: ship the design's 4 columns; last-read deferred)
+    // MARK: - Column set (WI-6c — 5 columns including last-read)
 
-    /// The table exposes exactly the 4 designed columns. `last-read` is
-    /// deferred to WI-6c (GH #1059 needs-design).
-    @Test func exposesTheFourDesignedColumns() {
+    /// The table exposes the 5 sortable columns in render order: the
+    /// 4 originally-designed columns plus the WI-6c `lastRead` 5th column
+    /// (`PerBookTableAllFive` variant from `stats-followups-artboards.jsx`).
+    @Test func exposesTheFiveSortableColumns() {
         let table = makeTable()
         let fields = table.sortableFieldsForTesting
-        #expect(fields == [.title, .readingTime, .highlights, .notes])
+        #expect(fields == [.title, .readingTime, .highlights, .notes, .lastRead])
     }
 
     @Test func columnHeaderLabelsMatchTheDesign() {
-        // Pinned to `vreader-profile-stats.jsx` SortablePerBookTable:
-        //   Book / Time / Hl / Notes
+        // Pinned to `vreader-profile-stats.jsx` SortablePerBookTable + the
+        // `stats-followups-artboards.jsx` PerBookTableAllFive Read column.
         #expect(StatsPerBookTable.headerLabel(for: .title) == "Book")
         #expect(StatsPerBookTable.headerLabel(for: .readingTime) == "Time")
         #expect(StatsPerBookTable.headerLabel(for: .highlights) == "Hl")
         #expect(StatsPerBookTable.headerLabel(for: .notes) == "Notes")
+        #expect(StatsPerBookTable.headerLabel(for: .lastRead) == "Read")
+    }
+
+    /// Tapping the new `Read` header for an inactive column makes it active
+    /// in `desc` — same toggle semantics as the other 4 columns.
+    @Test func tappingLastReadHeaderActivatesItDescending() {
+        var observed: ReadingDashboardSort?
+        let table = makeTable(
+            sort: ReadingDashboardSort(field: .readingTime, ascending: false),
+            onSort: { observed = $0 }
+        )
+        table.headerTapForTesting(.lastRead)
+        #expect(observed == ReadingDashboardSort(field: .lastRead, ascending: false))
+    }
+
+    /// Re-tapping the active `Read` header flips direction — symmetric with
+    /// the other 4 columns' toggle behaviour.
+    @Test func togglingActiveLastReadColumnFlipsDirection() {
+        var observed: ReadingDashboardSort?
+        let table = makeTable(
+            sort: ReadingDashboardSort(field: .lastRead, ascending: false),
+            onSort: { observed = $0 }
+        )
+        table.headerTapForTesting(.lastRead)
+        #expect(observed == ReadingDashboardSort(field: .lastRead, ascending: true))
+    }
+
+    /// Body builds cleanly when the rows carry mixed nil + non-nil
+    /// `lastReadAt` — the 5th column must render "—" for nil cells
+    /// without crashing the view.
+    @Test func bodyBuildsWithMixedLastReadValues() {
+        let mixedRows = [
+            row("pp",   title: "Pride and Prejudice", seconds: 738 * 60, lastRead: Date(timeIntervalSince1970: 1_700_000_000)),
+            row("ghost", title: "Ghost Book", seconds: 0, lastRead: nil),
+        ]
+        let table = makeTable(rows: mixedRows)
+        _ = table.body
+        #expect(table.rowsForTesting.count == 2)
     }
 
     // MARK: - Sort header tap behaviour
