@@ -40,3 +40,26 @@
   - New SwiftUI views contain no `WKWebView`, no `evaluateJavaScript`, no JS escaping surface, no `#if DEBUG`, and no `print()` (scanned under `vreader/Views/Stats/*.swift`).
   - Files are under ~300 lines: `ReadingDashboardView.swift` (~172), `StatsTimeWindowBar.swift` (~108), `StatsPerBookTable.swift` (~191).
 
+---
+
+# Round 2 (re-audit) — 2026-05-20 — commit `0d153ea`
+
+**Verdict**: ship-as-is
+
+## Round-1 findings status
+
+- [RESOLVED] Sheet title mismatch: `ReadingDashboardView.sheetTitle` is now `"Reading"`, matching the pinned design’s `FullStatsDashboard` sheet title (`<Sheet … title="Reading" …>`).
+- [RESOLVED] Hero subtitle copy mismatch: `activeWindowSublabel` now uses `viewModel.activeWindow.label.lowercased()`, matching the pinned JSX’s `TIME_WINDOWS.label.toLowerCase()` contract (and still uppercased on-screen via `.textCase(.uppercase)`).
+
+## Regression check (no new findings from the fixes)
+
+- The new constants are *more* traceable to the design bundle than before (both changes remove a user-visible divergence rather than introduce one).
+- `sheetTitleMatchesTheDesign` was updated to assert `"Reading"`, consistent with the new pinned constant.
+- `activeWindowSublabel`’s new behavior is narrow and deterministic (purely derived from `ReadingStatsWindow.label`), and does not change any async flow, VM wiring, or testing seams.
+
+## Tests (composition)
+
+- Attempted to run `xcodebuild test` locally for `vreaderTests/ReadingDashboardViewTests`, but the sandbox environment cannot execute the suite end-to-end:
+  - iOS Simulator destination unavailable (no simulator runtimes/devices present).
+  - macOS destination build failed due to code signing requiring a Development Team for targets `vreader`, `vreaderTests`, and `vreaderUITests`.
+- Static check: the updated assertions in `ReadingDashboardViewTests.swift` align with the updated constants in `ReadingDashboardView.swift`, so there is no internal mismatch introduced by the fixes.
