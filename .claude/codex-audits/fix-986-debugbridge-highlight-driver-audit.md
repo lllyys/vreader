@@ -1,3 +1,11 @@
+---
+branch: fix/986-debugbridge-highlight-driver
+threadId: 019e4456-35d7-7191-82a4-59ac0f9d7e63
+rounds: 3
+final_verdict: ship-as-is
+date: 2026-05-20
+---
+
 # Codex Gate-4 audit — Bug #237 / GH #986 (DebugBridge highlight-driver)
 
 **Branch**: `fix/986-debugbridge-highlight-driver`
