@@ -60,6 +60,7 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 | `tts`      | `action=start\|stop`               | —                                     | Drive `TTSService` from outside the play-button tap (Feature #45 WI-4c-b). XCUITest's gesture path cannot reliably activate `AVSpeechSynthesizer`'s audio session, so verification tests fire this URL after opening a book. No-op when no reader is presented. |
 | `search`   | `query=<str>`                      | `index=<int>`                         | Drive the in-reader search sheet (Bug #238). Opens the search sheet, sets `SearchViewModel.query` to `query`, and — when `index` (0-indexed, ≥0) is supplied — taps result N once results arrive (re-fires `.readerNavigateToLocator` then dismisses the sheet, mirroring the real-user tap path). Used by the verify harness to reproduce search-result-tap repros (e.g. Bug #182 cross-chapter EPUB search highlight) CU-free. No-op when no reader is presented. |
 | `highlight`| `start=<int>`, `end=<int>`         | `color=<yellow\|pink\|green\|blue>`   | Create a highlight at UTF-16 range `[start, end)` in the active TXT/MD/EPUB reader (Bug #237 TXT/MD; Bug #220 EPUB). Bypasses the long-press → SelectionPopoverView gesture path (XCUITest cannot synthesize it on iOS 26). The TXT/MD observer builds a format-correct `Locator` via `LocatorFactory` (extracting `textQuote` + context from source) and calls `HighlightCoordinator.create(...)`. The EPUB observer evaluates `EPUBDebugBridgeHighlightJS.buildResolveRangeJS(...)` in the active WKWebView to walk visible text nodes (skipping bilingual `data-vreader-decoration` siblings) and map `[start, end)` UTF-16 offsets to a DOM `EPUBSerializedRange`, snaps surrogate-pair boundaries, then calls the same `HighlightCoordinator.create(...)` with `AnnotationAnchor.epub(...)`. Either path is byte-identical to a gesture-created highlight at the same offsets (`canonicalHash` matches, so dedupe works correctly). PDF / AZW3 don't register the observer; the URL is silently a no-op for them. |
+| `provider` | `action=add\|remove\|clear` (plus action-specific params, see below) | — | Configure AI provider profiles for autonomous AI-feature verification (Bug #243). `action=add` inserts (or replaces by display name) a `ProviderProfile` in `ProviderProfileStore.shared` and saves its API key to the per-profile Keychain account (`add` requires `name`, `kind=<openAICompatible\|anthropicNative>`, `endpoint=<http(s) URL>`, `apiKey`; optional `model=<id>`, `active=<true\|false>`). Re-running an `add` URL with the same `name` reuses the existing UUID + keychain account — the operation is idempotent so `remove(name:)` always has a deterministic target. `action=remove` deletes the profile with the given display `name` + its keychain entry. `action=clear` wipes every profile + every per-profile keychain entry + the active selection. The handler auto-promotes the first added profile to active (so a single `add` URL leaves the harness in a usable state). All three sub-actions are idempotent and unlock CU-free AI-feature verification (Feature #56 b/d, Feature #65/#69, Bug #93) regardless of CU availability. |
 
 ### Parameter validation
 
@@ -72,6 +73,13 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 - `index` (`search`): non-negative integer; rejected if empty, non-integer, or negative. Without `index`, the URL runs the query and leaves the sheet open.
 - `start` / `end` (`highlight`): non-negative integers with `end > start`. A zero-length range (`start == end`) is rejected — the user gesture path requires `selectedRange.length > 0` too.
 - `color` (`highlight`): one of `yellow` / `pink` / `green` / `blue` (the four `NamedHighlightColor` rawValues). Unknown or empty values rejected; omit the parameter to default to `yellow`.
+- `action` (`provider`): one of `add` / `remove` / `clear`. Anything else throws `parse.invalidParam: action`.
+- `name` (`provider`): non-empty display name. Required for `add` + `remove`; ignored for `clear`. The name (not the UUID) is the key for `remove` because the harness produces names — UUIDs aren't useful at the URL boundary.
+- `kind` (`provider` `add`): one of `openAICompatible` / `anthropicNative`. Maps 1:1 to `ProviderKind`.
+- `endpoint` (`provider` `add`): an absolute URL with a host. Mirrors the production add-provider preflight (`AISettingsViewModel.validateBaseURL`): HTTPS-only except `http://localhost` / `http://127.0.0.1`. Empty / opaque (`https:foo`) / scheme-less / non-localhost-HTTP values rejected at parse so the handler doesn't insert a profile whose URL would fail at request time.
+- `apiKey` (`provider` `add`): non-empty string. Trimmed of leading/trailing whitespace + newlines before save (mirrors `AISettingsViewModel.addProfile`). Saved to Keychain under the per-profile account (`com.vreader.ai.apiKey.<UUID>`).
+- `model` (`provider` `add`): optional model id. When omitted, defaults to `kind.defaultModel` (e.g., `gpt-4o-mini` for `openAICompatible`).
+- `active` (`provider` `add`): optional `true` / `false`. When `true`, the new profile is set active (even if another profile already is). When `false` or omitted, the handler auto-promotes to active only when no profile is currently active.
 - Duplicate query keys throw `parse.invalidParam: <name>: duplicate parameter`.
 
 ## Driving the bridge from a verification flow
@@ -126,6 +134,43 @@ try XCTSkipUnless(
 This preserves the regression net that the XCUITest provides for any non-bridge-dependent gate (e.g. accessibility identifiers, layout, navigation) while letting the host-driven layer carry the bridge-dependent assertions.
 
 **Choosing between the two paths**: if the assertion needs CoreSimulator (open a URL, write to the app container), use the HOST-driven path. If it's a UI / AX / layout assertion, the XCUITest in-runner path is fine. If it's both, do the bridge driving from the host driver and let the XCUITest assert only on what's observable through XCUITest's own API.
+
+## Driving AI-feature verification (Bug #243)
+
+AI features (Feature #56 bilingual mode b/d criteria, Feature #65 AI sheet re-skin, Feature #69 AI Summarize scope selector, Bug #93 chat sessions) all require a configured `ProviderProfile`. Before Bug #243's fix the only way to configure a provider was Settings → AI driven through computer-use; that's fragile when CU is flapping (Bug #1054 sandbox + display-state issues), so AI-feature verification couldn't run autonomously.
+
+The `provider` URL family closes that gap. The typical flow:
+
+```bash
+# 1. Wipe library + provider state.
+xcrun simctl openurl "$SIM_ID" "vreader-debug://reset"
+xcrun simctl openurl "$SIM_ID" "vreader-debug://provider?action=clear"
+
+# 2. Configure an OpenRouter-backed OpenAI-compatible provider. Reads the
+#    free-tier key from .secrets/.env (gitignored). The active flag tells
+#    the handler to set this as the active profile so AI requests resolve
+#    against it immediately.
+set -a; source .secrets/.env; set +a
+ENDPOINT_ENC=$(printf '%s' "https://openrouter.ai/api/v1" | jq -sRr @uri)
+KEY_ENC=$(printf '%s' "$OPENROUTER_API_KEY" | jq -sRr @uri)
+xcrun simctl openurl "$SIM_ID" "vreader-debug://provider?action=add&name=OpenRouter&kind=openAICompatible&endpoint=${ENDPOINT_ENC}&apiKey=${KEY_ENC}&model=mistralai%2Fmistral-7b-instruct&active=true"
+
+# 3. Seed a fixture book, open it, and start exercising the AI feature.
+xcrun simctl openurl "$SIM_ID" "vreader-debug://seed?fixture=war-and-peace"
+xcrun simctl openurl "$SIM_ID" "vreader-debug://open?bookId=$ENCODED_KEY"
+# ... feature-specific driving (e.g. UI taps for the AI sheet) ...
+
+# 4. Tear down for the next iteration so providers don't leak across runs.
+xcrun simctl openurl "$SIM_ID" "vreader-debug://provider?action=clear"
+```
+
+Key properties:
+
+- **API key never logs**: the URL is opaque to the harness operator, and the handler logs only `kind` / `model` / `active`, never the key.
+- **Mutations propagate naturally**: the handler writes to `ProviderProfileStore.shared`, which posts `.providerProfilesDidChange` itself. Any in-app picker / Settings VM resyncs without a bridge-specific notification — the production code path is exercised end-to-end.
+- **First-add auto-active**: omitting `active=` on the first `add` URL still leaves the harness with an active profile, so single-provider flows can drop the flag.
+- **`remove` keys on display name**: the harness produces names, so the URL boundary uses names instead of UUIDs.
+- **`clear` is the right teardown**: leaves the next iteration with a known-empty `ProviderProfileStore`; also drops the per-profile Keychain entries.
 
 ## Output files
 
@@ -428,7 +473,8 @@ In practice the prompt only appears on a freshly-erased simulator, because `lsd`
 | `vreader/Services/DebugBridge/DebugBridge.swift`              | Orchestrator — parse + dispatch + lastError |
 | `vreader/Services/DebugBridge/DebugCommand.swift`             | URL grammar + parameter validation          |
 | `vreader/Services/DebugBridge/DebugSnapshot.swift`            | JSON shape for snapshot output              |
-| `vreader/Services/DebugBridge/RealDebugBridgeContext.swift`   | Production handlers                         |
+| `vreader/Services/DebugBridge/RealDebugBridgeContext.swift`   | Production handlers (reset/seed/open/theme/tts/search/highlight) |
+| `vreader/Services/DebugBridge/RealDebugBridgeContext+Provider.swift` | `provider` command handler (Bug #243 — AI provider profile add/remove/clear) |
 | `vreader/Services/DebugBridge/DebugReaderRegistry.swift`      | Active-reader registry + probe protocol     |
 | `vreader/Services/DebugBridge/DebugReaderProbeAdapter.swift`  | Default probe used by ReaderContainerView   |
 | `vreader/Services/DebugBridge/DebugBridgeNotifications.swift` | DEBUG-only notification names               |
