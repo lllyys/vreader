@@ -90,12 +90,23 @@ final class BookImporter: BookImporting, Sendable {
         source: ImportSource,
         titleOverride: String? = nil
     ) async throws -> ImportResult {
-        // Trim once at the entry point — empty/whitespace overrides are
-        // treated as "no override" so we never persist a blank title.
+        // Normalize the override once at the entry point so the same
+        // value reaches both the insert (new-row) and updateBookTitle
+        // (dedupe-hit) paths AND the returned `ImportResult.title`.
+        // Three rules, in order:
+        //   1. trim leading/trailing whitespace + newlines
+        //   2. empty (after trim) → nil (no override)
+        //   3. cap at 255 characters — matches `Book.init`'s defense-in-
+        //      depth truncation and `MetadataExtractor.maxTitleLength`.
+        //      Without this, an oversized manifest title would persist
+        //      truncated on insert but un-truncated on dedupe-update,
+        //      AND `ImportResult.title` would diverge from the DB row
+        //      on the new-row path.
         let trimmedOverride: String? = {
             guard let raw = titleOverride else { return nil }
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            guard !trimmed.isEmpty else { return nil }
+            return String(trimmed.prefix(255))
         }()
         // Step 0: Reject non-file and directory URLs
         guard fileURL.isFileURL else {

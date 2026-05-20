@@ -384,6 +384,32 @@ struct BookImporterTests {
         #expect(resultWhitespace.title == fileURL2.deletingPathExtension().lastPathComponent)
     }
 
+    /// Pathologically long overrides (>255 chars) get capped at 255 to
+    /// match `Book.init`'s defense-in-depth truncation. Without this, the
+    /// returned `ImportResult.title` would diverge from what's actually
+    /// persisted in SwiftData on the new-row path AND the dedupe-hit
+    /// path would silently bypass `Book.init`'s cap, leaving the DB row
+    /// with an over-long title. Codex audit Medium fix.
+    @Test func importFile_overlongTitleOverride_truncatedTo255() async throws {
+        let fileURL = try makeTempTxtFile()
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let (importer, mock, sandbox) = try await makeImporter()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let overlong = String(repeating: "A", count: 600)
+        let expectedCap = String(repeating: "A", count: 255)
+        let result = try await importer.importFile(
+            at: fileURL,
+            source: .restore,
+            titleOverride: overlong
+        )
+        #expect(result.title == expectedCap)
+        let stored = await mock.book(forKey: result.fingerprintKey)
+        #expect(stored?.title == expectedCap)
+        #expect(stored?.title.count == 255)
+    }
+
     /// Override is trimmed before persistence — leading/trailing whitespace
     /// from manifests shouldn't survive into the persisted Book title.
     @Test func importFile_trimmedTitleOverride_persistsTrimmedValue() async throws {

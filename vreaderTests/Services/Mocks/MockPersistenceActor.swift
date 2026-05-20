@@ -77,9 +77,16 @@ actor MockPersistenceActor: BookPersisting {
         guard var book = books[key] else {
             throw ImportError.bookNotFound(key)
         }
+        // Mirror PersistenceActor's defense-in-depth normalization so
+        // mock-based tests see the same truncation behavior as production.
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            throw PersistenceError.invalidContent("Empty title")
+        }
+        let normalizedTitle = String(trimmedTitle.prefix(255))
         book = BookRecord(
             fingerprintKey: book.fingerprintKey,
-            title: title,
+            title: normalizedTitle,
             author: author ?? book.author,
             coverImagePath: book.coverImagePath,
             fingerprint: book.fingerprint,

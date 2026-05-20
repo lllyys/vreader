@@ -203,6 +203,10 @@ actor PersistenceActor: BookPersisting {
     /// earlier restore). Post-fix, the manifest title from
     /// `BackupLibraryEntry.title` is the source of truth and the row
     /// gets updated so the user sees the original book name.
+    ///
+    /// Defense in depth: applies the same trim + 255-char cap that
+    /// `Book.init` does so direct callers (including future ones) can't
+    /// silently bypass the invariant by going through this entry point.
     func updateBookTitle(fingerprintKey key: String, title: String, author: String?) async throws {
         let context = ModelContext(modelContainer)
         let predicate = #Predicate<Book> { $0.fingerprintKey == key }
@@ -212,7 +216,14 @@ actor PersistenceActor: BookPersisting {
         guard let book = try context.fetch(descriptor).first else {
             throw ImportError.bookNotFound(key)
         }
-        book.title = title
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            // Mirrors Book.init's "Untitled" fallback — but here it's a
+            // programmer error to call with empty/whitespace; the
+            // BookImporter caller has already filtered those out.
+            throw PersistenceError.invalidContent("Empty title")
+        }
+        book.title = String(trimmedTitle.prefix(255))
         if let author { book.author = author }
         try context.save()
     }
