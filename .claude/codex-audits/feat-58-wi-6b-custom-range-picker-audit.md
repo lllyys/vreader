@@ -1,3 +1,11 @@
+---
+branch: feat/58-wi-6b-custom-range-picker
+threadId: 019e4560-c813-7c72-922e-4fffa3899099
+rounds: 2
+final_verdict: ship-as-is
+date: 2026-05-20
+---
+
 # Codex Gate-4 Audit Log — feature #58 WI-6b (Custom range picker)
 
 Branch: `feat/58-wi-6b-custom-range-picker`
