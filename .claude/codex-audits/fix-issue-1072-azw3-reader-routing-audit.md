@@ -1,3 +1,11 @@
+---
+branch: fix/issue-1072-azw3-reader-routing
+threadId: 019e4756-1a31-7461-bcaa-fe3f74e58cf9
+rounds: 4
+final_verdict: ship-as-is
+date: 2026-05-21
+---
+
 # Codex Audit — Bug #246 / GH #1072
 
 **Branch**: `fix/issue-1072-azw3-reader-routing`
