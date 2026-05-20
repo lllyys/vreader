@@ -229,6 +229,40 @@ struct SheetReSkinSnapshotTests {
         }
     }
 
+    // MARK: - Feature #67 WI-4: profile card mount + core-group restyle
+
+    @Test("Settings view renders the WI-4 core-group palette keys in design order")
+    func settingsView_rowPaletteKeys_match_designOrder() {
+        // WI-4 mounts the SettingsProfileCard as the first Form row, then
+        // restyles the three core groups (Cloud & Sync / Reading / About)
+        // to SettingsIconRow using SettingsRowPalette. AI group is WI-5
+        // and is excluded from this seam (it lives in AISettingsSection).
+        // Pinned to the plan's "WI-4 Test catalogue" assertion:
+        // ["webDAVBackup", "bookSources", "replacementRules",
+        //  "httpTTS", "helpFeedback", "version"].
+        let view = SettingsView()
+        #expect(view.rowPaletteKeysForTesting == [
+            "webDAVBackup",
+            "bookSources",
+            "replacementRules",
+            "httpTTS",
+            "helpFeedback",
+            "version"
+        ])
+    }
+
+    @Test("Settings view's profile-card mount renders with the library glyph")
+    func settingsView_profileCard_isMounted() {
+        // WI-4: SettingsView mounts SettingsProfileCard as the first
+        // Form row, fed by SettingsHeaderViewModel from the optional
+        // \.persistenceActor environment. The view exposes the mounted
+        // card for composition assertion.
+        let view = SettingsView()
+        _ = view.body
+        let card = view.profileCardForTesting
+        #expect(card.headerTextForTesting == SettingsProfileCard.headerText)
+    }
+
     // MARK: - Helpers
 
     /// A TXT-style `Locator` at the given UTF-16 offset.

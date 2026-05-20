@@ -267,6 +267,7 @@ All cross-component communication uses NotificationCenter:
 | `.bookFileStateDidChange`      | `["fingerprintKey","state"]` | LazyDownloadCoordinator (reconcile) → LibraryView (refresh row, feature #47) |
 | `.libraryRowTappedWhileNotLocal` | `["fingerprintKey","fileState"]` | LibraryView → BookDownloadSheet (future, #47 WI-6) |
 | `.bookDidImport`               | `["fingerprintKey"]`         | BookImporter (after persist, new + duplicate paths) → LibraryView (force-refresh; bug #197) |
+| `.openReadingStatsRequested`   | nil                          | `SettingsView` profile-card Stats pill → `SettingsView` itself (feature #67 WI-4 — Settings sheet hosts both the post site and the observer; the observer presents `ReadingDashboardView` as a sheet over the `.modelContext` container's aggregator). Lives in `vreader/Services/SettingsNotifications.swift` (the file is app-shell scoped, not reader-bridge scoped — `ReaderNotifications.swift` is documented as reader coordination only). |
 
 ## Shared Reader UI State (Phase R3)
 
