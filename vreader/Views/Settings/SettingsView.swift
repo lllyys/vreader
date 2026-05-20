@@ -65,8 +65,12 @@ struct SettingsView: View {
 
     @State private var viewModel = AISettingsViewModel()
     @State private var headerViewModel = SettingsHeaderViewModel()
-    @State var isShowingStats = false
-    @State var statsDashboardViewModel: ReadingDashboardViewModel?
+
+    /// The Stats-dashboard sheet's state machine — owns the
+    /// `isShowing` flag and the current `ReadingDashboardViewModel`.
+    /// Production opens supply `makeProductionStatsViewModel()` as
+    /// the per-open builder; tests substitute a stub builder.
+    @State var statsPresenter = SettingsStatsPresenter()
 
     /// The design theme for this sheet — the Library is not
     /// theme-switchable, so it uses the `.paper` light palette per the
@@ -145,9 +149,19 @@ struct SettingsView: View {
             await headerViewModel.load(persistence: persistenceActor)
         }
         .onReceive(NotificationCenter.default.publisher(for: .openReadingStatsRequested)) { _ in
-            presentStatsDashboard()
+            statsPresenter.present(build: makeProductionStatsViewModel)
         }
-        .sheet(isPresented: $isShowingStats) {
+        .sheet(
+            isPresented: $statsPresenter.isShowing,
+            onDismiss: {
+                // Clear the VM on swipe-dismiss so the next open
+                // allocates a fresh presenter. The Done button's
+                // explicit `.dismiss()` path clears too, but `.sheet`'s
+                // native swipe-down bypasses that closure — this
+                // `onDismiss:` covers it.
+                statsPresenter.handleSheetOnDismiss()
+            }
+        ) {
             statsSheetContent
         }
     }
