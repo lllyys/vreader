@@ -97,20 +97,69 @@ final class HighlightListViewModel {
     // MARK: - Remove
 
     /// Removes a highlight by its ID.
+    ///
+    /// Bug #229 / GH #938: AZW3/MOBI highlights are rendered as Foliate-js SVG
+    /// overlays driven by `.foliateRequestAnnotationJSDelete` (CFI-keyed), not
+    /// by `.readerHighlightRemoved` (UUID-keyed). The Foliate Coordinator's
+    /// `.readerHighlightRemoved` observer does not exist — only its
+    /// `.foliateRequestAnnotationJSDelete` observer does — so the panel-delete
+    /// path must capture the record's `.epub` anchor CFI BEFORE the
+    /// persistence delete and post the JS-strip notification alongside the
+    /// `.readerHighlightRemoved` it already emits for the panel/list sync.
+    ///
+    /// Mirrors `FoliateHighlightJSBridge.delete(record:fingerprintKey:)` — the
+    /// in-reader popover's delete path — so panel + in-reader paths converge
+    /// on the same notification contract. A record whose anchor is not
+    /// `.epub` (TXT/MD/PDF, or legacy/nil/empty-CFI) posts only
+    /// `.readerHighlightRemoved` — no JS strip is needed for those renderers,
+    /// and the Foliate Coordinator's CFI filter would reject an empty CFI
+    /// anyway.
     func removeHighlight(highlightId: UUID) async {
         errorMessage = nil
+        // Capture the record BEFORE the persistence delete — a post-hoc
+        // `fetchHighlights` would miss it (the record is gone), and `self.highlights`
+        // is the authoritative in-memory copy after `loadHighlights`.
+        let preDeleteCFI = Self.epubAnchorCFI(
+            of: highlights.first(where: { $0.highlightId == highlightId })
+        )
         do {
             try await store.removeHighlight(highlightId: highlightId)
             highlights.removeAll { $0.highlightId == highlightId }
             outOfBoundsHighlightIds.remove(highlightId)
-            // Notify reader to clear the visual highlight immediately (bug #78)
+            // Notify reader to clear the visual highlight immediately (bug #78).
             NotificationCenter.default.post(
                 name: .readerHighlightRemoved,
                 object: highlightId.uuidString
             )
+            // AZW3/MOBI overlay strip (bug #229). The Foliate Coordinator
+            // observes `.foliateRequestAnnotationJSDelete` keyed on
+            // `fingerprintKey`; concurrent readers on other books ignore this
+            // post via the same key filter. Posted only when the captured
+            // record carried a non-empty `.epub` CFI — other anchor cases
+            // (TXT/MD .text, PDF .pdf, nil, empty-CFI) skip cleanly.
+            if let cfi = preDeleteCFI {
+                NotificationCenter.default.post(
+                    name: .foliateRequestAnnotationJSDelete,
+                    object: nil,
+                    userInfo: [
+                        "cfi": cfi,
+                        "fingerprintKey": bookFingerprintKey,
+                    ]
+                )
+            }
         } catch {
             errorMessage = "Failed to remove highlight."
         }
+    }
+
+    /// Extracts the CFI from an `.epub` anchor on a captured highlight record.
+    /// Returns `nil` for any non-`.epub` anchor, a `nil` record, a `nil`
+    /// anchor, or an empty CFI — mirrors `FoliateHighlightJSBridge.cfi(from:)`
+    /// so the panel-delete and in-reader-delete paths apply the same filter.
+    private static func epubAnchorCFI(of record: HighlightRecord?) -> String? {
+        guard let record = record else { return nil }
+        guard case let .epub(_, cfi, _) = record.anchor, !cfi.isEmpty else { return nil }
+        return cfi
     }
 
     // MARK: - Edit

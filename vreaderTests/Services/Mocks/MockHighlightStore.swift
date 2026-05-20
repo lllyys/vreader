@@ -144,6 +144,10 @@ actor MockHighlightStore: HighlightPersisting {
         addError = error
     }
 
+    func setRemoveError(_ error: (any Error & Sendable)?) {
+        removeError = error
+    }
+
     func seed(_ record: HighlightRecord, forBookWithKey key: String) {
         highlights[record.highlightId] = record
         bookIndex[key, default: []].append(record.highlightId)
