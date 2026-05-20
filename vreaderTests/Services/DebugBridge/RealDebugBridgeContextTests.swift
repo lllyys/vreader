@@ -1178,6 +1178,122 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertEqual(receivedIndex, 1)
         XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
     }
+
+    // MARK: - highlight (Bug #237 — verification harness highlight-creator)
+    //
+    // RealDebugBridgeContext.highlight posts `.debugBridgeHighlightCommand`
+    // with the parsed offsets + optional color. The active reader's
+    // `.onReceive` observer (ReaderContainerView, Bug #237 wiring) builds
+    // a Locator from the offsets, calls `PersistenceActor.addHighlight`,
+    // then posts `.readerHighlightsDidImport` so the per-format renderer
+    // re-paints. When no reader is loaded, the URL is silently a no-op
+    // (mirrors the `tts` / `search` posture).
+
+    @MainActor
+    func test_highlight_postsHighlightCommandNotificationWithStartEnd() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "highlightCommand notification posted")
+        nonisolated(unsafe) var receivedStart: Int?
+        nonisolated(unsafe) var receivedEnd: Int?
+        nonisolated(unsafe) var hasColor: Bool = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeHighlightCommand, object: nil, queue: .main
+        ) { notification in
+            receivedStart = notification.userInfo?["start"] as? Int
+            receivedEnd = notification.userInfo?["end"] as? Int
+            hasColor = notification.userInfo?["color"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.highlight(startUTF16: 10, endUTF16: 42, color: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedStart, 10)
+        XCTAssertEqual(receivedEnd, 42)
+        XCTAssertFalse(hasColor,
+                       "userInfo must omit 'color' when nil was passed — lets observers fall back to the default color")
+    }
+
+    @MainActor
+    func test_highlight_postsHighlightCommandNotificationWithColor() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "highlightCommand notification posted with color")
+        nonisolated(unsafe) var receivedStart: Int?
+        nonisolated(unsafe) var receivedEnd: Int?
+        nonisolated(unsafe) var receivedColor: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeHighlightCommand, object: nil, queue: .main
+        ) { notification in
+            receivedStart = notification.userInfo?["start"] as? Int
+            receivedEnd = notification.userInfo?["end"] as? Int
+            receivedColor = notification.userInfo?["color"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.highlight(startUTF16: 0, endUTF16: 5, color: "pink")
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedStart, 0)
+        XCTAssertEqual(receivedEnd, 5)
+        XCTAssertEqual(receivedColor, "pink")
+    }
+
+    @MainActor
+    func test_highlight_postsHighlightCommandWithStartZero() async throws {
+        // start=0 is a valid range start (first character). Verify the
+        // bridge does not collapse 0 with nil in the userInfo payload.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "highlightCommand notification posted with start=0")
+        nonisolated(unsafe) var receivedStart: Int?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeHighlightCommand, object: nil, queue: .main
+        ) { notification in
+            receivedStart = notification.userInfo?["start"] as? Int
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.highlight(startUTF16: 0, endUTF16: 5, color: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedStart, 0, "start=0 must reach observers as 0, not nil")
+    }
+
+    @MainActor
+    func test_highlight_endToEndThroughBridge_dispatchesAndPostsNotification() async throws {
+        // End-to-end: URL → DebugBridge.handle → RealDebugBridgeContext.highlight.
+        // Verifies the parser → dispatcher → handler → notification chain is
+        // fully wired and that the bridge clears `lastError` on success.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+        let bridge = DebugBridge(context: context)
+
+        let exp = expectation(description: "highlight notification posted via bridge")
+        nonisolated(unsafe) var receivedStart: Int?
+        nonisolated(unsafe) var receivedEnd: Int?
+        nonisolated(unsafe) var receivedColor: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeHighlightCommand, object: nil, queue: .main
+        ) { notification in
+            receivedStart = notification.userInfo?["start"] as? Int
+            receivedEnd = notification.userInfo?["end"] as? Int
+            receivedColor = notification.userInfo?["color"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        await bridge.handle(URL(string: "vreader-debug://highlight?start=100&end=120&color=blue")!)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedStart, 100)
+        XCTAssertEqual(receivedEnd, 120)
+        XCTAssertEqual(receivedColor, "blue")
+        XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
+    }
 }
 
 /// Probe whose awaitSettle always throws settleTimeout. Lets the timeout

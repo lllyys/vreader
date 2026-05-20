@@ -562,6 +562,200 @@ final class DebugCommandTests: XCTestCase {
             XCTAssertEqual(name, "query")
         }
     }
+
+    // MARK: - highlight (Bug #237 — verification harness highlight-creator)
+    //
+    // `vreader-debug://highlight?start=<int>&end=<int>[&color=<name>]` lets
+    // the harness create a TXT/MD highlight without going through the
+    // long-press → SelectionPopoverView gesture, which XCUITest cannot
+    // synthesize reliably on iOS 26.
+
+    func test_parse_highlightWithStartEnd_returnsHighlightDefaultColor() throws {
+        let url = URL(string: "vreader-debug://highlight?start=10&end=42")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .highlight(startUTF16: 10, endUTF16: 42, color: nil))
+    }
+
+    func test_parse_highlightWithExplicitColor_returnsHighlightWithColor() throws {
+        let url = URL(string: "vreader-debug://highlight?start=0&end=5&color=pink")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .highlight(startUTF16: 0, endUTF16: 5, color: "pink"))
+    }
+
+    func test_parse_highlightStartZero_returnsHighlight() throws {
+        // start=0 is a valid range start (first character). Parser must not
+        // collapse 0 with missing.
+        let url = URL(string: "vreader-debug://highlight?start=0&end=1")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .highlight(startUTF16: 0, endUTF16: 1, color: nil))
+    }
+
+    func test_parse_highlightAllNamedColors_accepted() throws {
+        // The four named colors from `NamedHighlightColor` (feature #60
+        // WI-7c) — yellow, pink, green, blue — must all parse.
+        for color in ["yellow", "pink", "green", "blue"] {
+            let url = URL(string: "vreader-debug://highlight?start=0&end=5&color=\(color)")!
+            let cmd = try DebugCommand.parse(url)
+            XCTAssertEqual(cmd, .highlight(startUTF16: 0, endUTF16: 5, color: color),
+                           "color=\(color) should round-trip through the parser")
+        }
+    }
+
+    func test_parse_highlightMissingStart_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://highlight?end=5")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "start")
+        }
+    }
+
+    func test_parse_highlightMissingEnd_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://highlight?start=0")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "end")
+        }
+    }
+
+    func test_parse_highlightNonIntegerStart_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://highlight?start=abc&end=5")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "start")
+        }
+    }
+
+    func test_parse_highlightNonIntegerEnd_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://highlight?start=0&end=xyz")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "end")
+        }
+    }
+
+    func test_parse_highlightNegativeStart_throwsInvalidParam() {
+        // UTF-16 offsets are non-negative integers (Locator validation rejects
+        // negative offsets too). Surface this at the parser, not silently
+        // delegate to Locator validation downstream.
+        let url = URL(string: "vreader-debug://highlight?start=-1&end=5")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "start")
+        }
+    }
+
+    func test_parse_highlightNegativeEnd_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://highlight?start=0&end=-5")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "end")
+        }
+    }
+
+    func test_parse_highlightStartGreaterThanEnd_throwsInvalidParam() {
+        // Inverted range — Locator validation would reject this too; better to
+        // catch it at the URL boundary with a clear param name.
+        let url = URL(string: "vreader-debug://highlight?start=10&end=5")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "end")
+        }
+    }
+
+    func test_parse_highlightStartEqualsEnd_throwsInvalidParam() {
+        // Zero-length range = empty selection = no meaningful highlight; the
+        // production gesture path can't produce this either (UITextView's
+        // `selectedRange.length > 0` guard).
+        let url = URL(string: "vreader-debug://highlight?start=5&end=5")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "end")
+        }
+    }
+
+    func test_parse_highlightEmptyStartValue_throwsMissingParam() {
+        // `start=` (empty value) is treated as missing, matching the other
+        // commands' `requireParam` posture.
+        let url = URL(string: "vreader-debug://highlight?start=&end=5")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "start")
+        }
+    }
+
+    func test_parse_highlightUnknownColor_throwsInvalidParam() {
+        // Color must be one of the four NamedHighlightColor rawValues; an
+        // unknown one is a caller bug (silently falling back to yellow would
+        // mask test errors).
+        let url = URL(string: "vreader-debug://highlight?start=0&end=5&color=fuchsia")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "color")
+        }
+    }
+
+    func test_parse_highlightEmptyColorValue_throwsInvalidParam() {
+        // `color=` (empty value) is rejected, matching the index= empty
+        // rejection on `search`.
+        let url = URL(string: "vreader-debug://highlight?start=0&end=5&color=")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "color")
+        }
+    }
+
+    func test_parse_highlightDuplicateStart_throwsInvalidParam() {
+        // Duplicate keys are rejected by the parser's queryParams helper.
+        let url = URL(string: "vreader-debug://highlight?start=0&start=5&end=10")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "start")
+        }
+    }
+
+    func test_parse_highlightLargeOffsets_accepted() throws {
+        // Large UTF-16 offsets are valid (a 10MB TXT can have offsets
+        // approaching 5_000_000). Verify no overflow / truncation.
+        let url = URL(string: "vreader-debug://highlight?start=4999999&end=5000000")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .highlight(startUTF16: 4_999_999, endUTF16: 5_000_000, color: nil))
+    }
 }
 
 #endif

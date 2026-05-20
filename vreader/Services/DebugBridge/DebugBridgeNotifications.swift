@@ -72,6 +72,30 @@ extension Notification.Name {
     ///   when the bridge command included the `index=` parameter. When
     ///   absent, observers run the query only.
     static let debugBridgeSearchCommand = Notification.Name("vreader.debugBridge.searchCommand")
+
+    /// Posted by RealDebugBridgeContext.highlight to create a highlight in
+    /// the active reader, bypassing the long-press + SelectionPopoverView
+    /// gesture path (Bug #237 verification harness — XCUITest cannot
+    /// synthesize the long-press → text-selection sequence on iOS 26).
+    ///
+    /// The active reader's observer builds a `Locator` from the offsets,
+    /// calls `PersistenceActor.addHighlight`, then posts
+    /// `.readerHighlightsDidImport` so the per-format renderer (TXT / MD /
+    /// EPUB / PDF) re-paints. If no reader is loaded, observers don't
+    /// fire — the URL is silently a no-op (mirrors `tts` / `search`).
+    ///
+    /// Range semantics are inclusive-exclusive — `[start, end)` — matching
+    /// how `Locator.charRangeStartUTF16` / `charRangeEndUTF16` are used by
+    /// the gesture path. Parser enforces `start >= 0`, `end > start`.
+    ///
+    /// userInfo:
+    /// - `"start"`: Int — UTF-16 range start (≥ 0).
+    /// - `"end"`: Int — UTF-16 range end (> start).
+    /// - `"color"`: String? — optional NamedHighlightColor rawValue
+    ///   (`yellow` / `pink` / `green` / `blue`). Present only when the
+    ///   bridge command included the `color=` parameter; observers fall
+    ///   back to `"yellow"` when absent.
+    static let debugBridgeHighlightCommand = Notification.Name("vreader.debugBridge.highlightCommand")
 }
 
 #endif

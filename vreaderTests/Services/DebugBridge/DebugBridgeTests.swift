@@ -53,6 +53,26 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_highlightURLWithStartEnd_callsHighlightHandlerWithNilColor() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://highlight?start=10&end=42")!)
+
+        XCTAssertEqual(context.calls, [.highlight(startUTF16: 10, endUTF16: 42, color: nil)])
+    }
+
+    @MainActor
+    func test_handle_highlightURLWithColor_callsHighlightHandler() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://highlight?start=0&end=5&color=pink")!)
+
+        XCTAssertEqual(context.calls, [.highlight(startUTF16: 0, endUTF16: 5, color: "pink")])
+    }
+
+    @MainActor
     func test_handle_unknownCommand_recordsParseErrorWithoutCallingHandlers() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -206,6 +226,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func search(query: String, index: Int?) async throws {
         await record("search:\(query):\(index.map(String.init) ?? "nil")")
     }
+    func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws {
+        await record("highlight:\(startUTF16):\(endUTF16):\(color ?? "nil")")
+    }
 }
 
 // MARK: - Recorder
@@ -225,6 +248,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case eval(bridge: String, js: String)
         case tts(action: String)
         case search(query: String, index: Int?)
+        case highlight(startUTF16: Int, endUTF16: Int, color: String?)
     }
 
     private(set) var calls: [Call] = []
@@ -247,6 +271,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     func tts(action: String) async throws { calls.append(.tts(action: action)) }
     func search(query: String, index: Int?) async throws {
         calls.append(.search(query: query, index: index))
+    }
+    func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws {
+        calls.append(.highlight(startUTF16: startUTF16, endUTF16: endUTF16, color: color))
     }
 }
 

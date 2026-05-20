@@ -39,6 +39,13 @@ protocol DebugBridgeContext {
     /// notification observed by the active reader. If no reader is
     /// loaded, the action is a no-op (matches `tts` / `theme`).
     func search(query: String, index: Int?) async throws
+    /// Bug #237 — create a highlight over a UTF-16 range in the active
+    /// reader, bypassing the long-press + SelectionPopoverView gesture
+    /// path that XCUITest cannot synthesize on iOS 26. The handler posts
+    /// a notification observed by the active TXT/MD reader, which builds
+    /// a Locator + persists the highlight + re-paints. If no reader is
+    /// loaded, the action is a no-op (matches `tts` / `search`).
+    func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -154,6 +161,8 @@ final class DebugBridge {
             try await context.tts(action: action)
         case .search(let query, let index):
             try await context.search(query: query, index: index)
+        case .highlight(let start, let end, let color):
+            try await context.highlight(startUTF16: start, endUTF16: end, color: color)
         }
     }
 }

@@ -32,6 +32,14 @@ import Foundation
 ///   results arrive. The harness uses this to drive search-result-tap repros
 ///   (e.g. Bug #182 cross-chapter EPUB search highlight verification) without
 ///   computer-use. No-op when no reader is presented.
+/// - `highlight?start=<int>&end=<int>[&color=<name>]` — create a highlight
+///   over a UTF-16 range in the active TXT/MD reader (Bug #237 verification
+///   harness). The harness uses this to bypass the long-press +
+///   `SelectionPopoverView` gesture, which XCUITest cannot synthesize
+///   reliably on iOS 26. `start` < `end` (inclusive-exclusive), both
+///   non-negative. `color` is optional; one of `NamedHighlightColor`'s four
+///   rawValues (`yellow` / `pink` / `green` / `blue`). No-op when no reader
+///   is presented.
 enum DebugCommand: Equatable {
     case reset
     case seed(fixture: String)
@@ -42,6 +50,7 @@ enum DebugCommand: Equatable {
     case eval(bridge: String, js: String)
     case tts(action: String)
     case search(query: String, index: Int?)
+    case highlight(startUTF16: Int, endUTF16: Int, color: String?)
 
     /// Reader theme selector for the `theme` command.
     ///
@@ -198,6 +207,73 @@ extension DebugCommand {
                 index = nil
             }
             return .search(query: query, index: index)
+
+        case "highlight":
+            // Bug #237: verification harness highlight-creator. Builds a
+            // highlight over a UTF-16 range in the active TXT/MD reader,
+            // bypassing the long-press + SelectionPopoverView gesture
+            // (which XCUITest cannot synthesize on iOS 26). Range is
+            // inclusive-exclusive (`[start, end)`), both non-negative,
+            // start < end (a zero-length range is rejected — the user
+            // gesture path requires `selectedRange.length > 0` too).
+            // Color is optional; defaults to "yellow" downstream. When
+            // present, must be one of NamedHighlightColor's four rawValues.
+            let startRaw = try requireParam("start", in: params)
+            guard let parsedStart = Int(startRaw) else {
+                throw DebugCommandError.invalidParam(
+                    "start",
+                    reason: "expected non-negative integer, got \(startRaw)"
+                )
+            }
+            guard parsedStart >= 0 else {
+                throw DebugCommandError.invalidParam(
+                    "start",
+                    reason: "must be ≥ 0, got \(parsedStart)"
+                )
+            }
+            let endRaw = try requireParam("end", in: params)
+            guard let parsedEnd = Int(endRaw) else {
+                throw DebugCommandError.invalidParam(
+                    "end",
+                    reason: "expected non-negative integer, got \(endRaw)"
+                )
+            }
+            guard parsedEnd >= 0 else {
+                throw DebugCommandError.invalidParam(
+                    "end",
+                    reason: "must be ≥ 0, got \(parsedEnd)"
+                )
+            }
+            guard parsedEnd > parsedStart else {
+                throw DebugCommandError.invalidParam(
+                    "end",
+                    reason: "must be > start (got start=\(parsedStart) end=\(parsedEnd))"
+                )
+            }
+            let color: String?
+            if let rawColor = params["color"] {
+                guard !rawColor.isEmpty else {
+                    throw DebugCommandError.invalidParam(
+                        "color",
+                        reason: "expected one of yellow|pink|green|blue, got empty value"
+                    )
+                }
+                // Allowlist — NamedHighlightColor.rawValue cases (feature #60
+                // WI-7c). Keeping the allowlist literal here rather than
+                // referencing the type avoids a release/debug coupling
+                // (parser is pure-value; presenter type lives elsewhere).
+                let validColors: Set<String> = ["yellow", "pink", "green", "blue"]
+                guard validColors.contains(rawColor) else {
+                    throw DebugCommandError.invalidParam(
+                        "color",
+                        reason: "expected one of yellow|pink|green|blue, got \(rawColor)"
+                    )
+                }
+                color = rawColor
+            } else {
+                color = nil
+            }
+            return .highlight(startUTF16: parsedStart, endUTF16: parsedEnd, color: color)
 
         default:
             throw DebugCommandError.unknownCommand(host)

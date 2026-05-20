@@ -202,6 +202,12 @@ struct ReaderContainerView: View {
     /// can never fire `.readerNavigateToLocator` after the reader closes.
     /// `internal` (not `private`) for the +DebugBridgeSearch extension.
     @State var debugBridgeSearchTask: Task<Void, Never>?
+    /// Bug #237 — in-flight bridge-highlight task. Same posture as the
+    /// search task — a new `.debugBridgeHighlightCommand` URL cancels the
+    /// previous task; `.onDisappear` cancels so a late completion can never
+    /// post `.readerHighlightsDidImport` after the reader closes.
+    /// `internal` (not `private`) for the +DebugBridgeHighlight extension.
+    @State var debugBridgeHighlightTask: Task<Void, Never>?
     #endif
 
     var body: some View {
@@ -516,6 +522,16 @@ struct ReaderContainerView: View {
                 handleDebugBridgeSearchCommand(query: query, index: index)
             }
         ))
+        // Bug #237 — create a TXT/MD highlight from outside the chrome.
+        // Same `ViewModifier` pattern as the search observer above so the
+        // body keeps within the type-inference budget.
+        .modifier(ReaderDebugBridgeHighlightObserver(
+            onCommand: { startUTF16, endUTF16, color in
+                handleDebugBridgeHighlightCommand(
+                    startUTF16: startUTF16, endUTF16: endUTF16, color: color
+                )
+            }
+        ))
         #endif
         // PERF: Single deferred .task for all non-critical setup.
         // Per-book settings + TOC prep deferred to avoid contending with the
@@ -628,6 +644,8 @@ struct ReaderContainerView: View {
             #if DEBUG
             debugBridgeSearchTask?.cancel()
             debugBridgeSearchTask = nil
+            debugBridgeHighlightTask?.cancel()
+            debugBridgeHighlightTask = nil
             #endif
         }
         #if DEBUG

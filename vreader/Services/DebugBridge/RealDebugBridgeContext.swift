@@ -288,6 +288,40 @@ final class RealDebugBridgeContext: DebugBridgeContext {
             "search: posted notification query=\(query, privacy: .public) index=\(index.map(String.init) ?? "nil", privacy: .public)"
         )
     }
+
+    /// Bug #237 — create a highlight over a UTF-16 range in the active reader,
+    /// bypassing the long-press + `SelectionPopoverView` gesture path that
+    /// XCUITest cannot synthesize on iOS 26.
+    ///
+    /// Posts `.debugBridgeHighlightCommand` with `start` / `end` (parser has
+    /// already validated `start >= 0` and `end > start`) and optional `color`
+    /// (parser has already validated it as one of the four
+    /// `NamedHighlightColor` rawValues when present). `ReaderContainerView`
+    /// observes the notification when a book is open; it builds a `Locator`
+    /// from the offsets, calls `PersistenceActor.addHighlight`, then posts
+    /// `.readerHighlightsDidImport` so the per-format renderer re-paints.
+    /// If no reader is loaded, the URL is silently a no-op (the same posture
+    /// as `tts` / `search`).
+    ///
+    /// `color` is omitted from `userInfo` when nil so observers can fall
+    /// back to the default ("yellow") without relying on a sentinel value.
+    func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws {
+        var userInfo: [AnyHashable: Any] = [
+            "start": startUTF16,
+            "end": endUTF16,
+        ]
+        if let color {
+            userInfo["color"] = color
+        }
+        NotificationCenter.default.post(
+            name: .debugBridgeHighlightCommand,
+            object: nil,
+            userInfo: userInfo
+        )
+        log.info(
+            "highlight: posted notification start=\(startUTF16) end=\(endUTF16) color=\(color ?? "nil", privacy: .public)"
+        )
+    }
 }
 
 #endif
