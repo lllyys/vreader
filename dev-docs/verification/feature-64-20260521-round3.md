@@ -2,7 +2,7 @@
 kind: feature
 id: 64
 status_target: VERIFIED
-commit_sha: 08083419
+commit_sha: 6f7f576140a593248c25e4e21e1693fe560e4629
 app_version: 3.38.27 (build 602)
 date: 2026-05-21
 verifier: claude
@@ -57,19 +57,33 @@ verification path. Result:
 The critical diagnostic from PR #1088's instrumentation: the new log line
 `[com.vreader.app:EPUB] loadFileURL: <file>` is emitted from
 `EPUBWebViewBridge.updateUIView` *immediately before*
-`webView.loadFileURL(...)`. **That log not firing means
-`EPUBWebViewBridge.updateUIView` was never invoked at all** — i.e., the
-SwiftUI host (`EPUBReaderContainerView`) never instantiated the bridge
-view, or the bridge view never entered the view hierarchy, or the bridge's
-`UIViewRepresentable.makeUIView` returned without ever attaching. This is
-a layer above the bridge coordinator — neither #1085 (settle gate) nor
-#1086 (bridge-level fallback) could address it.
+`webView.loadFileURL(...)`. The filtered `subsystem == "com.vreader.app"`
+log stream did NOT contain that log on either EPUB attempt. **The
+strongest inference from absence**: the run never reached the
+`loadFileURL` logging site in `updateUIView`. The most parsimonious
+explanation is that `updateUIView` was not invoked at all on the
+`EPUBWebViewBridge` view for `mini-epub3`, i.e., the SwiftUI host
+(`EPUBReaderContainerView`) never instantiated the bridge view, or the
+bridge view never entered the view hierarchy, or the bridge's
+`UIViewRepresentable.makeUIView` returned without `updateUIView` being
+called downstream. **This is inference from absence on a filtered log
+stream, not direct observation** — the next round should add
+`AppLogger.epub.info` entry logs at the host layer
+(`EPUBReaderContainerView.body` and `EPUBWebViewBridge.makeUIView`) to
+directly observe what is or isn't being mounted; the current round
+cannot directly distinguish "view tree never reached the bridge" from
+"bridge mounted but `updateUIView` short-circuited before the log site".
+What IS firm: the failure is upstream of the existing PR #1088
+bridge-level instrumentation — neither #1085 (settle gate) nor #1086
+(bridge-level fallback) could address it, because the bridge-level code
+where they sit is never reached.
 
-The 2.0s early-settle fallback in PR #1088 is keyed on a code path inside
-the bridge coordinator that runs *only* after `updateUIView` calls
-`loadFileURL`. With `updateUIView` never running, the fallback `Task` is
-never scheduled, the cancel-token is never armed, and the registry is
-never touched. The bridge instrumentation can't observe what isn't there.
+The 2.0s early-settle fallback in PR #1088 is scheduled inside
+`EPUBWebViewBridge.updateUIView` immediately *after* `loadFileURL`. With
+the run not reaching that schedule call (per the same log-absence
+inference), the fallback `Task` is never scheduled, the cancel-token is
+never armed, and the registry is never touched. The bridge
+instrumentation can't observe what isn't there.
 
 **Conclusion**: there is a layer-3 EPUB blocker upstream of the bridge.
 Per the brief: *"if there is a THIRD EPUB race — file as Bug #252 and
@@ -98,7 +112,7 @@ The acceptance criteria coverage that round-3 *does* contribute:
 | 1 | Tap-on-highlight opens unified popover on TXT | DebugBridge highlight-create succeeds (`highlightCount: 0 → 1`, `lastError: null` on snapshot `r3-txt-after-hl.json`). Tap-on-highlight observation requires CU; CU display unavailable. | DEFERRED (CU blocker) |
 | 1 | Tap-on-highlight opens unified popover on MD | DebugBridge highlight-create succeeds (`highlightCount: 0 → 1`, `lastError: null` on snapshot `r3-md-after-hl.json`). Tap-on-highlight observation requires CU; CU display unavailable. | DEFERRED (CU blocker) |
 | 1 | Tap-on-highlight opens unified popover on PDF | No DebugBridge `highlight` support for PDF per `docs/subsystems/debug-bridge.md` (only TXT/MD/EPUB are wired). No PDF fixture in `DebugFixtureCatalog`. Cannot create a highlight without CU; cannot observe tap without CU. | DEFERRED (harness gap + CU blocker) |
-| 1 | Tap-on-highlight opens unified popover on EPUB | Settle returns `error: "settle timeout"`, `phase: "unknown"` 41-55s after `open` (2 independent attempts). **None of PR #1088's new logs fire**: no `loadFileURL: <file>`, no `didFinish: url=...`, no `didFail*`, no early-settle fallback fire. `EPUBWebViewBridge.updateUIView` is never invoked, which means the bridge is upstream-of-the-fix layer. **Filed as Bug #252**. | DEFERRED (new blocker: Bug #252) |
+| 1 | Tap-on-highlight opens unified popover on EPUB | Settle returns `error: "settle timeout"`, `phase: "unknown"` 41-55s after `open` (2 independent attempts). **None of PR #1088's new logs appear** in the filtered `subsystem == "com.vreader.app"` stream: no `loadFileURL: <file>`, no `didFinish: url=...`, no `didFail*`, no early-settle fallback fire. The strongest inference from absence: the run did not reach the `loadFileURL` logging site inside `EPUBWebViewBridge.updateUIView`, which sits upstream of every PR #1085 / PR #1088 code path. **Filed as Bug #252**. | DEFERRED (new blocker: Bug #252) |
 | 1 | Tap-on-highlight opens unified popover on AZW3 | Settle returns cleanly (no error) — Foliate WebView path works end-to-end on `mini-azw3` fixture. `vreader-debug://highlight` is a documented no-op on AZW3 (only TXT/MD/EPUB are wired in the observer), so `highlightCount` stays at 0 as expected. To exercise the tap-on-highlight path on AZW3, a highlight must first be created by the user (gesture path) OR a new bridge command must be added for AZW3/Foliate highlight-create. | DEFERRED (harness gap + CU blocker) |
 | 2 | Popover shows correct excerpt, color swatch, note | Cannot observe popover (CU + EPUB-load blockers). | DEFERRED |
 | 3 | Color change persists + repaints | Cannot exercise (no popover access). | DEFERRED |
@@ -110,8 +124,8 @@ The acceptance criteria coverage that round-3 *does* contribute:
 | — | DebugBridge highlight-driver creates highlight on TXT (post-#1088) | Snapshot `r3-txt-after-hl.json`: `highlightCount: 1`, `currentBookId: txt:bd8285a8...:1705`, `lastError: null`. Log: `txt highlight observer: created start=0 end=20 color=yellow`. | PASS (regression net — confirms #1088 didn't regress TXT) |
 | — | DebugBridge highlight-driver creates highlight on MD (post-#1088) | Snapshot `r3-md-after-hl.json`: `highlightCount: 1`, `currentBookId: md:963155b0...:925`, `lastError: null`. Log: `md highlight observer: created start=0 end=20 color=yellow`. | PASS (regression net) |
 | — | AZW3 (Foliate) settles cleanly under #1088 (Bug #1085's regression net) | Snapshot `r3-azw3.json`: `highlightCount: 0`, `currentBookId: azw3:fadbaa44...:128650`, `format: azw3`, `lastError: null`. Settle returned in <11s with no error. | PASS (Bug #1085 regression net intact post-#1088) |
-| — | PR #1088 Stage-1 instrumentation observable on EPUB load | **None of the new EPUB logs fire**: no `loadFileURL: <file>`, no `didFinish: url=...`, no `didFailProvisionalNavigation`, no `didFail`, no early-settle fallback. The bridge's `updateUIView` is never invoked, so the new logs that are emitted from inside it are never reached. This was the diagnostic the PR #1088 author hoped would *resolve* the round-2 inference; instead it provides a stronger inference in the same direction: the failure is upstream of the bridge. | DEFERRED (Bug #252 — upstream of the instrumentation) |
-| — | PR #1088 Stage-1 early-settle fallback fires on EPUB load | Unit-tested by `EPUBWebViewBridgeEarlySettleFallbackTests` (3 cases pass per PR body). **Not exercised on device**: the fallback `Task` is scheduled by `EPUBWebViewBridge.updateUIView` immediately after `loadFileURL`; with `updateUIView` never invoked, the fallback never schedules. | DEFERRED (Bug #252 — upstream of the fallback) |
+| — | PR #1088 Stage-1 instrumentation observable on EPUB load | **None of the new EPUB logs appear** in the filtered `subsystem == "com.vreader.app"` log stream: no `loadFileURL: <file>`, no `didFinish: url=...`, no `didFailProvisionalNavigation`, no `didFail`, no early-settle fallback. The bridge's `updateUIView` log site is not reached (inference from absence on a filtered stream). This was the diagnostic the PR #1088 author hoped would *resolve* the round-2 inference; instead it provides a stronger inference in the same direction: the failure is upstream of the bridge. **Direct observation requires** host-layer / `makeUIView` instrumentation, which the Bug #252 fix-direction names. | DEFERRED (Bug #252 — upstream of the instrumentation) |
+| — | PR #1088 Stage-1 early-settle fallback fires on EPUB load | Unit-tested by `EPUBWebViewBridgeEarlySettleFallbackTests` (3 cases pass per PR body). **Not exercised on device**: the fallback `Task` is scheduled by `EPUBWebViewBridge.updateUIView` immediately after `loadFileURL`; under the inference that `updateUIView`'s log site is not reached, the fallback never schedules either. | DEFERRED (Bug #252 — upstream of the fallback) |
 
 ## Commands run
 
@@ -158,7 +172,9 @@ for attempt in 1 2; do
 done
 # → Both attempts: ready-epub-r3*.json carries error="settle timeout", phase="unknown"
 
-# 4. Log capture — confirmation that PR #1088's instrumentation does NOT fire
+# 4. Log capture — filtered to com.vreader.app subsystem. The conclusion below
+#    is based on ABSENCE of expected app-subsystem logs in that filtered stream,
+#    not direct observation of the SwiftUI/representable lifecycle.
 xcrun simctl spawn "$UDID" log show --last 300s \
     --predicate 'subsystem == "com.vreader.app"' --info --debug --style compact
 # → Captured (only DebugBridge events, no EPUB events at info / debug / error):
@@ -216,14 +232,22 @@ xcrun simctl openurl "$UDID" "vreader-debug://snapshot?dest=r3-azw3.json"
      SwiftUI host nor the `UIViewRepresentable` ever lands `EPUBWebViewBridge`
      into the view hierarchy, so neither set of fixes is exercised.
 
-2. **The new instrumentation answered the round-2 question definitively.**
-   Round-2 ended with the inference *"the most parsimonious explanation is
-   that `didFinish` does not fire, but the round-2 instrumentation cannot
-   directly confirm that."* Round-3 now confirms: not only does `didFinish`
-   not fire, neither does any other coordinator callback — and most
-   importantly, **the bridge's `updateUIView` is never invoked**. The
-   `loadFileURL: <file>` log line from #1088 was the diagnostic; it's
-   silent. That moves the suspect surface from `EPUBWebViewBridgeCoordinator`
+2. **The new instrumentation strengthened the round-2 inference but did
+   not close it.** Round-2 ended with the inference *"the most
+   parsimonious explanation is that `didFinish` does not fire, but the
+   round-2 instrumentation cannot directly confirm that."* Round-3 now
+   strengthens that to a deeper inference: the filtered
+   `subsystem == "com.vreader.app"` log stream does not contain any of
+   PR #1088's new EPUB-category logs, including the
+   `[com.vreader.app:EPUB] loadFileURL: <file>` line that's emitted
+   inside `EPUBWebViewBridge.updateUIView` immediately before
+   `webView.loadFileURL(...)`. The strongest inference from that
+   absence: the run does not reach the `loadFileURL` log site inside
+   `updateUIView`. This **remains inference from absence on a filtered
+   stream** — round-3 did not add host-layer / `makeUIView` logs to
+   prove the bridge wasn't mounted vs mounted-but-bypassed.
+   Direct observation is the explicit fix-direction (b) named in Bug
+   #252. The suspect surface moves from `EPUBWebViewBridgeCoordinator`
    *up* to either `EPUBReaderContainerView`'s SwiftUI body / route, the
    `ReaderContainerView.engineReaderView` dispatch, or `ReaderEngine`'s
    format resolution. (All of these were churned heavily by feature #56
