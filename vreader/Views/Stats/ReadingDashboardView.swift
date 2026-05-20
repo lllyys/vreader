@@ -38,9 +38,11 @@ import SwiftUI
 /// itself in a `ReaderSheetChrome` "Stats" sheet over the active theme.
 struct ReadingDashboardView: View {
 
-    /// Pinned to the design — the Stats button label and the
-    /// `FullStatsDashboard` chrome title.
-    static let sheetTitle = "Stats"
+    /// Pinned to the design — `FullStatsDashboard` chrome title in
+    /// `vreader-profile-stats.jsx` (`<Sheet … title="Reading" …>`). The
+    /// Stats *button* (in `ProfileCardLibrary`) is labelled "Stats"; the
+    /// *sheet* it opens is titled "Reading" per the design bundle.
+    static let sheetTitle = "Reading"
 
     @Bindable private var viewModel: ReadingDashboardViewModel
     private let theme: ReaderThemeV2
@@ -157,16 +159,13 @@ struct ReadingDashboardView: View {
         }
     }
 
-    /// Subtitle copy under the hero — "Reading time, today" / "…, last 7 days" etc.
+    /// Subtitle copy under the hero — pinned to the design
+    /// `FullStatsDashboard` (`vreader-profile-stats.jsx`):
+    ///     `Reading time, {TIME_WINDOWS.label.toLowerCase()}`
+    /// i.e. the window pill's own label, lowercased. The result reads as
+    /// "Reading time, today" / "Reading time, 7d" / "Reading time, 30d"
+    /// / etc. — matching the design verbatim.
     private var activeWindowSublabel: String {
-        switch viewModel.activeWindow {
-        case .today:        return "today"
-        case .last7Days:    return "last 7 days"
-        case .last30Days:   return "last 30 days"
-        case .last90Days:   return "last 90 days"
-        case .last180Days:  return "last 180 days"
-        case .last365Days:  return "last 365 days"
-        case .allTime:      return "all time"
-        }
+        viewModel.activeWindow.label.lowercased()
     }
 }

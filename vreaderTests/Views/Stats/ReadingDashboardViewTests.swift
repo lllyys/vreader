@@ -101,9 +101,11 @@ struct ReadingDashboardViewTests {
     // MARK: - Sheet title (D1-A: design's "Stats" chrome)
 
     @Test func sheetTitleMatchesTheDesign() {
-        // Pinned to `vreader-profile-stats.jsx` — the Stats button label
-        // and the `FullStatsDashboard` chrome title.
-        #expect(ReadingDashboardView.sheetTitle == "Stats")
+        // Pinned to `vreader-profile-stats.jsx` `FullStatsDashboard`:
+        // `<Sheet … title="Reading" …>`. The Stats *button* (in
+        // `ProfileCardLibrary`) is labelled "Stats"; the *sheet* it opens
+        // is titled "Reading" per the design.
+        #expect(ReadingDashboardView.sheetTitle == "Reading")
     }
 
     // MARK: - Hero content (D4-A)
