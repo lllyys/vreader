@@ -33,6 +33,12 @@ protocol DebugBridgeContext {
     /// loaded, the action is a no-op (matches the parser's grammar
     /// guarantee but lets tests fire the URL without preconditions).
     func tts(action: String) async throws
+    /// Bug #238 — drive the in-reader search sheet from outside.
+    /// `query` runs the search; the optional `index` (0-indexed, ≥0)
+    /// taps result N once results arrive. The handler posts a
+    /// notification observed by the active reader. If no reader is
+    /// loaded, the action is a no-op (matches `tts` / `theme`).
+    func search(query: String, index: Int?) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -146,6 +152,8 @@ final class DebugBridge {
             try await context.eval(bridge: bridge, js: js)
         case .tts(let action):
             try await context.tts(action: action)
+        case .search(let query, let index):
+            try await context.search(query: query, index: index)
         }
     }
 }

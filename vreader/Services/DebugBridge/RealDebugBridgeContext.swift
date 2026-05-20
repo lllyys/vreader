@@ -261,6 +261,33 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         )
         log.info("tts: posted notification action=\(action, privacy: .public)")
     }
+
+    /// Bug #238 — drive the in-reader search sheet from outside the chrome.
+    ///
+    /// Posts `.debugBridgeSearchCommand` with `query` and optional `index`
+    /// (parser has already validated query non-empty and index ≥ 0 when
+    /// present). `ReaderContainerView` observes the notification when a
+    /// book is open; it opens the search sheet, sets `SearchViewModel.query`,
+    /// and — when an index is supplied — taps result N once results arrive.
+    /// If no reader is loaded, the URL is silently a no-op (the same posture
+    /// as `tts` / `theme`).
+    ///
+    /// `index` is omitted from `userInfo` when nil so observers can
+    /// distinguish "just run the query" from "run query and tap N".
+    func search(query: String, index: Int?) async throws {
+        var userInfo: [AnyHashable: Any] = ["query": query]
+        if let index {
+            userInfo["index"] = index
+        }
+        NotificationCenter.default.post(
+            name: .debugBridgeSearchCommand,
+            object: nil,
+            userInfo: userInfo
+        )
+        log.info(
+            "search: posted notification query=\(query, privacy: .public) index=\(index.map(String.init) ?? "nil", privacy: .public)"
+        )
+    }
 }
 
 #endif

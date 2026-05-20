@@ -195,6 +195,13 @@ struct ReaderContainerView: View {
     /// disappear. Holds a closure that the registry queries for the current
     /// position; v1 will wire per-format settle/eval hooks here.
     @State private var debugProbe: DebugReaderProbeAdapter?
+
+    /// Bug #238 — in-flight bridge-search task. A new
+    /// `.debugBridgeSearchCommand` URL cancels the previous task before
+    /// spawning a new one; `.onDisappear` also cancels so a late completion
+    /// can never fire `.readerNavigateToLocator` after the reader closes.
+    /// `internal` (not `private`) for the +DebugBridgeSearch extension.
+    @State var debugBridgeSearchTask: Task<Void, Never>?
     #endif
 
     var body: some View {
@@ -500,6 +507,15 @@ struct ReaderContainerView: View {
                 break
             }
         }
+        // Bug #238 — drive the in-reader search sheet from outside the
+        // chrome. Factored into a dedicated `ViewModifier` (same precedent
+        // as `ReaderOpenAITranslateObserver`) so adding the new observer
+        // doesn't push `body` over SwiftUI's type-inference budget.
+        .modifier(ReaderDebugBridgeSearchObserver(
+            onCommand: { query, index in
+                handleDebugBridgeSearchCommand(query: query, index: index)
+            }
+        ))
         #endif
         // PERF: Single deferred .task for all non-critical setup.
         // Per-book settings + TOC prep deferred to avoid contending with the
@@ -603,9 +619,16 @@ struct ReaderContainerView: View {
         // post-await block in `startAZW3TTS` also re-checks
         // `Task.isCancelled`, so cancellation here suppresses late
         // speech even if the walk had already resolved.
+        // Bug #238 (DEBUG-only): same posture for the bridge-search
+        // task — kill it so a late result tap can never post
+        // `.readerNavigateToLocator` after the reader closes.
         .onDisappear {
             azw3ExtractionTask?.cancel()
             azw3ExtractionTask = nil
+            #if DEBUG
+            debugBridgeSearchTask?.cancel()
+            debugBridgeSearchTask = nil
+            #endif
         }
         #if DEBUG
         .onAppear {

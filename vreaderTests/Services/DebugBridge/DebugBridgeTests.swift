@@ -33,6 +33,26 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_searchURLWithQueryOnly_callsSearchHandlerWithNilIndex() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://search?query=alice")!)
+
+        XCTAssertEqual(context.calls, [.search(query: "alice", index: nil)])
+    }
+
+    @MainActor
+    func test_handle_searchURLWithQueryAndIndex_callsSearchHandler() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://search?query=alice&index=2")!)
+
+        XCTAssertEqual(context.calls, [.search(query: "alice", index: 2)])
+    }
+
+    @MainActor
     func test_handle_unknownCommand_recordsParseErrorWithoutCallingHandlers() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -183,6 +203,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func snapshot(dest: String, lastErrorMessage: String?) async throws { await record("snapshot:\(dest)") }
     func eval(bridge: String, js: String) async throws { await record("eval:\(bridge)") }
     func tts(action: String) async throws { await record("tts:\(action)") }
+    func search(query: String, index: Int?) async throws {
+        await record("search:\(query):\(index.map(String.init) ?? "nil")")
+    }
 }
 
 // MARK: - Recorder
@@ -201,6 +224,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case snapshot(dest: String, lastErrorMessage: String?)
         case eval(bridge: String, js: String)
         case tts(action: String)
+        case search(query: String, index: Int?)
     }
 
     private(set) var calls: [Call] = []
@@ -221,6 +245,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         calls.append(.eval(bridge: bridge, js: js))
     }
     func tts(action: String) async throws { calls.append(.tts(action: action)) }
+    func search(query: String, index: Int?) async throws {
+        calls.append(.search(query: query, index: index))
+    }
 }
 
 #endif

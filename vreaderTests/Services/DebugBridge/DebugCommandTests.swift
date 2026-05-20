@@ -440,6 +440,128 @@ final class DebugCommandTests: XCTestCase {
             XCTAssertEqual(name, "action")
         }
     }
+
+    // MARK: - search (Bug #238 — verification harness search-driver)
+
+    func test_parse_searchWithQueryOnly_returnsSearchWithNilIndex() throws {
+        let url = URL(string: "vreader-debug://search?query=alice")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .search(query: "alice", index: nil))
+    }
+
+    func test_parse_searchWithQueryAndIndex_returnsSearchWithIndex() throws {
+        let url = URL(string: "vreader-debug://search?query=alice&index=2")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .search(query: "alice", index: 2))
+    }
+
+    func test_parse_searchWithIndexZero_returnsSearchWithIndexZero() throws {
+        // Index 0 is valid — taps the first result.
+        let url = URL(string: "vreader-debug://search?query=alice&index=0")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .search(query: "alice", index: 0))
+    }
+
+    func test_parse_searchWithPercentEncodedQuery_decodesIt() throws {
+        // The percent-encoded query reaches the parser as URLComponents already
+        // decodes %20 → space, %2B → '+', etc. Verifies the harness can pass a
+        // multi-word query through the URL safely.
+        let url = URL(string: "vreader-debug://search?query=white%20rabbit&index=1")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .search(query: "white rabbit", index: 1))
+    }
+
+    func test_parse_searchWithCJKQuery_decodesIt() throws {
+        // CJK characters in the query are percent-encoded by the caller and
+        // decoded by URLComponents. Mirrors the verify-cron's real workload
+        // (Bug #182 cross-chapter EPUB search uses CJK text).
+        let cjk = "白兔"
+        let encoded = cjk.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let url = URL(string: "vreader-debug://search?query=\(encoded)")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .search(query: cjk, index: nil))
+    }
+
+    func test_parse_searchMissingQuery_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://search")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "query")
+        }
+    }
+
+    func test_parse_searchEmptyQuery_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://search?query=")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "query")
+        }
+    }
+
+    func test_parse_searchIndexOnly_throwsMissingParam() {
+        // index without query is an error — they go together. The harness
+        // cannot meaningfully tap a result without first running a query.
+        let url = URL(string: "vreader-debug://search?index=0")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "query")
+        }
+    }
+
+    func test_parse_searchNonIntegerIndex_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://search?query=alice&index=notanint")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "index")
+        }
+    }
+
+    func test_parse_searchNegativeIndex_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://search?query=alice&index=-1")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "index")
+        }
+    }
+
+    func test_parse_searchEmptyIndexValue_throwsInvalidParam() {
+        // `index=` (empty value) is malformed — should not parse as 0 silently.
+        let url = URL(string: "vreader-debug://search?query=alice&index=")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "index")
+        }
+    }
+
+    func test_parse_searchDuplicateQuery_throwsInvalidParam() {
+        // Duplicate keys are rejected by the parser's queryParams helper.
+        let url = URL(string: "vreader-debug://search?query=alice&query=bob")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "query")
+        }
+    }
 }
 
 #endif

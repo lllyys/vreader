@@ -53,6 +53,25 @@ extension Notification.Name {
     /// userInfo:
     /// - `"action"`: String — "start" or "stop" (validated by parser).
     static let debugBridgeTTSCommand = Notification.Name("vreader.debugBridge.ttsCommand")
+
+    /// Posted by RealDebugBridgeContext.search to drive the in-reader search
+    /// sheet (Bug #238 verification harness). The active reader's observer
+    /// opens the search sheet, sets `SearchViewModel.query`, and — when the
+    /// optional `"index"` key is present — taps result N once results arrive
+    /// (re-firing `.readerNavigateToLocator` then dismissing the sheet).
+    ///
+    /// The harness uses this URL family to reach search-result-tap repros
+    /// (e.g. Bug #182 cross-chapter EPUB search highlight) without
+    /// computer-use. If no reader is loaded, observers don't fire — the URL
+    /// is silently a no-op (the same `tts` / `theme` posture).
+    ///
+    /// userInfo:
+    /// - `"query"`: String — the search query (validated non-empty by parser;
+    ///   percent-encoded values reach observers already decoded).
+    /// - `"index"`: Int? — optional tap target (0-indexed, ≥0), present only
+    ///   when the bridge command included the `index=` parameter. When
+    ///   absent, observers run the query only.
+    static let debugBridgeSearchCommand = Notification.Name("vreader.debugBridge.searchCommand")
 }
 
 #endif

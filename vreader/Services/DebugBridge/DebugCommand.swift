@@ -26,6 +26,12 @@ import Foundation
 ///   WI-4c-b). XCUITest's gesture path cannot reliably activate
 ///   `AVSpeechSynthesizer`'s audio session, so verification tests fire this URL
 ///   after opening a book to bypass the play-button tap.
+/// - `search?query=<str>[&index=<int>]` — drive the in-reader search sheet
+///   (Bug #238 verification harness). `query` opens the search sheet and runs
+///   the query; the optional `index` (0-indexed, ≥0) taps result N once
+///   results arrive. The harness uses this to drive search-result-tap repros
+///   (e.g. Bug #182 cross-chapter EPUB search highlight verification) without
+///   computer-use. No-op when no reader is presented.
 enum DebugCommand: Equatable {
     case reset
     case seed(fixture: String)
@@ -35,6 +41,7 @@ enum DebugCommand: Equatable {
     case snapshot(dest: String)
     case eval(bridge: String, js: String)
     case tts(action: String)
+    case search(query: String, index: Int?)
 
     /// Reader theme selector for the `theme` command.
     ///
@@ -157,6 +164,40 @@ extension DebugCommand {
                 )
             }
             return .tts(action: action)
+
+        case "search":
+            // Bug #238: verification harness search-driver. `query` opens
+            // the search sheet + runs the query; optional `index` (0-indexed,
+            // ≥0) taps result N. `index` without `query` is rejected — they
+            // go together (the harness cannot meaningfully tap a result
+            // before running a query). The empty-value rejection on `index`
+            // matches `requireParam`'s posture on the other commands.
+            let query = try requireParam("query", in: params)
+            let index: Int?
+            if let rawIndex = params["index"] {
+                guard !rawIndex.isEmpty else {
+                    throw DebugCommandError.invalidParam(
+                        "index",
+                        reason: "expected non-negative integer, got empty value"
+                    )
+                }
+                guard let parsed = Int(rawIndex) else {
+                    throw DebugCommandError.invalidParam(
+                        "index",
+                        reason: "expected non-negative integer, got \(rawIndex)"
+                    )
+                }
+                guard parsed >= 0 else {
+                    throw DebugCommandError.invalidParam(
+                        "index",
+                        reason: "must be ≥ 0, got \(parsed)"
+                    )
+                }
+                index = parsed
+            } else {
+                index = nil
+            }
+            return .search(query: query, index: index)
 
         default:
             throw DebugCommandError.unknownCommand(host)

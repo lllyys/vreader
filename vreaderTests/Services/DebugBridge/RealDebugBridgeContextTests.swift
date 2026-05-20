@@ -1071,6 +1071,113 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertEqual(snap.highlightCount, 3)
         try? FileManager.default.removeItem(at: url)
     }
+
+    // MARK: - search (Bug #238 — verification harness search-driver)
+    //
+    // RealDebugBridgeContext.search posts `.debugBridgeSearchCommand` with the
+    // parsed query + optional index. The active reader's `.onReceive` observer
+    // (ReaderContainerView, Bug #238 wiring) routes the query into the search
+    // sheet and — when an index is supplied — taps result N once results
+    // arrive. When no reader is loaded, the URL is silently a no-op (mirrors
+    // the `tts` / `theme` posture).
+
+    @MainActor
+    func test_search_postsSearchCommandNotificationWithQueryOnly() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "searchCommand notification posted")
+        nonisolated(unsafe) var receivedQuery: String?
+        nonisolated(unsafe) var hasIndex: Bool = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeSearchCommand, object: nil, queue: .main
+        ) { notification in
+            receivedQuery = notification.userInfo?["query"] as? String
+            hasIndex = notification.userInfo?["index"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.search(query: "alice", index: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedQuery, "alice")
+        XCTAssertFalse(hasIndex,
+                       "userInfo must omit 'index' when nil was passed — lets observers distinguish 'just run query' from 'run query and tap N'")
+    }
+
+    @MainActor
+    func test_search_postsSearchCommandNotificationWithQueryAndIndex() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "searchCommand notification posted with index")
+        nonisolated(unsafe) var receivedQuery: String?
+        nonisolated(unsafe) var receivedIndex: Int?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeSearchCommand, object: nil, queue: .main
+        ) { notification in
+            receivedQuery = notification.userInfo?["query"] as? String
+            receivedIndex = notification.userInfo?["index"] as? Int
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.search(query: "rabbit", index: 2)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedQuery, "rabbit")
+        XCTAssertEqual(receivedIndex, 2)
+    }
+
+    @MainActor
+    func test_search_postsSearchCommandWithIndexZero() async throws {
+        // Index 0 is a valid tap target (tap the first result). Verify
+        // the bridge does not collapse 0 with nil.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "searchCommand notification posted with index=0")
+        nonisolated(unsafe) var receivedIndex: Int?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeSearchCommand, object: nil, queue: .main
+        ) { notification in
+            receivedIndex = notification.userInfo?["index"] as? Int
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.search(query: "alice", index: 0)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedIndex, 0, "index=0 must reach observers as 0, not nil")
+    }
+
+    @MainActor
+    func test_search_endToEndThroughBridge_dispatchesAndPostsNotification() async throws {
+        // End-to-end: URL → DebugBridge.handle → RealDebugBridgeContext.search.
+        // Verifies the parser → dispatcher → handler → notification chain is
+        // fully wired and that the bridge clears `lastError` on success.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+        let bridge = DebugBridge(context: context)
+
+        let exp = expectation(description: "search notification posted via bridge")
+        nonisolated(unsafe) var receivedQuery: String?
+        nonisolated(unsafe) var receivedIndex: Int?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeSearchCommand, object: nil, queue: .main
+        ) { notification in
+            receivedQuery = notification.userInfo?["query"] as? String
+            receivedIndex = notification.userInfo?["index"] as? Int
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        await bridge.handle(URL(string: "vreader-debug://search?query=white%20rabbit&index=1")!)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedQuery, "white rabbit",
+                       "percent-encoded query must reach observers decoded")
+        XCTAssertEqual(receivedIndex, 1)
+        XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
+    }
 }
 
 /// Probe whose awaitSettle always throws settleTimeout. Lets the timeout
