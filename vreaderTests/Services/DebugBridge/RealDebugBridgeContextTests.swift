@@ -955,13 +955,15 @@ final class RealDebugBridgeContextTests: XCTestCase {
             persistence: persistence, importer: importer, userDefaults: defaults
         )
         let token = "epub-no-wv-\(UUID().uuidString)"
-        // Use the test-seam settleWithTimeout to pin the WebView-wait
-        // budget — `settle()` (the production API) uses the same internal
-        // helper but with a 5-second EPUB WebView wait that would slow the
-        // test. The behavior we're pinning is: after probe.awaitSettle
-        // resolves, the bridge checks `epubWebView(for:)` and surfaces
-        // `webview not registered` when the registry's EPUB slot is empty.
-        try await context.settleWithTimeout(token: token, timeoutSeconds: 0.5)
+        // Use the test-seam settleWithTimeout's webViewWaitSeconds
+        // override to pin the WebView-wait budget — the production
+        // 5-second Stage-2 wait would slow the test. The behavior we're
+        // pinning is: after probe.awaitSettle resolves, the bridge polls
+        // the registry's EPUB slot and surfaces `webview not registered`
+        // when the slot is empty.
+        try await context.settleWithTimeout(
+            token: token, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
 
         let url = try RealDebugBridgeContext.snapshotsDirectory()
             .appendingPathComponent("ready-\(token).json")
@@ -976,9 +978,13 @@ final class RealDebugBridgeContextTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
-    /// Bug #250 / GH #1084: when the EPUB WebView IS registered (the normal
+    /// Bug #250 / GH #1084: when the EPUB WebView IS registered AND the
+    /// `expectedReaderToken` matches the slot's stored token (the normal
     /// success path), settle returns clean — no error key, mirroring the
-    /// pre-fix behavior for non-WebView readers and the TXT path.
+    /// pre-fix behavior for non-WebView readers and the TXT path. Token
+    /// match is required because the production `epubWebView(for:token:)`
+    /// accessor is token-keyed; the gate must accept ONLY when downstream
+    /// commands can actually use the slot.
     @MainActor
     func test_settle_onEPUBProbe_withRegisteredWebView_writesNoErrorSentinel() async throws {
         DebugReaderRegistry.shared.reset()
@@ -987,7 +993,8 @@ final class RealDebugBridgeContextTests: XCTestCase {
         defer { DebugReaderRegistry.shared.unregister(probe) }
 
         // Build a real WKWebView reference and register it via the same
-        // path the EPUB coordinator's didFinish uses — token-keyed write.
+        // path the EPUB coordinator's didFinish uses — token-keyed write
+        // AND token-keyed read.
         let token = UUID()
         DebugReaderRegistry.shared.setExpectedReaderToken(token)
         let webView = WKWebView()
@@ -999,7 +1006,9 @@ final class RealDebugBridgeContextTests: XCTestCase {
             persistence: persistence, importer: importer, userDefaults: defaults
         )
         let sentinelToken = "epub-wv-ok-\(UUID().uuidString)"
-        try await context.settleWithTimeout(token: sentinelToken, timeoutSeconds: 0.5)
+        try await context.settleWithTimeout(
+            token: sentinelToken, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
 
         let url = try RealDebugBridgeContext.snapshotsDirectory()
             .appendingPathComponent("ready-\(sentinelToken).json")
@@ -1029,7 +1038,9 @@ final class RealDebugBridgeContextTests: XCTestCase {
             persistence: persistence, importer: importer, userDefaults: defaults
         )
         let token = "azw3-no-wv-\(UUID().uuidString)"
-        try await context.settleWithTimeout(token: token, timeoutSeconds: 0.5)
+        try await context.settleWithTimeout(
+            token: token, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
 
         let url = try RealDebugBridgeContext.snapshotsDirectory()
             .appendingPathComponent("ready-\(token).json")
@@ -1057,7 +1068,9 @@ final class RealDebugBridgeContextTests: XCTestCase {
             persistence: persistence, importer: importer, userDefaults: defaults
         )
         let token = "txt-skip-\(UUID().uuidString)"
-        try await context.settleWithTimeout(token: token, timeoutSeconds: 0.5)
+        try await context.settleWithTimeout(
+            token: token, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
 
         let url = try RealDebugBridgeContext.snapshotsDirectory()
             .appendingPathComponent("ready-\(token).json")
@@ -1067,6 +1080,91 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(json?["error"],
                      "TXT probe must skip the WebView-registration check and report success")
         XCTAssertEqual(json?["format"] as? String, "txt")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084 (Codex Gate-4 round-1 High fix): the same-key
+    /// reopen race — outgoing reader A's WebView slot persists into
+    /// incoming reader B's lifetime (same `fingerprintKey`, B's token is
+    /// the new `expectedReaderToken`). A token-agnostic gate would falsely
+    /// report "registered" because the slot's KEY matches; downstream
+    /// `vreader-debug://highlight-create` would still fail because
+    /// `epubWebView(for:token:)` (the production accessor) is token-keyed.
+    /// This test pins that settle correctly surfaces `webview not
+    /// registered` when the slot's stored token doesn't match the
+    /// registry's expected reader token.
+    @MainActor
+    func test_settle_onEPUBProbe_withStaleTokenWebView_writesWebViewNotRegisteredError() async throws {
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "epub:qrst:4096", format: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        // Stale slot: outgoing reader A's token is bound to the slot,
+        // then incoming reader B takes over `expectedReaderToken`. The
+        // slot's key still matches but its token is now stale.
+        let staleToken = UUID()
+        DebugReaderRegistry.shared.setExpectedReaderToken(staleToken)
+        let staleWebView = WKWebView()
+        DebugReaderRegistry.shared.setActiveEPUBWebView(
+            staleWebView, for: probe.fingerprintKey, token: staleToken
+        )
+        // Now reader B mounts — replaces expectedReaderToken without
+        // overwriting the slot (the matching coordinator's didFinish
+        // hasn't fired yet for reader B).
+        let liveToken = UUID()
+        DebugReaderRegistry.shared.setExpectedReaderToken(liveToken)
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let sentinelToken = "epub-stale-tok-\(UUID().uuidString)"
+        try await context.settleWithTimeout(
+            token: sentinelToken, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(sentinelToken).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "webview not registered",
+                       "EPUB probe with a stale-token WebView slot must surface webview-not-registered, not success — production `epubWebView(for:token:)` would return nil for the live reader, breaking downstream highlight-create")
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "epub:qrst:4096")
+        XCTAssertEqual(json?["format"] as? String, "epub")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084 (Codex Gate-4 round-1 Medium fix): format
+    /// strings persisted in the bug-#1065 era can carry mixed case
+    /// (`"EPUB"`, `"AZW3"`). The reader dispatch path lowercases via
+    /// `BookFormat(rawValue: book.format.lowercased())`; the WebView
+    /// gate must normalize the same way or it would silently skip the
+    /// gate for any mixed-case row and re-open the false-success window.
+    @MainActor
+    func test_settle_onEPUBProbe_withMixedCaseFormat_stillEntersWebViewGate() async throws {
+        DebugReaderRegistry.shared.reset()
+        // Mixed-case format string — the gate must lowercase before
+        // matching against the EPUB/Foliate switch.
+        let probe = SettleOKProbe(fingerprintKey: "epub:uvwx:8192", format: "EPUB")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "epub-mixed-case-\(UUID().uuidString)"
+        try await context.settleWithTimeout(
+            token: token, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "webview not registered",
+                       "Mixed-case `EPUB` format must normalize to lowercase and enter the WebView gate — without normalization, the gate would silently skip and the bug recurs")
         try? FileManager.default.removeItem(at: url)
     }
 

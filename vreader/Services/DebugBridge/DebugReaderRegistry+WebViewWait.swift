@@ -43,13 +43,18 @@ extension DebugReaderRegistry {
     /// their text directly from Swift and have no WebView dependency, so
     /// the gate is a no-op for them.
     ///
-    /// `format` is the raw string the probe carries — the same one the
-    /// snapshot wire format uses (per `DebugSnapshot.format`).
+    /// `format` is normalized to lowercase before matching — `probe.format`
+    /// carries the raw `book.format` value (`ReaderContainerView.swift`
+    /// constructs the adapter with `format: book.format`), and historical
+    /// rows can carry mixed case (`"EPUB"`, `"AZW3"`). The reader dispatch
+    /// path already lowercases via `BookFormat(rawValue: book.format
+    /// .lowercased())`; this helper must do the same or it would silently
+    /// skip the gate for any mixed-case row.
     static func formatRequiresWebView(_ format: String) -> Bool {
         // Foliate is the single host for the AZW3 family per
         // `FormatCapabilities` (azw3, azw, mobi, prc). Match the lower-
         // case strings the snapshot path emits.
-        switch format {
+        switch format.lowercased() {
         case "epub", "azw3", "azw", "mobi", "prc":
             return true
         default:
@@ -58,12 +63,15 @@ extension DebugReaderRegistry {
     }
 
     /// Return `true` if the WebView slot the given `format` is gated on
-    /// has been populated for `fingerprintKey`. The token check is
-    /// intentionally omitted here — the gate's job is to confirm "any
-    /// WebView is registered for this key", not "the WebView for this
-    /// specific reader-instance". Token-keyed checks are the call site's
-    /// concern (see `epubWebView(for:token:)` / `foliateWebView(for:token:)`
-    /// in `DebugReaderRegistry.swift`).
+    /// has been populated for `fingerprintKey` AND the active
+    /// `expectedReaderToken` matches the slot's stored token (Codex
+    /// Gate-4 round-1 High fix). The token check closes a same-key
+    /// reopen race: outgoing reader A and incoming reader B share a
+    /// `fingerprintKey`; A's slot can persist past A's `unregister` when
+    /// `activeReader === reader` is false (B already took over), so the
+    /// slot's *key* matches B but its *token* still belongs to A. A
+    /// token-agnostic check would falsely report "registered" while
+    /// `epubWebView(for:token:)` (the production accessor) returns nil.
     ///
     /// Returns `false` for any format that doesn't require a WebView (per
     /// `formatRequiresWebView`) — the gate is a no-op shape that lets the
@@ -71,13 +79,23 @@ extension DebugReaderRegistry {
     func hasActiveWebView(for fingerprintKey: String, format: String) -> Bool {
         #if canImport(WebKit)
         guard Self.formatRequiresWebView(format) else { return false }
-        switch format {
+        switch format.lowercased() {
         case "epub":
-            return activeEPUBWebViewKeyInternal == fingerprintKey
-                && rawActiveEPUBWebViewForTests != nil
+            // Token-keyed match — see `epubWebView(for:token:)` for the
+            // production-equivalent guard.
+            guard activeEPUBWebViewKeyInternal == fingerprintKey,
+                  rawActiveEPUBWebViewForTests != nil,
+                  let activeToken = rawActiveEPUBWebViewTokenForTests,
+                  expectedReaderTokenForTests == activeToken
+            else { return false }
+            return true
         case "azw3", "azw", "mobi", "prc":
-            return activeFoliateWebViewKeyInternal == fingerprintKey
-                && rawActiveFoliateWebViewForTests != nil
+            guard activeFoliateWebViewKeyInternal == fingerprintKey,
+                  rawActiveFoliateWebViewForTests != nil,
+                  let activeToken = rawActiveFoliateWebViewTokenForTests,
+                  expectedReaderTokenForTests == activeToken
+            else { return false }
+            return true
         default:
             return false
         }
@@ -91,13 +109,15 @@ extension DebugReaderRegistry {
     /// path (where `setActiveEPUBWebView` / `setActiveFoliateWebView` has
     /// already fired by the time settle reaches this gate) the wait is
     /// effectively zero; the wait grows only when the WebView slot is
-    /// genuinely lagging — exactly the scenario bug #250 names.
+    /// genuinely lagging or stale-token-mismatched — exactly the scenarios
+    /// bug #250 names.
     ///
     /// Throws `DebugReaderProbeError.settleTimeout` if the deadline expires
-    /// before the slot is populated. The bridge's `+Settle.swift` catch-
-    /// block maps that to the `webview not registered` sentinel error so
-    /// callers see a different field value than the `settle timeout`
-    /// (probe layer) and `no active reader` (registration layer) paths.
+    /// before the slot is populated AND matches the expected token. The
+    /// bridge's `+Settle.swift` catch-block maps that to the
+    /// `webview not registered` sentinel error so callers see a different
+    /// field value than the `settle timeout` (probe layer) and
+    /// `no active reader` (registration layer) paths.
     func awaitWebViewRegistered(
         for fingerprintKey: String,
         format: String,
@@ -105,7 +125,7 @@ extension DebugReaderRegistry {
     ) async throws {
         // Fast path: not a WebView format — nothing to wait for.
         guard Self.formatRequiresWebView(format) else { return }
-        // Fast path: already registered.
+        // Fast path: already registered and token-matched.
         if hasActiveWebView(for: fingerprintKey, format: format) {
             return
         }
@@ -117,18 +137,24 @@ extension DebugReaderRegistry {
         }
 
         let pollIntervalNS: UInt64 = 50_000_000 // 50ms
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        // Codex Gate-4 round-2 Low fix: use ContinuousClock for the
+        // deadline so a system-clock change (NTP step, manual time
+        // adjustment) doesn't make the poll exit early or hang past the
+        // intended budget. Task.sleep is still the right cancellation-
+        // aware sleep primitive — the bridge's outer withSettleTimeout
+        // race needs to cancel this poll cleanly.
+        let clock = ContinuousClock()
+        let start = clock.now
+        let budget: Duration = .nanoseconds(Int64(timeout * 1_000_000_000))
+        while (clock.now - start) < budget {
             if hasActiveWebView(for: fingerprintKey, format: format) {
                 return
             }
-            // Task.sleep IS cancellation-aware — the bridge's outer
-            // withSettleTimeout race can cancel this poll cleanly.
             try await Task.sleep(nanoseconds: pollIntervalNS)
         }
         // Last check after the loop — a slot can flip in the gap between
-        // the final `Date() < deadline` test and the timeout. Without this
-        // tail check, a flip racing with the deadline reports a false
+        // the final deadline test and the timeout. Without this tail
+        // check, a flip racing with the deadline reports a false
         // negative.
         if hasActiveWebView(for: fingerprintKey, format: format) {
             return
