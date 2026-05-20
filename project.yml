@@ -146,8 +146,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
-        CURRENT_PROJECT_VERSION: 608
-        MARKETING_VERSION: 3.38.33
+        CURRENT_PROJECT_VERSION: 609
+        MARKETING_VERSION: 3.38.34
     info:
       # XcodeGen writes vreader/SupportingFiles/Info.plist with this content.
       # We need a real Info.plist (not Xcode's auto-generated one) because
