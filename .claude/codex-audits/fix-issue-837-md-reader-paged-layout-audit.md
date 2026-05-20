@@ -1,3 +1,11 @@
+---
+branch: fix/issue-837-md-reader-paged-layout
+threadId: 019e47a7-38eb-7a03-b175-def5e40f8df7
+rounds: 2
+final_verdict: follow-up-recommended
+date: 2026-05-21
+---
+
 # Codex audit — Bug #215 / GH #837 — MD reader paged layout
 
 **Branch**: `fix/issue-837-md-reader-paged-layout`
