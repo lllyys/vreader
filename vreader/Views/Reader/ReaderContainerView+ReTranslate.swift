@@ -114,6 +114,19 @@ extension ReaderContainerView {
             let vm = ensureReTranslateVM(
                 initialProfileID: activeOrFirstProfile.id,
                 initialModel: activeOrFirstProfile.model)
+            // Codex Gate-4 round-1 Low (thread `019e4399-b8cd`): the VM is
+            // reused across opens, so its previous picker selection may
+            // reference a profile that's since been deleted. Reset to the
+            // active-or-first profile so the picker always has a valid
+            // selection — the submit path can't fail purely because the
+            // selected profile vanished between opens.
+            let validProfileIDs = Set(snapshot.profiles.map(\.id))
+            if !validProfileIDs.contains(vm.selection.providerProfileID) {
+                vm.updateSelection { selection in
+                    selection.providerProfileID = activeOrFirstProfile.id
+                    selection.model = activeOrFirstProfile.model
+                }
+            }
             vm.presentPicker(
                 unit: unit,
                 unitTitle: reTranslateUnitTitle(for: unit),
@@ -160,8 +173,24 @@ extension ReaderContainerView {
                 // backing state (chapter index, EPUB spine cache) is fully
                 // value/actor-isolated. The async suspension doesn't block
                 // the main actor.
-                guard let provider else { return "" }
-                return (try? await provider.sourceText(for: unit)) ?? ""
+                //
+                // **Throwing on purpose (Codex Gate-4 round-1 Critical, thread
+                // `019e4399-b8cd`)**: an empty string means "legitimately
+                // empty unit" (the VM completes the run as no-op). A throw
+                // surfaces a real source-text failure or cancellation up
+                // to the VM, which rolls back to the picker WITHOUT posting
+                // the misleading "Re-translated" success state.
+                //
+                // No-provider edge case: the VM presents the picker only
+                // after `handleReTranslateChapterRequested` confirmed a
+                // provider was published; an unset capture here is the
+                // host-swap edge case (provider replaced mid-flight) — we
+                // surface it as a throw so the VM rolls back.
+                guard let provider else {
+                    struct NoProviderError: Error {}
+                    throw NoProviderError()
+                }
+                return try await provider.sourceText(for: unit)
             })
 
         // Apply translations back to the chrome notification so the active

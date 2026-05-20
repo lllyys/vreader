@@ -133,9 +133,23 @@ final class ChapterReTranslateViewModel {
     private let store: ChapterTranslationStore
     /// Asynchronous source-text provider. Adapters resolve the unit's text
     /// off the main thread (PDFKit page extraction, EPUB spine read, Foliate
-    /// WKWebView message) — wrapping this in `@Sendable async` lets the host
-    /// stay on the main actor while the actual text resolution suspends.
-    private let sourceTextProvider: @Sendable (TranslationUnitID) async -> String
+    /// WKWebView message) — wrapping this in `@Sendable async throws` lets
+    /// the host stay on the main actor while the actual text resolution
+    /// suspends, AND lets the VM differentiate three outcomes: an empty
+    /// string returned (legitimately empty unit, complete with no work), a
+    /// `CancellationError` thrown (cancel path, return to picker), or any
+    /// other thrown error (surface in the picker's error banner).
+    ///
+    /// **Critical fix (Codex Gate-4 round-1 Critical, thread
+    /// `019e4399-b8cd`)**: the previous signature was non-throwing with the
+    /// host wrapping the call in `try?` — any thrown error from the
+    /// underlying `ChapterTextProviding.sourceText(for:)` collapsed to
+    /// empty text, the VM's empty-source branch treated it as success,
+    /// posted `[]` back into the bilingual VM, and ended in `.complete` —
+    /// while having already deleted the original cache row. The throwing
+    /// signature surfaces the failure honestly so the VM can roll back to
+    /// the picker without a misleading "Re-translated" success state.
+    private let sourceTextProvider: @Sendable (TranslationUnitID) async throws -> String
     private let log = Logger(subsystem: "com.vreader.app", category: "ChapterReTranslateViewModel")
 
     /// In-flight translation task — cancelled by `cancel()`.
@@ -151,7 +165,7 @@ final class ChapterReTranslateViewModel {
         resolver: any RetranslateProviderResolving,
         runner: any ChapterReTranslating,
         store: ChapterTranslationStore,
-        sourceTextProvider: @escaping @Sendable (TranslationUnitID) async -> String
+        sourceTextProvider: @escaping @Sendable (TranslationUnitID) async throws -> String
     ) {
         self.bookFingerprintKey = bookFingerprintKey
         self.promptVersion = promptVersion
@@ -271,8 +285,24 @@ final class ChapterReTranslateViewModel {
 
         progress = 0.25
 
-        // 2. Source text for the unit. Empty source → no translation work.
-        let sourceText = await sourceTextProvider(unit)
+        // 2. Source text for the unit. Three outcomes (Codex Gate-4 round-1
+        //    Critical, thread `019e4399-b8cd`):
+        //    - empty string returned → legitimately empty unit, complete.
+        //    - CancellationError thrown → cancel path; restore picker.
+        //    - any other Error thrown → surface in picker, do NOT post a
+        //      misleading "Re-translated" success.
+        let sourceText: String
+        do {
+            sourceText = try await sourceTextProvider(unit)
+        } catch is CancellationError {
+            // Cancellation: cancel() (or a dismiss) already restored state.
+            return
+        } catch {
+            log.error("sourceText(for:) failed: \(String(describing: error), privacy: .public)")
+            lastError = "Couldn't read the chapter text. Try again."
+            sheetState = .picker
+            return
+        }
         guard !sourceText.isEmpty else {
             log.info("empty source text for unit \(unit.storageKey, privacy: .public); skipping")
             onTranslationApplied?(unit, [])

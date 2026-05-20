@@ -115,7 +115,7 @@ struct ChapterReTranslateViewModelTests {
             resolver: resolver,
             runner: runner,
             store: store,
-            sourceTextProvider: { _ in sourceText })  // implicit async, returns immediately
+            sourceTextProvider: { _ in sourceText })  // implicit async throws, returns immediately
     }
 
     // MARK: - Initial state
@@ -292,6 +292,73 @@ struct ChapterReTranslateViewModelTests {
         #expect(runnerCalls.isEmpty)
         // The host gets a no-op callback (no translations to apply).
         #expect(vm.sheetState == .complete)
+    }
+
+    // MARK: - Source-text extraction failure
+
+    @Test func submit_sourceTextProviderThrows_surfacesErrorAndDoesNotApply() async throws {
+        // Codex Gate-4 round-1 Critical (thread `019e4399-b8cd`): a thrown
+        // sourceText error must roll back to .picker with an error message
+        // — it must NOT post the empty-source success state, which would
+        // leave the original cache row deleted and the user believing the
+        // re-translate succeeded.
+        struct ExtractionFailed: Error {}
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: [], fromCache: false)))
+        let vm = ChapterReTranslateViewModel(
+            bookFingerprintKey: Self.bookKey,
+            promptVersion: Self.promptVersion,
+            initialProviderProfileID: Self.initialProfileID,
+            initialModel: "initial-model",
+            resolver: resolver,
+            runner: runner,
+            store: store,
+            sourceTextProvider: { _ in throw ExtractionFailed() })
+
+        var translationsApplied: [TranslationUnitID: [String]] = [:]
+        vm.onTranslationApplied = { unit, segments in
+            translationsApplied[unit] = segments
+        }
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        // No translation applied (no spurious empty [] flowed back).
+        #expect(translationsApplied.isEmpty)
+        // Runner was not called.
+        let runnerCalls = await runner.calls
+        #expect(runnerCalls.isEmpty)
+        // Sheet rolled back to picker with an error visible.
+        #expect(vm.sheetState == .picker)
+        #expect(vm.lastError != nil)
+    }
+
+    @Test func submit_sourceTextProviderCancels_returnsWithoutApplyOrError() async throws {
+        // CancellationError thrown by the source-text provider should
+        // restore state via the cancel() path — no error banner, no apply.
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: [], fromCache: false)))
+        let vm = ChapterReTranslateViewModel(
+            bookFingerprintKey: Self.bookKey,
+            promptVersion: Self.promptVersion,
+            initialProviderProfileID: Self.initialProfileID,
+            initialModel: "initial-model",
+            resolver: resolver,
+            runner: runner,
+            store: store,
+            sourceTextProvider: { _ in throw CancellationError() })
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        // No translation applied, no error surfaced — clean cancellation.
+        let runnerCalls = await runner.calls
+        #expect(runnerCalls.isEmpty)
+        #expect(vm.lastError == nil)
     }
 
     // MARK: - Provider override does not mutate ProviderProfileStore
