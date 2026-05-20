@@ -54,6 +54,101 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
      All were FIXED in Summary but had not been archived per the
      "Move to archive on FIXED" rule. -->
 
+### Bug #247 — WebDAV restore loses book titles — restored TXT/MD/PDF books show `restore_<sha256>` filename as title (TODO 2026-05-20)
+
+**Reported** by the user, 2026-05-20 (`/triage`): "the books from web-dav backups lost there names".
+
+**Symptom (user-confirmed via questionnaire)**: after restoring from
+WebDAV backup, books in the library show titles like `restore_<sha256>`
+(the content-addressed temp filename used during materialization)
+instead of the original book name. User confirms TXT is affected;
+suspects EPUB / AZW3 / PDF may share the bug.
+
+**Repro**:
+
+1. Set up WebDAV backend (e.g. the local rclone test server).
+2. Import a TXT book with a recognisable filename (e.g. `war-and-peace.txt`).
+3. Run backup → confirm `library-manifest.json` carries the title and
+   the blob is uploaded under `VReader/books/txt/<sha256>_<bytes>.txt`.
+4. Wipe app data (or restore on a fresh install).
+5. Run restore.
+6. Open library. The restored book's title row reads
+   `restore_<sha256-hex>` (or similar SHA-prefixed string) instead of
+   `war-and-peace`.
+
+**Expected**: restored books carry their original titles (taken from
+the manifest, which the backup step extracted at backup time).
+
+**Actual**: restored books carry the SHA-prefixed temp-file name as
+their title for formats without embedded title metadata.
+
+**Root cause (code-read, high confidence)**:
+
+- `BookFileMaterializer.materializeOneDownload`
+  (`vreader/Services/Backup/BookFileMaterializer.swift:194-196`)
+  writes the downloaded blob to a temp file named
+  `restore_<sha256>.<originalExtension>` and then calls
+  `importer.importFile(at: tempURL, source: .restore)`.
+- `BookImporter.importFile(...)` derives the title from
+  `MetadataExtractor.extractMetadata(from: fileURL)`.
+- For formats without embedded title metadata — **TXT**
+  (`TXTMetadataExtractor` uses filename) and **MD**
+  (`MDMetadataExtractor`, same) — the title becomes the SHA-prefixed
+  temp filename.
+- For formats with optional embedded titles (**PDF** in particular),
+  when the PDF's metadata `Title` field is empty the fallback is the
+  same filename-derived path → also broken.
+- **EPUB** (`EPUBMetadataExtractor` reads `<dc:title>` from
+  `package.opf`) and **AZW3** (reads MOBI header title) usually
+  escape this bug because their formats embed titles in the file
+  contents.
+
+**Manifest already carries the right title — it's just not used**:
+
+- `BackupLibraryEntry.title: String?` exists in the manifest schema
+  (`BackupSectionDTOs.swift:262`). The doc-comment even says: *"The
+  materializer re-extracts these from the imported file via
+  `MetadataExtractor`; they're carried in the manifest so future
+  selective-restore UI (feature #47) can show them before downloading
+  the blob."* The "re-extracts from the imported file" assumption is
+  exactly what fails for filename-derived-title formats.
+
+**Fix direction (three viable options)**:
+
+1. **Easiest** — in `BookFileMaterializer` write the temp file with a
+   filename derived from `entry.title` (sanitised + uniquified with
+   the SHA suffix to stay collision-free under concurrent restores).
+   Falls back to the current SHA-prefixed name when the manifest's
+   `title` is nil.
+2. **More correct** — add a `titleOverride: String?` parameter to
+   `BookImporter.importFile(...)` and pass `entry.title` from the
+   materializer. Preserves the manifest as the source of truth for
+   pre-extracted metadata. The importer's metadata-extraction step
+   continues to run (still authoritative for everything else); when
+   the extractor's title is empty AND a titleOverride is supplied,
+   use the override.
+3. **Post-import patch** — after `importFile` returns, update the
+   persisted Book's `title` if it equals the temp-file filename AND
+   the manifest carries a non-nil title.
+
+Option (b) is the cleanest and matches the manifest-as-source-of-truth
+invariant the plan already documents.
+
+**Latent since feature #46 (VERIFIED) and #47 (VERIFIED) shipped**.
+Both features' acceptance criteria covered "book file present after
+restore" and "library shows restored books"; neither explicitly
+asserted the *titles* round-trip for filename-derived-title formats.
+
+**Severity High** — every restore on a non-embedded-title format
+loses every book's name, making the restored library unusable
+without manual rename. Affects feature #46 + #47's device-verified
+scope.
+
+**Verification harness**: after the fix lands, run a full backup →
+wipe → restore cycle against the local rclone WebDAV server with at
+least one of each format (TXT, MD, PDF, EPUB, AZW3) and confirm each
+book carries the original title in the library after restore.
+
 ### Bug #246 — AZW3 book opens in the wrong reader UI — `FoliateBilingualContainerView` route not selected for the AZW3 file (TODO 2026-05-20)
 
 **Reported** by the user, 2026-05-20 (`/triage`): "azw3 book now at wrong format". Symptom-questionnaire clarified to "Opens in the wrong reader UI" — the AZW3 book opens but the reader visually is NOT the Foliate-js AZW3 reader.
@@ -771,6 +866,7 @@ The scroll math (`attemptScrollRestore`, `scrollToMatchedOffset`) is unchanged �
 
 | #  | Summary                                                                                               | File/Area  | Severity | Status   | Notes                                                                                                                                                                                              |
 | -- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 247| WebDAV restore loses book titles — restored TXT/MD/PDF books show `restore_<sha256>` filename as title instead of the original book name | Backup/Restore | High | TODO | **Filed 2026-05-20 (user triage — "the books from web-dav backups lost there names")**. **Symptom (user-confirmed)**: after restoring from WebDAV backup, books in the library show titles like `restore_abc123…` (the content-addressed temp filename) instead of the original book name. User confirms TXT is affected; suspects EPUB/AZW3/PDF may share the bug. **Root cause (code-read, high confidence)**: `BookFileMaterializer.materializeOneDownload` (`vreader/Services/Backup/BookFileMaterializer.swift:194-196`) writes the downloaded blob to a temp file named `restore_<sha256>.<originalExtension>` and then hands it to `BookImporter.importFile(at: tempURL, source: .restore)`. `BookImporter` derives the book title from `MetadataExtractor.extractMetadata(from: fileURL)`. For formats with no embedded title metadata — **TXT** (`TXTMetadataExtractor` uses filename) and **MD** (`MDMetadataExtractor`, same) — the title becomes the SHA-prefixed temp name. For formats with optional embedded titles (**PDF** in particular), when the PDF metadata is empty the fallback is the same filename-derived path → also broken. **EPUB** (`EPUBMetadataExtractor` reads `<dc:title>` from `package.opf`) and **AZW3** (reads MOBI header title) usually escape this bug because their formats embed titles in the file contents. **The manifest already carries the correct title** in `BackupLibraryEntry.title: String?` (see `BackupSectionDTOs.swift:262`), but `BookFileMaterializer` doesn't pass it to the importer, and `BookImporter` has no `titleOverride` parameter — so the manifest title is unused at materialize time. Latent since feature #46 (WebDAV materializing restore, VERIFIED) and feature #47 (selective restore, VERIFIED) shipped. **Fix direction (3 viable options)**: (a) **easiest** — in `BookFileMaterializer` write the temp file with the manifest's title-derived filename (e.g. `<title>.<originalExtension>`, sanitised + uniquified with the SHA suffix); (b) **more correct** — add a `titleOverride: String?` parameter to `BookImporter.importFile(...)` and pass `entry.title` from the materializer (preserves the manifest as the source of truth); (c) **post-import patch** — after `importFile` returns, update the persisted Book's `title` if it equals the temp-file filename AND the manifest carries a non-nil title. Option (b) is the cleanest and matches the manifest-as-source-of-truth invariant the plan already documents. **Severity High** — every restore on a non-embedded-title format loses every book's name, making the restored library unusable without manual rename. Includes feature #46 + #47 device-verified-VERIFIED scope. See Open Bug Details. GH: #1074 |
 | 246| AZW3 book opens in the wrong reader UI — `FoliateBilingualContainerView` route not selected for AZW3 file | Reader/AZW3 | High | TODO | **Filed 2026-05-20 (user triage — "azw3 book now at wrong format")**. **Symptom**: an AZW3 book in the library, when tapped open, renders in a reader UI that is NOT the Foliate-js AZW3 reader (i.e., the user-visible UI is the EPUB / TXT / PDF / MD reader instead). User has only tested one AZW3 file. **AZW3 was openable correctly on v3.37.x and earlier (feature #11 / #21 acceptance runs landed against an AZW3 fixture; Bug #108 closure 2026-05-04 confirmed Foliate route was wired). Recent changes touching AZW3 routing or rendering between v3.37 → v3.38**: feature #56 WI-11 (`e8c1c2e4` — AZW3/MOBI bilingual interlinear renderer + Foliate host wiring; introduces `FoliateBilingualContainerView` as a wrapper around `FoliateSpikeView`); feature #56 WI-15 (`5adc346b` — per-chapter re-translation picker + progress + host wiring, **final WI**); feature #54 WI-3 (`e30f7693` — route reader dispatch by `ReaderEngine`, the .azw3 → .foliateWeb case is the routing target for this complaint). Code-read of `ReaderContainerView.engineReaderView` confirms `.azw3 → .foliateWeb → FoliateBilingualContainerView` case is wired (lines 876–889); `ReaderEngine.resolve(.azw3)` returns `.foliateWeb`. So the routing-by- format itself is intact. **Most likely root cause**: the book's persisted `format` field is something other than `"azw3"` (e.g. `"epub"`, `"mobi"`, `"azw"`) so `BookFormat(rawValue: book.format.lowercased())` returns a non-`.azw3` case, and `ReaderEngine.resolve` then routes to the wrong engine. Suspect causes for the wrong format string: (1) import path lost track of the canonical format on a recent migration; (2) feature #59 file-URL import-router (`FileURLImportRouter`) misclassifies on a specific extension; (3) a backup-restore path coerced the format. **Fix direction**: (a) log `book.format`, `book.originalExtension`, and the resolved `BookFormat` for the affected book to confirm what string is persisted; (b) if the field is wrong, bisect the import / restore path to find when it was set; (c) if the field IS `"azw3"`, the regression is downstream in the `engineReaderView` dispatch or `FoliateBilingualContainerView` itself (less likely given the wrapper still has `FoliateSpikeView(...)` in its `body`). **Severity High** — core app functionality, AZW3 is a major format, regression hits every AZW3 user. See Open Bug Details. GH: #1072 |
 | 245| TXT bilingual mode renders chrome pill but does NOT render inline translations even after disk-cache hit | Reader/TXT | Medium | TODO | **Filed 2026-05-20 by verify cron** during Feature #56 Gate-5b round-2 acceptance verification (`dev-docs/verification/feature-56-20260520-round2.md`). **Symptom**: turn bilingual ON for a TXT book (war-and-peace.txt), run "Translate entire book" → 4/4 chapters land in `ZCHAPTERTRANSLATION` SwiftData rows (criterion c verified — disk-cache pipeline PASSES). The EN ↔ 中 reader-chrome pill paints (criterion a verified). But the chapter text still renders English-only — no interlinear Chinese segments below each paragraph. Killing the app + relaunching + re-opening the book still doesn't render inline translations, even though the disk cache rows survive. **Root cause confirmed by code-read**: TXT reader's `bilingualNonce` (`TXTReaderContainerView.swift:163-170`) reads `vm.translations(for: unit)?.count` from `BilingualReadingViewModel.translationsByUnit` — an in-memory dict, NOT the disk store. The dict is only populated by `vm.startPrefetch(...)` → `prefetcher.translate(...)` → `vm.setTranslations(...)`, and the only trigger for `startPrefetch` is `vm.handlePositionChange(locator)` (BilingualReadingViewModel+Prefetch.swift:58-97). **EPUB / Foliate / PDF / MD all wire `handlePositionChange`** (EPUBReaderContainerView+Bilingual.swift:142, FoliateBilingualContainerView.swift:304, PDFReaderContainerView+Bilingual.swift:189, MDReaderContainerView.swift:224 posts the position notification observed in ReaderContainerView). **TXT does not** — `TXTReaderContainerView.swift` has `onChange(of: viewModel.currentChapterIdx)` handlers but they only call `updateChapterScrollFraction()` and never post `.readerPositionDidChange` or invoke `vm.handlePositionChange`. So the bilingual VM's in-memory dict is never populated for TXT, the compose pipeline (`BilingualDisplayPipeline.compose`) short-circuits to the identity pass-through (no segments → returns source verbatim), and the chapter renders English-only. **Repro on v3.38.16 / build 591**: (1) Configure an AI provider (e.g., via `vreader-debug://provider?action=add&...`); (2) seed war-and-peace.txt; (3) open the book; (4) turn bilingual ON via More menu → setup sheet → Confirm; (5) tap Book details → Translate entire book → Translate; wait ~30s for 4/4 DONE; (6) close the Book Details sheet and observe the chapter text — English-only despite 4 ZCHAPTERTRANSLATION rows in the cache. **Fix direction**: in `TXTReaderContainerView.swift`'s `bilingualSurfacesModifier`-equivalent or the existing `onChange(of: viewModel.currentChapterIdx)` block, drive `Task { await bilingualViewModel?.handlePositionChange(makeLocator()) }` after the VM is ready (use the `bilingualViewModel != nil` precondition mirroring EPUB+Bilingual). Also drive an initial `handlePositionChange` once `ensureBilingualViewModel()` constructs the VM AND chapter index is loaded (mirror EPUB's `handleBilingualBlocks(_:)` warm-up). The compose pipeline + offset router + segment map already handle the rendering — only the trigger is missing. **Test**: a `TXTReaderContainerView+BilingualRenderTests` Swift Testing suite asserting that with bilingual ON + cached translations present, `chapterAttrString` length > `typographedAttrString.length` for the current chapter (the composer extends the string with translation runs). **Severity Medium** — bilingual mode silently has no visible effect for TXT-format books with cached translations; user sees the EN ↔ 中 pill (implies the feature is on) but the chapter text is unchanged. Major user-facing gap. No data loss (disk cache is intact); user-recoverable IF they know to scroll/navigate, but the gap is the missing trigger, not the renderer. EPUB / Foliate / PDF / MD are unaffected (their wires are present). **Filed, not fixed** — verify cron files bugs, never fixes them. GH: #1070 |
 | 244| EPUB reader opens but content area is blank — no text rendered on tap-from-library | Reader/EPUB | High | TODO | **Renumbered 243 → 244 on 2026-05-20** — concurrent parallel work landed the DebugBridge `provider`-URL-family bug at #243 on `main` (PR #1062 / GH #1057) while this user-triage row was being filed at the same number. Per the #225/#226/#228 and #236→#239 collision precedent, the established row keeps the number; this newcomer renumbers. GH issue title updated #1065 "Bug #243…" → "Bug #244…" via `gh issue edit`. **Filed 2026-05-20 (user triage — "can not open the epub books now")**. **Symptom**: tapping an EPUB in the library navigates to the reader (chrome visible) but the content area renders empty (no text). User has only tried one EPUB so all-vs-specific scope unconfirmed at filing time. **EPUB load-path was openable on v3.37.x and earlier (feature #11 VERIFIED, feature #21 VERIFIED, feature #54 WI-3 routed through `ReaderEngine.resolve(.epub) = .epubWKWebView` and the path still exists in `ReaderContainerView.engineReaderView`). Heavy churn in EPUB load surface between v3.37 → v3.38: feature #56 WI-10 (commit `2544fa2f` — bilingual interlinear renderer, 53 lines added to `EPUBReaderContainerView.swift`, 18 to `EPUBWebViewBridge.swift`, 25 to `EPUBWebViewBridgeCoordinator.swift`, 24 modified in `EPUBHighlightJS.swift`, new `EPUBReaderContainerView+Bilingual.swift` of 329 lines, R-EPUB-CFI fix), feature #62 WI-5 (`d17f6dfd` — rewire reader chrome to TOCSheet + HighlightsSheet, delete legacy panel), feature #64 WI-8 (`2bab1d07` — migrate EPUB container to unified highlight popover), feature #64 WI-10 (`18bd553a` — tear down superseded #55/#53 highlight surfaces), feature #491 WI-3 (`d37bcc1e` — route EPUB font size through `FontSizeCalibrator`). Primary suspect = #56 WI-10 by surface-area-touched count.** **Fix direction**: bisect from origin/main HEAD backward across feature #56 WI-10 / #62 WI-5 / #64 WI-8 / #64 WI-10 / #54 WI-3 against a known-openable EPUB fixture; reader chrome visible but content blank narrows to `EPUBWebViewBridge.loadEPUB` / `EPUBReaderContainerView.onReceive` lifecycle vs. the WKWebView's first content load (HTML payload empty? CSS theme hides text? bilingual JS injects before content arrives? overlay strip masks content?). Confirm scope (single EPUB vs all) by importing a fresh fixture (`mini-epub3` or Alice). **Severity High** — opening books is core app functionality; EPUB is a major format; regression hits every EPUB user. See Open Bug Details. GH: #1065 |
