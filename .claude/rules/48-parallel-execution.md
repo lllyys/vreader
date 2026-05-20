@@ -79,6 +79,59 @@ A subagent without one of these will drift.
 - Never give two concurrent agents the same worktree. One worktree = one writer.
 - The main checkout's working tree must be clean before spawning a worktree-based agent — pre-existing dirty state poisons the agent's git context.
 
+## Worktree cwd discipline (binding for every worktree-isolated agent)
+
+**Failure mode.** When the orchestrator spawns a subagent with `Agent(subagent_type: claude, isolation: worktree, ...)`, the Agent harness creates the worktree but does **NOT** set the spawned subprocess's initial cwd to the worktree path. The agent's Bash tool starts with `cwd = orchestrator's cwd` (typically `/Users/ll/workspace/vreader`, the main checkout). The agent must explicitly `cd "<worktree-path>"` at the start of **every** Bash call. The Bash tool persists cwd between calls in a single session, but a single early call from the wrong cwd writes files to the wrong place — and any later `xcodegen generate` in the contaminated main checkout will fold those stray files into `vreader.xcodeproj/project.pbxproj`, producing a build that fails on any clean clone with "file not found in compile sources".
+
+**Standing precedent.** This class of bug has manifested multiple times:
+
+- **v3.37.18 → v3.37.19 hotfix (PR #1029)**: the WI-7b → WI-8 transition shipped stray `ReaderMoreMenuBilingualTests.swift` references in `project.pbxproj` without the source file being git-tracked. Required a dedicated hotfix PR to restore main.
+- **Bugfix #957 agent self-report**: the agent caught itself mid-flow — "my first 4 Bash calls accidentally cd'd into /Users/ll/workspace/vreader (main checkout) instead of staying in the worktree, so the initial RED→GREEN cycle ran in the main repo. I patched this mid-flow by saving the diff to /tmp, reverting the main checkout, and re-applying the patch inside the worktree on the proper branch before committing." Self-rescue, no main contamination shipped, but only because the agent noticed.
+- **Bug #241 filing (2026-05-20)**: filed by the verify cron after 3+ recurrences in a single session.
+
+The session-tested workaround: **the briefs from WI-10 onward all included an explicit "cd "<worktree-path>" first" discipline in their preamble, and no contamination recurred for the agents that received that discipline.** This subsection codifies that workaround into a rule.
+
+**Mandate.** Every worktree-isolated agent's brief MUST include a "Critical Operational" preamble that:
+
+1. States the exact worktree path the agent is expected to operate inside.
+2. Requires `cd "<worktree-path>"` at the **start of every `Bash` tool call** — not just the first one. (A single later call that omits the prefix can silently land work in the main checkout.)
+3. Requires `pwd` confirmation in the first Bash call, before any edit or write, so the agent fails loudly if it's not where it expects to be.
+4. Names the consequence explicitly so the agent treats the discipline as load-bearing, not decorative: contaminating main produces broken builds on clean clones and costs a hotfix PR.
+
+This requirement applies to **every** worktree-isolated agent spawn — feature agents, bugfix agents, audit subagents, verification subagents. There is no "small task" exemption; the contamination cost is the same whether the agent writes one file or twenty.
+
+**Copy-pasteable preamble template** (orchestrators: paste verbatim into the brief, substituting the worktree path):
+
+```
+## CRITICAL OPERATIONAL — binding
+
+Your worktree path is: <ABSOLUTE-WORKTREE-PATH>
+
+Every `Bash` tool call you issue MUST begin with `cd "<ABSOLUTE-WORKTREE-PATH>"`.
+Before your first edit or write, run `pwd` and confirm it prints the worktree
+path. If `pwd` does NOT match, stop and report — do NOT attempt to recover by
+guessing.
+
+The Agent harness creates the worktree but does NOT set your initial cwd to
+it. Your Bash tool starts with cwd = the orchestrator's main checkout
+(`/Users/ll/workspace/vreader`). A single Bash call that forgets the `cd`
+prefix can write to the main checkout instead of your worktree; a later
+`xcodegen generate` then folds stray files into `project.pbxproj` and breaks
+the build on every clean clone. Standing precedent: PR #1029 (v3.37.19) was a
+hotfix for exactly this pattern; bug #957's agent self-rescued from the same
+drift mid-flow.
+
+This is binding for every Bash call, not just the first. Do not skip this in
+the interest of brevity.
+```
+
+**Orchestrator checklist when spawning a worktree-isolated agent.** Before sending the brief:
+
+- [ ] The brief includes the "Critical Operational" preamble (or an equivalent that names the cwd, the `pwd` confirmation, and the consequence).
+- [ ] The worktree path is the **absolute** path, not a relative one.
+- [ ] If the brief includes multi-step bash sequences, every step starts with `cd "<worktree-path>"` (compound commands `cd X && Y && Z` are fine — what's not fine is a later Bash call that omits the prefix and assumes the previous call's cwd persists).
+- [ ] If the agent reports something that smells like contamination (PR has unexpected `project.pbxproj` references, `git status` in main checkout shows files the agent shouldn't have written), treat the agent's output as suspect and verify by inspecting the main checkout's working tree before merging.
+
 ## Worked examples
 
 **Good — mixed gates, this session's `#46 WI-0a + #48 planning`**:
