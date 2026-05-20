@@ -46,6 +46,11 @@ extension RealDebugBridgeContext {
             return
         }
         var settleError: String?
+        // Stage 1: probe-level render-complete. A probe-layer
+        // `.settleTimeout` here is genuinely a probe failure — the
+        // sentinel reports `settle timeout` and we do NOT proceed to the
+        // Stage 2 WebView gate (the probe is the cause, not a missing
+        // WebView slot).
         do {
             try await withSettleTimeout(seconds: timeoutSeconds) {
                 try await probe.awaitSettle(timeout: timeoutSeconds)
@@ -56,6 +61,33 @@ extension RealDebugBridgeContext {
             settleError = "settle timeout"
         } catch {
             settleError = String(describing: error)
+        }
+
+        // Stage 2: WebView registration gate. Only entered when Stage 1
+        // succeeded. Bug #250: `markReaderSettled` and
+        // `setActiveEPUBWebView` fire in lockstep from the same
+        // didFinish callback, but the registry's stale-write guard
+        // (`expectedReaderToken != token`) can silently reject the
+        // WebView write in a same-key reopen race. Without this gate,
+        // settle reports success on a registry with an empty WebView
+        // slot, and a downstream `vreader-debug://highlight-create`
+        // logs `no active EPUB WebView registered`. The wait is bounded
+        // (5s) so a malformed fixture still reaches the sentinel path
+        // with a precise error string. The error string is distinct
+        // (`webview not registered`) so callers can tell apart the
+        // probe-layer timeout from the registry-layer gap.
+        if settleError == nil {
+            do {
+                try await DebugReaderRegistry.shared.awaitWebViewRegistered(
+                    for: probe.fingerprintKey,
+                    format: probe.format,
+                    timeout: Self.webViewWaitSeconds
+                )
+            } catch DebugReaderProbeError.settleTimeout {
+                settleError = "webview not registered"
+            } catch {
+                settleError = String(describing: error)
+            }
         }
 
         try writeReadySentinel(token: token, probe: probe, error: settleError)
@@ -69,6 +101,15 @@ extension RealDebugBridgeContext {
     /// Default settle timeout. Not URL-configurable in v0; harness can
     /// shorten by triggering its own timeout if needed.
     static var settleTimeoutSeconds: TimeInterval { 30.0 }
+
+    /// Bug #250: bounded additional wait for the format-specific WebView
+    /// registration after `probe.awaitSettle` resolves. Kept short — the
+    /// happy path completes in <100ms because `setActiveEPUBWebView` and
+    /// `markReaderSettled` fire in the same didFinish callback; the wait
+    /// only stretches when the stale-write guard rejected the WebView
+    /// register, in which case 5s is plenty to surface the failure as a
+    /// `webview not registered` sentinel instead of a 30s false-positive.
+    static var webViewWaitSeconds: TimeInterval { 5.0 }
 
     // MARK: - Internal helpers (extension-scoped)
 

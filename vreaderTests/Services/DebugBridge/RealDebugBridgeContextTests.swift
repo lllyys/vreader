@@ -7,6 +7,9 @@
 
 import XCTest
 import SwiftData
+#if canImport(WebKit)
+import WebKit
+#endif
 @testable import vreader
 
 final class RealDebugBridgeContextTests: XCTestCase {
@@ -927,6 +930,146 @@ final class RealDebugBridgeContextTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
+    // MARK: - Bug #250: settle waits for WebView registration on EPUB/AZW3
+
+    /// Bug #250 / GH #1084: a probe whose `awaitSettle` resolves cleanly but
+    /// whose format is "epub" should NOT cause settle to report success when
+    /// no EPUB WebView has been registered with the registry — settle's
+    /// contract for the WebView-backed formats is "render-complete AND
+    /// WebView registered". Without the fix, the harness's downstream
+    /// `vreader-debug://highlight-create` URL fires before the WebView
+    /// registry slot is populated, and the highlight observer logs
+    /// `no active EPUB WebView registered` instead of creating a highlight.
+    @MainActor
+    func test_settle_onEPUBProbe_withoutRegisteredWebView_writesWebViewNotRegisteredError() async throws {
+        // Use the production registry shared instance because the prod
+        // settle handler reads from DebugReaderRegistry.shared. We reset it
+        // first (mirrors the no-active-reader case) so prior tests' probe
+        // state can't leak in.
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "epub:abcd:1024", format: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "epub-no-wv-\(UUID().uuidString)"
+        // Use the test-seam settleWithTimeout to pin the WebView-wait
+        // budget — `settle()` (the production API) uses the same internal
+        // helper but with a 5-second EPUB WebView wait that would slow the
+        // test. The behavior we're pinning is: after probe.awaitSettle
+        // resolves, the bridge checks `epubWebView(for:)` and surfaces
+        // `webview not registered` when the registry's EPUB slot is empty.
+        try await context.settleWithTimeout(token: token, timeoutSeconds: 0.5)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "webview not registered",
+                       "EPUB probe without a registered WebView must surface webview-not-registered, not success")
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "epub:abcd:1024")
+        XCTAssertEqual(json?["format"] as? String, "epub")
+        XCTAssertEqual(json?["phase"] as? String, "unknown")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084: when the EPUB WebView IS registered (the normal
+    /// success path), settle returns clean — no error key, mirroring the
+    /// pre-fix behavior for non-WebView readers and the TXT path.
+    @MainActor
+    func test_settle_onEPUBProbe_withRegisteredWebView_writesNoErrorSentinel() async throws {
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "epub:efgh:2048", format: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        // Build a real WKWebView reference and register it via the same
+        // path the EPUB coordinator's didFinish uses — token-keyed write.
+        let token = UUID()
+        DebugReaderRegistry.shared.setExpectedReaderToken(token)
+        let webView = WKWebView()
+        DebugReaderRegistry.shared.setActiveEPUBWebView(
+            webView, for: probe.fingerprintKey, token: token
+        )
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let sentinelToken = "epub-wv-ok-\(UUID().uuidString)"
+        try await context.settleWithTimeout(token: sentinelToken, timeoutSeconds: 0.5)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(sentinelToken).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertNil(json?["error"],
+                     "EPUB probe with registered WebView must succeed without an error key")
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "epub:efgh:2048")
+        XCTAssertEqual(json?["format"] as? String, "epub")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084: AZW3 / MOBI books render via Foliate; the
+    /// WebView is stored under a different registry slot
+    /// (`activeFoliateWebView*`). settle's WebView-registration check must
+    /// route by format — an AZW3 probe without a Foliate WebView gets the
+    /// same "webview not registered" error, never an EPUB false-positive.
+    @MainActor
+    func test_settle_onAZW3Probe_withoutRegisteredFoliateWebView_writesWebViewNotRegisteredError() async throws {
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "azw3:ijkl:512", format: "azw3")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "azw3-no-wv-\(UUID().uuidString)"
+        try await context.settleWithTimeout(token: token, timeoutSeconds: 0.5)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "webview not registered",
+                       "AZW3 probe without a registered Foliate WebView must surface webview-not-registered")
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "azw3:ijkl:512")
+        XCTAssertEqual(json?["format"] as? String, "azw3")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084: TXT / MD / PDF readers have no WebView slot —
+    /// their settle path must continue to succeed without any WebView
+    /// registration check (otherwise we break every non-WebView format).
+    @MainActor
+    func test_settle_onTXTProbe_skipsWebViewCheckAndSucceeds() async throws {
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "txt:mnop:64", format: "txt")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "txt-skip-\(UUID().uuidString)"
+        try await context.settleWithTimeout(token: token, timeoutSeconds: 0.5)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertNil(json?["error"],
+                     "TXT probe must skip the WebView-registration check and report success")
+        XCTAssertEqual(json?["format"] as? String, "txt")
+        try? FileManager.default.removeItem(at: url)
+    }
+
     @MainActor
     func test_eval_withoutActiveReader_writesErrorFileButDoesNotThrow() async throws {
         DebugReaderRegistry.shared.reset()
@@ -1602,6 +1745,33 @@ private final class TimingOutProbe: DebugReaderProbe {
 
     func awaitSettle(timeout: TimeInterval) async throws {
         throw DebugReaderProbeError.settleTimeout
+    }
+
+    func evaluateJavaScript(_ script: String) async throws -> Data {
+        throw DebugReaderProbeError.evalUnsupported(format: format)
+    }
+}
+
+/// Bug #250 / GH #1084: probe whose `awaitSettle` resolves immediately
+/// without throwing — exercises the "render-complete OK, WebView slot
+/// pending" subpath that the WebView-registration gate must surface as
+/// `webview not registered`. Sibling of TimingOutProbe / HangingProbe; the
+/// distinguishing axis is that this one SUCCEEDS at the probe layer so the
+/// bridge-side WebView check is what determines the sentinel's `error`
+/// field. Re-using `TimingOutProbe` would conflate the two failure modes.
+@MainActor
+private final class SettleOKProbe: DebugReaderProbe {
+    let fingerprintKey: String
+    let format: String
+    var currentPositionString: String? = nil
+
+    init(fingerprintKey: String, format: String) {
+        self.fingerprintKey = fingerprintKey
+        self.format = format
+    }
+
+    func awaitSettle(timeout: TimeInterval) async throws {
+        // No-op — the probe's render-complete contract is satisfied.
     }
 
     func evaluateJavaScript(_ script: String) async throws -> Data {
