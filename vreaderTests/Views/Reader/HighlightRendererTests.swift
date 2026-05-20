@@ -145,6 +145,45 @@ struct TextHighlightRendererTests {
         #expect(state.highlightRange == NSRange(location: 10, length: 10))
     }
 
+    @Test @MainActor func applyIsIdempotentOnSameHighlightId() {
+        // Bug #237 round-2 audit (Medium): `HighlightCoordinator.create` may
+        // resolve the same `HighlightRecord` twice when two callers race on
+        // the same locator — the persistence layer dedupes (returning the
+        // existing record), but `renderer.apply(record:)` was previously
+        // appending the range every call. The DebugBridge highlight-driver
+        // can fire URLs back-to-back, surfacing the latent double-paint.
+        // The fix: skip the append when the highlightId is already tracked.
+        let state = TextReaderUIState()
+        let renderer = TextHighlightRenderer(uiState: state)
+        let id = UUID()
+        let recordA = makeRecord(id: id, start: 10, end: 20)
+        let recordB = makeRecord(id: id, start: 10, end: 20) // same id
+
+        renderer.apply(record: recordA)
+        renderer.apply(record: recordB)
+
+        #expect(state.persistedHighlightRanges.count == 1,
+                "second apply with the same highlightId must not double-append")
+        #expect(state.persistedHighlightLookup.count == 1,
+                "second apply with the same highlightId must not double-track in the lookup")
+    }
+
+    @Test @MainActor func applyIsIdempotentEvenWhenColorChanged() {
+        // Same id, different color. The first apply wins — a follow-up
+        // mutation should go through `restoreAll` / `changeColor` (which
+        // rebuilds the state from scratch), not a second `apply`.
+        let state = TextReaderUIState()
+        let renderer = TextHighlightRenderer(uiState: state)
+        let id = UUID()
+
+        renderer.apply(record: makeRecord(id: id, start: 0, end: 5, color: "yellow"))
+        renderer.apply(record: makeRecord(id: id, start: 0, end: 5, color: "pink"))
+
+        #expect(state.persistedHighlightRanges.count == 1)
+        #expect(state.persistedHighlightRanges[0].colorName == "yellow",
+                "first-write-wins on the dedupe path; color updates flow through restoreAll")
+    }
+
     @Test @MainActor func removeClearsActiveHighlight() {
         let state = TextReaderUIState()
         state.highlightRange = NSRange(location: 10, length: 10)
