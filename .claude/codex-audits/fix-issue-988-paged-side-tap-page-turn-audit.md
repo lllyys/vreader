@@ -1,3 +1,11 @@
+---
+branch: fix/issue-988-paged-side-tap-page-turn
+threadId: 019e477e-9369-7010-a91b-6a2bd418d266
+rounds: 1
+final_verdict: follow-up-recommended
+date: 2026-05-21
+---
+
 # Codex audit — Bug #239 / GH #988 — Paged-layout side-tap page-turn restoration
 
 **Branch:** `fix/issue-988-paged-side-tap-page-turn`
