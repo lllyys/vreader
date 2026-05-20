@@ -80,6 +80,14 @@ extension MDReaderContainerView {
 
     /// Lazily constructs the bilingual VM + prefetcher once parsing
     /// has populated `renderedText` + `headings`. Idempotent.
+    ///
+    /// Codex Gate-4 round-1 finding [M3]: if persistence loaded
+    /// `isEnabled == true` (the user previously enabled bilingual
+    /// for this book), the parent `ReaderContainerView` needs to
+    /// learn that state so the chrome pill paints correctly on open.
+    /// Without this `postDidChange()`, the parent stays in the
+    /// default `bilingualActive = false` state until the user
+    /// toggles manually.
     func ensureBilingualViewModel() {
         guard bilingualViewModel == nil else { return }
         guard let textProvider = Self.makeTextProvider(viewModel: viewModel) else { return }
@@ -102,6 +110,9 @@ extension MDReaderContainerView {
                 granularity: vm.granularity
             )
         }
+        // Mirror the loaded-from-persistence state to the parent
+        // container's chrome.
+        vm.postDidChange()
     }
 
     /// Handle a `.readerMoreBilingual` notification — toggle the

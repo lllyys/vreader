@@ -217,4 +217,70 @@ struct BilingualDisplaySegmentMapTests {
         #expect(map.sourceOffset(forDisplayOffset: 10) == 10)
         #expect(map.displayOffset(forSourceOffset: 10) == 10)
     }
+
+    // MARK: - boundary edge cases (Codex Gate-4 round-1 finding [L4])
+
+    @Test("displayOffset at exact source-segment boundary picks the start of the NEXT source segment")
+    func displayOffsetExactBoundary() {
+        let map = Self.twoParagraphMap()
+        // Source offset 10 lies inside paragraph B's source range
+        // [10, 20) so the map resolves it as the first char of
+        // paragraph B (display 15) — not as "right after paragraph
+        // A" (which would be display 10). This is the right
+        // selection-start semantics: a click at the start of a new
+        // paragraph lands inside that paragraph, not on the trailing
+        // edge of the previous one.
+        #expect(map.displayOffset(forSourceOffset: 10) == 15)
+        // At sourceLength (20, no source range contains it), the
+        // boundary-search branch returns the upper bound of paragraph
+        // B's display range = 25. This is the selection-end-point
+        // semantics: a selection ending at the source's last char
+        // lands right after paragraph B in display, before the
+        // trailing synthetic run.
+        #expect(map.displayOffset(forSourceOffset: 20) == 25)
+    }
+
+    @Test("displayOffset at exactly displayLength of inputs is clamped to displayLength")
+    func displayOffsetClampedAtDisplayLength() {
+        let map = Self.twoParagraphMap()
+        // sourceOffset >> sourceLength clamps to displayLength == 32.
+        #expect(map.displayOffset(forSourceOffset: map.sourceLength + 1) == map.displayLength)
+    }
+
+    @Test("synthetic leading-newline display position has no source")
+    func syntheticLeadingNewlineHasNoSource() {
+        // The first display position of any synthetic segment is its
+        // leading character (the renderer prepends "\n" to each
+        // translation run). It must return nil — selection on the
+        // newline boundary cannot resolve to a source offset.
+        let map = Self.twoParagraphMap()
+        // Display offset 10 is the synthetic A's first character.
+        #expect(map.sourceOffset(forDisplayOffset: 10) == nil)
+    }
+
+    @Test("non-BMP scalars (emoji) round-trip UTF-16 surrogate pair offsets")
+    func surrogatePairRoundTrip() {
+        // Emoji U+1F600 is a non-BMP scalar — it occupies 2 UTF-16
+        // code units. A paragraph with one emoji has sourceLength = 2.
+        // The display interleave must round-trip every UTF-16 offset,
+        // including the interior of the surrogate pair.
+        let source = "\u{1F600}A"  // 1 emoji (2 UTF-16) + 1 ASCII = 3 UTF-16
+        #expect(source.utf16.count == 3)
+        let map = BilingualDisplaySegmentMap(
+            sourceLength: source.utf16.count,
+            segments: [
+                .source(sourceRange: 0..<3, displayRange: 0..<3),
+                .synthetic(displayRange: 3..<5)
+            ]
+        )
+        for offset in 0..<3 {
+            let display = map.displayOffset(forSourceOffset: offset)
+            #expect(map.sourceOffset(forDisplayOffset: display) == offset)
+        }
+        // The interior offset of the surrogate pair (offset 1) is a
+        // valid UTF-16 position even though it splits the scalar. The
+        // map must still round-trip — hit-test selection isn't aware
+        // of grapheme boundaries.
+        #expect(map.sourceOffset(forDisplayOffset: 1) == 1)
+    }
 }

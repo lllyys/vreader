@@ -79,36 +79,39 @@ extension TXTReaderContainerView {
     }
 
     /// Build the TXT chapter-text adapter from the VM's chapter index
-    /// + full text. Returns `nil` until the index is populated (the
-    /// container threads that state in via `onChange`).
+    /// + full text. Returns `nil` until BOTH the index is populated
+    /// AND the VM has the full book in `textContent` — chapter-paged
+    /// mode loads chapter text per navigation and does NOT populate
+    /// `textContent` (its slices are local), so the provider cannot
+    /// safely slice document-global offsets in that mode.
+    ///
+    /// Continuous-mode TXT and the legacy small-file path both
+    /// populate `textContent` with the whole book, so the provider
+    /// constructs fine for them.
+    ///
+    /// Codex Gate-4 round-1 finding [H2]: a prior version of this
+    /// helper fell back to `nil` only on `chapterIndex == nil`, then
+    /// supplied a chapter-local `textContent` to
+    /// `TXTChapterTextProvider`. `TXTChapterTextProvider` slices by
+    /// document-global UTF-16 offsets — that would yield wrong
+    /// source text for every chapter except (sometimes) the open
+    /// one. The fix is to require the full book text up front; the
+    /// follow-up render-injection slice extends the provider with a
+    /// loader-backed fallback for chapter-paged mode.
     static func makeTextProvider(
         viewModel: TXTReaderViewModel
     ) -> TXTChapterTextProvider? {
         guard let index = viewModel.chapterIndex,
               !index.chapters.isEmpty else { return nil }
-        // The provider reads from the full text; in chapter-based mode
-        // the VM may not hold the whole book in `textContent`, so we
-        // reconstruct from the chapter list's offset bounds. The
-        // simplest valid source is the concatenation in order — which
-        // matches `TXTChapterIndex.totalTextLengthUTF16` (the index's
-        // own invariant).
-        let fullText: String
-        if let content = viewModel.textContent {
-            fullText = content
-        } else {
-            // The index alone doesn't carry text. Without
-            // `viewModel.textContent`, the provider's `sourceText`
-            // can't slice safely — return nil so the VM waits for
-            // text to be available (continuous mode populates
-            // `textContent` lazily; chapter-paged mode loads chapter
-            // text per navigation but not the whole book).
-            //
-            // The follow-up slice that wires the renderer into the
-            // live UITextView will need to ensure `textContent` is
-            // populated, or extend the provider to slice per-chapter
-            // from the VM's chapter-text cache. WI-12 leaves the
-            // hook in place but accepts source-only render when text
-            // isn't yet available.
+        guard let fullText = viewModel.textContent else {
+            // Chapter-paged mode loads chapter text per navigation
+            // and does not populate `textContent`. The VM cannot
+            // construct here without the full book text. The
+            // follow-up slice that wires the live render-injection
+            // resolves this by introducing a loader-backed text
+            // provider; for WI-12a (foundational) the VM lazily
+            // re-attempts construction as the container's
+            // `textContent` state changes via `onChange`.
             return nil
         }
         return TXTChapterTextProvider(
@@ -121,8 +124,17 @@ extension TXTReaderContainerView {
     // MARK: - Bilingual surface modifier + event handlers
 
     /// Lazily constructs the bilingual VM + prefetcher once the
-    /// chapter index becomes available. Idempotent — already-
-    /// constructed VM is preserved on subsequent calls.
+    /// chapter index AND the full book text become available.
+    /// Idempotent — already-constructed VM is preserved on
+    /// subsequent calls.
+    ///
+    /// Codex Gate-4 round-1 finding [M3]: if persistence loaded
+    /// `isEnabled == true` (the user previously enabled bilingual
+    /// for this book), the parent `ReaderContainerView` needs to
+    /// learn that state so the chrome pill paints correctly on open.
+    /// Without this `postDidChange()`, the parent stays in the
+    /// default `bilingualActive = false` state until the user
+    /// toggles manually.
     func ensureBilingualViewModel() {
         guard bilingualViewModel == nil else { return }
         guard let textProvider = Self.makeTextProvider(viewModel: viewModel) else { return }
@@ -145,6 +157,11 @@ extension TXTReaderContainerView {
                 granularity: vm.granularity
             )
         }
+        // Mirror the loaded-from-persistence state to the parent
+        // container's chrome — `.readerBilingualDidChange` is the
+        // notification the parent observes to repaint the pill /
+        // More-menu row.
+        vm.postDidChange()
     }
 
     /// Handle a `.readerMoreBilingual` notification — toggle the
@@ -189,10 +206,16 @@ extension TXTReaderContainerView {
     }
 
     /// SwiftUI modifier bundling all bilingual reading event hooks.
+    /// The chapter-index nonce composes both `chapterIndex?.count`
+    /// AND whether `textContent` has been populated — VM
+    /// construction requires both (Codex Gate-4 round-1 finding
+    /// [H2] requires the full book text), so the modifier triggers
+    /// `ensureViewModel` on changes in either.
     var bilingualSurfacesModifier: some ViewModifier {
         TXTBilingualSurfacesModifier(
             bookFingerprintKey: viewModel.bookFingerprintKey,
             chapterIndexNonce: viewModel.chapterIndex?.count,
+            textContentReady: viewModel.textContent != nil,
             ensureViewModel: { ensureBilingualViewModel() },
             onMoreBilingualToggle: { handleMoreBilingualToggle() },
             showSetupSheet: $showBilingualSetupSheet,
@@ -229,6 +252,7 @@ extension TXTReaderContainerView {
 struct TXTBilingualSurfacesModifier: ViewModifier {
     let bookFingerprintKey: String
     let chapterIndexNonce: Int?
+    let textContentReady: Bool
     let ensureViewModel: () -> Void
     let onMoreBilingualToggle: () -> Void
     @Binding var showSetupSheet: Bool
@@ -237,6 +261,7 @@ struct TXTBilingualSurfacesModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: chapterIndexNonce) { _, _ in ensureViewModel() }
+            .onChange(of: textContentReady) { _, _ in ensureViewModel() }
             .onReceive(
                 NotificationCenter.default.publisher(for: .readerMoreBilingual)
             ) { _ in onMoreBilingualToggle() }
