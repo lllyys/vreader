@@ -1,3 +1,11 @@
+---
+branch: fix/issue-1107-debugbridge-present-sheet
+threadId: 019e4846-2483-7482-9c96-b882b9bfc8b7
+rounds: 2
+final_verdict: ship-as-is
+date: 2026-05-21
+---
+
 # Codex Audit — fix/issue-1107-debugbridge-present-sheet
 
 **Bug**: #253 / GH #1107 — DebugBridge `present?sheet=…` command
