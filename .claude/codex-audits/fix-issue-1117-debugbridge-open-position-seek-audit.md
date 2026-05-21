@@ -1,3 +1,11 @@
+---
+branch: fix/issue-1117-debugbridge-open-position-seek
+threadId: 019e48ee-4d50-7f02-9be3-7f206f057af6
+rounds: 2
+final_verdict: ship-as-is
+date: 2026-05-21
+---
+
 # Codex Audit — fix/issue-1117-debugbridge-open-position-seek
 
 **Bug**: #257 / GH #1117 — DebugBridge `open?position=N` parses but does not move the reader (host-side seek deferred).
