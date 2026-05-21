@@ -72,6 +72,11 @@ extension EPUBReaderContainerView {
 
         viewModel.navigateToSpine(index: targetIndex)
         webViewError = nil
+        // Bug #165 / GH #489 (audit round-1 finding [1] High): a pending
+        // backward-chapter-wrap intent must NOT bleed into an unrelated
+        // scrubber seek. The dedicated entry point names the call-site
+        // intent for grep-precision in future audits.
+        chapterWrapPendingTarget.cancelBecauseUnrelatedNavigationStarted()
 
         let href = meta.spineItems[targetIndex].href
         Task { await ensureChapterExtracted(href: href) } // bug #102

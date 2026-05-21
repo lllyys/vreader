@@ -74,6 +74,11 @@ struct EPUBReaderContainerView: View {
     @State var pageNavigator = BasePageNavigator()
     /// Current page in paged mode (drives bridge navigation).
     @State var currentPaginationPage: Int?
+    /// Bug #165 / GH #489: armed by a backward chapter-wrap so the
+    /// new chapter's `onPaginationReady` callback lands the user on the
+    /// LAST page (design §2.2's "left-tap from first page → last page
+    /// of N-1"). One-shot — consumed when pagination resolves.
+    @State var chapterWrapPendingTarget = EPUBChapterWrapPendingTarget()
     /// Phase R4: highlight renderer and coordinator.
     @State var highlightRenderer = EPUBHighlightRenderer()
     @State var highlightCoordinator: HighlightCoordinator?
@@ -248,13 +253,11 @@ struct EPUBReaderContainerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerNextPage)) { _ in
             guard isPaged else { return }
-            pageNavigator.nextPage()
-            currentPaginationPage = pageNavigator.currentPage
+            handleSideTapNext()
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerPreviousPage)) { _ in
             guard isPaged else { return }
-            pageNavigator.previousPage()
-            currentPaginationPage = pageNavigator.currentPage
+            handleSideTapPrevious()
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerNavigateToLocator)) { notification in
             guard let locator = notification.object as? Locator,
@@ -267,6 +270,11 @@ struct EPUBReaderContainerView: View {
                 // Issue 6: Reset pagination on locator navigation (same as chapter nav).
                 pageNavigator.reset()
                 currentPaginationPage = nil
+                // Bug #165 / GH #489 (audit round-1 finding [1] High):
+                // a pending backward-chapter-wrap intent must NOT bleed
+                // into an unrelated TOC / search / annotation navigation.
+                // The dedicated entry point names the call-site intent.
+                chapterWrapPendingTarget.cancelBecauseUnrelatedNavigationStarted()
                 // Issue 3: Use locator.progression to scroll within the chapter.
                 // This reuses the existing WI-004d scroll-to-fraction mechanism so
                 // the WebView lands at the correct position, not chapter top.
@@ -576,6 +584,17 @@ struct EPUBReaderContainerView: View {
             paginationPage: currentPaginationPage,
             onPaginationReady: { totalPages in
                 pageNavigator.totalPages = totalPages
+                // Bug #165 / GH #489: a backward chapter-wrap armed
+                // `chapterWrapPendingTarget`; now that the new chapter
+                // has settled, land on its LAST page so the user
+                // continues reading where the previous chapter left
+                // off (design §2.2).
+                if let landingPage = chapterWrapPendingTarget.consume(
+                    totalPages: totalPages
+                ) {
+                    pageNavigator.jumpToPage(landingPage)
+                    currentPaginationPage = landingPage
+                }
             }
             )
             .ignoresSafeArea(edges: .bottom)
