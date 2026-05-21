@@ -269,32 +269,42 @@ struct FoliateStyleMapperTests {
         // or braces in the sanitized output. Words like "display" may survive as harmless
         // text trapped inside the quoted font-family value.
         //
-        // Security invariant (robust to bug #261's added cascade-flatten rules):
-        // the injected `display: none` must NOT have escaped the quoted
-        // font-family value into its own rule. The font-family declaration is a
-        // single `font-family: "<sanitized>" !important;` — its sanitized value
-        // contains no unescaped `}` that could open a new rule block, and no
-        // bare `display:` declaration exists outside the quoted value.
+        // Security invariant (robust to future legitimate rule additions —
+        // Gate-4 audit Low): assert the injection did NOT break out of the
+        // quoted font-family value, WITHOUT coupling to the exact number of
+        // rule blocks the mapper emits. The safety comes from `escapeForCSS`
+        // stripping `" ' \ ; { } \n \r`, so:
+        //  (a) the font-family declaration is still emitted (sanitized), and
+        //  (b) the malicious `}` that would close the font-family rule and
+        //      `{` that would open the injected `body { display: none }` block
+        //      are gone — so no `body { display` / `.x {` block can appear.
         #expect(
             css.contains("font-family:"),
             "The font-family rule must still be emitted with the sanitized value"
         )
-        // The malicious closing brace is stripped, so the count of `}` equals
-        // the number of legitimate rule blocks the mapper itself emits — the
-        // injection added none. With the bug #261 fix the mapper emits four
-        // blocks for this input (html/body base, text-container reset, heading
-        // revert, font-family); the injection must not push that higher.
-        let closeBraceCount = css.filter { $0 == "}" }.count
-        #expect(
-            closeBraceCount == 4,
-            "Injection must not open extra rule blocks; expected 4 mapper blocks, found \(closeBraceCount)"
-        )
-        // The `display: none` payload, if present at all, survives only as inert
-        // text inside the quoted font-family value — never as its own
-        // declaration that the browser would honor.
+        // The injected payload's WORDS (`display`, `none`, `body`) survive only
+        // as inert text inside the quoted font-family value — that is the
+        // documented harmless behavior, so we do NOT assert their absence.
+        // What must NOT appear is the STRUCTURAL breakout: a `}` closing the
+        // font-family rule followed by a new selector `{`. `escapeForCSS`
+        // strips both braces and the `;`, so no `} body {` / `}.x{` can form.
         #expect(
             !css.contains("} body {") && !css.contains("}body{"),
             "Injection must not break out into a new `body` rule block"
+        )
+        #expect(
+            !css.contains("} .x {") && !css.contains("}.x{"),
+            "Injection must not break out into the trailing `.x` rule block"
+        )
+        // The number of `{` equals the number of `}` — every rule block the
+        // mapper opens, it closes; the injection's unbalanced brace was
+        // stripped, so the structure stays balanced regardless of how many
+        // legitimate rules the mapper emits.
+        let openBraces = css.filter { $0 == "{" }.count
+        let closeBraces = css.filter { $0 == "}" }.count
+        #expect(
+            openBraces == closeBraces,
+            "Brace structure must stay balanced — injection added no unbalanced brace (open=\(openBraces), close=\(closeBraces))"
         )
     }
 

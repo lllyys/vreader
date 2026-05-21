@@ -56,14 +56,18 @@ enum FoliateStyleMapper {
         // 1.15em}`. Forcing the common text containers to `font-size: inherit`
         // makes them resolve to the inherited body px instead of compounding,
         // so AZW3/MOBI body text renders at the same flat per-format size EPUB
-        // already delivers (bug #57 / feature #70). This is the EXACT selector
-        // list + reset EPUB uses (`ReaderThemeV2+EPUBCSS.swift`). `color` is
-        // deliberately omitted from the reset here — the Foliate style mapper
-        // does not theme colors (AZW3/MOBI theme-color parity is a separate
-        // gap), so resetting it would overreach. `line-height: inherit` keeps
-        // descendant line-height from fighting the body value.
+        // already delivers (bug #57 / feature #70). The base list mirrors EPUB
+        // (`ReaderThemeV2+EPUBCSS.swift`); Kindle KFX/MOBI output additionally
+        // wraps content in HTML5 semantic containers (`section`, `article`,
+        // `figure`, etc.) that often carry their own `em` font-size, so those
+        // are added here to widen compounding immunity beyond EPUB's list
+        // (Gate-4 audit Medium). `color` is deliberately omitted — the Foliate
+        // style mapper does not theme colors (AZW3/MOBI theme-color parity is a
+        // separate gap), so resetting it would overreach. `line-height:
+        // inherit` keeps descendant line-height from fighting the body value.
         rules.append(
-            "p, div, span, li, td, th, dd, dt, blockquote, figcaption { "
+            "p, div, span, li, td, th, dd, dt, blockquote, figcaption, "
+            + "section, article, aside, main, header, footer, figure { "
             + "font-size: inherit !important; line-height: inherit !important; }"
         )
 
