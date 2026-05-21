@@ -56,6 +56,17 @@ import Foundation
 ///   too. Idempotent — removing an unknown name is a no-op.
 /// - `provider?action=clear` — wipe every profile + every per-profile
 ///   Keychain entry + clear active selection. Idempotent.
+/// - `present?sheet=<toc|highlights|ai|settings|bookmarks>[&tab=<...>]`
+///   — present a reader sheet so its rendered content becomes CU-free
+///   verifiable via `snapshot` + `eval` (Bug #253 verification harness).
+///   The handler posts `.debugBridgePresentSheet`; the reader-host
+///   observer maps `(sheet, tab)` to the SAME `@State` / route the chrome
+///   buttons set, so the harness drives the real presentation path. The
+///   optional `tab` selects a sub-tab: `toc` → `contents`/`bookmarks`;
+///   `highlights` → `all`/`highlights`/`notes`/`bookmarks`; `ai` →
+///   `summarize`/`translate`/`chat`. `settings` and `bookmarks` take no
+///   `tab` (`bookmarks` is itself the `TOCSheet` Bookmarks tab). No-op
+///   when no reader is presented (mirrors `tts` / `search` / `highlight`).
 enum DebugCommand: Equatable {
     case reset
     case seed(fixture: String)
@@ -68,6 +79,7 @@ enum DebugCommand: Equatable {
     case search(query: String, index: Int?)
     case highlight(startUTF16: Int, endUTF16: Int, color: String?)
     case provider(action: ProviderAction)
+    case present(sheet: SheetKind, tab: String?)
 
     /// Reader theme selector for the `theme` command.
     ///
@@ -91,6 +103,47 @@ enum DebugCommand: Equatable {
     enum ProviderActionKind: String, Equatable, CaseIterable {
         case openAICompatible
         case anthropicNative
+    }
+
+    /// Which reader sheet the `present` command opens (Bug #253 —
+    /// verification harness sheet-presenter). The handler posts
+    /// `.debugBridgePresentSheet`; the reader-host observer maps each
+    /// case (and the optional `tab`) to the SAME `@State` / route the
+    /// chrome buttons set, so the harness drives the real presentation
+    /// path. Kept local (mirroring `ThemeMode` / `ProviderActionKind`)
+    /// so this file stays a pure value-type parser with no View-layer
+    /// imports.
+    ///
+    /// - `toc` — the navigation sheet (`TOCSheet`: Contents + Bookmarks).
+    /// - `highlights` — the review sheet (`HighlightsSheet`: All /
+    ///   Highlights / Notes / Bookmarks).
+    /// - `ai` — the AI assistant panel (`AIReaderPanel`: Summarize /
+    ///   Translate / Chat).
+    /// - `settings` — the reader settings panel (`ReaderSettingsPanel`).
+    /// - `bookmarks` — a top-level alias for the `TOCSheet` Bookmarks tab.
+    enum SheetKind: String, Equatable, CaseIterable {
+        case toc
+        case highlights
+        case ai
+        case settings
+        case bookmarks
+
+        /// The set of valid `tab` values for this sheet, or `nil` when the
+        /// sheet takes no `tab` parameter (settings has no tabs; bookmarks
+        /// is itself a tab selector). Kept as literal string allowlists —
+        /// same posture as the `highlight` `color` allowlist — so the
+        /// parser stays free of View-layer enum imports. The reader-host
+        /// observer maps these strings to the concrete tab enums
+        /// (`TOCSheetTab` / `HighlightsSheetFilter` / `AIReaderTab`).
+        var allowedTabs: Set<String>? {
+            switch self {
+            case .toc:        return ["contents", "bookmarks"]
+            case .highlights: return ["all", "highlights", "notes", "bookmarks"]
+            case .ai:         return ["summarize", "translate", "chat"]
+            case .settings:   return nil
+            case .bookmarks:  return nil
+            }
+        }
     }
 
     /// Discriminated action carried by `provider`. `add` carries every
@@ -407,6 +460,50 @@ extension DebugCommand {
                     reason: "expected add|remove|clear, got \(actionRaw)"
                 )
             }
+
+        case "present":
+            // Bug #253: verification harness sheet-presenter. `sheet` names
+            // which reader sheet to present; optional `tab` selects a sub-tab
+            // (validated against the sheet's vocabulary). The handler posts
+            // `.debugBridgePresentSheet`; the reader-host observer maps the
+            // (sheet, tab) to the SAME `@State` / route the chrome buttons
+            // set — no parallel presentation logic.
+            let sheetRaw = try requireParam("sheet", in: params)
+            guard let sheet = SheetKind(rawValue: sheetRaw) else {
+                let valid = SheetKind.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam(
+                    "sheet",
+                    reason: "expected \(valid), got \(sheetRaw)"
+                )
+            }
+            let tab: String?
+            if let rawTab = params["tab"] {
+                guard !rawTab.isEmpty else {
+                    throw DebugCommandError.invalidParam(
+                        "tab",
+                        reason: "expected a non-empty tab value, got empty value"
+                    )
+                }
+                // Reject a `tab` for sheets that take none (settings /
+                // bookmarks) so a typo surfaces rather than silently no-op.
+                guard let allowed = sheet.allowedTabs else {
+                    throw DebugCommandError.invalidParam(
+                        "tab",
+                        reason: "sheet '\(sheetRaw)' takes no tab parameter"
+                    )
+                }
+                guard allowed.contains(rawTab) else {
+                    let valid = allowed.sorted().joined(separator: "|")
+                    throw DebugCommandError.invalidParam(
+                        "tab",
+                        reason: "expected \(valid) for sheet '\(sheetRaw)', got \(rawTab)"
+                    )
+                }
+                tab = rawTab
+            } else {
+                tab = nil
+            }
+            return .present(sheet: sheet, tab: tab)
 
         default:
             throw DebugCommandError.unknownCommand(host)

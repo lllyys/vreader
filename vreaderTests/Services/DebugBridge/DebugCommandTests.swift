@@ -1146,6 +1146,233 @@ final class DebugCommandTests: XCTestCase {
             XCTAssertEqual(parsedKind.rawValue, kindRaw)
         }
     }
+
+    // MARK: - present (Bug #253 — verification harness sheet-presenter)
+    //
+    // `vreader-debug://present?sheet=<toc|highlights|ai|settings|bookmarks>[&tab=<...>]`
+    // posts the same notification / sets the same `@State` the reader chrome
+    // buttons trigger to present each sheet, so the presented sheet's rendered
+    // content becomes CU-free verifiable via `snapshot` + `eval`. Unlocks the
+    // visible-verification close-gate for Bug #248 (TOC scroll+highlight),
+    // Feature #65 (AI sheet re-skin), Feature #69 (AI Summarize scope chips),
+    // and the future Bug #249 (HighlightsSheet delete).
+
+    func test_parse_presentTOC_returnsPresentTOCNoTab() throws {
+        let url = URL(string: "vreader-debug://present?sheet=toc")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .toc, tab: nil))
+    }
+
+    func test_parse_presentTOCWithContentsTab_returnsContentsTab() throws {
+        let url = URL(string: "vreader-debug://present?sheet=toc&tab=contents")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .toc, tab: "contents"))
+    }
+
+    func test_parse_presentTOCWithBookmarksTab_returnsBookmarksTab() throws {
+        let url = URL(string: "vreader-debug://present?sheet=toc&tab=bookmarks")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .toc, tab: "bookmarks"))
+    }
+
+    func test_parse_presentHighlights_returnsPresentHighlightsNoTab() throws {
+        let url = URL(string: "vreader-debug://present?sheet=highlights")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .highlights, tab: nil))
+    }
+
+    func test_parse_presentHighlightsWithFilters_returnsFilter() throws {
+        for filter in ["all", "highlights", "notes", "bookmarks"] {
+            let url = URL(string: "vreader-debug://present?sheet=highlights&tab=\(filter)")!
+            let cmd = try DebugCommand.parse(url)
+            XCTAssertEqual(cmd, .present(sheet: .highlights, tab: filter),
+                           "highlights filter \(filter) must parse")
+        }
+    }
+
+    func test_parse_presentAI_returnsPresentAINoTab() throws {
+        let url = URL(string: "vreader-debug://present?sheet=ai")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .ai, tab: nil))
+    }
+
+    func test_parse_presentAIWithSummarizeTab_returnsSummarize() throws {
+        let url = URL(string: "vreader-debug://present?sheet=ai&tab=summarize")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .ai, tab: "summarize"))
+    }
+
+    func test_parse_presentAIWithAllTabs_returnsTab() throws {
+        for tab in ["summarize", "translate", "chat"] {
+            let url = URL(string: "vreader-debug://present?sheet=ai&tab=\(tab)")!
+            let cmd = try DebugCommand.parse(url)
+            XCTAssertEqual(cmd, .present(sheet: .ai, tab: tab),
+                           "AI tab \(tab) must parse")
+        }
+    }
+
+    func test_parse_presentSettings_returnsPresentSettings() throws {
+        let url = URL(string: "vreader-debug://present?sheet=settings")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .settings, tab: nil))
+    }
+
+    func test_parse_presentBookmarks_returnsPresentBookmarks() throws {
+        let url = URL(string: "vreader-debug://present?sheet=bookmarks")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .bookmarks, tab: nil))
+    }
+
+    func test_parse_presentAllSheetKinds_accepted() throws {
+        // Every SheetKind case must parse with no tab. Verifies the URL
+        // grammar covers everything the enum surfaces.
+        for sheetRaw in ["toc", "highlights", "ai", "settings", "bookmarks"] {
+            let url = URL(string: "vreader-debug://present?sheet=\(sheetRaw)")!
+            let cmd = try DebugCommand.parse(url)
+            guard case .present(let kind, let tab) = cmd else {
+                XCTFail("expected .present, got \(cmd) for sheet=\(sheetRaw)")
+                continue
+            }
+            XCTAssertEqual(kind.rawValue, sheetRaw)
+            XCTAssertNil(tab)
+        }
+    }
+
+    func test_parse_presentMissingSheet_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://present")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "sheet")
+        }
+    }
+
+    func test_parse_presentEmptySheet_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://present?sheet=")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "sheet")
+        }
+    }
+
+    func test_parse_presentUnknownSheet_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://present?sheet=nonexistent")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "sheet")
+        }
+    }
+
+    func test_parse_presentTOCInvalidTab_throwsInvalidParam() {
+        // `summarize` is an AI tab, not a TOC tab — must be rejected for toc.
+        let url = URL(string: "vreader-debug://present?sheet=toc&tab=summarize")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "tab")
+        }
+    }
+
+    func test_parse_presentAIInvalidTab_throwsInvalidParam() {
+        // `contents` is a TOC tab, not an AI tab — must be rejected for ai.
+        let url = URL(string: "vreader-debug://present?sheet=ai&tab=contents")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "tab")
+        }
+    }
+
+    func test_parse_presentHighlightsInvalidTab_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://present?sheet=highlights&tab=summarize")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "tab")
+        }
+    }
+
+    func test_parse_presentSettingsWithTab_throwsInvalidParam() {
+        // Settings has no tabs — any `tab` value must be rejected so a typo
+        // surfaces rather than silently no-op.
+        let url = URL(string: "vreader-debug://present?sheet=settings&tab=contents")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "tab")
+        }
+    }
+
+    func test_parse_presentBookmarksWithTab_throwsInvalidParam() {
+        // Bookmarks is itself a tab selector (TOC sheet → Bookmarks tab); it
+        // takes no further `tab` param.
+        let url = URL(string: "vreader-debug://present?sheet=bookmarks&tab=contents")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "tab")
+        }
+    }
+
+    func test_parse_presentEmptyTab_throwsInvalidParam() {
+        // An explicit empty `tab=` is a caller bug — reject rather than treat
+        // as "no tab" (mirrors `index=`/`color=` empty-value rejection).
+        let url = URL(string: "vreader-debug://present?sheet=toc&tab=")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "tab")
+        }
+    }
+
+    func test_parse_presentTrailingSlash_parses() throws {
+        let url = URL(string: "vreader-debug://present/?sheet=toc")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .present(sheet: .toc, tab: nil))
+    }
+
+    func test_parse_presentDeepPath_throwsUnknownCommand() {
+        // A deeper path segment is rejected (matches every other command).
+        let url = URL(string: "vreader-debug://present/extra?sheet=toc")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.unknownCommand = error else {
+                XCTFail("expected unknownCommand, got \(error)")
+                return
+            }
+        }
+    }
+
+    func test_parse_presentDuplicateSheet_throwsInvalidParam() {
+        // Duplicate keys are rejected by the parser's queryParams helper.
+        let url = URL(string: "vreader-debug://present?sheet=toc&sheet=ai")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "sheet")
+        }
+    }
 }
 
 #endif

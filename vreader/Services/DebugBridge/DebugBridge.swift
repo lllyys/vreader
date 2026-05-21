@@ -55,6 +55,13 @@ protocol DebugBridgeContext {
     /// `.providerProfilesDidChange` notification, so any in-app picker
     /// resyncs without an additional bridge-level notification.
     func provider(action: DebugCommand.ProviderAction) async throws
+    /// Bug #253 — present a reader sheet from outside the chrome so its
+    /// rendered content becomes CU-free verifiable via `snapshot` + `eval`.
+    /// The handler posts `.debugBridgePresentSheet`; the active reader's
+    /// observer maps the `(sheet, tab)` to the SAME `@State` / route the
+    /// chrome buttons set (no parallel presentation logic). If no reader is
+    /// loaded, the action is a no-op (matches `tts` / `search` / `highlight`).
+    func present(sheet: DebugCommand.SheetKind, tab: String?) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -174,6 +181,8 @@ final class DebugBridge {
             try await context.highlight(startUTF16: start, endUTF16: end, color: color)
         case .provider(let action):
             try await context.provider(action: action)
+        case .present(let sheet, let tab):
+            try await context.present(sheet: sheet, tab: tab)
         }
     }
 }

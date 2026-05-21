@@ -97,6 +97,30 @@ extension Notification.Name {
     ///   back to `"yellow"` when absent.
     static let debugBridgeHighlightCommand = Notification.Name("vreader.debugBridge.highlightCommand")
 
+    /// Posted by RealDebugBridgeContext.present to present a reader sheet
+    /// from outside the chrome (Bug #253 verification harness). The active
+    /// reader's observer (`ReaderContainerView`, Bug #253 wiring) maps the
+    /// `(sheet, tab)` to the SAME `@State` / `annotationsRoute` the chrome
+    /// buttons set — `TOCSheet` (Contents/Bookmarks), `HighlightsSheet`
+    /// (All/Highlights/Notes/Bookmarks), `AIReaderPanel` (Summarize/
+    /// Translate/Chat), or the reader settings panel — so the harness drives
+    /// the real presentation path and the presented sheet's rendered content
+    /// becomes CU-free verifiable via `snapshot` + `eval`. The AI sheet is
+    /// gated on `resolvedAICoordinator.isAIAvailable` (matches the chrome's
+    /// AI gate); when AI isn't configured the URL is a no-op for the AI sheet.
+    /// If no reader is loaded, observers don't fire — the URL is silently a
+    /// no-op (the same `tts` / `search` / `highlight` posture).
+    ///
+    /// userInfo:
+    /// - `"sheet"`: String — one of `DebugCommand.SheetKind`'s rawValues
+    ///   (`toc` / `highlights` / `ai` / `settings` / `bookmarks`), validated
+    ///   by the parser.
+    /// - `"tab"`: String? — optional sub-tab, validated by the parser against
+    ///   the sheet's vocabulary. Present only when the bridge command included
+    ///   the `tab=` parameter; observers fall back to each sheet's default tab
+    ///   when absent.
+    static let debugBridgePresentSheet = Notification.Name("vreader.debugBridge.presentSheet")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker

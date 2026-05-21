@@ -516,6 +516,17 @@ struct ReaderContainerView: View {
                 handleDebugBridgeSearchCommand(query: query, index: index)
             }
         ))
+        // Bug #253 — present a reader sheet from outside the chrome so the
+        // sheet's rendered content becomes CU-free verifiable via `snapshot`
+        // + `eval`. Factored into a dedicated `ViewModifier` (same precedent
+        // as the search observer above) so adding it doesn't push `body` over
+        // SwiftUI's type-inference budget. The handler sets the SAME `@State`
+        // / `annotationsRoute` the chrome buttons set — no parallel logic.
+        .modifier(ReaderDebugBridgePresentObserver(
+            onCommand: { sheet, tab in
+                handleDebugBridgePresentSheet(sheet: sheet, tab: tab)
+            }
+        ))
         // Bug #237 — DebugBridge highlight-driver observer lives in the
         // TXT and MD format hosts, NOT here. Format hosts have the source
         // text + chapter index they need to build canonical Locators via

@@ -1536,6 +1536,112 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
     }
 
+    // MARK: - present (Bug #253 — verification harness sheet-presenter)
+    //
+    // RealDebugBridgeContext.present posts `.debugBridgePresentSheet` with the
+    // parsed `sheet` (rawValue) + optional `tab`. The active reader's observer
+    // (ReaderContainerView, Bug #253 wiring) sets the matching `@State` /
+    // `annotationsRoute` the chrome buttons set, so the presented sheet's
+    // rendered content becomes CU-free verifiable via `snapshot` + `eval`.
+    // When no reader is loaded, the URL is silently a no-op (mirrors the
+    // `tts` / `search` / `highlight` posture).
+
+    @MainActor
+    func test_present_postsPresentSheetNotificationSheetOnly() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "presentSheet notification posted")
+        nonisolated(unsafe) var receivedSheet: String?
+        nonisolated(unsafe) var hasTab: Bool = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePresentSheet, object: nil, queue: .main
+        ) { notification in
+            receivedSheet = notification.userInfo?["sheet"] as? String
+            hasTab = notification.userInfo?["tab"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.present(sheet: .toc, tab: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedSheet, "toc")
+        XCTAssertFalse(hasTab,
+                       "userInfo must omit 'tab' when nil was passed — lets observers fall back to each sheet's default tab")
+    }
+
+    @MainActor
+    func test_present_postsPresentSheetNotificationWithTab() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "presentSheet notification posted with tab")
+        nonisolated(unsafe) var receivedSheet: String?
+        nonisolated(unsafe) var receivedTab: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePresentSheet, object: nil, queue: .main
+        ) { notification in
+            receivedSheet = notification.userInfo?["sheet"] as? String
+            receivedTab = notification.userInfo?["tab"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.present(sheet: .ai, tab: "translate")
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedSheet, "ai")
+        XCTAssertEqual(receivedTab, "translate")
+    }
+
+    @MainActor
+    func test_present_eachSheetKind_postsMatchingRawValue() async throws {
+        // Every SheetKind reaches observers as its rawValue so the observer's
+        // switch is exhaustive and disambiguated.
+        for kind in DebugCommand.SheetKind.allCases {
+            let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+            let exp = expectation(description: "presentSheet posted for \(kind.rawValue)")
+            nonisolated(unsafe) var receivedSheet: String?
+            let token = NotificationCenter.default.addObserver(
+                forName: .debugBridgePresentSheet, object: nil, queue: .main
+            ) { notification in
+                receivedSheet = notification.userInfo?["sheet"] as? String
+                exp.fulfill()
+            }
+            try await context.present(sheet: kind, tab: nil)
+            await fulfillment(of: [exp], timeout: 2.0)
+            NotificationCenter.default.removeObserver(token)
+            XCTAssertEqual(receivedSheet, kind.rawValue)
+        }
+    }
+
+    @MainActor
+    func test_present_endToEndThroughBridge_dispatchesAndPostsNotification() async throws {
+        // End-to-end: URL → DebugBridge.handle → RealDebugBridgeContext.present.
+        // Verifies the parser → dispatcher → handler → notification chain is
+        // fully wired and that the bridge clears `lastError` on success.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+        let bridge = DebugBridge(context: context)
+
+        let exp = expectation(description: "present notification posted via bridge")
+        nonisolated(unsafe) var receivedSheet: String?
+        nonisolated(unsafe) var receivedTab: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePresentSheet, object: nil, queue: .main
+        ) { notification in
+            receivedSheet = notification.userInfo?["sheet"] as? String
+            receivedTab = notification.userInfo?["tab"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        await bridge.handle(URL(string: "vreader-debug://present?sheet=highlights&tab=notes")!)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedSheet, "highlights")
+        XCTAssertEqual(receivedTab, "notes")
+        XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
+    }
+
     // MARK: - provider (Bug #243 — verification harness AI-provider-setup)
     //
     // RealDebugBridgeContext.provider mutates a ProviderProfileStore and a

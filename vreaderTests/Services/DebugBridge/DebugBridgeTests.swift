@@ -118,6 +118,26 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_presentSheetURL_callsPresentHandlerWithSheetOnly() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://present?sheet=toc")!)
+
+        XCTAssertEqual(context.calls, [.present(sheet: .toc, tab: nil)])
+    }
+
+    @MainActor
+    func test_handle_presentSheetWithTabURL_callsPresentHandlerWithTab() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://present?sheet=ai&tab=summarize")!)
+
+        XCTAssertEqual(context.calls, [.present(sheet: .ai, tab: "summarize")])
+    }
+
+    @MainActor
     func test_handle_unknownCommand_recordsParseErrorWithoutCallingHandlers() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -277,6 +297,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func provider(action: DebugCommand.ProviderAction) async throws {
         await record("provider:\(actionTag(action))")
     }
+    func present(sheet: DebugCommand.SheetKind, tab: String?) async throws {
+        await record("present:\(sheet.rawValue):\(tab ?? "nil")")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -306,6 +329,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case search(query: String, index: Int?)
         case highlight(startUTF16: Int, endUTF16: Int, color: String?)
         case provider(action: DebugCommand.ProviderAction)
+        case present(sheet: DebugCommand.SheetKind, tab: String?)
     }
 
     private(set) var calls: [Call] = []
@@ -334,6 +358,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func provider(action: DebugCommand.ProviderAction) async throws {
         calls.append(.provider(action: action))
+    }
+    func present(sheet: DebugCommand.SheetKind, tab: String?) async throws {
+        calls.append(.present(sheet: sheet, tab: tab))
     }
 }
 
