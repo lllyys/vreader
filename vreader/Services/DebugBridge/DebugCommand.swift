@@ -539,68 +539,9 @@ extension DebugCommand {
             return .present(sheet: sheet, tab: tab)
 
         case "ai":
-            // Bug #255: verification harness AI-action driver. `action` names
-            // which AI action to fire on the presented AI sheet; `scope` is
-            // summarize-only; `text` is the chat message (required for chat)
-            // or the translate target-language override (optional). The
-            // handler posts `.debugBridgeAIAction`; the AI panel's observer
-            // invokes the SAME view-model path the chrome buttons trigger —
-            // no parallel AI call.
-            let actionRaw = try requireParam("action", in: params)
-            guard let action = AIActionKind(rawValue: actionRaw) else {
-                let valid = AIActionKind.allCases.map(\.rawValue).joined(separator: "|")
-                throw DebugCommandError.invalidParam(
-                    "action",
-                    reason: "expected \(valid), got \(actionRaw)"
-                )
-            }
-
-            // `scope` is only meaningful for summarize (the Summarize tab's
-            // scope chips). Reject it on chat/translate so a typo surfaces
-            // rather than silently dropping the scope.
-            let scope: SummaryScope?
-            if let rawScope = params["scope"] {
-                guard action == .summarize else {
-                    throw DebugCommandError.invalidParam(
-                        "scope",
-                        reason: "scope is only valid for action=summarize, got action=\(actionRaw)"
-                    )
-                }
-                guard !rawScope.isEmpty else {
-                    throw DebugCommandError.invalidParam(
-                        "scope",
-                        reason: "expected one of section|chapter|book, got empty value"
-                    )
-                }
-                // The URL uses the friendly `book`; map it to the
-                // `SummaryScope.bookSoFar` case. `section`/`chapter` map 1:1.
-                switch rawScope {
-                case "section": scope = .section
-                case "chapter": scope = .chapter
-                case "book":    scope = .bookSoFar
-                default:
-                    throw DebugCommandError.invalidParam(
-                        "scope",
-                        reason: "expected one of section|chapter|book, got \(rawScope)"
-                    )
-                }
-            } else {
-                scope = nil
-            }
-
-            // `text` is required for chat (the message to send) and optional
-            // for translate (target-language override). It is meaningless for
-            // summarize (the scope chip drives it) — accepted but ignored, so
-            // the handler doesn't need a separate guard.
-            let text: String?
-            if action == .chat {
-                // requireParam treats empty as missing — chat with no message
-                // has nothing to send (the VM's sendMessage ignores empties).
-                text = try requireParam("text", in: params)
-            } else {
-                text = nonEmpty(params["text"])
-            }
-            return .aiAction(action: action, scope: scope, text: text)
+            // Bug #255: verification harness AI-action driver. Extracted to a
+            // helper to keep this already-large parser switch readable.
+            return try parseAICommand(params)
 
         default:
             throw DebugCommandError.unknownCommand(host)
@@ -608,6 +549,72 @@ extension DebugCommand {
     }
 
     // MARK: - Helpers
+
+    /// Parse the `ai` command's `(action, scope, text)` (Bug #255). `action`
+    /// names which AI action to fire on the presented AI sheet; `scope` is
+    /// summarize-only (maps the URL-friendly `book` → `SummaryScope.bookSoFar`,
+    /// rejected for chat/translate); `text` is the chat message (required for
+    /// chat) or the translate target-language override (optional, ignored for
+    /// summarize). The handler posts `.debugBridgeAIAction`; the AI panel's
+    /// observer invokes the SAME view-model path the chrome buttons trigger —
+    /// no parallel AI call.
+    private static func parseAICommand(_ params: [String: String]) throws -> DebugCommand {
+        let actionRaw = try requireParam("action", in: params)
+        guard let action = AIActionKind(rawValue: actionRaw) else {
+            let valid = AIActionKind.allCases.map(\.rawValue).joined(separator: "|")
+            throw DebugCommandError.invalidParam(
+                "action",
+                reason: "expected \(valid), got \(actionRaw)"
+            )
+        }
+
+        // `scope` is only meaningful for summarize (the Summarize tab's scope
+        // chips). Reject it on chat/translate so a typo surfaces rather than
+        // silently dropping the scope.
+        let scope: SummaryScope?
+        if let rawScope = params["scope"] {
+            guard action == .summarize else {
+                throw DebugCommandError.invalidParam(
+                    "scope",
+                    reason: "scope is only valid for action=summarize, got action=\(actionRaw)"
+                )
+            }
+            guard !rawScope.isEmpty else {
+                throw DebugCommandError.invalidParam(
+                    "scope",
+                    reason: "expected one of section|chapter|book, got empty value"
+                )
+            }
+            // The URL uses the friendly `book`; map it to the
+            // `SummaryScope.bookSoFar` case. `section`/`chapter` map 1:1.
+            switch rawScope {
+            case "section": scope = .section
+            case "chapter": scope = .chapter
+            case "book":    scope = .bookSoFar
+            default:
+                throw DebugCommandError.invalidParam(
+                    "scope",
+                    reason: "expected one of section|chapter|book, got \(rawScope)"
+                )
+            }
+        } else {
+            scope = nil
+        }
+
+        // `text` is required for chat (the message to send) and optional for
+        // translate (target-language override). It is meaningless for
+        // summarize (the scope chip drives it) — accepted but ignored, so the
+        // handler doesn't need a separate guard.
+        let text: String?
+        if action == .chat {
+            // requireParam treats empty as missing — chat with no message has
+            // nothing to send (the VM's sendMessage ignores empties).
+            text = try requireParam("text", in: params)
+        } else {
+            text = nonEmpty(params["text"])
+        }
+        return .aiAction(action: action, scope: scope, text: text)
+    }
 
     private static func queryParams(_ url: URL) throws -> [String: String] {
         guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),

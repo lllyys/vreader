@@ -115,9 +115,15 @@ extension AIReaderPanel {
             }
 
         case .chat(let message):
-            // Mirror the Chat send button: forward the verbatim message to
-            // the chat view model (empty is silently ignored by the VM, the
-            // same as the chrome's `canSend` guard).
+            // Mirror the Chat send button precisely: `AIChatView`'s `canSend`
+            // gate disables Send while `isLoading` (and on empty input), and
+            // `AIChatViewModel.sendMessage` does NOT coalesce concurrent
+            // callers. Without this guard two rapid `ai?action=chat` fires
+            // could start overlapping chat requests the chrome button cannot
+            // trigger — the same in-flight hazard `runSummarize` guards
+            // against. Empty input is a VM no-op (matches `canSend`'s
+            // non-empty check), so only the `isLoading` arm needs guarding.
+            guard !chatViewModel.isLoading else { return }
             Task {
                 await chatViewModel.sendMessage(message)
             }
