@@ -66,23 +66,54 @@ enum DebugPresentSheetEffect: Equatable {
         }
     }
 
-    /// Map a validated lowercase `tab` to `TOCSheetTab`. Default: `.contents`.
+    /// Map a validated lowercase `tab` to `TOCSheetTab`.
+    ///
+    /// The no-tab default delegates to the production chrome routing helper
+    /// (`AnnotationsSheetRoute.route(forChromeButton: .contents)`) so the
+    /// default `present?sheet=toc` resolves to exactly what the Contents
+    /// chrome button sets — one source of truth, no drift (Gate-4 round-1 L1).
+    /// Only the explicit `bookmarks` sub-tab (a debug-only selector the chrome
+    /// reaches via the TOC sheet's own segmented control, not a chrome button)
+    /// is constructed locally.
     private static func tocTab(from tab: String?) -> TOCSheetTab {
         switch tab {
-        case "bookmarks": return .bookmarks
-        case "contents":  return .contents
-        default:          return .contents
+        case "bookmarks":
+            return .bookmarks
+        case "contents":
+            return .contents
+        default:
+            // Default == the Contents chrome button's route.
+            if case .toc(let initialTab) = AnnotationsSheetRoute.route(forChromeButton: .contents) {
+                return initialTab
+            }
+            return .contents
         }
     }
 
-    /// Map a validated lowercase `tab` to `HighlightsSheetFilter`. Default: `.all`.
+    /// Map a validated lowercase `tab` to `HighlightsSheetFilter`.
+    ///
+    /// The no-tab default delegates to the production chrome routing helper
+    /// (`AnnotationsSheetRoute.route(forChromeButton: .notes)`) so the default
+    /// `present?sheet=highlights` resolves to exactly what the Notes chrome
+    /// button sets (Gate-4 round-1 L1). The explicit filters
+    /// (`highlights` / `notes` / `bookmarks`) are debug-only selectors the
+    /// chrome reaches via the sheet's own chip row, so they're local.
     private static func highlightsFilter(from tab: String?) -> HighlightsSheetFilter {
         switch tab {
-        case "highlights": return .highlights
-        case "notes":      return .notes
-        case "bookmarks":  return .bookmarks
-        case "all":        return .all
-        default:           return .all
+        case "highlights":
+            return .highlights
+        case "notes":
+            return .notes
+        case "bookmarks":
+            return .bookmarks
+        case "all":
+            return .all
+        default:
+            // Default == the Notes chrome button's route.
+            if case .highlights(let filter) = AnnotationsSheetRoute.route(forChromeButton: .notes) {
+                return filter
+            }
+            return .all
         }
     }
 

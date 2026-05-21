@@ -76,6 +76,19 @@ extension ReaderContainerView {
                 log.info("present observer: AI sheet requested but AI unavailable — no-op")
                 return
             }
+            // Gate-4 round-1 M1: this is a selectionless cold open (no
+            // text-selection drives it), so mirror the production
+            // selectionless-translate path (`ReaderOpenAITranslateObserver`):
+            // ensure the AI VMs exist, then clear stale Translate-tab state
+            // when opening on `.translate`. Without the reset, a prior
+            // selection's translated text + result would still be visible —
+            // which would corrupt the very verification this command exists
+            // to enable. Summarize / Chat carry no stale-translate concern,
+            // so the reset is scoped to the translate tab to match production.
+            ensureAIReady()
+            if initialTab == .translate {
+                resolvedAICoordinator.translationViewModel?.reset()
+            }
             aiInitialTab = initialTab
             showAIPanel = true
         case .settings:
