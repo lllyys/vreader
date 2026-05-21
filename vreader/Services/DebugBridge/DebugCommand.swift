@@ -67,6 +67,20 @@ import Foundation
 ///   `summarize`/`translate`/`chat`. `settings` and `bookmarks` take no
 ///   `tab` (`bookmarks` is itself the `TOCSheet` Bookmarks tab). No-op
 ///   when no reader is presented (mirrors `tts` / `search` / `highlight`).
+/// - `ai?action=<summarize|chat|translate>[&scope=<section|chapter|book>][&text=<...>]`
+///   — fire the AI action the *presented* AI sheet exposes (Bug #255
+///   verification harness). `present?sheet=ai` opens the panel; this fires
+///   the action the chrome buttons trigger (Summarize tap / chat send /
+///   translate), so the AI-response-card render states become CU-free
+///   verifiable. The handler posts `.debugBridgeAIAction`; the AI panel's
+///   observer invokes the SAME view-model path the button does — no
+///   parallel AI call. `scope` is summarize-only and maps the URL-friendly
+///   `book` → `SummaryScope.bookSoFar` (`section`/`chapter` map 1:1); a
+///   `scope` on chat/translate is rejected. `text` is the chat message
+///   (required for `chat`) or the translate target-language override
+///   (optional for `translate`; absent → the panel's current target
+///   language); ignored for `summarize`. No-op when no AI sheet is
+///   presented (mirrors `present`).
 enum DebugCommand: Equatable {
     case reset
     case seed(fixture: String)
@@ -80,6 +94,25 @@ enum DebugCommand: Equatable {
     case highlight(startUTF16: Int, endUTF16: Int, color: String?)
     case provider(action: ProviderAction)
     case present(sheet: SheetKind, tab: String?)
+    case aiAction(action: AIActionKind, scope: SummaryScope?, text: String?)
+
+    /// Which AI action the `ai` command fires (Bug #255 — verification
+    /// harness AI-action driver). The handler posts `.debugBridgeAIAction`;
+    /// the AI panel's observer invokes the SAME view-model path the chrome
+    /// buttons trigger (`AISummaryTabView.runSummarize` /
+    /// `AIChatView.sendMessage` / `TranslationPanel.translate`), so there is
+    /// no parallel AI call.
+    ///
+    /// - `summarize` — runs the Summarize tab's summary at the selected
+    ///   `scope` over the full book text.
+    /// - `chat` — sends a chat message (`text`) on the Chat tab.
+    /// - `translate` — runs the Translate tab's translation (optional `text`
+    ///   overrides the target language).
+    enum AIActionKind: String, Equatable, CaseIterable {
+        case summarize
+        case chat
+        case translate
+    }
 
     /// Reader theme selector for the `theme` command.
     ///
@@ -504,6 +537,70 @@ extension DebugCommand {
                 tab = nil
             }
             return .present(sheet: sheet, tab: tab)
+
+        case "ai":
+            // Bug #255: verification harness AI-action driver. `action` names
+            // which AI action to fire on the presented AI sheet; `scope` is
+            // summarize-only; `text` is the chat message (required for chat)
+            // or the translate target-language override (optional). The
+            // handler posts `.debugBridgeAIAction`; the AI panel's observer
+            // invokes the SAME view-model path the chrome buttons trigger —
+            // no parallel AI call.
+            let actionRaw = try requireParam("action", in: params)
+            guard let action = AIActionKind(rawValue: actionRaw) else {
+                let valid = AIActionKind.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam(
+                    "action",
+                    reason: "expected \(valid), got \(actionRaw)"
+                )
+            }
+
+            // `scope` is only meaningful for summarize (the Summarize tab's
+            // scope chips). Reject it on chat/translate so a typo surfaces
+            // rather than silently dropping the scope.
+            let scope: SummaryScope?
+            if let rawScope = params["scope"] {
+                guard action == .summarize else {
+                    throw DebugCommandError.invalidParam(
+                        "scope",
+                        reason: "scope is only valid for action=summarize, got action=\(actionRaw)"
+                    )
+                }
+                guard !rawScope.isEmpty else {
+                    throw DebugCommandError.invalidParam(
+                        "scope",
+                        reason: "expected one of section|chapter|book, got empty value"
+                    )
+                }
+                // The URL uses the friendly `book`; map it to the
+                // `SummaryScope.bookSoFar` case. `section`/`chapter` map 1:1.
+                switch rawScope {
+                case "section": scope = .section
+                case "chapter": scope = .chapter
+                case "book":    scope = .bookSoFar
+                default:
+                    throw DebugCommandError.invalidParam(
+                        "scope",
+                        reason: "expected one of section|chapter|book, got \(rawScope)"
+                    )
+                }
+            } else {
+                scope = nil
+            }
+
+            // `text` is required for chat (the message to send) and optional
+            // for translate (target-language override). It is meaningless for
+            // summarize (the scope chip drives it) — accepted but ignored, so
+            // the handler doesn't need a separate guard.
+            let text: String?
+            if action == .chat {
+                // requireParam treats empty as missing — chat with no message
+                // has nothing to send (the VM's sendMessage ignores empties).
+                text = try requireParam("text", in: params)
+            } else {
+                text = nonEmpty(params["text"])
+            }
+            return .aiAction(action: action, scope: scope, text: text)
 
         default:
             throw DebugCommandError.unknownCommand(host)

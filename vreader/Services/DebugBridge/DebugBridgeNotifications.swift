@@ -121,6 +121,32 @@ extension Notification.Name {
     ///   when absent.
     static let debugBridgePresentSheet = Notification.Name("vreader.debugBridge.presentSheet")
 
+    /// Posted by RealDebugBridgeContext.aiAction to fire an AI action on the
+    /// *presented* AI sheet from outside the chrome (Bug #255 verification
+    /// harness). `present?sheet=ai` opens the panel; this fires the action
+    /// the chrome buttons trigger (Summarize tap / chat send / translate),
+    /// so the AI-response-card render states become CU-free verifiable via
+    /// `snapshot` + `eval`. `AIReaderPanel`'s observer invokes the SAME
+    /// view-model path the button does — `AISummaryTabView.runSummarize` /
+    /// `AIChatView.sendMessage` / `TranslationPanel.translate` — there is no
+    /// parallel AI call. The observer lives in `AIReaderPanel` (not
+    /// `ReaderContainerView`) because the panel holds the locator / full
+    /// text / chapter bounds / format the action needs. If no AI sheet is
+    /// presented, observers don't fire — the URL is silently a no-op
+    /// (mirrors `present` / `tts` / `search`).
+    ///
+    /// userInfo:
+    /// - `"action"`: String — one of `DebugCommand.AIActionKind`'s rawValues
+    ///   (`summarize` / `chat` / `translate`), validated by the parser.
+    /// - `"scope"`: String? — summarize-only; a `SummaryScope` rawValue
+    ///   (`section` / `chapter` / `bookSoFar`). The parser maps the
+    ///   URL-friendly `book` to `bookSoFar` before posting. Present only when
+    ///   the bridge command included `scope=`.
+    /// - `"text"`: String? — the chat message (chat) or translate
+    ///   target-language override (translate). Present only when the bridge
+    ///   command included a non-empty `text=`.
+    static let debugBridgeAIAction = Notification.Name("vreader.debugBridge.aiAction")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker

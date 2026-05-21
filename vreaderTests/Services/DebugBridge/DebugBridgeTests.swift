@@ -138,6 +138,26 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_aiSummarizeURL_callsAIActionHandler() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://ai?action=summarize&scope=chapter")!)
+
+        XCTAssertEqual(context.calls, [.aiAction(action: .summarize, scope: .chapter, text: nil)])
+    }
+
+    @MainActor
+    func test_handle_aiChatURL_callsAIActionHandlerWithText() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://ai?action=chat&text=hello")!)
+
+        XCTAssertEqual(context.calls, [.aiAction(action: .chat, scope: nil, text: "hello")])
+    }
+
+    @MainActor
     func test_handle_unknownCommand_recordsParseErrorWithoutCallingHandlers() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -300,6 +320,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func present(sheet: DebugCommand.SheetKind, tab: String?) async throws {
         await record("present:\(sheet.rawValue):\(tab ?? "nil")")
     }
+    func aiAction(action: DebugCommand.AIActionKind, scope: SummaryScope?, text: String?) async throws {
+        await record("ai:\(action.rawValue):\(scope?.rawValue ?? "nil"):\(text ?? "nil")")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -330,6 +353,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case highlight(startUTF16: Int, endUTF16: Int, color: String?)
         case provider(action: DebugCommand.ProviderAction)
         case present(sheet: DebugCommand.SheetKind, tab: String?)
+        case aiAction(action: DebugCommand.AIActionKind, scope: SummaryScope?, text: String?)
     }
 
     private(set) var calls: [Call] = []
@@ -361,6 +385,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func present(sheet: DebugCommand.SheetKind, tab: String?) async throws {
         calls.append(.present(sheet: sheet, tab: tab))
+    }
+    func aiAction(action: DebugCommand.AIActionKind, scope: SummaryScope?, text: String?) async throws {
+        calls.append(.aiAction(action: action, scope: scope, text: text))
     }
 }
 

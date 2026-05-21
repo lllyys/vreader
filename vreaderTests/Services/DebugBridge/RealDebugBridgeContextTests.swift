@@ -1642,6 +1642,135 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
     }
 
+    // MARK: - ai (Bug #255 — verification harness AI-action driver)
+    //
+    // RealDebugBridgeContext.aiAction posts `.debugBridgeAIAction` with the
+    // parsed action rawValue + optional scope (summarize) + optional text
+    // (chat message / translate language). The active AI sheet's observer
+    // (AIReaderPanel, Bug #255 wiring) fires the SAME action the chrome
+    // buttons trigger, so the AI-response-card render states become CU-free
+    // verifiable via `snapshot` + `eval`. When no AI sheet is presented, the
+    // URL is silently a no-op (mirrors `tts` / `search` / `present`).
+
+    @MainActor
+    func test_aiAction_summarize_postsActionNotificationActionOnly() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "aiAction notification posted")
+        nonisolated(unsafe) var receivedAction: String?
+        nonisolated(unsafe) var hasScope = true
+        nonisolated(unsafe) var hasText = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeAIAction, object: nil, queue: .main
+        ) { notification in
+            receivedAction = notification.userInfo?["action"] as? String
+            hasScope = notification.userInfo?["scope"] != nil
+            hasText = notification.userInfo?["text"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.aiAction(action: .summarize, scope: nil, text: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedAction, "summarize")
+        XCTAssertFalse(hasScope, "userInfo must omit 'scope' when nil was passed")
+        XCTAssertFalse(hasText, "userInfo must omit 'text' when nil was passed")
+    }
+
+    @MainActor
+    func test_aiAction_summarizeWithScope_postsScopeRawValue() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "aiAction notification posted with scope")
+        nonisolated(unsafe) var receivedAction: String?
+        nonisolated(unsafe) var receivedScope: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeAIAction, object: nil, queue: .main
+        ) { notification in
+            receivedAction = notification.userInfo?["action"] as? String
+            receivedScope = notification.userInfo?["scope"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.aiAction(action: .summarize, scope: .chapter, text: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedAction, "summarize")
+        XCTAssertEqual(receivedScope, "chapter",
+                       "scope reaches observers as SummaryScope.rawValue (chapter), not the URL-friendly 'book' alias")
+    }
+
+    @MainActor
+    func test_aiAction_chatWithText_postsText() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "aiAction notification posted with text")
+        nonisolated(unsafe) var receivedAction: String?
+        nonisolated(unsafe) var receivedText: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeAIAction, object: nil, queue: .main
+        ) { notification in
+            receivedAction = notification.userInfo?["action"] as? String
+            receivedText = notification.userInfo?["text"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.aiAction(action: .chat, scope: nil, text: "who is the narrator?")
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedAction, "chat")
+        XCTAssertEqual(receivedText, "who is the narrator?")
+    }
+
+    @MainActor
+    func test_aiAction_eachActionKind_postsMatchingRawValue() async throws {
+        for action in DebugCommand.AIActionKind.allCases {
+            let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+            let exp = expectation(description: "aiAction posted for \(action.rawValue)")
+            nonisolated(unsafe) var receivedAction: String?
+            let token = NotificationCenter.default.addObserver(
+                forName: .debugBridgeAIAction, object: nil, queue: .main
+            ) { notification in
+                receivedAction = notification.userInfo?["action"] as? String
+                exp.fulfill()
+            }
+            try await context.aiAction(action: action, scope: nil, text: nil)
+            await fulfillment(of: [exp], timeout: 2.0)
+            NotificationCenter.default.removeObserver(token)
+            XCTAssertEqual(receivedAction, action.rawValue)
+        }
+    }
+
+    @MainActor
+    func test_aiAction_endToEndThroughBridge_dispatchesAndPostsNotification() async throws {
+        // End-to-end: URL → DebugBridge.handle → RealDebugBridgeContext.aiAction.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+        let bridge = DebugBridge(context: context)
+
+        let exp = expectation(description: "ai notification posted via bridge")
+        nonisolated(unsafe) var receivedAction: String?
+        nonisolated(unsafe) var receivedScope: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeAIAction, object: nil, queue: .main
+        ) { notification in
+            receivedAction = notification.userInfo?["action"] as? String
+            receivedScope = notification.userInfo?["scope"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        await bridge.handle(URL(string: "vreader-debug://ai?action=summarize&scope=book")!)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedAction, "summarize")
+        XCTAssertEqual(receivedScope, "bookSoFar",
+                       "the URL-friendly 'book' is mapped to SummaryScope.bookSoFar before posting")
+        XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
+    }
+
     // MARK: - provider (Bug #243 — verification harness AI-provider-setup)
     //
     // RealDebugBridgeContext.provider mutates a ProviderProfileStore and a

@@ -1373,6 +1373,208 @@ final class DebugCommandTests: XCTestCase {
             XCTAssertEqual(name, "sheet")
         }
     }
+
+    // MARK: - ai (Bug #255 — verification harness AI-action driver)
+    //
+    // `vreader-debug://ai?action=<summarize|chat|translate>[&scope=<section|chapter|book>][&text=<...>]`
+    // fires the AI action the presented AI sheet exposes — the SAME path the
+    // chrome buttons (Summarize tap / chat send / language pill) take, so the
+    // AI-response-card render states become CU-free verifiable via `snapshot`
+    // + `eval`. `scope` is summarize-only (maps the URL-friendly `book` →
+    // `SummaryScope.bookSoFar`); `text` is the chat message (required for
+    // chat) or the translate target-language override (optional).
+
+    func test_parse_aiSummarize_returnsSummarizeNoScopeNoText() throws {
+        let url = URL(string: "vreader-debug://ai?action=summarize")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .summarize, scope: nil, text: nil))
+    }
+
+    func test_parse_aiSummarizeWithChapterScope_returnsChapterScope() throws {
+        let url = URL(string: "vreader-debug://ai?action=summarize&scope=chapter")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .summarize, scope: .chapter, text: nil))
+    }
+
+    func test_parse_aiSummarizeWithSectionScope_returnsSectionScope() throws {
+        let url = URL(string: "vreader-debug://ai?action=summarize&scope=section")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .summarize, scope: .section, text: nil))
+    }
+
+    func test_parse_aiSummarizeWithBookScope_mapsToBookSoFar() throws {
+        // The URL uses the friendly `book`; the parser maps it to the
+        // `SummaryScope.bookSoFar` case (whose rawValue is `bookSoFar`).
+        let url = URL(string: "vreader-debug://ai?action=summarize&scope=book")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .summarize, scope: .bookSoFar, text: nil))
+    }
+
+    func test_parse_aiChatWithText_returnsChatMessage() throws {
+        let url = URL(string: "vreader-debug://ai?action=chat&text=hello")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .chat, scope: nil, text: "hello"))
+    }
+
+    func test_parse_aiChatPercentEncodedText_decodesText() throws {
+        // A multi-word chat message arrives URL-encoded; the parser returns it
+        // decoded so the handler forwards the verbatim user prompt.
+        let url = URL(string: "vreader-debug://ai?action=chat&text=who%20is%20the%20narrator%3F")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .chat, scope: nil, text: "who is the narrator?"))
+    }
+
+    func test_parse_aiChatMissingText_throwsMissingParam() {
+        // Chat has nothing to send without a message — reject rather than
+        // dispatch an empty `sendMessage` (which the VM silently ignores).
+        let url = URL(string: "vreader-debug://ai?action=chat")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "text")
+        }
+    }
+
+    func test_parse_aiChatEmptyText_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://ai?action=chat&text=")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "text")
+        }
+    }
+
+    func test_parse_aiTranslate_returnsTranslateNoText() throws {
+        // Translate with no `text` uses the panel's current target language.
+        let url = URL(string: "vreader-debug://ai?action=translate")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .translate, scope: nil, text: nil))
+    }
+
+    func test_parse_aiTranslateWithText_returnsTargetLanguageOverride() throws {
+        // For translate, `text` is the target-language override (e.g. force
+        // a specific language rather than the pre-selected default).
+        let url = URL(string: "vreader-debug://ai?action=translate&text=Spanish")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .translate, scope: nil, text: "Spanish"))
+    }
+
+    func test_parse_aiMissingAction_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://ai")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
+
+    func test_parse_aiEmptyAction_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://ai?action=")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
+
+    func test_parse_aiUnknownAction_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://ai?action=explode")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
+
+    func test_parse_aiScopeOnNonSummarize_throwsInvalidParam() {
+        // `scope` only means anything for summarize — reject it on chat so a
+        // typo (wrong action) surfaces rather than silently no-op the scope.
+        let url = URL(string: "vreader-debug://ai?action=chat&text=hi&scope=chapter")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "scope")
+        }
+    }
+
+    func test_parse_aiUnknownScope_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://ai?action=summarize&scope=paragraph")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "scope")
+        }
+    }
+
+    func test_parse_aiEmptyScope_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://ai?action=summarize&scope=")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "scope")
+        }
+    }
+
+    func test_parse_aiAllActionKinds_accepted() throws {
+        // Every AIActionKind must parse. summarize/translate need no extra
+        // param; chat needs `text`.
+        let cases: [(String, String)] = [
+            ("summarize", "vreader-debug://ai?action=summarize"),
+            ("chat", "vreader-debug://ai?action=chat&text=hi"),
+            ("translate", "vreader-debug://ai?action=translate"),
+        ]
+        for (raw, urlString) in cases {
+            let cmd = try DebugCommand.parse(URL(string: urlString)!)
+            guard case .aiAction(let action, _, _) = cmd else {
+                XCTFail("expected .aiAction, got \(cmd) for action=\(raw)")
+                continue
+            }
+            XCTAssertEqual(action.rawValue, raw)
+        }
+    }
+
+    func test_parse_aiTrailingSlash_parses() throws {
+        let url = URL(string: "vreader-debug://ai/?action=summarize")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .aiAction(action: .summarize, scope: nil, text: nil))
+    }
+
+    func test_parse_aiDeepPath_throwsUnknownCommand() {
+        let url = URL(string: "vreader-debug://ai/extra?action=summarize")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.unknownCommand = error else {
+                XCTFail("expected unknownCommand, got \(error)")
+                return
+            }
+        }
+    }
+
+    func test_parse_aiDuplicateAction_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://ai?action=summarize&action=chat")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "action")
+        }
+    }
 }
 
 #endif

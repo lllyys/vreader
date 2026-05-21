@@ -24,6 +24,7 @@
 		02CBE47CFF27030CBBCF0B13 /* EPUBSelectionTokenCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78743D11EADF7D49C2AD970 /* EPUBSelectionTokenCache.swift */; };
 		0355A26EEC17FC8847311896 /* HighlightPopoverActionRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 726B2271F9C320E40AA66D67 /* HighlightPopoverActionRouter.swift */; };
 		036A7AA1F02D9219384C777A /* NativeTextPagedIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5CE4AD339F8C68B973D9C88 /* NativeTextPagedIntegrationTests.swift */; };
+		03C41583AD63B5252F8AE8F0 /* DebugAIActionEffectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55CA2260032B7EFD94B1480B /* DebugAIActionEffectTests.swift */; };
 		04059C90590FC9DE007E150D /* BilingualDisplayPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC88A66F5D64402A04C999C3 /* BilingualDisplayPipeline.swift */; };
 		044A57EF6D114FA998DB29FA /* TextKit2Paginator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F317CDBF13A6A5673D64A8A /* TextKit2Paginator.swift */; };
 		04680C6879EFBD0BD77D56DF /* LibraryViewSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF69255252D28E9C698F4E20 /* LibraryViewSheets.swift */; };
@@ -300,6 +301,7 @@
 		38051CD7C934E284022C36A6 /* SettingsViewStatsHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E714627B9379C1CF150D20D7 /* SettingsViewStatsHandoffTests.swift */; };
 		381D47129E7564BFBE0B26EB /* ThemeBackgroundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21055A4DC487F0F56BA7C475 /* ThemeBackgroundTests.swift */; };
 		3821F3BE76B9BE588B9FA995 /* SearchHitToLocatorResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9102277C4126793229AEEB9 /* SearchHitToLocatorResolverTests.swift */; };
+		3825952E33170D1AB08DECAE /* RealDebugBridgeContext+AIAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29B89D96641AE245EA38B05 /* RealDebugBridgeContext+AIAction.swift */; };
 		383B1C50C15197132A88DE90 /* Color+ReaderHex.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2280805065667E3AE55EC34 /* Color+ReaderHex.swift */; };
 		384E9916435C82876752D9D9 /* AIAssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A5928551FF9FBB8D2E87E6F /* AIAssistantView.swift */; };
 		38661CFAC1618DB7526ACB28 /* PersistenceActor+Highlights.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC517B8E3581F795DEDEC934 /* PersistenceActor+Highlights.swift */; };
@@ -1224,6 +1226,7 @@
 		F3F7CDAB38376CE0AE8AE67A /* FoliateSpikeViewTTSTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FC663099F4228086D7EA54 /* FoliateSpikeViewTTSTests.swift */; };
 		F42AB6BD6B470B69A0F5A551 /* BookTranslationProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF42781312FD73B373FB2BB5 /* BookTranslationProgressTests.swift */; };
 		F437CE5879D0238AC5523F52 /* BookFileImportFinalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B21FF5B2854F2C50C5A43F17 /* BookFileImportFinalizerTests.swift */; };
+		F4FA879DAB45756BADC7D26E /* AIReaderPanel+DebugBridgeAIAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE5B5FE13287A24AE9EEFBA7 /* AIReaderPanel+DebugBridgeAIAction.swift */; };
 		F4FE45E62955A90DF146DE4B /* GenerativeCoverStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B75BA41298C5306AC9AD036 /* GenerativeCoverStyle.swift */; };
 		F51F7B9360A990E857FE1373 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6686ECBBE526053A51CBA2 /* ChatMessage.swift */; };
 		F5A31837AE39AA372B31F1B5 /* LocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E8B92C301E5470AB98C87E /* LocatorTests.swift */; };
@@ -1250,6 +1253,7 @@
 		FB165F7EA6481A67F3435EDD /* OPDSCatalogListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326632F80DB744679F67D712 /* OPDSCatalogListTests.swift */; };
 		FB379B5459AC6B9D5975E3D2 /* BookFileState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2838729583E68E78C072AD56 /* BookFileState.swift */; };
 		FB4B2B41D865A14865DF4DE1 /* HTTPTTSProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CDE700F3AC42B0D8AD377E1 /* HTTPTTSProviderTests.swift */; };
+		FB59D6FDE7A4F0E7F44C78DA /* DebugAIActionEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 291B9DC0FD8C89549850D5A6 /* DebugAIActionEffect.swift */; };
 		FB7EAB10F53380ED4FFAF9D1 /* ChapterTranslationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09A9F4F3A737FB80599893B5 /* ChapterTranslationStore.swift */; };
 		FBE9680C2EE09F4F1936BC5C /* PDFReaderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43D54AC9AD2556A67C96BD52 /* PDFReaderViewModel.swift */; };
 		FBF9F886D16DA6D941A6C8CD /* LibraryShellTokensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40146D7306CDCE0F1A2FC91 /* LibraryShellTokensTests.swift */; };
@@ -1494,6 +1498,7 @@
 		2838729583E68E78C072AD56 /* BookFileState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFileState.swift; sourceTree = "<group>"; };
 		28793D1AC2241553AC5DB5CC /* SimpTradTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpTradTransform.swift; sourceTree = "<group>"; };
 		28A6E86CE6A4730CD6F7D674 /* AIServiceProfileDispatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServiceProfileDispatchTests.swift; sourceTree = "<group>"; };
+		291B9DC0FD8C89549850D5A6 /* DebugAIActionEffect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugAIActionEffect.swift; sourceTree = "<group>"; };
 		292131FE5DD09EAEDDD3191C /* LibraryEmptyStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryEmptyStateTests.swift; sourceTree = "<group>"; };
 		292EB76312E500AFAC065E1F /* PreferenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferenceStore.swift; sourceTree = "<group>"; };
 		295669F5B358B6C7BE41952E /* NativeTextPaginatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTextPaginatorTests.swift; sourceTree = "<group>"; };
@@ -1729,6 +1734,7 @@
 		551DA6A3D645B1D9D72EE159 /* ChapterTranslationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterTranslationService.swift; sourceTree = "<group>"; };
 		55633F1E05B29D20C4A4D0D5 /* TXTReaderPositionBackCompatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderPositionBackCompatTests.swift; sourceTree = "<group>"; };
 		55AE145B1D7CBB62F06750BA /* CoverPickCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverPickCoordinatorTests.swift; sourceTree = "<group>"; };
+		55CA2260032B7EFD94B1480B /* DebugAIActionEffectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugAIActionEffectTests.swift; sourceTree = "<group>"; };
 		560129625F0E48471C0F4B62 /* BlobPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlobPath.swift; sourceTree = "<group>"; };
 		5639E3F809343C8CE5D7A020 /* PDFPasswordTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPasswordTests.swift; sourceTree = "<group>"; };
 		56912BE618BA41A3B17325C5 /* SettingsHeaderViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsHeaderViewModelTests.swift; sourceTree = "<group>"; };
@@ -2178,6 +2184,7 @@
 		B1DBBFF061B96088FFE84194 /* TXTService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTService.swift; sourceTree = "<group>"; };
 		B21FF5B2854F2C50C5A43F17 /* BookFileImportFinalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFileImportFinalizerTests.swift; sourceTree = "<group>"; };
 		B294CBB624E1CE03FEFA40E6 /* WebDAVProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProviderTests.swift; sourceTree = "<group>"; };
+		B29B89D96641AE245EA38B05 /* RealDebugBridgeContext+AIAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RealDebugBridgeContext+AIAction.swift"; sourceTree = "<group>"; };
 		B2A04EAFA37410DA616E33D6 /* BackgroundDownloadSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloadSession.swift; sourceTree = "<group>"; };
 		B2B73649BCBDBE8A99B210A9 /* WebDAVNetworkPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVNetworkPolicyTests.swift; sourceTree = "<group>"; };
 		B2DB7F421D9D2E7492E12F89 /* ZIPReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZIPReader.swift; sourceTree = "<group>"; };
@@ -2489,6 +2496,7 @@
 		ED80D7FC768F4B87E7DB036A /* VoiceOverAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverAuditTests.swift; sourceTree = "<group>"; };
 		EE41196788F697BB4ACD4B06 /* ReadingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionTests.swift; sourceTree = "<group>"; };
 		EE4A2E56BB468589356E2DBF /* BilingualLanguageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualLanguageTests.swift; sourceTree = "<group>"; };
+		EE5B5FE13287A24AE9EEFBA7 /* AIReaderPanel+DebugBridgeAIAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIReaderPanel+DebugBridgeAIAction.swift"; sourceTree = "<group>"; };
 		EE9DA4CCA7E942838A838495 /* FontSizeCalibrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontSizeCalibrator.swift; sourceTree = "<group>"; };
 		EEDD43BA2EC5C331FDF3A703 /* PersistenceHighlightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceHighlightTests.swift; sourceTree = "<group>"; };
 		EEF87AF7EE6B0FB8E4CC9332 /* TypographySettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypographySettingsTests.swift; sourceTree = "<group>"; };
@@ -2921,6 +2929,7 @@
 				1351525282D8D0C13B726F85 /* DebugReaderRegistry+WebViewWait.swift */,
 				94C32FCAEDE0062125F6A51E /* DebugSnapshot.swift */,
 				0378B284E969CD8625A89EA1 /* RealDebugBridgeContext.swift */,
+				B29B89D96641AE245EA38B05 /* RealDebugBridgeContext+AIAction.swift */,
 				A3D74F5FB31BAB5089EB5022 /* RealDebugBridgeContext+Eval.swift */,
 				BB8C0771E06618E5F68C410D /* RealDebugBridgeContext+Present.swift */,
 				2E5C9F4DD3DE16D29E00E5F6 /* RealDebugBridgeContext+Provider.swift */,
@@ -3029,6 +3038,7 @@
 				CF50D372D73575F047EF0991 /* BookContentCacheTests.swift */,
 				C85205257E8103AA80C08BAB /* BookmarkFeedbackTests.swift */,
 				C80D6D1B18008B168D01FFF2 /* BookOpenPerformanceTests.swift */,
+				55CA2260032B7EFD94B1480B /* DebugAIActionEffectTests.swift */,
 				310813C564EF1BF86A13694E /* DebugBridgeHighlightObserverTests.swift */,
 				6D72F88359945829695CD984 /* DebugPresentSheetEffectTests.swift */,
 				66440341C1BA8050AFD3A65C /* EPUBChapterNavigationRouterTests.swift */,
@@ -3559,11 +3569,13 @@
 			children = (
 				064AE6DC1BC56B9DD7CCA796 /* AIProviderPicker.swift */,
 				6DF113D7E83A1CE51F417258 /* AIReaderPanel.swift */,
+				EE5B5FE13287A24AE9EEFBA7 /* AIReaderPanel+DebugBridgeAIAction.swift */,
 				8A46EC81A33304A8D024F7CA /* AIReaderPanelHeader.swift */,
 				83BEF8E9F5CAD4246490C06D /* AISummaryCard.swift */,
 				DB61A191698AD787CC1CCB2F /* AISummaryScopeChipStrip.swift */,
 				F691E61DE6E713DE4FD47733 /* AISummaryTabView.swift */,
 				C2280805065667E3AE55EC34 /* Color+ReaderHex.swift */,
+				291B9DC0FD8C89549850D5A6 /* DebugAIActionEffect.swift */,
 				073161C86CE5691A8173C851 /* DebugBridgeHighlightObserver.swift */,
 				48BCADB7187645F41A660385 /* DebugPresentSheetEffect.swift */,
 				FBD54F8887091F46753F09A4 /* DictionarySheet.swift */,
@@ -5106,6 +5118,7 @@
 				7BF82A6DDAC0867B0F7FC20D /* CoverLifecycleTests.swift in Sources */,
 				2DCAFC088952BBB5A24F7637 /* CoverPickCoordinatorTests.swift in Sources */,
 				ACE4A8A746F082AEC08BB273 /* CustomCoverStoreTests.swift in Sources */,
+				03C41583AD63B5252F8AE8F0 /* DebugAIActionEffectTests.swift in Sources */,
 				5C4609A0AEAD65A12670FB78 /* DebugBridgeHighlightObserverTests.swift in Sources */,
 				20A406327C10BC9CBAB7D9D8 /* DebugBridgeTests.swift in Sources */,
 				0B598B705531647D3BC5BC60 /* DebugCommandTests.swift in Sources */,
@@ -5552,6 +5565,7 @@
 				DADE03AB3940ED9668FEF1B9 /* AIProviderPicker.swift in Sources */,
 				A74E0B8A07E4DD90EB24B234 /* AIProviderPickerViewModel.swift in Sources */,
 				B6390E651DCC967457775D96 /* AIReaderAvailability.swift in Sources */,
+				F4FA879DAB45756BADC7D26E /* AIReaderPanel+DebugBridgeAIAction.swift in Sources */,
 				81498F908FAF97F421A3C35F /* AIReaderPanel.swift in Sources */,
 				F0A36C4FB1AD5746B8636062 /* AIReaderPanelHeader.swift in Sources */,
 				04759BE2CD3CA39424689484 /* AIResponseCache.swift in Sources */,
@@ -5678,6 +5692,7 @@
 				D012C1E7B7D9AD21911C9E8E /* ContinueReadingRail.swift in Sources */,
 				426386DE8ABF03F1A1292508 /* CoverPickCoordinator.swift in Sources */,
 				F14A4E744781186C72D46349 /* CustomCoverStore.swift in Sources */,
+				FB59D6FDE7A4F0E7F44C78DA /* DebugAIActionEffect.swift in Sources */,
 				FFCACE71EA64842074302A98 /* DebugBridge.swift in Sources */,
 				22106005DF670AB1A6A9AB34 /* DebugBridgeHighlightObserver.swift in Sources */,
 				6BEC4693E4FE9F9EFC9FDE41 /* DebugBridgeNotifications.swift in Sources */,
@@ -5976,6 +5991,7 @@
 				7F9B63BF3B9DCB2C4ED34710 /* ReadingStatsCustomRange.swift in Sources */,
 				8A1909A1927C0A98F6F8D6D0 /* ReadingStatsModels.swift in Sources */,
 				38F1AB473618B5EB717D05DE /* ReadingTimeFormatter.swift in Sources */,
+				3825952E33170D1AB08DECAE /* RealDebugBridgeContext+AIAction.swift in Sources */,
 				2DCCDBB57F5086AF49FF8D99 /* RealDebugBridgeContext+Eval.swift in Sources */,
 				2D22FEBD43A0354357992A28 /* RealDebugBridgeContext+Present.swift in Sources */,
 				009D566180EA91AB79A4F32C /* RealDebugBridgeContext+Provider.swift in Sources */,

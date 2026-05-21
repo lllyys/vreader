@@ -62,6 +62,16 @@ protocol DebugBridgeContext {
     /// chrome buttons set (no parallel presentation logic). If no reader is
     /// loaded, the action is a no-op (matches `tts` / `search` / `highlight`).
     func present(sheet: DebugCommand.SheetKind, tab: String?) async throws
+    /// Bug #255 — fire an AI action on the *presented* AI sheet from outside
+    /// the chrome so the AI-response-card render states become CU-free
+    /// verifiable via `snapshot` + `eval`. The handler posts
+    /// `.debugBridgeAIAction`; the AI panel's observer invokes the SAME
+    /// view-model path the chrome buttons trigger (`runSummarize` /
+    /// `sendMessage` / `translate`) — no parallel AI call. `scope` is
+    /// summarize-only; `text` is the chat message / translate language
+    /// override. If no AI sheet is presented, the action is a no-op (matches
+    /// `present` / `tts` / `search`).
+    func aiAction(action: DebugCommand.AIActionKind, scope: SummaryScope?, text: String?) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -183,6 +193,8 @@ final class DebugBridge {
             try await context.provider(action: action)
         case .present(let sheet, let tab):
             try await context.present(sheet: sheet, tab: tab)
+        case .aiAction(let action, let scope, let text):
+            try await context.aiAction(action: action, scope: scope, text: text)
         }
     }
 }
