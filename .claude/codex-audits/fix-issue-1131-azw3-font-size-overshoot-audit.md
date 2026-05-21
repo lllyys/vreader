@@ -1,3 +1,11 @@
+---
+branch: fix/issue-1131-azw3-font-size-overshoot
+threadId: 019e4c36-d6e4-7903-b75e-b5fc853abf95
+rounds: 1
+final_verdict: follow-up-recommended
+date: 2026-05-22
+---
+
 # Codex Audit — Bug #261 / GH #1131 (AZW3/MOBI font-size overshoot)
 
 - **Branch**: `fix/issue-1131-azw3-font-size-overshoot`
