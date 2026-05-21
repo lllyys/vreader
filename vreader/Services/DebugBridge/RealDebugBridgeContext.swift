@@ -40,6 +40,14 @@ enum DebugBridgeContextError: Error, Equatable {
     /// Feature #49 WI-7b: awaitReader timed out waiting for a reader matching
     /// `fingerprintKey` to register after the open notification was posted.
     case openAwaitReaderTimeout(fingerprintKey: String)
+    /// Bug #257: a `position` was supplied for a format whose host-side seek
+    /// cannot honor the resolved position shape. Currently only EPUB — its
+    /// navigate handler resolves the spine by `href`, not raw CFI, so a
+    /// CFI-only seek would be a silent no-op. Failing loudly (rather than
+    /// opening at the wrong place) preserves the bug's original "fail loudly"
+    /// contract. TXT / MD (offset), PDF (page), and AZW3 (Foliate consumes
+    /// CFI directly) all seek; EPUB does not yet.
+    case seekUnsupportedForFormat(format: String, position: String)
 }
 
 /// Production DebugBridgeContext. Each handler is a thin wrapper over
@@ -188,6 +196,19 @@ final class RealDebugBridgeContext: DebugBridgeContext {
             resolvedPosition = nil
         }
 
+        // Step 2b (Bug #257, Codex audit round 1 Medium): reject EPUB `position`
+        // up front rather than open at offset 0 and silently drop the seek. The
+        // EPUB navigate handler resolves the spine by `href`; a CFI-only seek
+        // would no-op. Failing here (before opening) keeps the bug's original
+        // "fail loudly instead of opening at the wrong place" contract. AZW3
+        // takes the Foliate CFI path (which DOES seek), so only EPUB is gated.
+        if case .epubCFI = resolvedPosition, let position {
+            throw DebugBridgeContextError.seekUnsupportedForFormat(
+                format: book.format,
+                position: position
+            )
+        }
+
         // Step 3: post notification — opens the reader. Library navigation
         // observes `.debugBridgeOpenBook` and pushes the matching book.
         NotificationCenter.default.post(
@@ -243,12 +264,10 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     ///
     /// Every reader container observes `.readerNavigateToLocator` and seeks via
     /// the field that matches its format: TXT / MD use `charOffsetUTF16`, PDF
-    /// uses `page`, EPUB uses `href`, Foliate uses `cfi`. A CFI-only locator
-    /// (EPUB / AZW3) is therefore a best-effort no-op for EPUB — its handler
-    /// resolves spine by `href`, not raw CFI — and a best-effort attempt for
-    /// AZW3 (Foliate's `navigateToSearchResult(cfi:)` accepts a CFI). The TXT /
-    /// MD / PDF paths are fully wired; those are the formats the verification
-    /// harness exercises.
+    /// uses `page`, AZW3 (Foliate) uses `cfi` (`navigateToSearchResult(cfi:)`).
+    /// EPUB is rejected before this point (`seekUnsupportedForFormat`) because
+    /// its handler resolves the spine by `href`, not raw CFI — so every
+    /// `DebugPosition` that reaches here maps to a field its host consumes.
     private func seekActiveReader(to position: DebugPosition, fingerprint: DocumentFingerprint) {
         guard let locator = position.locator(bookFingerprint: fingerprint) else {
             log.error("open: could not build a Locator for resolved position \(String(describing: position), privacy: .public)")

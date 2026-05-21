@@ -157,6 +157,8 @@ final class DebugBridge {
                 return "bridge.invalidPosition: \(format) \(position) — \(reason)"
             case .openAwaitReaderTimeout(let key):
                 return "bridge.openAwaitReaderTimeout: \(key)"
+            case .seekUnsupportedForFormat(let format, let position):
+                return "bridge.seekUnsupportedForFormat: \(format) \(position)"
             }
         default:
             return "unknown: \(String(describing: type(of: error)))"

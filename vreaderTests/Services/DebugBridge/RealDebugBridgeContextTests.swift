@@ -877,6 +877,125 @@ final class RealDebugBridgeContextTests: XCTestCase {
                        "the navigate locator must carry the opened book's fingerprint")
     }
 
+    /// Bug #257: AZW3 IS supported — Foliate's navigate handler consumes a raw
+    /// CFI (`navigateToSearchResult(cfi:)`), unlike EPUB. So an AZW3 `position`
+    /// must reach the seek and post `.readerNavigateToLocator` carrying the CFI,
+    /// not be rejected. Asserts the supported/unsupported split is per-format.
+    @MainActor
+    func test_open_withAzw3CFI_postsNavigateWithCFI() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "4", count: 64),
+            fileByteCount: 8192,
+            format: .azw3
+        )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "AZW3 seekable",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+
+        let cfi = "epubcfi(/6/12!/4/3)"
+        let openExp = expectation(description: "open notification posted")
+        let navExp = expectation(description: "navigate posted")
+        nonisolated(unsafe) var navLocator: Locator?
+        let openToken = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook, object: nil, queue: .main
+        ) { _ in openExp.fulfill() }
+        let navToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { notification in
+            navLocator = notification.object as? Locator
+            navExp.fulfill()
+        }
+        defer {
+            NotificationCenter.default.removeObserver(openToken)
+            NotificationCenter.default.removeObserver(navToken)
+        }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        let openTask = Task { try await context.open(bookId: fp.canonicalKey, position: cfi) }
+        await fulfillment(of: [openExp], timeout: 3.0)
+        // Register a probe so awaitReader resolves (nil settleStrategy → 100ms).
+        DebugReaderRegistry.shared.register(
+            DebugReaderProbeAdapter(fingerprintKey: fp.canonicalKey, format: "azw3")
+        )
+        await fulfillment(of: [navExp], timeout: 3.0)
+        try await openTask.value
+
+        XCTAssertEqual(navLocator?.cfi, cfi, "AZW3 seek must carry the CFI to Foliate")
+    }
+
+    /// Bug #257 (Codex audit round 1 Medium): a VALID EPUB CFI position must
+    /// fail loudly with `seekUnsupportedForFormat` rather than open the book at
+    /// offset 0 and silently drop the seek — the EPUB navigate handler resolves
+    /// the spine by `href`, not raw CFI, so a CFI-only seek would no-op. The
+    /// throw happens BEFORE the open notification (no partial side effect).
+    @MainActor
+    func test_open_withValidEpubCFI_throwsSeekUnsupported_andPostsNoNotification() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "3", count: 64),
+            fileByteCount: 8192,
+            format: .epub
+        )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "EPUB no-seek",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+
+        // No open notification, no navigate — the throw precedes both.
+        let openExp = expectation(description: "no open notification expected")
+        openExp.isInverted = true
+        let navExp = expectation(description: "no navigate expected")
+        navExp.isInverted = true
+        let openToken = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook, object: nil, queue: .main
+        ) { _ in openExp.fulfill() }
+        let navToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { _ in navExp.fulfill() }
+        defer {
+            NotificationCenter.default.removeObserver(openToken)
+            NotificationCenter.default.removeObserver(navToken)
+        }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        do {
+            try await context.open(bookId: fp.canonicalKey, position: "epubcfi(/6/4!/4/1:0)")
+            XCTFail("expected seekUnsupportedForFormat for EPUB position")
+        } catch DebugBridgeContextError.seekUnsupportedForFormat(let format, let position) {
+            XCTAssertEqual(format, "epub")
+            XCTAssertEqual(position, "epubcfi(/6/4!/4/1:0)")
+        }
+        await fulfillment(of: [openExp, navExp], timeout: 0.5)
+    }
+
     /// Bug #257: a nil position must NOT trigger any navigation — opening a
     /// book without `position` lands at the restored/default location, not a
     /// seek. Guards against a regression where the seek fires unconditionally.
