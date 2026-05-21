@@ -115,7 +115,14 @@ struct PDFReaderContainerView: View {
                     pendingHighlightId: pendingHighlightId,
                     searchHighlightText: searchHighlightText,
                     highlightRenderer: highlightRenderer,
-                    theme: settingsStore?.theme
+                    theme: settingsStore?.theme,
+                    // Bug #239 — gate side-tap → page-turn dispatch in the
+                    // bridge's tap recognizer on the current layout. PDF's
+                    // singlePageContinuous display means scroll is the
+                    // default mode; in `.paged` layout the left/right
+                    // zones produce `.readerNextPage` / `.readerPreviousPage`
+                    // (PDFPageNavigator's observer turns the PDFKit page).
+                    layout: settingsStore?.epubLayout
                 )
                 .ignoresSafeArea(edges: .bottom)
                 .accessibilityIdentifier("pdfReaderContent")

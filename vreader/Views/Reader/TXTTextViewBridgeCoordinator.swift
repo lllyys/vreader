@@ -60,6 +60,15 @@ extension TXTTextViewBridge {
         var bilingualSegmentMap: BilingualDisplaySegmentMap =
             BilingualDisplaySegmentMap.identity(sourceLength: 0)
 
+        /// Bug #239 — current layout preference, mirrored from the bridge's
+        /// `layout` parameter on every `updateUIView`. The content-tap path
+        /// consults this via `ReaderTapZoneRouter` so a side-tap in `.paged`
+        /// layout posts `.readerNextPage` / `.readerPreviousPage` instead of
+        /// toggling chrome. In `.scroll` (and `nil`, the safe default) every
+        /// tap collapses to `.readerContentTapped` — preserving the legacy
+        /// pre-paged behavior the TXT scroll surface has always shipped.
+        var pagedLayout: EPUBLayoutPreference?
+
         init(delegate: TXTTextViewBridgeDelegate?, config: TXTViewConfig = TXTViewConfig()) {
             self.delegate = delegate
             self.lastConfig = config
@@ -228,7 +237,23 @@ extension TXTTextViewBridge {
             if let tv = gesture.view as? UITextView {
                 rebuildHighlights(in: tv)
             }
-            TXTBridgeShared.postContentTappedNotification()
+            // Bug #239 — restore side-tap → page-turn in Paged layout. The
+            // legacy `TapZoneOverlay` SwiftUI surface that used to dispatch
+            // these notifications was deleted by feature #54 WI-3; the
+            // native bridge's own tap recognizer is now the producer.
+            // In `.scroll` layout (and the safe `nil` default), the router
+            // collapses every tap to `.readerContentTapped` — preserving the
+            // pre-paged chrome-toggle behavior.
+            if let tv = gesture.view as? UITextView {
+                let location = gesture.location(in: tv)
+                ReaderTapZoneRouter.dispatch(
+                    x: location.x,
+                    totalWidth: tv.bounds.width,
+                    layout: pagedLayout
+                )
+            } else {
+                TXTBridgeShared.postContentTappedNotification()
+            }
         }
 
         /// Resolves a tap into a `ReaderHighlightTapEvent` if the location

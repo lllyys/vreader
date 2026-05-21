@@ -7,9 +7,16 @@
 // - Shows page indicator ("Page X of Y") at the bottom.
 // - Supports both plain text and attributed text.
 // - Posts .readerPositionDidChange after page changes for AI panel context.
+// - Bug #215 / GH #837: container owns a single-tap recognizer that routes
+//   through `ReaderTapZoneRouter` (paged layout → side-tap page-turn,
+//   center-tap chrome-toggle; scroll / nil layout → chrome-toggle for every
+//   tap). The textView keeps `isSelectable = true` so long-press selection
+//   still produces a `SelectionPopover`; the tap recognizer requires that
+//   the long-press gesture failed, so single-tap and selection do not
+//   conflict.
 //
 // @coordinates-with: NativeTextPageNavigator.swift, TXTReaderContainerView.swift,
-//   MDReaderContainerView.swift, TapZoneOverlay.swift, PageTurnAnimator.swift
+//   MDReaderContainerView.swift, ReaderTapZoneRouter.swift, PageTurnAnimator.swift
 
 #if canImport(UIKit)
 import SwiftUI
@@ -28,10 +35,18 @@ struct NativeTextPagedView: UIViewRepresentable {
     let currentPage: Int
     /// Page turn animation style.
     let pageTurnAnimation: PageTurnAnimation
+    /// Bug #215 / GH #837: the active layout preference. Threaded into the
+    /// container so its tap recognizer routes via `ReaderTapZoneRouter`. In
+    /// `.paged` left/right zones produce `.readerNextPage` /
+    /// `.readerPreviousPage`; in `.scroll` (and the safe `nil` default) every
+    /// tap collapses to `.readerContentTapped` — matching the bridge tap
+    /// router added in PR #1098 (Bug #239).
+    var layout: EPUBLayoutPreference? = nil
 
     func makeUIView(context: Context) -> NativePagedContainer {
         let container = NativePagedContainer()
         container.applyConfig(config)
+        container.pagedLayout = layout
         applyContent(to: container.textView)
         container.accessibilityIdentifier = "nativeTextPagedView"
         return container
@@ -39,6 +54,7 @@ struct NativeTextPagedView: UIViewRepresentable {
 
     func updateUIView(_ container: NativePagedContainer, context: Context) {
         container.applyConfig(config)
+        container.pagedLayout = layout
 
         // Animate page transition if needed
         let oldPage = context.coordinator.lastPage
@@ -81,18 +97,46 @@ struct NativeTextPagedView: UIViewRepresentable {
 /// Container UIView that holds a UITextView and supports page turn animations.
 @MainActor
 final class NativePagedContainer: UIView {
+    /// Bug #215 / GH #837: per-side `textContainerInset` on the paged
+    /// `UITextView`. Exposed as a static constant so the MD container can
+    /// subtract `2 × textInset` from the measured GeometryReader proxy
+    /// before paginating — pagination must compute pages for the textView's
+    /// usable interior (proxy − textContainerInset on both axes), not the
+    /// raw container size. Without parity the paginator packs more glyphs
+    /// per page than the renderer can display, and the last 1–2 lines get
+    /// clipped (Cause 1 in the bug doc).
+    static let textInset: CGFloat = 16
+
     let textView: UITextView = {
         let tv = UITextView()
         tv.isEditable = false
         tv.isSelectable = true
         tv.isScrollEnabled = false
-        tv.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        tv.textContainerInset = UIEdgeInsets(
+            top: NativePagedContainer.textInset,
+            left: NativePagedContainer.textInset,
+            bottom: NativePagedContainer.textInset,
+            right: NativePagedContainer.textInset
+        )
+        // Bug #215 / GH #837: match NativeTextPaginator's
+        // `lineFragmentPadding = 0` (NativeTextPaginator.swift:102). Without
+        // this parity each rendered line costs an extra ~5pt of horizontal
+        // padding the paginator does not account for; long lines reflow
+        // differently between paginator and renderer, drifting page
+        // boundaries.
+        tv.textContainer.lineFragmentPadding = 0
         tv.translatesAutoresizingMaskIntoConstraints = false
         return tv
     }()
 
     /// Snapshot view used during page turn animations.
     private var snapshotView: UIView?
+
+    /// Bug #215 / GH #837: current layout preference; consulted by the tap
+    /// recognizer to decide between page-turn (paged) and chrome-toggle
+    /// (scroll / nil). Defaults to nil so a freshly-instantiated container
+    /// (e.g. in a unit test or a pre-wiring path) is scroll-equivalent.
+    var pagedLayout: EPUBLayoutPreference?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -103,6 +147,18 @@ final class NativePagedContainer: UIView {
             textView.trailingAnchor.constraint(equalTo: trailingAnchor),
             textView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        // Bug #215 — install a single-tap recognizer that routes through
+        // `ReaderTapZoneRouter`. The textView keeps `isSelectable = true`
+        // so long-press selection still works; the long-press recognizer
+        // resolves first because UIKit's default disambiguation lets the
+        // long-press hold defer the single tap, and a quick single tap
+        // (which doesn't transition the long-press to "began") fires this
+        // handler.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleContentTap(_:)))
+        tap.numberOfTapsRequired = 1
+        tap.cancelsTouchesInView = false
+        addGestureRecognizer(tap)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
@@ -111,6 +167,25 @@ final class NativePagedContainer: UIView {
         textView.backgroundColor = config.backgroundColor
         textView.textColor = config.textColor
         backgroundColor = config.backgroundColor
+    }
+
+    // MARK: - Content Tap
+
+    /// Bug #215 / GH #837: route a content tap through `ReaderTapZoneRouter`.
+    /// `.paged` layout: left zone → `.readerPreviousPage`, right zone →
+    /// `.readerNextPage`, center zone → `.readerContentTapped`. `.scroll` or
+    /// nil layout: every tap → `.readerContentTapped`. Mirrors
+    /// `TXTTextViewBridgeCoordinator.handleContentTap` (PR #1098 / Bug #239).
+    /// `@objc` so a `UITapGestureRecognizer` selector can target it; visible
+    /// to tests for unit-driven coverage (UIKit's gesture system does not
+    /// fire recognizers in an XCTest harness).
+    @objc func handleContentTap(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: self)
+        ReaderTapZoneRouter.dispatch(
+            x: location.x,
+            totalWidth: bounds.width,
+            layout: pagedLayout
+        )
     }
 
     /// Performs page turn animation: snapshots current content, applies new content,

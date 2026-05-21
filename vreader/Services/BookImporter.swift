@@ -77,12 +77,37 @@ final class BookImporter: BookImporting, Sendable {
     /// - Parameters:
     ///   - fileURL: URL to the file to import. May be a security-scoped resource.
     ///   - source: How the file was provided (Files app, share sheet, etc.).
+    ///   - titleOverride: Optional title that wins over the extractor's
+    ///     filename-derived title. Whitespace-trimmed before use; empty
+    ///     or whitespace-only strings are treated as nil (no override).
+    ///     Bug #247: WebDAV restore path uses this to surface
+    ///     `BackupLibraryEntry.title` from the manifest so restored
+    ///     TXT/MD/PDF books keep their original names.
     /// - Returns: The import result with book identity and metadata.
     /// - Throws: `ImportError` for all failure modes.
     func importFile(
         at fileURL: URL,
-        source: ImportSource
+        source: ImportSource,
+        titleOverride: String? = nil
     ) async throws -> ImportResult {
+        // Normalize the override once at the entry point so the same
+        // value reaches both the insert (new-row) and updateBookTitle
+        // (dedupe-hit) paths AND the returned `ImportResult.title`.
+        // Three rules, in order:
+        //   1. trim leading/trailing whitespace + newlines
+        //   2. empty (after trim) → nil (no override)
+        //   3. cap at 255 characters — matches `Book.init`'s defense-in-
+        //      depth truncation and `MetadataExtractor.maxTitleLength`.
+        //      Without this, an oversized manifest title would persist
+        //      truncated on insert but un-truncated on dedupe-update,
+        //      AND `ImportResult.title` would diverge from the DB row
+        //      on the new-row path.
+        let trimmedOverride: String? = {
+            guard let raw = titleOverride else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return String(trimmed.prefix(255))
+        }()
         // Step 0: Reject non-file and directory URLs
         guard fileURL.isFileURL else {
             throw ImportError.fileNotReadable("Not a file URL")
@@ -149,6 +174,28 @@ final class BookImporter: BookImporting, Sendable {
             )
             try await persistence.replaceProvenance(provenance, toBookWithKey: fingerprintKey)
 
+            // Bug #247: when restore supplies a manifest title override,
+            // update the existing row's title so a dedupe-hit on restore
+            // surfaces the manifest title (the source of truth) instead
+            // of whatever stale title the prior import left behind.
+            // We update only when the override actually differs — saves
+            // a SwiftData write on the common case where the user
+            // re-imports the same file from the same source.
+            let resolvedTitle: String
+            let resolvedAuthor: String?
+            if let override = trimmedOverride, override != existing.title {
+                try await persistence.updateBookTitle(
+                    fingerprintKey: fingerprintKey,
+                    title: override,
+                    author: nil  // Don't clobber an existing author on a routine dedupe.
+                )
+                resolvedTitle = override
+                resolvedAuthor = existing.author
+            } else {
+                resolvedTitle = existing.title
+                resolvedAuthor = existing.author
+            }
+
             // Bug #197: duplicate path still surfaces the row so a user who
             // re-shares an already-imported file sees the library reflect it
             // (selection, scroll-to-row, or just confirmation that "it's
@@ -164,8 +211,8 @@ final class BookImporter: BookImporting, Sendable {
             // detectedEncoding and other metadata are unchanged.
             return ImportResult(
                 fingerprintKey: existing.fingerprintKey,
-                title: existing.title,
-                author: existing.author,
+                title: resolvedTitle,
+                author: resolvedAuthor,
                 fingerprint: existing.fingerprint,
                 provenance: provenance,
                 detectedEncoding: existing.detectedEncoding,
@@ -222,9 +269,16 @@ final class BookImporter: BookImporting, Sendable {
         // the user's original extension.
         let pathExt = fileURL.pathExtension.lowercased()
         let originalExt: String? = pathExt.isEmpty ? nil : pathExt
+        // Bug #247: when the caller (typically the WebDAV restore path)
+        // supplies a non-empty title override, it wins over the extractor's
+        // filename-derived title. The override has already been trimmed
+        // and validated above; the extractor's title is the fallback when
+        // no override is supplied (in-app picker, share sheet, etc.) or
+        // when restoring an older manifest with no per-entry title.
+        let resolvedTitle = trimmedOverride ?? metadata.title
         let record = BookRecord(
             fingerprintKey: fingerprintKey,
-            title: metadata.title,
+            title: resolvedTitle,
             author: metadata.author,
             coverImagePath: metadata.coverImagePath,
             fingerprint: fingerprint,

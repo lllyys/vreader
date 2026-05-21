@@ -49,8 +49,16 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 #### Dispatcher
 
 `ReaderContainerView.swift` routes to format-specific readers via
-`engineReaderView(fingerprint:)`, which switches on `ReaderEngine.resolve(format:)`
-— an internal per-format engine selector (feature #54). The dispatch no
+`engineReaderView(fingerprint:)`, which switches on
+`ReaderEngine.resolve(format: fingerprint.format)` — an internal per-format
+engine selector (feature #54). Bug #246 / GH #1072 hardened the dispatch
+to route off `fingerprint.format` (the typed `BookFormat` already parsed
+from the canonical `book.fingerprintKey` by the body's
+`DocumentFingerprint(canonicalKey:)` guard) instead of `book.format` (a
+parallel String `@Model` column set once at `Book.init` and never re-synced).
+Routing off the structural primary key makes the dispatch drift-proof against
+any future writer that updates one without the other (SwiftData migration,
+direct context write, restore-path edit, CloudKit sync). The dispatch no
 longer consults a reading-mode preference, and the reader-settings Reading
 Mode picker UI is gone. The `readerReadingMode` UserDefaults key and the
 `ReadingMode` enum have been removed; `ReadingModeMigration` (run
@@ -60,9 +68,10 @@ JSON files.
 
 - `.textNative` → `TXTReaderHost`, `.markdownNative` → `MDReaderHost`,
   `.epubWKWebView` → `EPUBReaderHost`, `.pdfKit` → `PDFReaderHost`,
-  `.foliateWeb` → `FoliateSpikeView` (AZW3/MOBI; routes directly to
-  `FoliateSpikeView`, not `FoliateReaderHost` — the host wrapper exists but
-  isn't currently in the dispatch path).
+  `.foliateWeb` → `FoliateBilingualContainerView` (AZW3/MOBI; the
+  bilingual wrapper from feature #56 WI-11 sits between the dispatcher
+  and `FoliateSpikeView`, adding the bilingual VM / orchestrator / setup-
+  sheet wiring without modifying the spike itself).
 - `resolve(format:)` maps `.epub` to `.epubWKWebView` unconditionally;
   feature #42 will later route EPUB to `.foliateWeb` behind a flag.
 
@@ -241,8 +250,8 @@ All cross-component communication uses NotificationCenter:
 | `.readerDefineRequested`       | `TextSelectionInfo`  | Bridge → Container (dictionary)                         |
 | `.readerTranslateRequested`    | `TextSelectionInfo`  | Bridge → Container (AI translate)                       |
 | `.searchHighlightClear`        | nil                  | SearchViewModel → Bridges                               |
-| `.readerPreviousPage`          | nil                  | TapZoneOverlay → Container                              |
-| `.readerNextPage`              | nil                  | TapZoneOverlay → Container                              |
+| `.readerPreviousPage`          | nil                  | `ReaderTapZoneRouter` (left-zone tap in `.paged` layout) → format container's `onReceive` consumer. Bug #239 / GH #988 restored this producer after feature #54 WI-3 unmounted the legacy `TapZoneOverlay` overlay; native bridges' tap recognizers / WKWebView JS handlers now route through the router. |
+| `.readerNextPage`              | nil                  | `ReaderTapZoneRouter` (right-zone tap in `.paged` layout) → format container's `onReceive` consumer. Mirror of `.readerPreviousPage`. Foliate (AZW3/MOBI) additionally observes on the spike coordinator and evaluates `readerAPI.next();` against the live WKWebView. |
 | `.readerOpenContents`          | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #62 — opens `TOCSheet` on the Contents tab) |
 | `.readerOpenNotes`             | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #62 — opens `HighlightsSheet` on the All filter) |
 | `.readerOpenDisplay`           | nil                  | `ReaderBottomChrome` toolbar → ReaderContainerView (Feature #60 WI-6b — opens reader settings) |

@@ -39,6 +39,15 @@ protocol BookPersisting: Sendable {
     /// Updates the provenance for an existing book.
     /// Note: V1 replaces provenance. V2 will maintain a provenance history array.
     func replaceProvenance(_ provenance: ImportProvenance, toBookWithKey key: String) async throws
+
+    /// Updates the title (and optionally author) for an existing book.
+    /// Used by the WebDAV restore path (bug #247) when the manifest's
+    /// `BackupLibraryEntry.title` should override the extractor's
+    /// filename-derived title on a dedupe-hit. `title` must already be
+    /// non-empty after trimming; the caller is responsible for that
+    /// validation. `author` is set when non-nil; an existing author is
+    /// left untouched when `author` is nil.
+    func updateBookTitle(fingerprintKey: String, title: String, author: String?) async throws
 }
 
 /// Lightweight value type representing a book for cross-boundary transfer.
@@ -185,6 +194,37 @@ actor PersistenceActor: BookPersisting {
             throw ImportError.bookNotFound(key)
         }
         book.provenance = provenance
+        try context.save()
+    }
+
+    /// Bug #247: WebDAV restore re-uses a dedupe-hit Book row when the
+    /// content SHA matches an existing import. Pre-fix, the existing
+    /// title stuck (often the SHA-prefixed `restore_<sha>` from an
+    /// earlier restore). Post-fix, the manifest title from
+    /// `BackupLibraryEntry.title` is the source of truth and the row
+    /// gets updated so the user sees the original book name.
+    ///
+    /// Defense in depth: applies the same trim + 255-char cap that
+    /// `Book.init` does so direct callers (including future ones) can't
+    /// silently bypass the invariant by going through this entry point.
+    func updateBookTitle(fingerprintKey key: String, title: String, author: String?) async throws {
+        let context = ModelContext(modelContainer)
+        let predicate = #Predicate<Book> { $0.fingerprintKey == key }
+        var descriptor = FetchDescriptor<Book>(predicate: predicate)
+        descriptor.fetchLimit = 1
+
+        guard let book = try context.fetch(descriptor).first else {
+            throw ImportError.bookNotFound(key)
+        }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            // Mirrors Book.init's "Untitled" fallback — but here it's a
+            // programmer error to call with empty/whitespace; the
+            // BookImporter caller has already filtered those out.
+            throw PersistenceError.invalidContent("Empty title")
+        }
+        book.title = String(trimmedTitle.prefix(255))
+        if let author { book.author = author }
         try context.save()
     }
 

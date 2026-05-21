@@ -431,6 +431,14 @@ struct ReaderContainerView: View {
             if resolvedAICoordinator.loadedTextContent != nil {
                 resolvedAICoordinator.chatViewModel?.bookContext = resolvedAICoordinator.currentTextContent
             }
+            #if DEBUG
+            // Bug #257: surface the live reading position into the DebugBridge
+            // probe so `snapshot.position` reflects where the reader actually
+            // is — including after an `open?position=N` seek. The string shape
+            // mirrors the `open?position=` URL grammar per format so a
+            // round-trip (seek then snapshot) is symmetric for TXT / MD.
+            debugProbe?.livePositionString = Self.debugPositionString(for: locator)
+            #endif
         }
         // Feature #56 WI-15: per-chapter re-translation picker. The
         // observer fires on `.readerMoreReTranslateChapter`, resolves the
@@ -514,6 +522,17 @@ struct ReaderContainerView: View {
         .modifier(ReaderDebugBridgeSearchObserver(
             onCommand: { query, index in
                 handleDebugBridgeSearchCommand(query: query, index: index)
+            }
+        ))
+        // Bug #253 — present a reader sheet from outside the chrome so the
+        // sheet's rendered content becomes CU-free verifiable via `snapshot`
+        // + `eval`. Factored into a dedicated `ViewModifier` (same precedent
+        // as the search observer above) so adding it doesn't push `body` over
+        // SwiftUI's type-inference budget. The handler sets the SAME `@State`
+        // / `annotationsRoute` the chrome buttons set — no parallel logic.
+        .modifier(ReaderDebugBridgePresentObserver(
+            onCommand: { sheet, tab in
+                handleDebugBridgePresentSheet(sheet: sheet, tab: tab)
             }
         ))
         // Bug #237 — DebugBridge highlight-driver observer lives in the
@@ -832,60 +851,70 @@ struct ReaderContainerView: View {
     // MARK: - Engine Dispatch
 
     /// Dispatches to the format-specific reader host, selecting the host by
-    /// `ReaderEngine.resolve(format:)` (feature #54). For an unrecognized
-    /// format string, `resolvedBookFormat` falls back to `.txt`; the genuine
-    /// unknown-format case is the `else` of the `BookFormat(rawValue:)` guard.
+    /// `ReaderEngine.resolve(format:)` (feature #54).
+    ///
+    /// Bug #246 / GH #1072: the dispatch reads `fingerprint.format` — the
+    /// canonical `BookFormat` already parsed from `book.fingerprintKey` by
+    /// the `body`'s `DocumentFingerprint(canonicalKey:)` guard — instead of
+    /// re-deriving the format from `book.format` (the parallel String
+    /// `@Model` column). `book.format` is set once at `Book.init` from
+    /// `fingerprint.format.rawValue` and never re-synced, so a SwiftData
+    /// migration / restore-path edit / direct-write that changes one
+    /// without the other can leave the column stale while the canonical
+    /// fingerprint key stays correct. Routing off the canonical key
+    /// (the structural primary key) makes the dispatch drift-proof
+    /// without depending on every future writer to keep the two in sync.
+    /// Note: the `unsupportedFormatView` helper is retained for future
+    /// surfaces and pinned by `ReaderContainerViewEngineDispatchTests`;
+    /// `fingerprint.format` is already a typed `BookFormat` so this
+    /// dispatch reaches every case unconditionally.
     @ViewBuilder
     func engineReaderView(fingerprint: DocumentFingerprint) -> some View {
-        if let format = BookFormat(rawValue: book.format.lowercased()) {
-            switch ReaderEngine.resolve(format: format) {
-            case .epubWKWebView:
-                EPUBReaderHost(
-                    fileURL: resolvedFileURL,
-                    fingerprint: fingerprint,
-                    modelContainer: modelContext.container,
-                    settingsStore: settingsStore,
-                    ttsService: ttsService,
-                    readerToken: readerToken
-                )
-            case .pdfKit:
-                PDFReaderHost(
-                    fileURL: resolvedFileURL,
-                    fingerprint: fingerprint,
-                    modelContainer: modelContext.container,
-                    ttsService: ttsService,
-                    settingsStore: settingsStore
-                )
-            case .textNative:
-                TXTReaderHost(
-                    fileURL: resolvedFileURL,
-                    fingerprint: fingerprint,
-                    modelContainer: modelContext.container,
-                    settingsStore: settingsStore,
-                    ttsService: ttsService,
-                    tocEntries: tocEntries
-                )
-            case .markdownNative:
-                MDReaderHost(
-                    fileURL: resolvedFileURL,
-                    fingerprint: fingerprint,
-                    modelContainer: modelContext.container,
-                    settingsStore: settingsStore,
-                    ttsService: ttsService
-                )
-            case .foliateWeb:
-                // Feature #56 WI-11: wraps the live AZW3/MOBI spike
-                // in the bilingual container.
-                FoliateBilingualContainerView(
-                    bookURL: resolvedFileURL,
-                    fingerprintKey: book.fingerprintKey,
-                    readerToken: readerToken,
-                    settingsStore: settingsStore,
-                    coordinatorBox: foliateCoordinatorBox
-                )
-            }
-        } else {
-            unsupportedFormatView(format: book.format.uppercased())
+        switch ReaderEngine.resolve(format: fingerprint.format) {
+        case .epubWKWebView:
+            EPUBReaderHost(
+                fileURL: resolvedFileURL,
+                fingerprint: fingerprint,
+                modelContainer: modelContext.container,
+                settingsStore: settingsStore,
+                ttsService: ttsService,
+                readerToken: readerToken
+            )
+        case .pdfKit:
+            PDFReaderHost(
+                fileURL: resolvedFileURL,
+                fingerprint: fingerprint,
+                modelContainer: modelContext.container,
+                ttsService: ttsService,
+                settingsStore: settingsStore
+            )
+        case .textNative:
+            TXTReaderHost(
+                fileURL: resolvedFileURL,
+                fingerprint: fingerprint,
+                modelContainer: modelContext.container,
+                settingsStore: settingsStore,
+                ttsService: ttsService,
+                tocEntries: tocEntries
+            )
+        case .markdownNative:
+            MDReaderHost(
+                fileURL: resolvedFileURL,
+                fingerprint: fingerprint,
+                modelContainer: modelContext.container,
+                settingsStore: settingsStore,
+                ttsService: ttsService
+            )
+        case .foliateWeb:
+            // Feature #56 WI-11: wraps the live AZW3/MOBI spike
+            // in the bilingual container.
+            FoliateBilingualContainerView(
+                bookURL: resolvedFileURL,
+                fingerprintKey: book.fingerprintKey,
+                readerToken: readerToken,
+                settingsStore: settingsStore,
+                coordinatorBox: foliateCoordinatorBox
+            )
         }
     }
 

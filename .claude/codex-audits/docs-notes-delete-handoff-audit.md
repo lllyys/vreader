@@ -12,7 +12,9 @@ Syncs the claude.ai/design "VReader Notes Delete Canvas" handoff
 (chat10) into the `dev-docs/designs/vreader-fidelity-v1/` bundle and
 unblocks Bug #249. Touches the design bundle + one tracker row
 (`docs/bugs.md` Bug #249 design-landed note), plus `project.yml` /
-`project.pbxproj` (version bump 3.38.21/596 → 3.38.22/597).
+`project.pbxproj` (version bump → 3.38.44/619 after rebasing onto
+origin/main, which had advanced to 3.38.43/618 via the #250–#257
+DebugBridge-harness work merged concurrently).
 
 **No Swift source files changed.** The audit-gate hook fires on
 `project.pbxproj` — false positive of the Swift-file heuristic.
@@ -75,9 +77,12 @@ regression that shape (a) `List` + `.swipeActions` would force).
    triage time (Bug #249) now has a committed design bundle. The
    subsequent `/fix-issue` run can implement against it without
    inventing UI.
-7. **Version bump** — 3.38.22 / build 597 (patch — docs /
-   design-bundle sync). `xcodegen generate` confirmed both files;
-   `xcodebuild build` SUCCEEDED on iPhone 17 Pro Simulator (Debug).
+7. **Version bump** — 3.38.44 / build 619 (patch — docs /
+   design-bundle sync; resolved after a merge with origin/main that
+   had reached 3.38.43/618). `xcodegen generate` confirmed both
+   files; `xcodebuild build` SUCCEEDED on iPhone 17 Pro Simulator
+   (Debug). The `docs/bugs.md` merge took the union — origin's new
+   rows #250–#257 plus this branch's Bug #249 design-landed note.
 
 ## Verdict
 

@@ -34,6 +34,15 @@ final class DebugReaderProbeAdapter: DebugReaderProbe {
     /// small fixed interval (a stand-in until per-format hooks land).
     var settleStrategy: (@MainActor (TimeInterval) async throws -> Void)?
 
+    /// Bug #257: live position string pushed by the host. When set, it takes
+    /// precedence over `positionProvider` so `snapshot.position` reflects the
+    /// reader's current location (e.g. after an `open?position=N` seek). The
+    /// host (`ReaderContainerView`) writes this from its
+    /// `.readerPositionDidChange` observer. Nil falls back to `positionProvider`
+    /// (which itself defaults to nil), preserving the prior "no position"
+    /// posture for hosts that don't wire it.
+    var livePositionString: String?
+
     /// Optional JS evaluator. When nil, evaluateJavaScript throws
     /// `evalUnsupported(format:)` — the default for non-webview readers.
     /// Returns raw JSON bytes of the JS value (see DebugReaderProbe doc).
@@ -58,7 +67,7 @@ final class DebugReaderProbeAdapter: DebugReaderProbe {
     }
 
     var currentPositionString: String? {
-        positionProvider()
+        livePositionString ?? positionProvider()
     }
 
     var currentTTSState: String? {

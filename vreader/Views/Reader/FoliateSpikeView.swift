@@ -425,6 +425,20 @@ extension FoliateSpikeView {
         /// pattern as the highlight observers above.
         nonisolated(unsafe) private var foliateBilingualEvalToken: NSObjectProtocol?
 
+        /// Bug #239 — observer for `.readerNextPage`. Side-tap in paged
+        /// AZW3/MOBI: `ReaderTapZoneRouter.dispatch(...)` (driven by the
+        /// foliate-host.js content-tap handler's `{x, w}` payload) posts
+        /// this notification; the observer evaluates `readerAPI.next()`
+        /// against the live `WKWebView`. The notification is global, so
+        /// the observer cannot be filtered by `fingerprintKey` — Foliate
+        /// spikes deinit when their reader unmounts, so a stale observer
+        /// from an outgoing reader can't fire after dismissal.
+        nonisolated(unsafe) private var foliateNextPageToken: NSObjectProtocol?
+
+        /// Bug #239 — observer for `.readerPreviousPage`. Sibling of
+        /// `foliateNextPageToken`; evaluates `readerAPI.prev()`.
+        nonisolated(unsafe) private var foliatePrevPageToken: NSObjectProtocol?
+
         init(initialLayoutFlow: String,
              initialThemeCSS: String? = nil,
              onBookReady: @escaping @MainActor (String) -> Void,
@@ -493,6 +507,35 @@ extension FoliateSpikeView {
                     self.webView?.evaluateJavaScript(js, completionHandler: nil)
                 }
             }
+            // Bug #239 — paged-mode side-tap → page-turn observers. The
+            // content-tap handler (foliate-host.js → spike's `tap` case →
+            // `ReaderTapZoneRouter.dispatch`) posts `.readerNextPage` /
+            // `.readerPreviousPage`; these observers call into the
+            // Foliate-js engine via `readerAPI.next()` / `prev()`. The
+            // notification is global (no fingerprintKey filter) — the
+            // observer is removed in `deinit` when the reader unmounts,
+            // so a stale post from a previous reader cannot reach this
+            // coordinator.
+            self.foliateNextPageToken = NotificationCenter.default.addObserver(
+                forName: .readerNextPage,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self = self else { return }
+                MainActor.assumeIsolated {
+                    self.webView?.evaluateJavaScript("readerAPI.next();", completionHandler: nil)
+                }
+            }
+            self.foliatePrevPageToken = NotificationCenter.default.addObserver(
+                forName: .readerPreviousPage,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self = self else { return }
+                MainActor.assumeIsolated {
+                    self.webView?.evaluateJavaScript("readerAPI.prev();", completionHandler: nil)
+                }
+            }
         }
 
         deinit {
@@ -503,6 +546,17 @@ extension FoliateSpikeView {
                 NotificationCenter.default.removeObserver(token)
             }
             if let token = foliateBilingualEvalToken {
+                NotificationCenter.default.removeObserver(token)
+            }
+            // Bug #239 — release the side-tap → page-turn observers so a
+            // future notification posted after this coordinator has
+            // deinited cannot fire `readerAPI.next/prev` against an
+            // already-released `WKWebView` (UIKit dismantle ordering can
+            // briefly outlive the coordinator's deinit on iOS).
+            if let token = foliateNextPageToken {
+                NotificationCenter.default.removeObserver(token)
+            }
+            if let token = foliatePrevPageToken {
                 NotificationCenter.default.removeObserver(token)
             }
         }
@@ -615,12 +669,28 @@ extension FoliateSpikeView {
                 }
 
             case "tap":
-                // Bug #108: forward center-tap to the chrome-toggle
-                // observer in `ReaderContainerView`. Without this case
-                // the toolbar stayed visible because the JS bundle's
-                // `tap` message hit the default branch and silently
-                // no-oped.
-                NotificationCenter.default.post(name: .readerContentTapped, object: nil)
+                // Bug #108: forward the chrome-toggle observer in
+                // `ReaderContainerView`. Bug #239: the JS now carries
+                // `{x, w}` for non-synthetic clicks; in paginated layout,
+                // side zones route to `.readerNextPage` /
+                // `.readerPreviousPage` via `ReaderTapZoneRouter`, restoring
+                // the producer feature #54 WI-3 deleted. In scrolled layout
+                // (Foliate-js owns swipe/scroll internally), every tap
+                // collapses to `.readerContentTapped`.
+                if let dict = body as? [String: Any],
+                   let x = (dict["x"] as? NSNumber)?.doubleValue,
+                   let w = (dict["w"] as? NSNumber)?.doubleValue,
+                   w > 0 {
+                    let layout: EPUBLayoutPreference =
+                        (currentLayoutFlow == "paginated") ? .paged : .scroll
+                    ReaderTapZoneRouter.dispatch(
+                        x: CGFloat(x),
+                        totalWidth: CGFloat(w),
+                        layout: layout
+                    )
+                } else {
+                    NotificationCenter.default.post(name: .readerContentTapped, object: nil)
+                }
 
             case "selection":
                 // Bug #201 / GH #739: user finished a long-press selection

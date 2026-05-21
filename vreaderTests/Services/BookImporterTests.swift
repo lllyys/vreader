@@ -307,6 +307,157 @@ struct BookImporterTests {
     // production source. The notification was dead code (no production
     // observer); lazy indexing in `ReaderSearchCoordinator` is the real
     // path. Other tests in this suite cover import-success regression.
+
+    // MARK: - Bug #247: titleOverride for restore paths
+
+    /// When the caller supplies a non-empty `titleOverride`, the persisted
+    /// Book title is the override, not the extractor's filename-derived
+    /// title. This is the path the WebDAV restore materializer uses to
+    /// thread the manifest's `BackupLibraryEntry.title` through.
+    @Test func importFile_withTitleOverride_usesOverrideForPersistedTitle() async throws {
+        // Use a TXT file with a SHA-prefixed temp filename to mirror the
+        // production restore path's temp file naming convention.
+        let dir = FileManager.default.temporaryDirectory
+        let tempName = "restore_abc123def456"
+        let fileURL = dir.appendingPathComponent("\(tempName)_\(UUID().uuidString).txt")
+        try "Real book content".data(using: .utf8)!.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let (importer, mock, sandbox) = try await makeImporter()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let originalTitle = "Hamlet"
+        let result = try await importer.importFile(
+            at: fileURL,
+            source: .restore,
+            titleOverride: originalTitle
+        )
+        #expect(result.title == originalTitle)
+
+        let stored = await mock.book(forKey: result.fingerprintKey)
+        #expect(stored?.title == originalTitle)
+    }
+
+    /// Nil override = current behavior (filename-derived title for TXT).
+    @Test func importFile_nilTitleOverride_usesExtractedTitle() async throws {
+        let fileURL = try makeTempTxtFile()
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let (importer, _, sandbox) = try await makeImporter()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let result = try await importer.importFile(
+            at: fileURL,
+            source: .restore,
+            titleOverride: nil
+        )
+        // Filename-derived (e.g. "test_<uuid>") — extractor wins when no override.
+        let filenameStem = fileURL.deletingPathExtension().lastPathComponent
+        #expect(result.title == filenameStem)
+    }
+
+    /// Empty/whitespace override is ignored (would otherwise leave the
+    /// Book with a blank title that breaks library rendering).
+    @Test func importFile_emptyTitleOverride_doesNotOverride() async throws {
+        let fileURL = try makeTempTxtFile()
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let (importer, _, sandbox) = try await makeImporter()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let extractedFilename = fileURL.deletingPathExtension().lastPathComponent
+        let resultEmpty = try await importer.importFile(
+            at: fileURL,
+            source: .restore,
+            titleOverride: ""
+        )
+        #expect(resultEmpty.title == extractedFilename)
+
+        // Different SHA file for the second import to avoid dedupe.
+        let fileURL2 = try makeTempTxtFile(content: "Distinct content for second test")
+        defer { try? FileManager.default.removeItem(at: fileURL2) }
+        let resultWhitespace = try await importer.importFile(
+            at: fileURL2,
+            source: .restore,
+            titleOverride: "   \t\n  "
+        )
+        #expect(resultWhitespace.title == fileURL2.deletingPathExtension().lastPathComponent)
+    }
+
+    /// Pathologically long overrides (>255 chars) get capped at 255 to
+    /// match `Book.init`'s defense-in-depth truncation. Without this, the
+    /// returned `ImportResult.title` would diverge from what's actually
+    /// persisted in SwiftData on the new-row path AND the dedupe-hit
+    /// path would silently bypass `Book.init`'s cap, leaving the DB row
+    /// with an over-long title. Codex audit Medium fix.
+    @Test func importFile_overlongTitleOverride_truncatedTo255() async throws {
+        let fileURL = try makeTempTxtFile()
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let (importer, mock, sandbox) = try await makeImporter()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let overlong = String(repeating: "A", count: 600)
+        let expectedCap = String(repeating: "A", count: 255)
+        let result = try await importer.importFile(
+            at: fileURL,
+            source: .restore,
+            titleOverride: overlong
+        )
+        #expect(result.title == expectedCap)
+        let stored = await mock.book(forKey: result.fingerprintKey)
+        #expect(stored?.title == expectedCap)
+        #expect(stored?.title.count == 255)
+    }
+
+    /// Override is trimmed before persistence — leading/trailing whitespace
+    /// from manifests shouldn't survive into the persisted Book title.
+    @Test func importFile_trimmedTitleOverride_persistsTrimmedValue() async throws {
+        let fileURL = try makeTempTxtFile()
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let (importer, _, sandbox) = try await makeImporter()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let result = try await importer.importFile(
+            at: fileURL,
+            source: .restore,
+            titleOverride: "   Pride and Prejudice   "
+        )
+        #expect(result.title == "Pride and Prejudice")
+    }
+
+    /// Title override on a duplicate-import path updates the existing
+    /// row's title — restore-replacing a previously-imported book should
+    /// surface the manifest title, not keep whatever stale title the
+    /// existing row had from a long-ago first import.
+    @Test func importFile_titleOverrideOnDuplicate_updatesPersistedTitle() async throws {
+        let fileURL = try makeTempTxtFile(content: "Identical content")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let (importer, mock, sandbox) = try await makeImporter()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        // First import: no override → extractor-derived title.
+        let first = try await importer.importFile(at: fileURL, source: .filesApp)
+        let originalExtractedTitle = first.title
+
+        // Second import: same content, with manifest-style title override.
+        let manifestTitle = "From-Manifest Title"
+        let second = try await importer.importFile(
+            at: fileURL,
+            source: .restore,
+            titleOverride: manifestTitle
+        )
+        #expect(second.isDuplicate == true)
+        #expect(second.fingerprintKey == first.fingerprintKey)
+        // The override takes effect on the duplicate path too — manifest
+        // is the source of truth, so a duplicate replace must surface it.
+        #expect(second.title == manifestTitle)
+        let stored = await mock.book(forKey: first.fingerprintKey)
+        #expect(stored?.title == manifestTitle)
+        #expect(stored?.title != originalExtractedTitle)
+    }
 }
 
 // MARK: - Test Helpers

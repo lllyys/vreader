@@ -40,6 +40,14 @@ enum DebugBridgeContextError: Error, Equatable {
     /// Feature #49 WI-7b: awaitReader timed out waiting for a reader matching
     /// `fingerprintKey` to register after the open notification was posted.
     case openAwaitReaderTimeout(fingerprintKey: String)
+    /// Bug #257: a `position` was supplied for a format whose host-side seek
+    /// cannot honor the resolved position shape. Currently only EPUB — its
+    /// navigate handler resolves the spine by `href`, not raw CFI, so a
+    /// CFI-only seek would be a silent no-op. Failing loudly (rather than
+    /// opening at the wrong place) preserves the bug's original "fail loudly"
+    /// contract. TXT / MD (offset), PDF (page), and AZW3 (Foliate consumes
+    /// CFI directly) all seek; EPUB does not yet.
+    case seekUnsupportedForFormat(format: String, position: String)
 }
 
 /// Production DebugBridgeContext. Each handler is a thin wrapper over
@@ -142,11 +150,15 @@ final class RealDebugBridgeContext: DebugBridgeContext {
     /// push it onto the navigation stack. Throws `bookNotFound` if no book
     /// in the library has the given fingerprint key.
     ///
-    /// Position handling: v0 only supports nil position. A non-nil position
-    /// throws `notImplemented` rather than silently ignoring the parameter,
-    /// so repros that depend on opening at a specific location fail loudly
-    /// instead of opening at the wrong place. v1 will resolve position to
-    /// a Locator and pass it to the reader.
+    /// Position handling (Bug #257): when `position` is supplied it is parsed
+    /// per-format via `DebugPositionResolver`, then — after the reader
+    /// registers and settles — the handler posts `.readerNavigateToLocator`
+    /// carrying a `Locator` built from the resolved position. This is the SAME
+    /// production navigation path that TOC / search / restore use; there is no
+    /// parallel DEBUG-only seek. Fully wired for TXT / MD (UTF-16 offset) and
+    /// PDF (page); EPUB / AZW3 carry only a CFI (the webview navigate handlers
+    /// also need an `href` / Foliate-search hook) so a CFI-only seek is a
+    /// best-effort no-op for those formats — see `seekActiveReader`.
     func open(bookId: String, position: String?) async throws {
         // Step 1: book lookup — validate before any side effect (the v3 plan's
         // "validate before posting notification" rule, Round-2 audit fix #3).
@@ -184,6 +196,19 @@ final class RealDebugBridgeContext: DebugBridgeContext {
             resolvedPosition = nil
         }
 
+        // Step 2b (Bug #257, Codex audit round 1 Medium): reject EPUB `position`
+        // up front rather than open at offset 0 and silently drop the seek. The
+        // EPUB navigate handler resolves the spine by `href`; a CFI-only seek
+        // would no-op. Failing here (before opening) keeps the bug's original
+        // "fail loudly instead of opening at the wrong place" contract. AZW3
+        // takes the Foliate CFI path (which DOES seek), so only EPUB is gated.
+        if case .epubCFI = resolvedPosition, let position {
+            throw DebugBridgeContextError.seekUnsupportedForFormat(
+                format: book.format,
+                position: position
+            )
+        }
+
         // Step 3: post notification — opens the reader. Library navigation
         // observes `.debugBridgeOpenBook` and pushes the matching book.
         NotificationCenter.default.post(
@@ -193,24 +218,66 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         )
         log.info("open: posted notification for \(bookId, privacy: .public)")
 
-        // Step 4: when a position was supplied, await the reader to register
-        // and then dispatch the seek. The actual seek implementation lives in
-        // per-format hosts (feature #50 WI-7b's host-side seekStrategy).
-        // For now, we just resolve the await — host-side seek wiring is a
-        // follow-up that consumes `resolvedPosition`.
-        if resolvedPosition != nil {
+        // Step 4: when a position was supplied, await the reader to register,
+        // wait for it to settle, then dispatch the seek (Bug #257). The seek
+        // reuses the production `.readerNavigateToLocator` path — the same one
+        // TOC / search / restore drive — so there is no parallel seek impl to
+        // drift from the user-facing behavior.
+        if let resolvedPosition {
             do {
                 let probe = try await DebugReaderRegistry.shared.awaitReader(
                     fingerprintKey: bookId,
                     timeout: 10.0
                 )
                 log.info("open: awaitReader resolved for \(probe.fingerprintKey, privacy: .public)")
-                // Seek dispatch deferred to feature #50 (per-format hosts populate
-                // a seek strategy on the probe; the bridge calls it here).
+                // Wait for the reader to reach a settled render state before
+                // navigating — a TXT/MD reader that hasn't laid out yet drops
+                // a `scrollToOffset` write, and a webview reader can't accept
+                // a CFI before its first paint. The adapter's settleStrategy
+                // (EPUB/AZW3 = webview didFinish/relocate; TXT/MD/PDF = 100ms
+                // layout-commit fallback) decides what "settled" means.
+                try await probe.awaitSettle(timeout: 10.0)
+                // `LibraryBookItem` carries only the canonical key string;
+                // parse it back into a `DocumentFingerprint` for the locator.
+                // `bookId == book.fingerprintKey` (the lookup matched on it),
+                // so this parse only fails on a structurally malformed key,
+                // which `fetchAllLibraryBooks` would not have produced.
+                if let fingerprint = DocumentFingerprint(canonicalKey: bookId) {
+                    seekActiveReader(to: resolvedPosition, fingerprint: fingerprint)
+                } else {
+                    log.error("open: could not parse fingerprint from key \(bookId, privacy: .public); seek skipped")
+                }
             } catch DebugReaderRegistryError.awaitReaderTimeout(let key) {
                 throw DebugBridgeContextError.openAwaitReaderTimeout(fingerprintKey: key)
+            } catch DebugReaderProbeError.settleTimeout {
+                // Settle timed out — surface as the await-reader timeout so the
+                // harness sees a single "reader never came ready" failure shape
+                // rather than two distinct error vocabularies.
+                throw DebugBridgeContextError.openAwaitReaderTimeout(fingerprintKey: bookId)
             }
         }
+    }
+
+    /// Bug #257: drive the active reader to `position` by posting the
+    /// production `.readerNavigateToLocator` notification with a `Locator`
+    /// built from the resolved position + the opened book's fingerprint.
+    ///
+    /// Every reader container observes `.readerNavigateToLocator` and seeks via
+    /// the field that matches its format: TXT / MD use `charOffsetUTF16`, PDF
+    /// uses `page`, AZW3 (Foliate) uses `cfi` (`navigateToSearchResult(cfi:)`).
+    /// EPUB is rejected before this point (`seekUnsupportedForFormat`) because
+    /// its handler resolves the spine by `href`, not raw CFI — so every
+    /// `DebugPosition` that reaches here maps to a field its host consumes.
+    private func seekActiveReader(to position: DebugPosition, fingerprint: DocumentFingerprint) {
+        guard let locator = position.locator(bookFingerprint: fingerprint) else {
+            log.error("open: could not build a Locator for resolved position \(String(describing: position), privacy: .public)")
+            return
+        }
+        NotificationCenter.default.post(
+            name: .readerNavigateToLocator,
+            object: locator
+        )
+        log.info("open: posted navigate-to-locator seek for resolved position")
     }
 
     /// Set reader theme + optional font size. Mutates a transient

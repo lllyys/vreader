@@ -98,6 +98,66 @@ final class DebugPositionResolverTests: XCTestCase {
         let pos = try DebugPositionResolver.resolve("42", format: "TXT")
         XCTAssertEqual(pos, .charOffsetUTF16(42))
     }
+
+    // MARK: - Locator conversion (Bug #257)
+    //
+    // The seek dispatch in `RealDebugBridgeContext.open` reuses the production
+    // navigation path (`.readerNavigateToLocator` carrying a `Locator`). The
+    // typed `DebugPosition` → `Locator` mapping lives on `DebugPosition` so it
+    // is unit-testable without an active reader.
+
+    private func makeFingerprint(_ format: BookFormat) -> DocumentFingerprint {
+        DocumentFingerprint(
+            contentSHA256: String(repeating: "a", count: 64),
+            fileByteCount: 4096,
+            format: format
+        )
+    }
+
+    func test_locator_charOffsetUTF16_buildsTxtLocator() {
+        let fp = makeFingerprint(.txt)
+        let locator = DebugPosition.charOffsetUTF16(800).locator(bookFingerprint: fp)
+        XCTAssertEqual(locator?.charOffsetUTF16, 800)
+        XCTAssertNil(locator?.page)
+        XCTAssertNil(locator?.cfi)
+        XCTAssertNil(locator?.href)
+        XCTAssertEqual(locator?.bookFingerprint, fp)
+    }
+
+    func test_locator_charOffsetUTF16_zero_buildsValidLocator() {
+        let fp = makeFingerprint(.md)
+        let locator = DebugPosition.charOffsetUTF16(0).locator(bookFingerprint: fp)
+        XCTAssertEqual(locator?.charOffsetUTF16, 0)
+    }
+
+    func test_locator_pdfPage_buildsPageLocator() {
+        let fp = makeFingerprint(.pdf)
+        let locator = DebugPosition.pdfPage(3).locator(bookFingerprint: fp)
+        // Locator.page is 0-based (PDFKit index); DebugPosition.pdfPage is the
+        // 1-based URL value, so the converter subtracts 1.
+        XCTAssertEqual(locator?.page, 2)
+        XCTAssertNil(locator?.charOffsetUTF16)
+        XCTAssertNil(locator?.cfi)
+        XCTAssertNil(locator?.href)
+    }
+
+    func test_locator_epubCFI_buildsCFILocator() {
+        let fp = makeFingerprint(.epub)
+        let cfi = "epubcfi(/6/4!/4/1:0)"
+        let locator = DebugPosition.epubCFI(cfi).locator(bookFingerprint: fp)
+        XCTAssertEqual(locator?.cfi, cfi)
+        XCTAssertNil(locator?.charOffsetUTF16)
+        XCTAssertNil(locator?.page)
+    }
+
+    func test_locator_foliateCFI_buildsCFILocator() {
+        let fp = makeFingerprint(.azw3)
+        let cfi = "epubcfi(/6/12!/4/3)"
+        let locator = DebugPosition.foliateCFI(cfi).locator(bookFingerprint: fp)
+        XCTAssertEqual(locator?.cfi, cfi)
+        XCTAssertNil(locator?.charOffsetUTF16)
+        XCTAssertNil(locator?.page)
+    }
 }
 
 #endif

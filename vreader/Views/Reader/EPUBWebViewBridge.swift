@@ -281,7 +281,28 @@ struct EPUBWebViewBridge: UIViewRepresentable {
                 context.coordinator.pendingHighlightJS = js
                 context.coordinator.onPendingHighlightJSCompleted = onPendingJSCompleted
             }
+            // Bug #251 / GH #1086: directly observable load-request entry
+            // log. Round-2 verification could only infer the absence of
+            // didFinish; this log lets future verify runs confirm that
+            // `loadFileURL` was actually invoked. Combined with the
+            // didFinish entry log (in the coordinator), the verify cron
+            // can distinguish "load never requested" from "load requested
+            // but didFinish never fired".
+            AppLogger.epub.info(
+                "loadFileURL: \(contentURL.lastPathComponent, privacy: .public)"
+            )
             webView.loadFileURL(contentURL, allowingReadAccessTo: baseDirectory)
+            #if DEBUG
+            // Bug #251 / GH #1086: schedule the bounded fallback that
+            // marks the reader settled + registers the WebView if
+            // `webView(_:didFinish:)` does not fire within the
+            // coordinator's `earlySettleFallbackDelay` window. The
+            // happy-path `didFinish` cancels the fallback immediately;
+            // the fallback only fires when didFinish is delayed past
+            // the verify budget (typical observed delay: <500ms; this
+            // window is 2s).
+            context.coordinator.scheduleEarlySettleFallback(webView: webView)
+            #endif
         } else if isPaged, let page = paginationPage,
                   page != context.coordinator.pendingPaginationPage {
             // Paged mode: navigate to specific page

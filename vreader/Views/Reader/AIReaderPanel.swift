@@ -90,8 +90,11 @@ struct AIReaderPanel: View {
     /// Initial tab to show (e.g., .translate from readerTranslateRequested). (bug #95)
     var initialTab: AIReaderTab = .summarize
 
-    /// The currently selected tab.
-    @State private var selectedTab: AIReaderTab = .summarize
+    /// The currently selected tab. `internal` (not `private`) so the Bug
+    /// #255 DebugBridge AI-action observer (a sibling-file extension) can
+    /// switch the tab to match the fired action before invoking the
+    /// view-model path — the same tab the chrome would land on.
+    @State var selectedTab: AIReaderTab = .summarize
 
     /// Feature #50 WI-7: in-reader provider picker. Owned by this view
     /// so its state survives tab changes and stays in sync with the
@@ -159,6 +162,23 @@ struct AIReaderPanel: View {
             ShareActivityView(activityItems: [item.text])
                 .ignoresSafeArea()
         }
+        .modifier(debugAIActionObserver)
+    }
+
+    /// Bug #255 — the DebugBridge AI-action observer. In Release this is an
+    /// identity modifier (no observer); in DEBUG it attaches the
+    /// `.debugBridgeAIAction` `.onReceive` that fires the SAME view-model
+    /// path the chrome buttons trigger, so the AI-response-card render states
+    /// become CU-free verifiable. Factored behind a computed modifier so the
+    /// `#if DEBUG` doesn't fragment the SwiftUI `body`.
+    private var debugAIActionObserver: some ViewModifier {
+        #if DEBUG
+        return ReaderDebugBridgeAIActionObserver { action, scope, text in
+            handleDebugAIAction(action: action, scope: scope, text: text)
+        }
+        #else
+        return EmptyModifier()
+        #endif
     }
 }
 

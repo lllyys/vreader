@@ -767,7 +767,13 @@ struct TXTReaderContainerView: View {
                 // bridge threads this map into TXTBridgeShared so
                 // every posted `TextSelectionInfo` carries source-
                 // domain offsets even with bilingual on.
-                bilingualSegmentMap: bilingualSegmentMap
+                bilingualSegmentMap: bilingualSegmentMap,
+                // Bug #239 — gate side-tap → page-turn dispatch in the
+                // bridge's tap recognizer on the current layout. Paged
+                // surfaces produce `.readerNextPage` / `.readerPreviousPage`
+                // for left/right zones; scroll surfaces collapse every tap
+                // to the legacy `.readerContentTapped` chrome toggle.
+                layout: settingsStore?.epubLayout
             )
         }
         .ignoresSafeArea(edges: .bottom)
@@ -851,7 +857,10 @@ struct TXTReaderContainerView: View {
                 // bridge's display-domain delegate calls through the
                 // adapter when bilingual is on.
                 delegate: bilingualBridgeDelegate ?? viewModel,
-                bilingualSegmentMap: bilingualSegmentMap
+                bilingualSegmentMap: bilingualSegmentMap,
+                // Bug #239 — see readerContent: gate side-tap → page-turn
+                // dispatch on the current paged/scroll layout.
+                layout: settingsStore?.epubLayout
             )
         }
         .ignoresSafeArea(edges: .bottom)
@@ -902,7 +911,10 @@ struct TXTReaderContainerView: View {
                     // so a later font/theme re-render can't re-paint it.
                     uiState.highlightRange = nil
                 },
-                safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top)
+                safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
+                // Bug #239 — gate side-tap → page-turn dispatch in the
+                // chunked bridge's tap recognizer on the current layout.
+                layout: settingsStore?.epubLayout
             )
         }
         .ignoresSafeArea(edges: .bottom)
@@ -944,7 +956,12 @@ struct TXTReaderContainerView: View {
                 },
                 safeAreaTopInset: ReaderSafeAreaResolver.topInsetWithFallback(proxy.safeAreaInsets.top),
                 chapterOffsetIndex: viewModel.chapterOffsetIndex,
-                restoreGlobalOffset: viewModel.continuousRestoreGlobalOffset
+                restoreGlobalOffset: viewModel.continuousRestoreGlobalOffset,
+                // Bug #239 — gate side-tap → page-turn dispatch on the
+                // current paged/scroll layout (continuous chaptered TXT
+                // ships in scroll mode, so this collapses to chrome-toggle,
+                // but plumb it through for completeness).
+                layout: settingsStore?.epubLayout
             )
         }
         .ignoresSafeArea(edges: .bottom)

@@ -11,7 +11,10 @@
 // constructed in its own `.task` — so the Bookmarks count badge is live
 // the moment the sheet appears even when it opens on the Contents tab
 // (Gate-2 round-2 finding 5). The current-chapter determination reuses
-// `TOCListView`'s `activeEntryIndex` matching logic, lifted here.
+// `TOCListView`'s `activeEntryIndex` matching logic, lifted here. The
+// Contents list wraps a `ScrollViewReader` and auto-scrolls the active
+// chapter into view on appear (Bug #248 restored what feature #62 WI-5
+// dropped when it replaced the legacy `TOCListView`).
 //
 // Empty states use the shared `AnnotationsEmptyStateView` (WI-2) — the
 // Contents-empty state carries an "Open Search" CTA. Both the Contents
@@ -212,21 +215,41 @@ struct TOCSheet: View {
 
     @ViewBuilder
     private var tocEntryList: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(Array(tocEntries.enumerated()), id: \.element.id) { index, entry in
-                TOCContentsRow(
-                    theme: theme,
-                    chapterOrdinal: index + 1,
-                    title: entry.title,
-                    page: Self.displayPage(entry.locator.page),
-                    isCurrent: index == activeEntryIndex,
-                    onTap: { onNavigate(entry.locator); onDismiss() }
-                )
-                .accessibilityIdentifier("tocRow-\(entry.id)")
+        // `ScrollViewReader` + per-row `.id(entry.id)` restores the
+        // auto-scroll-to-current-chapter capability feature #62 WI-5 dropped
+        // when it replaced the legacy `TOCListView` (Bug #248). On appear the
+        // proxy centers the active chapter's row; the `.task(id:)` retry loop
+        // (lifted from the legacy `edc550d0` hardening) re-issues the scroll
+        // at 100 / 300 / 600 ms so a row not yet materialised in the
+        // `LazyVStack` for a long TOC still lands centered.
+        ScrollViewReader { proxy in
+            LazyVStack(spacing: 0) {
+                ForEach(Array(tocEntries.enumerated()), id: \.element.id) { index, entry in
+                    TOCContentsRow(
+                        theme: theme,
+                        chapterOrdinal: index + 1,
+                        title: entry.title,
+                        page: Self.displayPage(entry.locator.page),
+                        isCurrent: index == activeEntryIndex,
+                        onTap: { onNavigate(entry.locator); onDismiss() }
+                    )
+                    .id(entry.id)
+                    .accessibilityIdentifier("tocRow-\(entry.id)")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 14)
+            .task(id: currentChapterScrollTarget) {
+                guard let targetID = currentChapterScrollTarget else { return }
+                for delay in [100, 300, 600] {
+                    try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo(targetID, anchor: .center)
+                    }
+                }
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 14)
     }
 
     // MARK: - Bookmarks body

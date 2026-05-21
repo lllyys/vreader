@@ -6,6 +6,9 @@
 
 import Testing
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 @testable import vreader
 
 // MARK: - Helpers
@@ -226,6 +229,83 @@ struct TextReaderUIStateTests {
 
         #expect(state.pageNavigator != nil,
                 "Bug #82: navigator preserved when attrText nil but paged mode on")
+    }
+
+    // Bug #215: `updatePagination` previously hardcoded
+    // `viewportSize: UIScreen.main.bounds.size` — full screen, ignoring the
+    // chrome-aware inset that `pagedReaderContent` actually renders into.
+    // Pages were mis-sized: each page tried to lay out a screen's worth of
+    // text into a smaller `NativeTextPagedView` box, and the layout-manager
+    // truncated the page text at the renderer (visible as "clipped mid-
+    // line" in the original repro). The fix exposes an explicit
+    // `viewportSize:` parameter; callers (MD container) pass the measured
+    // `NativeTextPagedView` box via `GeometryReader`.
+    //
+    // These tests assert the parameter actually feeds the paginator —
+    // smaller viewport → more pages, larger viewport → fewer pages.
+    @Test @MainActor func updatePaginationHonorsExplicitViewportSize_smallerYieldsMorePages() {
+        // A text long enough to span multiple pages at any reasonable
+        // viewport, so the *delta* between two viewports is the assertion
+        // (not "any" page count, which would be timing/font-fragile).
+        let paragraphs = Array(repeating: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.", count: 40).joined(separator: "\n\n")
+        let attr = NSAttributedString(
+            string: paragraphs,
+            attributes: [.font: UIFont.systemFont(ofSize: 18)]
+        )
+        let state = TextReaderUIState()
+
+        state.updatePagination(
+            isPagedMode: true,
+            attributedText: attr,
+            initialRestoreOffset: nil,
+            autoPageTurnEnabled: false,
+            autoPageTurnInterval: 5.0,
+            viewportSize: CGSize(width: 400, height: 800)
+        )
+        let pagesLarge = state.pageNavigator?.totalPages ?? 0
+
+        // Force a fresh navigator so the per-call paginate runs cleanly
+        // (the production code reuses the navigator across re-paginate
+        // events; both calls must observe the parameter, so use the same
+        // state instance and a smaller viewport.)
+        state.updatePagination(
+            isPagedMode: true,
+            attributedText: attr,
+            initialRestoreOffset: nil,
+            autoPageTurnEnabled: false,
+            autoPageTurnInterval: 5.0,
+            viewportSize: CGSize(width: 400, height: 200)
+        )
+        let pagesSmall = state.pageNavigator?.totalPages ?? 0
+
+        #expect(pagesLarge >= 1)
+        #expect(pagesSmall > pagesLarge,
+                "smaller viewport should paginate to MORE pages, got large=\(pagesLarge) small=\(pagesSmall)")
+    }
+
+    @Test @MainActor func updatePaginationDefaultsToMainScreenWhenViewportNotSupplied() {
+        // Backward compat — TXT and any caller that hasn't been
+        // updated to thread a measured viewport gets the legacy default
+        // (`UIScreen.main.bounds.size`). The default exists so this isn't
+        // a breaking API change.
+        let attr = NSAttributedString(
+            string: "One paragraph.",
+            attributes: [.font: UIFont.systemFont(ofSize: 18)]
+        )
+        let state = TextReaderUIState()
+
+        state.updatePagination(
+            isPagedMode: true,
+            attributedText: attr,
+            initialRestoreOffset: nil,
+            autoPageTurnEnabled: false,
+            autoPageTurnInterval: 5.0
+        )
+
+        // A very short text fits in 1 page at the iPhone 17 Pro default
+        // viewport. The point is just that the call SUCCEEDED without an
+        // explicit viewport (no compile error, no crash).
+        #expect(state.pageNavigator?.totalPages == 1)
     }
 
     // MARK: - Auto Page Turner

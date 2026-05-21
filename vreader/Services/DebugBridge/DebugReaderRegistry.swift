@@ -188,6 +188,15 @@ final class DebugReaderRegistry {
     var rawActiveEPUBWebViewForTests: WKWebView? { activeEPUBWebViewRef }
     var rawActiveEPUBWebViewTokenForTests: UUID? { activeEPUBWebViewToken }
 
+    /// Bug #250: read-only key accessor used by `+WebViewWait.swift` (a
+    /// sibling extension file) to confirm the EPUB slot's key matches a
+    /// requested fingerprintKey without requiring the caller to provide a
+    /// token. Token-keyed reads stay on `epubWebView(for:token:)`. Marked
+    /// `internal` so the extension can read it; production code outside
+    /// the registry's extension family must continue to go through
+    /// `epubWebView(for:token:)`.
+    var activeEPUBWebViewKeyInternal: String? { activeEPUBWebViewKey }
+
     /// Bug #141: weak side-channel ref to the active Foliate (AZW3/MOBI)
     /// webview. Same keyed + per-reader-token protection as the EPUB
     /// binding above (bug #142). Set by `FoliateViewCoordinator` and
@@ -219,6 +228,12 @@ final class DebugReaderRegistry {
     var rawActiveFoliateWebViewKeyForTests: String? { activeFoliateWebViewKey }
     var rawActiveFoliateWebViewForTests: WKWebView? { activeFoliateWebViewRef }
     var rawActiveFoliateWebViewTokenForTests: UUID? { activeFoliateWebViewToken }
+
+    /// Bug #250: read-only key accessor used by `+WebViewWait.swift` for
+    /// the Foliate (AZW3/MOBI) slot. Same posture as
+    /// `activeEPUBWebViewKeyInternal` — token-keyed reads stay on
+    /// `foliateWebView(for:token:)`.
+    var activeFoliateWebViewKeyInternal: String? { activeFoliateWebViewKey }
     #endif
 
     /// Per-key waiters added by `awaitReader(fingerprintKey:timeout:)`.

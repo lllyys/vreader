@@ -56,6 +56,31 @@ import Foundation
 ///   too. Idempotent — removing an unknown name is a no-op.
 /// - `provider?action=clear` — wipe every profile + every per-profile
 ///   Keychain entry + clear active selection. Idempotent.
+/// - `present?sheet=<toc|highlights|ai|settings|bookmarks>[&tab=<...>]`
+///   — present a reader sheet so its rendered content becomes CU-free
+///   verifiable via `snapshot` + `eval` (Bug #253 verification harness).
+///   The handler posts `.debugBridgePresentSheet`; the reader-host
+///   observer maps `(sheet, tab)` to the SAME `@State` / route the chrome
+///   buttons set, so the harness drives the real presentation path. The
+///   optional `tab` selects a sub-tab: `toc` → `contents`/`bookmarks`;
+///   `highlights` → `all`/`highlights`/`notes`/`bookmarks`; `ai` →
+///   `summarize`/`translate`/`chat`. `settings` and `bookmarks` take no
+///   `tab` (`bookmarks` is itself the `TOCSheet` Bookmarks tab). No-op
+///   when no reader is presented (mirrors `tts` / `search` / `highlight`).
+/// - `ai?action=<summarize|chat|translate>[&scope=<section|chapter|book>][&text=<...>]`
+///   — fire the AI action the *presented* AI sheet exposes (Bug #255
+///   verification harness). `present?sheet=ai` opens the panel; this fires
+///   the action the chrome buttons trigger (Summarize tap / chat send /
+///   translate), so the AI-response-card render states become CU-free
+///   verifiable. The handler posts `.debugBridgeAIAction`; the AI panel's
+///   observer invokes the SAME view-model path the button does — no
+///   parallel AI call. `scope` is summarize-only and maps the URL-friendly
+///   `book` → `SummaryScope.bookSoFar` (`section`/`chapter` map 1:1); a
+///   `scope` on chat/translate is rejected. `text` is the chat message
+///   (required for `chat`) or the translate target-language override
+///   (optional for `translate`; absent → the panel's current target
+///   language); ignored for `summarize`. No-op when no AI sheet is
+///   presented (mirrors `present`).
 enum DebugCommand: Equatable {
     case reset
     case seed(fixture: String)
@@ -68,6 +93,26 @@ enum DebugCommand: Equatable {
     case search(query: String, index: Int?)
     case highlight(startUTF16: Int, endUTF16: Int, color: String?)
     case provider(action: ProviderAction)
+    case present(sheet: SheetKind, tab: String?)
+    case aiAction(action: AIActionKind, scope: SummaryScope?, text: String?)
+
+    /// Which AI action the `ai` command fires (Bug #255 — verification
+    /// harness AI-action driver). The handler posts `.debugBridgeAIAction`;
+    /// the AI panel's observer invokes the SAME view-model path the chrome
+    /// buttons trigger (`AISummaryTabView.runSummarize` /
+    /// `AIChatView.sendMessage` / `TranslationPanel.translate`), so there is
+    /// no parallel AI call.
+    ///
+    /// - `summarize` — runs the Summarize tab's summary at the selected
+    ///   `scope` over the full book text.
+    /// - `chat` — sends a chat message (`text`) on the Chat tab.
+    /// - `translate` — runs the Translate tab's translation (optional `text`
+    ///   overrides the target language).
+    enum AIActionKind: String, Equatable, CaseIterable {
+        case summarize
+        case chat
+        case translate
+    }
 
     /// Reader theme selector for the `theme` command.
     ///
@@ -91,6 +136,47 @@ enum DebugCommand: Equatable {
     enum ProviderActionKind: String, Equatable, CaseIterable {
         case openAICompatible
         case anthropicNative
+    }
+
+    /// Which reader sheet the `present` command opens (Bug #253 —
+    /// verification harness sheet-presenter). The handler posts
+    /// `.debugBridgePresentSheet`; the reader-host observer maps each
+    /// case (and the optional `tab`) to the SAME `@State` / route the
+    /// chrome buttons set, so the harness drives the real presentation
+    /// path. Kept local (mirroring `ThemeMode` / `ProviderActionKind`)
+    /// so this file stays a pure value-type parser with no View-layer
+    /// imports.
+    ///
+    /// - `toc` — the navigation sheet (`TOCSheet`: Contents + Bookmarks).
+    /// - `highlights` — the review sheet (`HighlightsSheet`: All /
+    ///   Highlights / Notes / Bookmarks).
+    /// - `ai` — the AI assistant panel (`AIReaderPanel`: Summarize /
+    ///   Translate / Chat).
+    /// - `settings` — the reader settings panel (`ReaderSettingsPanel`).
+    /// - `bookmarks` — a top-level alias for the `TOCSheet` Bookmarks tab.
+    enum SheetKind: String, Equatable, CaseIterable {
+        case toc
+        case highlights
+        case ai
+        case settings
+        case bookmarks
+
+        /// The set of valid `tab` values for this sheet, or `nil` when the
+        /// sheet takes no `tab` parameter (settings has no tabs; bookmarks
+        /// is itself a tab selector). Kept as literal string allowlists —
+        /// same posture as the `highlight` `color` allowlist — so the
+        /// parser stays free of View-layer enum imports. The reader-host
+        /// observer maps these strings to the concrete tab enums
+        /// (`TOCSheetTab` / `HighlightsSheetFilter` / `AIReaderTab`).
+        var allowedTabs: Set<String>? {
+            switch self {
+            case .toc:        return ["contents", "bookmarks"]
+            case .highlights: return ["all", "highlights", "notes", "bookmarks"]
+            case .ai:         return ["summarize", "translate", "chat"]
+            case .settings:   return nil
+            case .bookmarks:  return nil
+            }
+        }
     }
 
     /// Discriminated action carried by `provider`. `add` carries every
@@ -408,12 +494,127 @@ extension DebugCommand {
                 )
             }
 
+        case "present":
+            // Bug #253: verification harness sheet-presenter. `sheet` names
+            // which reader sheet to present; optional `tab` selects a sub-tab
+            // (validated against the sheet's vocabulary). The handler posts
+            // `.debugBridgePresentSheet`; the reader-host observer maps the
+            // (sheet, tab) to the SAME `@State` / route the chrome buttons
+            // set — no parallel presentation logic.
+            let sheetRaw = try requireParam("sheet", in: params)
+            guard let sheet = SheetKind(rawValue: sheetRaw) else {
+                let valid = SheetKind.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam(
+                    "sheet",
+                    reason: "expected \(valid), got \(sheetRaw)"
+                )
+            }
+            let tab: String?
+            if let rawTab = params["tab"] {
+                guard !rawTab.isEmpty else {
+                    throw DebugCommandError.invalidParam(
+                        "tab",
+                        reason: "expected a non-empty tab value, got empty value"
+                    )
+                }
+                // Reject a `tab` for sheets that take none (settings /
+                // bookmarks) so a typo surfaces rather than silently no-op.
+                guard let allowed = sheet.allowedTabs else {
+                    throw DebugCommandError.invalidParam(
+                        "tab",
+                        reason: "sheet '\(sheetRaw)' takes no tab parameter"
+                    )
+                }
+                guard allowed.contains(rawTab) else {
+                    let valid = allowed.sorted().joined(separator: "|")
+                    throw DebugCommandError.invalidParam(
+                        "tab",
+                        reason: "expected \(valid) for sheet '\(sheetRaw)', got \(rawTab)"
+                    )
+                }
+                tab = rawTab
+            } else {
+                tab = nil
+            }
+            return .present(sheet: sheet, tab: tab)
+
+        case "ai":
+            // Bug #255: verification harness AI-action driver. Extracted to a
+            // helper to keep this already-large parser switch readable.
+            return try parseAICommand(params)
+
         default:
             throw DebugCommandError.unknownCommand(host)
         }
     }
 
     // MARK: - Helpers
+
+    /// Parse the `ai` command's `(action, scope, text)` (Bug #255). `action`
+    /// names which AI action to fire on the presented AI sheet; `scope` is
+    /// summarize-only (maps the URL-friendly `book` → `SummaryScope.bookSoFar`,
+    /// rejected for chat/translate); `text` is the chat message (required for
+    /// chat) or the translate target-language override (optional, ignored for
+    /// summarize). The handler posts `.debugBridgeAIAction`; the AI panel's
+    /// observer invokes the SAME view-model path the chrome buttons trigger —
+    /// no parallel AI call.
+    private static func parseAICommand(_ params: [String: String]) throws -> DebugCommand {
+        let actionRaw = try requireParam("action", in: params)
+        guard let action = AIActionKind(rawValue: actionRaw) else {
+            let valid = AIActionKind.allCases.map(\.rawValue).joined(separator: "|")
+            throw DebugCommandError.invalidParam(
+                "action",
+                reason: "expected \(valid), got \(actionRaw)"
+            )
+        }
+
+        // `scope` is only meaningful for summarize (the Summarize tab's scope
+        // chips). Reject it on chat/translate so a typo surfaces rather than
+        // silently dropping the scope.
+        let scope: SummaryScope?
+        if let rawScope = params["scope"] {
+            guard action == .summarize else {
+                throw DebugCommandError.invalidParam(
+                    "scope",
+                    reason: "scope is only valid for action=summarize, got action=\(actionRaw)"
+                )
+            }
+            guard !rawScope.isEmpty else {
+                throw DebugCommandError.invalidParam(
+                    "scope",
+                    reason: "expected one of section|chapter|book, got empty value"
+                )
+            }
+            // The URL uses the friendly `book`; map it to the
+            // `SummaryScope.bookSoFar` case. `section`/`chapter` map 1:1.
+            switch rawScope {
+            case "section": scope = .section
+            case "chapter": scope = .chapter
+            case "book":    scope = .bookSoFar
+            default:
+                throw DebugCommandError.invalidParam(
+                    "scope",
+                    reason: "expected one of section|chapter|book, got \(rawScope)"
+                )
+            }
+        } else {
+            scope = nil
+        }
+
+        // `text` is required for chat (the message to send) and optional for
+        // translate (target-language override). It is meaningless for
+        // summarize (the scope chip drives it) — accepted but ignored, so the
+        // handler doesn't need a separate guard.
+        let text: String?
+        if action == .chat {
+            // requireParam treats empty as missing — chat with no message has
+            // nothing to send (the VM's sendMessage ignores empties).
+            text = try requireParam("text", in: params)
+        } else {
+            text = nonEmpty(params["text"])
+        }
+        return .aiAction(action: action, scope: scope, text: text)
+    }
 
     private static func queryParams(_ url: URL) throws -> [String: String] {
         guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),

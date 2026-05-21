@@ -86,12 +86,24 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
 
     /// Creates or updates the page navigator when entering paged mode.
     /// Pass the rendered attributed string and the initial scroll offset (nil after first paginate).
+    ///
+    /// Bug #215 / GH #837: `viewportSize` is the paginator's per-page box.
+    /// The MD paged renderer (`NativeTextPagedView`) does NOT cover the full
+    /// screen — `ReaderBottomChrome` and the top safe area both inset its
+    /// frame. Paginating against `UIScreen.main.bounds.size` produced pages
+    /// sized for the wrong box: the layout-manager packed too much text per
+    /// page, and the renderer (which clips to its actual smaller box) cut
+    /// the last line mid-glyph. The MD container threads the measured box
+    /// via a `GeometryReader`. Callers without a measured viewport (TXT,
+    /// or test-time defaults) get `UIScreen.main.bounds.size` to preserve
+    /// the legacy behavior.
     func updatePagination(
         isPagedMode: Bool,
         attributedText: NSAttributedString?,
         initialRestoreOffset: Int?,
         autoPageTurnEnabled: Bool,
-        autoPageTurnInterval: TimeInterval
+        autoPageTurnInterval: TimeInterval,
+        viewportSize: CGSize = UIScreen.main.bounds.size
     ) {
         guard isPagedMode else {
             // Explicit switch to scroll mode — destroy navigator.
@@ -108,7 +120,7 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
         let nav = pageNavigator ?? NativeTextPageNavigator()
         nav.paginateAttributed(
             attributedText: attrStr,
-            viewportSize: UIScreen.main.bounds.size
+            viewportSize: viewportSize
         )
 
         // Restore position from saved offset on first paginate

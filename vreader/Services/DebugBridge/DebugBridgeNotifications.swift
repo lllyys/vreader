@@ -97,6 +97,56 @@ extension Notification.Name {
     ///   back to `"yellow"` when absent.
     static let debugBridgeHighlightCommand = Notification.Name("vreader.debugBridge.highlightCommand")
 
+    /// Posted by RealDebugBridgeContext.present to present a reader sheet
+    /// from outside the chrome (Bug #253 verification harness). The active
+    /// reader's observer (`ReaderContainerView`, Bug #253 wiring) maps the
+    /// `(sheet, tab)` to the SAME `@State` / `annotationsRoute` the chrome
+    /// buttons set — `TOCSheet` (Contents/Bookmarks), `HighlightsSheet`
+    /// (All/Highlights/Notes/Bookmarks), `AIReaderPanel` (Summarize/
+    /// Translate/Chat), or the reader settings panel — so the harness drives
+    /// the real presentation path and the presented sheet's rendered content
+    /// becomes CU-free verifiable via `snapshot` + `eval`. The AI sheet is
+    /// gated on `resolvedAICoordinator.isAIAvailable` (matches the chrome's
+    /// AI gate); when AI isn't configured the URL is a no-op for the AI sheet.
+    /// If no reader is loaded, observers don't fire — the URL is silently a
+    /// no-op (the same `tts` / `search` / `highlight` posture).
+    ///
+    /// userInfo:
+    /// - `"sheet"`: String — one of `DebugCommand.SheetKind`'s rawValues
+    ///   (`toc` / `highlights` / `ai` / `settings` / `bookmarks`), validated
+    ///   by the parser.
+    /// - `"tab"`: String? — optional sub-tab, validated by the parser against
+    ///   the sheet's vocabulary. Present only when the bridge command included
+    ///   the `tab=` parameter; observers fall back to each sheet's default tab
+    ///   when absent.
+    static let debugBridgePresentSheet = Notification.Name("vreader.debugBridge.presentSheet")
+
+    /// Posted by RealDebugBridgeContext.aiAction to fire an AI action on the
+    /// *presented* AI sheet from outside the chrome (Bug #255 verification
+    /// harness). `present?sheet=ai` opens the panel; this fires the action
+    /// the chrome buttons trigger (Summarize tap / chat send / translate),
+    /// so the AI-response-card render states become CU-free verifiable via
+    /// `snapshot` + `eval`. `AIReaderPanel`'s observer invokes the SAME
+    /// view-model path the button does — `AISummaryTabView.runSummarize` /
+    /// `AIChatView.sendMessage` / `TranslationPanel.translate` — there is no
+    /// parallel AI call. The observer lives in `AIReaderPanel` (not
+    /// `ReaderContainerView`) because the panel holds the locator / full
+    /// text / chapter bounds / format the action needs. If no AI sheet is
+    /// presented, observers don't fire — the URL is silently a no-op
+    /// (mirrors `present` / `tts` / `search`).
+    ///
+    /// userInfo:
+    /// - `"action"`: String — one of `DebugCommand.AIActionKind`'s rawValues
+    ///   (`summarize` / `chat` / `translate`), validated by the parser.
+    /// - `"scope"`: String? — summarize-only; a `SummaryScope` rawValue
+    ///   (`section` / `chapter` / `bookSoFar`). The parser maps the
+    ///   URL-friendly `book` to `bookSoFar` before posting. Present only when
+    ///   the bridge command included `scope=`.
+    /// - `"text"`: String? — the chat message (chat) or translate
+    ///   target-language override (translate). Present only when the bridge
+    ///   command included a non-empty `text=`.
+    static let debugBridgeAIAction = Notification.Name("vreader.debugBridge.aiAction")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker

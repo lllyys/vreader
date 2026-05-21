@@ -7,6 +7,9 @@
 
 import XCTest
 import SwiftData
+#if canImport(WebKit)
+import WebKit
+#endif
 @testable import vreader
 
 final class RealDebugBridgeContextTests: XCTestCase {
@@ -804,6 +807,225 @@ final class RealDebugBridgeContextTests: XCTestCase {
         try await openTask.value
     }
 
+    // MARK: - open position seek (Bug #257)
+
+    /// Bug #257: `open?position=N` must actually move the reader, not just
+    /// await it. After `awaitReader` + `awaitSettle` resolve, the handler
+    /// posts `.readerNavigateToLocator` carrying a `Locator` with the resolved
+    /// offset — the same production navigation path that TOC / search / restore
+    /// use. This is the regression test that fails on the pre-fix commit (the
+    /// seek was a documented deferred no-op).
+    @MainActor
+    func test_open_withTxtPosition_postsNavigateToLocatorAfterReaderRegisters() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "5", count: 64),
+            fileByteCount: 4096,
+            format: .txt
+        )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "Seekable",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+
+        // Observe BOTH notifications so the test can register the probe at the
+        // right moment and assert the navigate locator carries the offset.
+        let openExp = expectation(description: "open notification posted")
+        let navExp = expectation(description: "navigate-to-locator posted")
+        nonisolated(unsafe) var navLocator: Locator?
+        let openToken = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook, object: nil, queue: .main
+        ) { _ in openExp.fulfill() }
+        let navToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { notification in
+            navLocator = notification.object as? Locator
+            navExp.fulfill()
+        }
+        defer {
+            NotificationCenter.default.removeObserver(openToken)
+            NotificationCenter.default.removeObserver(navToken)
+        }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        let openTask = Task { try await context.open(bookId: fp.canonicalKey, position: "800") }
+        await fulfillment(of: [openExp], timeout: 3.0)
+        // Register a probe so `awaitReader` resolves; the adapter's nil
+        // settleStrategy falls back to a 100ms sleep — well under the timeout.
+        DebugReaderRegistry.shared.register(
+            DebugReaderProbeAdapter(fingerprintKey: fp.canonicalKey, format: "txt")
+        )
+        await fulfillment(of: [navExp], timeout: 3.0)
+        try await openTask.value
+
+        XCTAssertEqual(navLocator?.charOffsetUTF16, 800,
+                       "the seek must navigate to the resolved UTF-16 offset")
+        XCTAssertEqual(navLocator?.bookFingerprint, fp,
+                       "the navigate locator must carry the opened book's fingerprint")
+    }
+
+    /// Bug #257: AZW3 IS supported — Foliate's navigate handler consumes a raw
+    /// CFI (`navigateToSearchResult(cfi:)`), unlike EPUB. So an AZW3 `position`
+    /// must reach the seek and post `.readerNavigateToLocator` carrying the CFI,
+    /// not be rejected. Asserts the supported/unsupported split is per-format.
+    @MainActor
+    func test_open_withAzw3CFI_postsNavigateWithCFI() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "4", count: 64),
+            fileByteCount: 8192,
+            format: .azw3
+        )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "AZW3 seekable",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+
+        let cfi = "epubcfi(/6/12!/4/3)"
+        let openExp = expectation(description: "open notification posted")
+        let navExp = expectation(description: "navigate posted")
+        nonisolated(unsafe) var navLocator: Locator?
+        let openToken = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook, object: nil, queue: .main
+        ) { _ in openExp.fulfill() }
+        let navToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { notification in
+            navLocator = notification.object as? Locator
+            navExp.fulfill()
+        }
+        defer {
+            NotificationCenter.default.removeObserver(openToken)
+            NotificationCenter.default.removeObserver(navToken)
+        }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        let openTask = Task { try await context.open(bookId: fp.canonicalKey, position: cfi) }
+        await fulfillment(of: [openExp], timeout: 3.0)
+        // Register a probe so awaitReader resolves (nil settleStrategy → 100ms).
+        DebugReaderRegistry.shared.register(
+            DebugReaderProbeAdapter(fingerprintKey: fp.canonicalKey, format: "azw3")
+        )
+        await fulfillment(of: [navExp], timeout: 3.0)
+        try await openTask.value
+
+        XCTAssertEqual(navLocator?.cfi, cfi, "AZW3 seek must carry the CFI to Foliate")
+    }
+
+    /// Bug #257 (Codex audit round 1 Medium): a VALID EPUB CFI position must
+    /// fail loudly with `seekUnsupportedForFormat` rather than open the book at
+    /// offset 0 and silently drop the seek — the EPUB navigate handler resolves
+    /// the spine by `href`, not raw CFI, so a CFI-only seek would no-op. The
+    /// throw happens BEFORE the open notification (no partial side effect).
+    @MainActor
+    func test_open_withValidEpubCFI_throwsSeekUnsupported_andPostsNoNotification() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "3", count: 64),
+            fileByteCount: 8192,
+            format: .epub
+        )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "EPUB no-seek",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+
+        // No open notification, no navigate — the throw precedes both.
+        let openExp = expectation(description: "no open notification expected")
+        openExp.isInverted = true
+        let navExp = expectation(description: "no navigate expected")
+        navExp.isInverted = true
+        let openToken = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook, object: nil, queue: .main
+        ) { _ in openExp.fulfill() }
+        let navToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { _ in navExp.fulfill() }
+        defer {
+            NotificationCenter.default.removeObserver(openToken)
+            NotificationCenter.default.removeObserver(navToken)
+        }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        do {
+            try await context.open(bookId: fp.canonicalKey, position: "epubcfi(/6/4!/4/1:0)")
+            XCTFail("expected seekUnsupportedForFormat for EPUB position")
+        } catch DebugBridgeContextError.seekUnsupportedForFormat(let format, let position) {
+            XCTAssertEqual(format, "epub")
+            XCTAssertEqual(position, "epubcfi(/6/4!/4/1:0)")
+        }
+        await fulfillment(of: [openExp, navExp], timeout: 0.5)
+    }
+
+    /// Bug #257: a nil position must NOT trigger any navigation — opening a
+    /// book without `position` lands at the restored/default location, not a
+    /// seek. Guards against a regression where the seek fires unconditionally.
+    @MainActor
+    func test_open_withoutPosition_doesNotPostNavigateToLocator() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
+        let key = try await CollectionTestHelper.insertBook(
+            persistence: persistence,
+            title: "No-seek",
+            sha: String(repeating: "6", count: 64)
+        )
+
+        let navExp = expectation(description: "no navigate expected")
+        navExp.isInverted = true
+        let navToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { _ in navExp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(navToken) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.open(bookId: key, position: nil)
+        await fulfillment(of: [navExp], timeout: 0.5)
+    }
+
     // MARK: - settle / eval (active-reader registry)
 
     @MainActor
@@ -924,6 +1146,244 @@ final class RealDebugBridgeContextTests: XCTestCase {
                        "timeout must surface in JSON file, not as a thrown error")
         XCTAssertEqual(json?["token"] as? String, token)
         XCTAssertEqual(json?["fingerprintKey"] as? String, "to-key")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    // MARK: - Bug #250: settle waits for WebView registration on EPUB/AZW3
+
+    /// Bug #250 / GH #1084: a probe whose `awaitSettle` resolves cleanly but
+    /// whose format is "epub" should NOT cause settle to report success when
+    /// no EPUB WebView has been registered with the registry — settle's
+    /// contract for the WebView-backed formats is "render-complete AND
+    /// WebView registered". Without the fix, the harness's downstream
+    /// `vreader-debug://highlight-create` URL fires before the WebView
+    /// registry slot is populated, and the highlight observer logs
+    /// `no active EPUB WebView registered` instead of creating a highlight.
+    @MainActor
+    func test_settle_onEPUBProbe_withoutRegisteredWebView_writesWebViewNotRegisteredError() async throws {
+        // Use the production registry shared instance because the prod
+        // settle handler reads from DebugReaderRegistry.shared. We reset it
+        // first (mirrors the no-active-reader case) so prior tests' probe
+        // state can't leak in.
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "epub:abcd:1024", format: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "epub-no-wv-\(UUID().uuidString)"
+        // Use the test-seam settleWithTimeout's webViewWaitSeconds
+        // override to pin the WebView-wait budget — the production
+        // 5-second Stage-2 wait would slow the test. The behavior we're
+        // pinning is: after probe.awaitSettle resolves, the bridge polls
+        // the registry's EPUB slot and surfaces `webview not registered`
+        // when the slot is empty.
+        try await context.settleWithTimeout(
+            token: token, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "webview not registered",
+                       "EPUB probe without a registered WebView must surface webview-not-registered, not success")
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "epub:abcd:1024")
+        XCTAssertEqual(json?["format"] as? String, "epub")
+        XCTAssertEqual(json?["phase"] as? String, "unknown")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084: when the EPUB WebView IS registered AND the
+    /// `expectedReaderToken` matches the slot's stored token (the normal
+    /// success path), settle returns clean — no error key, mirroring the
+    /// pre-fix behavior for non-WebView readers and the TXT path. Token
+    /// match is required because the production `epubWebView(for:token:)`
+    /// accessor is token-keyed; the gate must accept ONLY when downstream
+    /// commands can actually use the slot.
+    @MainActor
+    func test_settle_onEPUBProbe_withRegisteredWebView_writesNoErrorSentinel() async throws {
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "epub:efgh:2048", format: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        // Build a real WKWebView reference and register it via the same
+        // path the EPUB coordinator's didFinish uses — token-keyed write
+        // AND token-keyed read.
+        let token = UUID()
+        DebugReaderRegistry.shared.setExpectedReaderToken(token)
+        let webView = WKWebView()
+        DebugReaderRegistry.shared.setActiveEPUBWebView(
+            webView, for: probe.fingerprintKey, token: token
+        )
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let sentinelToken = "epub-wv-ok-\(UUID().uuidString)"
+        try await context.settleWithTimeout(
+            token: sentinelToken, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(sentinelToken).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertNil(json?["error"],
+                     "EPUB probe with registered WebView must succeed without an error key")
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "epub:efgh:2048")
+        XCTAssertEqual(json?["format"] as? String, "epub")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084: AZW3 / MOBI books render via Foliate; the
+    /// WebView is stored under a different registry slot
+    /// (`activeFoliateWebView*`). settle's WebView-registration check must
+    /// route by format — an AZW3 probe without a Foliate WebView gets the
+    /// same "webview not registered" error, never an EPUB false-positive.
+    @MainActor
+    func test_settle_onAZW3Probe_withoutRegisteredFoliateWebView_writesWebViewNotRegisteredError() async throws {
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "azw3:ijkl:512", format: "azw3")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "azw3-no-wv-\(UUID().uuidString)"
+        try await context.settleWithTimeout(
+            token: token, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "webview not registered",
+                       "AZW3 probe without a registered Foliate WebView must surface webview-not-registered")
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "azw3:ijkl:512")
+        XCTAssertEqual(json?["format"] as? String, "azw3")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084: TXT / MD / PDF readers have no WebView slot —
+    /// their settle path must continue to succeed without any WebView
+    /// registration check (otherwise we break every non-WebView format).
+    @MainActor
+    func test_settle_onTXTProbe_skipsWebViewCheckAndSucceeds() async throws {
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "txt:mnop:64", format: "txt")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "txt-skip-\(UUID().uuidString)"
+        try await context.settleWithTimeout(
+            token: token, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertNil(json?["error"],
+                     "TXT probe must skip the WebView-registration check and report success")
+        XCTAssertEqual(json?["format"] as? String, "txt")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084 (Codex Gate-4 round-1 High fix): the same-key
+    /// reopen race — outgoing reader A's WebView slot persists into
+    /// incoming reader B's lifetime (same `fingerprintKey`, B's token is
+    /// the new `expectedReaderToken`). A token-agnostic gate would falsely
+    /// report "registered" because the slot's KEY matches; downstream
+    /// `vreader-debug://highlight-create` would still fail because
+    /// `epubWebView(for:token:)` (the production accessor) is token-keyed.
+    /// This test pins that settle correctly surfaces `webview not
+    /// registered` when the slot's stored token doesn't match the
+    /// registry's expected reader token.
+    @MainActor
+    func test_settle_onEPUBProbe_withStaleTokenWebView_writesWebViewNotRegisteredError() async throws {
+        DebugReaderRegistry.shared.reset()
+        let probe = SettleOKProbe(fingerprintKey: "epub:qrst:4096", format: "epub")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        // Stale slot: outgoing reader A's token is bound to the slot,
+        // then incoming reader B takes over `expectedReaderToken`. The
+        // slot's key still matches but its token is now stale.
+        let staleToken = UUID()
+        DebugReaderRegistry.shared.setExpectedReaderToken(staleToken)
+        let staleWebView = WKWebView()
+        DebugReaderRegistry.shared.setActiveEPUBWebView(
+            staleWebView, for: probe.fingerprintKey, token: staleToken
+        )
+        // Now reader B mounts — replaces expectedReaderToken without
+        // overwriting the slot (the matching coordinator's didFinish
+        // hasn't fired yet for reader B).
+        let liveToken = UUID()
+        DebugReaderRegistry.shared.setExpectedReaderToken(liveToken)
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let sentinelToken = "epub-stale-tok-\(UUID().uuidString)"
+        try await context.settleWithTimeout(
+            token: sentinelToken, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(sentinelToken).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "webview not registered",
+                       "EPUB probe with a stale-token WebView slot must surface webview-not-registered, not success — production `epubWebView(for:token:)` would return nil for the live reader, breaking downstream highlight-create")
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "epub:qrst:4096")
+        XCTAssertEqual(json?["format"] as? String, "epub")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Bug #250 / GH #1084 (Codex Gate-4 round-1 Medium fix): format
+    /// strings persisted in the bug-#1065 era can carry mixed case
+    /// (`"EPUB"`, `"AZW3"`). The reader dispatch path lowercases via
+    /// `BookFormat(rawValue: book.format.lowercased())`; the WebView
+    /// gate must normalize the same way or it would silently skip the
+    /// gate for any mixed-case row and re-open the false-success window.
+    @MainActor
+    func test_settle_onEPUBProbe_withMixedCaseFormat_stillEntersWebViewGate() async throws {
+        DebugReaderRegistry.shared.reset()
+        // Mixed-case format string — the gate must lowercase before
+        // matching against the EPUB/Foliate switch.
+        let probe = SettleOKProbe(fingerprintKey: "epub:uvwx:8192", format: "EPUB")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let token = "epub-mixed-case-\(UUID().uuidString)"
+        try await context.settleWithTimeout(
+            token: token, timeoutSeconds: 0.5, webViewWaitSeconds: 0.2
+        )
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory()
+            .appendingPathComponent("ready-\(token).json")
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "webview not registered",
+                       "Mixed-case `EPUB` format must normalize to lowercase and enter the WebView gate — without normalization, the gate would silently skip and the bug recurs")
         try? FileManager.default.removeItem(at: url)
     }
 
@@ -1295,6 +1755,241 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
     }
 
+    // MARK: - present (Bug #253 — verification harness sheet-presenter)
+    //
+    // RealDebugBridgeContext.present posts `.debugBridgePresentSheet` with the
+    // parsed `sheet` (rawValue) + optional `tab`. The active reader's observer
+    // (ReaderContainerView, Bug #253 wiring) sets the matching `@State` /
+    // `annotationsRoute` the chrome buttons set, so the presented sheet's
+    // rendered content becomes CU-free verifiable via `snapshot` + `eval`.
+    // When no reader is loaded, the URL is silently a no-op (mirrors the
+    // `tts` / `search` / `highlight` posture).
+
+    @MainActor
+    func test_present_postsPresentSheetNotificationSheetOnly() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "presentSheet notification posted")
+        nonisolated(unsafe) var receivedSheet: String?
+        nonisolated(unsafe) var hasTab: Bool = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePresentSheet, object: nil, queue: .main
+        ) { notification in
+            receivedSheet = notification.userInfo?["sheet"] as? String
+            hasTab = notification.userInfo?["tab"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.present(sheet: .toc, tab: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedSheet, "toc")
+        XCTAssertFalse(hasTab,
+                       "userInfo must omit 'tab' when nil was passed — lets observers fall back to each sheet's default tab")
+    }
+
+    @MainActor
+    func test_present_postsPresentSheetNotificationWithTab() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "presentSheet notification posted with tab")
+        nonisolated(unsafe) var receivedSheet: String?
+        nonisolated(unsafe) var receivedTab: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePresentSheet, object: nil, queue: .main
+        ) { notification in
+            receivedSheet = notification.userInfo?["sheet"] as? String
+            receivedTab = notification.userInfo?["tab"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.present(sheet: .ai, tab: "translate")
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedSheet, "ai")
+        XCTAssertEqual(receivedTab, "translate")
+    }
+
+    @MainActor
+    func test_present_eachSheetKind_postsMatchingRawValue() async throws {
+        // Every SheetKind reaches observers as its rawValue so the observer's
+        // switch is exhaustive and disambiguated.
+        for kind in DebugCommand.SheetKind.allCases {
+            let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+            let exp = expectation(description: "presentSheet posted for \(kind.rawValue)")
+            nonisolated(unsafe) var receivedSheet: String?
+            let token = NotificationCenter.default.addObserver(
+                forName: .debugBridgePresentSheet, object: nil, queue: .main
+            ) { notification in
+                receivedSheet = notification.userInfo?["sheet"] as? String
+                exp.fulfill()
+            }
+            try await context.present(sheet: kind, tab: nil)
+            await fulfillment(of: [exp], timeout: 2.0)
+            NotificationCenter.default.removeObserver(token)
+            XCTAssertEqual(receivedSheet, kind.rawValue)
+        }
+    }
+
+    @MainActor
+    func test_present_endToEndThroughBridge_dispatchesAndPostsNotification() async throws {
+        // End-to-end: URL → DebugBridge.handle → RealDebugBridgeContext.present.
+        // Verifies the parser → dispatcher → handler → notification chain is
+        // fully wired and that the bridge clears `lastError` on success.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+        let bridge = DebugBridge(context: context)
+
+        let exp = expectation(description: "present notification posted via bridge")
+        nonisolated(unsafe) var receivedSheet: String?
+        nonisolated(unsafe) var receivedTab: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePresentSheet, object: nil, queue: .main
+        ) { notification in
+            receivedSheet = notification.userInfo?["sheet"] as? String
+            receivedTab = notification.userInfo?["tab"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        await bridge.handle(URL(string: "vreader-debug://present?sheet=highlights&tab=notes")!)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedSheet, "highlights")
+        XCTAssertEqual(receivedTab, "notes")
+        XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
+    }
+
+    // MARK: - ai (Bug #255 — verification harness AI-action driver)
+    //
+    // RealDebugBridgeContext.aiAction posts `.debugBridgeAIAction` with the
+    // parsed action rawValue + optional scope (summarize) + optional text
+    // (chat message / translate language). The active AI sheet's observer
+    // (AIReaderPanel, Bug #255 wiring) fires the SAME action the chrome
+    // buttons trigger, so the AI-response-card render states become CU-free
+    // verifiable via `snapshot` + `eval`. When no AI sheet is presented, the
+    // URL is silently a no-op (mirrors `tts` / `search` / `present`).
+
+    @MainActor
+    func test_aiAction_summarize_postsActionNotificationActionOnly() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "aiAction notification posted")
+        nonisolated(unsafe) var receivedAction: String?
+        nonisolated(unsafe) var hasScope = true
+        nonisolated(unsafe) var hasText = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeAIAction, object: nil, queue: .main
+        ) { notification in
+            receivedAction = notification.userInfo?["action"] as? String
+            hasScope = notification.userInfo?["scope"] != nil
+            hasText = notification.userInfo?["text"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.aiAction(action: .summarize, scope: nil, text: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedAction, "summarize")
+        XCTAssertFalse(hasScope, "userInfo must omit 'scope' when nil was passed")
+        XCTAssertFalse(hasText, "userInfo must omit 'text' when nil was passed")
+    }
+
+    @MainActor
+    func test_aiAction_summarizeWithScope_postsScopeRawValue() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "aiAction notification posted with scope")
+        nonisolated(unsafe) var receivedAction: String?
+        nonisolated(unsafe) var receivedScope: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeAIAction, object: nil, queue: .main
+        ) { notification in
+            receivedAction = notification.userInfo?["action"] as? String
+            receivedScope = notification.userInfo?["scope"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.aiAction(action: .summarize, scope: .chapter, text: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedAction, "summarize")
+        XCTAssertEqual(receivedScope, "chapter",
+                       "scope reaches observers as SummaryScope.rawValue (chapter), not the URL-friendly 'book' alias")
+    }
+
+    @MainActor
+    func test_aiAction_chatWithText_postsText() async throws {
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+
+        let exp = expectation(description: "aiAction notification posted with text")
+        nonisolated(unsafe) var receivedAction: String?
+        nonisolated(unsafe) var receivedText: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeAIAction, object: nil, queue: .main
+        ) { notification in
+            receivedAction = notification.userInfo?["action"] as? String
+            receivedText = notification.userInfo?["text"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await context.aiAction(action: .chat, scope: nil, text: "who is the narrator?")
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedAction, "chat")
+        XCTAssertEqual(receivedText, "who is the narrator?")
+    }
+
+    @MainActor
+    func test_aiAction_eachActionKind_postsMatchingRawValue() async throws {
+        for action in DebugCommand.AIActionKind.allCases {
+            let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+            let exp = expectation(description: "aiAction posted for \(action.rawValue)")
+            nonisolated(unsafe) var receivedAction: String?
+            let token = NotificationCenter.default.addObserver(
+                forName: .debugBridgeAIAction, object: nil, queue: .main
+            ) { notification in
+                receivedAction = notification.userInfo?["action"] as? String
+                exp.fulfill()
+            }
+            try await context.aiAction(action: action, scope: nil, text: nil)
+            await fulfillment(of: [exp], timeout: 2.0)
+            NotificationCenter.default.removeObserver(token)
+            XCTAssertEqual(receivedAction, action.rawValue)
+        }
+    }
+
+    @MainActor
+    func test_aiAction_endToEndThroughBridge_dispatchesAndPostsNotification() async throws {
+        // End-to-end: URL → DebugBridge.handle → RealDebugBridgeContext.aiAction.
+        let context = RealDebugBridgeContext(persistence: persistence, importer: importer)
+        let bridge = DebugBridge(context: context)
+
+        let exp = expectation(description: "ai notification posted via bridge")
+        nonisolated(unsafe) var receivedAction: String?
+        nonisolated(unsafe) var receivedScope: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeAIAction, object: nil, queue: .main
+        ) { notification in
+            receivedAction = notification.userInfo?["action"] as? String
+            receivedScope = notification.userInfo?["scope"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        await bridge.handle(URL(string: "vreader-debug://ai?action=summarize&scope=book")!)
+        await fulfillment(of: [exp], timeout: 2.0)
+
+        XCTAssertEqual(receivedAction, "summarize")
+        XCTAssertEqual(receivedScope, "bookSoFar",
+                       "the URL-friendly 'book' is mapped to SummaryScope.bookSoFar before posting")
+        XCTAssertNil(bridge.lastError, "successful dispatch must clear lastError")
+    }
+
     // MARK: - provider (Bug #243 — verification harness AI-provider-setup)
     //
     // RealDebugBridgeContext.provider mutates a ProviderProfileStore and a
@@ -1602,6 +2297,33 @@ private final class TimingOutProbe: DebugReaderProbe {
 
     func awaitSettle(timeout: TimeInterval) async throws {
         throw DebugReaderProbeError.settleTimeout
+    }
+
+    func evaluateJavaScript(_ script: String) async throws -> Data {
+        throw DebugReaderProbeError.evalUnsupported(format: format)
+    }
+}
+
+/// Bug #250 / GH #1084: probe whose `awaitSettle` resolves immediately
+/// without throwing — exercises the "render-complete OK, WebView slot
+/// pending" subpath that the WebView-registration gate must surface as
+/// `webview not registered`. Sibling of TimingOutProbe / HangingProbe; the
+/// distinguishing axis is that this one SUCCEEDS at the probe layer so the
+/// bridge-side WebView check is what determines the sentinel's `error`
+/// field. Re-using `TimingOutProbe` would conflate the two failure modes.
+@MainActor
+private final class SettleOKProbe: DebugReaderProbe {
+    let fingerprintKey: String
+    let format: String
+    var currentPositionString: String? = nil
+
+    init(fingerprintKey: String, format: String) {
+        self.fingerprintKey = fingerprintKey
+        self.format = format
+    }
+
+    func awaitSettle(timeout: TimeInterval) async throws {
+        // No-op — the probe's render-complete contract is satisfied.
     }
 
     func evaluateJavaScript(_ script: String) async throws -> Data {
