@@ -42,8 +42,35 @@ enum FoliateStyleMapper {
         let clampedHeight = FoliateJSEscaper.clampLineHeight(lineHeight)
         var rules: [String] = []
 
-        // Font size and line height are always included.
-        rules.append("body { font-size: \(clampedSize)px !important; line-height: \(formatLineHeight(clampedHeight)) !important; }")
+        // Font size and line height are always included. Bug #261: pin BOTH
+        // `html` and `body` (not `body` alone) so a book's `rem`-based CSS
+        // resolves against the calibrated size, not the 16px UA root default.
+        // Mirrors the EPUB path's `html, body { font-size: <n>px }` base rule
+        // (`ReaderThemeV2+EPUBCSS.swift`).
+        rules.append("html, body { font-size: \(clampedSize)px !important; line-height: \(formatLineHeight(clampedHeight)) !important; }")
+
+        // Bug #261: cascade-flatten. AZW3/MOBI (Kindle) books frequently carry
+        // their own `em`/`%`-based font-size CSS on text containers, which
+        // compounds against the injected `body` base — device-measured 31px
+        // body → 35.65px paragraphs at unified 28 with a book `p{font-size:
+        // 1.15em}`. Forcing the common text containers to `font-size: inherit`
+        // makes them resolve to the inherited body px instead of compounding,
+        // so AZW3/MOBI body text renders at the same flat per-format size EPUB
+        // already delivers (bug #57 / feature #70). This is the EXACT selector
+        // list + reset EPUB uses (`ReaderThemeV2+EPUBCSS.swift`). `color` is
+        // deliberately omitted from the reset here — the Foliate style mapper
+        // does not theme colors (AZW3/MOBI theme-color parity is a separate
+        // gap), so resetting it would overreach. `line-height: inherit` keeps
+        // descendant line-height from fighting the body value.
+        rules.append(
+            "p, div, span, li, td, th, dd, dt, blockquote, figcaption { "
+            + "font-size: inherit !important; line-height: inherit !important; }"
+        )
+
+        // Bug #261: headings revert to the UA-default proportional scale
+        // (matching EPUB) so they still scale WITH the body size but do not
+        // compound off the book's arbitrary base.
+        rules.append("h1,h2,h3,h4,h5,h6 { font-size: revert !important; }")
 
         // Font family only when provided and non-empty; sanitized for CSS.
         if let family = fontFamily, !family.isEmpty {

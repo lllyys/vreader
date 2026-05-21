@@ -135,6 +135,7 @@
 		18B415B48942ADDF3FDE479A /* MDReflowableTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9773A45B1D89408E85D126BA /* MDReflowableTextSource.swift */; };
 		18F17DCE91707A996AFA35F1 /* ReaderSearchSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7D1FCE2E15F04329AB1978 /* ReaderSearchSheetTests.swift */; };
 		19A48F5C5BC46818F3CC10BB /* AddNoteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A49E33ACBED018932A38F0C /* AddNoteSheet.swift */; };
+		19E67B18323968F22F71B99D /* FoliateStyleMapperCascadeFlattenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F4BA9D085BDF7728D698FDA /* FoliateStyleMapperCascadeFlattenTests.swift */; };
 		1A1A49D11D3506DEA6EA695F /* WebDAVProfileMigrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FC5D3DF85816AC1F7B42E3D /* WebDAVProfileMigrator.swift */; };
 		1A487543E57CF9FCB9F2625D /* SourceSerif4-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = B65D826E5B7D1B6AAE5EFEB7 /* SourceSerif4-Bold.otf */; };
 		1A7E58193D247BB8900BA5B3 /* NSUKVSBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFFFEDEA99460D1154D19EE5 /* NSUKVSBridge.swift */; };
@@ -1546,6 +1547,7 @@
 		2ED5B25F56B248FE8953B5A1 /* ChangeTokenStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeTokenStoreTests.swift; sourceTree = "<group>"; };
 		2EDF15104F7C0B4EAC533454 /* ReaderEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderEngineTests.swift; sourceTree = "<group>"; };
 		2F317CDBF13A6A5673D64A8A /* TextKit2Paginator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextKit2Paginator.swift; sourceTree = "<group>"; };
+		2F4BA9D085BDF7728D698FDA /* FoliateStyleMapperCascadeFlattenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateStyleMapperCascadeFlattenTests.swift; sourceTree = "<group>"; };
 		2F891C451718B4BC9AC7BCEC /* LazyDownloadBackgroundEventsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LazyDownloadBackgroundEventsTests.swift; sourceTree = "<group>"; };
 		300CB93197976B4D665AEDFC /* PersistenceActor+RemoteOnly.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+RemoteOnly.swift"; sourceTree = "<group>"; };
 		3035E9BDF79106F058459E0D /* StatsCustomRangePickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsCustomRangePickerTests.swift; sourceTree = "<group>"; };
@@ -4796,6 +4798,7 @@
 				8293E5CECE7616545BEEE15F /* FoliatePaginatorScrollBoundaryTests.swift */,
 				A6DB55181F2F55D99D879507 /* FoliateSearchAdapterTests.swift */,
 				97EE89998FF9D71667B4B83C /* FoliateSelectionDispatcherTests.swift */,
+				2F4BA9D085BDF7728D698FDA /* FoliateStyleMapperCascadeFlattenTests.swift */,
 				A1E3F274866072EA56D8C0B4 /* FoliateStyleMapperChapterStartTests.swift */,
 				42E9BBD87941E0D6C66010EC /* FoliateStyleMapperTests.swift */,
 				C91F653CA8E9B107CA2CA4CA /* FoliateTOCConverterTests.swift */,
@@ -5254,6 +5257,7 @@
 				48A5EC0AC543C0F4ACF27AAE /* FoliateSpikeViewCreateOverlayTests.swift in Sources */,
 				F3F7CDAB38376CE0AE8AE67A /* FoliateSpikeViewTTSTests.swift in Sources */,
 				A9FBA093179D68123CDA14E5 /* FoliateSpikeViewTapTests.swift in Sources */,
+				19E67B18323968F22F71B99D /* FoliateStyleMapperCascadeFlattenTests.swift in Sources */,
 				357590BC921E8A3A0E7132F1 /* FoliateStyleMapperChapterStartTests.swift in Sources */,
 				51F6D90704CD88D8F5160E19 /* FoliateStyleMapperTests.swift in Sources */,
 				F017AB8749D17949AC040CAA /* FoliateTOCConverterTests.swift in Sources */,

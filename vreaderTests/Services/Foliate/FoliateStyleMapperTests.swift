@@ -269,10 +269,33 @@ struct FoliateStyleMapperTests {
         // or braces in the sanitized output. Words like "display" may survive as harmless
         // text trapped inside the quoted font-family value.
         //
-        // Count the number of CSS rule blocks — there should be exactly 2
-        // (font-size + line-height, font-family), not 3+ if injection succeeded.
-        let ruleCount = css.components(separatedBy: "!important").count - 1
-        #expect(ruleCount == 3, "Should have exactly 3 !important rules (font-size, line-height, font-family), not more from injection")
+        // Security invariant (robust to bug #261's added cascade-flatten rules):
+        // the injected `display: none` must NOT have escaped the quoted
+        // font-family value into its own rule. The font-family declaration is a
+        // single `font-family: "<sanitized>" !important;` — its sanitized value
+        // contains no unescaped `}` that could open a new rule block, and no
+        // bare `display:` declaration exists outside the quoted value.
+        #expect(
+            css.contains("font-family:"),
+            "The font-family rule must still be emitted with the sanitized value"
+        )
+        // The malicious closing brace is stripped, so the count of `}` equals
+        // the number of legitimate rule blocks the mapper itself emits — the
+        // injection added none. With the bug #261 fix the mapper emits four
+        // blocks for this input (html/body base, text-container reset, heading
+        // revert, font-family); the injection must not push that higher.
+        let closeBraceCount = css.filter { $0 == "}" }.count
+        #expect(
+            closeBraceCount == 4,
+            "Injection must not open extra rule blocks; expected 4 mapper blocks, found \(closeBraceCount)"
+        )
+        // The `display: none` payload, if present at all, survives only as inert
+        // text inside the quoted font-family value — never as its own
+        // declaration that the browser would honor.
+        #expect(
+            !css.contains("} body {") && !css.contains("}body{"),
+            "Injection must not break out into a new `body` rule block"
+        )
     }
 
     // MARK: - layoutJS: Flow Sanitization
