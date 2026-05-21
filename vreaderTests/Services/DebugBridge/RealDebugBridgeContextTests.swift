@@ -807,6 +807,106 @@ final class RealDebugBridgeContextTests: XCTestCase {
         try await openTask.value
     }
 
+    // MARK: - open position seek (Bug #257)
+
+    /// Bug #257: `open?position=N` must actually move the reader, not just
+    /// await it. After `awaitReader` + `awaitSettle` resolve, the handler
+    /// posts `.readerNavigateToLocator` carrying a `Locator` with the resolved
+    /// offset — the same production navigation path that TOC / search / restore
+    /// use. This is the regression test that fails on the pre-fix commit (the
+    /// seek was a documented deferred no-op).
+    @MainActor
+    func test_open_withTxtPosition_postsNavigateToLocatorAfterReaderRegisters() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "5", count: 64),
+            fileByteCount: 4096,
+            format: .txt
+        )
+        let record = BookRecord(
+            fingerprintKey: fp.canonicalKey,
+            title: "Seekable",
+            author: nil,
+            coverImagePath: nil,
+            fingerprint: fp,
+            provenance: CollectionTestHelper.makeProvenance(),
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+        _ = try await persistence.insertBook(record)
+
+        // Observe BOTH notifications so the test can register the probe at the
+        // right moment and assert the navigate locator carries the offset.
+        let openExp = expectation(description: "open notification posted")
+        let navExp = expectation(description: "navigate-to-locator posted")
+        nonisolated(unsafe) var navLocator: Locator?
+        let openToken = NotificationCenter.default.addObserver(
+            forName: .debugBridgeOpenBook, object: nil, queue: .main
+        ) { _ in openExp.fulfill() }
+        let navToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { notification in
+            navLocator = notification.object as? Locator
+            navExp.fulfill()
+        }
+        defer {
+            NotificationCenter.default.removeObserver(openToken)
+            NotificationCenter.default.removeObserver(navToken)
+        }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        let openTask = Task { try await context.open(bookId: fp.canonicalKey, position: "800") }
+        await fulfillment(of: [openExp], timeout: 3.0)
+        // Register a probe so `awaitReader` resolves; the adapter's nil
+        // settleStrategy falls back to a 100ms sleep — well under the timeout.
+        DebugReaderRegistry.shared.register(
+            DebugReaderProbeAdapter(fingerprintKey: fp.canonicalKey, format: "txt")
+        )
+        await fulfillment(of: [navExp], timeout: 3.0)
+        try await openTask.value
+
+        XCTAssertEqual(navLocator?.charOffsetUTF16, 800,
+                       "the seek must navigate to the resolved UTF-16 offset")
+        XCTAssertEqual(navLocator?.bookFingerprint, fp,
+                       "the navigate locator must carry the opened book's fingerprint")
+    }
+
+    /// Bug #257: a nil position must NOT trigger any navigation — opening a
+    /// book without `position` lands at the restored/default location, not a
+    /// seek. Guards against a regression where the seek fires unconditionally.
+    @MainActor
+    func test_open_withoutPosition_doesNotPostNavigateToLocator() async throws {
+        DebugReaderRegistry.shared.reset()
+        defer { DebugReaderRegistry.shared.reset() }
+
+        let key = try await CollectionTestHelper.insertBook(
+            persistence: persistence,
+            title: "No-seek",
+            sha: String(repeating: "6", count: 64)
+        )
+
+        let navExp = expectation(description: "no navigate expected")
+        navExp.isInverted = true
+        let navToken = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { _ in navExp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(navToken) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.open(bookId: key, position: nil)
+        await fulfillment(of: [navExp], timeout: 0.5)
+    }
+
     // MARK: - settle / eval (active-reader registry)
 
     @MainActor

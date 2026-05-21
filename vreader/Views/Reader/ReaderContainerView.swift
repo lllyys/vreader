@@ -431,6 +431,14 @@ struct ReaderContainerView: View {
             if resolvedAICoordinator.loadedTextContent != nil {
                 resolvedAICoordinator.chatViewModel?.bookContext = resolvedAICoordinator.currentTextContent
             }
+            #if DEBUG
+            // Bug #257: surface the live reading position into the DebugBridge
+            // probe so `snapshot.position` reflects where the reader actually
+            // is — including after an `open?position=N` seek. The string shape
+            // mirrors the `open?position=` URL grammar per format so a
+            // round-trip (seek then snapshot) is symmetric for TXT / MD.
+            debugProbe?.livePositionString = Self.debugPositionString(for: locator)
+            #endif
         }
         // Feature #56 WI-15: per-chapter re-translation picker. The
         // observer fires on `.readerMoreReTranslateChapter`, resolves the

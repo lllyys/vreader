@@ -15,9 +15,9 @@
 import Foundation
 
 /// Typed position payload after parsing the per-format `position` string.
-/// The bridge hands this to the active reader's `seekStrategy` (per-format
-/// hosts populate `seekStrategy` in feature #50; the resolver itself is
-/// host-agnostic).
+/// The bridge converts this to a `Locator` (`locator(bookFingerprint:)`) and
+/// drives the active reader via the production `.readerNavigateToLocator`
+/// path (Bug #257) — no parallel seek implementation.
 enum DebugPosition: Equatable, Sendable {
     /// TXT / MD: 0-based UTF-16 character offset within the document.
     case charOffsetUTF16(Int)
@@ -28,6 +28,41 @@ enum DebugPosition: Equatable, Sendable {
     case foliateCFI(String)
     /// PDF: 1-based page number.
     case pdfPage(Int)
+
+    /// Bug #257: convert this typed position into a `Locator` so the bridge
+    /// can drive the reader through the same `.readerNavigateToLocator`
+    /// notification that TOC / search / restore use — there is no separate
+    /// DEBUG-only seek path. Returns nil only when `Locator.validated`
+    /// rejects the fields (e.g. a negative offset that slipped past the
+    /// resolver's own guards), so callers fail loudly rather than navigating
+    /// to a malformed locator.
+    ///
+    /// Per-format mapping:
+    /// - `.charOffsetUTF16(n)` → `Locator.charOffsetUTF16 = n` (TXT / MD).
+    /// - `.pdfPage(n)` → `Locator.page = n - 1` (the URL value is 1-based;
+    ///   `Locator.page` is the 0-based PDFKit page index the PDF reader's
+    ///   navigate handler feeds straight into `pageDidChange`).
+    /// - `.epubCFI(s)` / `.foliateCFI(s)` → `Locator.cfi = s`.
+    func locator(bookFingerprint: DocumentFingerprint) -> Locator? {
+        switch self {
+        case .charOffsetUTF16(let offset):
+            return Locator.validated(
+                bookFingerprint: bookFingerprint,
+                charOffsetUTF16: offset
+            )
+        case .pdfPage(let page):
+            // URL value is 1-based; Locator.page is the 0-based PDFKit index.
+            return Locator.validated(
+                bookFingerprint: bookFingerprint,
+                page: max(0, page - 1)
+            )
+        case .epubCFI(let cfi), .foliateCFI(let cfi):
+            return Locator.validated(
+                bookFingerprint: bookFingerprint,
+                cfi: cfi
+            )
+        }
+    }
 }
 
 /// Errors thrown by `DebugPositionResolver.resolve(_:format:)`.
