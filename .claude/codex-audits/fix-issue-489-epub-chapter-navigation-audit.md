@@ -1,3 +1,11 @@
+---
+branch: fix/issue-489-epub-chapter-navigation
+threadId: 019e47c8-fefd-7610-babd-8ad3951c6e46
+rounds: 2
+final_verdict: follow-up-recommended
+date: 2026-05-21
+---
+
 # Codex Audit — Bug #165 / GH #489 (EPUB chapter navigation)
 
 Branch: `fix/issue-489-epub-chapter-navigation`
