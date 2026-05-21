@@ -170,6 +170,112 @@ struct TOCSheetTests {
         #expect(sheet.activeEntryIndexForTesting == nil)
     }
 
+    // MARK: - Current-chapter for TXT (the Bug #248 user repro: charOffsetUTF16)
+
+    /// Builds a TXT-style TOC where each chapter starts at an increasing
+    /// UTF-16 character offset — the position model TXT books use. This is
+    /// the exact shape the Bug #248 user hit ("txt toc dont jump").
+    private func makeTXTTOCEntries(offsets: [Int]) -> [TOCEntry] {
+        offsets.enumerated().map { (i, offset) in
+            TOCEntry(
+                title: "Chapter \(i + 1)",
+                level: 0,
+                locator: makeTXTLocator(offset: offset)
+            )
+        }
+    }
+
+    @Test("TXT current-chapter index matches a mid-book charOffset (Bug #248 repro)")
+    func txtCurrentChapterIndexMatchesOffset() {
+        // 10 chapters at offsets 0, 1000, 2000, …, 9000.
+        let entries = makeTXTTOCEntries(offsets: (0..<10).map { $0 * 1000 })
+        // Reading position deep in chapter 5 (offset 4500 → last entry at-or-before is index 4).
+        let loc = makeTXTLocator(offset: 4500)
+        let sheet = makeSheet(tocEntries: entries, currentLocator: loc)
+        #expect(sheet.activeEntryIndexForTesting == 4)   // chapter 5 (0-based index 4)
+    }
+
+    @Test("TXT current-chapter resolves exactly on a chapter boundary")
+    func txtCurrentChapterOnBoundary() {
+        let entries = makeTXTTOCEntries(offsets: (0..<10).map { $0 * 1000 })
+        // Offset exactly at chapter 8's start (7000) → index 7, not 6.
+        let loc = makeTXTLocator(offset: 7000)
+        let sheet = makeSheet(tocEntries: entries, currentLocator: loc)
+        #expect(sheet.activeEntryIndexForTesting == 7)
+    }
+
+    @Test("TXT current-chapter before the first entry's offset yields nil")
+    func txtCurrentChapterBeforeFirstEntry() {
+        // TOC entries start at offset 500; a position at offset 100 precedes
+        // all of them → no active chapter (matches the "last at-or-before"
+        // rule's empty result, not a crash / index 0).
+        let entries = makeTXTTOCEntries(offsets: [500, 1500, 2500])
+        let loc = makeTXTLocator(offset: 100)
+        let sheet = makeSheet(tocEntries: entries, currentLocator: loc)
+        #expect(sheet.activeEntryIndexForTesting == nil)
+    }
+
+    @Test("Last TXT chapter stays selected past the final entry's offset")
+    func txtCurrentChapterPastLastEntry() {
+        let entries = makeTXTTOCEntries(offsets: (0..<10).map { $0 * 1000 })
+        // Reading past the last chapter start (offset 12000) → stays on the
+        // last entry (index 9), the row the scroll target must center on.
+        let loc = makeTXTLocator(offset: 12000)
+        let sheet = makeSheet(tocEntries: entries, currentLocator: loc)
+        #expect(sheet.activeEntryIndexForTesting == 9)
+    }
+
+    // MARK: - Scroll target id (Bug #248 — the dropped ScrollViewReader)
+
+    /// The auto-scroll target — the `TOCEntry.id` of the active entry, which
+    /// the list's `ScrollViewReader` proxy scrolls to on appear. `nil` when
+    /// no current chapter is known (no reading position, or a position before
+    /// the first entry), so the list opens at the top rather than guessing.
+    @Test("Scroll target id is the active entry's id (Bug #248)")
+    func scrollTargetIsActiveEntryID() {
+        let entries = makeTXTTOCEntries(offsets: (0..<10).map { $0 * 1000 })
+        let loc = makeTXTLocator(offset: 4500)   // chapter 5, index 4
+        let sheet = makeSheet(tocEntries: entries, currentLocator: loc)
+        #expect(sheet.currentChapterScrollTargetForTesting == entries[4].id)
+    }
+
+    @Test("Scroll target id is nil when there is no current chapter")
+    func scrollTargetNilWhenNoCurrentChapter() {
+        // No reading position → nothing to scroll to → list opens at the top.
+        let noLoc = makeSheet(tocEntries: makeTXTTOCEntries(offsets: [0, 100]), currentLocator: nil)
+        #expect(noLoc.currentChapterScrollTargetForTesting == nil)
+        // Empty TOC → no target either.
+        let empty = makeSheet(tocEntries: [], currentLocator: makeTXTLocator(offset: 5))
+        #expect(empty.currentChapterScrollTargetForTesting == nil)
+    }
+
+    // MARK: - Current-chapter row styling decision (Bug #248 — accent + bold)
+
+    @Test("Current-chapter row styles accent + bold; others ink + regular (Bug #248)")
+    func currentChapterRowStyling() {
+        let theme = ReaderThemeV2.paper
+        // The current row: accent foreground, semibold weight, tinted background.
+        let current = TOCContentsRow.styleForTesting(theme: theme, isCurrent: true)
+        #expect(current.foregroundUIColor == theme.accentColor)
+        #expect(current.isBold)
+        #expect(current.hasBackgroundTint)
+        // A non-current row: ink foreground, regular weight, clear background.
+        let other = TOCContentsRow.styleForTesting(theme: theme, isCurrent: false)
+        #expect(other.foregroundUIColor == theme.inkColor)
+        #expect(other.isBold == false)
+        #expect(other.hasBackgroundTint == false)
+    }
+
+    @Test("Current-chapter row styling holds across every theme (Bug #248)")
+    func currentChapterRowStylingEveryTheme() {
+        for theme in ReaderThemeV2.allCases {
+            let current = TOCContentsRow.styleForTesting(theme: theme, isCurrent: true)
+            #expect(current.foregroundUIColor == theme.accentColor)
+            #expect(current.isBold)
+            #expect(current.hasBackgroundTint)
+        }
+    }
+
     // MARK: - Empty states
 
     @Test("Empty TOC renders the empty state with the Open-Search CTA")

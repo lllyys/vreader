@@ -35,7 +35,34 @@ struct TOCContentsRow: View {
     let isCurrent: Bool
     let onTap: () -> Void
 
+    /// The current-chapter visual treatment, derived once from `theme` +
+    /// `isCurrent` so the highlight decision is a single named value the
+    /// body reads and the tests pin (Bug #248: the user reported the
+    /// current-chapter title "isn't highlighted"). Mirrors the design
+    /// `vreader-panels.jsx` TOCSheet: the current row's title is the accent
+    /// colour at weight 600 with an accent-tinted background; every other
+    /// row is the ink colour at weight 400 with a clear background.
+    struct Style: Equatable {
+        /// Title foreground colour — `accentColor` when current, else `inkColor`.
+        let titleColor: UIColor
+        /// Title weight — `.semibold` (the design's 600) when current, else `.regular`.
+        let titleWeight: Font.Weight
+        /// Row background fill — an accent tint when current, else clear.
+        let background: Color
+
+        static func make(theme: ReaderThemeV2, isCurrent: Bool) -> Style {
+            Style(
+                titleColor: isCurrent ? theme.accentColor : theme.inkColor,
+                titleWeight: isCurrent ? .semibold : .regular,
+                background: isCurrent
+                    ? Color(theme.accentColor).opacity(theme.isDark ? 0.12 : 0.06)
+                    : Color.clear
+            )
+        }
+    }
+
     var body: some View {
+        let style = Style.make(theme: theme, isCurrent: isCurrent)
         Button(action: onTap) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Text("\(chapterOrdinal)")
@@ -46,8 +73,8 @@ struct TOCContentsRow: View {
 
                 Text(title)
                     .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 16)))
-                    .fontWeight(isCurrent ? .semibold : .regular)
-                    .foregroundStyle(Color(isCurrent ? theme.accentColor : theme.inkColor))
+                    .fontWeight(style.titleWeight)
+                    .foregroundStyle(Color(style.titleColor))
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let page {
@@ -59,15 +86,34 @@ struct TOCContentsRow: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isCurrent
-                          ? Color(theme.accentColor).opacity(theme.isDark ? 0.12 : 0.06)
-                          : Color.clear)
+                RoundedRectangle(cornerRadius: 10).fill(style.background)
             )
         }
         .buttonStyle(.plain)
     }
 }
+
+#if DEBUG
+extension TOCContentsRow {
+    /// Inspectable snapshot of the current-chapter row styling — pins the
+    /// Bug #248 highlight decision (accent + bold + tint vs ink + regular +
+    /// clear) without rendering a view.
+    struct StyleProbe {
+        let foregroundUIColor: UIColor
+        let isBold: Bool
+        let hasBackgroundTint: Bool
+    }
+
+    static func styleForTesting(theme: ReaderThemeV2, isCurrent: Bool) -> StyleProbe {
+        let style = Style.make(theme: theme, isCurrent: isCurrent)
+        return StyleProbe(
+            foregroundUIColor: style.titleColor,
+            isBold: style.titleWeight == .semibold,
+            hasBackgroundTint: style.background != Color.clear
+        )
+    }
+}
+#endif
 
 // MARK: - TOCBookmarkRow
 

@@ -103,6 +103,17 @@ extension TOCSheet {
         return matchedEntryIndex(for: loc)
     }
 
+    /// The `TOCEntry.id` the Contents list scrolls to on appear — the active
+    /// entry's stable id, or `nil` when there is no current chapter (no
+    /// reading position, an out-of-range index, or a position before the
+    /// first entry). `nil` means "open at the top, don't guess". Restores
+    /// the auto-scroll capability feature #62 WI-5 dropped (Bug #248): the
+    /// list's `ScrollViewReader` proxy targets this id.
+    var currentChapterScrollTarget: String? {
+        guard let index = activeEntryIndex, tocEntries.indices.contains(index) else { return nil }
+        return tocEntries[index].id
+    }
+
     // MARK: - Badge counts
 
     /// The Contents tab badge — the TOC entry count.
@@ -125,6 +136,10 @@ extension TOCSheet {
 
     /// The lifted `activeEntryIndex` result, for the current-chapter test.
     var activeEntryIndexForTesting: Int? { activeEntryIndex }
+
+    /// The id the Contents list auto-scrolls to on appear — for the
+    /// Bug #248 scroll-target test.
+    var currentChapterScrollTargetForTesting: String? { currentChapterScrollTarget }
 
     /// True when the Contents tab carries no TOC entries — distinct
     /// from whether the empty *state* renders (that is also gated on
