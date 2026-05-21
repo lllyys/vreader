@@ -1,3 +1,11 @@
+---
+branch: fix/issue-1078-toc-sheet-current-chapter
+threadId: 019e480e-abd0-7931-9f06-5b14e1f82eed
+rounds: 1
+final_verdict: follow-up-recommended
+date: 2026-05-21
+---
+
 # Codex Gate-4 Audit — Bug #248 / GH #1078
 
 **Branch**: `fix/issue-1078-toc-sheet-current-chapter`
