@@ -109,11 +109,28 @@ view.addEventListener('external-link', e => {
 }
 
 // Content tap (chrome toggle + bug #239 side-tap page-turn). The body now
-// carries the tap's x-coordinate in viewport pixels and the viewport width so
+// carries the tap's x-coordinate and the width in *host-viewport* pixels so
 // the Swift FoliateSpikeView coordinator can route through
 // `ReaderTapZoneRouter` for paged-mode side-tap → next/prev page. Synthetic
 // clicks that lack `clientX` post the empty body (`{}`) and fall through to the
 // chrome-toggle path.
+//
+// Bug #108 REOPEN (GH #224): the click `event` fires inside the section's
+// iframe document. In paginated mode foliate-js renders the section as a
+// multi-column page in an iframe WIDER than the screen and shifts that iframe
+// horizontally (`left: -<columnWidth>`) to reveal one column at a time. So
+// `event.clientX` is in the iframe's internal coordinate space (0..iframeWidth)
+// while `documentElement.clientWidth` is a single column's width. Posting that
+// raw pair made `ReaderTapZoneRouter` see `x/w > 2/3` on every right-column
+// page and misclassify a center tap as a right-zone next-page — the toolbar
+// never toggled. We map the click back to the host viewport via the section's
+// `frameElement`: `hostX = clientX + frameRect.left`, `hostW = host window
+// innerWidth`. That matches the coordinate space the EPUB content-tap handler
+// already uses (EPUB renders in the top-level document, so its clientX/width
+// are host-relative to begin with). When there is no host frame (defensive —
+// a non-iframe renderer or a cross-origin section we cannot read), we post the
+// bare `'tap'` so the tap still toggles chrome (the safe default) rather than
+// turning the page on a wrong coordinate.
 view.addEventListener('load', e => {
     const doc = e.detail.doc
     doc.addEventListener('click', event => {
@@ -123,16 +140,71 @@ view.addEventListener('load', e => {
         const sel = doc.getSelection()
         if (sel && !sel.isCollapsed) return
         const x = (typeof event.clientX === 'number') ? event.clientX : null
-        const w = doc.documentElement?.clientWidth
-            || (doc.defaultView && doc.defaultView.innerWidth)
-            || 0
-        if (x === null || !isFinite(x) || w <= 0) {
+        if (x === null || !isFinite(x)) {
             post('tap', {})
             return
         }
-        post('tap', { x: x, w: w })
+        const mapped = mapTapToHostViewport(doc, x)
+        if (!mapped) {
+            // No reliable host-viewport mapping — toggle chrome rather than
+            // risk a wrong side-tap classification.
+            post('tap', {})
+            return
+        }
+        post('tap', { x: mapped.x, w: mapped.w })
     })
 })
+
+// Bug #108 REOPEN: convert a click's iframe-internal `clientX` into the host
+// viewport's coordinate space + return the host viewport width, so
+// `ReaderTapZoneRouter`'s 30/40/30 zone split lands on the screen the user
+// actually sees. Returns `null` when no usable mapping exists (caller then
+// posts the bare chrome-toggle tap).
+//
+// - `frameEl` is the iframe element hosting this section, read from the
+//   section document's own window. Its `getBoundingClientRect().left` is the
+//   horizontal shift foliate-js applies to page through columns (0 on the
+//   first column, negative on later columns).
+// - `hostWin` is the window that OWNS that iframe (the foliate host page).
+//   Its `innerWidth` is the on-screen reader width — the correct `w`.
+// - When `frameEl` is absent (top-level / non-iframe renderer), `clientX`
+//   and `documentElement.clientWidth` are already host-relative, so we use
+//   them directly.
+//
+// We do NOT fall back to the iframe element's own width when the host
+// viewport width is unavailable: that width is the WIDE multi-column iframe
+// (the very thing that broke `clientX`/`clientWidth` parity), so using it
+// would re-introduce the mixed-coordinate bug. When `hostWin.innerWidth`
+// isn't a usable number we return `null` so the caller posts the bare
+// chrome-toggle `tap` (the safe default) rather than risk a wrong side-tap.
+function mapTapToHostViewport(doc, clientX) {
+    try {
+        // `docWin` is the section document's own window — NOT the module-level
+        // `view` (<foliate-view>). Named distinctly to avoid shadowing it.
+        const docWin = doc.defaultView
+        const frameEl = docWin && docWin.frameElement
+        if (!frameEl) {
+            // No nested iframe → clientX / clientWidth are already in the
+            // host viewport space (matches the EPUB top-level-document case).
+            const w = doc.documentElement?.clientWidth
+                || (docWin && docWin.innerWidth) || 0
+            if (!isFinite(w) || w <= 0) return null
+            return { x: clientX, w: w }
+        }
+        const frameLeft = frameEl.getBoundingClientRect().left
+        const hostWin = frameEl.ownerDocument
+            && frameEl.ownerDocument.defaultView
+        const hostW = hostWin && hostWin.innerWidth
+        // Only the HOST viewport width is a valid `w`. No iframe-width
+        // fallback — that would re-mix coordinate spaces (Bug #108).
+        if (!isFinite(frameLeft) || !isFinite(hostW) || hostW <= 0) return null
+        return { x: clientX + frameLeft, w: hostW }
+    } catch (e) {
+        // Cross-origin frame access (should not happen for blob: sections,
+        // but defensive) — no reliable mapping.
+        return null
+    }
+}
 
 // Import Overlayer for draw-annotation handler
 import { Overlayer } from './overlayer.js'

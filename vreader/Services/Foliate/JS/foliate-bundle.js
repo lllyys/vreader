@@ -6612,14 +6612,36 @@ ${doc.querySelector("parsererror").innerText}`);
       const sel = doc.getSelection();
       if (sel && !sel.isCollapsed) return;
       const x3 = typeof event.clientX === "number" ? event.clientX : null;
-      const w2 = doc.documentElement?.clientWidth || doc.defaultView && doc.defaultView.innerWidth || 0;
-      if (x3 === null || !isFinite(x3) || w2 <= 0) {
+      if (x3 === null || !isFinite(x3)) {
         post("tap", {});
         return;
       }
-      post("tap", { x: x3, w: w2 });
+      const mapped = mapTapToHostViewport(doc, x3);
+      if (!mapped) {
+        post("tap", {});
+        return;
+      }
+      post("tap", { x: mapped.x, w: mapped.w });
     });
   });
+  function mapTapToHostViewport(doc, clientX) {
+    try {
+      const docWin = doc.defaultView;
+      const frameEl = docWin && docWin.frameElement;
+      if (!frameEl) {
+        const w2 = doc.documentElement?.clientWidth || docWin && docWin.innerWidth || 0;
+        if (!isFinite(w2) || w2 <= 0) return null;
+        return { x: clientX, w: w2 };
+      }
+      const frameLeft = frameEl.getBoundingClientRect().left;
+      const hostWin = frameEl.ownerDocument && frameEl.ownerDocument.defaultView;
+      const hostW = hostWin && hostWin.innerWidth;
+      if (!isFinite(frameLeft) || !isFinite(hostW) || hostW <= 0) return null;
+      return { x: clientX + frameLeft, w: hostW };
+    } catch (e3) {
+      return null;
+    }
+  }
   var bookReady = false;
   var currentBook = null;
   window.readerAPI = {
