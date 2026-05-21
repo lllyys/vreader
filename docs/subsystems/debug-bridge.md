@@ -61,6 +61,7 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 | `search`   | `query=<str>`                      | `index=<int>`                         | Drive the in-reader search sheet (Bug #238). Opens the search sheet, sets `SearchViewModel.query` to `query`, and — when `index` (0-indexed, ≥0) is supplied — taps result N once results arrive (re-fires `.readerNavigateToLocator` then dismisses the sheet, mirroring the real-user tap path). Used by the verify harness to reproduce search-result-tap repros (e.g. Bug #182 cross-chapter EPUB search highlight) CU-free. No-op when no reader is presented. |
 | `highlight`| `start=<int>`, `end=<int>`         | `color=<yellow\|pink\|green\|blue>`   | Create a highlight at UTF-16 range `[start, end)` in the active TXT/MD/EPUB reader (Bug #237 TXT/MD; Bug #220 EPUB). Bypasses the long-press → SelectionPopoverView gesture path (XCUITest cannot synthesize it on iOS 26). The TXT/MD observer builds a format-correct `Locator` via `LocatorFactory` (extracting `textQuote` + context from source) and calls `HighlightCoordinator.create(...)`. The EPUB observer evaluates `EPUBDebugBridgeHighlightJS.buildResolveRangeJS(...)` in the active WKWebView to walk visible text nodes (skipping bilingual `data-vreader-decoration` siblings) and map `[start, end)` UTF-16 offsets to a DOM `EPUBSerializedRange`, snaps surrogate-pair boundaries, then calls the same `HighlightCoordinator.create(...)` with `AnnotationAnchor.epub(...)`. Either path is byte-identical to a gesture-created highlight at the same offsets (`canonicalHash` matches, so dedupe works correctly). PDF / AZW3 don't register the observer; the URL is silently a no-op for them. |
 | `provider` | `action=add\|remove\|clear` (plus action-specific params, see below) | — | Configure AI provider profiles for autonomous AI-feature verification (Bug #243). `action=add` inserts (or replaces by display name) a `ProviderProfile` in `ProviderProfileStore.shared` and saves its API key to the per-profile Keychain account (`add` requires `name`, `kind=<openAICompatible\|anthropicNative>`, `endpoint=<http(s) URL>`, `apiKey`; optional `model=<id>`, `active=<true\|false>`). Re-running an `add` URL with the same `name` reuses the existing UUID + keychain account — the operation is idempotent so `remove(name:)` always has a deterministic target. `action=remove` deletes the profile with the given display `name` + its keychain entry. `action=clear` wipes every profile + every per-profile keychain entry + the active selection. The handler auto-promotes the first added profile to active (so a single `add` URL leaves the harness in a usable state). All three sub-actions are idempotent and unlock CU-free AI-feature verification (Feature #56 b/d, Feature #65/#69, Bug #93) regardless of CU availability. |
+| `present`  | `sheet=toc\|highlights\|ai\|settings\|bookmarks` | `tab=<...>`            | Present a reader sheet so its rendered content becomes CU-free verifiable via `snapshot` + `eval` (Bug #253). Posts `.debugBridgePresentSheet`; the active reader's observer maps `(sheet, tab)` to the **same** `@State` / `annotationsRoute` the chrome buttons set (no parallel presentation logic), so the harness drives the real presentation path. `sheet=toc` presents `TOCSheet` (Contents/Bookmarks); `sheet=highlights` presents `HighlightsSheet` (All/Highlights/Notes/Bookmarks review); `sheet=ai` presents `AIReaderPanel` (Summarize/Translate/Chat) — gated on `resolvedAICoordinator.isAIAvailable` (configure a provider first via `provider?action=add`), and a `tab=translate` open resets stale Translate-tab state to match the production selectionless-translate path; `sheet=settings` presents the reader settings panel; `sheet=bookmarks` is a top-level alias for the `TOCSheet` Bookmarks tab. The `tab` param selects a sub-tab (see Parameter validation). No-op when no reader is presented (mirrors `tts` / `search` / `highlight`). |
 
 ### Parameter validation
 
@@ -80,6 +81,8 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 - `apiKey` (`provider` `add`): non-empty string. Trimmed of leading/trailing whitespace + newlines before save (mirrors `AISettingsViewModel.addProfile`). Saved to Keychain under the per-profile account (`com.vreader.ai.apiKey.<UUID>`).
 - `model` (`provider` `add`): optional model id. When omitted, defaults to `kind.defaultModel` (e.g., `gpt-4o-mini` for `openAICompatible`).
 - `active` (`provider` `add`): optional `true` / `false`. When `true`, the new profile is set active (even if another profile already is). When `false` or omitted, the handler auto-promotes to active only when no profile is currently active.
+- `sheet` (`present`): one of `toc` / `highlights` / `ai` / `settings` / `bookmarks`. Anything else (or empty) throws `parse.invalidParam: sheet` (empty throws `parse.missingParam: sheet`).
+- `tab` (`present`): optional sub-tab, validated against the sheet's vocabulary — `toc`: `contents` / `bookmarks`; `highlights`: `all` / `highlights` / `notes` / `bookmarks`; `ai`: `summarize` / `translate` / `chat`. `settings` and `bookmarks` take **no** `tab` (`bookmarks` is itself the Bookmarks-tab selector) — passing one throws `parse.invalidParam: tab`. An out-of-vocabulary or empty `tab=` is rejected. Omit `tab` to open each sheet on its default tab (`toc`→Contents, `highlights`→All, `ai`→Summarize).
 - Duplicate query keys throw `parse.invalidParam: <name>: duplicate parameter`.
 
 ## Driving the bridge from a verification flow
@@ -171,6 +174,55 @@ Key properties:
 - **First-add auto-active**: omitting `active=` on the first `add` URL still leaves the harness with an active profile, so single-provider flows can drop the flag.
 - **`remove` keys on display name**: the harness produces names, so the URL boundary uses names instead of UUIDs.
 - **`clear` is the right teardown**: leaves the next iteration with a known-empty `ProviderProfileStore`; also drops the per-profile Keychain entries.
+
+## Driving sheet-content verification (Bug #253)
+
+Several visible-verification close-gates need a reader sheet **open** so its
+rendered content can be inspected — but computer-use can't tap the chrome
+button on the virtual-display host, and (before Bug #253) no `vreader-debug://`
+command presented a sheet. The `present` family closes that gap. The sheet is
+presented through the same `@State` / `annotationsRoute` the chrome buttons set
+(no parallel presentation logic), so what you observe is the real sheet.
+
+```bash
+SIM_ID=<udid>
+
+# 1. Seed + open a book (the present command is a no-op with no reader open).
+xcrun simctl openurl "$SIM_ID" "vreader-debug://reset"
+xcrun simctl openurl "$SIM_ID" "vreader-debug://seed?fixture=war-and-peace"
+# (resolve the seeded book's fingerprintKey from a snapshot, then:)
+xcrun simctl openurl "$SIM_ID" "vreader-debug://open?bookId=<key>"
+
+# 2. Present the Contents (TOC) sheet — e.g. to verify Bug #248's
+#    auto-scroll + current-chapter highlight.
+xcrun simctl openurl "$SIM_ID" "vreader-debug://present?sheet=toc&tab=contents"
+
+# 3. Snapshot / eval to inspect the now-presented sheet's content.
+xcrun simctl openurl "$SIM_ID" "vreader-debug://snapshot?dest=after-present.json"
+
+# Other sheets:
+xcrun simctl openurl "$SIM_ID" "vreader-debug://present?sheet=highlights&tab=notes"
+xcrun simctl openurl "$SIM_ID" "vreader-debug://present?sheet=ai&tab=summarize"   # needs a provider configured
+xcrun simctl openurl "$SIM_ID" "vreader-debug://present?sheet=settings"
+xcrun simctl openurl "$SIM_ID" "vreader-debug://present?sheet=bookmarks"          # TOC sheet → Bookmarks tab
+```
+
+Key properties:
+
+- **Real presentation path**: `present` sets the exact `annotationsRoute` /
+  `showAIPanel` / `showSettings` the Contents / Notes / AI / Display chrome
+  buttons set. A `DebugPresentSheetEffect` resolver pins this — its default
+  `toc`/`highlights` routes derive from `AnnotationsSheetRoute.route(forChromeButton:)`.
+- **AI gate honored**: `sheet=ai` is a no-op when no provider is configured
+  (matches the chrome's AI gate). Configure one first with `provider?action=add`.
+  A `tab=translate` open resets stale Translate-tab state, matching the
+  production selectionless-translate path.
+- **No-op without a reader**: like `tts` / `search` / `highlight`, the URL is
+  silently a no-op when no book is open (the observer only fires on a mounted
+  reader).
+- **Unblocks**: Bug #248 (TOC scroll+highlight), Feature #65 (AI sheet
+  re-skin), Feature #69 (AI Summarize scope chips), the future Bug #249
+  (HighlightsSheet delete).
 
 ## Output files
 
@@ -475,6 +527,9 @@ In practice the prompt only appears on a freshly-erased simulator, because `lsd`
 | `vreader/Services/DebugBridge/DebugSnapshot.swift`            | JSON shape for snapshot output              |
 | `vreader/Services/DebugBridge/RealDebugBridgeContext.swift`   | Production handlers (reset/seed/open/theme/tts/search/highlight) |
 | `vreader/Services/DebugBridge/RealDebugBridgeContext+Provider.swift` | `provider` command handler (Bug #243 — AI provider profile add/remove/clear) |
+| `vreader/Services/DebugBridge/RealDebugBridgeContext+Present.swift` | `present` command handler (Bug #253 — posts `.debugBridgePresentSheet`) |
+| `vreader/Views/Reader/DebugPresentSheetEffect.swift`         | Pure `(sheet, tab)` → host presentation effect resolver (Bug #253) |
+| `vreader/Views/Reader/ReaderContainerView+DebugBridgePresent.swift` | Reader-host `.debugBridgePresentSheet` observer (Bug #253) |
 | `vreader/Services/DebugBridge/DebugReaderRegistry.swift`      | Active-reader registry + probe protocol     |
 | `vreader/Services/DebugBridge/DebugReaderProbeAdapter.swift`  | Default probe used by ReaderContainerView   |
 | `vreader/Services/DebugBridge/DebugBridgeNotifications.swift` | DEBUG-only notification names               |
