@@ -176,18 +176,31 @@ struct SelectiveRestoreCoordinatorTests {
         let entry = Self.makeEntry(title: "X", bytes: Self.makeEPUBBytes(seed: 1))
         await blobReader.setBlob(Self.makeEPUBBytes(seed: 1), at: entry.blobPath)
 
-        actor Collector { var values: [Double] = []; func record(_ v: Double) { values.append(v) } }
+        // Bug #230 / GH #954: record progress values synchronously under a
+        // lock. `progress` is `@Sendable (Double) -> Void` and the coordinator
+        // calls it synchronously while it runs, so recording inline guarantees
+        // every value is captured in call order by the time
+        // `restoreSelectively` returns. The previous `{ v in Task { await
+        // collector.record(v) } }` spawned a detached Task per callback and
+        // relied on `Task.yield()` to drain them — but `Task.yield()` is not a
+        // synchronization primitive, so under load the final callback's Task
+        // (recording 1.0) could be unscheduled when the test read `values`,
+        // leaving `values.last == 0.85` and flaking the assertion.
+        final class Collector: @unchecked Sendable {
+            private let lock = NSLock()
+            private var storage: [Double] = []
+            func record(_ v: Double) { lock.lock(); storage.append(v); lock.unlock() }
+            var values: [Double] { lock.lock(); defer { lock.unlock() }; return storage }
+        }
         let collector = Collector()
 
         _ = try await coordinator.restoreSelectively(
             manifest: [entry],
             selectedKeys: [entry.fingerprintKey],
             metadataSections: SelectiveRestoreMetadataSections(),
-            progress: { v in Task { await collector.record(v) } }
+            progress: { v in collector.record(v) }
         )
-        await Task.yield()
-        await Task.yield()
-        let values = await collector.values
+        let values = collector.values
         #expect(values.first == 0.0)
         #expect(values.last == 1.0)
         // Monotonic non-decreasing.
