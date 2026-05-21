@@ -124,18 +124,22 @@ struct SettingsRowPaletteTests {
         #expect(high.b == 255)
     }
 
-    // MARK: - AI group (WI-5)
+    // MARK: - AI group (WI-5 provider row + WI-6 toggle rows)
 
-    /// The AI rows WI-5 adds. Currently only one — `aiProvider` —
-    /// because the design bundle (`vreader-panels.jsx` line 869) only
-    /// depicts the AI provider row. The AI Assistant + Data & Privacy
-    /// toggle rows are not in the palette: per rule 51 their visual
-    /// treatment must come from a committed design, not an invented one.
+    /// The AI-group rows. WI-5 added `aiProvider` (the only AI row in
+    /// the original `vreader-panels.jsx` design). WI-6 adds the two
+    /// toggle rows now that design #1068 (`vreader-ai-toggles.jsx`,
+    /// Variant A) supplies their colored-tile treatment: `aiAssistant`
+    /// (master gate) and `aiDataSharing` (consent).
     private var aiSpecs: [SettingsRowSpec] {
-        [SettingsRowPalette.aiProvider]
+        [
+            SettingsRowPalette.aiProvider,
+            SettingsRowPalette.aiAssistant,
+            SettingsRowPalette.aiDataSharing
+        ]
     }
 
-    @Test func aiProvider_hasNonEmptySymbolName_andResolves() {
+    @Test func aiSpecs_haveNonEmptySymbolNames_andResolve() {
         for spec in aiSpecs {
             #expect(!spec.symbolName.isEmpty, "symbolName for \(spec.paletteKey)")
             #expect(UIImage(systemName: spec.symbolName) != nil,
@@ -154,12 +158,49 @@ struct SettingsRowPaletteTests {
                 RGBComponents(r: 0x8c, g: 0x2f, b: 0x2f))
     }
 
-    @Test func aiProvider_isDistinct_fromEveryCoreSpec() {
-        for core in coreSpecs {
-            #expect(SettingsRowPalette.aiProvider != core,
-                    "aiProvider must not collide with \(core.paletteKey)")
-            #expect(SettingsRowPalette.aiProvider.paletteKey != core.paletteKey,
-                    "no palette-key collision with \(core.paletteKey)")
+    @Test func aiAssistant_paletteKey_isPinned() {
+        #expect(SettingsRowPalette.aiAssistant.paletteKey == "aiAssistant")
+    }
+
+    @Test func aiAssistant_pinsItsDesignSymbol_andHex() {
+        // `vreader-ai-toggles.jsx:95-96` — `Icons.Sparkle` `#8c2f2f`
+        // (same chroma as the AI Provider row — the AI energy color).
+        #expect(SettingsRowPalette.aiAssistant.symbolName == "sparkles")
+        #expect(SettingsRowPalette.aiAssistant.background ==
+                RGBComponents(r: 0x8c, g: 0x2f, b: 0x2f))
+    }
+
+    @Test func aiDataSharing_paletteKey_isPinned() {
+        #expect(SettingsRowPalette.aiDataSharing.paletteKey == "aiDataSharing")
+    }
+
+    @Test func aiDataSharing_pinsItsDesignSymbol_andHex() {
+        // `vreader-ai-toggles.jsx:109-110` — `ShieldIcon` (a shield with
+        // an inner checkmark) `#4a6a8a` (the cool-blue "system/safety"
+        // family, next to Cloud #3a8ac8 / Folder #7c6ad6).
+        #expect(SettingsRowPalette.aiDataSharing.symbolName == "checkmark.shield")
+        #expect(SettingsRowPalette.aiDataSharing.background ==
+                RGBComponents(r: 0x4a, g: 0x6a, b: 0x8a))
+    }
+
+    @Test func aiSpecs_areDistinct_fromEveryCoreSpec_andEachOther() {
+        for ai in aiSpecs {
+            for core in coreSpecs {
+                #expect(ai != core,
+                        "\(ai.paletteKey) must not collide with \(core.paletteKey)")
+                #expect(ai.paletteKey != core.paletteKey,
+                        "no palette-key collision: \(ai.paletteKey) vs \(core.paletteKey)")
+            }
+        }
+        // The two AI toggle specs share the sparkle/shield chroma family
+        // but must remain distinct rows (distinct palette keys + at least
+        // one differing field).
+        let keys = aiSpecs.map(\.paletteKey)
+        #expect(Set(keys).count == keys.count, "AI palette keys are unique")
+        for i in aiSpecs.indices {
+            for j in aiSpecs.indices where j > i {
+                #expect(aiSpecs[i] != aiSpecs[j], "AI specs \(i) and \(j) differ")
+            }
         }
     }
 }

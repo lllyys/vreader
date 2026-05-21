@@ -1,22 +1,25 @@
-// Purpose: Feature #67 WI-5 — `AISettingsSection` row-restyle
-// composition test. Pins the WI-5 restyle: the AI Provider
-// `NavigationLink` row uses the design's colored-icon `SettingsIconRow`
-// (`SettingsRowPalette.aiProvider`), while the AI Assistant +
-// Data & Privacy toggle rows stay on their existing plain-`Toggle`
-// chrome (the design bundle does not depict colored-icon variants for
-// those two — per rule 51 they're tracked under a `needs-design`
-// follow-up, not invented here).
+// Purpose: Feature #67 WI-5 + WI-6 — `AISettingsSection` row-restyle
+// composition test.
 //
-// Asserts the new `rowPaletteKeysForTesting` seam returns the AI
-// rows' palette keys in render order across both the `isAIEnabled
-// == false` (toggle visible, provider hidden) and `isAIEnabled ==
-// true` (all 3 rows visible) states.
+// WI-5 restyled the AI Provider `NavigationLink` row to the design's
+// colored-icon `SettingsIconRow` (`SettingsRowPalette.aiProvider`).
+//
+// WI-6 (design #1068 `vreader-ai-toggles.jsx`, Variant A — now
+// unblocked) restyles the AI Assistant master toggle + the
+// Data & Privacy consent toggle to the design's `SettingsToggleRow`
+// (colored tile + `PillSwitch`), so the AI group now renders three
+// design-colored rows: AI Assistant (always), AI Provider + Allow AI
+// data sharing (when AI on).
+//
+// Asserts the `rowPaletteKeysForTesting` seam returns the AI rows'
+// palette keys in render order across both the `isAIEnabled == false`
+// (master toggle only) and `isAIEnabled == true` (all 3 rows) states.
 
 import Testing
 import SwiftUI
 @testable import vreader
 
-@Suite("AISettingsSection restyle — feature #67 WI-5")
+@Suite("AISettingsSection restyle — feature #67 WI-5 + WI-6")
 @MainActor
 struct AISettingsSectionRestyleTests {
 
@@ -43,22 +46,26 @@ struct AISettingsSectionRestyleTests {
 
     // MARK: - rowPaletteKeysForTesting seam
 
-    /// When AI is disabled, only the Enable toggle is visible — no
-    /// design-colored row renders, so the palette keys are empty.
-    @Test func rowPaletteKeys_whenAIDisabled_areEmpty() {
+    /// When AI is disabled, the AI Assistant master toggle is the only
+    /// visible row — and WI-6 restyles it to a colored `SettingsToggleRow`,
+    /// so its palette key (`aiAssistant`) renders. The provider + consent
+    /// rows are hidden.
+    @Test func rowPaletteKeys_whenAIDisabled_isMasterToggleOnly() {
         let section = makeSection(isAIEnabled: false)
-        #expect(section.rowPaletteKeysForTesting == [])
+        #expect(section.rowPaletteKeysForTesting ==
+                [SettingsRowPalette.aiAssistant.paletteKey])
     }
 
-    /// When AI is enabled, the AI Provider `NavigationLink` row
-    /// renders the design's colored-icon style (palette key
-    /// `aiProvider`). The two toggle rows (`aiToggle` /
-    /// `consentToggle`) do NOT have palette entries because the
-    /// design does not depict them as colored-icon rows.
-    @Test func rowPaletteKeys_whenAIEnabled_includes_aiProvider() {
+    /// When AI is enabled, all three rows render in Variant-A order:
+    /// AI Assistant (master toggle) → AI Provider (nav) → Allow AI data
+    /// sharing (consent toggle).
+    @Test func rowPaletteKeys_whenAIEnabled_areAllThreeInOrder() {
         let section = makeSection(isAIEnabled: true)
-        #expect(section.rowPaletteKeysForTesting ==
-                [SettingsRowPalette.aiProvider.paletteKey])
+        #expect(section.rowPaletteKeysForTesting == [
+            SettingsRowPalette.aiAssistant.paletteKey,
+            SettingsRowPalette.aiProvider.paletteKey,
+            SettingsRowPalette.aiDataSharing.paletteKey
+        ])
     }
 
     // MARK: - Restyled row composition

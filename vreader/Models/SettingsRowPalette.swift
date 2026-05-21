@@ -13,7 +13,10 @@
 //   render path (the `SheetSectionContract` precedent).
 // - **Scoped to exactly the rows this sheet renders.** WI-2 declares
 //   the six core-group rows (Cloud & Sync / Reading / About); WI-5
-//   adds the AI-group rows. The design's OPDS-catalogs /
+//   adds the AI Provider row; WI-6 adds the two AI toggle rows
+//   (AI Assistant master gate + Allow AI data sharing consent) now
+//   that design #1068 (`vreader-ai-toggles.jsx`) supplies their
+//   colored-tile treatment. The design's OPDS-catalogs /
 //   translation-languages / Chinese-conversion rows are deliberately
 //   absent — OPDS routes through the Library nav (not this sheet),
 //   and the translation / Chinese-conversion rows are aspirational in
@@ -116,18 +119,35 @@ enum SettingsRowPalette {
         background: RGBComponents(r: 0x99, g: 0x99, b: 0x99)
     )
 
-    // MARK: - AI group (WI-5)
+    // MARK: - AI group (WI-5 provider + WI-6 toggle rows)
 
     /// AI Provider — the design's `Icons.Sparkle` glyph + `#8c2f2f`
-    /// (`vreader-panels.jsx` line 869 — the ONLY AI row depicted in the
-    /// committed design). The AI Assistant + Data & Privacy toggle rows
-    /// are NOT in this enum: the design bundle does not depict them, so
-    /// per rule 51 they stay on their existing plain-`Toggle` chrome
-    /// pending a `needs-design` follow-up. The shipped sheet renders
-    /// only this `aiProvider` palette key for the AI section in WI-5.
+    /// (`vreader-panels.jsx` line 869, also `vreader-ai-toggles.jsx`
+    /// line 104-105). The AI energy color.
     static let aiProvider = SettingsRowSpec(
         paletteKey: "aiProvider",
         symbolName: "sparkles",
         background: RGBComponents(r: 0x8c, g: 0x2f, b: 0x2f)
+    )
+
+    /// AI Assistant master toggle — the design's `Icons.Sparkle` glyph
+    /// + `#8c2f2f` (`vreader-ai-toggles.jsx` line 95-96, Variant A). Same
+    /// chroma as the AI Provider row (the AI energy color); a distinct
+    /// row identity via its own `paletteKey`. WI-6 (design #1068).
+    static let aiAssistant = SettingsRowSpec(
+        paletteKey: "aiAssistant",
+        symbolName: "sparkles",
+        background: RGBComponents(r: 0x8c, g: 0x2f, b: 0x2f)
+    )
+
+    /// Allow AI data sharing (consent) — the design's `ShieldIcon`
+    /// (a shield with an inner checkmark → SF Symbol `checkmark.shield`)
+    /// + `#4a6a8a` (`vreader-ai-toggles.jsx` line 109-110, Variant A).
+    /// The cool-blue "system / safety" family, sitting next to Cloud
+    /// (`#3a8ac8`) and Folder (`#7c6ad6`). WI-6 (design #1068).
+    static let aiDataSharing = SettingsRowSpec(
+        paletteKey: "aiDataSharing",
+        symbolName: "checkmark.shield",
+        background: RGBComponents(r: 0x4a, g: 0x6a, b: 0x8a)
     )
 }

@@ -23,9 +23,13 @@
 // - **`isDestructive` drives the title color** to the design's danger
 //   red (`#c44`); `resolvedTitleColorForTesting` exposes the resolved
 //   color so the composition test can assert it without a render path.
+// - The toggle-trailing peer of this row is `SettingsToggleRow`
+//   (`SettingsToggleRow.swift`, feature #67 WI-6) — same tile/title
+//   vocabulary via the shared `SettingsRowMetrics`, a `PillSwitch`
+//   trail instead of value+chevron.
 //
 // @coordinates-with: SettingsRowPalette.swift, SettingsView.swift,
-//   AISettingsSection.swift, ReaderThemeV2.swift,
+//   AISettingsSection.swift, ReaderThemeV2.swift, SettingsToggleRow.swift,
 //   SettingsIconRowTests.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
 

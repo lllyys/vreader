@@ -163,3 +163,119 @@ struct SettingsIconRowTests {
         }
     }
 }
+
+// MARK: - SettingsToggleRow (feature #67 WI-6 — design #1068 Variant A)
+
+/// Composition tests for `SettingsToggleRow` — the colored-tile peer of
+/// `SettingsIconRow` whose trailing slot is a `PillSwitch` instead of a
+/// value+chevron (`vreader-ai-toggles.jsx` `SettingsToggleRow`).
+@Suite("SettingsToggleRow composition — feature #67 WI-6")
+@MainActor
+struct SettingsToggleRowTests {
+
+    @Test func buildsWithDetailAndPillSwitch() {
+        let row = SettingsToggleRow(
+            theme: .paper,
+            icon: Image(systemName: "sparkles"),
+            iconBackground: SettingsRowPalette.aiAssistant.background.color,
+            title: "Enable AI Assistant",
+            detail: "Translation, summarize, ask about the text",
+            isOn: .constant(false)
+        )
+        _ = row.body
+    }
+
+    @Test func buildsWithoutDetail() {
+        let row = SettingsToggleRow(
+            theme: .paper,
+            icon: Image(systemName: "checkmark.shield"),
+            iconBackground: SettingsRowPalette.aiDataSharing.background.color,
+            title: "Allow AI data sharing",
+            isOn: .constant(true)
+        )
+        _ = row.body
+    }
+
+    @Test func buildsOnAndOff() {
+        _ = SettingsToggleRow(
+            theme: .paper,
+            icon: Image(systemName: "sparkles"),
+            iconBackground: .red,
+            title: "Enable AI Assistant",
+            detail: "detail",
+            isOn: .constant(true)
+        ).body
+        _ = SettingsToggleRow(
+            theme: .paper,
+            icon: Image(systemName: "sparkles"),
+            iconBackground: .red,
+            title: "Enable AI Assistant",
+            detail: "detail",
+            isOn: .constant(false)
+        ).body
+    }
+
+    @Test func buildsForEveryReaderTheme() {
+        for theme in ReaderThemeV2.allCases {
+            let row = SettingsToggleRow(
+                theme: theme,
+                icon: Image(systemName: "checkmark.shield"),
+                iconBackground: .blue,
+                title: "Allow AI data sharing",
+                detail: "Send passages and chat history for better answers",
+                isOn: .constant(false)
+            )
+            _ = row.body
+        }
+    }
+
+    /// The toggle row reuses the shared row metrics so its tile/title
+    /// vocabulary is identical to `SettingsIconRow` (design parity — the
+    /// rows are peers in the same group).
+    @Test func reusesSharedRowMetrics() {
+        #expect(SettingsToggleRow.iconTileSizeForTesting == SettingsRowMetrics.iconTileSize)
+        #expect(SettingsToggleRow.titleFontSizeForTesting == SettingsRowMetrics.titleFontSize)
+        #expect(SettingsToggleRow.detailFontSizeForTesting == SettingsRowMetrics.detailFontSize)
+    }
+
+    /// The toggle row's detail subline uses the design's own spacing
+    /// (`vreader-ai-toggles.jsx` `SettingsToggleRow`: `marginTop: 2`,
+    /// `lineHeight: 1.35`) — distinct from `SettingsIconRow`'s
+    /// `marginTop: 1` (which sources `vreader-panels.jsx`).
+    @Test func detailSublineUsesToggleRowDesignSpacing() {
+        #expect(SettingsToggleRowMetrics.titleToDetailSpacing == 2)
+        #expect(SettingsToggleRowMetrics.titleToDetailSpacing != SettingsRowMetrics.titleToDetailSpacing)
+        #expect(SettingsToggleRowMetrics.detailLineSpacing > 0)
+    }
+
+    /// The bound value flips when the row's switch action fires.
+    @Test func toggleActionFlipsBinding() {
+        var stored = false
+        let binding = Binding<Bool>(get: { stored }, set: { stored = $0 })
+        let row = SettingsToggleRow(
+            theme: .paper,
+            icon: Image(systemName: "sparkles"),
+            iconBackground: .red,
+            title: "Enable AI Assistant",
+            isOn: binding
+        )
+        row.toggleForTesting()
+        #expect(stored == true)
+    }
+
+    /// The row builds with a toggle accessibility identifier (which is
+    /// applied to the underlying `Toggle`, not the row container — the
+    /// wiring-preservation fix).
+    @Test func buildsWithToggleAccessibilityIdentifier() {
+        let row = SettingsToggleRow(
+            theme: .paper,
+            icon: Image(systemName: "sparkles"),
+            iconBackground: .red,
+            title: "Enable AI Assistant",
+            detail: "detail",
+            isOn: .constant(true),
+            toggleAccessibilityIdentifier: "aiToggle"
+        )
+        _ = row.body
+    }
+}

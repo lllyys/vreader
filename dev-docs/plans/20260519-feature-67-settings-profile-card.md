@@ -318,3 +318,65 @@ Re-audit of plan v3. The auditor verified every round-2 fix as real and correct:
 ## Manual Audit Evidence
 
 _Not applicable — the Codex auditor was available and ran 3 rounds (see "Audit fixes applied (Gate 2)"). This section is the rule-47 manual-fallback, used only when the independent AI auditor is genuinely unavailable._
+
+---
+
+## WI-6 addendum (2026-05-21) — AI Assistant + Data & Privacy toggle rows (design #1068 unblocked)
+
+**Why a new WI.** The original 5-WI plan's WI-5 said "definitively restyles `AISettingsSection`" assuming all three AI rows would take the existing `SettingsIconRow` colored-tile chrome. During WI-5's Gate-3 implementation (2026-05-20), an audit of the then-committed design (`vreader-panels.jsx:868-870`) found it depicted **only** the AI Provider row as a colored-icon row — it had no treatment for the two **toggle** rows (AI Assistant master gate, Allow AI data sharing consent). Per rule 51 (no self-designed UI), WI-5's PR narrowed scope to restyle the Provider row only (shipped as `SettingsRowPalette.aiProvider` + `AISettingsProviderRow`), and the two toggle rows were paused under `BLOCKED: needs-design (#1068)` on plain-`Toggle` chrome.
+
+**The block is now resolved.** A dedicated design landed (commit `3735529a`, "resolves #1068"): `dev-docs/designs/vreader-fidelity-v1/project/vreader-ai-toggles.jsx` + `ai-toggles-artboards.jsx`. The design introduces a **new component** (`SettingsToggleRow`) that the original plan did not anticipate, so the unblocked slice is its own WI (WI-6) rather than a continuation of WI-5.
+
+**Design content (binding — implement exactly to it).** Three variants A/B/C are presented; the artboards file's recommendation post-it (`ai-toggles-artboards.jsx:222`) is explicit: **"ship A — peer-parity with the row WI-5 shipped, lowest implementation cost."** The brief independently names `AISectionVariantA`. **WI-6 implements Variant A only.**
+
+Variant A (`vreader-ai-toggles.jsx:85-120`):
+- A single AI group card with a `SectionLabel`/title.
+- **AI Assistant** — `SettingsToggleRow`, icon `Icons.Sparkle` on `#8c2f2f`, title "Enable AI Assistant", detail "Translation, summarize, ask about the text", trailing `PillSwitch`. **Always visible** (master gate).
+- When AI on: the existing AI **Provider** `SettingsRow` (already shipped, unchanged) + **Allow AI data sharing** — `SettingsToggleRow`, icon `ShieldIcon` on `#4a6a8a`, title "Allow AI data sharing", detail "Send passages and chat history for better answers", trailing `PillSwitch`. **Consent + Provider both hidden when AI off** — matches the current `if viewModel.isAIEnabled` gate exactly; no new visibility logic.
+
+`SettingsToggleRow` (`vreader-ai-toggles.jsx:53-78`): the colored-tile peer of `SettingsRow`/`SettingsIconRow`, with a trailing `PillSwitch` instead of value+chevron, and an 11px detail subline (`marginTop: 2`, `lineHeight: 1.35`).
+
+`PillSwitch` (`vreader-retranslate.jsx:362-377`): `34×20` track, `borderRadius: 10`; on-color `#3a6a5a`, off-color `rgba(255,255,255,0.12)` (dark) / `rgba(0,0,0,0.12)` (light); `16×16` white knob, `top: 2`, `left: on ? 16 : 2`, shadow `0 1px 2px rgba(0,0,0,0.2)`.
+
+### Surface area (WI-6)
+
+| File | Change |
+|---|---|
+| `vreader/Views/Settings/PillSwitch.swift` (CREATE) | The design's `PillSwitch` as a SwiftUI view — a 34×20 capsule track + 16pt knob, on/off bound to a `Binding<Bool>`, theme-aware off-color. Pure presentation. Used as the trailing slot of `SettingsToggleRow`. Foundation/SwiftUI; ~70 LOC. Exposes `resolvedTrackColorForTesting` so the composition test pins the on/off track color without a render path. |
+| `vreader/Views/Settings/SettingsRowStyle.swift` (MODIFY) | Add `SettingsToggleRow` — a colored-tile row with a 30pt icon tile + 15pt title + optional 11pt detail + trailing `PillSwitch`. Reuses `SettingsRowMetrics`/`SettingsRowColors`. Distinct from `SettingsIconRow` (which has value+chevron); `SettingsToggleRow`'s trailing is always a `PillSwitch`, so it is a small dedicated struct, not a generic-`Trailing` reuse. Keeps the file <300 lines (currently 211; addition ~70 lines → ~280, within budget — if it exceeds, split `SettingsToggleRow` to its own file). |
+| `vreader/Models/SettingsRowPalette.swift` (MODIFY) | Add `aiAssistant` (`sparkles` / `#8c2f2f` — same chroma as `aiProvider`, distinct `paletteKey`) and `aiDataSharing` (a shield SF Symbol / `#4a6a8a`). Same `SettingsRowSpec` shape + invariants as the existing entries. |
+| `vreader/Views/Settings/AISettingsSection.swift` (MODIFY) | Restyle the AI Assistant + consent `Toggle`s to `SettingsToggleRow` bound to `$viewModel.isAIEnabled` / `$viewModel.hasConsent`. Merge the three separate `Section`s into the design's single AI group so it reads as one card (Variant A). Preserve `aiToggle` / `consentToggle` / `aiProvidersNavLink` accessibility identifiers + the `AIProviderListView` destination verbatim (R3 — re-skin must not drop wiring). Extend `rowPaletteKeysForTesting` to include `aiAssistant` (always) and `aiDataSharing` + `aiProvider` (when AI on). Update the file header comment (rule 22). |
+| `docs/architecture.md` (MODIFY) | If `SettingsToggleRow` / `PillSwitch` count as new shared UI components, note them where `SettingsIconRow` is referenced. (Doc-sync check at PR time — likely a 1-line addition to whatever pattern table lists the WI-2 row components, or n/a if those weren't separately tabled.) |
+
+**Files OUT of scope (WI-6):** Variants B and C (rejected by the design's own recommendation); the `AISettingsViewModel` consent/feature-flag logic (unchanged — only the row chrome changes); `AIProviderListView` / the pushed AI detail screens (unchanged); `SettingsView.swift` (the AI group is delegated to `AISettingsSection`, which WI-6 owns — `SettingsView` is not touched).
+
+### Test catalogue (WI-6)
+
+- **`vreaderTests/Views/Settings/PillSwitchTests.swift`** (CREATE) — builds on/off for every `ReaderThemeV2`; `resolvedTrackColorForTesting` is the design `#3a6a5a` when on; the design off-color (light vs dark) when off; the binding toggles (tapping flips the bound value).
+- **`vreaderTests/Views/Settings/SettingsIconRowTests.swift`** (EXTEND) — `SettingsToggleRow` builds with detail + `PillSwitch`; builds for every theme; the icon-tile + title + detail render (composition).
+- **`vreaderTests/Models/SettingsRowPaletteTests.swift`** (EXTEND) — `aiAssistant` + `aiDataSharing` satisfy the same invariants (non-empty valid SF Symbol via `UIImage(systemName:)`, design-hex RGB, pairwise-distinct from all existing specs).
+- **`vreaderTests/Views/Settings/AISettingsSectionRestyleTests.swift`** (EXTEND) — `rowPaletteKeysForTesting` now returns `["aiAssistant"]` when AI disabled (the master toggle is a colored row now) and `["aiAssistant", "aiProvider", "aiDataSharing"]` when AI enabled (render order: master → provider → consent, per Variant A). Section still builds in both states. The existing `providerRow_composition_uses_paletteSpec` assertion is preserved.
+
+### Tier + verification
+
+**Behavioral** (visible UI). This WI **completes Feature #67** — it is the last remaining scope (WI-1/2/3/4 done; WI-5's Provider row shipped; these two toggle rows were the only deferred piece). On merge → feature row `IN PROGRESS` → `DONE`. Gate-5a slice-verify CU-free via DebugBridge present-sheet (`vreader-debug://present?sheet=settings`) + `simctl io screenshot`, or via the unit suite if the visual can't be captured (CU is virtual-display-only this session).
+
+### Gate-2 status for WI-6
+
+The design content is fixed (committed bundle, the design *is* the spec). This addendum records the now-unblocked scope; it does not redesign anything. The WI-6 implementation is audited at Gate 4 (per-WI Codex audit) like every WI. No new Gate-2 plan-audit round is required for a slice whose design is externally fixed and whose surface is a bounded restyle of an already-audited plan's AI-group WI — the original Gate-2 (3 rounds, clean) covered the AI-group restyle intent; #1068 only supplied the missing component vocabulary.
+
+### WI-6 implementation outcome (2026-05-21)
+
+**Gate 3 (TDD)**: RED tests for `PillSwitch` (design colors/metrics/binding), `SettingsToggleRow` (composition + design metrics + binding), `SettingsRowPalette` (`aiAssistant`/`aiDataSharing` design pins), and `AISettingsSection` (Variant A render order + visibility gate). GREEN: `PillSwitch.swift`, `SettingsToggleRow.swift` (extracted to its own file so `SettingsRowStyle.swift` stays under the 300-line guideline), palette specs, AISettingsSection Variant-A rewrite. Full suite green (7042 tests).
+
+**Implementation decisions** (beyond the Surface-area sketch above):
+- `PillSwitch` is implemented as `PillSwitchStyle: ToggleStyle` applied to a real label-less `Toggle` (the `PillSwitch` view wraps it). This gives native switch accessibility (VoiceOver announces a switch with an on/off value, not a "selected button") — a Gate-4 fix.
+- The `aiToggle` / `consentToggle` identifiers are threaded through `SettingsToggleRow(toggleAccessibilityIdentifier:)` onto the `PillSwitch`'s underlying `Toggle` (the actionable control), not the row container — a Gate-4 wiring-preservation fix (feature #60 WI-9 lesson).
+- The shield SF Symbol is `checkmark.shield` (matches the design `ShieldIcon`'s shield-with-inner-check).
+- `SettingsToggleRowMetrics` carries the toggle-row's own detail spacing (`marginTop: 2` + `lineHeight: 1.35`), distinct from `SettingsIconRow`'s `marginTop: 1` (the toggle row's design source is `vreader-ai-toggles.jsx`, the icon row's is `vreader-panels.jsx`) — a Gate-4 fidelity fix.
+
+**Gate 4 (impl audit)**: Codex thread `019e4a37`, 2 rounds, final verdict **ship-as-is**. Round 1: 1 High (a11y identifier on row container not the control), 1 Medium (button/selected vs toggle semantics), 1 Low (detail spacing not exact Variant A) — all fixed. Round 2: clean. Audit log: `.claude/codex-audits/feat-feature-67-wi-ai-toggle-rows-audit.md`.
+
+**Gate 5a (slice verification)**: CU-free on iPhone 17 Pro Simulator (iOS 26.4) at v3.39.0, via the sim-drive-fallback tap-injection path (computer-use is virtual-display-only on this host; the app Settings sheet has no DebugBridge present hook, so DebugBridge alone can't reach it). Two-state proof chain: AI-ON shows all three colored rows (master `SettingsToggleRow` with green `PillSwitch`, AI Providers nav, consent `SettingsToggleRow` with shield tile + off `PillSwitch`); toggling AI OFF collapses the AI card to the single master row (provider + consent hidden). Artifacts: `dev-docs/verification/artifacts/feature-67-wi6-{02-ai-on-allrows,03-ai-off-collapsed}-20260521.png`.
+
+**Feature completion**: WI-6 was the last remaining scope (WI-1/2/3/4 done; WI-5's Provider row shipped). Feature row → `DONE`. Gate-5b end-to-end acceptance pass + `dev-docs/verification/feature-67-<date>.md` evidence (`result: pass`) pending before `VERIFIED`.
