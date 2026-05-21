@@ -258,10 +258,26 @@ extension Notification.Name {
     /// tracking even when the position change does not load a new
     /// section (page turn within an already-loaded section in
     /// paginated mode). Carries
-    /// `userInfo = ["sectionIndex": Int, "tocHref": String?,
-    ///              "fingerprintKey": String]`. Filtered by
-    /// `fingerprintKey`.
+    /// `userInfo = ["sectionIndex": Int, "sectionTotal": Int,
+    ///              "fraction": Double, "tocHref": String?,
+    ///              "tocLabel": String?, "fingerprintKey": String]`.
+    /// Filtered by `fingerprintKey`. Bug #260 added `fraction` /
+    /// `sectionTotal` / `tocLabel` so the AZW3/MOBI bottom-chrome
+    /// scrubber + position label have a live progress source.
     static let foliateRelocated = Notification.Name("vreader.foliateRelocated")
+
+    /// Bug #260 / GH #1130: posted by the AZW3/MOBI bottom-chrome
+    /// scrubber (in `FoliateBilingualContainerView`) when the user
+    /// drags to seek. Carries
+    /// `userInfo = ["fraction": Double, "fingerprintKey": String]`.
+    /// `FoliateSpikeView.Coordinator` observes it and evaluates
+    /// `readerAPI.goToFraction(<clamped>)` against its live
+    /// `WKWebView`. A dedicated channel (not the bilingual eval
+    /// channel) so the seek path is self-documenting — mirrors the
+    /// Bug #239 `.readerNextPage` / `.readerPreviousPage` precedent.
+    /// Filtered by `fingerprintKey` so concurrent AZW3/MOBI readers
+    /// do not cross-fire.
+    static let foliateRequestSeekFraction = Notification.Name("vreader.foliateRequestSeekFraction")
 
     /// Feature #60 WI-7c1: posted by a reader bridge when the user
     /// finishes a long-press selection. The

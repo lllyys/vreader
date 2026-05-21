@@ -439,6 +439,16 @@ extension FoliateSpikeView {
         /// `foliateNextPageToken`; evaluates `readerAPI.prev()`.
         nonisolated(unsafe) private var foliatePrevPageToken: NSObjectProtocol?
 
+        /// Bug #260 — observer for `.foliateRequestSeekFraction`. The
+        /// AZW3/MOBI bottom-chrome scrubber posts a target `fraction`
+        /// (filtered by `fingerprintKey`); this observer evaluates
+        /// `readerAPI.goToFraction(<clamped>)` against the live
+        /// `WKWebView`. The JS is built by `FoliateBottomChromeSeek`
+        /// (clamp + finite-literal guard). Same `.main` queue +
+        /// `MainActor.assumeIsolated` lifecycle as the sibling
+        /// page-turn / annotation observers; released in `deinit`.
+        nonisolated(unsafe) private var foliateSeekFractionToken: NSObjectProtocol?
+
         init(initialLayoutFlow: String,
              initialThemeCSS: String? = nil,
              onBookReady: @escaping @MainActor (String) -> Void,
@@ -536,6 +546,26 @@ extension FoliateSpikeView {
                     self.webView?.evaluateJavaScript("readerAPI.prev();", completionHandler: nil)
                 }
             }
+            // Bug #260 — bottom-chrome scrubber seek. Filtered by
+            // `fingerprintKey` (unlike the global page-turn observers)
+            // because a stale seek from an outgoing reader could
+            // otherwise jump a freshly-opened second reader. The JS
+            // builder clamps the fraction to a finite 0...1 literal.
+            self.foliateSeekFractionToken = NotificationCenter.default.addObserver(
+                forName: .foliateRequestSeekFraction,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let info = notification.userInfo,
+                      let fraction = info["fraction"] as? Double,
+                      let key = info["fingerprintKey"] as? String,
+                      key == self.fingerprintKey else { return }
+                let js = FoliateBottomChromeSeek.goToFractionJS(fraction)
+                MainActor.assumeIsolated {
+                    self.webView?.evaluateJavaScript(js, completionHandler: nil)
+                }
+            }
         }
 
         deinit {
@@ -557,6 +587,12 @@ extension FoliateSpikeView {
                 NotificationCenter.default.removeObserver(token)
             }
             if let token = foliatePrevPageToken {
+                NotificationCenter.default.removeObserver(token)
+            }
+            // Bug #260 — release the scrubber-seek observer so a seek
+            // posted after this coordinator deinits cannot evaluate
+            // `goToFraction` against an already-released `WKWebView`.
+            if let token = foliateSeekFractionToken {
                 NotificationCenter.default.removeObserver(token)
             }
         }
@@ -808,9 +844,24 @@ extension FoliateSpikeView {
                     var userInfo: [AnyHashable: Any] = [
                         "sectionIndex": parsed.sectionIndex,
                         "fingerprintKey": key,
+                        // Bug #260: the reading-progress fraction (0...1)
+                        // drives the bottom-chrome scrubber for AZW3/MOBI.
+                        // foliate-host.js always emits `fraction` on
+                        // relocate; forwarding it here is what gives the
+                        // (previously-missing) bottom bar a live progress
+                        // source. `sectionTotal` rides along for the
+                        // chapter-position label.
+                        "fraction": parsed.fraction,
+                        "sectionTotal": parsed.sectionTotal,
                     ]
                     if let href = parsed.tocHref {
                         userInfo["tocHref"] = href
+                    }
+                    // Bug #260: the current TOC entry label feeds the
+                    // bottom-chrome leading label (e.g. the chapter
+                    // title). Optional — sparse AZW3/MOBI TOCs omit it.
+                    if let label = parsed.tocLabel {
+                        userInfo["tocLabel"] = label
                     }
                     NotificationCenter.default.post(
                         name: .foliateRelocated,

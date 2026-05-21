@@ -907,13 +907,16 @@ struct ReaderContainerView: View {
             )
         case .foliateWeb:
             // Feature #56 WI-11: wraps the live AZW3/MOBI spike
-            // in the bilingual container.
+            // in the bilingual container. Bug #260: `ttsService` is
+            // threaded so the bottom chrome hides while TTS plays
+            // (it would otherwise stack over the TTS control bar).
             FoliateBilingualContainerView(
                 bookURL: resolvedFileURL,
                 fingerprintKey: book.fingerprintKey,
                 readerToken: readerToken,
                 settingsStore: settingsStore,
-                coordinatorBox: foliateCoordinatorBox
+                coordinatorBox: foliateCoordinatorBox,
+                ttsService: ttsService
             )
         }
     }

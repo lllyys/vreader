@@ -61,8 +61,44 @@ struct FoliateBilingualContainerView: View {
     let readerToken: UUID?
     let settingsStore: ReaderSettingsStore?
     let coordinatorBox: FoliateCoordinatorBox?
+    /// Bug #260: TTS state, threaded from `engineReaderView`. The
+    /// bottom chrome hides while TTS is active so it does not stack
+    /// over `ReaderContainerView`'s `TTSControlBar` (the same gate the
+    /// EPUB / TXT / PDF / MD containers apply to their own bottom
+    /// overlays). Optional → preview / test call sites stay
+    /// source-compatible.
+    var ttsService: TTSService?
 
     @Environment(\.modelContext) private var modelContext
+
+    // MARK: - Bottom chrome state (Bug #260)
+
+    /// Bug #260: mirrors the shared chrome-visibility toggle. The live
+    /// AZW3/MOBI spike posts `.readerContentTapped` on a center tap;
+    /// `ReaderContainerView` toggles the *top* chrome on it, and this
+    /// container toggles the *bottom* chrome in lockstep — the same
+    /// per-container pattern the four native containers use (each owns
+    /// its own `isChromeVisible`). Defaults visible so the bar shows on
+    /// first open, matching the native containers.
+    @State private var isChromeVisible = true
+
+    /// Bug #260: reading progress (0...1) for the bottom-chrome
+    /// scrubber, fed from the Foliate relocate `fraction`. Two-way so
+    /// the thumb tracks page turns as well as drags.
+    // Bug #260: `internal` (not `private`) so the `+BottomChrome`
+    // extension file can read/write — the container body is already
+    // past the ~300-line guideline, so the bottom-chrome view + update
+    // logic live in that extension file.
+    @State var readingProgress: Double = 0
+
+    /// Bug #260: the bottom-chrome leading label — the current chapter
+    /// title (relocate `tocLabel`) when present, else a percentage.
+    @State var chromeLeadingLabel: String = ""
+
+    /// Bug #260: the bottom-chrome trailing label — the section
+    /// position ("Chapter X of Y") derived from relocate
+    /// `sectionIndex` / `sectionTotal`.
+    @State var chromeTrailingLabel: String = ""
 
     // MARK: - Bilingual state
 
@@ -87,6 +123,38 @@ struct FoliateBilingualContainerView: View {
     @State private var currentSectionIndex: Int?
 
     var body: some View {
+        ZStack {
+            spikeWithBilingualWiring
+
+            // Bug #260: the shared bottom chrome (scrubber + labels +
+            // Contents / Notes / Display / AI toolbar) — previously
+            // never mounted for AZW3/MOBI. Gated on chrome visibility
+            // and TTS-idle so it hides on a chrome-toggle tap and never
+            // stacks over the TTS control bar (parity with the four
+            // native containers' bottom-overlay gate). The toolbar
+            // buttons post `.readerOpen*` notifications that
+            // `ReaderContainerView` already observes — no closure
+            // plumbing is needed here.
+            if isChromeVisible, (ttsService?.state ?? .idle) == .idle {
+                VStack(spacing: 0) {
+                    Spacer()
+                    bottomChromeOverlay
+                }
+            }
+        }
+        // Bug #260: mirror the chrome toggle. The spike posts
+        // `.readerContentTapped` on a center tap; toggling here keeps
+        // the bottom bar in lockstep with the top chrome.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .readerContentTapped)
+        ) { _ in isChromeVisible.toggle() }
+    }
+
+    /// The live AZW3/MOBI spike plus the bilingual enumerate / inject /
+    /// clear wiring. Extracted from `body` so the Bug #260 bottom-chrome
+    /// overlay can compose over it in a `ZStack` without ballooning the
+    /// `body` expression past the Swift type-checker's complexity ceiling.
+    private var spikeWithBilingualWiring: some View {
         FoliateSpikeView(
             bookURL: bookURL,
             fingerprintKey: fingerprintKey,
@@ -362,6 +430,12 @@ struct FoliateBilingualContainerView: View {
     /// cache only grows by section-load count, which is bounded by
     /// the book length, so this is not a leak hazard.
     private func handleRelocated(_ userInfo: [AnyHashable: Any]?) {
+        // Bug #260: update the bottom-chrome scrubber + labels from the
+        // relocate payload. Runs regardless of bilingual state (the
+        // bottom bar shows for every AZW3/MOBI book), so it precedes the
+        // bilingual-only guard below.
+        updateBottomChrome(from: userInfo)
+
         guard let nextIndex = userInfo?["sectionIndex"] as? Int else {
             return
         }
