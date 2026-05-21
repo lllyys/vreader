@@ -91,3 +91,7 @@ Each variant has artboards for AI off / on+consent off / on+consent on / dark, p
 
 Implementation surface is small — one new `SettingsToggleRow` view + a `shield.checkmark` SF symbol — and stays inside rule 51's anti-pattern table by reusing the shipped `SettingsRowPalette` rather than inventing new colored variants.
 
+## User
+
+https://github.com/lllyys/vreader/issues/1103
+

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VReader — HighlightsSheet delete affordance (#1103)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: #f0eee9;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .hide-scroll::-webkit-scrollbar { display: none; }
+  .hide-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+  button { font-family: inherit; }
+  button:focus { outline: none; }
+  code { font-family: "SF Mono", "JetBrains Mono", Menlo, monospace; }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes ndMenuIn {
+    from { transform: scale(0.94) translateY(-4px); opacity: 0; }
+    to   { transform: scale(1) translateY(0); opacity: 1; }
+  }
+  @keyframes ndCaret {
+    50% { opacity: 0; }
+  }
+</style>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" fill="#1a1815"/>
+    <rect x="22" y="36" width="156" height="128" rx="10" fill="#fcf8f0"/>
+    <!-- meta row + ⋯ -->
+    <rect x="32" y="50" width="8" height="8" rx="2" fill="#e88ca0"/>
+    <rect x="46" y="52" width="48" height="4" rx="2" fill="#1d1a14" opacity="0.35"/>
+    <circle cx="156" cy="54" r="1.6" fill="#5a554a"/>
+    <circle cx="162" cy="54" r="1.6" fill="#5a554a"/>
+    <circle cx="168" cy="54" r="1.6" fill="#5a554a"/>
+    <!-- quote bar -->
+    <rect x="36" y="66" width="2" height="22" fill="#e88ca0"/>
+    <rect x="44" y="68" width="120" height="3" rx="1.5" fill="#1d1a14" opacity="0.35"/>
+    <rect x="44" y="76" width="100" height="3" rx="1.5" fill="#1d1a14" opacity="0.35"/>
+    <!-- destructive confirm strip -->
+    <rect x="32" y="98" width="136" height="42" rx="6" fill="#a83a3a" opacity="0.08"/>
+    <rect x="40" y="106" width="60" height="4" rx="2" fill="#1d1a14" opacity="0.6"/>
+    <rect x="40" y="116" width="90" height="3" rx="1.5" fill="#1d1a14" opacity="0.35"/>
+    <rect x="40" y="126" width="52" height="10" rx="3" fill="#fcf8f0" stroke="#1d1a14" stroke-opacity="0.18"/>
+    <rect x="100" y="126" width="60" height="10" rx="3" fill="#a83a3a"/>
+    <text x="100" y="186" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#d8d2c5" text-anchor="middle" letter-spacing="2">#1103 DELETE</text>
+  </svg>
+</template>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Canvas + base -->
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="vreader-themes.jsx"></script>
+<script type="text/babel" src="vreader-icons.jsx"></script>
+<script type="text/babel" src="vreader-panels.jsx"></script>
+
+<!-- Surfaces this design depends on -->
+<script type="text/babel" src="vreader-annotations.jsx"></script>
+<script type="text/babel" src="vreader-notes-unified.jsx"></script>
+<script type="text/babel" src="vreader-highlight-popover.jsx"></script>
+
+<!-- This issue's design -->
+<script type="text/babel" src="vreader-notes-delete.jsx"></script>
+<script type="text/babel" src="notes-delete-canvas-artboards.jsx"></script>
+
+<script type="text/babel">
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<NotesDeleteCanvas/>);
+</script>
+</body>
+</html>
