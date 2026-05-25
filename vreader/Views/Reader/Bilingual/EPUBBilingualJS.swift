@@ -73,10 +73,15 @@ enum EPUBBilingualJS {
 
     // MARK: - enumerate
 
-    /// JS that walks every translatable block (`p` / `div`-with-text
-    /// child / `li` / `blockquote` / `pre` heading), stamps a stable
-    /// `data-vreader-bid` on it, and posts an ordered
-    /// `[{bid, text}]` array back to Swift.
+    /// JS that walks every translatable LEAF block (`p` / `li` /
+    /// `blockquote` / `pre` / `dd` / `dt` that does NOT contain another
+    /// block element), stamps a stable `data-vreader-bid` on it, and posts
+    /// an ordered `[{bid, text}]` array back to Swift.
+    ///
+    /// Bug #266: only leaf blocks are enumerated — a `<blockquote><p>…` or
+    /// `<li><p>…` would otherwise enumerate both container and child,
+    /// double-counting against the plain-text paragraph segmentation and
+    /// drifting the translation pairing.
     ///
     /// Stamping is idempotent — a block that already carries
     /// `data-vreader-bid` keeps the existing id (so re-enumerating
@@ -103,6 +108,9 @@ enum EPUBBilingualJS {
             var BLOCK_TAGS = {
                 p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1
             };
+            // Bug #266: the CSS selector for "any block tag", used to detect a
+            // NON-leaf block (a block element that contains another block).
+            var BLOCK_SELECTOR = Object.keys(BLOCK_TAGS).join(',');
 
             var seq = 0;
             function stamp(el) {
@@ -127,6 +135,17 @@ enum EPUBBilingualJS {
                     // injected — a re-enumerate after inject must
                     // never re-stamp translation nodes.
                     if (el.hasAttribute && el.hasAttribute('\(decorationAttribute)')) {
+                        continue;
+                    }
+                    // Bug #266: enumerate LEAF blocks only. A block element
+                    // that contains another block element (e.g.
+                    // <blockquote><p>…</p></blockquote>, <li><p>…</p></li>)
+                    // would otherwise enumerate BOTH the container and its
+                    // child, double-counting against the plain-text paragraph
+                    // segmentation and drifting every later translation pairing.
+                    // Enumerate the inner leaf; skip the container (its text is
+                    // covered by its block descendants).
+                    if (el.querySelector && el.querySelector(BLOCK_SELECTOR)) {
                         continue;
                     }
                     var text = el.textContent || '';

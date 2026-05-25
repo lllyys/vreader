@@ -69,6 +69,22 @@ struct EPUBBilingualJSTests {
         #expect(js.contains("text"))
     }
 
+    @Test("enumerate JS counts only LEAF blocks — skips a block containing a block descendant (Bug #266)")
+    func enumerateSkipsNonLeafBlocks() {
+        let js = EPUBBilingualJS.bilingualEnumerateJS()
+        // Bug #266: a <blockquote><p> (or <li><p>) would otherwise enumerate
+        // BOTH the container and its child, double-counting against the
+        // plain-text paragraph segmentation and drifting every later pairing.
+        // The fix skips any block element that contains another block element
+        // (querySelector over the same tag set) so the DOM block sequence is
+        // 1:1 with the segmentation. Pin the guard so a refactor can't silently
+        // reintroduce the double-count.
+        #expect(
+            js.contains("querySelector"),
+            "enumerate JS must skip non-leaf blocks (a block element containing a block descendant) via querySelector, or nested blockquote>p / li>p double-counts and misaligns translations (Bug #266)."
+        )
+    }
+
     // MARK: - injectJS
 
     @Test("inject JS marks translation nodes with data-vreader-decoration")

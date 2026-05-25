@@ -93,29 +93,20 @@ enum EPUBBilingualPipeline {
     }
 
     /// Maps an ordered `[String]` translation cache onto a `[bid: text]`
-    /// table by position. The two arrays are paired by index — the
-    /// enumerate JS and the chapter-translation service share the same
-    /// "ordered source segments" contract.
+    /// table via the shared `BilingualPairing` contract: paired by position
+    /// ONLY when `blocks.count == segments.count`.
     ///
-    /// Mismatched lengths fall back to a partial map: the renderer
-    /// injects what it has and leaves the rest as source-only
-    /// (silent-source-fallback semantics — plan Decision 2).
-    ///
-    /// `translatedSegments == nil` means "no cached translation"; the
-    /// returned map is empty so the renderer paints source-only.
+    /// Bug #266: a count mismatch (or `translatedSegments == nil`) returns an
+    /// empty map → the renderer paints source-only. A partial (min-count)
+    /// pairing is exactly the misalignment that put paragraph N's translation
+    /// under the wrong paragraph, so it is never produced.
     static func translationsByBid(
         blocks: [BilingualBlock],
         translatedSegments: [String]?
     ) -> [String: String] {
-        guard let segments = translatedSegments, !segments.isEmpty else {
-            return [:]
-        }
-        let count = min(blocks.count, segments.count)
-        var map: [String: String] = [:]
-        map.reserveCapacity(count)
-        for i in 0..<count {
-            map[blocks[i].bid] = segments[i]
-        }
-        return map
+        // Bug #266: pair only on a 1:1 count match (source-only otherwise) via
+        // the shared contract — never a wrong paragraph→translation pairing.
+        BilingualPairing.translationsByBid(
+            blocks: blocks, translatedSegments: translatedSegments)
     }
 }

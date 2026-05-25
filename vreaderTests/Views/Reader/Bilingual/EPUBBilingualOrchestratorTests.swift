@@ -83,28 +83,19 @@ struct EPUBBilingualOrchestratorTests {
         #expect(js.contains("Monde"))
     }
 
-    @Test("buildInjectJS shorter translation array maps a prefix and drops the rest")
-    func buildInjectJSShortArrayPartial() throws {
+    @Test("buildInjectJS is nil on a count mismatch — source-only, never a wrong pairing (Bug #266)")
+    func buildInjectJSMismatchIsSourceOnly() {
         let orchestrator = EPUBBilingualOrchestrator()
         orchestrator.updateBlocks([
             BilingualBlock(bid: "b1", text: "Hello"),
             BilingualBlock(bid: "b2", text: "World"),
             BilingualBlock(bid: "b3", text: "Goodbye")
         ])
-        let js = try #require(orchestrator.buildInjectJS(
-            translatedSegments: ["Bonjour"]))
-        #expect(js.contains("Bonjour"))
-        #expect(js.contains("b1"))
-        // The renderer should NOT have produced an entry for b2 / b3
-        // — the inject payload should only carry b1's mapping.
-        // We look at the structural pattern in the emitted JS rather
-        // than asserting the absence of a string that may legitimately
-        // appear as part of other content.
-        let occurrences = js.components(separatedBy: "': '").count - 1
-        #expect(
-            occurrences == 1,
-            "Inject JS should carry exactly one bid → translation entry when the translation array has one element and the enumerate had three blocks."
-        )
+        // 3 blocks vs 1 segment: pre-Bug-#266 this mapped segment 0 → block 0
+        // and dropped the rest (a partial, position-trusting inject). Now a
+        // count mismatch yields no inject at all (source-only) so a divergence
+        // can never paint a translation under the wrong paragraph.
+        #expect(orchestrator.buildInjectJS(translatedSegments: ["Bonjour"]) == nil)
     }
 
     @Test("updateBlocks replaces prior blocks")

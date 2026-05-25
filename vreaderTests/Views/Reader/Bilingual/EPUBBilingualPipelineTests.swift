@@ -99,12 +99,13 @@ struct EPUBBilingualPipelineTests {
         #expect(table["b2"] == "Monde")
     }
 
-    @Test("translationsByBid truncates extra translation segments")
-    func translationsByBidTruncatesExtras() {
-        // The translation array is N elements but the enumerate
-        // payload had only 2 blocks. The pipeline maps the first 2
-        // and drops the rest — a renderer can never inject without
-        // a matching bid.
+    @Test("translationsByBid is source-only when there are MORE segments than blocks (Bug #266)")
+    func translationsByBidMoreSegmentsIsSourceOnly() {
+        // Count mismatch (3 segments, 2 blocks) means the render-side
+        // enumerate and the translation-side segmentation diverged, so
+        // positional pairing can't be trusted. Returning empty (source-only)
+        // is correct: a translation under the WRONG paragraph is worse than
+        // none. Pre-Bug-#266 this mapped the first 2 by index (wrong pairing).
         let blocks = [
             BilingualBlock(bid: "b1", text: "Hello"),
             BilingualBlock(bid: "b2", text: "World")
@@ -113,17 +114,15 @@ struct EPUBBilingualPipelineTests {
             blocks: blocks,
             translatedSegments: ["Bonjour", "Monde", "Extra"]
         )
-        #expect(table.count == 2)
-        #expect(table["b1"] == "Bonjour")
-        #expect(table["b2"] == "Monde")
-        #expect(!table.keys.contains("b3"))
+        #expect(table.isEmpty)
     }
 
-    @Test("translationsByBid pads short translation arrays with no entry")
-    func translationsByBidShortArrayPartialMap() {
-        // The translation array is shorter than the enumerate payload
-        // — the renderer should inject what it has and leave the rest
-        // as source-only (silent-source-fallback semantics).
+    @Test("translationsByBid is source-only when there are FEWER segments than blocks (Bug #266)")
+    func translationsByBidFewerSegmentsIsSourceOnly() {
+        // The reported repro shape: the DOM enumerate double-counted nested
+        // blocks (blockquote>p), so blocks.count (3) > segments.count (2).
+        // Pre-fix this mapped segment i → block i, drifting paragraph 1's
+        // translation onto the wrong block. Now: mismatch → source-only.
         let blocks = [
             BilingualBlock(bid: "b1", text: "Hello"),
             BilingualBlock(bid: "b2", text: "World"),
@@ -133,9 +132,6 @@ struct EPUBBilingualPipelineTests {
             blocks: blocks,
             translatedSegments: ["Bonjour", "Monde"]
         )
-        #expect(table.count == 2)
-        #expect(table["b1"] == "Bonjour")
-        #expect(table["b2"] == "Monde")
-        #expect(table["b3"] == nil)
+        #expect(table.isEmpty)
     }
 }
