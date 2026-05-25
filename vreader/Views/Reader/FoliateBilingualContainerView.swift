@@ -69,7 +69,9 @@ struct FoliateBilingualContainerView: View {
     /// source-compatible.
     var ttsService: TTSService?
 
-    @Environment(\.modelContext) private var modelContext
+    // Bug #265: `internal` (not `private`) so the `+Position` extension file
+    // can build the PersistenceActor from the SwiftData container.
+    @Environment(\.modelContext) var modelContext
 
     // MARK: - Bottom chrome state (Bug #260)
 
@@ -121,6 +123,24 @@ struct FoliateBilingualContainerView: View {
     /// orchestrator's enumerate / inject / clear JS so a unit's
     /// translations never bleed into adjacent loaded sections.
     @State private var currentSectionIndex: Int?
+
+    // MARK: - Reading-position persistence (Bug #265)
+
+    /// Bug #265: owns cross-session position save/restore for the live
+    /// AZW3/MOBI path (the wiring previously lived only in dead
+    /// `FoliateReaderHost`). Built lazily from the SwiftData container on
+    /// first need. Handler logic lives in
+    /// `FoliateBilingualContainerView+Position.swift`.
+    @State var positionController: FoliatePositionRestoreController?
+
+    /// Bug #265: ensures restore (load saved position → seek) runs once per
+    /// open, on the first `.foliateRelocated`.
+    @State var didStartPositionRestore = false
+
+    /// Bug #265: the in-flight restore task, cancelled on teardown so a
+    /// fast dismiss→reopen of the same book can't have a stale task post a
+    /// seek into the new reader instance (Codex Gate-4).
+    @State var positionRestoreTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -288,6 +308,26 @@ struct FoliateBilingualContainerView: View {
                 onCancel: { cancelBilingualSetup() },
                 onOpenSettings: { cancelBilingualSetup() }
             )
+        }
+        // Bug #265: persist the live reading position. The spike posts
+        // `.readerPositionDidChange` (object: Locator) on every relocate; the
+        // controller gates out the pre-restore open→start relocate and saves
+        // the rest (filtered to this book). Handler in `+Position.swift`.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .readerPositionDidChange)
+        ) { notification in
+            handlePositionDidChange(notification)
+        }
+        // Bug #265: build the persistence controller eagerly so a fast
+        // close-before-relocate can still flush, and so restore is ready.
+        .task { ensurePositionController() }
+        // Bug #265: flush the last position on teardown (close to library /
+        // relaunch) in case the debounce window hasn't elapsed, and cancel any
+        // in-flight restore task so it can't seek a re-opened reader instance.
+        .onDisappear {
+            positionRestoreTask?.cancel()
+            let controller = positionController
+            Task { await controller?.flush() }
         }
     }
 
@@ -477,6 +517,13 @@ struct FoliateBilingualContainerView: View {
     /// cache only grows by section-load count, which is bounded by
     /// the book length, so this is not a leak hazard.
     private func handleRelocated(_ userInfo: [AnyHashable: Any]?) {
+        // Bug #265: the FIRST relocate is the right restore trigger — it fires
+        // for EVERY book (TOC or not) and only AFTER `readerAPI.init({})` has
+        // rendered + navigated, so a restore `goTo` actually takes (book-ready
+        // fires before init, and `.foliateBookReadyTOC` is suppressed for
+        // TOC-less books — neither is a safe seek signal). Guarded once.
+        triggerPositionRestoreIfNeeded()
+
         // Bug #260: update the bottom-chrome scrubber + labels from the
         // relocate payload. Runs regardless of bilingual state (the
         // bottom bar shows for every AZW3/MOBI book), so it precedes the
