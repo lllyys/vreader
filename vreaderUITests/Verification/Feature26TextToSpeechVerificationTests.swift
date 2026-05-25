@@ -368,4 +368,24 @@ final class Feature26TextToSpeechVerificationTests: XCTestCase {
     func test_verify_feature_26_epub_start_pause_resume_stop_cycle() throws {
         runTTSLifecycle(seed: .epubFixture, formatName: "EPUB")
     }
+
+    // MARK: - C1-C4 — AZW3/MOBI (Foliate WKWebView reader) — Feature #57 criterion 4
+
+    /// Full TTS lifecycle on the AZW3/MOBI (Foliate) reader: start → pause →
+    /// resume → stop. This closes the one remaining gap in **Feature #57**
+    /// (AZW3/MOBI TTS wiring): its Gate-5 acceptance pass
+    /// (`dev-docs/verification/feature-57-20260519.md`, `result: partial`)
+    /// device-verified start + stop on AZW3 but could NOT exercise
+    /// **pause/resume** — at the time the `--seed-azw3-fixture` XCUITest seed
+    /// did not exist (Bug #233 added it) and the run conflated "CU down" with
+    /// "the play/pause button is unreachable". XCUITest taps the play/pause
+    /// control via the accessibility API (CU-independent), so the
+    /// `.speaking ⇄ .paused` transition IS reachable on the AZW3 reader the
+    /// same way it is on TXT/EPUB/MD. The `TTSControlBar` + `TTSService` state
+    /// machine is format-agnostic shared code; feature #57 changed only the
+    /// AZW3 *text source*, so a green run here confirms the AZW3 path drives
+    /// the full pause/resume cycle end-to-end.
+    func test_verify_feature_57_azw3_start_pause_resume_stop_cycle() throws {
+        runTTSLifecycle(seed: .azw3Fixture, formatName: "AZW3")
+    }
 }
