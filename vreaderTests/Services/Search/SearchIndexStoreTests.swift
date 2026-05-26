@@ -390,7 +390,13 @@ struct SearchIndexStoreTests {
         let units = [TextUnit(sourceUnitId: "txt:segment:0", text: "test")]
         try store.indexBook(fingerprintKey: "meta:nooffsets:1", textUnits: units)
 
-        // segment_base_offsets column is NULL by default after indexBook
+        // Bug #264 trap condition: indexBook creates the search_metadata row
+        // (isBookIndexed → true) but the segment_base_offsets column is NULL
+        // until setSegmentBaseOffsets runs. A row left in THIS state (an
+        // interrupted index, an older schema, or a stale row surviving reset)
+        // is what made ReaderSearchCoordinator.setup's restore branch a silent
+        // no-op — the book reads as "indexed" yet has nothing to restore.
+        #expect(store.isBookIndexed(fingerprintKey: "meta:nooffsets:1") == true)
         let retrieved = store.getSegmentBaseOffsets(fingerprintKey: "meta:nooffsets:1")
         #expect(retrieved == nil)
     }

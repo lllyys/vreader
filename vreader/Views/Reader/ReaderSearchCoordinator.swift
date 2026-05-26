@@ -87,16 +87,40 @@ final class ReaderSearchCoordinator {
         }
 
         if alreadyIndexed {
-            // Restore persisted segment offsets for valid locators (bug #61)
-            if let offsets = store.getSegmentBaseOffsets(
+            let offsets = store.getSegmentBaseOffsets(
                 fingerprintKey: fingerprint.canonicalKey
-            ) {
+            )
+            if let offsets {
+                // TXT/MD with persisted offsets — restore for valid locators
+                // (bug #61); also marks the book indexed in memory.
                 await service.restoreSegmentOffsets(
                     fingerprint: fingerprint,
                     offsets: offsets
                 )
+            } else if inMemoryIndexed {
+                // Already marked this session (fresh index earlier) — the
+                // persisted row simply lacks offsets; nothing to restore.
+            } else if Self.formatRequiresSegmentOffsets(format) {
+                // Bug #264: a TXT/MD persisted row with NO restorable offsets
+                // is stale (interrupted index, older schema, or a row a DEBUG
+                // reset left behind). The restore branch above would silently
+                // no-op, leaving the book un-searchable forever — drop it and
+                // re-index for real.
+                try? store.removeBook(fingerprintKey: fingerprint.canonicalKey)
+                alreadyIndexed = false
+            } else {
+                // Bug #264: EPUB/PDF persist FTS content but never segment
+                // offsets, so a nil-offsets persisted row is NORMAL for them.
+                // The content rows already exist in the store, so mark the
+                // book indexed in memory WITHOUT a wasteful re-index — this
+                // makes `service.isIndexed()` honest (the search driver's
+                // index-wait then completes) while search already works off
+                // the persistent FTS content.
+                service.markPersistentlyIndexed(fingerprint: fingerprint)
             }
-        } else {
+        }
+
+        if !alreadyIndexed {
             // Defer indexing to background (WI-F05)
             let coordinator = BackgroundIndexingCoordinator(
                 searchService: service
@@ -115,12 +139,42 @@ final class ReaderSearchCoordinator {
 
     // MARK: - Persistent Search Index (WI-F06)
 
+    /// The directory holding the persistent FTS store. Single source of truth
+    /// so `makePersistentStore` (production) and `wipeSearchIndex` (the
+    /// Bug #264 DEBUG reset-wipe) agree on the path.
+    nonisolated static var searchIndexDirectoryURL: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("SearchIndex", isDirectory: true)
+    }
+
+    /// Removes the persistent FTS store directory. Idempotent — succeeds when
+    /// the directory is absent. Bug #264: the DEBUG `vreader-debug://reset`
+    /// calls this so a reset is a true clean slate; without it a stale
+    /// `search_metadata` row (esp. one with empty `segment_base_offsets`)
+    /// survives reset+seed and the indexed-search wait never completes.
+    /// Takes the directory as a parameter so it is unit-testable against a
+    /// temp directory rather than the real Application Support path.
+    nonisolated static func wipeSearchIndex(at directory: URL) {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    /// Bug #264: whether a format persists segment base offsets (the TXT/MD
+    /// char-offset locator map) as part of its index. Only TXT and MD do —
+    /// EPUB and PDF index FTS content but pass `segmentBaseOffsets: nil`
+    /// (they locate by href / page, not char offset). This distinction
+    /// decides how `setup` treats a persisted index row that has no
+    /// restorable offsets: for TXT/MD that means a STALE row → re-index; for
+    /// EPUB/PDF it is the NORMAL state → just mark indexed in memory (the FTS
+    /// content already exists), never re-index on every reopen.
+    nonisolated static func formatRequiresSegmentOffsets(_ format: String) -> Bool {
+        format == "txt" || format == "md"
+    }
+
     /// Creates a persistent file-backed SearchIndexStore.
     /// Falls back to in-memory if file creation fails.
     private static func makePersistentStore() throws -> SearchIndexStore {
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("SearchIndex", isDirectory: true)
+        let dir = searchIndexDirectoryURL
         let dbPath = dir.appendingPathComponent("search.sqlite3")
         do {
             let core = try SearchIndexCore(databasePath: dbPath.path)

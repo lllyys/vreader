@@ -225,6 +225,19 @@ struct SearchServiceTests {
         #expect(indexed)
     }
 
+    @Test func markPersistentlyIndexedMakesIsIndexedTrueWithoutReindex() async throws {
+        // Bug #264: for EPUB/PDF (which persist FTS content but no segment
+        // offsets), reopen marks the book indexed in memory without a
+        // re-index. isIndexed() must flip true so the search driver's
+        // index-wait completes.
+        let service = try makeService()
+        #expect(await service.isIndexed(fingerprint: Self.epubFP) == false)
+
+        service.markPersistentlyIndexed(fingerprint: Self.epubFP)
+
+        #expect(await service.isIndexed(fingerprint: Self.epubFP) == true)
+    }
+
     // MARK: - removeIndex
 
     @Test func removeIndexClearsData() async throws {

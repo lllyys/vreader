@@ -114,8 +114,17 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         for book in books {
             try await persistence.deleteBook(fingerprintKey: book.fingerprintKey)
         }
+        // Bug #264: the persistent FTS store lives outside SwiftData
+        // (Application Support/SearchIndex/search.sqlite3). Deleting only the
+        // library books leaves stale `search_metadata` rows behind, so a
+        // reset+seed can resume a half-indexed book whose indexed-search wait
+        // never completes. Wipe the FTS store too so reset is a true clean
+        // slate.
+        ReaderSearchCoordinator.wipeSearchIndex(
+            at: ReaderSearchCoordinator.searchIndexDirectoryURL
+        )
         NotificationCenter.default.post(name: .debugBridgeLibraryChanged, object: nil)
-        log.info("reset: removed \(books.count) book(s)")
+        log.info("reset: removed \(books.count) book(s) + wiped search index")
     }
 
     /// Import a bundled fixture book by name. Idempotent — if a book with
