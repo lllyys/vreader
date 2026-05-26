@@ -740,6 +740,7 @@
 		8A5EFD4729B7E4BE9D2CA38E /* ReplacementTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AF84D4FD4FAA3232D18AA96 /* ReplacementTransform.swift */; };
 		8AE1A6146EC01A464580BBA9 /* DeviceIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B8B24C49B7E5DCAC2B9667 /* DeviceIdentityTests.swift */; };
 		8B009CA87373EC45C1796A1B /* BookImporterNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319F6B718764EAF33C88ECC4 /* BookImporterNotificationTests.swift */; };
+		8B22450F3063ED561B06485D /* RealDebugBridgeContext+Seek.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ED10DF5769D7EBC4A879992 /* RealDebugBridgeContext+Seek.swift */; };
 		8B3D497F2C0DF268AE1FE653 /* legado_multiple_sources.json in Resources */ = {isa = PBXBuildFile; fileRef = 84E4ABD8F17B04EA35F23724 /* legado_multiple_sources.json */; };
 		8B893E3D3C61482BEA500F32 /* Feature25TapZonesVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AEAE00997ED48B68EE20E6 /* Feature25TapZonesVerificationTests.swift */; };
 		8BBE50E626A6524E8C6DB59D /* SearchViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 576F111E93E863C656BDEC70 /* SearchViewModelTests.swift */; };
@@ -1146,6 +1147,7 @@
 		DB8B88C4C865EF973B826442 /* ReaderThemeV2+ColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A96C651E9CF9C1D386312A /* ReaderThemeV2+ColorScheme.swift */; };
 		DBFD718C101EE9B752D9C205 /* WebDAVProviderFactoryProfileDispatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56E344B835F385EF870989C9 /* WebDAVProviderFactoryProfileDispatchTests.swift */; };
 		DCB3DF75803B93E9AFB05F1D /* FormatCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050AAFD290B8995258D78AC2 /* FormatCapabilities.swift */; };
+		DCE25175B70820F119B432FB /* FoliateDebugSeekFractionObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A3F655F5FD823BABBA93412 /* FoliateDebugSeekFractionObserver.swift */; };
 		DCE7A66917407F83D657A63B /* FoliateURLSchemeHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432F646AE5FB7BFD06470EB5 /* FoliateURLSchemeHandlerTests.swift */; };
 		DD040D904159CBFF9C5B03F2 /* FoliateHighlightJSBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 469B267E0D3DB05D1D8F530A /* FoliateHighlightJSBridgeTests.swift */; };
 		DD1020F3F0A2D5BA7FFCB279 /* UnifiedScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0753D8C40DFE06B0323EE5B /* UnifiedScrollView.swift */; };
@@ -1407,6 +1409,7 @@
 		0E32E90EB8316752FB90F6B5 /* SourceSerif4-LICENSE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "SourceSerif4-LICENSE.md"; sourceTree = "<group>"; };
 		0E394527455B13D1EE9B06A9 /* MigrationFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationFixtures.swift; sourceTree = "<group>"; };
 		0E8D5CB4F3E93E8A15D3EDEA /* ChangeTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeTokenStore.swift; sourceTree = "<group>"; };
+		0ED10DF5769D7EBC4A879992 /* RealDebugBridgeContext+Seek.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RealDebugBridgeContext+Seek.swift"; sourceTree = "<group>"; };
 		0F181A4B41B6349FB9A8F4F7 /* SettingsProfileCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsProfileCard.swift; sourceTree = "<group>"; };
 		0F64D33F5E4EB6B2F8F10CC8 /* OPDSCatalogListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPDSCatalogListView.swift; sourceTree = "<group>"; };
 		0F7059169A9ADC70EE01420E /* TXTFileLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTFileLoaderTests.swift; sourceTree = "<group>"; };
@@ -2044,6 +2047,7 @@
 		89DE76057526BA48CAE2A83A /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		8A12A0D94CF17D48152929F0 /* ReadingStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStats.swift; sourceTree = "<group>"; };
 		8A1A348FFCBCC9C7A5360C28 /* RuleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleEngineTests.swift; sourceTree = "<group>"; };
+		8A3F655F5FD823BABBA93412 /* FoliateDebugSeekFractionObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateDebugSeekFractionObserver.swift; sourceTree = "<group>"; };
 		8A46EC81A33304A8D024F7CA /* AIReaderPanelHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIReaderPanelHeader.swift; sourceTree = "<group>"; };
 		8A86CD6BD10792F5107FFB5A /* ReaderSettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsStoreTests.swift; sourceTree = "<group>"; };
 		8A9899D5096108025F3AA19C /* SchemaV6.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaV6.swift; sourceTree = "<group>"; };
@@ -3010,6 +3014,7 @@
 				BB8C0771E06618E5F68C410D /* RealDebugBridgeContext+Present.swift */,
 				2E5C9F4DD3DE16D29E00E5F6 /* RealDebugBridgeContext+Provider.swift */,
 				C65CF531180D798D01E12893 /* RealDebugBridgeContext+SeedSessions.swift */,
+				0ED10DF5769D7EBC4A879992 /* RealDebugBridgeContext+Seek.swift */,
 				6671E9F8673155BDC726A6ED /* RealDebugBridgeContext+Settle.swift */,
 				7703EBA1FB78FEA2CADBFB7F /* RealDebugBridgeContext+Snapshot.swift */,
 			);
@@ -3696,6 +3701,7 @@
 				F1B78961833B958737E550A6 /* FoliateBottomChromeLabels.swift */,
 				C78DF73C0577F734E90ACB70 /* FoliateBottomChromeSeek.swift */,
 				DCC4E330CF0A4F1EBF039346 /* FoliateCoordinatorBox.swift */,
+				8A3F655F5FD823BABBA93412 /* FoliateDebugSeekFractionObserver.swift */,
 				B75EC9C3C222236A27183F13 /* FoliateHighlightJSBridge.swift */,
 				4BC51E5F1213D2B1363C13D5 /* FoliateHighlightMutator.swift */,
 				21CF1C76C54971B97341E5E9 /* FoliateHighlightRenderer.swift */,
@@ -5893,6 +5899,7 @@
 				35A3D4A4B62F808EF8874EEA /* FoliateBottomChromeSeek.swift in Sources */,
 				915C38C106026EB4386107C5 /* FoliateChapterTextProvider.swift in Sources */,
 				301498E0C7A6CBC1E7E8DF49 /* FoliateCoordinatorBox.swift in Sources */,
+				DCE25175B70820F119B432FB /* FoliateDebugSeekFractionObserver.swift in Sources */,
 				84FDAB02CDE741029EE927A8 /* FoliateHighlightJSBridge.swift in Sources */,
 				2D73988936C9A657637B8154 /* FoliateHighlightMutator.swift in Sources */,
 				11268CE0083F01ADC27C5C6B /* FoliateHighlightRenderer.swift in Sources */,
@@ -6142,6 +6149,7 @@
 				2D22FEBD43A0354357992A28 /* RealDebugBridgeContext+Present.swift in Sources */,
 				009D566180EA91AB79A4F32C /* RealDebugBridgeContext+Provider.swift in Sources */,
 				ABB95D6805BADA4CC6DBE564 /* RealDebugBridgeContext+SeedSessions.swift in Sources */,
+				8B22450F3063ED561B06485D /* RealDebugBridgeContext+Seek.swift in Sources */,
 				5F9CD9BF3AC140F1D753E05A /* RealDebugBridgeContext+Settle.swift in Sources */,
 				3165DCCEDBA5A70FCCCE4C40 /* RealDebugBridgeContext+Snapshot.swift in Sources */,
 				6FCF7DD822CCDC8C47899DF7 /* RealDebugBridgeContext.swift in Sources */,
@@ -6476,13 +6484,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 642;
+				CURRENT_PROJECT_VERSION = 643;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.39.21;
+				MARKETING_VERSION = 3.39.22;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -6626,13 +6634,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 642;
+				CURRENT_PROJECT_VERSION = 643;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.39.21;
+				MARKETING_VERSION = 3.39.22;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
