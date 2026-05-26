@@ -1827,6 +1827,54 @@ final class DebugCommandTests: XCTestCase {
         }
     }
 
+    // MARK: - seek (Bug #267 — Foliate fraction-seek harness command)
+    //   `vreader-debug://seek?fraction=<0...1>`
+
+    func test_parse_seekFraction_returnsClampedValue() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://seek?fraction=0.5")!)
+        XCTAssertEqual(cmd, .seekFraction(fraction: 0.5))
+    }
+
+    func test_parse_seekFractionAboveOne_clampsToOne() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://seek?fraction=1.8")!)
+        XCTAssertEqual(cmd, .seekFraction(fraction: 1.0))
+    }
+
+    func test_parse_seekFractionNegative_clampsToZero() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://seek?fraction=-0.3")!)
+        XCTAssertEqual(cmd, .seekFraction(fraction: 0.0))
+    }
+
+    func test_parse_seekMissingFraction_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://seek")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "fraction")
+        }
+    }
+
+    func test_parse_seekNonNumericFraction_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://seek?fraction=half")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "fraction")
+        }
+    }
+
+    func test_parse_seekNonFiniteFraction_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://seek?fraction=inf")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "fraction")
+        }
+    }
+
     func test_parse_seedSessionsDeepPath_throwsUnknownCommand() {
         let url = URL(string: "vreader-debug://seed-sessions/extra?book=a")!
         XCTAssertThrowsError(try DebugCommand.parse(url)) { error in

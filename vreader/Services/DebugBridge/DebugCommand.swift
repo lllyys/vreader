@@ -113,6 +113,11 @@ enum DebugCommand: Equatable {
     case highlight(startUTF16: Int, endUTF16: Int, color: String?)
     case provider(action: ProviderAction)
     case present(sheet: SheetKind, tab: String?, detent: SheetDetent?)
+    /// Bug #267 — `seek?fraction=<0...1>` drives the active Foliate (AZW3/MOBI)
+    /// reader to a fractional position (`readerAPI.goToFraction`) so the
+    /// harness can reach a distinguishable non-start position. `fraction` is
+    /// clamped to 0...1; a non-finite value is rejected by the parser.
+    case seekFraction(fraction: Double)
     case aiAction(action: AIActionKind, scope: SummaryScope?, text: String?)
     case seedSessions(bookFingerprintKey: String, secondsPerSession: Int)
 
@@ -659,6 +664,20 @@ extension DebugCommand {
                 secondsPerSession = 600
             }
             return .seedSessions(bookFingerprintKey: book, secondsPerSession: secondsPerSession)
+
+        case "seek":
+            // Bug #267: drive the active Foliate reader to a fractional
+            // position. `fraction` is required; must be a finite number; it is
+            // clamped to 0...1 (a verifier passing 0.5 reaches mid-book even if
+            // it slightly overshoots, rather than erroring).
+            let rawFraction = try requireParam("fraction", in: params)
+            guard let parsed = Double(rawFraction), parsed.isFinite else {
+                throw DebugCommandError.invalidParam(
+                    "fraction",
+                    reason: "expected a finite number in 0...1, got \(rawFraction)"
+                )
+            }
+            return .seekFraction(fraction: min(max(parsed, 0), 1))
 
         default:
             throw DebugCommandError.unknownCommand(host)

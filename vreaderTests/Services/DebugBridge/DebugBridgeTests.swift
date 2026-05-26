@@ -33,6 +33,17 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_seekURL_callsSeekFractionHandler() async {
+        // Bug #267: seek?fraction routes to the seekFraction handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://seek?fraction=0.5")!)
+
+        XCTAssertEqual(context.calls, [.seekFraction(fraction: 0.5)])
+    }
+
+    @MainActor
     func test_handle_searchURLWithQueryOnly_callsSearchHandlerWithNilIndex() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -351,6 +362,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int) async throws {
         await record("seed-sessions:\(bookFingerprintKey):\(secondsPerSession)")
     }
+    func seekFraction(fraction: Double) async throws {
+        await record("seek:\(fraction)")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -383,6 +397,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case present(sheet: DebugCommand.SheetKind, tab: String?, detent: DebugCommand.SheetDetent?)
         case aiAction(action: DebugCommand.AIActionKind, scope: SummaryScope?, text: String?)
         case seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int)
+        case seekFraction(fraction: Double)
     }
 
     private(set) var calls: [Call] = []
@@ -420,6 +435,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int) async throws {
         calls.append(.seedReadingSessions(bookFingerprintKey: bookFingerprintKey, secondsPerSession: secondsPerSession))
+    }
+    func seekFraction(fraction: Double) async throws {
+        calls.append(.seekFraction(fraction: fraction))
     }
 }
 

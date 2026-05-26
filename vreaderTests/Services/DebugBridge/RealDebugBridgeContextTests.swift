@@ -661,6 +661,33 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
+    func test_seekFraction_postsSeekFractionNotificationWithClampedValue() async throws {
+        // Bug #267: seekFraction posts .debugBridgeSeekFraction carrying the
+        // (already parser-clamped) fraction; the live Foliate container forwards
+        // it to .foliateRequestSeekFraction with its own key.
+        let exp = expectation(description: "seekFraction notification posted")
+        nonisolated(unsafe) var receivedFraction: Double?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeSeekFraction,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedFraction = notification.userInfo?["fraction"] as? Double
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.seekFraction(fraction: 0.5)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedFraction, 0.5)
+    }
+
+    @MainActor
     func test_open_withInvalidEpubPosition_throwsInvalidPosition() async throws {
         // Feature #49 WI-7b: position is now parsed via DebugPositionResolver.
         // EPUB requires a non-empty CFI; empty string → invalidPosition.

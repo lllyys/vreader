@@ -85,6 +85,16 @@ protocol DebugBridgeContext {
     /// `ReadingStats` aggregate. NOT idempotent — each call ADDS another
     /// six-session spread (totals grow), so a verify run should `reset` first.
     func seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int) async throws
+    /// Bug #267 — drive the active Foliate (AZW3/MOBI) reader to a fractional
+    /// position so the harness can reach a *distinguishable non-start* position
+    /// for the Bug #265 save→reopen→restore round-trip. The handler posts
+    /// `.debugBridgeSeekFraction`; the live `FoliateBilingualContainerView`
+    /// observer forwards it to the SAME `.foliateRequestSeekFraction` channel
+    /// the bottom-chrome scrubber uses (`readerAPI.goToFraction`), injecting its
+    /// own `fingerprintKey`. If no Foliate reader is loaded, the action is a
+    /// no-op (matches `tts` / `search` / `present`). `fraction` is clamped to
+    /// 0...1 by the parser.
+    func seekFraction(fraction: Double) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -217,6 +227,8 @@ final class DebugBridge {
                 bookFingerprintKey: bookFingerprintKey,
                 secondsPerSession: secondsPerSession
             )
+        case .seekFraction(let fraction):
+            try await context.seekFraction(fraction: fraction)
         }
     }
 }

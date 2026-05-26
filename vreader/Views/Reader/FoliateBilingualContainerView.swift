@@ -318,6 +318,13 @@ struct FoliateBilingualContainerView: View {
         ) { notification in
             handlePositionDidChange(notification)
         }
+        // Bug #267: DEBUG-only — forward a harness seek-fraction command to the
+        // spike's key-filtered `.foliateRequestSeekFraction` observer. Both the
+        // call site and the modifier are `#if DEBUG`-gated so no symbol leaks
+        // into Release (rule 50 §11; Bug #254 lesson).
+        #if DEBUG
+        .modifier(FoliateDebugSeekFractionObserver(fingerprintKey: fingerprintKey))
+        #endif
         // Bug #265: build the persistence controller eagerly so a fast
         // close-before-relocate can still flush, and so restore is ready.
         .task { ensurePositionController() }

@@ -156,6 +156,21 @@ extension Notification.Name {
     ///   command included a non-empty `text=`.
     static let debugBridgeAIAction = Notification.Name("vreader.debugBridge.aiAction")
 
+    /// Posted by RealDebugBridgeContext.seekFraction (Bug #267) to drive the
+    /// active Foliate (AZW3/MOBI) reader to a fractional position so the
+    /// harness can reach a *distinguishable non-start* position for Bug #265's
+    /// save→reopen→restore round-trip. The live `FoliateBilingualContainerView`
+    /// observer re-posts `.foliateRequestSeekFraction` (the SAME channel the
+    /// bottom-chrome scrubber uses → `readerAPI.goToFraction`) with its own
+    /// `fingerprintKey` injected, because the spike's seek observer filters by
+    /// key. If no Foliate reader is loaded, no observer fires — the URL is
+    /// silently a no-op (mirrors `present` / `tts` / `search`).
+    ///
+    /// userInfo:
+    /// - `"fraction"`: Double — the target reading fraction, clamped 0...1 by
+    ///   the parser.
+    static let debugBridgeSeekFraction = Notification.Name("vreader.debugBridge.seekFraction")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker
