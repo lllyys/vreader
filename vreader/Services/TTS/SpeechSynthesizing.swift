@@ -23,6 +23,14 @@ protocol SpeechSynthesizing: AnyObject {
     var isSpeaking: Bool { get }
     var isPaused: Bool { get }
 
+    /// The `AVSpeechSynthesizerDelegate` `TTSService` sets to receive progress
+    /// callbacks (`willSpeakRange` for highlight/scroll, `didFinish`,
+    /// `didCancel`). Feature #72 WI-0: hoisted from the concrete
+    /// `SystemSpeechSynthesizer` onto the protocol so `TTSService` can wire the
+    /// delegate for ANY synthesizer (the on-device synth, the XCUITest mock,
+    /// and the forthcoming `HTTPSpeechSynthesizer` adapter) without type-casing.
+    var delegateTarget: AVSpeechSynthesizerDelegate? { get set }
+
     func speak(_ utterance: SpeechUtteranceProtocol)
     @discardableResult func pauseSpeaking() -> Bool
     @discardableResult func continueSpeaking() -> Bool

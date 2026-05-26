@@ -8,6 +8,7 @@
 
 import Testing
 import Foundation
+import AVFoundation
 @testable import vreader
 
 // MARK: - TTSService State Transition Tests
@@ -21,6 +22,18 @@ struct TTSServiceStateTransitionTests {
         service.startSpeaking(text: "Hello, world!", fromOffset: 5)
         #expect(service.state == .speaking)
         #expect(service.currentOffsetUTF16 == 5)
+    }
+
+    @Test @MainActor
+    func init_wiresDelegateGenerically_forAnySynthesizer() {
+        // Feature #72 WI-0: TTSService wires `delegateTarget` via the protocol
+        // for ANY conformer — not just System/XCUITestMock. A plain
+        // `MockSpeechSynthesizer` (neither special-cased type) must now receive
+        // the service as its delegate target. Pre-WI-0 the type-cased wiring
+        // left this nil; this guards the generic wiring the HTTP adapter needs.
+        let mock = MockSpeechSynthesizer()
+        let service = TTSService(synthesizerFactory: { mock })
+        #expect(mock.delegateTarget === service)
     }
 
     @Test @MainActor
@@ -424,6 +437,10 @@ final class MockSpeechSynthesizer: SpeechSynthesizing {
 
     var isSpeaking: Bool = false
     var isPaused: Bool = false
+
+    /// Feature #72 WI-0: the protocol now requires `delegateTarget`; TTSService
+    /// wires it generically, so this mock records what it was set to.
+    weak var delegateTarget: AVSpeechSynthesizerDelegate?
 
     func speak(_ utterance: SpeechUtteranceProtocol) {
         speakCalled = true

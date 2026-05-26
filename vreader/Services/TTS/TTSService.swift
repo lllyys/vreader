@@ -70,16 +70,13 @@ final class TTSService: NSObject {
         self.synthesizer = synthesizerFactory()
         super.init()
 
-        // Wire delegate to whichever concrete synthesizer was constructed.
-        if let system = synthesizer as? SystemSpeechSynthesizer {
-            system.delegateTarget = self
-        } else {
-            #if DEBUG
-            if let mock = synthesizer as? XCUITestMockSpeechSynthesizer {
-                mock.delegateTarget = self
-            }
-            #endif
-        }
+        // Feature #72 WI-0: wire the delegate generically via the protocol's
+        // `delegateTarget` — works for ANY `SpeechSynthesizing` (on-device,
+        // XCUITest mock, and the forthcoming HTTPSpeechSynthesizer adapter)
+        // without type-casing. Previously only `SystemSpeechSynthesizer` /
+        // `XCUITestMockSpeechSynthesizer` were special-cased, so a new adapter
+        // would silently receive no callbacks.
+        synthesizer.delegateTarget = self
     }
 
     /// Default synthesizer picker. Returns the XCUITest mock when the
