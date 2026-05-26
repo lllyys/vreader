@@ -138,16 +138,32 @@ targets:
           PY
         inputFiles:
           - "$(SRCROOT)/vreader/SupportingFiles/DebugBridge.plist"
+          # Bug #259: declaring the BUILT Info.plist as an INPUT forces
+          # XCBuild to schedule this script AFTER the task that produces it
+          # (`ProcessInfoPlistFile`). Without this edge, an INCREMENTAL build
+          # re-ran `ProcessInfoPlistFile` AFTER this inject script — regenerating
+          # the Info.plist from source and CLOBBERING the just-injected
+          # vreader-debug:// scheme (verified: build log showed inject →
+          # ProcessInfoPlistFile → CodeSign ordering), so `simctl openurl`
+          # failed with error 115 until a clean build. (Inputs do NOT cause the
+          # "duplicate output file" failure that declaring it as an OUTPUT
+          # would — only the producer, ProcessInfoPlistFile, owns the output.)
+          - "$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"
         # No outputFiles: the script modifies the Info.plist that Xcode's own
         # plist-processing phase writes; declaring it as an output here would
-        # cause a "duplicate output file" build failure. Lack of outputFiles
-        # means Xcode runs the script every build (acceptable — the script is
-        # idempotent and < 0.1s).
+        # cause a "duplicate output file" build failure.
+        #
+        # `basedOnDependencyAnalysis: false` ALSO sets the phase's "Based on
+        # dependency analysis" checkbox OFF (pbxproj `alwaysOutOfDate = 1`) so
+        # it runs on EVERY build regardless of input freshness — belt-and-
+        # suspenders with the input-ordering edge above. The script is
+        # idempotent + < 0.1s, so always-run is safe.
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
-        CURRENT_PROJECT_VERSION: 641
-        MARKETING_VERSION: 3.39.20
+        CURRENT_PROJECT_VERSION: 642
+        MARKETING_VERSION: 3.39.21
     info:
       # XcodeGen writes vreader/SupportingFiles/Info.plist with this content.
       # We need a real Info.plist (not Xcode's auto-generated one) because
