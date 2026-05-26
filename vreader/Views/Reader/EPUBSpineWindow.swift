@@ -123,4 +123,20 @@ struct EPUBSpineWindow: Equatable {
         }
         return EPUBSpineWindow(lo: newLo, hi: newHi, anchor: anchor, spineCount: spineCount)
     }
+
+    /// Returns a copy with the `anchor` moved to `newAnchor`, clamped into the
+    /// currently-materialized `lo...hi` range (the reader can only be "in" a
+    /// chapter that is materialized). The visible range (`lo`/`hi`) is
+    /// unchanged — re-anchoring is pure bookkeeping, no DOM change.
+    ///
+    /// The continuous-scroll coordinator (WI-4) re-anchors to the observer's
+    /// reported `visibleSpineIndex` on each boundary signal so that far-end
+    /// eviction trims the chapters farthest from where the reader actually is.
+    /// Without this, a fixed open-position anchor would make forward eviction
+    /// drop the freshly-appended chapter ahead of a forward-scrolling reader.
+    func reanchored(to newAnchor: Int) -> EPUBSpineWindow {
+        let clamped = min(max(newAnchor, lo), hi)
+        guard clamped != anchor else { return self }
+        return EPUBSpineWindow(lo: lo, hi: hi, anchor: clamped, spineCount: spineCount)
+    }
 }

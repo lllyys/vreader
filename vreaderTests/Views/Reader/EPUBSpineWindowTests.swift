@@ -216,4 +216,51 @@ struct EPUBSpineWindowTests {
         let b = try #require(EPUBSpineWindow.initial(anchor: 2, spineCount: 20))
         #expect(a != b)
     }
+
+    // MARK: - reanchored(to:) (WI-4 dependency)
+
+    @Test("reanchored moves the anchor within the materialized range")
+    func reanchoredMovesAnchor() throws {
+        // Window 2...5 (anchor 2). The reader scrolls into chapter 4.
+        let window = try #require(EPUBSpineWindow.initial(anchor: 2, spineCount: 10))
+            .extendForward().extendForward().extendForward() // 2...5
+        let moved = window.reanchored(to: 4)
+        #expect(moved.anchor == 4)
+        #expect(moved.lo == 2)   // visible range unchanged
+        #expect(moved.hi == 5)
+    }
+
+    @Test("reanchored clamps a too-high target down to hi")
+    func reanchoredClampsHigh() throws {
+        let window = try #require(EPUBSpineWindow.initial(anchor: 1, spineCount: 10))
+            .extendForward() // 1...2
+        #expect(window.reanchored(to: 99).anchor == 2)
+    }
+
+    @Test("reanchored clamps a too-low target up to lo")
+    func reanchoredClampsLow() throws {
+        let window = try #require(EPUBSpineWindow.initial(anchor: 4, spineCount: 10))
+            .extendBackward() // 3...4
+        #expect(window.reanchored(to: -5).anchor == 3)
+    }
+
+    @Test("reanchored to the current anchor returns an equal window")
+    func reanchoredNoOp() throws {
+        let window = try #require(EPUBSpineWindow.initial(anchor: 3, spineCount: 10)).extendForward()
+        #expect(window.reanchored(to: 3) == window)
+    }
+
+    @Test("reanchored then evict trims the side farther from the new anchor")
+    func reanchoredThenEvictTrimsBehindReader() throws {
+        // 0...3 with anchor 0; reader has scrolled to chapter 3. Re-anchoring
+        // to 3 then evicting to span 2 must drop the chapters BEHIND the
+        // reader (0, 1), not the chapter the reader is on.
+        let window = try #require(EPUBSpineWindow.initial(anchor: 0, spineCount: 10))
+            .extendForward().extendForward().extendForward() // 0...3
+        let evicted = window.reanchored(to: 3).evictFarFromAnchor(maxSpan: 2)
+        #expect(evicted.contains(3))           // reader's chapter retained
+        #expect(evicted.contains(2))
+        #expect(evicted.contains(0) == false)  // far-behind chapter dropped
+        #expect(evicted.contains(1) == false)
+    }
 }
