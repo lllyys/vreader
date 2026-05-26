@@ -55,6 +55,16 @@ final class TTSService: NSObject {
     private(set) var currentGeneration: Int = 0
     /// Flag set during restart to prevent didCancel from clearing state.
     private var isRestarting: Bool = false
+    /// Count of `didCancel` callbacks expected from in-flight restarts that must
+    /// NOT clear state (the outgoing utterance's cancel when `startSpeaking`
+    /// stops a currently-active utterance before starting a new one). A
+    /// `didCancel` with no pending restart is a TERMINAL cancel — an external
+    /// stop or a synthesizer FAILURE (e.g. the cloud `HTTPSpeechSynthesizer`
+    /// surfacing a network error, feature #72 WI-5) — and must return the state
+    /// machine to idle. The previous `state == .speaking` heuristic could not
+    /// tell these apart, so a mid-speech cloud-TTS failure wedged the bar in
+    /// `.speaking` with no audio (feature #72 C5).
+    private var pendingRestartCancels: Int = 0
 
     // MARK: - Init
 
@@ -132,9 +142,19 @@ final class TTSService: NSObject {
 
         // Set restarting flag to prevent didCancel from clearing state
         isRestarting = true
-        // Stop any current speech
-        synthesizer.stopSpeaking()
+        // Stop any current speech. The Bool result reports whether an utterance
+        // was actually stopped — i.e. whether a didCancel for the OUTGOING
+        // utterance will follow. Arm `pendingRestartCancels` from THAT result,
+        // not from `state`: `state` lags the backend (didFinish/didCancel update
+        // it via a Task hop), so a restart issued just after natural completion
+        // would see `state == .speaking` yet stop nothing and emit no cancel,
+        // leaking the counter and swallowing the next terminal cancel
+        // (Gate-4 round-2 H1).
+        let didStopActiveUtterance = synthesizer.stopSpeaking()
         isRestarting = false
+        if didStopActiveUtterance {
+            pendingRestartCancels += 1
+        }
 
         // Safely convert UTF-16 offset to String.Index, aligning to character boundary.
         // If the offset lands inside a surrogate pair, align forward to the next valid boundary.
@@ -270,12 +290,16 @@ extension TTSService: AVSpeechSynthesizerDelegate {
         didCancel utterance: AVSpeechUtterance
     ) {
         Task { @MainActor in
-            // If a restart is in progress (startSpeaking called stop+start),
-            // ignore this cancel — the new utterance owns the state now.
-            // Also check generation: if state is .speaking with a newer generation,
-            // this is a stale cancel from a previous utterance.
-            if self.state == .speaking {
-                // New utterance is already running; ignore stale cancel
+            // A restart (startSpeaking → stopSpeaking → speak) emits a didCancel
+            // for the OUTGOING utterance that must NOT clear the new utterance's
+            // state. Those are counted in `pendingRestartCancels`; consume one
+            // and ignore. A didCancel with NO pending restart is terminal — an
+            // external stop (state already .idle, harmless) or a synthesizer
+            // FAILURE mid-speech (cloud HTTPSpeechSynthesizer surfacing an error,
+            // feature #72 WI-5) — so return the state machine to idle rather than
+            // leaving the control bar wedged in .speaking with no audio.
+            if self.pendingRestartCancels > 0 {
+                self.pendingRestartCancels -= 1
                 return
             }
             self.state = .idle

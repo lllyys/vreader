@@ -421,6 +421,82 @@ struct TTSServiceEdgeCaseTests {
         service.handleCancelledUtterance(generation: gen)
         #expect(service.state == .idle)
     }
+
+    // MARK: - Delegate didCancel: terminal failure vs restart (Feature #72 WI-5)
+
+    /// A terminal `didCancel` while speaking — a synthesizer FAILURE mid-speech
+    /// (e.g. the cloud `HTTPSpeechSynthesizer` surfacing a network error), NOT a
+    /// restart — must return the state machine to idle. The pre-WI-5
+    /// `state == .speaking` heuristic swallowed this and wedged the control bar
+    /// in `.speaking` with no audio.
+    @Test @MainActor
+    func delegateDidCancel_whileSpeaking_withoutRestart_returnsToIdle() async {
+        let service = TTSService(synthesizerFactory: { MockSpeechSynthesizer() })
+        service.startSpeaking(text: "Speaking text", fromOffset: 0)
+        #expect(service.state == .speaking)
+
+        // No intervening startSpeaking, so no pending restart-cancel is armed.
+        service.speechSynthesizer(AVSpeechSynthesizer(),
+                                  didCancel: AVSpeechUtterance(string: "Speaking text"))
+        for _ in 0..<100 where service.state != .idle { await Task.yield() }
+        #expect(service.state == .idle, "a non-restart didCancel (failure) returns to idle")
+    }
+
+    /// The restart-cancel of the OUTGOING utterance is ignored, but a SUBSEQUENT
+    /// terminal cancel of the new utterance still clears state. This is the exact
+    /// discriminator the `pendingRestartCancels` counter provides — the bug was
+    /// that both looked identical (`state == .speaking`).
+    @Test @MainActor
+    func delegateDidCancel_restartThenTerminal_ignoresFirst_clearsOnSecond() async {
+        let service = TTSService(synthesizerFactory: { MockSpeechSynthesizer() })
+        service.startSpeaking(text: "First", fromOffset: 0)
+        #expect(service.state == .speaking)
+
+        // Restart arms exactly one pending restart-cancel (state was .speaking).
+        service.startSpeaking(text: "Second", fromOffset: 0)
+        #expect(service.state == .speaking)
+
+        // The outgoing utterance's late didCancel must be ignored.
+        service.speechSynthesizer(AVSpeechSynthesizer(),
+                                  didCancel: AVSpeechUtterance(string: "First"))
+        for _ in 0..<100 { await Task.yield() }
+        #expect(service.state == .speaking, "restart-cancel of the outgoing utterance is ignored")
+
+        // A genuine terminal cancel of the new utterance then returns to idle.
+        service.speechSynthesizer(AVSpeechSynthesizer(),
+                                  didCancel: AVSpeechUtterance(string: "Second"))
+        for _ in 0..<100 where service.state != .idle { await Task.yield() }
+        #expect(service.state == .idle, "after the restart-cancel is consumed, a real terminal cancel clears state")
+    }
+
+    /// Codex Gate-4 round-2 H1: a restart issued just after the backend finished
+    /// naturally — `state` still reads `.speaking` because the `didFinish` Task
+    /// hasn't landed, but `stopSpeaking()` stops nothing and emits no cancel —
+    /// must NOT arm a restart-cancel. Arming from `state` (the pre-fix approach)
+    /// would leak the counter and swallow the next terminal cancel, recreating
+    /// the wedge. Arming from the stop RESULT avoids it.
+    @Test @MainActor
+    func restartAfterBackendQuietlyFinished_doesNotLeakRestartCancel() async {
+        let mock = MockSpeechSynthesizer()
+        let service = TTSService(synthesizerFactory: { mock })
+        service.startSpeaking(text: "First", fromOffset: 0)
+        #expect(service.state == .speaking)
+
+        // Backend finished naturally while TTSService.state still reads .speaking
+        // (didFinish not yet delivered): the synthesizer is now idle.
+        mock.isSpeaking = false
+
+        // Restart: stopSpeaking() returns false (nothing active) → counter stays 0.
+        service.startSpeaking(text: "Second", fromOffset: 0)
+        #expect(service.state == .speaking)
+
+        // A terminal cancel of "Second" must still clear state — it would be
+        // swallowed if a phantom restart-cancel had leaked.
+        service.speechSynthesizer(AVSpeechSynthesizer(),
+                                  didCancel: AVSpeechUtterance(string: "Second"))
+        for _ in 0..<100 where service.state != .idle { await Task.yield() }
+        #expect(service.state == .idle, "no leaked restart-cancel swallowed the terminal cancel")
+    }
 }
 
 // MARK: - Mock
@@ -472,8 +548,12 @@ final class MockSpeechSynthesizer: SpeechSynthesizing {
 
     func stopSpeaking() -> Bool {
         stopCalled = true
+        // Match the real synthesizers' contract: return true (→ a didCancel will
+        // follow) ONLY when an utterance was actually active. TTSService arms its
+        // restart-cancel counter from this result (feature #72 WI-5).
+        let wasActive = isSpeaking || isPaused
         isSpeaking = false
         isPaused = false
-        return true
+        return wasActive
     }
 }
