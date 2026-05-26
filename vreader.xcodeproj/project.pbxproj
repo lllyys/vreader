@@ -843,6 +843,7 @@
 		9F3CA2F590925EC1C4168656 /* TextTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20F02593B096CB3A08EE4DAF /* TextTransform.swift */; };
 		9FCA583CDA52A7FB584260FA /* LocatorRestorer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B81B909B41CB8C14B613D73 /* LocatorRestorer.swift */; };
 		A02EBB23E9A748965074B639 /* VReaderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71DF9DC9E8F3CCA4BE321C47 /* VReaderUITests.swift */; };
+		A03DBE125D6347EB3A73527F /* HTTPTTSChunkPlayerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31257B79B3B1BE785EFD5C26 /* HTTPTTSChunkPlayerTests.swift */; };
 		A09073BC74E3E77CF9A05D7C /* FoliateSpikeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4BF5EAA27DC53FE80B55A4 /* FoliateSpikeView.swift */; };
 		A09FA8DF38589B83DA06D15C /* BookDetailsActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0FDBE03DFF8791C7027EEAD /* BookDetailsActionsTests.swift */; };
 		A0E678BE188639F7AD4A45C9 /* ReaderUnsupportedFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0459CAA7394555E5A8E17146 /* ReaderUnsupportedFormatTests.swift */; };
@@ -871,6 +872,7 @@
 		A3C805774A79231FF5DBC4EE /* TXTChapterModeHighlightVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74260B9D22ACF57F72090F9A /* TXTChapterModeHighlightVerificationTests.swift */; };
 		A3D6C41E3B9BAD5A458D4A7F /* ReadingModeMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C5658424589A0D1017FDF72 /* ReadingModeMigrationTests.swift */; };
 		A43AD2AF5B19CF05B849BE2E /* BackupViewModelSelectiveRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3743321B8FFE925BFB43D262 /* BackupViewModelSelectiveRestoreTests.swift */; };
+		A48202EACCA0A4A642674E26 /* HTTPTTSChunkPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78F701D2D5416A758988C808 /* HTTPTTSChunkPlayer.swift */; };
 		A485A4DAFF233AE87062C3F6 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AA4BF056E74D056492E5858 /* DeviceIdentity.swift */; };
 		A4A49ED0A6DF2433D8292FF3 /* BilingualOffsetRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24B6FF7CD976BEA8E7BBA282 /* BilingualOffsetRouter.swift */; };
 		A4BA4366BC946C80885678AE /* Feature54ReadingModeRemovalVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC502E886EBA816F1DA34471 /* Feature54ReadingModeRemovalVerificationTests.swift */; };
@@ -1579,6 +1581,7 @@
 		3035E9BDF79106F058459E0D /* StatsCustomRangePickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsCustomRangePickerTests.swift; sourceTree = "<group>"; };
 		30D00221E111683E9FF0260A /* SearchTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTextExtractor.swift; sourceTree = "<group>"; };
 		310813C564EF1BF86A13694E /* DebugBridgeHighlightObserverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBridgeHighlightObserverTests.swift; sourceTree = "<group>"; };
+		31257B79B3B1BE785EFD5C26 /* HTTPTTSChunkPlayerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTTSChunkPlayerTests.swift; sourceTree = "<group>"; };
 		317401FBAE274C615325BDBC /* SourceSharingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceSharingServiceTests.swift; sourceTree = "<group>"; };
 		319F6B718764EAF33C88ECC4 /* BookImporterNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookImporterNotificationTests.swift; sourceTree = "<group>"; };
 		31AB5B40BD735A699BB480DE /* ReadingStatsAggregatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStatsAggregatorTests.swift; sourceTree = "<group>"; };
@@ -1960,6 +1963,7 @@
 		77AEAE00997ED48B68EE20E6 /* Feature25TapZonesVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feature25TapZonesVerificationTests.swift; sourceTree = "<group>"; };
 		78459E9C87CFFEA5BD741A5F /* SearchViewReskinTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewReskinTests.swift; sourceTree = "<group>"; };
 		78BD4CC018110BC0C96E2788 /* DebugReaderRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugReaderRegistryTests.swift; sourceTree = "<group>"; };
+		78F701D2D5416A758988C808 /* HTTPTTSChunkPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTTSChunkPlayer.swift; sourceTree = "<group>"; };
 		791CB502C8B59E737F15E63C /* VerificationSettingsHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerificationSettingsHelperTests.swift; sourceTree = "<group>"; };
 		79E3E09003BD79ED972F15D6 /* ChapterTranslationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterTranslationStoreTests.swift; sourceTree = "<group>"; };
 		79F003D569BCC0F29113468A /* EPUBMetadataExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBMetadataExtractorTests.swift; sourceTree = "<group>"; };
@@ -2992,6 +2996,7 @@
 		348FFD7C230F685969954CD8 /* TTS */ = {
 			isa = PBXGroup;
 			children = (
+				31257B79B3B1BE785EFD5C26 /* HTTPTTSChunkPlayerTests.swift */,
 				E4F77761B8C991CC700BC01E /* HTTPTTSConfigStoreTests.swift */,
 				4E47FF2613D8D1B235852F68 /* HTTPTTSConfigTests.swift */,
 				0CDE700F3AC42B0D8AD377E1 /* HTTPTTSProviderTests.swift */,
@@ -4387,6 +4392,7 @@
 		D544B1FCA1D99EBC7EAE9F25 /* TTS */ = {
 			isa = PBXGroup;
 			children = (
+				78F701D2D5416A758988C808 /* HTTPTTSChunkPlayer.swift */,
 				10C9907D3479515B56338825 /* HTTPTTSConfig.swift */,
 				01CD66C1E52331AC245386C9 /* HTTPTTSConfigStore.swift */,
 				9CE6D5875C20698F83D6EC1E /* HTTPTTSProvider.swift */,
@@ -5345,6 +5351,7 @@
 				1E5332F73297C4DB6DF747BD /* FontSizeCalibratorTests.swift in Sources */,
 				67307D96FA4FE6F86F92B988 /* FormatCapabilitiesTests.swift in Sources */,
 				2CBF53D883E09532ABC29FE4 /* GenerativeCoverViewStyleTests.swift in Sources */,
+				A03DBE125D6347EB3A73527F /* HTTPTTSChunkPlayerTests.swift in Sources */,
 				599306799B2551F63E7C5BAE /* HTTPTTSConfigStoreTests.swift in Sources */,
 				43228D2AF27BDD7DDD6BB5AB /* HTTPTTSConfigTests.swift in Sources */,
 				FB4B2B41D865A14865DF4DE1 /* HTTPTTSProviderTests.swift in Sources */,
@@ -5947,6 +5954,7 @@
 				F4FE45E62955A90DF146DE4B /* GenerativeCoverStyle.swift in Sources */,
 				15BC7FE6B105319B5709C4A9 /* GenerativeCoverView.swift in Sources */,
 				2E988A3214761CEAEF22D451 /* HTMLHelper.swift in Sources */,
+				A48202EACCA0A4A642674E26 /* HTTPTTSChunkPlayer.swift in Sources */,
 				401E58831F4DC6EB06E53738 /* HTTPTTSConfig.swift in Sources */,
 				916CF15735E1F170E2CE4695 /* HTTPTTSConfigStore.swift in Sources */,
 				EF1B83368D1AE23FFD738752 /* HTTPTTSProvider.swift in Sources */,
@@ -6496,13 +6504,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 647;
+				CURRENT_PROJECT_VERSION = 648;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.39.26;
+				MARKETING_VERSION = 3.39.27;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -6646,13 +6654,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 647;
+				CURRENT_PROJECT_VERSION = 648;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.39.26;
+				MARKETING_VERSION = 3.39.27;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
