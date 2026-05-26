@@ -30,13 +30,22 @@ struct FoliateDebugSeekFractionObserver: ViewModifier {
         content.onReceive(
             NotificationCenter.default.publisher(for: .debugBridgeSeekFraction)
         ) { notification in
-            guard let fraction = notification.userInfo?["fraction"] as? Double else { return }
-            NotificationCenter.default.post(
-                name: .foliateRequestSeekFraction,
-                object: nil,
-                userInfo: ["fraction": fraction, "fingerprintKey": fingerprintKey]
-            )
+            Self.forward(notification, fingerprintKey: fingerprintKey)
         }
+    }
+
+    /// Forwards a `.debugBridgeSeekFraction` notification to the spike's
+    /// key-filtered `.foliateRequestSeekFraction` observer, injecting
+    /// `fingerprintKey`. Extracted as a static so the load-bearing hop (the
+    /// key injection the spike filters on) is unit-testable without a SwiftUI
+    /// hosting context. No-op when the notification carries no `fraction`.
+    static func forward(_ notification: Notification, fingerprintKey: String) {
+        guard let fraction = notification.userInfo?["fraction"] as? Double else { return }
+        NotificationCenter.default.post(
+            name: .foliateRequestSeekFraction,
+            object: nil,
+            userInfo: ["fraction": fraction, "fingerprintKey": fingerprintKey]
+        )
     }
 }
 
