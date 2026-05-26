@@ -83,6 +83,33 @@ extension EPUBHighlightBridge {
                 if (!text || !text.trim()) return;
 
                 var rect = range.getBoundingClientRect();
+                // Feature #71 WI-5: attribute the selection to its section's href
+                // in continuous-scroll mode (the stitched DOM holds many chapters).
+                // closest('[data-vreader-href]') of the START / END containers'
+                // elements; both null in legacy single-chapter mode (no such
+                // ancestor) → Swift reads nil and falls back to the global
+                // currentHref, leaving the one-chapter path unchanged.
+                var startEl = range.startContainer.nodeType === 1
+                    ? range.startContainer
+                    : range.startContainer.parentElement;
+                var endEl = range.endContainer.nodeType === 1
+                    ? range.endContainer
+                    : range.endContainer.parentElement;
+                var startSection = startEl ? startEl.closest('[data-vreader-href]') : null;
+                var endSection = endEl ? endEl.closest('[data-vreader-href]') : null;
+                // Gate-2 [C1]: a drag can cross a chapter boundary in the stitched
+                // DOM. A mixed-section range (start in section A, end in B) can't be
+                // restored/painted per-section, so CLAMP the range to the END of the
+                // START section — the popover then operates on that single section's
+                // text. If the clamp empties the selection (degenerate), REJECT it
+                // (no popover). In legacy mode startSection/endSection are null so
+                // this never runs.
+                if (startSection && endSection && startSection !== endSection) {
+                    range.setEnd(startSection, startSection.childNodes.length);
+                    text = range.toString();
+                    if (!text || !text.trim()) return;
+                    rect = range.getBoundingClientRect();
+                }
                 var msg = {
                     selectedText: text,
                     startPath: getXPath(range.startContainer),
@@ -92,7 +119,8 @@ extension EPUBHighlightBridge {
                     rectX: rect.x,
                     rectY: rect.y,
                     rectWidth: rect.width,
-                    rectHeight: rect.height
+                    rectHeight: rect.height,
+                    sectionHref: startSection ? startSection.getAttribute('data-vreader-href') : null
                 };
                 window.webkit.messageHandlers.selectionChanged.postMessage(msg);
             }, 300);

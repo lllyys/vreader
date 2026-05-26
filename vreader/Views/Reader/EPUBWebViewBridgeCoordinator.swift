@@ -92,6 +92,12 @@ extension EPUBWebViewBridge {
         var previousIsPaged = false
         /// Called when pagination is ready with total page count.
         var onPaginationReady: (@MainActor (Int) -> Void)?
+        /// Feature #71 WI-5: non-nil in continuous-scroll mode. The
+        /// `continuousScrollHandler` channel routes each boundary signal to
+        /// `config.coordinator` (window transitions) and feeds the windowed
+        /// whole-book progress to `onProgressChange`. Nil ⇒ legacy single-doc
+        /// `progressHandler` path.
+        var continuousScroll: EPUBContinuousScrollConfig?
         private let onProgressChange: @MainActor (Double) -> Void
         private let onLoadError: @MainActor (String) -> Void
 
@@ -173,10 +179,31 @@ extension EPUBWebViewBridge {
                 handleBilingualEnumerateMessage(message.body)
                 return
             }
+            if message.name == "continuousScrollHandler" {
+                handleContinuousScrollMessage(message.body)
+                return
+            }
             guard message.name == "progressHandler",
                   let progress = message.body as? Double else { return }
             Task { @MainActor in
                 onProgressChange(progress)
+            }
+        }
+
+        /// Feature #71 WI-5: parse a `continuousScrollHandler` boundary signal,
+        /// forward it to the window-transition coordinator (WI-4 — materialize /
+        /// evict adjacent chapters), and feed the windowed whole-book progress
+        /// (`(visibleSpineIndex + intraFraction)/spineCount`) to the existing
+        /// `onProgressChange` contract. No-op when the config is absent (the
+        /// channel is only registered in continuous mode, but the guard keeps a
+        /// stray message safe).
+        private func handleContinuousScrollMessage(_ body: Any) {
+            guard let config = continuousScroll,
+                  let signal = EPUBScrollBoundarySignal.parse(body) else { return }
+            let progress = config.windowedProgress(for: signal)
+            Task { @MainActor in
+                onProgressChange(progress)
+                await config.coordinator.handleBoundarySignal(signal)
             }
         }
 
@@ -219,7 +246,12 @@ extension EPUBWebViewBridge {
 
         private func handleSelectionMessage(_ body: Any) {
             guard let parsed = EPUBHighlightBridge.parseSelectionMessage(body) else { return }
-            let href = currentHref ?? ""
+            // Feature #71 WI-5: in continuous-scroll mode the selection JS reports
+            // the section's href (`closest('[data-vreader-href]')`); attribute the
+            // anchor to THAT section, not the global current chapter. Legacy
+            // single-chapter mode reports no section href → falls back to
+            // `currentHref` (unchanged behaviour).
+            let href = parsed.sectionHref ?? currentHref ?? ""
             let event = EPUBHighlightBridge.makeSelectionEvent(
                 selectedText: parsed.selectedText,
                 href: href,

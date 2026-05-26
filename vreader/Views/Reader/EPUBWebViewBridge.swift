@@ -101,6 +101,14 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     var pendingJS: String?
     /// Called after pendingJS has been evaluated so the container can clear state.
     var onPendingJSCompleted: (@MainActor () -> Void)?
+    /// Feature #71 WI-5: continuous cross-chapter scroll config. `nil` ⇒ the
+    /// legacy one-chapter-per-`loadFileURL` path (paged + the existing
+    /// single-chapter scroll behaviour), unchanged. When non-nil, `makeUIView`
+    /// injects the section-aware observer (in place of `progressTrackingJS`),
+    /// registers the `continuousScrollHandler` channel, and the coordinator
+    /// routes each boundary signal to `config.coordinator` (window transitions)
+    /// while feeding the windowed spine-index + fraction to `onProgressChange`.
+    var continuousScroll: EPUBContinuousScrollConfig?
     /// Whether paged layout is enabled (CSS multi-column pagination).
     var isPaged: Bool = false
     /// Page index to navigate to in paged mode (0-based).
@@ -136,15 +144,32 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         )
         userContentController.addUserScript(preprocessScript)
 
-        // Add scroll progress tracking script (throttled)
-        let script = WKUserScript(
-            source: Self.progressTrackingJS,
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-        userContentController.addUserScript(script)
         let weakHandler = WeakScriptMessageHandler(context.coordinator)
-        userContentController.add(weakHandler, name: "progressHandler")
+        // Feature #71 WI-5: mode-branched scroll observer. In continuous-scroll
+        // mode the section-aware observer (reporting {visibleSpineIndex,
+        // intraFraction, nearTop/BottomBoundary}) REPLACES the single-document
+        // `progressTrackingJS` so the two don't both fire on the stitched
+        // bootstrap doc and race the windowed progress (Gate-2 round-1 [H3]).
+        // The nil-config (legacy paged + single-chapter scroll) path is byte-
+        // identical to before.
+        if continuousScroll != nil {
+            let observerScript = WKUserScript(
+                source: EPUBContinuousScrollJS.continuousScrollObserverJS,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+            userContentController.addUserScript(observerScript)
+            userContentController.add(weakHandler, name: "continuousScrollHandler")
+        } else {
+            // Add scroll progress tracking script (throttled)
+            let script = WKUserScript(
+                source: Self.progressTrackingJS,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+            userContentController.addUserScript(script)
+            userContentController.add(weakHandler, name: "progressHandler")
+        }
 
         // Add content tap tracking for toolbar toggle
         let tapScript = WKUserScript(
@@ -219,6 +244,7 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.isPaged = isPaged
         context.coordinator.previousIsPaged = isPaged
         context.coordinator.onPaginationReady = onPaginationReady
+        context.coordinator.continuousScroll = continuousScroll
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
         webView.accessibilityIdentifier = "epubWebView"
@@ -243,6 +269,7 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
         context.coordinator.isPaged = isPaged
         context.coordinator.onPaginationReady = onPaginationReady
+        context.coordinator.continuousScroll = continuousScroll
 
         // Update scroll enabled state when layout mode changes
         webView.scrollView.isScrollEnabled = !isPaged

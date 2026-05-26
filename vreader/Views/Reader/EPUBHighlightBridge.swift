@@ -19,6 +19,13 @@ struct EPUBSelectionMessage: Sendable {
     let selectedText: String
     let range: EPUBSerializedRange
     let sourceRect: CGRect
+    /// Feature #71 WI-5: in continuous-scroll mode the stitched DOM holds many
+    /// chapters, so a selection must be attributed to *its* section's href
+    /// (`closest('[data-vreader-spine-index]')`'s `data-vreader-href`), not the
+    /// global "current" chapter. The selection JS reports it; nil in legacy
+    /// single-chapter mode (no `data-vreader-href` ancestor) so the coordinator
+    /// falls back to `currentHref` — keeping the one-chapter path unchanged.
+    let sectionHref: String?
 }
 
 /// Bridge for EPUB text selection and highlight JS interop.
@@ -59,10 +66,17 @@ enum EPUBHighlightBridge {
             endOffset: endOffset
         )
 
+        // Feature #71 WI-5: optional section href (continuous-scroll attribution).
+        // Absent in legacy single-chapter mode; an empty string (degenerate
+        // clamp — selection start had no section ancestor) is treated as nil so
+        // the coordinator falls back to `currentHref`.
+        let sectionHref = (dict["sectionHref"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+
         return EPUBSelectionMessage(
             selectedText: selectedText,
             range: range,
-            sourceRect: CGRect(x: rectX, y: rectY, width: rectWidth, height: rectHeight)
+            sourceRect: CGRect(x: rectX, y: rectY, width: rectWidth, height: rectHeight),
+            sectionHref: sectionHref
         )
     }
 

@@ -148,6 +148,13 @@ extension EPUBWebViewBridge {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: "highlightTapHandler"
         )
+        // Feature #71 WI-5: matching teardown for the continuous-scroll observer
+        // handler (registered in makeUIView only in continuous mode). Removing
+        // an unregistered name is a safe no-op, so this is unconditional like the
+        // others — keeps the teardown symmetric with makeUIView (Gate-4 round-2).
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: "continuousScrollHandler"
+        )
     }
 
     // MARK: - JavaScript
