@@ -893,6 +893,7 @@
 		A7E8061B4810834EC0DC7F60 /* EPUBHighlightAnchoringRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD1A5A71CB18176C843FD40 /* EPUBHighlightAnchoringRegressionTests.swift */; };
 		A84E7CDEED71FF118D2DD7DC /* ReflowableTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D4AD419DD1123CDA21CCD0 /* ReflowableTextSource.swift */; };
 		A8A3BDDF157E89577638C20F /* LegadoImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D44DAF36D098C9C9A7C102B /* LegadoImporterTests.swift */; };
+		A8AD263731FD57DF817D6151 /* HTTPSpeechSynthesizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB08960CA0FADA20027FD4B /* HTTPSpeechSynthesizerTests.swift */; };
 		A94C7BEA198AF83B90936259 /* TranslateLanguageRailTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94AF8D98E6FAD355A8B3416B /* TranslateLanguageRailTests.swift */; };
 		A957D0C3F823092026646570 /* Highlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = C775619D3C0E4641505CE2B8 /* Highlight.swift */; };
 		A95CA2A8C9841860265A7FF3 /* PDFReaderPlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4D9A3C4C1072DA23511265D /* PDFReaderPlaceholderTests.swift */; };
@@ -1114,6 +1115,7 @@
 		D35863F85B17FE883F4EABBF /* ChapterTranslationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 551DA6A3D645B1D9D72EE159 /* ChapterTranslationService.swift */; };
 		D36EEE178AE4BC41B7B4C650 /* FileAvailabilityBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4B7084FA4C129303F52CB8 /* FileAvailabilityBadge.swift */; };
 		D371F8D98EA9603C6BF3E6ED /* EPUBHighlightTapBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A8BD899A79BEB3964941631 /* EPUBHighlightTapBridgeTests.swift */; };
+		D3AA14442F5D8686DD9BAA18 /* HTTPSpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 060D40EBDC75C3812596FB84 /* HTTPSpeechSynthesizer.swift */; };
 		D41473E2CF7AB980E43C6C54 /* BookFormatAZW3Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 627E42F1B1E8A59081CC6628 /* BookFormatAZW3Tests.swift */; };
 		D4332566CDFE7329E3709381 /* EPUBWebViewBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E536B950D178C97842DF52 /* EPUBWebViewBridge.swift */; };
 		D451E5FB27521C48F0A54FEA /* PersistenceActor+Stats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96FDA9A40CE891B901F1A28F /* PersistenceActor+Stats.swift */; };
@@ -1374,6 +1376,7 @@
 		0539DF828CDF0E2D670CDEFB /* SearchStateViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchStateViews.swift; sourceTree = "<group>"; };
 		055FBEA382F82BE342A50C8E /* LocatorFactoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorFactoryTests.swift; sourceTree = "<group>"; };
 		05F9CE63DD8632C8B63BACCD /* TXTChapterStartTypographyIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterStartTypographyIntegrationTests.swift; sourceTree = "<group>"; };
+		060D40EBDC75C3812596FB84 /* HTTPSpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPSpeechSynthesizer.swift; sourceTree = "<group>"; };
 		0616892213196BCF802266F8 /* ContentHasherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentHasherTests.swift; sourceTree = "<group>"; };
 		0646DB2E4CD5095035092623 /* FoliateHighlightTapResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateHighlightTapResolver.swift; sourceTree = "<group>"; };
 		064AE6DC1BC56B9DD7CCA796 /* AIProviderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderPicker.swift; sourceTree = "<group>"; };
@@ -1407,6 +1410,7 @@
 		0C47B0077BE4937C424FFBD9 /* SearchWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchWiringTests.swift; sourceTree = "<group>"; };
 		0C47FBD94DA9FC2BB9C5D2B6 /* ChapterCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterCache.swift; sourceTree = "<group>"; };
 		0C511C16F7FA93E91D703EE7 /* FoliateTTSAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateTTSAdapterTests.swift; sourceTree = "<group>"; };
+		0CB08960CA0FADA20027FD4B /* HTTPSpeechSynthesizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPSpeechSynthesizerTests.swift; sourceTree = "<group>"; };
 		0CDE700F3AC42B0D8AD377E1 /* HTTPTTSProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTTSProviderTests.swift; sourceTree = "<group>"; };
 		0D07360D9301C4F00D9BCA67 /* ChapterTextProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterTextProviding.swift; sourceTree = "<group>"; };
 		0D19C79EE604BFAB916EC630 /* EPUBBilingualJSTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBBilingualJSTests.swift; sourceTree = "<group>"; };
@@ -2996,6 +3000,7 @@
 		348FFD7C230F685969954CD8 /* TTS */ = {
 			isa = PBXGroup;
 			children = (
+				0CB08960CA0FADA20027FD4B /* HTTPSpeechSynthesizerTests.swift */,
 				31257B79B3B1BE785EFD5C26 /* HTTPTTSChunkPlayerTests.swift */,
 				E4F77761B8C991CC700BC01E /* HTTPTTSConfigStoreTests.swift */,
 				4E47FF2613D8D1B235852F68 /* HTTPTTSConfigTests.swift */,
@@ -4392,6 +4397,7 @@
 		D544B1FCA1D99EBC7EAE9F25 /* TTS */ = {
 			isa = PBXGroup;
 			children = (
+				060D40EBDC75C3812596FB84 /* HTTPSpeechSynthesizer.swift */,
 				78F701D2D5416A758988C808 /* HTTPTTSChunkPlayer.swift */,
 				10C9907D3479515B56338825 /* HTTPTTSConfig.swift */,
 				01CD66C1E52331AC245386C9 /* HTTPTTSConfigStore.swift */,
@@ -5351,6 +5357,7 @@
 				1E5332F73297C4DB6DF747BD /* FontSizeCalibratorTests.swift in Sources */,
 				67307D96FA4FE6F86F92B988 /* FormatCapabilitiesTests.swift in Sources */,
 				2CBF53D883E09532ABC29FE4 /* GenerativeCoverViewStyleTests.swift in Sources */,
+				A8AD263731FD57DF817D6151 /* HTTPSpeechSynthesizerTests.swift in Sources */,
 				A03DBE125D6347EB3A73527F /* HTTPTTSChunkPlayerTests.swift in Sources */,
 				599306799B2551F63E7C5BAE /* HTTPTTSConfigStoreTests.swift in Sources */,
 				43228D2AF27BDD7DDD6BB5AB /* HTTPTTSConfigTests.swift in Sources */,
@@ -5954,6 +5961,7 @@
 				F4FE45E62955A90DF146DE4B /* GenerativeCoverStyle.swift in Sources */,
 				15BC7FE6B105319B5709C4A9 /* GenerativeCoverView.swift in Sources */,
 				2E988A3214761CEAEF22D451 /* HTMLHelper.swift in Sources */,
+				D3AA14442F5D8686DD9BAA18 /* HTTPSpeechSynthesizer.swift in Sources */,
 				A48202EACCA0A4A642674E26 /* HTTPTTSChunkPlayer.swift in Sources */,
 				401E58831F4DC6EB06E53738 /* HTTPTTSConfig.swift in Sources */,
 				916CF15735E1F170E2CE4695 /* HTTPTTSConfigStore.swift in Sources */,
@@ -6504,13 +6512,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 648;
+				CURRENT_PROJECT_VERSION = 649;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.39.27;
+				MARKETING_VERSION = 3.39.28;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -6654,13 +6662,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 648;
+				CURRENT_PROJECT_VERSION = 649;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.39.27;
+				MARKETING_VERSION = 3.39.28;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
