@@ -6889,6 +6889,7 @@ ${doc.querySelector("parsererror").innerText}`);
           dd: 1,
           dt: 1
         };
+        const BLOCK_SELECTOR = Object.keys(BLOCK_TAGS).join(",");
         const TRUSTED_BID = /^fb\d+$/;
         const out = [];
         for (const entry of contents) {
@@ -6907,6 +6908,7 @@ ${doc.querySelector("parsererror").innerText}`);
             if (el.hasAttribute && el.hasAttribute("data-vreader-decoration")) {
               continue;
             }
+            if (el.querySelector && el.querySelector(BLOCK_SELECTOR)) continue;
             let txt = el.textContent || "";
             txt = txt.replace(/\s+/g, " ").trim();
             if (!txt) continue;
