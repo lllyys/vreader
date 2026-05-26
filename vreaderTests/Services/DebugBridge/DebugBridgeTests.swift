@@ -44,6 +44,17 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_scrollSheetURL_callsScrollSheetHandler() async {
+        // Bug #271: scroll-sheet?to routes to the scrollSheet handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://scroll-sheet?to=bottom")!)
+
+        XCTAssertEqual(context.calls, [.scrollSheet(target: .bottom)])
+    }
+
+    @MainActor
     func test_handle_searchURLWithQueryOnly_callsSearchHandlerWithNilIndex() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -365,6 +376,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func seekFraction(fraction: Double) async throws {
         await record("seek:\(fraction)")
     }
+    func scrollSheet(target: DebugCommand.ScrollTarget) async throws {
+        await record("scroll-sheet:\(target.rawValue)")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -398,6 +412,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case aiAction(action: DebugCommand.AIActionKind, scope: SummaryScope?, text: String?)
         case seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int)
         case seekFraction(fraction: Double)
+        case scrollSheet(target: DebugCommand.ScrollTarget)
     }
 
     private(set) var calls: [Call] = []
@@ -438,6 +453,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func seekFraction(fraction: Double) async throws {
         calls.append(.seekFraction(fraction: fraction))
+    }
+    func scrollSheet(target: DebugCommand.ScrollTarget) async throws {
+        calls.append(.scrollSheet(target: target))
     }
 }
 

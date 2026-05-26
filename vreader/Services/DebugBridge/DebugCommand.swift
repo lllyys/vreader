@@ -87,6 +87,20 @@ import Foundation
 ///   (optional for `translate`; absent → the panel's current target
 ///   language); ignored for `summarize`. No-op when no AI sheet is
 ///   presented (mirrors `present`).
+/// - `scroll-sheet?to=<top|bottom>` — scroll the active presented sheet's
+///   scrollable content to the requested end (Bug #271 verification harness).
+///   `detent=large` (Bug #256) reveals the larger AI sheet, but on the
+///   Translate tab the tall auto-extracted ORIGINAL card alone exceeds even
+///   the `.large` height, so the accent translation card stays below the fold;
+///   `to=bottom` drives the `TranslationResultCard` ScrollView's
+///   `ScrollViewReader` to its bottom anchor so `simctl io screenshot` captures
+///   the translation card without a drag gesture. `to=top` returns to the
+///   ORIGINAL card. The handler posts `.debugBridgeScrollSheet`; the presented
+///   sheet's observer maps it to a `scrollTo(_:anchor:)` — no parallel scroll
+///   logic. Issued AFTER `ai?action=translate` completes (the result card only
+///   exists in the `.complete` state), which is why it is a standalone command
+///   rather than a `present` parameter. No-op when no scrollable sheet observes
+///   it (mirrors `tts` / `search` / `present`). `#if DEBUG`-gated.
 /// - `seed-sessions?book=<fingerprintKey>[&seconds=<n>]` — seed a
 ///   deterministic spread of synthetic `ReadingSession` rows so the reading
 ///   dashboard (Feature #58) renders non-zero per-window totals CU-free
@@ -120,6 +134,16 @@ enum DebugCommand: Equatable {
     case seekFraction(fraction: Double)
     case aiAction(action: AIActionKind, scope: SummaryScope?, text: String?)
     case seedSessions(bookFingerprintKey: String, secondsPerSession: Int)
+    /// Bug #271 — `scroll-sheet?to=<top|bottom>` scrolls the active presented
+    /// sheet's scrollable content so below-fold content becomes CU-free
+    /// capturable. `detent=large` (Bug #256) reveals the larger AI sheet, but
+    /// on the Translate tab the tall auto-extracted ORIGINAL card alone exceeds
+    /// even the `.large` height, leaving the accent translation card below the
+    /// fold; this command drives the `TranslationResultCard` ScrollView's
+    /// `ScrollViewReader` to the requested end. Issued AFTER the translation
+    /// completes (the result card only exists in the `.complete` state), which
+    /// is why it is a standalone command rather than a `present` parameter.
+    case scrollSheet(target: ScrollTarget)
 
     /// Which AI action the `ai` command fires (Bug #255 — verification
     /// harness AI-action driver). The handler posts `.debugBridgeAIAction`;
@@ -235,6 +259,22 @@ enum DebugCommand: Equatable {
     enum SheetDetent: String, Equatable, CaseIterable {
         case medium
         case large
+    }
+
+    /// Which end the `scroll-sheet` command drives the active presented sheet's
+    /// scrollable content to (Bug #271 — below-fold content reveal). The
+    /// handler posts the rawValue in `.debugBridgeScrollSheet`'s `userInfo`; the
+    /// presented sheet's observer (today `TranslationResultCard`) maps it to a
+    /// `ScrollViewReader` `scrollTo(_:anchor:)` against its own top/bottom
+    /// anchor — no parallel scroll logic. `bottom` reveals the accent
+    /// translation card sitting below the tall ORIGINAL card; `top` returns to
+    /// the ORIGINAL card.
+    ///
+    /// Kept local (mirroring `ThemeMode` / `SheetKind` / `SheetDetent`) so this
+    /// file stays a pure value-type parser with no SwiftUI import.
+    enum ScrollTarget: String, Equatable, CaseIterable {
+        case top
+        case bottom
     }
 
     /// Discriminated action carried by `provider`. `add` carries every
@@ -678,6 +718,18 @@ extension DebugCommand {
                 )
             }
             return .seekFraction(fraction: min(max(parsed, 0), 1))
+
+        case "scroll-sheet":
+            // Bug #271: scroll the active presented sheet's scrollable content.
+            // `to` is required; one of top|bottom (mirrors the SheetDetent
+            // allowlist posture). Empty `to=` is treated as missing by
+            // requireParam — same as every other command.
+            let toRaw = try requireParam("to", in: params)
+            guard let target = ScrollTarget(rawValue: toRaw) else {
+                let valid = ScrollTarget.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam("to", reason: "expected \(valid), got \(toRaw)")
+            }
+            return .scrollSheet(target: target)
 
         default:
             throw DebugCommandError.unknownCommand(host)

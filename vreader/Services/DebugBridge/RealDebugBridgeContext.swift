@@ -124,6 +124,11 @@ final class RealDebugBridgeContext: DebugBridgeContext {
             at: ReaderSearchCoordinator.searchIndexDirectoryURL
         )
         NotificationCenter.default.post(name: .debugBridgeLibraryChanged, object: nil)
+        // Bug #271: reset is the verifier's hard session boundary — clear any
+        // unconsumed `scroll-sheet` target so a scroll requested in a prior
+        // session (whose result card never mounted) can't replay onto a later
+        // session's `TranslationResultCard`.
+        DebugBridgeScrollSheetState.shared.pendingTarget = nil
         log.info("reset: removed \(books.count) book(s) + wiped search index")
     }
 

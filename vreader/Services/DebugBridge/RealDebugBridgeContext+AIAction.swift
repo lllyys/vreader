@@ -38,6 +38,15 @@ extension RealDebugBridgeContext {
     /// can fall back to the panel's current scope / target language without
     /// relying on a sentinel value.
     func aiAction(action: DebugCommand.AIActionKind, scope: SummaryScope?, text: String?) async throws {
+        // Bug #271: a fresh translate produces a new `TranslationResultCard`,
+        // so forget any unconsumed `scroll-sheet` target — otherwise a scroll
+        // requested for a prior translate whose card never mounted would replay
+        // onto this translate's card on `.onAppear`. The verifier issues
+        // `scroll-sheet` AFTER this action, so the legit target is recorded
+        // after this clear and survives.
+        if action == .translate {
+            DebugBridgeScrollSheetState.shared.pendingTarget = nil
+        }
         var userInfo: [AnyHashable: Any] = ["action": action.rawValue]
         if let scope {
             userInfo["scope"] = scope.rawValue

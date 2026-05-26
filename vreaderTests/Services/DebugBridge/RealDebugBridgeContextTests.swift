@@ -688,6 +688,51 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
+    func test_scrollSheet_postsScrollSheetNotificationWithTarget() async throws {
+        // Bug #271: scrollSheet posts .debugBridgeScrollSheet carrying the
+        // target rawValue; the presented sheet's observer (TranslationResultCard)
+        // drives its ScrollViewReader proxy to the matching anchor.
+        let exp = expectation(description: "scrollSheet notification posted")
+        nonisolated(unsafe) var receivedTo: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeScrollSheet,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedTo = notification.userInfo?["to"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.scrollSheet(target: .bottom)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedTo, "bottom")
+    }
+
+    @MainActor
+    func test_scrollSheet_recordsPendingTargetForReplay() async throws {
+        // Bug #271 (Gate-4 round-1 Medium): scrollSheet records the target in
+        // the shared replay buffer so a scroll requested BEFORE the result card
+        // mounts (the card only exists once translation completes) is applied
+        // on the card's onAppear — making the harness order-independent.
+        DebugBridgeScrollSheetState.shared.pendingTarget = nil
+        defer { DebugBridgeScrollSheetState.shared.pendingTarget = nil }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.scrollSheet(target: .bottom)
+        XCTAssertEqual(DebugBridgeScrollSheetState.shared.pendingTarget, .bottom)
+    }
+
+    @MainActor
     func test_open_withInvalidEpubPosition_throwsInvalidPosition() async throws {
         // Feature #49 WI-7b: position is now parsed via DebugPositionResolver.
         // EPUB requires a non-empty CFI; empty string → invalidPosition.

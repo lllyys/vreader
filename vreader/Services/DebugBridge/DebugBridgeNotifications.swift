@@ -171,6 +171,23 @@ extension Notification.Name {
     ///   the parser.
     static let debugBridgeSeekFraction = Notification.Name("vreader.debugBridge.seekFraction")
 
+    /// Posted by RealDebugBridgeContext.scrollSheet (Bug #271) to scroll the
+    /// active presented sheet's scrollable content to a requested end so
+    /// below-fold content becomes CU-free capturable. Today the only observer
+    /// is `TranslationResultCard` (Feature #65 row-11 verification): its
+    /// `ScrollViewReader` proxy scrolls to its top / bottom anchor. `detent=large`
+    /// (Bug #256) reveals the larger AI sheet, but the tall ORIGINAL card alone
+    /// exceeds even the `.large` height, so the accent translation card needs a
+    /// scroll to come into view. Issued AFTER `ai?action=translate` completes
+    /// (the result card only exists in the `.complete` state). If no scrollable
+    /// sheet observes it, no observer fires — the URL is silently a no-op
+    /// (mirrors `present` / `tts` / `search`).
+    ///
+    /// userInfo:
+    /// - `"to"`: String — one of `DebugCommand.ScrollTarget`'s rawValues
+    ///   (`top` / `bottom`), validated by the parser.
+    static let debugBridgeScrollSheet = Notification.Name("vreader.debugBridge.scrollSheet")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker

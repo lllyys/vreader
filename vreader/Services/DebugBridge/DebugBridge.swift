@@ -95,6 +95,14 @@ protocol DebugBridgeContext {
     /// no-op (matches `tts` / `search` / `present`). `fraction` is clamped to
     /// 0...1 by the parser.
     func seekFraction(fraction: Double) async throws
+    /// Bug #271 — scroll the active presented sheet's scrollable content to a
+    /// requested end so below-fold content becomes CU-free capturable. The
+    /// handler posts `.debugBridgeScrollSheet`; the presented sheet's observer
+    /// (today `TranslationResultCard`) maps the target to a `ScrollViewReader`
+    /// `scrollTo(_:anchor:)` against its own top/bottom anchor — no parallel
+    /// scroll logic. If no scrollable sheet observes it, the action is a no-op
+    /// (matches `present` / `tts` / `search`).
+    func scrollSheet(target: DebugCommand.ScrollTarget) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -229,6 +237,8 @@ final class DebugBridge {
             )
         case .seekFraction(let fraction):
             try await context.seekFraction(fraction: fraction)
+        case .scrollSheet(let target):
+            try await context.scrollSheet(target: target)
         }
     }
 }

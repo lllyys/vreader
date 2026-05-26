@@ -1884,6 +1884,60 @@ final class DebugCommandTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - scroll-sheet (Bug #271 — presented-sheet content scroll harness)
+    //   `vreader-debug://scroll-sheet?to=<top|bottom>`
+
+    func test_parse_scrollSheetBottom_returnsScrollSheetBottom() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://scroll-sheet?to=bottom")!)
+        XCTAssertEqual(cmd, .scrollSheet(target: .bottom))
+    }
+
+    func test_parse_scrollSheetTop_returnsScrollSheetTop() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://scroll-sheet?to=top")!)
+        XCTAssertEqual(cmd, .scrollSheet(target: .top))
+    }
+
+    func test_parse_scrollSheetMissingTo_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://scroll-sheet")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "to")
+        }
+    }
+
+    func test_parse_scrollSheetEmptyTo_throwsMissingParam() {
+        // Empty value is treated as missing (requireParam posture).
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://scroll-sheet?to=")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "to")
+        }
+    }
+
+    func test_parse_scrollSheetUnknownTo_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://scroll-sheet?to=sideways")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "to")
+        }
+    }
+
+    func test_parse_scrollSheetDeepPath_throwsUnknownCommand() {
+        let url = URL(string: "vreader-debug://scroll-sheet/extra?to=bottom")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.unknownCommand = error else {
+                XCTFail("expected unknownCommand, got \(error)")
+                return
+            }
+        }
+    }
 }
 
 #endif

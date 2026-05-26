@@ -450,6 +450,7 @@
 		53DEE85CF4BDE11891B0E07A /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF5C12635DFA6BEE42EBB1CE /* KeychainServiceTests.swift */; };
 		53F990254493D95BE25D6BFD /* HighlightableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9E867C06CA165E731435125 /* HighlightableTextView.swift */; };
 		542FF947F7F993A2904D56C2 /* EPUBComplexityClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCA9065CD56F7F0C7AF165FE /* EPUBComplexityClassifier.swift */; };
+		5438D10CA89B5545B5657DFB /* RealDebugBridgeContext+ScrollSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C10F3A6846396B900A54D81 /* RealDebugBridgeContext+ScrollSheet.swift */; };
 		545CCE5FED3565C9BF15EF78 /* LocatorValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C87C165AFE78571456C14D1 /* LocatorValidationTests.swift */; };
 		5475FDB13471D68A8ACB1ADD /* LegadoRuleParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 515AB3C2D2185F41DAFD8D16 /* LegadoRuleParser.swift */; };
 		547FFE39E9DC4280100F850F /* BookDetailsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6D4D3FF162BE1661731AAA /* BookDetailsSheet.swift */; };
@@ -1737,6 +1738,7 @@
 		4BC51E5F1213D2B1363C13D5 /* FoliateHighlightMutator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateHighlightMutator.swift; sourceTree = "<group>"; };
 		4BD245135256A06A28C88178 /* SearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBar.swift; sourceTree = "<group>"; };
 		4BD56854A37D8EA2B318B926 /* HighlightDedupeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightDedupeTests.swift; sourceTree = "<group>"; };
+		4C10F3A6846396B900A54D81 /* RealDebugBridgeContext+ScrollSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RealDebugBridgeContext+ScrollSheet.swift"; sourceTree = "<group>"; };
 		4C19E96D5AE40D3577255C38 /* TXTChapterHighlightHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterHighlightHelperTests.swift; sourceTree = "<group>"; };
 		4C87C165AFE78571456C14D1 /* LocatorValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorValidationTests.swift; sourceTree = "<group>"; };
 		4CC7EBBBE07E87F07CC0FE4F /* ReaderNotificationHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderNotificationHandlerTests.swift; sourceTree = "<group>"; };
@@ -3038,6 +3040,7 @@
 				A3D74F5FB31BAB5089EB5022 /* RealDebugBridgeContext+Eval.swift */,
 				BB8C0771E06618E5F68C410D /* RealDebugBridgeContext+Present.swift */,
 				2E5C9F4DD3DE16D29E00E5F6 /* RealDebugBridgeContext+Provider.swift */,
+				4C10F3A6846396B900A54D81 /* RealDebugBridgeContext+ScrollSheet.swift */,
 				C65CF531180D798D01E12893 /* RealDebugBridgeContext+SeedSessions.swift */,
 				0ED10DF5769D7EBC4A879992 /* RealDebugBridgeContext+Seek.swift */,
 				6671E9F8673155BDC726A6ED /* RealDebugBridgeContext+Settle.swift */,
@@ -6192,6 +6195,7 @@
 				2DCCDBB57F5086AF49FF8D99 /* RealDebugBridgeContext+Eval.swift in Sources */,
 				2D22FEBD43A0354357992A28 /* RealDebugBridgeContext+Present.swift in Sources */,
 				009D566180EA91AB79A4F32C /* RealDebugBridgeContext+Provider.swift in Sources */,
+				5438D10CA89B5545B5657DFB /* RealDebugBridgeContext+ScrollSheet.swift in Sources */,
 				ABB95D6805BADA4CC6DBE564 /* RealDebugBridgeContext+SeedSessions.swift in Sources */,
 				8B22450F3063ED561B06485D /* RealDebugBridgeContext+Seek.swift in Sources */,
 				5F9CD9BF3AC140F1D753E05A /* RealDebugBridgeContext+Settle.swift in Sources */,
