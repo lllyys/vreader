@@ -1,0 +1,208 @@
+// Purpose: Feature #71 WI-4 — the @MainActor host-side coordinator for EPUB
+// continuous cross-chapter scroll. It owns the materialized `EPUBSpineWindow`
+// and turns the JS scroll observer's boundary signals into window transitions:
+// when the viewport nears a materialized end, it materializes the adjacent
+// chapter (`chapterBodyProvider`), emits the append/prepend section JS through
+// an async-throwing evaluator, and — only after the eval SUCCEEDS — advances
+// the window and evicts far chapters (emitting their remove JS).
+//
+// Key decisions (Gate-2 audit, thread 019e5f97):
+// - **Async-throwing evaluator** (round-1 [H4]): a `(String) -> Void` closure
+//   can't observe a failed `evaluateJavaScript`. The window must NOT advance if
+//   the DOM insert failed, so the evaluator is `@MainActor (String) async throws`.
+// - **Generation token** (round-1 [H4]): a `UUID` bumped on mode-switch / reopen
+//   / book-change. A `chapterBodyProvider` task that resolves AFTER the token
+//   bumped is discarded, so a stale chapter can't be stitched into a rebuilt doc.
+// - **Single in-flight extension** (idempotency): a re-entrant boundary signal
+//   while an extension is materializing is dropped, so a burst of near-boundary
+//   signals appends exactly one chapter.
+// - **Re-anchor to the reading chapter**: each signal re-anchors the window to
+//   `visibleSpineIndex` (when inside the window) so eviction trims chapters
+//   behind the reader, not the one being read. Re-anchor is a pure metadata
+//   change (no `lo`/`hi` shift) — no DOM eval needed.
+//
+// This file is WI-4's decision logic: it is unit-testable with a recording stub
+// evaluator + stub `chapterBodyProvider`, no live `WKWebView`. The bridge
+// integration (script/handler injection, signal parsing) is WI-5.
+//
+// @coordinates-with: EPUBSpineWindow.swift, EPUBContinuousScrollJS.swift,
+//   EPUBChapterBodyRewriter.swift (EPUBChapterBody),
+//   EPUBWebViewBridge.swift (WI-5 consumer),
+//   dev-docs/plans/20260525-feature-71-epub-continuous-scroll.md (WI-4)
+
+import Foundation
+import OSLog
+
+/// The throttled report the continuous-scroll JS observer posts back to Swift
+/// (`EPUBContinuousScrollJS.continuousScrollObserverJS`). WI-4 consumes only the
+/// boundary flags for window decisions + `visibleSpineIndex` for re-anchoring;
+/// `intraFraction` rides along for the WI-5/WI-6 progress mapping.
+struct EPUBScrollBoundarySignal: Equatable, Sendable {
+    /// The spine index of the section whose top boundary the viewport is past.
+    let visibleSpineIndex: Int
+    /// Progress (0...1) within that section.
+    let intraFraction: Double
+    /// The viewport is within the prefetch margin of the TOP of the materialized doc.
+    let nearTopBoundary: Bool
+    /// The viewport is within the prefetch margin of the BOTTOM of the materialized doc.
+    let nearBottomBoundary: Bool
+
+    init(visibleSpineIndex: Int, intraFraction: Double,
+         nearTopBoundary: Bool, nearBottomBoundary: Bool) {
+        self.visibleSpineIndex = visibleSpineIndex
+        self.intraFraction = intraFraction
+        self.nearTopBoundary = nearTopBoundary
+        self.nearBottomBoundary = nearBottomBoundary
+    }
+}
+
+@MainActor
+final class EPUBContinuousScrollCoordinator {
+
+    private static let log = Logger(subsystem: "com.vreader.app", category: "EPUBContinuousScroll")
+
+    /// The currently-materialized contiguous chapter window. Mutates only after
+    /// a successful section eval (or a pure re-anchor).
+    private(set) var window: EPUBSpineWindow
+
+    /// Max materialized span (chapter count) before eviction trims the far side.
+    private let maxSpan: Int
+    /// Materializes a chapter's rewritten body for a spine index (off-main I/O).
+    private let chapterBodyProvider: @MainActor (Int) async throws -> EPUBChapterBody
+    /// Evaluates section JS against the live `WKWebView`. Async-throwing so a
+    /// failed DOM insert is observable (the window does not advance on failure).
+    private let evaluate: @MainActor (String) async throws -> Void
+    /// Optional per-chapter divider title (chapter heading shown at the seam).
+    private let dividerTitle: (@MainActor (Int) -> String?)?
+
+    /// Bumped on mode-switch / reopen / book-change to discard stale in-flight
+    /// `chapterBodyProvider` results.
+    private(set) var generation = UUID()
+    /// True while an extension is materializing — drops re-entrant signals so a
+    /// burst of near-boundary reports appends exactly one chapter.
+    private(set) var isExtending = false
+
+    init(
+        initialWindow: EPUBSpineWindow,
+        maxSpan: Int = 3,
+        chapterBodyProvider: @escaping @MainActor (Int) async throws -> EPUBChapterBody,
+        evaluate: @escaping @MainActor (String) async throws -> Void,
+        dividerTitle: (@MainActor (Int) -> String?)? = nil
+    ) {
+        self.window = initialWindow
+        self.maxSpan = max(maxSpan, 1)
+        self.chapterBodyProvider = chapterBodyProvider
+        self.evaluate = evaluate
+        self.dividerTitle = dividerTitle
+    }
+
+    /// Discards any in-flight materialization and resets the busy flag. Call on
+    /// mode-switch / reopen / book-change before re-bootstrapping the window.
+    func invalidate() {
+        generation = UUID()
+        isExtending = false
+    }
+
+    /// React to a scroll boundary signal: re-anchor to the reading chapter, then
+    /// extend the window toward whichever boundary the viewport is near (if any
+    /// adjacent chapter remains). A no-op at the book's first/last chapter (no
+    /// bounce JS) and while an extension is already in flight.
+    func handleBoundarySignal(_ signal: EPUBScrollBoundarySignal) async {
+        // Re-anchor to the reading chapter (pure metadata; no DOM change) so
+        // eviction trims behind the reader.
+        if window.contains(signal.visibleSpineIndex) {
+            window = window.reanchored(to: signal.visibleSpineIndex)
+        }
+        guard !isExtending else { return }
+        // Extend toward whichever boundary the viewport is near. Both can be true
+        // at once (a short chapter in a tall viewport) — handle each sequentially
+        // so neither side starves (Gate-4 round-1 [M3]); `extend` is a no-op when
+        // that side can't grow.
+        if signal.nearBottomBoundary, window.canExtendForward {
+            await extend(forward: true)
+        }
+        if signal.nearTopBoundary, window.canExtendBackward {
+            await extend(forward: false)
+        }
+    }
+
+    // MARK: - Private
+
+    private func extend(forward: Bool) async {
+        isExtending = true
+        defer { isExtending = false }
+
+        let gen = generation
+        let targetIndex = forward ? window.hi + 1 : window.lo - 1
+
+        let body: EPUBChapterBody
+        do {
+            body = try await chapterBodyProvider(targetIndex)
+        } catch {
+            Self.log.error("chapter \(targetIndex) materialize failed: \(String(describing: error), privacy: .public)")
+            return // window unchanged
+        }
+        // Stale: a mode-switch / reopen happened while we awaited the chapter.
+        guard gen == generation else { return }
+        // Defensive (Gate-4 round-1 [L2]): the provider MUST return the requested
+        // chapter, or DOM section identity (`data-vreader-spine-index`) would
+        // desync from `window`. Abort on mismatch rather than stitch a wrong body.
+        guard body.spineIndex == targetIndex else {
+            Self.log.error("chapterBodyProvider returned spineIndex \(body.spineIndex) for requested \(targetIndex) — aborting extend")
+            return
+        }
+
+        let title = dividerTitle?(targetIndex)
+        let insertJS = forward
+            ? EPUBContinuousScrollJS.appendChapterSectionJS(body, dividerTitle: title)
+            : EPUBContinuousScrollJS.prependChapterSectionJS(body, dividerTitle: title)
+        do {
+            try await evaluate(insertJS)
+        } catch {
+            // round-1 [H4]: DOM insert failed → DO NOT advance the window.
+            Self.log.error("section insert eval failed for \(targetIndex): \(String(describing: error), privacy: .public)")
+            return
+        }
+        guard gen == generation else { return }
+
+        // Eval succeeded → the new chapter is in the DOM. Evict far chapters one
+        // at a time, advancing `committed` ONLY as each remove succeeds, so the
+        // published window always matches the DOM even under a partial (cascade)
+        // remove failure (Gate-4 round-2 [M5]). `window` is assigned ONCE at the
+        // end, gen-guarded, so a mode-switch DURING eviction can't publish this
+        // stale task's state over a rebuilt generation (round-1 [H1]). While
+        // evicting, `window` stays at its pre-extend value; `isExtending` blocks
+        // any reader meanwhile.
+        let extended = forward ? window.extendForward() : window.extendBackward()
+        let targetSpan = extended.evictFarFromAnchor(maxSpan: maxSpan).span
+        var committed = extended
+        while committed.span > targetSpan {
+            guard gen == generation else { return } // stale → emit nothing, publish nothing
+            // Trim exactly the ONE farthest-from-anchor chapter this step.
+            let next = committed.evictFarFromAnchor(maxSpan: committed.span - 1)
+            guard let index = singleDroppedIndex(from: committed, to: next) else { break }
+            do {
+                try await evaluate(EPUBContinuousScrollJS.removeChapterSectionJS(spineIndex: index))
+            } catch {
+                // round-1 [M4] / round-2 [M5]: a failed remove leaves that section
+                // in the DOM → stop here with `committed` reflecting ONLY the
+                // sections actually removed, so the window never under- or
+                // over-claims relative to the DOM.
+                Self.log.warning("evict remove eval failed for \(index): \(String(describing: error), privacy: .public)")
+                break
+            }
+            committed = next
+        }
+        guard gen == generation else { return }
+        window = committed
+    }
+
+    /// The single spine index present in `before` but not `after` for a
+    /// one-chapter trim (`after` drops exactly one end of `before`). `nil` if no
+    /// single end was trimmed.
+    private func singleDroppedIndex(from before: EPUBSpineWindow, to after: EPUBSpineWindow) -> Int? {
+        if after.lo > before.lo { return before.lo }
+        if after.hi < before.hi { return before.hi }
+        return nil
+    }
+}

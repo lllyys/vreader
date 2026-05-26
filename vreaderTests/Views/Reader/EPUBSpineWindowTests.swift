@@ -216,4 +216,34 @@ struct EPUBSpineWindowTests {
         let b = try #require(EPUBSpineWindow.initial(anchor: 2, spineCount: 20))
         #expect(a != b)
     }
+
+    // MARK: - reanchored (Feature #71 WI-4)
+
+    @Test("reanchored moves the anchor inside the window without changing the range")
+    func reanchoredMovesAnchorKeepsRange() throws {
+        // Window 0...4 anchored at 0; re-anchor to the reading chapter 3.
+        var w = try #require(EPUBSpineWindow.initial(anchor: 0, spineCount: 10))
+        for _ in 0..<4 { w = w.extendForward() } // 0...4, anchor 0
+        let r = w.reanchored(to: 3)
+        #expect(r.lo == 0 && r.hi == 4)        // materialized range unchanged
+        #expect(r.anchor == 3)                 // anchor moved
+        // Eviction now trims behind (toward lo), keeping the reading chapter.
+        let evicted = r.evictFarFromAnchor(maxSpan: 3)
+        #expect(evicted.contains(3))
+        #expect(evicted.lo > 0)                // far-behind chapters trimmed
+    }
+
+    @Test("reanchored clamps an out-of-window anchor into lo...hi")
+    func reanchoredClampsOutOfWindow() throws {
+        var w = try #require(EPUBSpineWindow.initial(anchor: 2, spineCount: 10))
+        w = w.extendForward() // 2...3, anchor 2
+        #expect(w.reanchored(to: 9).anchor == 3)   // clamps up to hi
+        #expect(w.reanchored(to: 0).anchor == 2)   // clamps down to lo
+    }
+
+    @Test("reanchored to the current anchor returns an equal window")
+    func reanchoredToSameAnchorIsNoOp() throws {
+        let w = try #require(EPUBSpineWindow.initial(anchor: 2, spineCount: 10))
+        #expect(w.reanchored(to: 2) == w)
+    }
 }

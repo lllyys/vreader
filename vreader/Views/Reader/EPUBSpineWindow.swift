@@ -73,6 +73,9 @@ struct EPUBSpineWindow: Equatable {
     }
 
     /// Whether the window can grow toward the end of the book.
+    /// Number of materialized chapters in the window (`hi - lo + 1`, always ≥ 1).
+    var span: Int { hi - lo + 1 }
+
     var canExtendForward: Bool { hi < spineCount - 1 }
 
     /// Whether the window can grow toward the start of the book.
@@ -122,5 +125,19 @@ struct EPUBSpineWindow: Equatable {
             }
         }
         return EPUBSpineWindow(lo: newLo, hi: newHi, anchor: anchor, spineCount: spineCount)
+    }
+
+    /// Returns a window with the anchor moved to `newAnchor`, clamped into the
+    /// current materialized `[lo, hi]` span. The materialized RANGE is unchanged
+    /// — only which chapter `evictFarFromAnchor` treats as "keep" moves. Feature
+    /// #71 WI-4: the continuous-scroll coordinator re-anchors to the reading
+    /// chapter as the user scrolls so eviction trims chapters BEHIND the reader
+    /// (far from the current position), not the one being read. Pure; re-anchor
+    /// does not touch the DOM (no `lo`/`hi` change), so the coordinator may apply
+    /// it without a JS eval.
+    func reanchored(to newAnchor: Int) -> EPUBSpineWindow {
+        let clamped = min(max(newAnchor, lo), hi)
+        guard clamped != anchor else { return self }
+        return EPUBSpineWindow(lo: lo, hi: hi, anchor: clamped, spineCount: spineCount)
     }
 }
