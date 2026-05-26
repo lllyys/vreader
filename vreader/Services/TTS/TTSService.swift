@@ -80,14 +80,22 @@ final class TTSService: NSObject {
     }
 
     /// Default synthesizer picker. Returns the XCUITest mock when the
-    /// DEBUG-only override is active, otherwise the real synthesizer.
+    /// DEBUG-only override is active; otherwise the HTTP cloud-TTS adapter when
+    /// a valid `HTTPTTSConfig` is configured (Feature #72); otherwise the
+    /// on-device synthesizer. `configStore` is injectable for tests.
     @MainActor
-    private static func defaultSynthesizer() -> SpeechSynthesizing {
+    static func defaultSynthesizer(
+        configStore: HTTPTTSConfigStore = HTTPTTSConfigStore()
+    ) -> SpeechSynthesizing {
         #if DEBUG
         if TTSTestOverride.useMockSynthesizer {
             return XCUITestMockSpeechSynthesizer()
         }
         #endif
+        // Feature #72: a configured + valid cloud provider takes over read-aloud.
+        if let config = configStore.loadValidConfig() {
+            return HTTPSpeechSynthesizer(config: config)
+        }
         return SystemSpeechSynthesizer()
     }
 
