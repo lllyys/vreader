@@ -11,6 +11,7 @@
 - **v1 (2026-05-25)** — initial draft. Author: feature-workflow orchestrator (Claude). Sent to Gate 2.
 - **v2 (2026-05-25)** — Gate 2 Codex audit round 1 (thread `019e5f97`) returned 2 Critical / 4 High / 2 Medium / 1 Low. Core reframe accepted: **this is an early DOM-contract change, not late bridge wiring** — anchor/selection/lifecycle work moves into the early WIs, not WI-5. All findings addressed; see "Audit fixes applied (Gate 2)" at the end. WI count grew 6 → 8 with a tighter foundational front.
 - **v3 (2026-05-25)** — Gate 2 Codex round 2 (same thread) confirmed H3/H4/H5(struct)/H6/M1/M2/L1 resolved but found 2 residual Highs + 1 Medium: C2-residual (linked external stylesheets + nested CSS `url(...)` not covered), C1-residual (cross-section selection policy undefined), H5-contradiction (stale "out of scope" claim). All three fixed in v3 — rewriter gains a `linkedStylesheetLoader` closure + `url(...)` rewrite, explicit cross-section clamp-to-start-section-or-reject policy, retracted the bilingual out-of-scope claim. Awaiting round 3.
+- **v4 (2026-05-27)** — Mid-implementation split of the Large WI-6 (after WI-1..5 merged). WI-6 (container integration) was marked Large and carried an **unresolved architectural gap**: the WI-4 coordinator's `evaluate` is an init-time `let`, but the container must create the coordinator before the bridge's `WKWebView` exists, so there was no specified path for `evaluate` to reach the webview. Split into **WI-6a** (foundational: `restoreHighlightsInSectionJS` + `EPUBContinuousChapterProvider` + `EPUBWebViewEvaluatorHandle` — all unit-testable, no live-render change) and **WI-6b** (the behavioral live wiring). Added the "WI-6 evaluate-binding" design subsection resolving the late-binding gap via the weak-webview handle. Re-audited (Gate-2 re-audit of the split) — see revision note below.
 
 ---
 
@@ -122,11 +123,88 @@ Round-1 Medium [M2] applied: WI-2 split into the DOM-contract vs the bridge inte
 | **WI-3** | `EPUBContinuousScrollJS` — static JS generators (bootstrap, append/prepend w/ scroll-compensation, evict, section-scoped observer, scroll-to-section, find-in-section, restore-in-section) | **Foundational** (pure JS strings, no WKWebView; injection-escaping is the test focus) | Medium | WI-2 |
 | **WI-4** | `EPUBContinuousScrollCoordinator` — `@MainActor` window-transition decision logic, async-throwing evaluator contract, generation token; window mutates only on successful eval | **Behavioral** (logic unit-testable with stub evaluator; no live WKWebView yet) | Medium | WI-1, WI-3 |
 | **WI-5** | Bridge plumbing: `continuousScroll:` input on `EPUBWebViewBridge`, mode-branched script/handler injection (observer replaces `progressTrackingJS`), `continuousScrollHandler` parse + windowed progress, **section-scoped selection href** | **Behavioral** | Medium | WI-4 |
-| **WI-6** | Container integration: instantiate the coordinator on `epubLayout == .scroll`, `chapterBodyProvider` wiring, position restore (bootstrap-window + seek), `sectionMaterialized` lifecycle hook driving **per-section highlight restore**, search-into-unmaterialized-chapter (extend then find-in-section), live mode-switch teardown/rebuild | **Behavioral** | Large | WI-5 |
+| **WI-6a** | Container-integration foundations (split out of the original Large WI-6, see v4 revision note): (1) `EPUBContinuousChapterProvider` — a testable `@MainActor` factory: spine index → `metadata.spineItems[i].href` → `parser.contentForSpineItem(href:)` → `EPUBChapterBodyRewriter.rewrite(...)` → `EPUBChapterBody` (the closure the WI-6b coordinator is built with); (2) `EPUBWebViewEvaluatorHandle` — `@MainActor final class { weak var webView: WKWebView?; func evaluate(_ js: String) async throws }` resolving the coordinator-`evaluate`-late-binding gap (see "WI-6 evaluate-binding" below). **Narrowed during implementation (v4.1)**: `restoreHighlightsInSectionJS` was originally listed here but is NOT cleanly foundational — section-scoped highlight restore must re-root the stored single-chapter XPaths within the `[data-vreader-spine-index]` section subtree, which is coupled to the highlight-paint primitive's resolution model + the live `sectionMaterialized` hook. Moved to **WI-6b** (where it already appears in the surface-area table) — a conservative narrowing (strictly fewer, more-foundational units than the Gate-2-approved scope). | **Foundational** (a factory + a handle type; no live-render change; both unit-testable with stubs) | Small–Medium | WI-5 |
+| **WI-6b** | Live container wiring (the behavioral remainder of the original WI-6): bridge load-path branch (load the bootstrap doc in continuous mode instead of a single chapter file), container instantiates the coordinator (built with the WI-6a provider + handle) + `EPUBContinuousScrollConfig` when `epubLayout == .scroll`, bridge `makeUIView` populates `handle.webView`, `sectionMaterialized` lifecycle hook driving **per-section highlight restore**, position restore (bootstrap-window + `scrollToSpineFraction`), search-into-unmaterialized-chapter (extend then find-in-section), live mode-switch teardown/rebuild | **Behavioral** | Large | WI-6a |
 | **WI-7** | Bilingual section-scoping for continuous EPUB (namespace `bid` by spine index, per-section enumerate/inject) OR gate-behind-follow-up if heavy | **Behavioral** | Medium | WI-6 |
 | **WI-8** | Final integration: memory-eviction tuning, divider/heading + skeleton (§2.4) polish, docs sync (`architecture.md`), full acceptance pass | **Behavioral (final WI)** | Medium | WI-7 |
 
 WI-1 (`EPUBSpineWindow`) is the clean small+foundational first WI — purely integer-range arithmetic, no XHTML parsing, tight unit test. WI-2/WI-3 are foundational but not small (the DOM contract + JS escaping carry the heavy edge-case surface). This iteration starts WI-1 if time allows; otherwise stops at the audited plan.
+
+### WI-6 evaluate-binding (resolves the v4-split design gap)
+
+`EPUBContinuousScrollCoordinator` (WI-4) holds `evaluate: @escaping @MainActor
+(String) async throws -> Void` as an immutable `let`, set at init. But the
+**container creates the coordinator before the live `WKWebView` exists** — the
+webview is built in `EPUBWebViewBridge.makeUIView`, which runs *after* the
+container passes `continuousScroll: EPUBContinuousScrollConfig` into the bridge.
+So the container cannot supply a working `evaluate` closure at coordinator-init
+time. The original Large WI-6 did not specify how `evaluate` reaches the webview;
+WI-6a closes that gap with a late-binding handle:
+
+- `EPUBWebViewEvaluatorHandle` — `@MainActor final class` holding
+  `weak var webView: WKWebView?` and `func evaluate(_ js: String) async throws`.
+  `evaluate` bridges `WKWebView.evaluateJavaScript` (the completion-handler form)
+  through a `withCheckedThrowingContinuation`; when `webView == nil` (not yet
+  mounted, or torn down) it **throws** `EPUBWebViewEvaluatorError.noWebView`, so
+  the coordinator's existing round-1 [H4] contract (window does NOT advance on a
+  failed eval) handles the pre-mount window safely — a boundary signal that
+  arrives before the webview mounts is a no-op, not a crash or a desynced window.
+- Wiring (WI-6b): the container builds the coordinator with
+  `evaluate: { [handle] js in try await handle.evaluate(js) }`, and threads the
+  handle to the bridge; `makeUIView` sets `handle.webView = webView` (a weak
+  capture — no retain cycle, released with the bridge). **Provisional — see the
+  "WI-6b design requirements" freshness rule below**: the `weak` ref alone is NOT
+  sufficient (an outgoing webview can briefly outlive a rebuild), so WI-6b must
+  use a FRESH handle per bridge generation (or nil+rebind on teardown), per
+  re-audit finding 2; the single-handle description here is the happy-path sketch,
+  not the teardown contract.
+- This keeps WI-4's coordinator API unchanged (still a `let` evaluate closure),
+  isolates the WKWebView dependency behind a testable seam (the handle is
+  unit-testable with `webView == nil`), and is the single architectural unblock
+  WI-6b's live wiring depends on.
+
+WI-6a is fully unit-testable with no live-render change (JS-string assertions for
+`restoreHighlightsInSectionJS`; a stub `contentForSpineItem` for the provider; a
+`webView == nil` handle for the evaluator-throws path). WI-6b is the behavioral
+live integration that consumes all three.
+
+### WI-6b design requirements (from the v4 Gate-2 re-audit — Codex thread 019e6683)
+
+The re-audit confirmed the split + WI-6a scope are sound (all named seams exist;
+`restoreHighlightsInSectionJS` is genuinely absent). It raised four **WI-6b**
+hardening requirements that MUST be in 6b's implementation (not deferrable):
+
+1. **[Critical] Continuous-mode progress must update `href`, not just total
+   progress.** WI-5's `EPUBWebViewBridgeCoordinator.handleContinuousScrollMessage`
+   currently maps the windowed `{visibleSpineIndex, intraFraction}` to a `Double`
+   and calls the existing `onProgressChange(Double)`. The container's
+   `onProgressChange` (EPUBReaderContainerView ~:495) then looks the spine index
+   up from `viewModel.currentPosition?.href` — which stays pinned to the OLD
+   chapter when the reader scrolls into the next section. WI-6b must add a
+   continuous-mode callback carrying at least `{visibleSpineIndex, intraFraction}`
+   (or the full `EPUBScrollBoundarySignal`) so the container updates both the
+   chapter `href` (from `metadata.spineItems[visibleSpineIndex].href`) and the
+   progression. Do NOT reuse the `Double`-only `onProgressChange` for position in
+   continuous mode.
+2. **[High] Handle stale-identity on rebuild.** `weak var webView` prevents a
+   retain cycle but does NOT guarantee freshness: a live mode-switch / reopen can
+   leave `handle.webView` pointing at an outgoing (still-briefly-alive) webview,
+   so an eval could hit the stale DOM instead of throwing `noWebView`. WI-6b must
+   break identity explicitly: create a FRESH `EPUBWebViewEvaluatorHandle` per
+   bridge generation (tie it to the coordinator's generation token / reader
+   token), OR nil+rebind it on teardown, so a stale-webview eval can't fire.
+3. **[High] Bootstrap load must satisfy the `file://` navigation policy.** The
+   bridge's `decidePolicyForNavigationAction` (EPUBWebViewBridgeCoordinator ~:283)
+   cancels any non-`file://` navigation. A naive `loadHTMLString(_, baseURL: nil)`
+   bootstrap is blocked. WI-6b must either `loadHTMLString` with a `file://`
+   `baseURL` under the extracted root, or write+`loadFileURL` a file-backed
+   bootstrap document, or narrowly relax the policy for the one bootstrap nav.
+4. **[Medium] Inner-scroll-root safe-area + restore.** Continuous mode scrolls
+   `#vreader-scroll-root`, not `webView.scrollView`. The bug-#163 safe-area top
+   inset and the "scroll to chapter top" restore both operate on
+   `webView.scrollView` today; WI-6b must revalidate them against the inner root
+   (inset via bootstrap CSS / root padding, or root-level JS scrolling) and add a
+   slice test for safe-area top + section-top restore in continuous mode.
 
 ---
 
