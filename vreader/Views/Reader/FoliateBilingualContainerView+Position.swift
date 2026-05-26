@@ -41,6 +41,15 @@ extension FoliateBilingualContainerView {
     /// preceded this is dropped (gate still closed) and the post-restore
     /// relocate persists. When nothing is saved, the gate still opens so
     /// reading from the start persists going forward.
+    /// Number of times the restore seek is re-asserted (Bug #265 rework). The
+    /// first relocate is render-complete of the OPENING section only, so a
+    /// cross-section `goToFraction` that early is a no-op; re-asserting over a
+    /// short window lands the seek once foliate-js finishes paginating — more
+    /// robust than one fixed delay across device speeds / book sizes.
+    private var restoreSeekAttempts: Int { 4 }
+    /// Gap between restore-seek re-assertions.
+    private var restoreSeekRetryNanoseconds: UInt64 { 700_000_000 }
+
     func triggerPositionRestoreIfNeeded() {
         guard !didStartPositionRestore else { return }
         didStartPositionRestore = true
@@ -48,17 +57,50 @@ extension FoliateBilingualContainerView {
         let controller = positionController
         let key = fingerprintKey
         positionRestoreTask = Task {
-            let target = await controller?.loadRestoreTarget()
+            let plan = await controller?.loadRestorePlan()
             // Bug #265 (Codex Gate-4): if the view was dismissed mid-load,
             // bail before posting so a stale task can't seek a new reader
             // instance of the same book.
             guard !Task.isCancelled else { return }
-            if let target {
-                NotificationCenter.default.post(
-                    name: .foliateRequestSeekTarget,
-                    object: nil,
-                    userInfo: ["target": target, "fingerprintKey": key]
-                )
+
+            // Nothing meaningful to restore → open the save gate IMMEDIATELY so
+            // reading-from-start persists with no needless delay (Codex round-1):
+            // a fresh book, or a saved position already at the start.
+            let hasRestore = (plan?.fraction ?? 0) > 0 || plan?.cfiTarget != nil
+            guard let plan, hasRestore else {
+                controller?.openSaveGate()
+                return
+            }
+
+            // Re-assert the restore seek across a short window. The save gate
+            // stays CLOSED until the restore completes, so the open→start
+            // relocates (and the seek's own relocates) are dropped, not
+            // persisted; only the post-restore position persists.
+            for attempt in 0..<restoreSeekAttempts {
+                if attempt > 0 {
+                    try? await Task.sleep(nanoseconds: restoreSeekRetryNanoseconds)
+                    guard !Task.isCancelled else { return }
+                }
+                if let fraction = plan.fraction, fraction > 0 {
+                    // Restore via whole-book fraction. The live Foliate reader
+                    // honors `goToFraction` (the bottom scrubber + `seek?fraction`
+                    // channel) but NOT `goTo(filepos-CFI)` for AZW3/MOBI —
+                    // device-confirmed: save + target-load worked, yet the CFI
+                    // seek never relocated the reader. Fraction resumes near
+                    // where the reader left off.
+                    NotificationCenter.default.post(
+                        name: .foliateRequestSeekFraction,
+                        object: nil,
+                        userInfo: ["fraction": fraction, "fingerprintKey": key]
+                    )
+                } else if let target = plan.cfiTarget {
+                    // Fallback only (no saved fraction): try the CFI/href target.
+                    NotificationCenter.default.post(
+                        name: .foliateRequestSeekTarget,
+                        object: nil,
+                        userInfo: ["target": target, "fingerprintKey": key]
+                    )
+                }
             }
             controller?.openSaveGate()
         }

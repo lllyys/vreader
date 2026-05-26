@@ -62,6 +62,37 @@ struct FoliatePositionRestoreControllerTests {
         #expect(await controller.loadRestoreTarget() == nil)
     }
 
+    // MARK: - loadRestorePlan (Bug #265 rework — fraction-first restore)
+
+    @Test("loadRestorePlan exposes the saved fraction (the reliable AZW3/MOBI restore channel) + the cfi fallback")
+    func loadRestorePlanExposesFractionAndCFI() async {
+        let store = MockPositionStore()
+        await store.seed(bookFingerprintKey: key,
+                         locator: locator(key, cfi: "epubcfi(/6/10!/4,/26,/28/1:219)", progression: 0.616))
+        let controller = makeController(store)
+        let plan = await controller.loadRestorePlan()
+        #expect(plan?.fraction == 0.616)
+        #expect(plan?.cfiTarget == "epubcfi(/6/10!/4,/26,/28/1:219)")
+    }
+
+    @Test("loadRestorePlan returns nil fraction when the saved position has none (forces the cfi fallback)")
+    func loadRestorePlanNilFractionFallsBackToCFI() async {
+        let store = MockPositionStore()
+        await store.seed(bookFingerprintKey: key,
+                         locator: locator(key, cfi: "epubcfi(/6/4!/2/10)", progression: nil))
+        let controller = makeController(store)
+        let plan = await controller.loadRestorePlan()
+        #expect(plan?.fraction == nil)
+        #expect(plan?.cfiTarget == "epubcfi(/6/4!/2/10)")
+    }
+
+    @Test("loadRestorePlan returns nil when nothing is saved")
+    func loadRestorePlanNilWhenNothingSaved() async {
+        let store = MockPositionStore()
+        let controller = makeController(store)
+        #expect(await controller.loadRestorePlan() == nil)
+    }
+
     // MARK: - the save gate
 
     @Test("position change BEFORE the gate opens is dropped (would clobber the saved position)")

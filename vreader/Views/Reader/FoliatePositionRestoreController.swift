@@ -30,9 +30,12 @@
 //   ReadingPositionPersisting.swift, PersistenceActor+ReadingPosition.swift
 
 import Foundation
+import OSLog
 
 @MainActor
 final class FoliatePositionRestoreController {
+
+    private static let log = Logger(subsystem: "com.vreader.app", category: "FoliatePosition")
 
     private let fingerprintKey: String
     private let persistence: any ReadingPositionPersisting
@@ -61,8 +64,36 @@ final class FoliatePositionRestoreController {
         )
     }
 
-    /// Loads the saved position and resolves the Foliate-js goTo target (CFI
-    /// preferred, href fallback), or `nil` when nothing is saved / usable.
+    /// The resolved restore instructions for a reopened book.
+    struct RestorePlan: Equatable, Sendable {
+        /// Whole-book progress (0...1) — the RELIABLE restore channel for
+        /// AZW3/MOBI (filepos-anchored CFIs that foliate-js `goTo` can't resolve).
+        let fraction: Double?
+        /// CFI/href goTo target — kept as a fallback only.
+        let cfiTarget: String?
+    }
+
+    /// Loads the saved position and returns both the whole-book `fraction` and
+    /// the CFI/href goTo `cfiTarget`. Bug #265 rework: the live Foliate reader
+    /// honors `goToFraction` but NOT a `goTo(filepos-CFI)` (device-confirmed:
+    /// save + target-load worked, but the CFI seek never relocated the reader),
+    /// so the caller restores via `fraction` and uses `cfiTarget` only as a
+    /// fallback. `nil` when nothing is saved.
+    ///
+    /// Does NOT open the save gate — the caller opens it via `openSaveGate()`
+    /// after posting the restore seek (gate-open/seek-post adjacency, Gate-4).
+    func loadRestorePlan() async -> RestorePlan? {
+        guard let saved = try? await persistence.loadPosition(bookFingerprintKey: fingerprintKey) else {
+            Self.log.info("loadRestorePlan: no saved position for \(self.fingerprintKey, privacy: .public)")
+            return nil
+        }
+        let cfi = FoliateNavSeek.navigationTarget(for: saved)
+        Self.log.info("loadRestorePlan: fraction=\(saved.progression ?? -1) cfi=\(saved.cfi ?? "nil", privacy: .public) → restore via \(saved.progression != nil ? "fraction" : "cfi", privacy: .public)")
+        return RestorePlan(fraction: saved.progression, cfiTarget: cfi)
+    }
+
+    /// Legacy CFI-only accessor (retained for unit tests + as the `cfiTarget`
+    /// source). Prefer `loadRestorePlan()` on the live path.
     ///
     /// Does NOT open the save gate — the caller opens it via `openSaveGate()`
     /// *after* posting the restore seek, so the gate-open and seek-post are
@@ -73,9 +104,12 @@ final class FoliatePositionRestoreController {
         // `loadPosition` returns `Locator?`; `try?` flattens the throw away,
         // so this binds the saved locator (nil when nothing is stored).
         guard let saved = try? await persistence.loadPosition(bookFingerprintKey: fingerprintKey) else {
+            Self.log.info("loadRestoreTarget: no saved position for \(self.fingerprintKey, privacy: .public)")
             return nil
         }
-        return FoliateNavSeek.navigationTarget(for: saved)
+        let target = FoliateNavSeek.navigationTarget(for: saved)
+        Self.log.info("loadRestoreTarget: saved cfi=\(saved.cfi ?? "nil", privacy: .public) href=\(saved.href ?? "nil", privacy: .public) progression=\(saved.progression ?? -1) → target=\(target ?? "nil", privacy: .public)")
+        return target
     }
 
     /// Opens the save gate. Call once, synchronously right after posting the
@@ -83,21 +117,33 @@ final class FoliatePositionRestoreController {
     /// position changes from then on persist. Idempotent.
     func openSaveGate() {
         restoreDispatched = true
+        Self.log.info("openSaveGate: save gate OPEN for \(self.fingerprintKey, privacy: .public)")
     }
 
     /// Persists a live position change — debounced — but only after restore has
     /// been dispatched and only for this book.
     func handlePositionChange(_ locator: Locator) {
-        guard restoreDispatched else { return }
-        guard locator.bookFingerprint.canonicalKey == fingerprintKey else { return }
+        guard restoreDispatched else {
+            Self.log.info("handlePositionChange: DROPPED (gate closed) cfi=\(locator.cfi ?? "nil", privacy: .public)")
+            return
+        }
+        guard locator.bookFingerprint.canonicalKey == fingerprintKey else {
+            Self.log.info("handlePositionChange: DROPPED (key mismatch) \(locator.bookFingerprint.canonicalKey, privacy: .public)")
+            return
+        }
         lastLocator = locator
         positionService.scheduleSave(locator: locator)
+        Self.log.info("handlePositionChange: scheduled save cfi=\(locator.cfi ?? "nil", privacy: .public) progression=\(locator.progression ?? -1)")
     }
 
     /// Immediately persists the last gated position (reader teardown), cancelling
     /// any pending debounce. No-op when nothing has been persisted yet.
     func flush() async {
-        guard let lastLocator else { return }
+        guard let lastLocator else {
+            Self.log.info("flush: nothing to flush (no gated position) for \(self.fingerprintKey, privacy: .public)")
+            return
+        }
+        Self.log.info("flush: saving cfi=\(lastLocator.cfi ?? "nil", privacy: .public) progression=\(lastLocator.progression ?? -1)")
         await positionService.saveNow(locator: lastLocator)
     }
 }
