@@ -34,4 +34,30 @@ protocol ChapterPrefetching: Sendable {
         targetLanguage: String,
         granularity: TranslationGranularity
     ) async throws -> [String]
+
+    /// Bug #268: translates PRE-SEGMENTED source segments (the render's own
+    /// enumerated block texts) directly, so blocks↔segments are 1:1 by
+    /// construction. Used by the EPUB bilingual divergence-fallback when the
+    /// plain-text segmentation count diverges from the DOM leaf-enumerate.
+    /// Same provider resolution + `ChapterTranslationError` contract as
+    /// `translatedSegments`. The result has the same count as `sourceSegments`.
+    func translatedSegmentsDirect(
+        for unit: TranslationUnitID,
+        sourceSegments: [String],
+        targetLanguage: String
+    ) async throws -> [String]
+}
+
+extension ChapterPrefetching {
+    /// Default: not supported. Conformers that don't drive the EPUB
+    /// divergence-fallback (most test mocks, non-EPUB formats) inherit this; the
+    /// VM treats the throw as a transient failure and leaves the unit
+    /// source-only (never worse than the current behavior).
+    func translatedSegmentsDirect(
+        for unit: TranslationUnitID,
+        sourceSegments: [String],
+        targetLanguage: String
+    ) async throws -> [String] {
+        throw ChapterTranslationError.providerFailed("direct pre-segmented translation not supported")
+    }
 }

@@ -192,6 +192,42 @@ actor ChapterTranslationService {
         return ChapterTranslationResult(segments: translated, fromCache: false)
     }
 
+    /// Bug #268: translates a PRE-SEGMENTED list of source segments directly,
+    /// bypassing `ChapterSegmenter` AND the disk cache. Used by the bilingual
+    /// EPUB divergence-fallback: when the DOM leaf-enumerate's block count
+    /// diverges from the plain-text paragraph segmentation (nested `<pre>` /
+    /// mixed-content `<blockquote>`), translating the enumerate's OWN block
+    /// `text[]` makes blocks↔segments 1:1 BY CONSTRUCTION — eliminating the
+    /// whole-chapter source-only fallback. The returned array is always the same
+    /// length as `segments`. No disk cache: the fallback is rare, and the
+    /// plain-text path's cache row is keyed by a different segment count that
+    /// must not be thrashed.
+    func translatePreSegmented(
+        segments: [String],
+        targetLanguage: String,
+        config: ResolvedAIProviderConfig,
+        style: TranslationStyle
+    ) async throws -> [String] {
+        guard !segments.isEmpty else { return [] }
+        let chunks = ChapterTranslationChunker.chunk(
+            segments: segments, maxCharsPerChunk: maxCharsPerChunk)
+        var translated = [String](repeating: "", count: segments.count)
+        do {
+            for chunk in chunks {
+                try Task.checkCancellation()
+                let chunkSegments = chunk.map { segments[$0] }
+                let chunkResult = try await translateChunk(
+                    chunkSegments, targetLanguage: targetLanguage, config: config, style: style)
+                for (offset, segmentIndex) in chunk.enumerated() {
+                    translated[segmentIndex] = chunkResult[offset]
+                }
+            }
+        } catch is CancellationError {
+            throw ChapterTranslationError.cancelled
+        }
+        return translated
+    }
+
     // MARK: - Private
 
     /// Translates one chunk: a single whole-chunk request with a strict

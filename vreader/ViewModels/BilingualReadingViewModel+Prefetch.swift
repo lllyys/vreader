@@ -147,6 +147,29 @@ extension BilingualReadingViewModel {
         startPrefetch(unit: unit, epoch: epoch)
     }
 
+    /// Bug #268: when the EPUB plain-text prefetch's segment count diverges from
+    /// the DOM leaf-enumerate's block count (nested `<pre>` / mixed-content
+    /// `<blockquote>` → the shared 1:1 pairing falls back to source-only),
+    /// translate the enumerate's OWN block texts directly so blocks↔segments are
+    /// 1:1 BY CONSTRUCTION. Stores the result for the unit so the next inject
+    /// pairs every block. A no-op when a matching-count translation already
+    /// exists; never worse than source-only on failure (the divergence-fallback
+    /// can only improve the divergent case, never regress the common one).
+    func translateBlocksDirectly(_ blockTexts: [String], for unit: TranslationUnitID) async {
+        guard isEnabled, let prefetcher, !blockTexts.isEmpty else { return }
+        // Already have a translation that pairs 1:1 with these blocks → nothing to do.
+        if let existing = translationsByUnit[unit], existing.count == blockTexts.count { return }
+        do {
+            let translated = try await prefetcher.translatedSegmentsDirect(
+                for: unit, sourceSegments: blockTexts, targetLanguage: targetLanguage)
+            guard isEnabled, translated.count == blockTexts.count else { return }
+            translationsByUnit[unit] = translated
+            postDidChange()
+        } catch {
+            // Leave the unit source-only — never worse than the current behavior.
+        }
+    }
+
     // MARK: - Reset + notification (called from the main file's toggle setters)
 
     /// Clears the per-unit translation cache + the unavailable set + the

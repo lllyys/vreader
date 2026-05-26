@@ -156,12 +156,22 @@ extension EPUBReaderContainerView {
         Task {
             guard let unit = await vm.textProvider?.unit(containing: locator),
                   let segments = vm.translations(for: unit) else { return }
-            await MainActor.run {
-                if let js = bilingualOrchestrator.buildInjectJS(
-                    translatedSegments: segments
-                ) {
-                    pendingHighlightJS = js
-                }
+            // Bug #268: the plain-text prefetch's segment count diverged from the
+            // DOM leaf-enumerate's block count (nested `<pre>` / mixed-content
+            // `<blockquote>`), so the 1:1 pairing would paint source-only.
+            // Translate the enumerate's OWN block texts directly so blocks↔segments
+            // are 1:1 by construction; that re-injects via the VM's
+            // `.readerBilingualDidChange` once it lands. The common matched-count
+            // path is untouched.
+            let blocks = bilingualOrchestrator.currentBlocks
+            if !blocks.isEmpty, segments.count != blocks.count {
+                await vm.translateBlocksDirectly(blocks.map(\.text), for: unit)
+                return
+            }
+            if let js = bilingualOrchestrator.buildInjectJS(
+                translatedSegments: segments
+            ) {
+                pendingHighlightJS = js
             }
         }
     }

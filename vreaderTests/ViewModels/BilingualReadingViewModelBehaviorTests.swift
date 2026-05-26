@@ -565,4 +565,60 @@ struct BilingualReadingViewModelBehaviorTests {
         vm.setEnabled(false)
         #expect(count >= 2)
     }
+
+    // MARK: - translateBlocksDirectly (Bug #268 — divergence-fallback)
+
+    /// A prefetcher whose `translatedSegmentsDirect` returns one translation per
+    /// input block text (1:1) — the contract `translateBlocksDirectly` relies on.
+    private actor DirectSpyPrefetcher: ChapterPrefetching {
+        private(set) var directCalls: [[String]] = []
+        func translatedSegments(
+            for unit: TranslationUnitID, targetLanguage: String,
+            granularity: TranslationGranularity
+        ) async throws -> [String] { [] }
+        func translatedSegmentsDirect(
+            for unit: TranslationUnitID, sourceSegments: [String], targetLanguage: String
+        ) async throws -> [String] {
+            directCalls.append(sourceSegments)
+            return sourceSegments.map { "T:" + $0 }   // 1:1 by construction
+        }
+        func directCallCount() -> Int { directCalls.count }
+    }
+
+    @Test func translateBlocksDirectly_storesOneToOneTranslationForTheUnit() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let prefetcher = DirectSpyPrefetcher()
+        let vm = BilingualReadingViewModel(bookFingerprintKey: Self.bookKey, perBookBaseURL: dir)
+        vm.attachProvider(StubProvider(units: Self.threeUnits))
+        vm.attachPrefetcher(prefetcher)
+        vm.setEnabled(true)
+        vm.dismissSetupSheet()
+
+        let unit = Self.threeUnits[0]
+        await vm.translateBlocksDirectly(["Block A.", "Block B.", "Block C."], for: unit)
+
+        // 1:1 with the 3 block texts — exactly what the EPUB inject needs to
+        // pair every block (no source-only fallback).
+        #expect(vm.translations(for: unit)?.count == 3)
+        #expect(vm.translations(for: unit) == ["T:Block A.", "T:Block B.", "T:Block C."])
+        #expect(await prefetcher.directCallCount() == 1)
+    }
+
+    @Test func translateBlocksDirectly_noOpWhenAMatchingCountTranslationAlreadyExists() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let prefetcher = DirectSpyPrefetcher()
+        let vm = BilingualReadingViewModel(bookFingerprintKey: Self.bookKey, perBookBaseURL: dir)
+        vm.attachProvider(StubProvider(units: Self.threeUnits))
+        vm.attachPrefetcher(prefetcher)
+        vm.setEnabled(true)
+        vm.dismissSetupSheet()
+
+        let unit = Self.threeUnits[0]
+        vm.setTranslations(["a", "b"], for: unit)   // already 1:1 with 2 blocks
+        await vm.translateBlocksDirectly(["B1", "B2"], for: unit)
+        #expect(await prefetcher.directCallCount() == 0)  // skipped — no re-translate
+        #expect(vm.translations(for: unit) == ["a", "b"])
+    }
 }
