@@ -139,6 +139,32 @@ extension Notification.Name {
     /// Each format renderer (WI-10..13) observes this to re-inject / clear
     /// the interlinear translation for the affected unit.
     static let readerBilingualDidChange = Notification.Name("vreader.reader.bilingualDidChange")
+    /// Feature #71 WI-7: posted when a chapter section is stitched into the
+    /// EPUB continuous-scroll DOM (`sectionMaterialized` lifecycle hook).
+    /// Appended/prepended sections never fire `didFinish`, so this is the
+    /// per-section signal the EPUB bilingual surfaces modifier observes to
+    /// drive a SECTION-SCOPED enumerate (`enumerateJS(spineIndex:)`) — keeping
+    /// each stitched chapter's bids namespaced (`s{N}b…`) so translations
+    /// inject per section with no cross-section bid bleed. The `userInfo`
+    /// carries `["fingerprintKey": String, "spineIndex": Int]` so a renderer
+    /// filters to its own book and section. Posted with no View capture from
+    /// the long-lived `EPUBContinuousScrollConfig.onSectionMaterialized`
+    /// closure.
+    static let readerBilingualSectionMaterialized = Notification.Name(
+        "vreader.reader.bilingualSectionMaterialized")
+    /// Feature #71 WI-7 (Gate-4 round-2 MEDIUM 2): posted when a chapter section
+    /// is EVICTED from the EPUB continuous-scroll DOM (the coordinator's
+    /// far-from-anchor trim emits `removeChapterSectionJS`). The bilingual
+    /// surfaces modifier observes this to drop the evicted section's bucket from
+    /// `EPUBBilingualOrchestrator.blocksBySection` (`clearBlocks(forSection:)`),
+    /// so stale per-section caches do not accumulate and worsen any flatten
+    /// path. Mirror of `.readerBilingualSectionMaterialized` — `userInfo`
+    /// carries `["fingerprintKey": String, "spineIndex": Int]` and it is posted
+    /// with no View capture from the long-lived
+    /// `EPUBContinuousScrollCoordinator` eviction path via the config's
+    /// `onSectionEvicted` seam.
+    static let readerBilingualSectionEvicted = Notification.Name(
+        "vreader.reader.bilingualSectionEvicted")
     /// Feature #56 WI-13: posted by the PDF below-page bilingual panel's
     /// offline-state Retry button. The PDF host observes and calls
     /// `BilingualReadingViewModel.retryUnit(currentUnit)` to refetch

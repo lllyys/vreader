@@ -75,6 +75,15 @@ final class EPUBContinuousScrollCoordinator {
     /// Optional per-chapter divider title (chapter heading shown at the seam).
     private let dividerTitle: (@MainActor (Int) -> String?)?
 
+    /// Feature #71 WI-7 (Gate-4 round-2 MEDIUM 2): invoked with a spine index
+    /// AFTER its remove (eviction) JS eval succeeds, so a far-side trim signals
+    /// downstream consumers (the bilingual orchestrator drops that section's
+    /// stale block bucket). Fires only on a successful remove — a failed remove
+    /// leaves the section in the DOM, so the callback must not fire and the
+    /// bucket must stay. Default no-op for callers (tests, paged mode) that
+    /// don't track per-section state.
+    private let onSectionEvicted: (@MainActor (Int) -> Void)?
+
     /// Bumped on mode-switch / reopen / book-change to discard stale in-flight
     /// `chapterBodyProvider` results.
     private(set) var generation = UUID()
@@ -93,7 +102,8 @@ final class EPUBContinuousScrollCoordinator {
         chapterBodyProvider: @escaping @MainActor (Int) async throws -> EPUBChapterBody,
         evaluate: @escaping @MainActor (String) async throws -> Void,
         dividerTitle: (@MainActor (Int) -> String?)? = nil,
-        restoreFraction: Double? = nil
+        restoreFraction: Double? = nil,
+        onSectionEvicted: (@MainActor (Int) -> Void)? = nil
     ) {
         self.window = initialWindow
         self.maxSpan = max(maxSpan, 1)
@@ -101,6 +111,7 @@ final class EPUBContinuousScrollCoordinator {
         self.evaluate = evaluate
         self.dividerTitle = dividerTitle
         self.restoreFraction = restoreFraction
+        self.onSectionEvicted = onSectionEvicted
     }
 
     /// Discards any in-flight materialization and resets the busy flag. Call on
@@ -357,6 +368,20 @@ final class EPUBContinuousScrollCoordinator {
                 Self.log.warning("evict remove eval failed for \(index): \(String(describing: error), privacy: .public)")
                 break
             }
+            // Feature #71 WI-7 (Gate-4 round-3 MEDIUM 3): re-check the generation
+            // AFTER the remove eval awaited. If the coordinator was invalidated
+            // mid-eval (mode-switch / reopen / book-change), this is a stale
+            // task — firing `onSectionEvicted` would clear a block bucket in the
+            // NEW generation (whose DOM the bilingual orchestrator is now
+            // tracking), corrupting it. Bail without signalling, exactly like the
+            // window-publish guard below.
+            guard gen == generation else { return }
+            // Feature #71 WI-7 (Gate-4 round-2 MEDIUM 2): the remove succeeded —
+            // signal the evicted spine index so the bilingual orchestrator drops
+            // that section's stale block bucket. Fires AFTER the eval (a failed
+            // remove `break`s above, leaving the section + its bucket alone) and
+            // AFTER the gen re-check (so a stale task never signals).
+            onSectionEvicted?(index)
             committed = next
         }
         guard gen == generation else { return }

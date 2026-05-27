@@ -86,12 +86,18 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     let onLoadError: @MainActor (String) -> Void
     /// Called when the user selects text in the EPUB content.
     var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
-    /// Feature #56 WI-10: receives the `[{bid, text}]` payload posted
-    /// by `EPUBBilingualJS.bilingualEnumerateJS` after a chapter
-    /// loads. Optional — call sites that don't enable bilingual mode
-    /// simply leave it `nil` and the handler short-circuits inside
-    /// the coordinator.
-    var onBilingualEnumerate: (@MainActor ([BilingualBlock]) -> Void)?
+    /// Feature #56 WI-10: receives the enumerate payload posted by
+    /// `EPUBBilingualJS.bilingualEnumerateJS` after a chapter loads.
+    /// Optional — call sites that don't enable bilingual mode simply
+    /// leave it `nil` and the handler short-circuits inside the
+    /// coordinator.
+    ///
+    /// Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1): the callback carries the
+    /// parsed `EPUBBilingualEnumeratePayload` (blocks + requested section)
+    /// rather than a bare `[BilingualBlock]`, so the container can route an
+    /// EMPTY scoped enumerate to `clearBlocks(forSection:)` instead of clearing
+    /// every bucket.
+    var onBilingualEnumerate: (@MainActor (EPUBBilingualEnumeratePayload) -> Void)?
     /// Called after a page finishes loading (for highlight restoration).
     /// The closure receives a JS evaluator that runs JavaScript on the WKWebView.
     var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?

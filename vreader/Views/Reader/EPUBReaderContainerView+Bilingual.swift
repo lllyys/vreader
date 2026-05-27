@@ -26,7 +26,17 @@
 //   VM sets it on first-enable; the sheet's confirm closes it via
 //   `dismissSetupSheet()`.
 //
+// Feature #71 WI-7: the CONTINUOUS-SCROLL section-scoped hooks
+// (per-section enumerate / inject, section materialize / evict, the
+// reinject-all-materialized path, and the `EPUBBilingualSurfacesModifier`
+// modifier graph) live in `EPUBReaderContainerView+ContinuousBilingual.swift`.
+// This file keeps the paged/global pipeline + VM lifecycle + setup-sheet +
+// More-toggle. It is slightly over the ~300-line guideline (pre-existing,
+// WI-10 surface); the WI-7 split moved the new section hooks out rather than
+// re-cutting WI-10's stable surface.
+//
 // @coordinates-with: EPUBReaderContainerView.swift,
+//   EPUBReaderContainerView+ContinuousBilingual.swift (WI-7 section hooks),
 //   EPUBBilingualJS.swift, EPUBBilingualOrchestrator.swift,
 //   EPUBBilingualPipeline.swift, BilingualReadingViewModel.swift,
 //   ChapterTranslationPrefetcher.swift, ReaderNotifications.swift,
@@ -131,11 +141,58 @@ extension EPUBReaderContainerView {
             userInfo: ["fingerprintKey": viewModel.bookFingerprintKey])
     }
 
+    /// Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1): route a parsed
+    /// `EPUBBilingualEnumeratePayload` from the JS enumerate channel.
+    ///
+    /// The continuous-scroll scoped enumerate posts an envelope
+    /// (`{sectionIndex, blocks}`) so an EMPTY result (a section with no
+    /// translatable leaf blocks) still carries its section identity. Without
+    /// the envelope, an empty `[]` would lose the section and fall into the
+    /// paged `updateBlocks([])` path that clears EVERY bucket — wiping adjacent
+    /// stitched sections' caches. Here, an empty scoped envelope clears ONLY
+    /// that section. A non-empty payload (or the paged bare-array path with no
+    /// requested section) delegates to `handleBilingualBlocks(_:)`.
+    func handleBilingualEnumeratePayload(_ payload: EPUBBilingualEnumeratePayload) {
+        if payload.blocks.isEmpty {
+            // An emptied scoped enumerate: clear ONLY that section's stale
+            // bucket so a later inject for it cannot resolve old bids. A bare
+            // empty array (paged path, no requested section) is dropped — there
+            // is no section to attribute it to, and clearing every bucket would
+            // be wrong.
+            if let section = payload.requestedSectionIndex {
+                bilingualOrchestrator.clearBlocks(forSection: section)
+            }
+            return
+        }
+        handleBilingualBlocks(payload.blocks)
+    }
+
     /// Process a parsed `[BilingualBlock]` from the JS enumerate
     /// channel. Replaces the orchestrator's block list and asks the
     /// VM to prefetch translation for the current unit (idempotent —
     /// the VM dedupes by `lastTriggerUnit`).
+    ///
+    /// Feature #71 WI-7: when the payload carries per-block section
+    /// tags (continuous-scroll mode — a per-section enumerate stamps
+    /// `sectionIndex` on every entry), the blocks are routed into the
+    /// orchestrator's PER-SECTION bucket via `updateBlocks(_:forSection:)`
+    /// so a re-enumerate of one stitched chapter cannot clobber an
+    /// adjacent section's stamped blocks. The paged/global path (no
+    /// section tags) keeps the replace-all `updateBlocks(_:)` behaviour.
     func handleBilingualBlocks(_ blocks: [BilingualBlock]) {
+        if let section = blocks.first?.sectionIndex,
+           blocks.allSatisfy({ $0.sectionIndex == section }) {
+            // Continuous-scroll per-section enumerate: bucket under the
+            // section so other stitched chapters' caches are preserved, then
+            // drive the prefetch + inject for THAT section's own unit (HIGH 1
+            // — NOT the current visible locator, which differs for the ±1 /
+            // lazily-stitched off-screen sections).
+            bilingualOrchestrator.updateBlocks(blocks, forSection: section)
+            handleSectionBilingualBlocks(forSection: section)
+            return
+        }
+        // Paged / global path (one chapter per document, untagged blocks) —
+        // replace all and drive off the current visible locator.
         bilingualOrchestrator.updateBlocks(blocks)
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
         guard let locator = viewModel.makeCurrentLocator() else { return }
@@ -178,8 +235,18 @@ extension EPUBReaderContainerView {
 
     /// Build clear JS and push through `pendingHighlightJS` to
     /// remove every bilingual decoration node from the live chapter.
+    ///
+    /// Feature #71 WI-7 (Gate-4 round-3 HIGH 2): in continuous-scroll mode the
+    /// bridge returns from `updateUIView` before consuming `pendingJS`, so the
+    /// `pendingHighlightJS` push is dead. Route the clear (and the per-section
+    /// bucket reset) through the live evaluator instead. The paged path keeps
+    /// the `pendingHighlightJS` seam unchanged.
     func clearBilingualDecorations() {
-        pendingHighlightJS = bilingualOrchestrator.clearJS()
+        if isBilingualContinuousMode {
+            disableBilingualContinuous()
+        } else {
+            pendingHighlightJS = bilingualOrchestrator.clearJS()
+        }
     }
 
     /// Handle a `.readerMoreBilingual` notification — toggle the
@@ -216,6 +283,11 @@ extension EPUBReaderContainerView {
                 granularity: vm.granularity
             )
             showBilingualSetupSheet = true
+        } else if isBilingualContinuousMode {
+            // Feature #71 WI-7 (Gate-4 round-3 HIGH 2): in continuous mode the
+            // bridge never consumes `pendingJS`, so enumerate every materialized
+            // window section through the live evaluator instead.
+            enableBilingualContinuousAllSections()
         } else {
             // No setup-sheet gate — run enumerate against the live
             // DOM. The bridge's `pendingJS` seam applies it
@@ -227,13 +299,26 @@ extension EPUBReaderContainerView {
     }
 
     /// Handle a `.readerBilingualDidChange` notification — when the
-    /// VM's prefetch lands, the cached translations for the current
+    /// VM's prefetch lands, the cached translations for the affected
     /// unit are ready; build inject JS and push it. The VM also
     /// posts on disable; we route that through `clearBilingualDecorations`.
+    ///
+    /// Feature #71 WI-7 (Gate-4 round-2 HIGH 2): in continuous-scroll mode the
+    /// prefetch that just landed may belong to ANY materialized stitched
+    /// section (the ±1 fill / lazily-stitched off-screen sections), not the
+    /// current visible locator's. Reinject EVERY materialized section whose
+    /// unit has a cached translation — each scoped to its own blocks — so a
+    /// translation for an off-screen section paints correctly when the reader
+    /// reaches it, with no cross-section bleed. The paged path keeps the
+    /// single-locator inject.
     func handleBilingualDidChange() {
         guard let vm = bilingualViewModel else { return }
         if !vm.isEnabled {
             clearBilingualDecorations()
+            return
+        }
+        if isBilingualContinuousMode {
+            reinjectAllMaterializedBilingualSections()
             return
         }
         guard let locator = viewModel.makeCurrentLocator() else { return }
@@ -261,7 +346,15 @@ extension EPUBReaderContainerView {
         // for a different reason and enumerate had already run for
         // the current chapter (`updateBlocks` replaces — stale
         // blocks get replaced with the fresh stamp pass).
-        pendingHighlightJS = bilingualOrchestrator.enumerateJS()
+        //
+        // Feature #71 WI-7 (Gate-4 round-3 HIGH 2): in continuous mode the
+        // bridge never consumes `pendingJS`; enumerate every materialized
+        // window section through the live evaluator instead.
+        if isBilingualContinuousMode {
+            enableBilingualContinuousAllSections()
+        } else {
+            pendingHighlightJS = bilingualOrchestrator.enumerateJS()
+        }
     }
 
     /// Dismiss the setup sheet without persisting changes and turn
@@ -289,6 +382,21 @@ extension EPUBReaderContainerView {
             onBilingualDidChange: { handleBilingualDidChange() },
             onReTranslateApplied: { unit, segments in
                 bilingualViewModel?.applyReTranslateResult(segments, for: unit)
+            },
+            // Feature #71 WI-7: a stitched chapter materialized in
+            // continuous-scroll mode — drive a section-scoped enumerate
+            // through the LIVE continuous evaluator (Gate-4 round-2 MEDIUM 1 —
+            // not the single `pendingHighlightJS` slot, which a burst of
+            // materialize posts would overwrite). The enumerate result routes
+            // back into `handleBilingualBlocks` → `handleSectionBilingualBlocks`.
+            onSectionMaterialized: { spineIndex in
+                enumerateBilingualSection(spineIndex: spineIndex)
+            },
+            // Feature #71 WI-7 (Gate-4 round-2 MEDIUM 2): a stitched chapter was
+            // evicted from the continuous-scroll DOM — drop its stale block
+            // bucket so per-section caches don't accumulate.
+            onSectionEvicted: { spineIndex in
+                handleBilingualSectionEvicted(spineIndex: spineIndex)
             },
             showSetupSheet: $showBilingualSetupSheet,
             sheetView: { AnyView(bilingualSetupSheetView) }
@@ -318,48 +426,4 @@ extension EPUBReaderContainerView {
     }
 }
 
-/// View modifier bundling EPUB bilingual reading hooks — the lazy
-/// VM construction, the More-menu toggle, the `.readerBilingualDidChange`
-/// observer, and the first-enable setup sheet. Encapsulates the
-/// modifier graph so the container body stays under SwiftUI's
-/// type-inference budget.
-struct EPUBBilingualSurfacesModifier: ViewModifier {
-    let bookFingerprintKey: String
-    let spineCount: Int?
-    let ensureViewModel: () -> Void
-    let onMoreBilingualToggle: () -> Void
-    let onBilingualDidChange: () -> Void
-    /// Feature #56 WI-15: routes a re-translate result to the format's
-    /// bilingual VM so the open chapter re-renders without waiting for the
-    /// next prefetch trigger.
-    let onReTranslateApplied: (TranslationUnitID, [String]) -> Void
-    @Binding var showSetupSheet: Bool
-    let sheetView: () -> AnyView
-
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: spineCount) { _, _ in ensureViewModel() }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .readerMoreBilingual)
-            ) { _ in onMoreBilingualToggle() }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .readerBilingualDidChange)
-            ) { notification in
-                let key = notification.userInfo?["fingerprintKey"] as? String
-                guard key == bookFingerprintKey else { return }
-                onBilingualDidChange()
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .readerBilingualReTranslateApplied)
-            ) { notification in
-                guard let info = notification.userInfo,
-                      info["fingerprintKey"] as? String == bookFingerprintKey,
-                      let unit = info["unit"] as? TranslationUnitID,
-                      let segments = info["segments"] as? [String]
-                else { return }
-                onReTranslateApplied(unit, segments)
-            }
-            .sheet(isPresented: $showSetupSheet) { sheetView() }
-    }
-}
 #endif

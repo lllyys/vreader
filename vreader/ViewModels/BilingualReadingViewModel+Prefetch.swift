@@ -114,6 +114,32 @@ extension BilingualReadingViewModel {
         }
     }
 
+    // MARK: - Unit-scoped prefetch (Feature #71 WI-7)
+
+    /// Prefetch ONE explicit unit's translation without touching the
+    /// visible-locator trigger state (`lastTriggerUnit` / `triggerRequestSeq`).
+    ///
+    /// Feature #71 WI-7 (Gate-4 round-2 HIGH 1): continuous-scroll EPUB stitches
+    /// multiple chapter sections into one document; an adjacent section that
+    /// materializes is frequently OFF-SCREEN relative to the visible locator
+    /// (the ±1 initial fill, lazy append/prepend). The whole-book
+    /// `handlePositionChange` trigger resolves its prefetch targets from the
+    /// CURRENT visible locator and dedupes against `lastTriggerUnit`, so reusing
+    /// it for an off-screen section would either no-op (wrong unit) or clobber
+    /// the dedupe anchor. This seam prefetches exactly the named unit through
+    /// the same `startPrefetch` internals (cache-guarded, in-flight-guarded,
+    /// epoch-stamped) so a section-materialize can warm its OWN unit's
+    /// translation independent of where the reader is looking.
+    ///
+    /// No-op when bilingual is disabled, no prefetcher is attached, or the unit
+    /// is already cached / already in flight (`startPrefetch` guards the latter
+    /// two). Does NOT mark the unit unavailable on its own — the existing
+    /// `finishPrefetch` outcome handling applies.
+    func prefetchUnitIfNeeded(_ unit: TranslationUnitID) {
+        guard isEnabled, prefetcher != nil else { return }
+        startPrefetch(unit: unit, epoch: epoch)
+    }
+
     // MARK: - Unit-scoped retry (Feature #56 WI-13)
 
     /// Retry one unit's translation fetch. Designed for the PDF

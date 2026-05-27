@@ -47,18 +47,28 @@ import Foundation
 /// translates by index — `bid` is the renderer's lookup key, `text`
 /// is for parity / debugging.
 ///
-/// Feature #56 WI-11 (Gate-4 audit finding H2): `sectionIndex` is
-/// populated only by the Foliate renderer (`-1` / `nil` for EPUB),
-/// because Foliate can keep multiple section docs loaded at the
-/// same time and an unscoped enumerate would let one section's
-/// blocks bleed into the adjacent section's translation map. The
-/// EPUB enumerate is per-spine-document and never has that hazard,
-/// so the field is optional and defaults to `nil`.
+/// `sectionIndex` scopes a block to one stitched chapter section so
+/// per-section translation maps never bleed across sections. It is
+/// populated by two renderers:
+///   - **Foliate** (feature #56 WI-11, Gate-4 H2): foliate-js keeps
+///     multiple section docs loaded at once (paginated preload), so an
+///     unscoped enumerate would let one section's blocks bleed into an
+///     adjacent section's translation map.
+///   - **EPUB continuous-scroll** (feature #71 WI-7): the continuous
+///     path stitches multiple chapter `<section data-vreader-spine-index
+///     ="N">` blocks into ONE document, each materializing
+///     independently and driving its own per-section enumerate
+///     (`EPUBBilingualJS.bilingualEnumerateJS(spineIndex:)`).
+/// The legacy paged EPUB path (one chapter per document, no section
+/// tags) leaves the field `nil` — there is no cross-section hazard
+/// there, so it is optional and defaults to `nil`.
 struct BilingualBlock: Sendable, Equatable {
     let bid: String
     let text: String
-    /// Foliate-only: the section index the block came from. `nil`
-    /// for EPUB (one chapter document, no cross-section leakage).
+    /// The stitched-section index this block came from — set by the
+    /// Foliate renderer and the EPUB continuous-scroll path; `nil` for
+    /// the legacy paged EPUB path (one chapter document, no
+    /// cross-section leakage).
     let sectionIndex: Int?
 
     init(bid: String, text: String, sectionIndex: Int? = nil) {
@@ -66,6 +76,25 @@ struct BilingualBlock: Sendable, Equatable {
         self.text = text
         self.sectionIndex = sectionIndex
     }
+}
+
+/// The parsed shape of a `bilingualEnumerate` JS message.
+///
+/// Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1): surfaces the
+/// `requestedSectionIndex` so the container can
+/// `clearBlocks(forSection:)` when a previously-populated stitched
+/// section re-enumerates to `[]`. Mirrors
+/// `FoliateBilingualEnumeratePayload`.
+struct EPUBBilingualEnumeratePayload: Sendable, Equatable {
+    /// The stitched section the scoped enumerate walked. `nil` for the
+    /// paged/global path (the bare-array shape — one chapter per
+    /// document, no per-section identity).
+    let requestedSectionIndex: Int?
+    /// The enumerated blocks. May be empty even when
+    /// `requestedSectionIndex != nil` — that is the "this section
+    /// re-enumerated to empty, clear its stale bucket" signal callers
+    /// must respect rather than clearing every bucket.
+    let blocks: [BilingualBlock]
 }
 
 /// Pure glue between the EPUB JS enumerate channel and the bilingual
@@ -76,8 +105,52 @@ enum EPUBBilingualPipeline {
     /// `[BilingualBlock]`. Drops malformed entries (missing fields,
     /// wrong type, empty `bid` or `text`) and never throws — a partial
     /// enumerate is the right failure mode.
+    ///
+    /// Feature #71 WI-7: each entry's optional `sectionIndex` (an Int)
+    /// is read when present — continuous-scroll mode stitches multiple
+    /// chapter `<section>` blocks into one document and the
+    /// section-scoped enumerate (`EPUBBilingualJS.bilingualEnumerateJS(
+    /// spineIndex:)`) tags every posted block with its section so the
+    /// orchestrator can bucket per section with no cross-section
+    /// bleed. When the field is absent (paged/global path) it stays
+    /// `nil` — backward compatible.
+    ///
+    /// Accepts BOTH the paged bare-array shape (`[{bid, text}]`) and the
+    /// continuous-scroll envelope (`{sectionIndex, blocks}`) — the
+    /// envelope's blocks are returned flat. Use `parseEnumeratePayload`
+    /// when the caller needs the requested-section identity (to clear an
+    /// emptied section's bucket).
     static func parseEnumerateMessage(_ body: Any) -> [BilingualBlock] {
-        guard let array = body as? [Any] else { return [] }
+        parseEnumeratePayload(body).blocks
+    }
+
+    /// Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1): parses the full payload
+    /// including the requested-section identity. The scoped enumerate posts an
+    /// envelope `{sectionIndex: N, blocks: [...]}`; the paged/global path posts
+    /// the bare `[{bid, text}]` array (no section identity). An empty scoped
+    /// envelope still carries `requestedSectionIndex` so the handler can clear
+    /// ONLY that section rather than every bucket.
+    static func parseEnumeratePayload(_ body: Any) -> EPUBBilingualEnumeratePayload {
+        // Continuous-scroll envelope: `{sectionIndex, blocks: [...]}`.
+        if let dict = body as? [String: Any] {
+            let req = dict["sectionIndex"] as? Int
+            let blocks = parseBlocksArray(dict["blocks"] as? [Any] ?? [])
+            return EPUBBilingualEnumeratePayload(
+                requestedSectionIndex: req, blocks: blocks)
+        }
+        // Paged/global bare-array shape (one chapter per document). No
+        // per-section identity — an empty result cannot be attributed.
+        if let array = body as? [Any] {
+            return EPUBBilingualEnumeratePayload(
+                requestedSectionIndex: nil, blocks: parseBlocksArray(array))
+        }
+        return EPUBBilingualEnumeratePayload(
+            requestedSectionIndex: nil, blocks: [])
+    }
+
+    /// Pure block-list parser shared by both payload shapes. Drops malformed
+    /// entries (missing fields, wrong type, empty `bid`/`text`).
+    private static func parseBlocksArray(_ array: [Any]) -> [BilingualBlock] {
         var blocks: [BilingualBlock] = []
         blocks.reserveCapacity(array.count)
         for raw in array {
@@ -87,7 +160,9 @@ enum EPUBBilingualPipeline {
                   !bid.isEmpty, !text.isEmpty else {
                 continue
             }
-            blocks.append(BilingualBlock(bid: bid, text: text))
+            let sectionIndex = dict["sectionIndex"] as? Int
+            blocks.append(BilingualBlock(
+                bid: bid, text: text, sectionIndex: sectionIndex))
         }
         return blocks
     }

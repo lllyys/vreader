@@ -181,6 +181,74 @@ struct EPUBContinuousScrollCoordinatorTests {
         #expect(eval.removedSpineIndex(0))       // the far-behind chapter was removed
     }
 
+    @Test func eviction_firesOnSectionEvictedWithRemovedIndex() async {
+        // Feature #71 WI-7 (Gate-4 round-2 MEDIUM 2): the eviction path must
+        // signal the evicted spine index so the bilingual orchestrator drops
+        // that section's stale block bucket. The callback fires ONLY after the
+        // remove eval succeeds (same posture as the window advance).
+        let eval = RecordingEvaluator()
+        var evicted: [Int] = []
+        let c = EPUBContinuousScrollCoordinator(
+            initialWindow: EPUBSpineWindow.initial(anchor: 0, spineCount: 10)!,
+            maxSpan: 3,
+            chapterBodyProvider: { self.body($0) },
+            evaluate: { try await eval.evaluate($0) },
+            onSectionEvicted: { evicted.append($0) })
+        await c.handleBoundarySignal(signal(visible: 0, bottom: true)) // [0,1]
+        await c.handleBoundarySignal(signal(visible: 1, bottom: true)) // [0,2]
+        await c.handleBoundarySignal(signal(visible: 2, bottom: true)) // [0,3]→evict 0→[1,3]
+        #expect(evicted == [0])
+    }
+
+    @Test func eviction_doesNotFireOnSectionEvictedWhenRemoveEvalFails() async {
+        // A failed remove eval leaves the section in the DOM → its bilingual
+        // bucket must NOT be cleared, so the callback must not fire.
+        let eval = RecordingEvaluator()
+        var evicted: [Int] = []
+        let c = EPUBContinuousScrollCoordinator(
+            initialWindow: EPUBSpineWindow.initial(anchor: 0, spineCount: 10)!,
+            maxSpan: 3,
+            chapterBodyProvider: { self.body($0) },
+            evaluate: { try await eval.evaluate($0) },
+            onSectionEvicted: { evicted.append($0) })
+        await c.handleBoundarySignal(signal(visible: 0, bottom: true)) // [0,1]
+        await c.handleBoundarySignal(signal(visible: 1, bottom: true)) // [0,2]
+        // Make the NEXT eval (the append for index 3, then the evict remove) throw.
+        // Throwing on the append aborts before any remove, so no eviction signal.
+        eval.shouldThrow = true
+        await c.handleBoundarySignal(signal(visible: 2, bottom: true))
+        #expect(evicted.isEmpty)
+    }
+
+    @Test func eviction_doesNotFireOnSectionEvictedWhenInvalidatedDuringRemoveEval() async {
+        // Feature #71 WI-7 (Gate-4 round-3 MEDIUM 3): if the coordinator is
+        // invalidated WHILE the remove eval awaits (a mode-switch / reopen /
+        // book-change mid-eviction), the stale task must NOT signal
+        // `onSectionEvicted` — doing so would clear a block bucket in the NEW
+        // generation, whose DOM the bilingual orchestrator now tracks. The
+        // remove eval still EMITS (its loop-top gen-check passed), but the
+        // post-eval gen re-check must bail before the callback.
+        let eval = RecordingEvaluator()
+        let holder = CoordHolder()
+        var evicted: [Int] = []
+        let c = EPUBContinuousScrollCoordinator(
+            initialWindow: EPUBSpineWindow.initial(anchor: 0, spineCount: 10)!,
+            maxSpan: 3,
+            chapterBodyProvider: { self.body($0) },
+            evaluate: { try await eval.evaluate($0) },
+            onSectionEvicted: { evicted.append($0) })
+        holder.c = c
+        await c.handleBoundarySignal(signal(visible: 0, bottom: true)) // [0,1]
+        await c.handleBoundarySignal(signal(visible: 1, bottom: true)) // [0,2]
+        // Bump the generation DURING the evict remove eval.
+        eval.onRemoveEval = { holder.c?.invalidate() }
+        await c.handleBoundarySignal(signal(visible: 2, bottom: true)) // [0,3]→evict 0 (stale)
+        // The remove WAS emitted (loop-top gen-check passed before the await)…
+        #expect(eval.removedSpineIndex(0))
+        // …but the stale task must NOT have signalled the eviction.
+        #expect(evicted.isEmpty)
+    }
+
     // MARK: - dual boundary (round-1 [M3])
 
     @Test func nearTopAndBottom_extendsBothSides() async {

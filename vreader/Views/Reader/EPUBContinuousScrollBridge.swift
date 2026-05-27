@@ -77,6 +77,19 @@ struct EPUBContinuousScrollConfig {
         self.onSectionMaterialized = onSectionMaterialized
     }
 
+    /// The live evaluator the bridge binds to the `WKWebView`. Feature #71 WI-7
+    /// (Gate-4 round-2 MEDIUM 1): per-section bilingual enumerate / inject JS is
+    /// evaluated through THIS handle (the live continuous-scroll evaluator)
+    /// rather than the bridge's single `pendingHighlightJS` slot — multiple
+    /// section-materialize posts in quick succession would otherwise let a later
+    /// section's JS overwrite an earlier one before the bridge evaluates it.
+    /// A no-op (throws `noWebView`) before the webview mounts or after teardown.
+    @MainActor
+    func evaluateBilingual(_ js: String) {
+        let handle = self.handle
+        Task { @MainActor in try? await handle.evaluate(js) }
+    }
+
     /// Whole-book progress for a boundary signal, reusing the existing EPUB
     /// progress formula `(spineIndex + scrollFraction) / totalSpineItems`
     /// (`EPUBProgressCalculator`, unchanged — the windowed `{visibleSpineIndex,

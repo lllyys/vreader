@@ -78,11 +78,13 @@ extension EPUBWebViewBridge {
         #endif
         /// Callback for text selection events.
         var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
-        /// Feature #56 WI-10: receives the `[BilingualBlock]` parsed
-        /// from the JS `bilingualEnumerate` channel after a chapter
-        /// loads. `nil` for non-bilingual call sites; the message
-        /// handler short-circuits there.
-        var onBilingualEnumerate: (@MainActor ([BilingualBlock]) -> Void)?
+        /// Feature #56 WI-10: receives the `EPUBBilingualEnumeratePayload`
+        /// parsed from the JS `bilingualEnumerate` channel after a chapter
+        /// loads. `nil` for non-bilingual call sites; the message handler
+        /// short-circuits there. Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1):
+        /// carries the requested-section identity so an empty scoped enumerate
+        /// clears only that section.
+        var onBilingualEnumerate: (@MainActor (EPUBBilingualEnumeratePayload) -> Void)?
         /// Callback to restore highlights after page loads.
         /// Provides a JS evaluator so the container can inject restore scripts.
         var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?
@@ -263,10 +265,15 @@ extension EPUBWebViewBridge {
         /// invokes the enumerate JS will still receive (and drop) any
         /// stray payload.
         private func handleBilingualEnumerateMessage(_ body: Any) {
-            let blocks = EPUBBilingualPipeline.parseEnumerateMessage(body)
+            // Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1): parse the FULL payload
+            // (blocks + requested section). The continuous-scroll scoped
+            // enumerate posts `{sectionIndex, blocks}`; the paged path posts the
+            // bare array. Forwarding the requested section lets the container
+            // clear ONLY an emptied section's bucket.
+            let payload = EPUBBilingualPipeline.parseEnumeratePayload(body)
             guard let callback = onBilingualEnumerate else { return }
             Task { @MainActor in
-                callback(blocks)
+                callback(payload)
             }
         }
 

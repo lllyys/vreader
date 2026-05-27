@@ -95,7 +95,11 @@ struct EPUBReaderContainerView: View {
     /// open `.task`) when `epubLayout == .scroll`. Nil in paged mode, before
     /// metadata loads, or for an empty spine. Passed into `EPUBWebViewBridge`;
     /// nil ⇒ the legacy one-chapter-per-`loadFileURL` path.
-    @State private var continuousScrollConfig: EPUBContinuousScrollConfig?
+    // Feature #71 WI-7: `internal` (not `private`) so the
+    // `+ContinuousBilingual` extension can route per-section bilingual
+    // enumerate / inject JS through the live evaluator handle instead of the
+    // single `pendingHighlightJS` slot (Gate-4 round-2 MEDIUM 1).
+    @State var continuousScrollConfig: EPUBContinuousScrollConfig?
 
     // MARK: - Feature #56 WI-10: bilingual reading state
 
@@ -590,7 +594,20 @@ struct EPUBReaderContainerView: View {
             // WI-6b-iii: restore the saved intra-chapter position. `anchorIndex`
             // is the saved chapter's spine index, so the coordinator scrolls it
             // to this fraction once the initial window materializes.
-            restoreFraction: viewModel.currentPosition?.progression
+            restoreFraction: viewModel.currentPosition?.progression,
+            // Feature #71 WI-7 (Gate-4 round-2 MEDIUM 2): on eviction, post the
+            // per-section evicted signal so the bilingual surfaces modifier
+            // drops that section's stale block bucket. Captures only the book
+            // key by value (no View / weak viewModel) so this long-lived
+            // coordinator closure holds no View snapshot. No-op downstream when
+            // bilingual is off.
+            onSectionEvicted: { [bookKey = viewModel.bookFingerprintKey] spineIndex in
+                NotificationCenter.default.post(
+                    name: .readerBilingualSectionEvicted,
+                    object: nil,
+                    userInfo: ["fingerprintKey": bookKey, "spineIndex": spineIndex]
+                )
+            }
         )
         continuousScrollConfig = EPUBContinuousScrollConfig(
             coordinator: coordinator,
@@ -625,6 +642,19 @@ struct EPUBReaderContainerView: View {
             // Captures the book key + container by value (not the View / weak
             // viewModel) so the long-lived config closure holds no View snapshot.
             onSectionMaterialized: { [handle, container = modelContainer, bookKey = viewModel.bookFingerprintKey] spineIndex, href in
+                // Feature #71 WI-7: post the per-section materialize signal so
+                // the bilingual surfaces modifier (which has View context) can
+                // drive a SECTION-SCOPED enumerate for THIS stitched chapter
+                // without this long-lived config closure capturing the View.
+                // The enumerate namespaces bids `s{N}b…` and tags each posted
+                // block `sectionIndex: N`, so translations inject per section
+                // with no cross-section bid bleed. No-op downstream when
+                // bilingual is off.
+                NotificationCenter.default.post(
+                    name: .readerBilingualSectionMaterialized,
+                    object: nil,
+                    userInfo: ["fingerprintKey": bookKey, "spineIndex": spineIndex]
+                )
                 guard let container else { return }
                 Task { @MainActor in
                     let persistence = PersistenceActor(modelContainer: container)
@@ -742,8 +772,8 @@ struct EPUBReaderContainerView: View {
             // current unit; on `.readerBilingualDidChange` the
             // observer builds the inject JS and pushes it through
             // `pendingHighlightJS`.
-            onBilingualEnumerate: { blocks in
-                handleBilingualBlocks(blocks)
+            onBilingualEnumerate: { payload in
+                handleBilingualEnumeratePayload(payload)
             },
             // Feature #64 WI-8: the EPUB highlight tap still posts
             // `.readerHighlightTapped` (from the JS `highlightTapHandler`
@@ -769,8 +799,27 @@ struct EPUBReaderContainerView: View {
                 // or a re-render of the same chapter) does not
                 // enumerate ahead of the user's confirm. The
                 // confirm path pushes its own enumerate.
+                //
+                // Feature #71 WI-7 (Gate-4 round-3 HIGH 1): the GLOBAL
+                // (paged) enumerate must NEVER run in continuous-scroll
+                // mode. In continuous mode `didFinish` fires for the
+                // bootstrap doc (empty body OR the whole stitched DOM);
+                // a global enumerate posts an UNTAGGED payload that
+                // routes through the paged `updateBlocks(_:)` and
+                // clobbers the per-section buckets (or creates a flat
+                // `-1` cache). Continuous enumerate is driven PER SECTION
+                // off `.readerBilingualSectionMaterialized`
+                // (`enumerateBilingualSection(spineIndex:)`), so gate the
+                // global enumerate to paged mode only.
+                // The continuous-mode test mirrors the bridge's own
+                // `continuousScroll: isPaged ? nil : continuousScrollConfig`
+                // gate exactly (a stale config under a paged layout is NOT
+                // continuous), so the global enumerate runs iff the bridge is
+                // actually rendering one-chapter-per-document.
+                let isContinuous = (isPaged ? nil : continuousScrollConfig) != nil
                 if bilingualViewModel?.isEnabled == true,
-                   !showBilingualSetupSheet {
+                   !showBilingualSetupSheet,
+                   !isContinuous {
                     evaluateJS(bilingualOrchestrator.enumerateJS())
                 }
             },
