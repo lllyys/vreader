@@ -398,6 +398,26 @@ struct EPUBContinuousScrollCoordinatorTests {
         #expect(c.window == windowBefore)
     }
 
+    @Test func navigate_outOfWindow_fractionZero_stillScrollsToTarget() async {
+        // WI-8 polish: out-of-window navigate at fraction 0 must DETERMINISTICALLY
+        // scroll to the target anchor — not rely on the browser's prepend
+        // scroll-anchoring (which lands ~one safe-area-inset short, the 77px
+        // in-window/out-of-window landing inconsistency found in device verify).
+        // `fillNeighboursAndScroll` previously skipped the scroll entirely when
+        // fraction == 0; the navigate path now forces it.
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 0, spineCount: 10, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()   // window → [0,1]
+        eval.evaluatedJS.removeAll()
+        let moved = await c.navigate(toSpineIndex: 7, fraction: 0)   // fraction 0!
+        #expect(moved)
+        #expect(c.window.anchor == 7)
+        // Even at fraction 0, a scroll to section 7 is emitted (deterministic landing).
+        #expect(eval.evaluatedJS.contains {
+            $0.contains("root.scrollTop = el.offsetTop") && $0.contains(#"data-vreader-spine-index="7""#)
+        })
+    }
+
     @Test func navigate_rapidDoubleInWindow_secondIsDropped() async {
         // Gate-4 round-3 High: in-window `navigate` must hold the mutation lane
         // for its whole body (not just the out-of-window rebuild). Two rapid

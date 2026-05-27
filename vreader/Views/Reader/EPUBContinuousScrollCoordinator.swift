@@ -242,7 +242,10 @@ final class EPUBContinuousScrollCoordinator {
         }
         // Commit the rebuilt window AFTER the anchor is in the DOM.
         window = committed
-        await fillNeighboursAndScroll(anchor: target, scrollFraction: fraction)
+        // force: a TOC/bookmark/search jump must land deterministically on the
+        // target chapter even at fraction 0 — not rely on the prepend's
+        // scroll-anchoring (the 77px landing inconsistency, WI-8 device-verify).
+        await fillNeighboursAndScroll(anchor: target, scrollFraction: fraction, force: true)
         // A mode-switch/reopen during the neighbour fill bails inside
         // `fillNeighboursAndScroll`; don't report success to the caller then
         // (Gate-4 round-3) — it would update the position from a stale task.
@@ -254,7 +257,17 @@ final class EPUBContinuousScrollCoordinator {
     /// it to `scrollFraction` (nil / ≤0 ⇒ chapter top). Shared by the initial
     /// open + `navigate` after each has committed the anchor section + window.
     /// Caller holds the mutation lane.
-    private func fillNeighboursAndScroll(anchor: Int, scrollFraction: Double?) async {
+    /// `force` (navigate-only): scroll to the anchor even at fraction 0. The
+    /// out-of-window rebuild PREPENDS the backward neighbour above the anchor,
+    /// and the browser's scroll-anchoring then bumps `scrollTop` to keep the
+    /// anchor visually in place — landing ~one safe-area-inset short of the
+    /// anchor's `offsetTop` (the 77px in-window/out-of-window landing
+    /// inconsistency found in device verify). Forcing the explicit scroll makes
+    /// the out-of-window landing DETERMINISTIC (exact `offsetTop`), matching the
+    /// in-window branch. `materializeInitialWindow` does NOT force: its anchor
+    /// sits at the document top, so a fraction-0/nil restore must stay at
+    /// `scrollTop` 0 (heading below the inset), not scroll to `offsetTop`.
+    private func fillNeighboursAndScroll(anchor: Int, scrollFraction: Double?, force: Bool = false) async {
         let gen = generation
         // Fill ±1 around the anchor (each a no-op at the respective book edge).
         // Re-check the generation BETWEEN the extends (Gate-4): a mode-switch /
@@ -266,7 +279,7 @@ final class EPUBContinuousScrollCoordinator {
         if window.canExtendBackward { await extend(forward: false) }
         guard gen == generation else { return }
         // Best-effort scroll — a failed eval just leaves the chapter top.
-        if let fraction = scrollFraction, fraction > 0 {
+        if let fraction = scrollFraction, force || fraction > 0 {
             try? await evaluate(
                 EPUBContinuousScrollJS.scrollToSpineFractionJS(spineIndex: anchor, fraction: fraction)
             )
