@@ -166,11 +166,32 @@ enum EPUBChapterCSSScoper {
             break
         }
 
+        // Non-root selectors → descendant of the section. They still match content
+        // nested in `.vreader-chapter-content` (descendant combinator), so the
+        // WI-6b-ii wrapper is transparent to them.
         guard consumedRoot else { return sectionSelector + " " + String(chars) }
+        // WI-6b-ii: root selectors (`html`/`body`/`:root`) collapse onto the
+        // chapter CONTENT WRAPPER, not the section. The chapter body's children
+        // live inside `<div class="vreader-chapter-content">` (a direct child of
+        // the section) so highlight-XPath re-rooting resolves against a node whose
+        // child-index space matches the original `<body>` (the prepended divider
+        // + scoped `<style>` stay outside it). A child-combinator root selector
+        // like `html > body > img` must therefore target
+        // `[section] > .vreader-chapter-content > img`, not `[section] > img`
+        // (which would match nothing now that body's children are nested).
+        let bodyRoot = sectionSelector + " > " + Self.chapterContentSelector
         let remainder = String(chars[i..<n])
-        if remainder.isEmpty { return sectionSelector + qualifiers }
-        return sectionSelector + qualifiers + (connector ?? "") + remainder
+        if remainder.isEmpty { return bodyRoot + qualifiers }
+        return bodyRoot + qualifiers + (connector ?? "") + remainder
     }
+
+    /// WI-6b-ii: the class selector of the per-section chapter-body wrapper that
+    /// `EPUBContinuousScrollJS.sectionHTML` emits (`vreader-chapter-content`).
+    /// Root CSS selectors collapse onto it — it is the synthetic `<body>` in the
+    /// stitched document, and its child-index space matches the original `<body>`
+    /// so `__vreader_createHighlightInSection` can re-root stored XPaths. Must
+    /// stay in sync with the class literal in `sectionHTML`.
+    static let chapterContentSelector = ".vreader-chapter-content"
 
     private static func rootTokenPrefix(_ chars: [Character], at index: Int) -> String? {
         for token in ["html", "body", ":root"] {

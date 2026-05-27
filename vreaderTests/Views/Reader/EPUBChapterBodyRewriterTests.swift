@@ -343,29 +343,33 @@ struct EPUBChapterBodyRewriterTests {
         #expect(body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"] p"#))
     }
 
-    @Test("leading root-selector chain collapses onto the section (html body p -> [section] p)")
+    // WI-6b-ii: root selectors now collapse onto the chapter-content wrapper
+    // (`[section] > .vreader-chapter-content`), the synthetic <body> in the
+    // stitched document, so child-combinator root selectors resolve through the
+    // wrapper that holds the chapter body's children.
+    @Test("leading root-selector chain collapses onto the content wrapper (html body p -> [section] > .vreader-chapter-content p)")
     func rootChainCollapsed() {
         let body = rewrite(#"""
         <html><head><style>html body p { color: red; }</style></head><body><p>x</p></body></html>
         """#)
-        #expect(body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"] p"#))
+        #expect(body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"] > .vreader-chapter-content p"#))
         #expect(!body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"] body"#))
     }
 
-    @Test("root element with a direct qualifier attaches without a descendant space (body.x -> [section].x)")
+    @Test("root element with a direct qualifier attaches to the wrapper (body.x -> [section] > .vreader-chapter-content.x)")
     func rootDirectQualifier() {
         let body = rewrite(#"""
         <html><head><style>body.theme { background: white; }</style></head><body class="theme"><p>x</p></body></html>
         """#)
-        #expect(body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"].theme"#))
+        #expect(body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"] > .vreader-chapter-content.theme"#))
     }
 
-    @Test("child combinator after root is preserved (html > body > img -> [section] > img)")
+    @Test("child combinator after root is preserved (html > body > img -> [section] > .vreader-chapter-content > img)")
     func rootChildCombinator() {
         let body = rewrite(#"""
         <html><head><style>html > body > img { width: 100%; }</style></head><body><img/></body></html>
         """#)
-        #expect(body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"] > img"#))
+        #expect(body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"] > .vreader-chapter-content > img"#))
     }
 
     @Test("multiple <body> tags: only the first body's content is taken")
