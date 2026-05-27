@@ -72,11 +72,13 @@ enum EPUBContinuousScrollJS {
     /// scroll column (forward scroll into the next chapter).
     static func appendChapterSectionJS(_ body: EPUBChapterBody, dividerTitle: String?) -> String {
         let escaped = FoliateJSEscaper.escapeForJSString(sectionHTML(body, dividerTitle: dividerTitle))
+        let escapedHref = FoliateJSEscaper.escapeForJSString(body.href)
         return """
         (function() {
             var root = document.getElementById('\(scrollRootID)');
             if (!root) { return; }
             root.insertAdjacentHTML('beforeend', '\(escaped)');
+            \(sectionMaterializedPostJS(spineIndex: body.spineIndex, escapedHref: escapedHref))
         })();
         """
     }
@@ -87,6 +89,7 @@ enum EPUBContinuousScrollJS {
     /// the insert, then add the height delta back to `scrollTop` after.
     static func prependChapterSectionJS(_ body: EPUBChapterBody, dividerTitle: String?) -> String {
         let escaped = FoliateJSEscaper.escapeForJSString(sectionHTML(body, dividerTitle: dividerTitle))
+        let escapedHref = FoliateJSEscaper.escapeForJSString(body.href)
         return """
         (function() {
             var root = document.getElementById('\(scrollRootID)');
@@ -95,7 +98,20 @@ enum EPUBContinuousScrollJS {
             root.insertAdjacentHTML('afterbegin', '\(escaped)');
             var after = root.scrollHeight;
             root.scrollTop += (after - before);
+            \(sectionMaterializedPostJS(spineIndex: body.spineIndex, escapedHref: escapedHref))
         })();
+        """
+    }
+
+    /// Feature #71 WI-6b-ii: the `sectionMaterialized` lifecycle post. Appended/
+    /// prepended sections never fire `webView(_:didFinish:)` (only the bootstrap
+    /// doc does), so each stitch posts `{spineIndex, href}` to the
+    /// `sectionMaterialized` handler, which drives per-section highlight restore
+    /// (and, later, bilingual enumerate). Wrapped in try/catch so a missing
+    /// handler (the channel is only registered in continuous mode) is inert.
+    private static func sectionMaterializedPostJS(spineIndex: Int, escapedHref: String) -> String {
+        """
+        try { window.webkit.messageHandlers.sectionMaterialized.postMessage({ spineIndex: \(spineIndex), href: '\(escapedHref)' }); } catch (e) {}
         """
     }
 
@@ -230,9 +246,17 @@ enum EPUBContinuousScrollJS {
             <div class="vreader-divider-rule"></div></div>
             """
         }
+        // WI-6b-ii: wrap the chapter body in `.vreader-chapter-content` so the
+        // section-scoped highlight restore (`__vreader_createHighlightInSection`)
+        // can resolve stored chapter-document XPaths relative to a node whose
+        // child-index space matches the ORIGINAL `<body>` exactly. Without the
+        // wrapper the prepended divider `<div>` + scoped `<style>` would shift
+        // element-index paths (a chapter's `div[1]` would read as the section's
+        // `div[2]`), misplacing highlights. The divider + style stay OUTSIDE the
+        // wrapper so they never enter that index space.
         return """
         <section data-vreader-spine-index="\(body.spineIndex)" data-vreader-href="\(htmlEscape(body.href))">\
-        \(divider)\(body.scopedStyleHTML)\(body.bodyHTML)</section>
+        \(divider)\(body.scopedStyleHTML)<div class="vreader-chapter-content">\(body.bodyHTML)</div></section>
         """
     }
 

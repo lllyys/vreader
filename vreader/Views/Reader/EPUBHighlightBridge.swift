@@ -202,6 +202,45 @@ enum EPUBHighlightBridge {
         """
     }
 
+    /// Feature #71 WI-6b-ii: section-scoped restore for continuous scroll mode.
+    /// Like `restoreHighlightsJS` but targets one stitched section by
+    /// `spineIndex`, re-rooting each stored chapter-document range into that
+    /// section's `.vreader-chapter-content` wrapper via
+    /// `__vreader_createHighlightInSection`. Returns "" for an empty set.
+    static func restoreHighlightsInSectionJS(
+        spineIndex: Int,
+        highlights: [(id: String, range: EPUBSerializedRange, color: String)]
+    ) -> String {
+        guard !highlights.isEmpty else { return "" }
+
+        var calls: [String] = []
+        for hl in highlights {
+            let escapedId = jsEscape(hl.id)
+            let escapedStartPath = jsEscape(hl.range.startContainerPath)
+            let escapedEndPath = jsEscape(hl.range.endContainerPath)
+            let escapedColor = jsEscape(hl.color)
+            calls.append("""
+                window.__vreader_createHighlightInSection(
+                    \(spineIndex),
+                    '\(escapedId)',
+                    '\(escapedStartPath)',
+                    \(hl.range.startOffset),
+                    '\(escapedEndPath)',
+                    \(hl.range.endOffset),
+                    '\(escapedColor)'
+                );
+            """)
+        }
+
+        return """
+        (function() {
+            if (typeof window.__vreader_createHighlightInSection === 'function') {
+                \(calls.joined(separator: "\n            "))
+            }
+        })();
+        """
+    }
+
     /// JavaScript to clear all highlights from the page.
     static let clearAllHighlightsJS = """
     (function() {

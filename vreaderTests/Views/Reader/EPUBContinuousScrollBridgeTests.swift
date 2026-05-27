@@ -168,3 +168,54 @@ struct EPUBContinuousScrollBridgeTests {
         #expect(msg.sectionHref == nil)
     }
 }
+
+// MARK: - Feature #71 WI-6b-ii: EPUBSectionMaterialized.parse
+
+@Suite("EPUBSectionMaterialized.parse (Feature #71 WI-6b-ii)")
+struct EPUBSectionMaterializedParseTests {
+
+    @Test("parses a well-formed sectionMaterialized message")
+    func parsesWellFormed() throws {
+        let signal = try #require(EPUBSectionMaterialized.parse(
+            ["spineIndex": 4, "href": "OEBPS/ch4.xhtml"]
+        ))
+        #expect(signal.spineIndex == 4)
+        #expect(signal.href == "OEBPS/ch4.xhtml")
+    }
+
+    @Test("accepts an integer-valued NSNumber spineIndex (JS bridge coercion)")
+    func acceptsNSNumberIndex() throws {
+        let signal = try #require(EPUBSectionMaterialized.parse(
+            ["spineIndex": NSNumber(value: 2), "href": "ch2.xhtml"]
+        ))
+        #expect(signal.spineIndex == 2)
+    }
+
+    @Test("rejects a non-dictionary body")
+    func rejectsNonDict() {
+        #expect(EPUBSectionMaterialized.parse("nope") == nil)
+        #expect(EPUBSectionMaterialized.parse([1, 2, 3]) == nil)
+    }
+
+    @Test("rejects a missing or negative spineIndex")
+    func rejectsBadIndex() {
+        #expect(EPUBSectionMaterialized.parse(["href": "ch1.xhtml"]) == nil)
+        #expect(EPUBSectionMaterialized.parse(["spineIndex": -1, "href": "ch1.xhtml"]) == nil)
+    }
+
+    @Test("rejects a fractional spineIndex (malformed, not floored)")
+    func rejectsFractionalIndex() {
+        #expect(EPUBSectionMaterialized.parse(["spineIndex": 3.9, "href": "ch1.xhtml"]) == nil)
+    }
+
+    @Test("rejects a bool-backed spineIndex (a JS true is not index 1)")
+    func rejectsBoolIndex() {
+        #expect(EPUBSectionMaterialized.parse(["spineIndex": true, "href": "ch1.xhtml"]) == nil)
+    }
+
+    @Test("rejects a missing or empty href")
+    func rejectsBadHref() {
+        #expect(EPUBSectionMaterialized.parse(["spineIndex": 0]) == nil)
+        #expect(EPUBSectionMaterialized.parse(["spineIndex": 0, "href": ""]) == nil)
+    }
+}

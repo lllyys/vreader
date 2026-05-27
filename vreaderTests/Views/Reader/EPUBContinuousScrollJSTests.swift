@@ -156,4 +156,41 @@ struct EPUBContinuousScrollJSTests {
         #expect(js.contains(#"can\'t"#))
         #expect(!js.contains("can't stop"))
     }
+
+    // MARK: - WI-6b-ii: chapter-content wrapper + sectionMaterialized lifecycle
+
+    private func sectionBody(spineIndex: Int = 3, href: String = "OEBPS/text/c3.xhtml") -> EPUBChapterBody {
+        EPUBChapterBody(spineIndex: spineIndex, href: href, bodyHTML: "<p>hello</p>", scopedStyleHTML: "")
+    }
+
+    @Test("appended section wraps the body in .vreader-chapter-content after the divider")
+    func appendWrapsChapterContent() {
+        let js = EPUBContinuousScrollJS.appendChapterSectionJS(sectionBody(), dividerTitle: "Chapter 3")
+        #expect(js.contains("vreader-chapter-content"))
+        // The wrapper opens AFTER the divider so the divider div stays out of the
+        // chapter body's element-index space (WI-6b-ii re-rooting invariant).
+        let dividerIdx = js.range(of: "vreader-chapter-divider")
+            .map { js.distance(from: js.startIndex, to: $0.lowerBound) }
+        let contentIdx = js.range(of: "vreader-chapter-content")
+            .map { js.distance(from: js.startIndex, to: $0.lowerBound) }
+        #expect(dividerIdx != nil && contentIdx != nil && dividerIdx! < contentIdx!)
+    }
+
+    @Test("appended section posts sectionMaterialized with spineIndex + href")
+    func appendPostsSectionMaterialized() {
+        let js = EPUBContinuousScrollJS.appendChapterSectionJS(
+            sectionBody(spineIndex: 3, href: "OEBPS/text/c3.xhtml"), dividerTitle: nil)
+        #expect(js.contains("messageHandlers.sectionMaterialized.postMessage"))
+        #expect(js.contains("spineIndex: 3"))
+        #expect(js.contains("OEBPS/text/c3.xhtml"))
+    }
+
+    @Test("prepended section also posts sectionMaterialized + wraps content")
+    func prependPostsSectionMaterialized() {
+        let js = EPUBContinuousScrollJS.prependChapterSectionJS(
+            sectionBody(spineIndex: 2, href: "ch2.xhtml"), dividerTitle: nil)
+        #expect(js.contains("messageHandlers.sectionMaterialized.postMessage"))
+        #expect(js.contains("spineIndex: 2"))
+        #expect(js.contains("vreader-chapter-content"))
+    }
 }

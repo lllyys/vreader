@@ -160,6 +160,10 @@ struct EPUBWebViewBridge: UIViewRepresentable {
             )
             userContentController.addUserScript(observerScript)
             userContentController.add(weakHandler, name: "continuousScrollHandler")
+            // WI-6b-ii: per-section lifecycle channel — each materialized section
+            // posts {spineIndex, href} so the container restores its highlights
+            // (appended sections never fire didFinish).
+            userContentController.add(weakHandler, name: "sectionMaterialized")
         } else {
             // Add scroll progress tracking script (throttled)
             let script = WKUserScript(

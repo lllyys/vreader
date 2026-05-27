@@ -572,6 +572,24 @@ struct EPUBReaderContainerView: View {
                         name: .readerPositionDidChange, object: locator
                     )
                 }
+            },
+            // WI-6b-ii: a chapter section was stitched in. Appended sections
+            // never fire `didFinish`, so restore THIS section's highlights here,
+            // re-rooted into the section via `__vreader_createHighlightInSection`.
+            // Captures the book key + container by value (not the View / weak
+            // viewModel) so the long-lived config closure holds no View snapshot.
+            onSectionMaterialized: { [handle, container = modelContainer, bookKey = viewModel.bookFingerprintKey] spineIndex, href in
+                guard let container else { return }
+                Task { @MainActor in
+                    let persistence = PersistenceActor(modelContainer: container)
+                    let highlights = (try? await persistence.fetchHighlights(
+                        forBookWithKey: bookKey
+                    )) ?? []
+                    let js = EPUBHighlightActions.restoreHighlightsInSectionJS(
+                        highlights: highlights, href: href, spineIndex: spineIndex
+                    )
+                    if !js.isEmpty { try? await handle.evaluate(js) }
+                }
             }
         )
     }

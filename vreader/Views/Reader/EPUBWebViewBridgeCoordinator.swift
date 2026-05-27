@@ -187,6 +187,10 @@ extension EPUBWebViewBridge {
                 handleContinuousScrollMessage(message.body)
                 return
             }
+            if message.name == "sectionMaterialized" {
+                handleSectionMaterializedMessage(message.body)
+                return
+            }
             guard message.name == "progressHandler",
                   let progress = message.body as? Double else { return }
             Task { @MainActor in
@@ -216,6 +220,17 @@ extension EPUBWebViewBridge {
                 onProgressChange(progress)
                 await config.coordinator.handleBoundarySignal(signal)
             }
+        }
+
+        /// Feature #71 WI-6b-ii: a chapter section was stitched into the DOM.
+        /// Appended/prepended sections never fire `webView(_:didFinish:)` (only
+        /// the bootstrap doc does), so this is the per-section lifecycle hook the
+        /// container uses to restore that section's highlights (re-rooted into
+        /// the section). No-op when the config is absent.
+        private func handleSectionMaterializedMessage(_ body: Any) {
+            guard let config = continuousScroll,
+                  let signal = EPUBSectionMaterialized.parse(body) else { return }
+            config.onSectionMaterialized(signal.spineIndex, signal.href)
         }
 
         /// Parses a `{id, rect}` payload from the JS `highlightTapHandler`

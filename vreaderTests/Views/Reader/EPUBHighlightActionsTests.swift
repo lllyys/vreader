@@ -261,4 +261,71 @@ struct EPUBHighlightActionsRestoreTests {
         #expect(js.isEmpty)
     }
 }
+
+// MARK: - Feature #71 WI-6b-ii: section-scoped restore (continuous scroll)
+
+@Suite("EPUBHighlightActions — restoreHighlightsInSectionJS (WI-6b-ii)")
+struct EPUBHighlightActionsSectionRestoreTests {
+
+    private func sectionCallCount(_ js: String) -> Int {
+        js.components(separatedBy: "__vreader_createHighlightInSection(").count - 1
+    }
+
+    @Test("targets the section-scoped API, not the document-rooted one")
+    func targetsSectionAPI() {
+        let r = makeHighlightRecord(href: "ch2.xhtml", range: makeTestRange())
+        let js = EPUBHighlightActions.restoreHighlightsInSectionJS(
+            highlights: [r], href: "ch2.xhtml", spineIndex: 3
+        )
+        #expect(js.contains("__vreader_createHighlightInSection"))
+        // The document-rooted call (open paren) must NOT appear.
+        #expect(!js.contains("__vreader_createHighlight("))
+        #expect(sectionCallCount(js) == 1)
+    }
+
+    @Test("filters to the section's href")
+    func filtersByHref() {
+        let ch1 = makeHighlightRecord(href: "ch1.xhtml")
+        let ch2a = makeHighlightRecord(href: "ch2.xhtml")
+        let ch2b = makeHighlightRecord(href: "ch2.xhtml",
+            range: makeTestRange(startOffset: 20, endOffset: 30))
+        let js = EPUBHighlightActions.restoreHighlightsInSectionJS(
+            highlights: [ch1, ch2a, ch2b], href: "ch2.xhtml", spineIndex: 5
+        )
+        #expect(sectionCallCount(js) == 2)  // both ch2 highlights, not ch1
+    }
+
+    @Test("empty href returns empty string")
+    func emptyHref() {
+        let r = makeHighlightRecord(href: "ch1.xhtml")
+        #expect(EPUBHighlightActions.restoreHighlightsInSectionJS(
+            highlights: [r], href: "", spineIndex: 0).isEmpty)
+    }
+
+    @Test("no matching href returns empty string")
+    func noMatch() {
+        let r = makeHighlightRecord(href: "ch1.xhtml")
+        #expect(EPUBHighlightActions.restoreHighlightsInSectionJS(
+            highlights: [r], href: "ch9.xhtml", spineIndex: 9).isEmpty)
+    }
+
+    @Test("carries the spineIndex, range paths/offsets, and color")
+    func carriesRangeData() {
+        let r = makeHighlightRecord(
+            href: "ch1.xhtml",
+            range: makeTestRange(
+                startPath: "/html/body/div[2]/p[1]/text()[1]", startOffset: 5,
+                endPath: "/html/body/div[2]/p[1]/text()[1]", endOffset: 12),
+            color: "green"
+        )
+        let js = EPUBHighlightActions.restoreHighlightsInSectionJS(
+            highlights: [r], href: "ch1.xhtml", spineIndex: 7
+        )
+        #expect(js.contains("/html/body/div[2]/p[1]/text()[1]"))
+        #expect(js.contains("7,"))   // spineIndex as the first call argument
+        #expect(js.contains("5,"))   // startOffset
+        #expect(js.contains("12,"))  // endOffset
+        #expect(js.contains("green"))
+    }
+}
 #endif

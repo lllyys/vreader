@@ -56,17 +56,25 @@ struct EPUBContinuousScrollConfig {
     /// reopen would otherwise restore to a stale chapter. Default is a no-op for
     /// callers (tests) that don't track position.
     let onWindowedPosition: @MainActor (_ visibleSpineIndex: Int, _ intraFraction: Double) -> Void
+    /// WI-6b-ii: invoked when a chapter section is materialized into the DOM
+    /// (the `sectionMaterialized` JS post — appended/prepended sections never
+    /// fire `didFinish`). The container restores that section's highlights
+    /// (and, later, bilingual enumerate) re-rooted into the section. Default is
+    /// a no-op for callers (tests) that don't drive per-section restore.
+    let onSectionMaterialized: @MainActor (_ spineIndex: Int, _ href: String) -> Void
 
     init(
         coordinator: EPUBContinuousScrollCoordinator,
         totalSpineCount: Int,
         handle: EPUBWebViewEvaluatorHandle,
-        onWindowedPosition: @escaping @MainActor (_ visibleSpineIndex: Int, _ intraFraction: Double) -> Void = { _, _ in }
+        onWindowedPosition: @escaping @MainActor (_ visibleSpineIndex: Int, _ intraFraction: Double) -> Void = { _, _ in },
+        onSectionMaterialized: @escaping @MainActor (_ spineIndex: Int, _ href: String) -> Void = { _, _ in }
     ) {
         self.coordinator = coordinator
         self.totalSpineCount = totalSpineCount
         self.handle = handle
         self.onWindowedPosition = onWindowedPosition
+        self.onSectionMaterialized = onSectionMaterialized
     }
 
     /// Whole-book progress for a boundary signal, reusing the existing EPUB
@@ -158,5 +166,42 @@ extension EPUBScrollBoundarySignal {
         if let b = any as? Bool { return b }
         if let n = any as? NSNumber { return n.boolValue }
         return false
+    }
+}
+
+/// Feature #71 WI-6b-ii: the `sectionMaterialized` JS post — `{spineIndex, href}`
+/// emitted after a chapter section is appended/prepended into the stitched DOM.
+/// Drives per-section highlight restore (appended sections never fire
+/// `didFinish`). Pure value + parser, unit-testable without a live WKWebView.
+struct EPUBSectionMaterialized: Equatable, Sendable {
+    let spineIndex: Int
+    let href: String
+
+    /// Parse a `sectionMaterialized` message body. Returns nil when the body is
+    /// not a dictionary, `spineIndex` is missing/negative/non-integral, or
+    /// `href` is missing/empty. `spineIndex` accepts `Int` or an integer-valued
+    /// `NSNumber` (JS numbers arrive as `NSNumber` over the bridge); a
+    /// bool-backed `NSNumber` is rejected.
+    nonisolated static func parse(_ body: Any) -> EPUBSectionMaterialized? {
+        guard let dict = body as? [String: Any] else { return nil }
+        guard let spineIndex = intValue(dict["spineIndex"]), spineIndex >= 0 else { return nil }
+        guard let href = dict["href"] as? String, !href.isEmpty else { return nil }
+        return EPUBSectionMaterialized(spineIndex: spineIndex, href: href)
+    }
+
+    private nonisolated static func intValue(_ any: Any?) -> Int? {
+        if any is Bool { return nil }
+        if let i = any as? Int { return i }
+        if let n = any as? NSNumber {
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
+            let d = n.doubleValue
+            guard d.isFinite, d == d.rounded() else { return nil }
+            return n.intValue
+        }
+        if let d = any as? Double {
+            guard d.isFinite, d == d.rounded() else { return nil }
+            return Int(d)
+        }
+        return nil
     }
 }
