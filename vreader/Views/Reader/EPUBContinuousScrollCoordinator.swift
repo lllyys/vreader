@@ -126,6 +126,41 @@ final class EPUBContinuousScrollCoordinator {
         }
     }
 
+    /// Feature #71 WI-6b-i: materialize the INITIAL window into the (empty)
+    /// bootstrap document. WI-4's `extend` assumes the window's chapters are
+    /// already in the DOM; on a fresh open NONE are, so this seeds the anchor
+    /// chapter's section first, then extends ±1 (no-op at the book edges). A
+    /// failed anchor append aborts with the window unchanged (the same [H4]
+    /// "don't advance on a failed eval" posture as `extend`), so a bootstrap
+    /// whose first chapter can't render leaves a clean empty document rather
+    /// than a half-stitched one. Call once after the bridge loads the bootstrap.
+    func materializeInitialWindow() async {
+        let gen = generation
+        let anchor = window.anchor
+        let body: EPUBChapterBody
+        do {
+            body = try await chapterBodyProvider(anchor)
+        } catch {
+            Self.log.error("initial anchor \(anchor) materialize failed: \(String(describing: error), privacy: .public)")
+            return
+        }
+        // Stale (mode-switch / reopen during the await) or a provider that
+        // returned the wrong chapter → abort without touching the DOM/window.
+        guard gen == generation, body.spineIndex == anchor else { return }
+        do {
+            try await evaluate(
+                EPUBContinuousScrollJS.appendChapterSectionJS(body, dividerTitle: dividerTitle?(anchor))
+            )
+        } catch {
+            Self.log.error("initial anchor \(anchor) append failed: \(String(describing: error), privacy: .public)")
+            return // window stays at [anchor, anchor]; nothing stitched
+        }
+        guard gen == generation else { return }
+        // Fill ±1 around the anchor (each a no-op at the respective book edge).
+        if window.canExtendForward { await extend(forward: true) }
+        if window.canExtendBackward { await extend(forward: false) }
+    }
+
     // MARK: - Private
 
     private func extend(forward: Bool) async {

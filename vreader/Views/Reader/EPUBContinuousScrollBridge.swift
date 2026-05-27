@@ -22,6 +22,8 @@
 
 import Foundation
 
+#if canImport(UIKit)
+
 /// The `continuousScroll:` input on `EPUBWebViewBridge` (nil ⇒ the legacy
 /// one-chapter-per-`loadFileURL` path, byte-identical for paged + the existing
 /// single-chapter scroll behaviour). When non-nil, the bridge stitches a windowed
@@ -30,6 +32,10 @@ import Foundation
 /// Holds a reference to the `@MainActor` coordinator + the book's spine count
 /// (for the windowed progress mapping). Constructed by the WI-6 container, which
 /// owns the `chapterBodyProvider` + restore logic the coordinator is wired with.
+///
+/// Gated to `canImport(UIKit)` because it carries the live-`WKWebView`
+/// `EPUBWebViewEvaluatorHandle` (WI-6b-i). The pure `EPUBScrollBoundarySignal.parse`
+/// extension below stays ungated so the parser remains unit-testable without UIKit.
 @MainActor
 struct EPUBContinuousScrollConfig {
     /// The window-transition decision engine (WI-4). The bridge forwards every
@@ -37,10 +43,30 @@ struct EPUBContinuousScrollConfig {
     let coordinator: EPUBContinuousScrollCoordinator
     /// Total spine items in the book — the denominator for whole-book progress.
     let totalSpineCount: Int
+    /// WI-6b-i late-binding evaluator: the container builds this handle, captures
+    /// it in `coordinator.evaluate`, AND hands it here so the bridge can bind
+    /// `handle.webView = webView` in `makeUIView` once the live `WKWebView` exists.
+    /// One handle is shared by both ends — the coordinator emits section JS through
+    /// it, the bridge populates its `webView` reference per generation.
+    let handle: EPUBWebViewEvaluatorHandle
+    /// WI-6b-i (re-audit finding 1, Critical): continuous-mode position update.
+    /// The bridge calls this with the windowed `{visibleSpineIndex, intraFraction}`
+    /// so the container can persist the chapter the reader scrolled *into* — the
+    /// Double-only `onProgressChange` can't carry which section is on screen, so a
+    /// reopen would otherwise restore to a stale chapter. Default is a no-op for
+    /// callers (tests) that don't track position.
+    let onWindowedPosition: @MainActor (_ visibleSpineIndex: Int, _ intraFraction: Double) -> Void
 
-    init(coordinator: EPUBContinuousScrollCoordinator, totalSpineCount: Int) {
+    init(
+        coordinator: EPUBContinuousScrollCoordinator,
+        totalSpineCount: Int,
+        handle: EPUBWebViewEvaluatorHandle,
+        onWindowedPosition: @escaping @MainActor (_ visibleSpineIndex: Int, _ intraFraction: Double) -> Void = { _, _ in }
+    ) {
         self.coordinator = coordinator
         self.totalSpineCount = totalSpineCount
+        self.handle = handle
+        self.onWindowedPosition = onWindowedPosition
     }
 
     /// Whole-book progress for a boundary signal, reusing the existing EPUB
@@ -62,6 +88,8 @@ struct EPUBContinuousScrollConfig {
         )
     }
 }
+
+#endif
 
 extension EPUBScrollBoundarySignal {
 

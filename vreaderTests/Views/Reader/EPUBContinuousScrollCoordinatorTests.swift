@@ -220,6 +220,49 @@ struct EPUBContinuousScrollCoordinatorTests {
         #expect(eval.removedSpineIndex(0))              // the remove WAS emitted (gen current at the loop-top check)
     }
 
+    // MARK: - materializeInitialWindow (Feature #71 WI-6b-i)
+
+    @Test func materializeInitialWindow_appendsAnchorThenExtendsBothSides() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 2, spineCount: 5, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()
+        // Anchor (2) + forward (3) appended; backward (1) prepended → window [1,3].
+        #expect(eval.appends.contains { $0.contains("data-vreader-spine-index=\"2\"") })
+        #expect(eval.appends.contains { $0.contains("data-vreader-spine-index=\"3\"") })
+        #expect(eval.prepends.contains { $0.contains("data-vreader-spine-index=\"1\"") })
+        #expect(c.window.lo == 1 && c.window.hi == 3 && c.window.anchor == 2)
+    }
+
+    @Test func materializeInitialWindow_atFirstChapter_appendsAnchorAndForwardOnly() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 0, spineCount: 5, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()
+        #expect(eval.appends.contains { $0.contains("data-vreader-spine-index=\"0\"") })
+        #expect(eval.appends.contains { $0.contains("data-vreader-spine-index=\"1\"") })
+        #expect(eval.prepends.isEmpty)
+        #expect(c.window.lo == 0 && c.window.hi == 1)
+    }
+
+    @Test func materializeInitialWindow_singleChapter_appendsAnchorOnly() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 0, spineCount: 1, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()
+        #expect(eval.appends.count == 1)
+        #expect(eval.appends.contains { $0.contains("data-vreader-spine-index=\"0\"") })
+        #expect(eval.prepends.isEmpty)
+        #expect(c.window.lo == 0 && c.window.hi == 0)
+    }
+
+    @Test func materializeInitialWindow_anchorAppendFails_windowUnchanged_noExtend() async {
+        let eval = RecordingEvaluator()
+        eval.shouldThrow = true
+        let c = makeCoordinator(anchor: 2, spineCount: 5, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()
+        // The anchor append threw → abort: no sections, window stays [2,2].
+        #expect(eval.appends.isEmpty)
+        #expect(c.window == EPUBSpineWindow.initial(anchor: 2, spineCount: 5)!)
+    }
+
     /// A tiny @MainActor gate so a stub provider can be held mid-materialization.
     @MainActor
     final class CheckedContinuationGate {

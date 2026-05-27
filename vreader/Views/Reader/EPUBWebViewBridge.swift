@@ -245,6 +245,13 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.previousIsPaged = isPaged
         context.coordinator.onPaginationReady = onPaginationReady
         context.coordinator.continuousScroll = continuousScroll
+        // Feature #71 WI-6b-i: bind the late-binding evaluator handle to this
+        // freshly-created webView so the coordinator's `evaluate` closure (which
+        // captured the same handle) can stitch chapter sections into it. The
+        // bootstrap load in `updateUIView` happens after this, and the bootstrap's
+        // `didFinish` triggers the coordinator's initial materialize — by then the
+        // handle's `webView` is bound.
+        continuousScroll?.handle.webView = webView
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
         webView.accessibilityIdentifier = "epubWebView"
@@ -273,6 +280,26 @@ struct EPUBWebViewBridge: UIViewRepresentable {
 
         // Update scroll enabled state when layout mode changes
         webView.scrollView.isScrollEnabled = !isPaged
+
+        // Feature #71 WI-6b-i: continuous mode loads ONE bootstrap document and
+        // then stitches chapter sections into it via the coordinator's evaluator
+        // (driven from the bootstrap's `didFinish`). The single-chapter
+        // `loadFileURL` path below never runs in this mode. Load the bootstrap
+        // exactly once — re-loading would wipe the stitched DOM. (Live theme
+        // re-inject + mode-switch teardown are WI-6b-iii.)
+        if continuousScroll != nil {
+            if !context.coordinator.didLoadContinuousBootstrap {
+                context.coordinator.didLoadContinuousBootstrap = true
+                loadContinuousBootstrap(into: webView)
+            }
+            // Deliberately do NOT record `currentURL` here. Leaving it unchanged
+            // means a later switch OUT of continuous mode (→ paged) sees
+            // `currentURL != contentURL`, so the legacy path force-reloads the
+            // real chapter and wipes the stitched bootstrap. (Full mode-switch
+            // teardown — coordinator generation bump + observer-script swap — is
+            // WI-6b-iii; this only guarantees the DOM is replaced on switch.)
+            return
+        }
 
         // Issue 5: When isPaged toggles without a URL change, inject/remove pagination CSS live.
         let isPagedChanged = context.coordinator.previousIsPaged != isPaged
@@ -436,6 +463,38 @@ struct EPUBWebViewBridge: UIViewRepresentable {
             Task { @MainActor in
                 onPendingJSCompleted?()
             }
+        }
+    }
+
+    /// Feature #71 WI-6b-i: load the continuous-scroll bootstrap document.
+    ///
+    /// Re-audit finding 3: WKWebView's navigation policy cancels non-`file://`
+    /// navigations and `loadHTMLString(_:baseURL:)` sandboxes `file://`
+    /// subresource access, so a string-loaded bootstrap can't read the rewriter's
+    /// absolute `file://` image / stylesheet refs. We therefore write a
+    /// file-backed bootstrap under the extracted root and `loadFileURL` it with
+    /// `allowingReadAccessTo: baseDirectory`, which grants the document read
+    /// access to the whole extracted tree (chapters + resources). The theme CSS
+    /// is baked into the bootstrap at construction (`bootstrapDocumentHTML`).
+    private func loadContinuousBootstrap(into webView: WKWebView) {
+        let html = EPUBContinuousScrollJS.bootstrapDocumentHTML(themeCSS: themeCSS ?? "")
+        let bootstrapURL = baseDirectory.appendingPathComponent("__vreader_continuous_bootstrap.html")
+        guard let data = html.data(using: .utf8) else {
+            AppLogger.epub.error("continuous bootstrap: failed to encode HTML")
+            onLoadError("Failed to prepare continuous scroll document")
+            return
+        }
+        do {
+            try data.write(to: bootstrapURL)
+            AppLogger.epub.info(
+                "loadContinuousBootstrap: \(bootstrapURL.lastPathComponent, privacy: .public)"
+            )
+            webView.loadFileURL(bootstrapURL, allowingReadAccessTo: baseDirectory)
+        } catch {
+            AppLogger.epub.error(
+                "continuous bootstrap write failed: \(String(describing: error), privacy: .public)"
+            )
+            onLoadError("Failed to prepare continuous scroll document")
         }
     }
 

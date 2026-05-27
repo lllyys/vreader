@@ -98,6 +98,10 @@ extension EPUBWebViewBridge {
         /// whole-book progress to `onProgressChange`. Nil ⇒ legacy single-doc
         /// `progressHandler` path.
         var continuousScroll: EPUBContinuousScrollConfig?
+        /// Feature #71 WI-6b-i: set once the bootstrap document has been requested
+        /// so `updateUIView` loads it exactly once (a reload would wipe the
+        /// stitched multi-chapter DOM).
+        var didLoadContinuousBootstrap = false
         private let onProgressChange: @MainActor (Double) -> Void
         private let onLoadError: @MainActor (String) -> Void
 
@@ -201,6 +205,13 @@ extension EPUBWebViewBridge {
             guard let config = continuousScroll,
                   let signal = EPUBScrollBoundarySignal.parse(body) else { return }
             let progress = config.windowedProgress(for: signal)
+            // WI-6b-i (re-audit finding 1): hand the container the windowed
+            // {visibleSpineIndex, intraFraction} so it can persist the chapter
+            // the reader scrolled into — `onProgressChange` only carries the
+            // whole-book Double, which can't say which section is on screen.
+            // Fired synchronously (no Task hop) so the position update isn't
+            // reordered behind the window-transition await below.
+            config.onWindowedPosition(signal.visibleSpineIndex, signal.intraFraction)
             Task { @MainActor in
                 onProgressChange(progress)
                 await config.coordinator.handleBoundarySignal(signal)
@@ -417,7 +428,16 @@ extension EPUBWebViewBridge {
                 }
             }
 
-            if isPaged {
+            if let cs = continuousScroll {
+                // Feature #71 WI-6b-i: the bootstrap document finished loading.
+                // Materialize the initial window (anchor chapter ±1) by stitching
+                // sections through the coordinator's evaluator. No single-chapter
+                // scroll-fraction / chapter-top offset restore here — section
+                // seeking against the inner scroll root is WI-6b-iii's job.
+                Task { @MainActor in
+                    await cs.coordinator.materializeInitialWindow()
+                }
+            } else if isPaged {
                 // Paged mode: inject pagination CSS, then query total pages
                 setupPagination(webView: webView)
             } else {

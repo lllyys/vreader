@@ -21,6 +21,13 @@ enum FeatureFlagKey: String, Sendable, CaseIterable {
     case sync
     case searchIndexingVerboseLogs
     case bilingualReading
+    /// Feature #71: EPUB continuous cross-chapter scroll. Ships dark while the
+    /// multi-WI build is in flight (WI-6b-i renders; navigation / position
+    /// restore / mode-switch arrive in WI-6b-ii/iii). Gating it off by default
+    /// keeps the live default `.scroll` mode on its existing single-chapter
+    /// behaviour, so the in-progress feature never regresses navigation. The
+    /// final WI flips the default on.
+    case epubContinuousScroll
 }
 
 /// Runtime feature flags with environment-based defaults, override support,
@@ -46,7 +53,7 @@ nonisolated final class FeatureFlags: Sendable {
     private static let persistenceKeyPrefix = "com.vreader.featureFlags."
 
     /// Flags that are persisted to UserDefaults when overridden.
-    private static let persistedFlags: Set<FeatureFlagKey> = [.aiAssistant]
+    private static let persistedFlags: Set<FeatureFlagKey> = [.aiAssistant, .epubContinuousScroll]
 
     // MARK: - Shared Singleton
 
@@ -127,6 +134,11 @@ nonisolated final class FeatureFlags: Sendable {
     /// Whether bilingual reading mode is enabled (feature #56).
     var bilingualReading: Bool { isEnabled(.bilingualReading) }
 
+    /// Whether EPUB continuous cross-chapter scroll is enabled (feature #71).
+    /// Ships dark; overridable per-launch via the persisted UserDefaults key
+    /// `com.vreader.featureFlags.epubContinuousScroll` (aiAssistant pattern).
+    var epubContinuousScroll: Bool { isEnabled(.epubContinuousScroll) }
+
     // MARK: - Override Management
 
     /// Sets a runtime override for a feature flag.
@@ -189,6 +201,9 @@ nonisolated final class FeatureFlags: Sendable {
             }
         case .bilingualReading:
             // Ships dark — enabled progressively via override (aiAssistant pattern).
+            return false
+        case .epubContinuousScroll:
+            // Feature #71 ships dark until the final WI — see the enum doc.
             return false
         }
     }

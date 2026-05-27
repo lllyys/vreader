@@ -141,11 +141,47 @@ struct FeatureFlagsTests {
     // MARK: - Flag Enum
 
     @Test func flagKeysAreExhaustive() {
-        #expect(FeatureFlagKey.allCases.count == 4)
+        #expect(FeatureFlagKey.allCases.count == 5)
         #expect(FeatureFlagKey.allCases.contains(.aiAssistant))
         #expect(FeatureFlagKey.allCases.contains(.sync))
         #expect(FeatureFlagKey.allCases.contains(.searchIndexingVerboseLogs))
         #expect(FeatureFlagKey.allCases.contains(.bilingualReading))
+        #expect(FeatureFlagKey.allCases.contains(.epubContinuousScroll))
+    }
+
+    // MARK: - Feature #71: epubContinuousScroll
+
+    @Test func epubContinuousScrollShipsDarkByDefault() {
+        // Ships dark in every environment until feature #71's final WI flips it.
+        for env in AppEnvironment.allCases {
+            let flags = FeatureFlags(environment: env)
+            #expect(flags.epubContinuousScroll == false)
+            #expect(flags.isEnabled(.epubContinuousScroll) == false)
+        }
+    }
+
+    @Test func epubContinuousScrollOverrideEnables() {
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .epubContinuousScroll)
+        #expect(flags.epubContinuousScroll == true)
+        flags.removeOverride(for: .epubContinuousScroll)
+        #expect(flags.epubContinuousScroll == false)
+    }
+
+    @Test func epubContinuousScrollOverridePersists() {
+        // Persisted (aiAssistant pattern) so a `defaults write` override survives
+        // across launches — the device-verification recipe relies on this.
+        let suiteName = "test.epubContinuousScroll.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let flags = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        flags.setOverride(true, for: .epubContinuousScroll)
+        #expect(defaults.bool(forKey: "com.vreader.featureFlags.epubContinuousScroll") == true)
+
+        // A fresh instance over the same defaults reads the persisted override.
+        let reloaded = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        #expect(reloaded.epubContinuousScroll == true)
     }
 
     // MARK: - Shared Singleton (Issue 1)
