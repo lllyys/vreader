@@ -82,18 +82,25 @@ final class EPUBContinuousScrollCoordinator {
     /// burst of near-boundary reports appends exactly one chapter.
     private(set) var isExtending = false
 
+    /// WI-6b-iii: intra-chapter progression (0...1) to scroll the anchor section
+    /// to after the initial window materializes (saved-position restore). Nil /
+    /// ≤0 opens at the chapter top.
+    private let restoreFraction: Double?
+
     init(
         initialWindow: EPUBSpineWindow,
         maxSpan: Int = 3,
         chapterBodyProvider: @escaping @MainActor (Int) async throws -> EPUBChapterBody,
         evaluate: @escaping @MainActor (String) async throws -> Void,
-        dividerTitle: (@MainActor (Int) -> String?)? = nil
+        dividerTitle: (@MainActor (Int) -> String?)? = nil,
+        restoreFraction: Double? = nil
     ) {
         self.window = initialWindow
         self.maxSpan = max(maxSpan, 1)
         self.chapterBodyProvider = chapterBodyProvider
         self.evaluate = evaluate
         self.dividerTitle = dividerTitle
+        self.restoreFraction = restoreFraction
     }
 
     /// Discards any in-flight materialization and resets the busy flag. Call on
@@ -157,8 +164,23 @@ final class EPUBContinuousScrollCoordinator {
         }
         guard gen == generation else { return }
         // Fill ±1 around the anchor (each a no-op at the respective book edge).
+        // Re-check the generation BETWEEN the extends (Gate-4): a mode-switch /
+        // reopen that bumps the token during the forward extend's await aborts it
+        // internally, but without this guard the backward extend would capture the
+        // NEW generation and stitch stale-window work into a rebuilt context.
         if window.canExtendForward { await extend(forward: true) }
+        guard gen == generation else { return }
         if window.canExtendBackward { await extend(forward: false) }
+        guard gen == generation else { return }
+        // WI-6b-iii: saved-position restore. The anchor section is materialized
+        // (and its ±1 neighbours, so offsetTop is stable), so scroll the anchor
+        // to the saved intra-chapter fraction. Best-effort — a failed scroll
+        // eval just leaves the reader at the chapter top.
+        if let fraction = restoreFraction, fraction > 0 {
+            try? await evaluate(
+                EPUBContinuousScrollJS.scrollToSpineFractionJS(spineIndex: anchor, fraction: fraction)
+            )
+        }
     }
 
     // MARK: - Private

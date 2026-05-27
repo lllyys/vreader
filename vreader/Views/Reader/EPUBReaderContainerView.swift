@@ -544,7 +544,11 @@ struct EPUBReaderContainerView: View {
             dividerTitle: { idx in
                 guard idx >= 0, idx < spineItems.count else { return nil }
                 return spineItems[idx].title
-            }
+            },
+            // WI-6b-iii: restore the saved intra-chapter position. `anchorIndex`
+            // is the saved chapter's spine index, so the coordinator scrolls it
+            // to this fraction once the initial window materializes.
+            restoreFraction: viewModel.currentPosition?.progression
         )
         continuousScrollConfig = EPUBContinuousScrollConfig(
             coordinator: coordinator,

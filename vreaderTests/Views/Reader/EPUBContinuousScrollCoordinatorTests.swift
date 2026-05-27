@@ -263,6 +263,44 @@ struct EPUBContinuousScrollCoordinatorTests {
         #expect(c.window == EPUBSpineWindow.initial(anchor: 2, spineCount: 5)!)
     }
 
+    // WI-6b-iii: saved-position restore — after the initial window materializes,
+    // scroll the anchor section to the restore fraction.
+    @Test func materializeInitialWindow_withRestoreFraction_scrollsAnchorToFraction() async {
+        let eval = RecordingEvaluator()
+        let c = EPUBContinuousScrollCoordinator(
+            initialWindow: EPUBSpineWindow.initial(anchor: 2, spineCount: 5)!,
+            chapterBodyProvider: { self.body($0) },
+            evaluate: { try await eval.evaluate($0) },
+            restoreFraction: 0.5
+        )
+        await c.materializeInitialWindow()
+        // A scrollToSpineFraction eval (recognized by its scrollTop math) was
+        // emitted, targeting the anchor section, AFTER the section appends.
+        let scrollEvals = eval.evaluatedJS.filter { $0.contains("root.scrollTop = el.offsetTop") }
+        #expect(scrollEvals.count == 1)
+        #expect(scrollEvals.first?.contains(#"data-vreader-spine-index="2""#) == true)
+        #expect(scrollEvals.first?.contains("* 0.5") == true)
+    }
+
+    @Test func materializeInitialWindow_noRestoreFraction_doesNotScroll() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 2, spineCount: 5, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()
+        #expect(eval.evaluatedJS.contains { $0.contains("root.scrollTop = el.offsetTop") } == false)
+    }
+
+    @Test func materializeInitialWindow_zeroRestoreFraction_doesNotScroll() async {
+        let eval = RecordingEvaluator()
+        let c = EPUBContinuousScrollCoordinator(
+            initialWindow: EPUBSpineWindow.initial(anchor: 0, spineCount: 3)!,
+            chapterBodyProvider: { self.body($0) },
+            evaluate: { try await eval.evaluate($0) },
+            restoreFraction: 0
+        )
+        await c.materializeInitialWindow()
+        #expect(eval.evaluatedJS.contains { $0.contains("root.scrollTop = el.offsetTop") } == false)
+    }
+
     /// A tiny @MainActor gate so a stub provider can be held mid-materialization.
     @MainActor
     final class CheckedContinuationGate {
