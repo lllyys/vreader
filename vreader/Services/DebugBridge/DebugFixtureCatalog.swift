@@ -60,6 +60,15 @@ enum DebugFixtureCatalog {
         // spine items also make the out-of-window rebuild branch reachable
         // (anchor 0 → window [0,1]; navigating to chapter 3/4 is out-of-window).
         DebugFixture(name: "multi-chapter-epub", format: .epub, resourceName: "multi-chapter-epub", resourceExtension: "epub"),
+        // Feature #17 (#361): a 6-page text-layer PDF so the PDF reader path is
+        // CU-free seedable+openable — the catalog had no PDF before, which
+        // blocked PDF render/theme verification. Generated via `cupsfilter`
+        // (selectable text layer, not rasterized). Note: PDF *highlight
+        // creation* still needs a real long-press-drag text selection (CU /
+        // real device) — there is no UTF-16 `highlight` driver for PDF — so this
+        // fixture unblocks open / render / theme verification, not the
+        // gesture-driven highlight criterion.
+        DebugFixture(name: "multi-page-pdf", format: .pdf, resourceName: "multi-page-pdf", resourceExtension: "pdf"),
     ]
 
     /// All catalog entries.
