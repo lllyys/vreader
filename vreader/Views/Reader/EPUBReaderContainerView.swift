@@ -276,6 +276,27 @@ struct EPUBReaderContainerView: View {
                   let meta = viewModel.metadata,
                   let base = resourceBase else { return }
             if let spineIndex = meta.spineItems.firstIndex(where: { $0.href == href }) {
+                // WI-8: continuous scroll drives the coordinator (scroll within the
+                // window, or rebuild the window around an out-of-window target)
+                // instead of the single-chapter `loadFileURL` path, which the
+                // bridge ignores in continuous mode. Without this, TOC / bookmark /
+                // search-result jumps no-op (the WI-6b-i Critical that gated the
+                // feature behind a flag). `progression` carries the intra-chapter
+                // landing fraction; a search `textQuote` highlight in continuous
+                // mode lands by fraction only (the find-in-section highlight is the
+                // deferred GH #1200-adjacent work). The persisted position is
+                // updated ONLY if the coordinator actually navigated (Gate-4
+                // round-2): a jump dropped because the mutation lane was busy must
+                // not move `currentPosition` while the DOM stays put.
+                if let config = continuousScrollConfig {
+                    let fraction = locator.progression ?? 0
+                    Task {
+                        if await config.coordinator.navigate(toSpineIndex: spineIndex, fraction: fraction) {
+                            viewModel.navigateToSpine(index: spineIndex)
+                        }
+                    }
+                    return
+                }
                 viewModel.navigateToSpine(index: spineIndex)
                 webViewError = nil
                 // Issue 6: Reset pagination on locator navigation (same as chapter nav).

@@ -141,7 +141,15 @@ final class EPUBContinuousScrollCoordinator {
     /// "don't advance on a failed eval" posture as `extend`), so a bootstrap
     /// whose first chapter can't render leaves a clean empty document rather
     /// than a half-stitched one. Call once after the bridge loads the bootstrap.
+    /// Materialize the anchor window on the freshly-loaded bootstrap. Holds the
+    /// mutation lane (`isExtending`) across the whole sequence (Gate-4 round-2
+    /// Critical) so a navigate / boundary signal arriving while the anchor
+    /// provider is suspended is dropped, not interleaved over the initial DOM.
     func materializeInitialWindow() async {
+        guard !isExtending else { return }
+        let wasExtending = isExtending
+        isExtending = true
+        defer { isExtending = wasExtending }
         let gen = generation
         let anchor = window.anchor
         let body: EPUBChapterBody
@@ -151,8 +159,6 @@ final class EPUBContinuousScrollCoordinator {
             Self.log.error("initial anchor \(anchor) materialize failed: \(String(describing: error), privacy: .public)")
             return
         }
-        // Stale (mode-switch / reopen during the await) or a provider that
-        // returned the wrong chapter → abort without touching the DOM/window.
         guard gen == generation, body.spineIndex == anchor else { return }
         do {
             try await evaluate(
@@ -160,9 +166,96 @@ final class EPUBContinuousScrollCoordinator {
             )
         } catch {
             Self.log.error("initial anchor \(anchor) append failed: \(String(describing: error), privacy: .public)")
-            return // window stays at [anchor, anchor]; nothing stitched
+            return
         }
         guard gen == generation else { return }
+        await fillNeighboursAndScroll(anchor: anchor, scrollFraction: restoreFraction)
+    }
+
+    /// WI-8: navigate the continuous reader to `target` spine index + the
+    /// intra-chapter `fraction` (TOC / bookmark / search-result jump). This is
+    /// the continuous-mode replacement for the single-chapter `loadFileURL`
+    /// navigate path — without it, `.readerNavigateToLocator` no-ops in
+    /// continuous mode (the WI-6b-i Critical that gated the feature behind a
+    /// flag). In-window targets just scroll (+ re-anchor so eviction trims
+    /// behind the new reading point); an out-of-window target rebuilds the
+    /// window around it (atomic clear-and-insert, then re-seed ±1).
+    ///
+    /// Serialized against initial-materialize / `extend` / another `navigate` via
+    /// `isExtending` (Gate-4): a jump arriving while the mutation lane is busy is
+    /// DROPPED, not interleaved into a half-built DOM. Returns `true` only when
+    /// the reader actually moved, so the caller updates the persisted position
+    /// only on a real navigation (Gate-4 round-2).
+    @discardableResult
+    func navigate(toSpineIndex target: Int, fraction: Double) async -> Bool {
+        guard target >= 0, target < window.spineCount else { return false }
+        guard !isExtending else { return false }
+        // Hold the mutation lane for the WHOLE navigate — in-window scroll AND
+        // out-of-window rebuild (Gate-4 round-3): two rapid jumps, or a boundary
+        // signal arriving while an in-window scroll eval is in flight, are
+        // serialized. The inner `extend` calls save/restore the flag, keeping it
+        // held through the ±1 fill.
+        isExtending = true
+        defer { isExtending = false }
+        let gen = generation
+
+        if window.contains(target) {
+            // Re-anchor only AFTER a successful scroll (Gate-4): a failed eval
+            // means the reader didn't move, so the eviction anchor must not.
+            do {
+                try await evaluate(
+                    EPUBContinuousScrollJS.scrollToSpineFractionJS(spineIndex: target, fraction: fraction)
+                )
+            } catch {
+                Self.log.error("navigate scroll to \(target) failed: \(String(describing: error), privacy: .public)")
+                return false
+            }
+            guard gen == generation else { return false }
+            window = window.reanchored(to: target)
+            return true
+        }
+
+        // Out-of-window rebuild. Fetch the target BEFORE touching the DOM (Gate-4
+        // round-2): a provider failure aborts with the old window still intact.
+        let body: EPUBChapterBody
+        do {
+            body = try await chapterBodyProvider(target)
+        } catch {
+            Self.log.error("navigate provider \(target) failed: \(String(describing: error), privacy: .public)")
+            return false
+        }
+        guard gen == generation, body.spineIndex == target else { return false }
+        // ONE transactional eval clears the old sections AND inserts the new
+        // anchor (Gate-4 round-2): the DOM is never left empty under a stale
+        // window — it's either fully replaced or untouched.
+        do {
+            try await evaluate(
+                EPUBContinuousScrollJS.clearAllAndInsertSectionJS(body, dividerTitle: dividerTitle?(target))
+            )
+        } catch {
+            Self.log.error("navigate clear+insert \(target) failed: \(String(describing: error), privacy: .public)")
+            return false
+        }
+        guard gen == generation,
+              let committed = EPUBSpineWindow.initial(anchor: target, spineCount: window.spineCount) else {
+            return false
+        }
+        // Commit the rebuilt window AFTER the anchor is in the DOM.
+        window = committed
+        await fillNeighboursAndScroll(anchor: target, scrollFraction: fraction)
+        // A mode-switch/reopen during the neighbour fill bails inside
+        // `fillNeighboursAndScroll`; don't report success to the caller then
+        // (Gate-4 round-3) — it would update the position from a stale task.
+        guard gen == generation else { return false }
+        return true
+    }
+
+    /// Materialize the ±1 neighbours of `anchor` (already in the DOM) and scroll
+    /// it to `scrollFraction` (nil / ≤0 ⇒ chapter top). Shared by the initial
+    /// open + `navigate` after each has committed the anchor section + window.
+    /// Caller holds the mutation lane.
+    private func fillNeighboursAndScroll(anchor: Int, scrollFraction: Double?) async {
+        let gen = generation
         // Fill ±1 around the anchor (each a no-op at the respective book edge).
         // Re-check the generation BETWEEN the extends (Gate-4): a mode-switch /
         // reopen that bumps the token during the forward extend's await aborts it
@@ -172,11 +265,8 @@ final class EPUBContinuousScrollCoordinator {
         guard gen == generation else { return }
         if window.canExtendBackward { await extend(forward: false) }
         guard gen == generation else { return }
-        // WI-6b-iii: saved-position restore. The anchor section is materialized
-        // (and its ±1 neighbours, so offsetTop is stable), so scroll the anchor
-        // to the saved intra-chapter fraction. Best-effort — a failed scroll
-        // eval just leaves the reader at the chapter top.
-        if let fraction = restoreFraction, fraction > 0 {
+        // Best-effort scroll — a failed eval just leaves the chapter top.
+        if let fraction = scrollFraction, fraction > 0 {
             try? await evaluate(
                 EPUBContinuousScrollJS.scrollToSpineFractionJS(spineIndex: anchor, fraction: fraction)
             )
@@ -186,8 +276,14 @@ final class EPUBContinuousScrollCoordinator {
     // MARK: - Private
 
     private func extend(forward: Bool) async {
+        // Save/restore (WI-8) rather than force-false: `navigate`'s out-of-window
+        // rebuild holds `isExtending` across its remove-loop + re-materialize, and
+        // the inner extends here must not clear it mid-rebuild (which would let a
+        // boundary signal interleave). For a standalone boundary-driven extend
+        // `wasExtending` is false, so behaviour is unchanged.
+        let wasExtending = isExtending
         isExtending = true
-        defer { isExtending = false }
+        defer { isExtending = wasExtending }
 
         let gen = generation
         let targetIndex = forward ? window.hi + 1 : window.lo - 1

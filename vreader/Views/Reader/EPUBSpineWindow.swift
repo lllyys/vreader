@@ -46,8 +46,10 @@ struct EPUBSpineWindow: Equatable {
     private(set) var anchor: Int
 
     /// Total spine items in the book. Kept so the transitions can clamp at
-    /// the book edges without the caller re-passing it each time.
-    private let spineCount: Int
+    /// the book edges without the caller re-passing it each time. Exposed
+    /// (WI-8) so the coordinator can rebuild a fresh window around an
+    /// out-of-window navigation target without re-threading the count.
+    private(set) var spineCount: Int
 
     private init(lo: Int, hi: Int, anchor: Int, spineCount: Int) {
         self.lo = lo

@@ -142,6 +142,28 @@ enum EPUBContinuousScrollJS {
         """
     }
 
+    /// WI-8: atomically clear every materialized section AND insert `body`'s
+    /// section as the new sole child, in ONE eval (the out-of-window navigate
+    /// rebuild's anchor step). Doing the clear + anchor insert together makes the
+    /// rebuild transactional at the DOM level: either the root is replaced with
+    /// the new anchor or it is untouched — a failure can't leave the DOM empty
+    /// while the coordinator's window claims a materialized range (Gate-4 round-2).
+    /// Fires `sectionMaterialized` so the new anchor's highlights restore.
+    static func clearAllAndInsertSectionJS(_ body: EPUBChapterBody, dividerTitle: String?) -> String {
+        let escaped = FoliateJSEscaper.escapeForJSString(sectionHTML(body, dividerTitle: dividerTitle))
+        let escapedHref = FoliateJSEscaper.escapeForJSString(body.href)
+        return """
+        (function() {
+            var root = document.getElementById('\(scrollRootID)');
+            if (!root) { return; }
+            root.replaceChildren();
+            root.insertAdjacentHTML('beforeend', '\(escaped)');
+            root.scrollTop = 0;
+            \(sectionMaterializedPostJS(spineIndex: body.spineIndex, escapedHref: escapedHref))
+        })();
+        """
+    }
+
     // MARK: - scroll observer
 
     /// The section-aware scroll observer user script. Replaces the single-`Double`

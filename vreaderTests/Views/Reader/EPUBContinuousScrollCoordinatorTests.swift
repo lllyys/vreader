@@ -24,7 +24,12 @@ struct EPUBContinuousScrollCoordinatorTests {
         /// Fired when a REMOVE (eviction) JS is evaluated — lets a test invalidate
         /// the coordinator mid-eviction to exercise the stale-generation guard.
         var onRemoveEval: (() -> Void)?
+        /// Awaited at the START of every evaluate — lets a test hold a specific
+        /// eval (e.g. the in-window scroll, which has no provider to gate on)
+        /// in-flight to exercise `navigate`'s mutation-lane serialization.
+        var beforeEvaluate: ((String) async -> Void)?
         func evaluate(_ js: String) async throws {
+            await beforeEvaluate?(js)
             if shouldThrow { throw NSError(domain: "test.eval", code: 1) }
             evaluatedJS.append(js)
             if js.contains("el.remove()") { onRemoveEval?() }
@@ -299,6 +304,128 @@ struct EPUBContinuousScrollCoordinatorTests {
         )
         await c.materializeInitialWindow()
         #expect(eval.evaluatedJS.contains { $0.contains("root.scrollTop = el.offsetTop") } == false)
+    }
+
+    // MARK: - WI-8: continuous-mode navigation (TOC / bookmark / search jump)
+
+    @Test func navigate_inWindow_scrollsAndReanchors() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 2, spineCount: 6, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()   // window → [1,3]
+        #expect(c.window.contains(3))
+        eval.evaluatedJS.removeAll()
+        await c.navigate(toSpineIndex: 3, fraction: 0.25)
+        // In-window: a single scroll to section 3, no remove/append, re-anchored.
+        let scrolls = eval.evaluatedJS.filter { $0.contains("root.scrollTop = el.offsetTop") }
+        #expect(scrolls.count == 1)
+        #expect(scrolls.first?.contains(#"data-vreader-spine-index="3""#) == true)
+        #expect(eval.removes.isEmpty)
+        #expect(eval.appends.isEmpty)
+        #expect(c.window.anchor == 3)
+    }
+
+    @Test func navigate_outOfWindow_rebuildsAroundTarget() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 0, spineCount: 10, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()   // window → [0,1]
+        #expect(c.window == EPUBSpineWindow.initial(anchor: 0, spineCount: 10)!.extendForward())
+        eval.evaluatedJS.removeAll()
+        let moved = await c.navigate(toSpineIndex: 7, fraction: 0.5)
+        #expect(moved)
+        // Out-of-window: ONE atomic eval clears (replaceChildren) AND inserts the
+        // target anchor (7) together, then ±1 rebuild around 7 → [6,8].
+        #expect(eval.evaluatedJS.contains {
+            $0.contains("replaceChildren") && $0.contains(#"data-vreader-spine-index="7""#)
+        })
+        #expect(c.window.contains(7))
+        #expect(c.window.anchor == 7)
+        #expect(c.window.lo == 6 && c.window.hi == 8)
+        // Neighbours 6 + 8 materialized; scrolled to the target fraction.
+        #expect(eval.evaluatedJS.contains { $0.contains(#"data-vreader-spine-index="8""#) })
+        #expect(eval.evaluatedJS.contains { $0.contains(#"data-vreader-spine-index="6""#) })
+        #expect(eval.evaluatedJS.contains {
+            $0.contains("root.scrollTop = el.offsetTop") && $0.contains(#"data-vreader-spine-index="7""#)
+        })
+    }
+
+    @Test func navigate_whileExtending_isDropped() async {
+        let eval = RecordingEvaluator()
+        let gate = CheckedContinuationGate()
+        let c = makeCoordinator(anchor: 0, spineCount: 8, eval: eval, provider: { idx in
+            await gate.wait()   // hold the first extend in-flight
+            return self.body(idx)
+        })
+        // Drive a boundary extend that blocks at the provider await (isExtending=true).
+        async let a: Void = c.handleBoundarySignal(signal(visible: 0, bottom: true))
+        while !c.isExtending { await Task.yield() }
+        eval.evaluatedJS.removeAll()
+        // A navigate arriving mid-extend is dropped (serialized), not interleaved.
+        let moved = await c.navigate(toSpineIndex: 5, fraction: 0.5)
+        #expect(moved == false)
+        #expect(eval.evaluatedJS.isEmpty)   // no clear / append / scroll emitted
+        #expect(!c.window.contains(5))
+        gate.open()
+        await a
+    }
+
+    @Test func navigate_duringInitialMaterialize_isDropped() async {
+        let eval = RecordingEvaluator()
+        let gate = CheckedContinuationGate()
+        let c = makeCoordinator(anchor: 2, spineCount: 8, eval: eval, provider: { idx in
+            await gate.wait()   // hold the initial anchor materialize in-flight
+            return self.body(idx)
+        })
+        // Round-2 Critical: initial materialize must own the mutation lane too,
+        // so a jump arriving while the anchor provider is suspended is dropped
+        // (not interleaved over the initial DOM).
+        async let m: Void = c.materializeInitialWindow()
+        while !c.isExtending { await Task.yield() }
+        let moved = await c.navigate(toSpineIndex: 5, fraction: 0.5)
+        #expect(moved == false)
+        #expect(!c.window.contains(5))
+        gate.open()
+        await m
+    }
+
+    @Test func navigate_outOfRange_isNoOp() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 0, spineCount: 3, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()
+        let windowBefore = c.window
+        eval.evaluatedJS.removeAll()
+        await c.navigate(toSpineIndex: 99, fraction: 0.5)   // out of spine range
+        #expect(eval.evaluatedJS.isEmpty)
+        #expect(c.window == windowBefore)
+    }
+
+    @Test func navigate_rapidDoubleInWindow_secondIsDropped() async {
+        // Gate-4 round-3 High: in-window `navigate` must hold the mutation lane
+        // for its whole body (not just the out-of-window rebuild). Two rapid
+        // in-window jumps must NOT both pass `guard !isExtending`; the second is
+        // dropped while the first scroll is still in flight, so positions don't
+        // interleave.
+        let eval = RecordingEvaluator()
+        let gate = CheckedContinuationGate()
+        let c = makeCoordinator(anchor: 2, spineCount: 6, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()   // window → [1,3]; both 1 and 3 in-window
+        eval.evaluatedJS.removeAll()
+        // Hold the first navigate's in-window scroll eval in flight.
+        eval.beforeEvaluate = { js in
+            if js.contains("root.scrollTop = el.offsetTop") { await gate.wait() }
+        }
+        async let first = c.navigate(toSpineIndex: 3, fraction: 0.25)
+        while !c.isExtending { await Task.yield() }
+        eval.beforeEvaluate = nil   // don't gate any later eval
+        // A second in-window jump arriving mid-scroll is serialized out.
+        let second = await c.navigate(toSpineIndex: 1, fraction: 0.0)
+        #expect(second == false)
+        gate.open()
+        let firstResult = await first
+        #expect(firstResult)
+        // Exactly one scroll happened (the first); the second emitted nothing,
+        // and the eviction anchor reflects the first target only.
+        #expect(eval.evaluatedJS.filter { $0.contains("root.scrollTop = el.offsetTop") }.count == 1)
+        #expect(c.window.anchor == 3)
     }
 
     /// A tiny @MainActor gate so a stub provider can be held mid-materialization.
