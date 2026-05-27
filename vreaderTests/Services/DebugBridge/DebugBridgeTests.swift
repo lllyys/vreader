@@ -89,6 +89,41 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_pdfHighlightURL_callsPDFHighlightHandlerWithNilColor() async {
+        // Feature #17: pdf-highlight?page&rect routes to the pdfHighlight handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.1,0.2,0.3,0.4")!)
+
+        XCTAssertEqual(
+            context.calls,
+            [.pdfHighlight(
+                page: 0,
+                rect: NormalizedRect(x: 0.1, y: 0.2, w: 0.3, h: 0.4),
+                color: nil
+            )]
+        )
+    }
+
+    @MainActor
+    func test_handle_pdfHighlightURLWithColor_callsPDFHighlightHandler() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://pdf-highlight?page=2&rect=0,0,1,1&color=green")!)
+
+        XCTAssertEqual(
+            context.calls,
+            [.pdfHighlight(
+                page: 2,
+                rect: NormalizedRect(x: 0, y: 0, w: 1, h: 1),
+                color: "green"
+            )]
+        )
+    }
+
+    @MainActor
     func test_handle_searchURLWithQueryOnly_callsSearchHandlerWithNilIndex() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -419,6 +454,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws {
         await record("scroll-boundary:\(spineIndex):\(near.rawValue)")
     }
+    func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws {
+        await record("pdf-highlight:\(page):\(rect.x),\(rect.y),\(rect.w),\(rect.h):\(color ?? "nil")")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -455,6 +493,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case scrollSheet(target: DebugCommand.ScrollTarget)
         case navigate(spineIndex: Int, fraction: Double?)
         case scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge)
+        case pdfHighlight(page: Int, rect: NormalizedRect, color: String?)
     }
 
     private(set) var calls: [Call] = []
@@ -504,6 +543,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws {
         calls.append(.scrollBoundary(spineIndex: spineIndex, near: near))
+    }
+    func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws {
+        calls.append(.pdfHighlight(page: page, rect: rect, color: color))
     }
 }
 

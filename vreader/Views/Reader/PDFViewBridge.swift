@@ -166,6 +166,24 @@ struct PDFViewBridge: UIViewRepresentable {
             }
         }
 
+        // Bind the live, unlocked PDFDocument into the renderer as soon as it's
+        // available — independent of whether there are saved highlights. The
+        // renderer's `weak var document` is the canonical handle to the live,
+        // already-unlocked document the reader is showing; the DEBUG-only
+        // `pdf-highlight` verification observer reads it to derive the selected
+        // text under a rect from the live document (Codex Gate-4 round-2
+        // MEDIUM 1) rather than reloading `PDFDocument(url:)` (expensive, and
+        // it yields a still-LOCKED document for password PDFs). For
+        // already-highlighted books the restore branch below also calls
+        // `setDocument` — a no-op once the identity matches — so this only adds
+        // the binding for the zero-highlight case. `setDocument` clears the
+        // (already-empty) annotation map only on a genuine identity change.
+        if let renderer = highlightRenderer,
+           let document = pdfView.document,
+           !document.isLocked {
+            renderer.setDocument(document)
+        }
+
         // Restore saved highlights (once, after document loads)
         if let records = highlightRecords,
            !context.coordinator.didRestoreHighlights,

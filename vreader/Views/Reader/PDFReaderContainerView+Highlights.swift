@@ -13,9 +13,17 @@ extension PDFReaderContainerView {
     // MARK: - Highlight Actions
 
     /// Phase R4b: delegates to coordinator (persists -> renderer.apply() with real ID).
+    ///
+    /// `color` defaults to `"yellow"` to preserve the gesture call sites (the
+    /// PDF confirmation dialog has no color picker). The DEBUG-only
+    /// `pdf-highlight` verification observer passes an explicit color through
+    /// the SAME method (Codex Gate-4 round-1 MEDIUM 3) so the requested color
+    /// is honored on BOTH the coordinator and fallback paths — no parallel
+    /// direct-coordinator branch that could silently drop the color.
     func handleHighlightAction(
         event: ReaderSelectionEvent,
-        container: ModelContainer
+        container: ModelContainer,
+        color: String = "yellow"
     ) {
         let locator = viewModel.makeCurrentLocator()
 
@@ -25,7 +33,7 @@ extension PDFReaderContainerView {
                     locator: locator,
                     anchor: event.anchor,
                     selectedText: event.selectedText,
-                    color: "yellow"
+                    color: color
                 )
             }
         } else {
@@ -34,12 +42,12 @@ extension PDFReaderContainerView {
             Task {
                 try? await persistence.addHighlight(
                     locator: locator, anchor: event.anchor,
-                    selectedText: event.selectedText, color: "yellow",
+                    selectedText: event.selectedText, color: color,
                     note: nil, toBookWithKey: viewModel.bookFingerprintKey
                 )
             }
             pendingHighlightPayload = PDFHighlightNotificationPayload(
-                anchor: event.anchor, color: "yellow"
+                anchor: event.anchor, color: color
             )
             pendingHighlightId += 1
         }

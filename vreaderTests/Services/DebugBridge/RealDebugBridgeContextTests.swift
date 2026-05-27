@@ -836,6 +836,72 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
+    func test_pdfHighlight_postsPDFHighlightCommandWithPageRectAndColor() async throws {
+        // Feature #17: pdfHighlight posts .debugBridgePDFHighlightCommand carrying
+        // the page index, normalized rect (x,y,w,h), and color; the live
+        // PDFReaderContainerView observer builds a ReaderSelectionEvent with a
+        // .pdf anchor and calls the SAME handleHighlightAction the gesture uses.
+        let exp = expectation(description: "pdf-highlight notification posted")
+        nonisolated(unsafe) var receivedPage: Int?
+        nonisolated(unsafe) var receivedRect: [Double]?
+        nonisolated(unsafe) var receivedColor: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePDFHighlightCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedPage = notification.userInfo?["page"] as? Int
+            receivedRect = notification.userInfo?["rect"] as? [Double]
+            receivedColor = notification.userInfo?["color"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.pdfHighlight(
+            page: 2,
+            rect: NormalizedRect(x: 0.1, y: 0.2, w: 0.3, h: 0.4),
+            color: "pink"
+        )
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedPage, 2)
+        XCTAssertEqual(receivedRect, [0.1, 0.2, 0.3, 0.4])
+        XCTAssertEqual(receivedColor, "pink")
+    }
+
+    @MainActor
+    func test_pdfHighlight_withNilColor_postsWithoutColorKey() async throws {
+        let exp = expectation(description: "pdf-highlight notification posted")
+        nonisolated(unsafe) var hasColorKey = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePDFHighlightCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            hasColorKey = notification.userInfo?["color"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.pdfHighlight(
+            page: 0,
+            rect: NormalizedRect(x: 0, y: 0, w: 1, h: 1),
+            color: nil
+        )
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertFalse(hasColorKey)
+    }
+
+    @MainActor
     func test_scrollSheet_recordsPendingTargetForReplay() async throws {
         // Bug #271 (Gate-4 round-1 Medium): scrollSheet records the target in
         // the shared replay buffer so a scroll requested BEFORE the result card

@@ -121,6 +121,18 @@ protocol DebugBridgeContext {
     /// If no matching continuous-mode EPUB reader is loaded, the action is a
     /// no-op (matches `navigate` / `seek` / `search`).
     func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws
+    /// Feature #17 — drive PDF highlight CREATION CU-free so the
+    /// selection-driven highlight → PDFAnnotation render + persist can be
+    /// device-verified WITHOUT a real long-press-drag text selection. The
+    /// handler posts `.debugBridgePDFHighlightCommand` carrying the page index,
+    /// the normalized rect (as a 4-element `[Double]` `[x, y, w, h]`), and the
+    /// optional color; the live `PDFReaderContainerView` observer builds a
+    /// `ReaderSelectionEvent` with a `.pdf` anchor and calls the SAME
+    /// `handleHighlightAction` the gesture uses (coordinator → `addHighlight`
+    /// → `PDFAnnotationBridge.createHighlightFromAnchor`) so the annotation
+    /// renders AND persists. If no PDF reader is loaded, no observer fires —
+    /// the URL is silently a no-op (matches `highlight` / `navigate` / `seek`).
+    func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -261,6 +273,8 @@ final class DebugBridge {
             try await context.navigate(spineIndex: spineIndex, fraction: fraction)
         case .scrollBoundary(let spineIndex, let near):
             try await context.scrollBoundary(spineIndex: spineIndex, near: near)
+        case .pdfHighlight(let page, let rect, let color):
+            try await context.pdfHighlight(page: page, rect: rect, color: color)
         }
     }
 }

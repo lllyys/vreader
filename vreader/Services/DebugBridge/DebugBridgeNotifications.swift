@@ -230,6 +230,33 @@ extension Notification.Name {
     ///   `bottom` ⇒ extend forward.
     static let debugBridgeScrollBoundaryCommand = Notification.Name("vreader.debugBridge.scrollBoundaryCommand")
 
+    /// Posted by RealDebugBridgeContext.pdfHighlight (feature #17) to create a
+    /// PDF highlight CU-free, bypassing the long-press-drag text-selection
+    /// gesture path (which needs a real touch / CU, unavailable on the
+    /// virtual-display test environment). The live `PDFReaderContainerView`
+    /// observer builds a `ReaderSelectionEvent` with a `.pdf` anchor
+    /// (`AnnotationAnchor.pdf(page:, rects:)`, the rect denormalized 0...1 →
+    /// page space downstream by `PDFAnnotationBridge`) and calls the SAME
+    /// `handleHighlightAction` the gesture uses — coordinator →
+    /// `PersistenceActor.addHighlight` → `PDFHighlightRenderer.apply` →
+    /// `PDFAnnotationBridge.createHighlightFromAnchor` — so the annotation
+    /// renders AND persists. EPUB / TXT / MD / AZW3 hosts don't register this
+    /// observer, so a stray URL fired while they're mounted is silently a
+    /// no-op (the same format-scoping posture as the TXT/MD `highlight`
+    /// observer). If no reader is loaded, no observer fires.
+    ///
+    /// userInfo:
+    /// - `"page"`: Int — the 0-based page index (non-negative, validated by
+    ///   the parser; the observer additionally range-checks against the loaded
+    ///   page count).
+    /// - `"rect"`: [Double] — the normalized highlight rect as `[x, y, w, h]`,
+    ///   each component in 0...1 (validated by the parser).
+    /// - `"color"`: String? — optional NamedHighlightColor rawValue
+    ///   (`yellow` / `pink` / `green` / `blue`). Present only when the bridge
+    ///   command included the `color=` parameter; the observer falls back to
+    ///   `"yellow"` when absent.
+    static let debugBridgePDFHighlightCommand = Notification.Name("vreader.debugBridge.pdfHighlightCommand")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker

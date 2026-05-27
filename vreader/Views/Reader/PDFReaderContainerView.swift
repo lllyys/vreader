@@ -62,7 +62,13 @@ struct PDFReaderContainerView: View {
     /// Whether the note input sheet is visible.
     @State var showNoteSheet = false
     /// Phase R4: highlight renderer and coordinator.
-    @State private var highlightRenderer = PDFHighlightRenderer()
+    ///
+    /// Internal (not `private`) so the DEBUG-only `pdf-highlight` verification
+    /// observer in `PDFReaderContainerView+DebugBridgePDFHighlight.swift` can
+    /// read the renderer's `document` — the live, already-unlocked
+    /// `PDFDocument` the reader is showing — to derive the selected text under
+    /// a rect (Codex Gate-4 round-2 MEDIUM 1) instead of reloading from URL.
+    @State var highlightRenderer = PDFHighlightRenderer()
     @State var highlightCoordinator: HighlightCoordinator?
     /// Text input for the note being added.
     @State var noteText = ""
@@ -334,6 +340,10 @@ struct PDFReaderContainerView: View {
         // toggle observer, retry / open-AI-tab observers, setup-sheet
         // presentation. See `PDFReaderContainerView+Bilingual.swift`.
         .modifier(bilingualSurfacesModifier)
+        // Feature #17: DEBUG-only `pdf-highlight` verification-harness observer.
+        // Release builds get an `EmptyModifier` stub (see
+        // `PDFReaderContainerView+DebugBridgePDFHighlight.swift`).
+        .modifier(debugBridgePDFHighlightObserverModifier)
     }
 
 }

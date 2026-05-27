@@ -2022,6 +2022,280 @@ final class DebugCommandTests: XCTestCase {
         }
     }
 
+    // MARK: - pdf-highlight (feature #17 — CU-free PDF highlight-creation harness)
+    //   `vreader-debug://pdf-highlight?page=<N>&rect=<x,y,w,h>[&color=<name>]`
+
+    func test_parse_pdfHighlight_returnsCommandWithDefaultColor() throws {
+        let cmd = try DebugCommand.parse(
+            URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.1,0.2,0.3,0.4")!
+        )
+        XCTAssertEqual(
+            cmd,
+            .pdfHighlight(
+                page: 0,
+                rect: NormalizedRect(x: 0.1, y: 0.2, w: 0.3, h: 0.4),
+                color: nil
+            )
+        )
+    }
+
+    func test_parse_pdfHighlightWithColor_returnsCommandWithColor() throws {
+        let cmd = try DebugCommand.parse(
+            URL(string: "vreader-debug://pdf-highlight?page=3&rect=0,0,1,1&color=pink")!
+        )
+        XCTAssertEqual(
+            cmd,
+            .pdfHighlight(
+                page: 3,
+                rect: NormalizedRect(x: 0, y: 0, w: 1, h: 1),
+                color: "pink"
+            )
+        )
+    }
+
+    func test_parse_pdfHighlightMissingPage_throwsMissingParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?rect=0,0,0.5,0.5")!)
+        ) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "page")
+        }
+    }
+
+    func test_parse_pdfHighlightNegativePage_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=-1&rect=0,0,0.5,0.5")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "page")
+        }
+    }
+
+    func test_parse_pdfHighlightNonIntegerPage_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=one&rect=0,0,0.5,0.5")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "page")
+        }
+    }
+
+    func test_parse_pdfHighlightMissingRect_throwsMissingParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0")!)
+        ) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightRectWrongComponentCount_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.1,0.2,0.3")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightRectNonNumericComponent_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.1,x,0.3,0.4")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightRectNonFiniteComponent_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.1,inf,0.3,0.4")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightRectComponentAboveOne_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.1,0.2,0.3,1.4")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightRectComponentBelowZero_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=-0.1,0.2,0.3,0.4")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightEmptyColor_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0,0,1,1&color=")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "color")
+        }
+    }
+
+    func test_parse_pdfHighlightInvalidColor_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0,0,1,1&color=chartreuse")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "color")
+        }
+    }
+
+    // Codex Gate-4 round-2 HIGH: a zero-AREA rect is rejected. A real text
+    // selection always covers glyphs and therefore has positive width AND
+    // height; `createHighlight` accepts `>= 0` dims, so a zero-area rect would
+    // persist an invisible (non-rendering) record — the exact
+    // library-contaminating outcome the harness must never produce. Rejecting
+    // at the parser keeps the malformed URL loud rather than silently creating
+    // a bogus annotation.
+
+    func test_parse_pdfHighlightZeroWidthRect_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            // w == 0 ⇒ zero area (a vertical line, no glyphs under it)
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.5,0.5,0,0.2")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightZeroHeightRect_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            // h == 0 ⇒ zero area (a horizontal line, no glyphs under it)
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.5,0.5,0.2,0")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightZeroAreaRect_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            // both w and h == 0 ⇒ a degenerate point
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.5,0.5,0,0")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightTinyPositiveRect_returnsCommand() throws {
+        // A tiny but strictly-positive rect is valid — a real selection can be
+        // a single short word. The boundary that matters is `> 0`, not a
+        // minimum size.
+        let cmd = try DebugCommand.parse(
+            URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.5,0.5,0.001,0.001")!
+        )
+        XCTAssertEqual(
+            cmd,
+            .pdfHighlight(
+                page: 0,
+                rect: NormalizedRect(x: 0.5, y: 0.5, w: 0.001, h: 0.001),
+                color: nil
+            )
+        )
+    }
+
+    // Codex Gate-4 round-1 HIGH 2: a rect whose origin + extent overflows the
+    // page is rejected. The gesture path clamps `w <= 1 - x` / `h <= 1 - y` via
+    // `PDFAnnotationBridge.normalizeRects`, so an overflow rect can never be
+    // produced by a real selection and would denormalize OFF the page.
+
+    func test_parse_pdfHighlightRectWidthOverflow_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            // x=0.9, w=0.5 ⇒ x + w = 1.4 > 1 (off the right edge)
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.9,0.1,0.5,0.2")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightRectHeightOverflow_throwsInvalidParam() {
+        XCTAssertThrowsError(
+            // y=0.9, h=0.5 ⇒ y + h = 1.4 > 1 (off the bottom edge)
+            try DebugCommand.parse(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.1,0.9,0.2,0.5")!)
+        ) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "rect")
+        }
+    }
+
+    func test_parse_pdfHighlightRectExactlyFillsPage_returnsCommand() throws {
+        // x + w == 1 and y + h == 1 is the boundary — a full-page rect is the
+        // legitimate maximum (matches `normalizeRects` clamp upper bound).
+        let cmd = try DebugCommand.parse(
+            URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.25,0.25,0.75,0.75")!
+        )
+        XCTAssertEqual(
+            cmd,
+            .pdfHighlight(
+                page: 0,
+                rect: NormalizedRect(x: 0.25, y: 0.25, w: 0.75, h: 0.75),
+                color: nil
+            )
+        )
+    }
+
     // MARK: - scroll-sheet (Bug #271 — presented-sheet content scroll harness)
     //   `vreader-debug://scroll-sheet?to=<top|bottom>`
 
