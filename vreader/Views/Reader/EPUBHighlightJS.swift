@@ -191,7 +191,7 @@ extension EPUBHighlightBridge {
                 // positional predicates) — reject anything else so a malformed or
                 // corrupted persisted path can't silently re-root to the wrong
                 // node (Codex Gate-4 Low). Reduce it to a section-relative `.` base.
-                var rel = xpath.replace(/^\\/html(?:\\[\\d+\\])?\\/body(?:\\[\\d+\\])?/, '.');
+                var rel = xpath.replace(/^\\/html(?:\\[1\\])?\\/body(?:\\[1\\])?(?=\\/|$)/, '.');
                 if (rel === xpath || rel.charAt(0) !== '.') return null;
                 var result = document.evaluate(
                     rewriteXPathNS(rel), contentRoot, null,
