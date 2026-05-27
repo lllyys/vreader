@@ -467,6 +467,12 @@ struct EPUBReaderContainerView: View {
         // PR #1047 — Release builds replace the modifier with an
         // `EmptyModifier` so no DebugBridge symbols leak.
         .modifier(debugBridgeHighlightObserverModifier)
+        // Feature #71 WI-6b — DebugBridge scroll-boundary-driver observer.
+        // DEBUG-only; lives in its own `ViewModifier` (like the highlight
+        // observer above) so this body stays within the compiler's
+        // type-inference budget. Release builds replace it with an
+        // `EmptyModifier` so no DebugBridge symbols leak.
+        .modifier(debugBridgeScrollBoundaryObserverModifier)
     }
 
     // MARK: - Subviews

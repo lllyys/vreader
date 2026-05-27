@@ -111,6 +111,16 @@ protocol DebugBridgeContext {
     /// channel a TOC/bookmark/search tap uses. If no matching EPUB reader is
     /// loaded, the action is a no-op (matches `seek` / `search` / `present`).
     func navigate(spineIndex: Int, fraction: Double?) async throws
+    /// Feature #71 WI-6b — drive `EPUBContinuousScrollCoordinator.handleBoundarySignal`
+    /// CU-free. The production `continuousScrollObserverJS` is rAF-throttled and
+    /// rAF is paused on the headless/virtual-display test environment, so a
+    /// synthetic touch scroll never triggers a boundary report; this posts the
+    /// signal directly. The handler posts `.debugBridgeScrollBoundaryCommand`;
+    /// the live `EPUBReaderContainerView` observer builds an
+    /// `EPUBScrollBoundarySignal` and calls `coordinator.handleBoundarySignal`.
+    /// If no matching continuous-mode EPUB reader is loaded, the action is a
+    /// no-op (matches `navigate` / `seek` / `search`).
+    func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -249,6 +259,8 @@ final class DebugBridge {
             try await context.scrollSheet(target: target)
         case .navigate(let spineIndex, let fraction):
             try await context.navigate(spineIndex: spineIndex, fraction: fraction)
+        case .scrollBoundary(let spineIndex, let near):
+            try await context.scrollBoundary(spineIndex: spineIndex, near: near)
         }
     }
 }

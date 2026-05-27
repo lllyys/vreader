@@ -156,6 +156,19 @@ enum DebugCommand: Equatable {
     /// `.readerNavigateToLocator`.
     case navigate(spineIndex: Int, fraction: Double?)
 
+    /// Feature #71 WI-6b — `scroll-boundary?spine=<N>&near=<top|bottom>` drives
+    /// `EPUBContinuousScrollCoordinator.handleBoundarySignal(_:)` CU-free. The
+    /// production `continuousScrollObserverJS` is rAF-throttled and rAF is paused
+    /// on the headless/virtual-display test environment, so a synthetic touch
+    /// scroll never triggers a boundary report; this command posts a boundary
+    /// signal directly. `spine` (required, ≥0) is the visible spine index; `near`
+    /// is which materialized-doc boundary the viewport is near (`top` ⇒ extend
+    /// backward, `bottom` ⇒ extend forward). The handler posts
+    /// `.debugBridgeScrollBoundaryCommand`; the live `EPUBReaderContainerView`
+    /// observer builds an `EPUBScrollBoundarySignal` and calls
+    /// `coordinator.handleBoundarySignal` — bypassing the rAF observer.
+    case scrollBoundary(spineIndex: Int, near: ScrollBoundaryEdge)
+
     /// Which AI action the `ai` command fires (Bug #255 — verification
     /// harness AI-action driver). The handler posts `.debugBridgeAIAction`;
     /// the AI panel's observer invokes the SAME view-model path the chrome
@@ -284,6 +297,23 @@ enum DebugCommand: Equatable {
     /// Kept local (mirroring `ThemeMode` / `SheetKind` / `SheetDetent`) so this
     /// file stays a pure value-type parser with no SwiftUI import.
     enum ScrollTarget: String, Equatable, CaseIterable {
+        case top
+        case bottom
+    }
+
+    /// Which materialized-doc boundary the `scroll-boundary` command reports the
+    /// viewport is near (feature #71 WI-6b — CU-free continuous-scroll boundary
+    /// driver). `top` ⇒ the viewport is within the prefetch margin of the TOP of
+    /// the materialized window (extend backward); `bottom` ⇒ near the BOTTOM
+    /// (extend forward). The handler posts the rawValue in
+    /// `.debugBridgeScrollBoundaryCommand`'s `userInfo`; the
+    /// `EPUBReaderContainerView` observer maps it to the
+    /// `EPUBScrollBoundarySignal`'s `nearTopBoundary` / `nearBottomBoundary`
+    /// flags + `intraFraction` (0.0 at top, 1.0 at bottom).
+    ///
+    /// Kept local (mirroring `ThemeMode` / `ScrollTarget`) so this file stays a
+    /// pure value-type parser with no reader-layer import.
+    enum ScrollBoundaryEdge: String, Equatable, CaseIterable {
         case top
         case bottom
     }
@@ -763,6 +793,26 @@ extension DebugCommand {
                 fraction = nil
             }
             return .navigate(spineIndex: spine, fraction: fraction)
+
+        case "scroll-boundary":
+            // Feature #71 WI-6b: drive `handleBoundarySignal` CU-free. `spine` is
+            // required and must be a non-negative integer (same validation as
+            // `navigate`'s `spine`). `near` is required; one of top|bottom (mirrors
+            // the ScrollTarget allowlist posture) — anything else is a caller bug
+            // the parser rejects rather than silently no-op.
+            let rawSpine = try requireParam("spine", in: params)
+            guard let spine = Int(rawSpine), spine >= 0 else {
+                throw DebugCommandError.invalidParam(
+                    "spine",
+                    reason: "expected a non-negative integer, got \(rawSpine)"
+                )
+            }
+            let nearRaw = try requireParam("near", in: params)
+            guard let near = ScrollBoundaryEdge(rawValue: nearRaw) else {
+                let valid = ScrollBoundaryEdge.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam("near", reason: "expected \(valid), got \(nearRaw)")
+            }
+            return .scrollBoundary(spineIndex: spine, near: near)
 
         case "scroll-sheet":
             // Bug #271: scroll the active presented sheet's scrollable content.

@@ -804,6 +804,38 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
+    func test_scrollBoundary_postsScrollBoundaryCommandWithSpineAndNear() async throws {
+        // Feature #71 WI-6b: scrollBoundary posts .debugBridgeScrollBoundaryCommand
+        // carrying the spine index + edge; the live EPUBReaderContainerView
+        // observer builds an EPUBScrollBoundarySignal and calls
+        // coordinator.handleBoundarySignal — bypassing the rAF-throttled JS
+        // observer (rAF is paused on the headless test environment).
+        let exp = expectation(description: "scroll-boundary notification posted")
+        nonisolated(unsafe) var receivedSpine: Int?
+        nonisolated(unsafe) var receivedNear: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeScrollBoundaryCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedSpine = notification.userInfo?["spineIndex"] as? Int
+            receivedNear = notification.userInfo?["near"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.scrollBoundary(spineIndex: 3, near: .bottom)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedSpine, 3)
+        XCTAssertEqual(receivedNear, "bottom")
+    }
+
+    @MainActor
     func test_scrollSheet_recordsPendingTargetForReplay() async throws {
         // Bug #271 (Gate-4 round-1 Medium): scrollSheet records the target in
         // the shared replay buffer so a scroll requested BEFORE the result card

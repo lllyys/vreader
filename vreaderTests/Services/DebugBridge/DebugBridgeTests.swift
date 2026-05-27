@@ -77,6 +77,18 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_scrollBoundaryURL_callsHandler() async {
+        // Feature #71 WI-6b: scroll-boundary?spine&near routes to the
+        // scrollBoundary handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://scroll-boundary?spine=2&near=bottom")!)
+
+        XCTAssertEqual(context.calls, [.scrollBoundary(spineIndex: 2, near: .bottom)])
+    }
+
+    @MainActor
     func test_handle_searchURLWithQueryOnly_callsSearchHandlerWithNilIndex() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -404,6 +416,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func navigate(spineIndex: Int, fraction: Double?) async throws {
         await record("navigate:\(spineIndex):\(fraction.map { String($0) } ?? "nil")")
     }
+    func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws {
+        await record("scroll-boundary:\(spineIndex):\(near.rawValue)")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -439,6 +454,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case seekFraction(fraction: Double)
         case scrollSheet(target: DebugCommand.ScrollTarget)
         case navigate(spineIndex: Int, fraction: Double?)
+        case scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge)
     }
 
     private(set) var calls: [Call] = []
@@ -485,6 +501,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func navigate(spineIndex: Int, fraction: Double?) async throws {
         calls.append(.navigate(spineIndex: spineIndex, fraction: fraction))
+    }
+    func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws {
+        calls.append(.scrollBoundary(spineIndex: spineIndex, near: near))
     }
 }
 

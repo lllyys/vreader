@@ -1958,6 +1958,70 @@ final class DebugCommandTests: XCTestCase {
         }
     }
 
+    // MARK: - scroll-boundary (feature #71 WI-6b — CU-free continuous-scroll
+    //   boundary-signal harness)
+    //   `vreader-debug://scroll-boundary?spine=<N>&near=<top|bottom>`
+
+    func test_parse_scrollBoundaryNearBottom_returnsCommand() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://scroll-boundary?spine=2&near=bottom")!)
+        XCTAssertEqual(cmd, .scrollBoundary(spineIndex: 2, near: .bottom))
+    }
+
+    func test_parse_scrollBoundaryNearTop_returnsCommand() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://scroll-boundary?spine=0&near=top")!)
+        XCTAssertEqual(cmd, .scrollBoundary(spineIndex: 0, near: .top))
+    }
+
+    func test_parse_scrollBoundaryMissingSpine_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://scroll-boundary?near=bottom")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "spine")
+        }
+    }
+
+    func test_parse_scrollBoundaryNegativeSpine_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://scroll-boundary?spine=-1&near=bottom")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "spine")
+        }
+    }
+
+    func test_parse_scrollBoundaryNonIntegerSpine_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://scroll-boundary?spine=two&near=top")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "spine")
+        }
+    }
+
+    func test_parse_scrollBoundaryMissingNear_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://scroll-boundary?spine=1")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "near")
+        }
+    }
+
+    func test_parse_scrollBoundaryInvalidNear_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://scroll-boundary?spine=1&near=sideways")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "near")
+        }
+    }
+
     // MARK: - scroll-sheet (Bug #271 — presented-sheet content scroll harness)
     //   `vreader-debug://scroll-sheet?to=<top|bottom>`
 

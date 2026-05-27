@@ -207,6 +207,29 @@ extension Notification.Name {
     ///   clamped 0...1 by the parser. Absent ⇒ chapter start.
     static let debugBridgeNavigateCommand = Notification.Name("vreader.debugBridge.navigateCommand")
 
+    /// Posted by RealDebugBridgeContext.scrollBoundary (feature #71 WI-6b) to
+    /// drive `EPUBContinuousScrollCoordinator.handleBoundarySignal(_:)` CU-free —
+    /// the verification harness for the WI-6b scroll-driven window extension +
+    /// eviction. The production `continuousScrollObserverJS` is rAF-throttled and
+    /// rAF is paused on the headless/virtual-display test environment, so a
+    /// synthetic touch scroll never fires a boundary report; this bypasses the
+    /// rAF observer. The live `EPUBReaderContainerView` observer builds an
+    /// `EPUBScrollBoundarySignal` (`intraFraction` 1.0 at the bottom / 0.0 at the
+    /// top; `nearTopBoundary` / `nearBottomBoundary` set from `near`) and calls
+    /// `coordinator.handleBoundarySignal` — re-entering the SAME WI-6b extension
+    /// path a real scroll boundary hits (no parallel logic). Guarded on
+    /// continuous mode (`continuousScrollConfig != nil`); if no continuous-mode
+    /// EPUB reader is loaded, no observer fires — the URL is silently a no-op
+    /// (mirrors `navigate` / `seek` / `search`).
+    ///
+    /// userInfo:
+    /// - `"spineIndex"`: Int — the visible spine index (non-negative, validated
+    ///   by the parser).
+    /// - `"near"`: String — one of `DebugCommand.ScrollBoundaryEdge`'s rawValues
+    ///   (`top` / `bottom`), validated by the parser. `top` ⇒ extend backward,
+    ///   `bottom` ⇒ extend forward.
+    static let debugBridgeScrollBoundaryCommand = Notification.Name("vreader.debugBridge.scrollBoundaryCommand")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker
