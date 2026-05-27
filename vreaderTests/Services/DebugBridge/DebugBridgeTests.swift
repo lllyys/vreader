@@ -55,6 +55,28 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_navigateURL_withFraction_callsNavigateHandler() async {
+        // Bug #273: navigate?spine&fraction routes to the navigate handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://navigate?spine=2&fraction=0.5")!)
+
+        XCTAssertEqual(context.calls, [.navigate(spineIndex: 2, fraction: 0.5)])
+    }
+
+    @MainActor
+    func test_handle_navigateURL_withoutFraction_callsNavigateHandlerWithNil() async {
+        // Bug #273: fraction is optional — absent ⇒ chapter start (nil).
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://navigate?spine=0")!)
+
+        XCTAssertEqual(context.calls, [.navigate(spineIndex: 0, fraction: nil)])
+    }
+
+    @MainActor
     func test_handle_searchURLWithQueryOnly_callsSearchHandlerWithNilIndex() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -379,6 +401,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func scrollSheet(target: DebugCommand.ScrollTarget) async throws {
         await record("scroll-sheet:\(target.rawValue)")
     }
+    func navigate(spineIndex: Int, fraction: Double?) async throws {
+        await record("navigate:\(spineIndex):\(fraction.map { String($0) } ?? "nil")")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -413,6 +438,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int)
         case seekFraction(fraction: Double)
         case scrollSheet(target: DebugCommand.ScrollTarget)
+        case navigate(spineIndex: Int, fraction: Double?)
     }
 
     private(set) var calls: [Call] = []
@@ -456,6 +482,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func scrollSheet(target: DebugCommand.ScrollTarget) async throws {
         calls.append(.scrollSheet(target: target))
+    }
+    func navigate(spineIndex: Int, fraction: Double?) async throws {
+        calls.append(.navigate(spineIndex: spineIndex, fraction: fraction))
     }
 }
 

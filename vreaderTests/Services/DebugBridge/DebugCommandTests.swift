@@ -1885,6 +1885,79 @@ final class DebugCommandTests: XCTestCase {
         }
     }
 
+    // MARK: - navigate (Bug #273 — CU-free .readerNavigateToLocator harness)
+    //   `vreader-debug://navigate?spine=<N>[&fraction=<0...1>]`
+
+    func test_parse_navigateSpineAndFraction_returnsBoth() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://navigate?spine=2&fraction=0.25")!)
+        XCTAssertEqual(cmd, .navigate(spineIndex: 2, fraction: 0.25))
+    }
+
+    func test_parse_navigateSpineOnly_returnsNilFraction() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://navigate?spine=0")!)
+        XCTAssertEqual(cmd, .navigate(spineIndex: 0, fraction: nil))
+    }
+
+    func test_parse_navigateFractionAboveOne_clampsToOne() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://navigate?spine=1&fraction=1.7")!)
+        XCTAssertEqual(cmd, .navigate(spineIndex: 1, fraction: 1.0))
+    }
+
+    func test_parse_navigateFractionNegative_clampsToZero() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://navigate?spine=1&fraction=-0.4")!)
+        XCTAssertEqual(cmd, .navigate(spineIndex: 1, fraction: 0.0))
+    }
+
+    func test_parse_navigateMissingSpine_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://navigate?fraction=0.5")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "spine")
+        }
+    }
+
+    func test_parse_navigateNegativeSpine_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://navigate?spine=-1")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "spine")
+        }
+    }
+
+    func test_parse_navigateNonIntegerSpine_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://navigate?spine=two")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "spine")
+        }
+    }
+
+    func test_parse_navigateNonFiniteFraction_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://navigate?spine=1&fraction=inf")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "fraction")
+        }
+    }
+
+    func test_parse_navigateEmptyFraction_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://navigate?spine=1&fraction=")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "fraction")
+        }
+    }
+
     // MARK: - scroll-sheet (Bug #271 — presented-sheet content scroll harness)
     //   `vreader-debug://scroll-sheet?to=<top|bottom>`
 

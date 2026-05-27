@@ -145,6 +145,17 @@ enum DebugCommand: Equatable {
     /// is why it is a standalone command rather than a `present` parameter.
     case scrollSheet(target: ScrollTarget)
 
+    /// Bug #273 — `navigate?spine=<N>[&fraction=<0...1>]` drives
+    /// `.readerNavigateToLocator` CU-free (the verification harness for feature
+    /// #71 WI-8 continuous-mode navigation, which the `search` driver cannot
+    /// exercise in continuous mode). `spine` (required, ≥0) is the target spine
+    /// index; `fraction` (optional, finite, clamped 0...1) is the intra-chapter
+    /// landing position (absent ⇒ chapter start). The handler posts
+    /// `.debugBridgeNavigateCommand`; the live `EPUBReaderContainerView` observer
+    /// resolves the index → href + builds the `Locator` + re-posts
+    /// `.readerNavigateToLocator`.
+    case navigate(spineIndex: Int, fraction: Double?)
+
     /// Which AI action the `ai` command fires (Bug #255 — verification
     /// harness AI-action driver). The handler posts `.debugBridgeAIAction`;
     /// the AI panel's observer invokes the SAME view-model path the chrome
@@ -718,6 +729,40 @@ extension DebugCommand {
                 )
             }
             return .seekFraction(fraction: min(max(parsed, 0), 1))
+
+        case "navigate":
+            // Bug #273: drive `.readerNavigateToLocator` CU-free — the
+            // verification harness for feature #71 WI-8 continuous-mode
+            // navigation. `spine` is required and must be a non-negative
+            // integer (the observer additionally range-checks against the
+            // loaded spine count). `fraction` is optional; when present it must
+            // be a finite number and is clamped to 0...1 (mirrors `seek`).
+            let rawSpine = try requireParam("spine", in: params)
+            guard let spine = Int(rawSpine), spine >= 0 else {
+                throw DebugCommandError.invalidParam(
+                    "spine",
+                    reason: "expected a non-negative integer, got \(rawSpine)"
+                )
+            }
+            let fraction: Double?
+            if let rawFraction = params["fraction"] {
+                guard !rawFraction.isEmpty else {
+                    throw DebugCommandError.invalidParam(
+                        "fraction",
+                        reason: "expected a finite number in 0...1, got empty value"
+                    )
+                }
+                guard let parsedFraction = Double(rawFraction), parsedFraction.isFinite else {
+                    throw DebugCommandError.invalidParam(
+                        "fraction",
+                        reason: "expected a finite number in 0...1, got \(rawFraction)"
+                    )
+                }
+                fraction = min(max(parsedFraction, 0), 1)
+            } else {
+                fraction = nil
+            }
+            return .navigate(spineIndex: spine, fraction: fraction)
 
         case "scroll-sheet":
             // Bug #271: scroll the active presented sheet's scrollable content.

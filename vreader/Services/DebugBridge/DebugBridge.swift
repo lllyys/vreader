@@ -103,6 +103,14 @@ protocol DebugBridgeContext {
     /// scroll logic. If no scrollable sheet observes it, the action is a no-op
     /// (matches `present` / `tts` / `search`).
     func scrollSheet(target: DebugCommand.ScrollTarget) async throws
+    /// Bug #273 — drive `.readerNavigateToLocator` CU-free (the verification
+    /// harness for feature #71 WI-8 continuous-mode navigation). The handler
+    /// posts `.debugBridgeNavigateCommand`; the live `EPUBReaderContainerView`
+    /// observer resolves `spineIndex` → href against `viewModel.metadata`,
+    /// builds a `Locator`, and re-posts `.readerNavigateToLocator` — the SAME
+    /// channel a TOC/bookmark/search tap uses. If no matching EPUB reader is
+    /// loaded, the action is a no-op (matches `seek` / `search` / `present`).
+    func navigate(spineIndex: Int, fraction: Double?) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -239,6 +247,8 @@ final class DebugBridge {
             try await context.seekFraction(fraction: fraction)
         case .scrollSheet(let target):
             try await context.scrollSheet(target: target)
+        case .navigate(let spineIndex, let fraction):
+            try await context.navigate(spineIndex: spineIndex, fraction: fraction)
         }
     }
 }

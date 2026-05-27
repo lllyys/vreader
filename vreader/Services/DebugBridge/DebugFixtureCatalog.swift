@@ -52,6 +52,14 @@ enum DebugFixtureCatalog {
         // catalog had no entry before this; the `Format.md` case already
         // existed.
         DebugFixture(name: "mini-markdown", format: .md,   resourceName: "mini-markdown", resourceExtension: "md"),
+        // Bug #273: a 4-chapter EPUB whose chapters are each TALLER than a
+        // viewport, so continuous-scroll navigation (feature #71 WI-8) produces
+        // a measurable, distinguishable scrollTop landing — `mini-epub3`'s two
+        // tiny chapters fit in roughly one screen (total scroll range ~53px),
+        // so a navigate clamps to the bottom and can't be told apart. Four
+        // spine items also make the out-of-window rebuild branch reachable
+        // (anchor 0 → window [0,1]; navigating to chapter 3/4 is out-of-window).
+        DebugFixture(name: "multi-chapter-epub", format: .epub, resourceName: "multi-chapter-epub", resourceExtension: "epub"),
     ]
 
     /// All catalog entries.

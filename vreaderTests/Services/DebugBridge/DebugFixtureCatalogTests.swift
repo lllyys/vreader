@@ -12,7 +12,7 @@ final class DebugFixtureCatalogTests: XCTestCase {
 
     func test_all_returnsKnownFixtureNames() {
         let names = DebugFixtureCatalog.all().map { $0.name }
-        XCTAssertEqual(Set(names), ["war-and-peace", "mini-epub3", "mini-azw3", "mini-markdown"])
+        XCTAssertEqual(Set(names), ["war-and-peace", "mini-epub3", "mini-azw3", "mini-markdown", "multi-chapter-epub"])
     }
 
     /// Feature #70 WI-4: the MD fixture added so the `.md` reader path is

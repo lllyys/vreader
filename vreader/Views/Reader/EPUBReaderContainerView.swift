@@ -331,6 +331,27 @@ struct EPUBReaderContainerView: View {
                 }
             }
         }
+        #if DEBUG
+        // Bug #273: CU-free harness for WI-8 continuous-mode navigation. The
+        // `navigate` DebugBridge command can't build a Locator itself (it has
+        // no spine metadata / fingerprint), so it posts the spine index here;
+        // we resolve index → href against the loaded metadata, build a Locator
+        // with the active book's fingerprint, and re-post the SAME
+        // `.readerNavigateToLocator` a real TOC/bookmark/search tap uses — so
+        // the WI-8 handler above performs the jump (no parallel path).
+        .onReceive(NotificationCenter.default.publisher(for: .debugBridgeNavigateCommand)) { notification in
+            guard let spineIndex = notification.userInfo?["spineIndex"] as? Int,
+                  let meta = viewModel.metadata,
+                  spineIndex >= 0, spineIndex < meta.spineItems.count,
+                  let fingerprint = DocumentFingerprint(canonicalKey: viewModel.bookFingerprintKey) else { return }
+            let fraction = notification.userInfo?["fraction"] as? Double
+            let href = meta.spineItems[spineIndex].href
+            guard let locator = Locator.validated(
+                bookFingerprint: fingerprint, href: href, progression: fraction
+            ) else { return }
+            NotificationCenter.default.post(name: .readerNavigateToLocator, object: locator)
+        }
+        #endif
         // Bug #88: re-render highlights after annotation import
         .onReceive(NotificationCenter.default.publisher(for: .readerHighlightsDidImport)) { _ in
             if let coordinator = highlightCoordinator {

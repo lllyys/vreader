@@ -745,6 +745,65 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
+    func test_navigate_postsNavigateCommandWithSpineAndFraction() async throws {
+        // Bug #273: navigate posts .debugBridgeNavigateCommand carrying the
+        // spine index + clamped fraction; the live EPUBReaderContainerView
+        // observer resolves index → href and re-posts .readerNavigateToLocator.
+        let exp = expectation(description: "navigate notification posted")
+        nonisolated(unsafe) var receivedSpine: Int?
+        nonisolated(unsafe) var receivedFraction: Double?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeNavigateCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedSpine = notification.userInfo?["spineIndex"] as? Int
+            receivedFraction = notification.userInfo?["fraction"] as? Double
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.navigate(spineIndex: 3, fraction: 0.25)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedSpine, 3)
+        XCTAssertEqual(receivedFraction, 0.25)
+    }
+
+    @MainActor
+    func test_navigate_withNilFraction_omitsFractionFromUserInfo() async throws {
+        // Bug #273: absent fraction ⇒ chapter start; the key is omitted so the
+        // observer's `as? Double` cleanly yields nil.
+        let exp = expectation(description: "navigate notification posted")
+        nonisolated(unsafe) var hasFractionKey = true
+        nonisolated(unsafe) var receivedSpine: Int?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeNavigateCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedSpine = notification.userInfo?["spineIndex"] as? Int
+            hasFractionKey = notification.userInfo?["fraction"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.navigate(spineIndex: 0, fraction: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedSpine, 0)
+        XCTAssertFalse(hasFractionKey)
+    }
+
+    @MainActor
     func test_scrollSheet_recordsPendingTargetForReplay() async throws {
         // Bug #271 (Gate-4 round-1 Medium): scrollSheet records the target in
         // the shared replay buffer so a scroll requested BEFORE the result card

@@ -188,6 +188,25 @@ extension Notification.Name {
     ///   (`top` / `bottom`), validated by the parser.
     static let debugBridgeScrollSheet = Notification.Name("vreader.debugBridge.scrollSheet")
 
+    /// Posted by RealDebugBridgeContext.navigate (Bug #273) to drive
+    /// `.readerNavigateToLocator` CU-free — the verification harness for
+    /// feature #71 WI-8 (EPUB continuous-mode TOC/bookmark/search navigation),
+    /// which the `search` driver cannot exercise in continuous mode. The live
+    /// `EPUBReaderContainerView` observer resolves the spine index to its
+    /// `href` against `viewModel.metadata`, builds a `Locator` with the active
+    /// book's fingerprint, and re-posts `.readerNavigateToLocator` — re-entering
+    /// the SAME WI-8 handler a real TOC/bookmark/search tap hits (no parallel
+    /// navigation path). If no EPUB reader with matching metadata is loaded, no
+    /// observer fires — the URL is silently a no-op (mirrors `seek` / `search`).
+    ///
+    /// userInfo:
+    /// - `"spineIndex"`: Int — the target spine index (non-negative, validated
+    ///   by the parser; the observer additionally range-checks against the
+    ///   loaded spine count).
+    /// - `"fraction"`: Double (optional) — the intra-chapter landing position,
+    ///   clamped 0...1 by the parser. Absent ⇒ chapter start.
+    static let debugBridgeNavigateCommand = Notification.Name("vreader.debugBridge.navigateCommand")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker
