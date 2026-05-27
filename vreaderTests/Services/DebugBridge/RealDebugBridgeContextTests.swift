@@ -114,6 +114,36 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertEqual(afterCount, 0)
     }
 
+    // Bug #272: `reset` must clear leaked reader settings so `open?position=`
+    // verification is deterministic. A `readerAutoPageTurn=true` persisted from a
+    // prior session made the AutoPageTurner advance the paged reader on open
+    // (page 0 → last page), masking the seek and producing a "stale position"
+    // snapshot that the prior cron ticks chased as a navigate/persistence bug.
+    @MainActor
+    func test_reset_clearsLeakedReaderSettings() async throws {
+        let suiteName = "test.bug272.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // Simulate a prior session leaking auto-page-turn + a custom layout.
+        defaults.set(true, forKey: ReaderSettingsStore.autoPageTurnKey)
+        defaults.set("paged", forKey: ReaderSettingsStore.epubLayoutKey)
+        XCTAssertTrue(defaults.bool(forKey: ReaderSettingsStore.autoPageTurnKey))
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        try await context.reset()
+
+        // Keys removed → a fresh reader mount reads deterministic defaults.
+        XCTAssertNil(
+            defaults.object(forKey: ReaderSettingsStore.autoPageTurnKey),
+            "reset must clear the leaked autoPageTurn key (Bug #272)"
+        )
+        XCTAssertNil(defaults.object(forKey: ReaderSettingsStore.epubLayoutKey))
+        let store = ReaderSettingsStore(defaults: defaults)
+        XCTAssertFalse(store.autoPageTurn, "a fresh store over the reset defaults must read autoPageTurn=false")
+    }
+
     // MARK: - seed
 
     @MainActor
