@@ -31,8 +31,8 @@ struct V5toV6MigrationTests {
     }
 
     @Test func migrationPlanLength() {
-        // V1, V2, V3, V4, V5, V6, V7 — seven schemas (V7 added by feature #56).
-        #expect(VReaderMigrationPlan.schemas.count == 7)
+        // V1…V8 — eight schemas (V8 added by feature #42, V7 by feature #56).
+        #expect(VReaderMigrationPlan.schemas.count == 8)
     }
 
     @Test func migrationPlanHasNoExplicitStages() {

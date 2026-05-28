@@ -28,14 +28,17 @@ struct V6toV7MigrationTests {
         #expect(v7Names == expected)
     }
 
-    @Test func migrationPlanIncludesV7AsLast() {
-        let last = VReaderMigrationPlan.schemas.last
-        #expect(last != nil)
-        #expect(String(describing: last!) == String(describing: SchemaV7.self))
+    @Test func migrationPlanIncludesV7AtIndex6() {
+        // V7 is the 7th schema (index 6). It is no longer the tail — SchemaV8
+        // (feature #42) follows it; the tail assertion lives in
+        // SchemaV8MigrationTests so this stays stable as new schemas land.
+        #expect(VReaderMigrationPlan.schemas.count > 6)
+        #expect(String(describing: VReaderMigrationPlan.schemas[6]) == String(describing: SchemaV7.self))
     }
 
-    @Test func migrationPlanLengthIsSeven() {
-        #expect(VReaderMigrationPlan.schemas.count == 7)
+    @Test func migrationPlanLengthIsEight() {
+        // V1…V8 — eight schemas (V8 added by feature #42).
+        #expect(VReaderMigrationPlan.schemas.count == 8)
     }
 
     @Test func migrationPlanHasNoExplicitStages() {
