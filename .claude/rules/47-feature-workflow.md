@@ -24,7 +24,7 @@ The features.md "Plan Template" fields (Problem, Scope, Edge Cases, Test plan, A
 
 ## Gate 2 — Independent Plan Audit
 
-Send the plan to an independent AI auditor (not the same agent/model/context as the plan author). Codex MCP is the current default; Gemini, OpenCode, or any equivalent satisfies the gate. The invariant is **independence**, not the brand.
+Send the plan to an independent AI auditor (not the same agent/model/context as the plan author). cc-suite (driving Codex via `codex exec`) is the current default; Gemini, OpenCode, or any equivalent satisfies the gate. The invariant is **independence**, not the brand.
 
 Audit prompt must explicitly request:
 
@@ -123,7 +123,7 @@ If a feature is genuinely 10+ WIs, consider whether the plan should split into m
 
 ## Author / auditor separation (invariant)
 
-The agent that writes the plan must NOT be the same agent that audits it. Today this happens by accident (Codex MCP is a separate process from the implementing Claude Code session). The rule preserves this invariant explicitly so a future single-agent setup doesn't degenerate into self-marking.
+The agent that writes the plan must NOT be the same agent that audits it. Today this happens by accident (cc-suite runs Codex as a separate `codex exec` process from the implementing Claude Code session). The rule preserves this invariant explicitly so a future single-agent setup doesn't degenerate into self-marking.
 
 If a future setup runs everything through one agent, the audit step requires invoking a different model/context boundary explicitly (e.g., a fresh subagent with read-only sandbox + explicit "audit, don't implement" framing).
 

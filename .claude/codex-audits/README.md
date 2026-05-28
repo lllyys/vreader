@@ -13,7 +13,7 @@ For branch `fix/issue-206-wire-lazy-download-finalizer` → file `fix-issue-206-
 ```yaml
 ---
 branch: <branch name, exactly as `git branch --show-current` returns>
-threadId: <Codex MCP thread id, or "manual-fallback">
+threadId: <Codex exec session id, or "manual-fallback">
 rounds: <integer ≥ 1>
 final_verdict: ship-as-is | follow-up-recommended | block-recommended
 date: YYYY-MM-DD
@@ -35,7 +35,7 @@ Free-form Markdown, but the workflow rule (`.claude/rules/47-feature-workflow.md
 2. **Resolution per finding** — fixed (with commit/file ref), accepted (with rationale), or deferred to follow-up bug (with bug id).
 3. **Final verdict statement** — one paragraph or sentence justifying the chosen `final_verdict`.
 
-For manual-fallback audits (Codex MCP unavailable), include a **Manual audit evidence** section instead of the Codex transcript, listing files read + symbols verified + edge cases checked.
+For manual-fallback audits (Codex runner unavailable), include a **Manual audit evidence** section instead of the Codex transcript, listing files read + symbols verified + edge cases checked.
 
 ## When the hook can be bypassed
 

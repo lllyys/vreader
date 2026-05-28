@@ -12,7 +12,7 @@
 #
 #   ---
 #   branch: <current branch name>
-#   threadId: <Codex MCP thread id>
+#   threadId: <Codex exec session id, or manual-fallback>
 #   rounds: <integer ≥ 1>
 #   final_verdict: ship-as-is | follow-up-recommended | block-recommended
 #   date: YYYY-MM-DD
@@ -120,11 +120,12 @@ skill's Phase 4, every PR that ships Swift code must run through a
 Codex audit loop before merge. Two ways to proceed:
 
   1. Run the audit. The cheap path:
-        a. mcp__plugin_codex-toolkit_codex__codex with sandbox=read-only
-           and a prompt that audits the diff vs main. Capture the
-           threadId from the response.
-        b. Iterate via codex-reply until the verdict is "ship-as-is"
-           or "follow-up-recommended" (with follow-ups filed as
+        a. Run /cc-suite:audit (read-only) — or /cc-suite:audit-fix for
+           the audit->fix->verify loop — against the diff vs main.
+           cc-suite drives Codex via "codex exec"; capture its session id.
+           Do NOT use the codex-toolkit MCP tool; it is no longer loaded.
+        b. Iterate until the verdict is "ship-as-is" or
+           "follow-up-recommended" (with follow-ups filed as
            separate bugs).
         c. Write the log to:
               $AUDIT_FILE
@@ -139,7 +140,7 @@ Codex audit loop before merge. Two ways to proceed:
         d. git add + commit the audit log alongside the fix.
         e. Retry the merge.
 
-  2. If the audit is genuinely impractical (Codex MCP is down and
+  2. If the audit is genuinely impractical (the Codex runner is down and
      can't be brought up), do a manual mini-audit per the
      /fix-issue skill's fallback procedure and write the same file
      with final_verdict + a "Manual audit evidence" section

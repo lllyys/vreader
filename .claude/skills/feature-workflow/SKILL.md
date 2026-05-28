@@ -135,7 +135,7 @@ required sections filled in. Ready for independent audit.
 | Field | Value |
 |---|---|
 | Required artifact | Audit verdict captured inline in the plan file's revision history (Codex thread + rounds + verdict), OR a `Manual Audit Evidence` section when AI auditor unavailable |
-| Owner / auditor | Author = Gate 1 author. Auditor = **DIFFERENT agent context** (Codex MCP default, or fresh subagent with read-only sandbox + "audit, don't implement" framing). Author/auditor separation is mandatory per rule 48 |
+| Owner / auditor | Author = Gate 1 author. Auditor = **DIFFERENT agent context** (the configured Codex runner — cc-suite — by default, or a fresh subagent with read-only sandbox + "audit, don't implement" framing). Author/auditor separation is mandatory per rule 48 |
 | Status transition | row → `PLANNED` only after this gate passes; that flip triggers GH issue creation if not already mirrored |
 | Blocking hook | `check_gh_issue_mirror.sh` on the `PLANNED` flip |
 | Exit criteria | Zero open Critical/High/Medium findings; Low findings fixed or accepted with rationale; **max 3 audit rounds** (escalate to user if not clean by round 3) |
@@ -145,50 +145,46 @@ verdict captured inline in the plan file's revision history, OR a
 `Manual Audit Evidence` section if the AI auditor is unavailable.
 
 **Author/auditor separation**: the agent that wrote the plan must
-**not** audit it. Codex MCP being a separate process satisfies this
+**not** audit it. cc-suite running Codex as a separate `codex exec` process satisfies this
 by default. If a future setup runs everything through one agent, this
 gate requires invoking a different model/context boundary explicitly
 (e.g., a fresh subagent with read-only sandbox + explicit
 "audit, don't implement" framing). See `.claude/rules/48-parallel-execution.md`.
 
-## 2a. Codex MCP availability test
+## 2a. Plan audit via the configured Codex runner
 
-Before the real audit, send a short ping:
+Run the project's configured **independent Codex audit runner** — current
+runner **`cc-suite`**, via **`/cc-suite:review-plan`** (architectural plan
+review: consistency, completeness, feasibility, ambiguity, risk; it drives
+Codex through `codex exec`). Do NOT use `ToolSearch +codex` or
+`mcp__plugin_codex-toolkit_codex__codex` — cc-suite intentionally avoids the
+MCP bridge (it hangs on long responses) and the old `codex-toolkit` MCP
+server is no longer loaded. If the `codex` CLI is missing/unauthenticated or
+cc-suite errors, skip to **2c. Manual fallback**.
 
-```
-mcp__plugin_codex-toolkit_codex__codex with:
-  prompt: "Respond with 'ok' if you can read this."
-```
+## 2b. Audit focus
 
-If Codex does not respond, skip to **2c. Manual fallback**.
+Point `/cc-suite:review-plan` at `dev-docs/plans/<plan-file>.md` for feature
+#<id>: <title> (read-only sandbox) and have it be direct — contradict the
+plan where it's wrong — focusing on:
 
-## 2b. Audit prompt (Codex available)
+1. Model assumption verification — do the SwiftData fields, enum
+   cases, function signatures, file paths the plan names actually
+   exist in the current codebase? (This catches the largest class
+   of pre-implementation bugs.)
+2. Risks + missing edge cases — what failure modes the plan misses.
+3. Protocol signature critique — are new interfaces well-shaped,
+   or do they leak implementation concerns?
+4. Concurrency hazards — actor isolation, Sendable, race conditions
+   in mutable state, @MainActor correctness.
+5. Cohesion check — is the WI split right, or are some WIs too big
+   or too small?
+6. Foundational-vs-behavioral classification — is each WI's tier
+   correct? (Foundational = DTOs/protocols/utilities, no user-observable
+   behavior. Behavioral = anything that changes app behavior, persistence,
+   networking, backup format, reader rendering, or UI flow.)
 
-```
-mcp__plugin_codex-toolkit_codex__codex with:
-  sandbox: read-only
-  prompt: |
-    Audit `dev-docs/plans/<plan-file>.md` for feature #<id>: <title>.
-
-    Focus areas — be direct, contradict if I'm wrong:
-    1. Model assumption verification — do the SwiftData fields, enum
-       cases, function signatures, file paths the plan names actually
-       exist in the current codebase? (This catches the largest class
-       of pre-implementation bugs.)
-    2. Risks + missing edge cases — what failure modes the plan misses.
-    3. Protocol signature critique — are new interfaces well-shaped,
-       or do they leak implementation concerns?
-    4. Concurrency hazards — actor isolation, Sendable, race conditions
-       in mutable state, @MainActor correctness.
-    5. Cohesion check — is the WI split right, or are some WIs too big
-       or too small?
-    6. Foundational-vs-behavioral classification — is each WI's tier
-       correct? (Foundational = DTOs/protocols/utilities, no user-observable
-       behavior. Behavioral = anything that changes app behavior, persistence,
-       networking, backup format, reader rendering, or UI flow.)
-
-    Report findings as: file:line | severity (Critical/High/Medium/Low) | issue | fix
-```
+Have it report findings as: file:line | severity (Critical/High/Medium/Low) | issue | fix
 
 ## 2c. Manual fallback (Codex unavailable)
 
@@ -277,7 +273,7 @@ Pass → continue. Fail → fix and retry. 3 failures → stop, report.
 | Field | Value |
 |---|---|
 | Required artifact | `.claude/codex-audits/<branch>-audit.md` with valid frontmatter (branch, threadId, rounds, final_verdict, date) |
-| Owner / auditor | Author = WI implementer. Auditor = Codex MCP (or fresh subagent). Author/auditor separation per rule 48 |
+| Owner / auditor | Author = WI implementer. Auditor = the configured Codex runner (cc-suite) or a fresh subagent. Author/auditor separation per rule 48 |
 | Status transition | none — row stays `IN PROGRESS` |
 | Blocking hook | `check_codex_audit_artifact.sh` blocks `gh pr merge` without this file |
 | Exit criteria | Zero open Critical/High/Medium findings; **max 3 audit rounds** (escalate to user if not clean by round 3) |
@@ -294,34 +290,31 @@ git diff main
 
 ### Codex audit
 
-Same availability test as Gate 2a. If Codex available:
+Run the same configured Codex runner as Gate 2a — **`cc-suite`**:
+**`/cc-suite:audit`** for a read-only audit (Codex audits, you fix —
+preserves rule-48 author/auditor separation), or **`/cc-suite:audit-fix`**
+for the audit→fix→verify loop. Do NOT use `ToolSearch +codex` /
+`mcp__plugin_codex-toolkit_codex__codex` — the codex-toolkit MCP server is
+gone. Point it at the changed files (`git diff main --name-only`) and focus on:
 
-```
-mcp__plugin_codex-toolkit_codex__codex with:
-  sandbox: read-only
-  prompt: |
-    Audit these files changed for feature #<id> WI-<n>: <title>
-    Files: {changed file list}
-    Diff summary: {git diff main --stat}
-    Focus:
-    1. Correctness vs the plan — does this WI deliver what the plan promised?
-    2. Edge cases — boundary conditions, nil, Unicode/CJK, concurrent access
-    3. Security — JS/CSS injection in evaluateJavaScript() and WKWebView bridges
-    4. Duplicate code — repeated logic that should be unified
-    5. Dead code — unused imports, unreachable branches, orphaned functions
-    6. Shortcuts & patches — workarounds, TODO markers, band-aids
-    7. VReader compliance — Swift 6 concurrency, @MainActor correctness,
-       SwiftData actor isolation, file size <300 lines
-    8. Bridge safety — FoliateJSEscaper used for all JS interpolation,
-       message parser handles edge cases
-    Report as: file:line | severity (Critical/High/Medium/Low) | issue | fix
-```
+1. Correctness vs the plan — does this WI deliver what the plan promised?
+2. Edge cases — boundary conditions, nil, Unicode/CJK, concurrent access
+3. Security — JS/CSS injection in evaluateJavaScript() and WKWebView bridges
+4. Duplicate code — repeated logic that should be unified
+5. Dead code — unused imports, unreachable branches, orphaned functions
+6. Shortcuts & patches — workarounds, TODO markers, band-aids
+7. VReader compliance — Swift 6 concurrency, @MainActor correctness,
+   SwiftData actor isolation, file size <300 lines
+8. Bridge safety — FoliateJSEscaper used for all JS interpolation,
+   message parser handles edge cases
 
-Fix every finding. Then `mcp__plugin_codex-toolkit_codex__codex-reply`
-on the same thread to verify.
+Have it report as: file:line | severity (Critical/High/Medium/Low) | issue | fix
 
-If Codex unavailable: manual mini-audit (same dimensions 1–8, written
-into the audit log artifact with `threadId: manual-fallback`).
+Fix every finding, then re-run `/cc-suite:audit` on the updated diff to
+verify (or let `/cc-suite:audit-fix`'s built-in verify pass cover it).
+
+If the Codex runner is unavailable: manual mini-audit (same dimensions 1–8,
+written into the audit log artifact with `threadId: manual-fallback`).
 
 ### Audit log artifact (required before merge)
 
@@ -332,7 +325,7 @@ Frontmatter:
 ```markdown
 ---
 branch: <current branch name, exactly as `git branch --show-current` returns>
-threadId: <Codex MCP thread id>      # OR `manual-fallback`
+threadId: <Codex exec session id>    # OR `manual-fallback`
 rounds: <integer ≥ 1>
 final_verdict: ship-as-is | follow-up-recommended | block-recommended
 date: YYYY-MM-DD
@@ -657,7 +650,7 @@ gate — that's how rule 47 was tightened in the first place.
 | `$ARGUMENTS` is empty | List `TODO`/`PLANNED` candidates; ask user to pick |
 | Target is actually a bug | Redirect to `/fix-issue`; STOP |
 | Plan exists at `dev-docs/plans/...` from a prior run | Resume at the correct gate (re-run Gate 2 if plan changed; else continue) |
-| Codex MCP unavailable | Use manual fallback; mark audit log `threadId: manual-fallback` |
+| Codex runner unavailable | Use manual fallback; mark audit log `threadId: manual-fallback` |
 | 3 audit rounds with findings still open (Gate 2 OR Gate 4) | STOP. Escalate to user — accept, defer, or redesign |
 | Test gate fails 3x | Report errors, keep branch, STOP |
 | `check_gh_issue_mirror.sh` blocks tracker edit | Add `GH: #N` to the row's Notes column, retry |

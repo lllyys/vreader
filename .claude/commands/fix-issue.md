@@ -129,54 +129,42 @@ git diff main --name-only
 git diff main
 ```
 
-#### 4b. Initial audit via Codex MCP
+#### 4b. Initial audit via the configured Codex runner
 
-`ToolSearch` with query `+codex` to discover Codex tools.
+Run the project's configured **independent Codex audit runner**. Current
+runner: **`cc-suite`**, which drives Codex through `codex exec` (a
+killable, deadline-bounded CLI runner). Do NOT use `ToolSearch +codex` or
+`mcp__plugin_codex-toolkit_codex__codex` — cc-suite intentionally avoids the
+MCP bridge (it hangs on long responses) and the old `codex-toolkit` MCP
+server is no longer loaded.
 
-**Availability test** — short ping first:
+Default to a **read-only audit** via **`/cc-suite:audit`** (Codex audits,
+*you* fix — this preserves the rule-48 author/auditor separation). Point it
+at the changed files (`git diff main --name-only`) and have it focus on:
 
-```
-mcp__plugin_codex-toolkit_codex__codex with:
-  prompt: "Respond with 'ok' if you can read this."
-```
+1. Correctness & logic — does the fix actually solve the root cause?
+2. Edge cases — boundary conditions, nil, Unicode/CJK, concurrent access
+3. Security — JS/CSS injection safety in evaluateJavaScript() and WKWebView bridges
+4. Duplicate code — repeated logic that should be unified
+5. Dead code — unused imports, unreachable branches, orphaned functions
+6. Shortcuts & patches — workarounds, TODO markers, band-aids
+7. VReader compliance — Swift 6 concurrency, @MainActor correctness, SwiftData actor isolation, file size <300 lines
+8. Bridge safety — FoliateJSEscaper used for all JS string interpolation, message parser handles all edge cases
 
-If Codex does not respond, skip to **4f. Fallback** immediately. If it
-responds:
-
-**Audit prompt**:
-
-```
-mcp__plugin_codex-toolkit_codex__codex with:
-  sandbox: read-only
-  prompt: |
-    Audit these files changed for GitHub issue #{N}: {title}
-    Files: {changed file list}
-    Diff summary: {git diff main --stat}
-    Focus:
-    1. Correctness & logic — does the fix actually solve the root cause?
-    2. Edge cases — boundary conditions, nil, Unicode/CJK, concurrent access
-    3. Security — JS/CSS injection safety in evaluateJavaScript() and WKWebView bridges
-    4. Duplicate code — repeated logic that should be unified
-    5. Dead code — unused imports, unreachable branches, orphaned functions
-    6. Shortcuts & patches — workarounds, TODO markers, band-aids
-    7. VReader compliance — Swift 6 concurrency, @MainActor correctness, SwiftData actor isolation, file size <300 lines
-    8. Bridge safety — FoliateJSEscaper used for all JS string interpolation, message parser handles all edge cases
-    Report as: file:line | severity (Critical/High/Medium/Low) | issue | fix
-```
+`/cc-suite:audit` reports findings as: file:line | severity | issue | fix.
+(`/cc-suite:audit-fix` runs the full audit→fix→verify loop with Codex
+driving the fixes — use it only if you want Codex-authored fixes and will
+review them yourself; `/cc-suite:status|result|cancel` track a running job.)
 
 #### 4c. Parse & fix
 
 Fix **every** finding — Critical, High, Medium, Low.
 
-#### 4d. Verify via Codex reply
+#### 4d. Verify
 
-`mcp__plugin_codex-toolkit_codex__codex-reply` on the same thread:
-
-```
-I fixed these issues: {list of fixes with file:line}
-Verify ALL fixes are correct. Check for new issues introduced by the fixes.
-Updated diff: {git diff main --stat}
-```
+Re-run **`/cc-suite:audit`** on the updated diff to confirm every finding is
+resolved and no new issue was introduced. (If you used `/cc-suite:audit-fix`,
+its built-in verify pass already covers this.)
 
 #### 4e. Loop or exit
 
@@ -187,8 +175,9 @@ Updated diff: {git diff main --stat}
 
 #### 4f. Fallback — manual mini-audit
 
-If Codex MCP is unavailable: read each changed file, audit dimensions
-1–8 above, fix Critical/High inline.
+If the Codex runner is genuinely unavailable (the `codex` CLI is missing or
+unauthenticated, or cc-suite errors): read each changed file, audit
+dimensions 1–8 above, and fix Critical/High inline.
 
 #### 4g. Write the audit log artifact
 
@@ -204,7 +193,7 @@ Frontmatter (required):
 ```markdown
 ---
 branch: <current branch name, exactly as `git branch --show-current` returns>
-threadId: <Codex MCP thread id>      # OR `manual-fallback` if 4f was used
+threadId: <Codex exec session id>    # OR `manual-fallback` if 4f was used
 rounds: <integer ≥ 1>
 final_verdict: ship-as-is | follow-up-recommended | block-recommended
 date: YYYY-MM-DD
@@ -579,7 +568,7 @@ rm -rf .claude/worktrees/agent-*
 | Issue is a feature | Redirect to `/feature-workflow`, STOP |
 | Dirty working tree | Isolate with branch, don't revert unrelated changes |
 | No labels (ambiguous type) | Ask user to classify |
-| Codex MCP unavailable | Use 4f manual fallback; mark audit log `threadId: manual-fallback` |
+| Codex runner unavailable | Use 4f manual fallback; mark audit log `threadId: manual-fallback` |
 | Test gate fails 3x | Report errors, keep branch, STOP |
 | `check_gh_issue_mirror.sh` blocks tracker edit | Add `GH: #N` to the row's Notes column, retry |
 | `check_codex_audit_artifact.sh` blocks `gh pr merge` | Verify the audit log file exists at the expected path with valid frontmatter |

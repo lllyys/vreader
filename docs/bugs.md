@@ -19,11 +19,11 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 3. Agent updates Status when done
 
 - **Bug fix workflow** (follow this order for every bug):
-  1. **Understand**: Read the file/area, reproduce the symptom, identify root cause (not just location). Run `/codex-toolkit:bug-analyze`. If it is not a bug, move it to `docs/features.md`.
+  1. **Understand**: Read the file/area, reproduce the symptom, identify root cause (not just location). Run `/cc-suite:bug-analyze`. If it is not a bug, move it to `docs/features.md`.
   2. **RED**: Write a failing test that proves the bug exists.
   3. **GREEN**: Minimal fix to make the test pass.
   4. **REFACTOR**: Clean up without changing behavior.
-  5. **Verify**: Run tests, confirm the fix, check for regressions. Run `/codex-toolkit:audit-fix` on changed files.
+  5. **Verify**: Run tests, confirm the fix, check for regressions. Run `/cc-suite:audit-fix` on changed files.
   6. **Track**: Update status in the Summary table to FIXED.
   7. Do NOT commit unless explicitly requested.
   8. Record cause, solution, and lessons in `archive/bugs-history.md`. Remove the bug's entry from `## Open Bug Details`.

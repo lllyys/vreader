@@ -26,7 +26,7 @@ If the answer isn't clearly positive, don't parallelize.
 
 ## Hard rules (non-negotiable)
 
-1. **Author/auditor separation**: the agent that writes a plan, code, or PR is never the agent that audits it. (Codex MCP being a separate process satisfies this by accident; preserve the boundary explicitly.)
+1. **Author/auditor separation**: the agent that writes a plan, code, or PR is never the agent that audits it. (cc-suite running Codex as a separate `codex exec` process satisfies this by accident; preserve the boundary explicitly.)
 2. **Hard dependency blocks downstream Gate 3**: if feature B depends on feature A, you cannot start B's TDD until A is `DONE`. Dependency graph in the tracker is the source of truth.
 3. **One writer per file/area at a time**: two agents can work the same feature if their write sets are disjoint and explicit. Two agents writing the same file is a merge conflict you will lose.
 

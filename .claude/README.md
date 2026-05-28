@@ -4,9 +4,9 @@ This directory contains configuration for AI coding tools — primarily [Claude 
 
 ## Prerequisites
 
-### Codex CLI (for `/codex-toolkit:*` audit commands)
+### Codex CLI (for `/cc-suite:*` audit commands)
 
-The `codex-toolkit` plugin (when enabled) uses OpenAI's Codex as an independent second opinion for code audits. Install Codex globally and log in with your subscription:
+The `cc-suite` plugin uses OpenAI's Codex as an independent second opinion for code audits, driving it via `codex exec` (a killable, deadline-bounded CLI runner — no MCP bridge). Install Codex globally and log in with your subscription:
 
 ```bash
 npm install -g @openai/codex
@@ -18,7 +18,7 @@ Subscription auth (`codex login` with ChatGPT Plus/Pro) is dramatically cheaper 
 
 ### Why a second AI model?
 
-Claude writes the code; Codex audits it independently. Cross-model verification catches blind spots a single model would miss. This is built into `/codex-toolkit:audit`, `/codex-toolkit:audit-fix`, and `/fix-issue`.
+Claude writes the code; Codex audits it independently. Cross-model verification catches blind spots a single model would miss. This is built into `/cc-suite:audit`, `/cc-suite:audit-fix`, and `/fix-issue`.
 
 ## Directory Structure
 
