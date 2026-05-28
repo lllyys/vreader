@@ -26,6 +26,15 @@ protocol DebugBridgeContext {
     /// string at dispatch time — the previous command's failure reason, or
     /// nil if the previous command succeeded.
     func snapshot(dest: String, lastErrorMessage: String?) async throws
+    /// Bug #1218 — write the active TXT reader's currently-rendered
+    /// (post-conversion) text to `dest` (a parser-validated basename) as
+    /// JSON. iOS 26 SwiftUI flattens the chunked TXT reader's inner cells
+    /// into the container, whose accessibility VALUE is the load-bearing
+    /// state probe, so CU-free XCUITest cannot read the rendered content
+    /// directly. Mirrors `snapshot` — always writes a file (an
+    /// `{"error": "no active reader"}` payload when no reader is presented),
+    /// throwing only on a filesystem-write failure.
+    func txtContent(dest: String) async throws
     func eval(bridge: String, js: String) async throws
     /// Feature #45 WI-4c-b — drive TTS from outside the reader.
     /// `action` is one of `"start"` / `"stop"`. The handler posts a
@@ -246,6 +255,8 @@ final class DebugBridge {
             // — the snapshot captures the state at dispatch time.
             let msg = lastError.map { Self.stableErrorMessage(for: $0) }
             try await context.snapshot(dest: dest, lastErrorMessage: msg)
+        case .txtContent(let dest):
+            try await context.txtContent(dest: dest)
         case .eval(let bridge, let js):
             try await context.eval(bridge: bridge, js: js)
         case .tts(let action):

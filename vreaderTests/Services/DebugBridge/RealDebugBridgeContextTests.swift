@@ -641,6 +641,115 @@ final class RealDebugBridgeContextTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
+    // MARK: - txt-content (bug #1218)
+
+    @MainActor
+    func test_txtContent_withProbeRenderedText_writesTextAndAvailableTrue() async throws {
+        // A registered probe with a known rendered text → the file contains
+        // that text and `available: true` (the CU-free read path for
+        // Feature #28's Simp→Trad conversion verification).
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "txt:abc123:1024",
+            format: "txt"
+        )
+        probe.renderedText = "繁體中文內容"  // CJK round-trips through JSON
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let dest = "txt-content-\(UUID().uuidString).json"
+        try await context.txtContent(dest: dest)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory().appendingPathComponent(dest)
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["text"] as? String, "繁體中文內容")
+        XCTAssertEqual(json?["available"] as? Bool, true)
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "txt:abc123:1024")
+        XCTAssertEqual(json?["format"] as? String, "txt")
+        XCTAssertNotNil(json?["ts"] as? String)
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_txtContent_withProbeButNoRenderedText_writesNullAndAvailableFalse() async throws {
+        // A registered probe that hasn't wired rendered text → `text: null`
+        // and `available: false` (still a file, mirroring eval/snapshot's
+        // always-write contract so the host-side waiter has output).
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "txt:def:2048",
+            format: "txt"
+        )
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let dest = "txt-content-\(UUID().uuidString).json"
+        try await context.txtContent(dest: dest)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory().appendingPathComponent(dest)
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertTrue(json?["text"] is NSNull, "text must be JSON null when no rendered text is wired")
+        XCTAssertEqual(json?["available"] as? Bool, false)
+        XCTAssertEqual(json?["fingerprintKey"] as? String, "txt:def:2048")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_txtContent_nonTXTFormatProbe_forcesUnavailable() async throws {
+        // Codex Gate-4 (Medium): the rendered-text probe is a TXT-only
+        // capability. Even if a non-TXT probe somehow populates `renderedText`,
+        // the command must report `available:false` / `text:null` so non-TXT
+        // content can't be misread as TXT prose.
+        let probe = DebugReaderProbeAdapter(
+            fingerprintKey: "epub:abc:4096",
+            format: "epub"
+        )
+        probe.renderedText = "should be ignored for non-txt"
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let dest = "txt-content-\(UUID().uuidString).json"
+        try await context.txtContent(dest: dest)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory().appendingPathComponent(dest)
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertTrue(json?["text"] is NSNull, "non-TXT format must force text:null")
+        XCTAssertEqual(json?["available"] as? Bool, false)
+        XCTAssertEqual(json?["format"] as? String, "epub")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    func test_txtContent_withoutActiveReader_writesErrorFileButDoesNotThrow() async throws {
+        DebugReaderRegistry.shared.reset()
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        let dest = "txt-content-\(UUID().uuidString).json"
+        try await context.txtContent(dest: dest)
+
+        let url = try RealDebugBridgeContext.snapshotsDirectory().appendingPathComponent(dest)
+        let json = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: Any]
+        XCTAssertEqual(json?["error"] as? String, "no active reader")
+        XCTAssertNil(json?["text"], "no text on the error path")
+        try? FileManager.default.removeItem(at: url)
+    }
+
     // MARK: - open
 
     @MainActor

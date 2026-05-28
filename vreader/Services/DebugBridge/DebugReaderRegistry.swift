@@ -66,6 +66,14 @@ protocol DebugReaderProbe: AnyObject, Sendable {
     /// `DebugSnapshot.SettingsProvenanceValue`. Nil when the host doesn't
     /// surface this distinction yet.
     var currentSettingsProvenance: String? { get }
+
+    /// Current rendered (post-conversion) text of the active reader, for
+    /// CU-free content verification (bug #1218). Nil unless the host wires
+    /// it (TXT only today). The TXT host pushes its converted display text
+    /// here via `.debugBridgeRenderedTextChanged`, so the `txt-content`
+    /// command can read the post-Simp→Trad text that XCUITest cannot reach
+    /// through the flattened accessibility tree on iOS 26.
+    var currentRenderedText: String? { get }
 }
 
 // Default implementations so existing adopters compile without per-host
@@ -76,6 +84,7 @@ extension DebugReaderProbe {
     var currentTTSOffsetUTF16: Int? { nil }
     var currentRenderPhase: String { DebugSnapshot.RenderPhaseValue.idle }
     var currentSettingsProvenance: String? { nil }
+    var currentRenderedText: String? { nil }
 }
 
 #if DEBUG

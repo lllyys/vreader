@@ -56,6 +56,7 @@ All commands are scheme `vreader-debug://`. Host names the command. Trailing `/`
 | `theme`    | `mode=dark\|light\|paper\|sepia\|oled\|photo` | `fontSize=<int>`           | Persist theme + optional font size to `UserDefaults`. Effect on next reader open. `light` is a backward-compatible alias for `paper`.                                |
 | `settle`   | `token=<basename>`                 | —                                     | Wait for the active reader to settle, then write `Caches/DebugBridge/ready-<token>.json`. Bridge enforces a 30s timeout — a hung probe still produces the sentinel. |
 | `snapshot` | `dest=<basename>`                  | —                                     | Build a `DebugSnapshot` and write it to `Caches/DebugBridge/<dest>`.                                                                                                |
+| `txt-content` | `dest=<basename>`               | —                                     | Write the active **TXT** reader's currently-rendered (post-Simp→Trad) chapter text to `Caches/DebugBridge/<dest>` (Bug #1218). iOS 26 SwiftUI flattens the chunked TXT reader's inner cells into the container, whose accessibility VALUE is the load-bearing `restoredOffset:N chapterMode:… chapters:K` state probe — so CU-free XCUITest cannot read the *rendered text content*, which blocks Feature #28 (verifying the Chinese conversion is applied to reader content). `TXTReaderContainerView` posts its converted display text on `.debugBridgeRenderedTextChanged`; `ReaderContainerView`'s observer writes it onto the active `DebugReaderProbeAdapter.renderedText` when the `fingerprintKey` matches, and this command reads it back. Mirrors `snapshot` end-to-end (always writes a file). Only TXT wires the probe; for other formats the file reports `available:false` / `text:null`. Writes `{"error":"no active reader"}` when no reader is presented. |
 | `eval`     | `bridge=<basename>`, `js=<base64>` | —                                     | Run JS in the active reader's webview; write result/error to `Caches/DebugBridge/eval-<bridge>.json`.                                                               |
 | `tts`      | `action=start\|stop`               | —                                     | Drive `TTSService` from outside the play-button tap (Feature #45 WI-4c-b). XCUITest's gesture path cannot reliably activate `AVSpeechSynthesizer`'s audio session, so verification tests fire this URL after opening a book. No-op when no reader is presented. |
 | `search`   | `query=<str>`                      | `index=<int>`                         | Drive the in-reader search sheet (Bug #238). Opens the search sheet, sets `SearchViewModel.query` to `query`, and — when `index` (0-indexed, ≥0) is supplied — taps result N once results arrive (re-fires `.readerNavigateToLocator` then dismisses the sheet, mirroring the real-user tap path). Used by the verify harness to reproduce search-result-tap repros (e.g. Bug #182 cross-chapter EPUB search highlight) CU-free. No-op when no reader is presented. |
@@ -362,6 +363,38 @@ cat "$DATA/Library/Caches/DebugBridge/<file>"
 - `schemaVersion`: bump on field add/remove/semantics-change. Pin a known version in CI.
 - `partial`: field names whose nil value means "not yet implemented". Empty/absent ⇒ every nil is authoritative. Currently always contains `"selection"`; without an active reader also contains `"currentBookId"`, `"format"`, `"position"`.
 - `lastError`: stable category prefix, not Swift enum spelling. See "Error codes" below.
+
+### `txt-content` → `<dest>`
+
+Happy path (active TXT reader with rendered text wired):
+
+```json
+{
+  "available": true,
+  "fingerprintKey": "txt:ab02...:1708",
+  "format": "txt",
+  "text": "繁體中文章節內容…",
+  "ts": "2026-05-02T13:32:20Z"
+}
+```
+
+No-active-reader path:
+
+```json
+{
+  "error": "no active reader",
+  "ts": "2026-05-02T13:32:20Z"
+}
+```
+
+- Sorted keys, pretty-printed (same `JSONSerialization` options as `eval`).
+- `text`: the active TXT reader's currently-rendered (post-Simp→Trad)
+  chapter text, or JSON `null` when the host hasn't wired it.
+- `available`: `true` only when `text` is non-null. A reader of a non-TXT
+  format (which never posts `.debugBridgeRenderedTextChanged`) reports
+  `available:false` / `text:null`.
+- Writes a file even on the no-reader path (mirrors `eval`'s always-write
+  contract); throws only on a filesystem-write failure.
 
 ### `settle` → `ready-<token>.json`
 

@@ -21,6 +21,15 @@ import Foundation
 ///   reader appearance. `light` is a backward-compatible alias for `paper`.
 /// - `settle?token=<id>` — write `Caches/ready-<id>.json` after layout settles.
 /// - `snapshot?dest=<file>` — write semantic state JSON to the app container.
+/// - `txt-content?dest=<file>` — write the active TXT reader's currently-
+///   rendered (post-conversion) text as JSON to the app container (bug #1218).
+///   iOS 26 SwiftUI flattens the chunked TXT reader's inner cells into the
+///   container, whose accessibility VALUE is a load-bearing state probe, so
+///   CU-free XCUITest cannot read the rendered text content. This mirrors
+///   `snapshot(dest:)` end-to-end and is the CU-free read path for Feature
+///   #28's Simp→Trad conversion verification. Output JSON shape:
+///   `{"ts", "fingerprintKey", "format", "text": <string|null>, "available": <bool>}`.
+///   Writes `{"error": "no active reader"}` when no reader is presented.
 /// - `eval?bridge=<name>&js=<base64>` — evaluate JS in the named webview bridge.
 /// - `tts?action=<start|stop>` — drive TTS from outside the reader (Feature #45
 ///   WI-4c-b). XCUITest's gesture path cannot reliably activate
@@ -121,6 +130,15 @@ enum DebugCommand: Equatable {
     case theme(mode: ThemeMode, fontSize: Int?)
     case settle(token: String)
     case snapshot(dest: String)
+    /// Bug #1218 — `txt-content?dest=<basename>` writes the active TXT
+    /// reader's currently-rendered (post-conversion) text to
+    /// `Caches/DebugBridge/<dest>` as JSON. iOS 26 SwiftUI flattens the
+    /// chunked TXT reader's inner cells into the container (whose
+    /// accessibility VALUE is the load-bearing `restoredOffset:…` state
+    /// probe), so CU-free XCUITest cannot read the rendered text content.
+    /// This mirrors `snapshot(dest:)` and is the CU-free read path for
+    /// Feature #28's Simp→Trad conversion verification.
+    case txtContent(dest: String)
     case eval(bridge: String, js: String)
     case tts(action: String)
     case search(query: String, index: Int?)
@@ -449,6 +467,14 @@ extension DebugCommand {
             let dest = try requireParam("dest", in: params)
             try validateBasename(dest, paramName: "dest")
             return .snapshot(dest: dest)
+
+        case "txt-content":
+            // Bug #1218: CU-free read of the active TXT reader's rendered
+            // (post-conversion) text. `dest` is validated as a basename to
+            // stop path traversal in the output path — mirrors `snapshot`.
+            let dest = try requireParam("dest", in: params)
+            try validateBasename(dest, paramName: "dest")
+            return .txtContent(dest: dest)
 
         case "eval":
             let bridge = try requireParam("bridge", in: params)
