@@ -109,13 +109,11 @@ Subagent definitions used by `/feature-workflow`:
 | Skill | When used |
 |-------|-----------|
 | `ai-coding-agents` | Multi-tool orchestration guidance (Codex CLI / Claude Code CLI) |
-| `mcp-dev` / `mcp-server-manager` | MCP server configuration |
 | `plan-audit` / `plan-verify` / `planning` | Implementation planning |
-| `release-gate` | Quality gate checks |
 | `sim-transfer` | Push files into the iOS Simulator |
 | `triage` | Classify reported issues into bugs/features |
 
-Web/Tauri skills (`react-app-dev`, `tauri-*`, `tiptap-*`, `css-design-tdd`, `shortcut-audit`, `rust-tauri-backend`) were removed in the same cleanup pass.
+Web/Tauri skills (`react-app-dev`, `tauri-*`, `tiptap-*`, `css-design-tdd`, `shortcut-audit`, `rust-tauri-backend`) were removed in an earlier cleanup pass. `release-gate`, `mcp-dev`, and `mcp-server-manager` were removed 2026-05-28 (imported from another project, not relevant to vreader's iOS context — surfaced by `/nlpm:fix`).
 
 ## Related Files (Project Root)
 

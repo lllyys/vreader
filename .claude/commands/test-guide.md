@@ -1,3 +1,7 @@
+---
+description: Open vreader's manual testing checklist and help verify features by category.
+---
+
 # Manual Testing Guide
 
 Open vreader's manual testing checklist and help the user verify features.

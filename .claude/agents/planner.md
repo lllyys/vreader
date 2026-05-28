@@ -19,7 +19,7 @@ Include a dedicated "Edge Cases" section in every Work Item listing all identifi
 
 ## Output requirements
 
-- Write/update plan files locally (e.g. `docs/codex-plans/{date}-{work-name}.md`).
+- Write/update plan files locally (e.g. `dev-docs/plans/{date}-{work-name}.md`).
 - Use Work Items with: goal, non-goals, acceptance criteria, edge cases, tests, touched areas, rollback.
 - Keep items small enough to complete in 1–3 commits each.
 

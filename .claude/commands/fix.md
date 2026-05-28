@@ -1,3 +1,8 @@
+---
+description: Quick bug fix for a described issue — reproduce, write a failing test (RED), fix (GREEN), refactor, verify. For the full GH-issue pipeline (tracker + Codex audit + PR + close-gate) use /fix-issue.
+argument-hint: "<bug description or file>"
+---
+
 # Fix
 
 ## Context

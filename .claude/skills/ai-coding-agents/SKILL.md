@@ -7,7 +7,7 @@ description: Comprehensive guide for using Codex CLI (OpenAI) and Claude Code CL
 
 Expert knowledge for Codex CLI and Claude Code CLI — the two leading AI coding agents.
 
-**Note:** This skill documents both tools for reference. VMark development primarily uses **Claude Code CLI**. The Codex CLI sections are retained for completeness and cross-tool workflows.
+**Note:** This skill documents both tools for reference. vreader development primarily uses **Claude Code CLI**. The Codex CLI sections are retained for completeness and cross-tool workflows.
 
 ## When to Use
 
