@@ -399,7 +399,21 @@ struct TXTReaderContainerView: View {
             // Bug #180: in continuous mode the chunked UITableView builds
             // per-cell attributed strings lazily; no whole-document or
             // per-chapter NSAttributedString is built here.
-            if viewModel.isContinuousMode { return }
+            if viewModel.isContinuousMode {
+                // Bug #1218: this IS the surface the bug targets (scroll-layout
+                // chunked TXT). Surface the rendered chunk text to the
+                // DebugBridge probe so CU-free XCUITest can read it. `joined()`
+                // reconstructs exactly what the chunked UITableView renders.
+                // Posted faithfully: Simp→Trad is NOT applied in scroll mode
+                // today (Bug #1230 / row #275) so this is the raw text — once
+                // #1230 lands, this probe surfaces the converted text and
+                // verifies Feature #28. The `attrStringKey` includes
+                // `chineseConversion`, so this re-fires when conversion changes.
+                #if DEBUG
+                postRenderedTextForDebug(viewModel.continuousChunks?.joined() ?? "")
+                #endif
+                return
+            }
 
             let config = settingsStore?.txtViewConfig ?? TXTViewConfig()
             let conversion = settingsStore?.chineseConversion ?? .none
@@ -429,18 +443,29 @@ struct TXTReaderContainerView: View {
                         text: displayText, config: config,
                         headingLineLength: headingLineLength
                     )
+                    #if DEBUG
+                    postRenderedTextForDebug(displayText)
+                    #endif
                 } else {
-                    let wrapped = await Task.detached(priority: .userInitiated) {
+                    // The detached closure returns the converted display text
+                    // alongside the typography result so the bug #1218 debug
+                    // post can run on the main actor after the cancel check
+                    // (the post reads no detached state).
+                    let result = await Task.detached(priority: .userInitiated) { () -> (wrapped: SendableAttributedString, displayText: String) in
                         let displayText = conversion != .none
                             ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
                             : chapterText
-                        return TXTAttributedStringBuilder.buildChapterStartSendable(
+                        let wrapped = TXTAttributedStringBuilder.buildChapterStartSendable(
                             text: displayText, config: config,
                             headingLineLength: headingLineLength
                         )
+                        return (wrapped, displayText)
                     }.value
                     guard !Task.isCancelled else { return }
-                    typographedAttrString = wrapped.value
+                    typographedAttrString = result.wrapped.value
+                    #if DEBUG
+                    postRenderedTextForDebug(result.displayText)
+                    #endif
                 }
 
                 // Feature #56 WI-12b: when bilingual is on for this
@@ -496,19 +521,32 @@ struct TXTReaderContainerView: View {
                 guard !Task.isCancelled else { return }
                 textChunks = splitResult.0
                 chunkStartOffsets = splitResult.1
+                // Bug #1218: legacy large-file chunked path (same flattened
+                // UITableView surface). The chunks are already converted
+                // (SimpTrad applied above), so joining them is the rendered text.
+                #if DEBUG
+                postRenderedTextForDebug(splitResult.0.joined())
+                #endif
             } else {
                 // Small file: build full attributed string
                 let isInitial = preparedAttrString == nil
                 if isInitial { isBuildingInitialAttrString = true }
                 defer { if isInitial { isBuildingInitialAttrString = false } }
 
-                let wrapped = await Task.detached(priority: .userInitiated) {
+                let built = await Task.detached(priority: .userInitiated) { () -> (wrapped: SendableAttributedString, text: String) in
                     let text = conversion != .none
                         ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: rawText).text
                         : rawText
-                    return TXTAttributedStringBuilder.buildSendable(text: text, config: config)
+                    return (TXTAttributedStringBuilder.buildSendable(text: text, config: config), text)
                 }.value
                 guard !Task.isCancelled else { return }
+                let wrapped = built.wrapped
+                // Bug #1218: legacy small-file path (single UITextView). Post the
+                // converted source text (before bilingual interleave) so the
+                // txt-content probe surfaces the rendered content here too.
+                #if DEBUG
+                postRenderedTextForDebug(built.text)
+                #endif
                 // Feature #56 WI-12b: legacy small-file path. The
                 // current-chapter unit is derived from the TXT VM's
                 // chapter index; an absent index yields a nil unit and
@@ -683,6 +721,29 @@ struct TXTReaderContainerView: View {
             hapticFeedback: HapticFeedbackProvider()
         )
     }
+
+    #if DEBUG
+    /// Bug #1218: post the current chapter's rendered (post-Simp→Trad) text on
+    /// `.debugBridgeRenderedTextChanged` so the DebugBridge probe can surface
+    /// it via the `txt-content` command. iOS 26 SwiftUI flattens the chunked
+    /// TXT reader's inner cells into the container, whose accessibility VALUE
+    /// is the load-bearing `restoredOffset:…` state probe, so CU-free XCUITest
+    /// cannot read the rendered content directly — which blocks Feature #28's
+    /// conversion verification. `ReaderContainerView`'s observer writes the
+    /// text onto the active probe when the `fingerprintKey` matches. The key is
+    /// the VM's `bookFingerprintKey` (== `DocumentFingerprint.canonicalKey`),
+    /// matching `book.fingerprintKey` in `ReaderContainerView`.
+    private func postRenderedTextForDebug(_ displayText: String) {
+        NotificationCenter.default.post(
+            name: .debugBridgeRenderedTextChanged,
+            object: nil,
+            userInfo: [
+                "fingerprintKey": viewModel.bookFingerprintKey,
+                "text": displayText
+            ]
+        )
+    }
+    #endif
 
     // MARK: - Subviews
 

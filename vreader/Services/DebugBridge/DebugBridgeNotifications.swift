@@ -257,6 +257,24 @@ extension Notification.Name {
     ///   `"yellow"` when absent.
     static let debugBridgePDFHighlightCommand = Notification.Name("vreader.debugBridge.pdfHighlightCommand")
 
+    /// Posted by `TXTReaderContainerView` (bug #1218) whenever it computes
+    /// the converted display text for the current chapter, so the
+    /// DebugBridge probe can surface the rendered (post-Simp→Trad) text via
+    /// the `txt-content` command. iOS 26 SwiftUI flattens the chunked TXT
+    /// reader's inner cells into the container, whose accessibility VALUE is
+    /// the load-bearing `restoredOffset:…` state probe — CU-free XCUITest
+    /// therefore cannot read the rendered text content directly, which
+    /// blocks Feature #28's conversion verification. `ReaderContainerView`'s
+    /// observer, when the `fingerprintKey` matches the active book, writes
+    /// the text onto `DebugReaderProbeAdapter.renderedText`. Only the TXT
+    /// host posts this; harmless for other formats (no observer fires for a
+    /// non-matching key). NOT posted in Release builds (`#if DEBUG`).
+    ///
+    /// userInfo:
+    /// - `"fingerprintKey"`: String — the book's canonical key.
+    /// - `"text"`: String — the rendered (post-conversion) chapter text.
+    static let debugBridgeRenderedTextChanged = Notification.Name("vreader.debug.renderedTextChanged")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker

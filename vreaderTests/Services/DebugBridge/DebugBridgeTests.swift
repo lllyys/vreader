@@ -33,6 +33,19 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_txtContentURL_callsTxtContentHandler() async {
+        // Bug #1218: txt-content?dest routes to the txtContent handler
+        // (mirrors the snapshot routing). The handler reads the active TXT
+        // reader's rendered text for CU-free conversion verification.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://txt-content?dest=txt.json")!)
+
+        XCTAssertEqual(context.calls, [.txtContent(dest: "txt.json")])
+    }
+
+    @MainActor
     func test_handle_seekURL_callsSeekFractionHandler() async {
         // Bug #267: seek?fraction routes to the seekFraction handler.
         let context = RecordingDebugBridgeContext()
@@ -422,6 +435,7 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func theme(mode: DebugCommand.ThemeMode, fontSize: Int?) async throws { await record("theme:\(mode.rawValue)") }
     func settle(token: String) async throws { await record("settle:\(token)") }
     func snapshot(dest: String, lastErrorMessage: String?) async throws { await record("snapshot:\(dest)") }
+    func txtContent(dest: String) async throws { await record("txt-content:\(dest)") }
     func eval(bridge: String, js: String) async throws { await record("eval:\(bridge)") }
     func tts(action: String) async throws { await record("tts:\(action)") }
     func search(query: String, index: Int?) async throws {
@@ -481,6 +495,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case theme(mode: DebugCommand.ThemeMode, fontSize: Int?)
         case settle(token: String)
         case snapshot(dest: String, lastErrorMessage: String?)
+        case txtContent(dest: String)
         case eval(bridge: String, js: String)
         case tts(action: String)
         case search(query: String, index: Int?)
@@ -509,6 +524,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     func settle(token: String) async throws { calls.append(.settle(token: token)) }
     func snapshot(dest: String, lastErrorMessage: String?) async throws {
         calls.append(.snapshot(dest: dest, lastErrorMessage: lastErrorMessage))
+    }
+    func txtContent(dest: String) async throws {
+        calls.append(.txtContent(dest: dest))
     }
     func eval(bridge: String, js: String) async throws {
         calls.append(.eval(bridge: bridge, js: js))

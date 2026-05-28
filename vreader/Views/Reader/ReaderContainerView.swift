@@ -569,6 +569,26 @@ struct ReaderContainerView: View {
                 handleDebugBridgePresentSheet(sheet: sheet, tab: tab, detent: detent)
             }
         ))
+        // Bug #1218 — surface the active TXT reader's rendered (post-Simp→Trad)
+        // text into the DebugBridge probe so the `txt-content` command can read
+        // it CU-free. iOS 26 SwiftUI flattens the chunked TXT reader's inner
+        // cells into the container, whose accessibility VALUE is the
+        // load-bearing `restoredOffset:…` state probe, so XCUITest cannot read
+        // the rendered content directly. `TXTReaderContainerView` posts the
+        // converted display text on `.debugBridgeRenderedTextChanged`; this
+        // observer writes it onto the SAME `debugProbe` instance registered in
+        // `.onAppear` (mirrors the bug #257 `livePositionString` wiring), gated
+        // on a matching `fingerprintKey` (guards a stale post from an outgoing
+        // reader). Factored into a dedicated `ViewModifier` (same precedent as
+        // the search / present observers above) so it doesn't push `body` over
+        // SwiftUI's type-inference budget. Only meaningful for TXT; harmless
+        // for other formats (they never post it).
+        .modifier(ReaderDebugBridgeRenderedTextObserver(
+            onText: { fingerprintKey, text in
+                guard fingerprintKey == book.fingerprintKey else { return }
+                debugProbe?.renderedText = text
+            }
+        ))
         // Bug #237 — DebugBridge highlight-driver observer lives in the
         // TXT and MD format hosts, NOT here. Format hosts have the source
         // text + chapter index they need to build canonical Locators via

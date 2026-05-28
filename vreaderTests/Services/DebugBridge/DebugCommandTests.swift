@@ -206,6 +206,49 @@ final class DebugCommandTests: XCTestCase {
         }
     }
 
+    // MARK: - txt-content (bug #1218)
+
+    func test_parse_txtContentWithDest_returnsTxtContent() throws {
+        let url = URL(string: "vreader-debug://txt-content?dest=txt.json")!
+        let cmd = try DebugCommand.parse(url)
+        XCTAssertEqual(cmd, .txtContent(dest: "txt.json"))
+    }
+
+    func test_parse_txtContentMissingDest_throwsMissingParam() {
+        let url = URL(string: "vreader-debug://txt-content")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "dest")
+        }
+    }
+
+    func test_parse_txtContentPathTraversalDest_throwsInvalidParam() {
+        // dest becomes a filename in the output path; a `..` traversal must
+        // be rejected as a basename (mirrors snapshot's dest validation).
+        let url = URL(string: "vreader-debug://txt-content?dest=../x")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "dest")
+        }
+    }
+
+    func test_parse_txtContentDotOnlyDest_throwsInvalidParam() {
+        let url = URL(string: "vreader-debug://txt-content?dest=..")!
+        XCTAssertThrowsError(try DebugCommand.parse(url)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "dest")
+        }
+    }
+
     // MARK: - eval
 
     func test_parse_evalWithBridgeAndBase64JS_returnsEvalWithDecodedJS() throws {

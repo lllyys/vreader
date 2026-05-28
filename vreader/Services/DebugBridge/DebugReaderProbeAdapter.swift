@@ -43,6 +43,16 @@ final class DebugReaderProbeAdapter: DebugReaderProbe {
     /// posture for hosts that don't wire it.
     var livePositionString: String?
 
+    /// Bug #1218: rendered (post-conversion) text pushed by the host. When
+    /// set, `currentRenderedText` returns it so the `txt-content` command
+    /// can read the active TXT reader's converted display text that XCUITest
+    /// cannot reach through the flattened accessibility tree on iOS 26. The
+    /// host (`ReaderContainerView`) writes this from its
+    /// `.debugBridgeRenderedTextChanged` observer. Nil for hosts that don't
+    /// wire it (everything but TXT today), preserving the "no content"
+    /// posture.
+    var renderedText: String?
+
     /// Optional JS evaluator. When nil, evaluateJavaScript throws
     /// `evalUnsupported(format:)` — the default for non-webview readers.
     /// Returns raw JSON bytes of the JS value (see DebugReaderProbe doc).
@@ -76,6 +86,10 @@ final class DebugReaderProbeAdapter: DebugReaderProbe {
 
     var currentTTSOffsetUTF16: Int? {
         ttsProbe?().offsetUTF16
+    }
+
+    var currentRenderedText: String? {
+        renderedText
     }
 
     func awaitSettle(timeout: TimeInterval) async throws {
