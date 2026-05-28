@@ -22,6 +22,14 @@ import UIKit
 struct TXTChunkedReaderBridge: UIViewRepresentable {
     let chunks: [String]
     let config: TXTViewConfig
+    /// Bug #1230 / GH #1230: Simplified↔Traditional conversion applied to the
+    /// RENDERED chunk text only. Mirrors the paged path's precedent
+    /// (TXTReaderContainerView ~line 437: "offsetMap discarded — reading
+    /// positions and highlights in source-text coordinates remain valid"):
+    /// SimpTrad is 1:1 UTF-16 for BMP CJK, so `chunks` / `chunkStartOffsets` /
+    /// position math stay in SOURCE (raw) coordinates — only the display string
+    /// is converted.
+    var chineseConversion: ChineseConversionDirection = .none
     var restoreChunkIndex: Int?
     var restoreIntraChunkOffset: CGFloat?
     weak var delegate: TXTTextViewBridgeDelegate?
@@ -96,6 +104,21 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
     // MARK: - Chunk Resolution (pure, testable)
 
+    /// Bug #1230 / GH #1230: per-chunk Simplified↔Traditional conversion for the
+    /// RENDERED display text. Pure + static so it is unit-testable without a
+    /// UITableView (`TXTChunkedReaderConversionTests`). The Coordinator's
+    /// `attributedString(forChunk:)` calls this; the converted string feeds only
+    /// the attributed-string builder. `chunkStartOffsets` / `chunkUTF16Lengths`
+    /// stay in source coordinates — valid because SimpTrad is 1:1 UTF-16 for BMP
+    /// CJK (same invariant the paged path relies on).
+    nonisolated static func renderedChunkText(
+        _ raw: String, conversion: ChineseConversionDirection
+    ) -> String {
+        conversion != .none
+            ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: raw).text
+            : raw
+    }
+
     /// Resolves a document-global UTF-16 offset to the index of the chunk
     /// containing it. Binary search over `chunkStartOffsets`; clamps to
     /// `[0, count-1]`. Returns `nil` for an empty offsets array.
@@ -155,6 +178,7 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
         context.coordinator.chunks = chunks
         context.coordinator.config = config
+        context.coordinator.chineseConversion = chineseConversion
         context.coordinator.chunkStartOffsets = chunkStartOffsets
         context.coordinator.persistedHighlights = persistedHighlights
         context.coordinator.persistedHighlightLookup = persistedHighlightLookup
@@ -248,8 +272,12 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         }
 
         let configChanged = !context.coordinator.config.renderingEquals(config)
-        if configChanged {
+        // Bug #1230 / GH #1230: a Simplified↔Traditional toggle re-renders every
+        // chunk, so invalidate the cache + reload exactly like a config change.
+        let conversionChanged = context.coordinator.chineseConversion != chineseConversion
+        if configChanged || conversionChanged {
             context.coordinator.config = config
+            context.coordinator.chineseConversion = chineseConversion
             context.coordinator.attrStringCache.removeAll()
             tableView.backgroundColor = config.backgroundColor
             tableView.reloadData()
@@ -331,6 +359,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     final class Coordinator: NSObject, UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate, UITextViewDelegate {
         var chunks: [String] = []
         var config = TXTViewConfig()
+        /// Bug #1230 / GH #1230: conversion direction applied to RENDERED chunk
+        /// text in `attributedString(forChunk:)`. Source coordinates unchanged.
+        var chineseConversion: ChineseConversionDirection = .none
         var chunkStartOffsets: [Int] = []
         /// Persisted highlights (document-global UTF-16) from DB (bug #55).
         /// Each carries its stored color (Bug #208).
@@ -801,7 +832,13 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             if let cached = attrStringCache[index] { return cached }
 
             guard index >= 0, index < chunks.count else { return NSAttributedString() }
-            let text = chunks[index]
+            // Bug #1230 / GH #1230: convert the RENDERED text only; `chunks` and
+            // `chunkStartOffsets` stay in source coordinates (1:1 UTF-16 for BMP
+            // CJK), so highlight/position math is unaffected — same invariant the
+            // paged path relies on (offsetMap discarded).
+            let text = TXTChunkedReaderBridge.renderedChunkText(
+                chunks[index], conversion: chineseConversion
+            )
             let attrStr = TXTAttributedStringBuilder.build(text: text, config: config)
             attrStringCache[index] = attrStr
 

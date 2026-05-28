@@ -404,13 +404,22 @@ struct TXTReaderContainerView: View {
                 // chunked TXT). Surface the rendered chunk text to the
                 // DebugBridge probe so CU-free XCUITest can read it. `joined()`
                 // reconstructs exactly what the chunked UITableView renders.
-                // Posted faithfully: Simp→Trad is NOT applied in scroll mode
-                // today (Bug #1230 / row #275) so this is the raw text — once
-                // #1230 lands, this probe surfaces the converted text and
+                // Bug #1230 / GH #1230: Simp→Trad now IS applied in scroll mode
+                // (per-chunk in the bridge), so post the CONVERTED joined text
+                // — this is what the UITableView actually renders, and it
                 // verifies Feature #28. The `attrStringKey` includes
                 // `chineseConversion`, so this re-fires when conversion changes.
                 #if DEBUG
-                postRenderedTextForDebug(viewModel.continuousChunks?.joined() ?? "")
+                // Codex Gate-4 (Low): convert PER-CHUNK via the same helper the
+                // bridge uses, so the probe matches the rendered cells exactly
+                // (a single joined-then-converted string could differ from
+                // per-chunk conversion at chunk boundaries) and the conversion
+                // logic isn't duplicated.
+                let conv = settingsStore?.chineseConversion ?? .none
+                let rendered = (viewModel.continuousChunks ?? [])
+                    .map { TXTChunkedReaderBridge.renderedChunkText($0, conversion: conv) }
+                    .joined()
+                postRenderedTextForDebug(rendered)
                 #endif
                 return
             }
@@ -1010,6 +1019,10 @@ struct TXTReaderContainerView: View {
             TXTChunkedReaderBridge(
                 chunks: chunks,
                 config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
+                // Bug #1230 / GH #1230: the scroll-layout / continuous chaptered
+                // path is the DEFAULT reading experience — convert the rendered
+                // text here so Simplified→Traditional applies (Feature #28).
+                chineseConversion: settingsStore?.chineseConversion ?? .none,
                 delegate: viewModel,
                 chunkStartOffsets: offsets,
                 scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
