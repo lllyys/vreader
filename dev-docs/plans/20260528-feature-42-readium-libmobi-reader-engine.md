@@ -189,6 +189,7 @@ flowchart TD
    fonts, dictionaries, fixed-layout/comics, Amazon-specific markup, DRM). Mitigation = the
    validated ingest pipeline (validate + keep-original + flag/fallback) **plus** a pre-commit
    spike: convert a real `.azw3`/`.mobi` corpus via libmobi, EPUB-validate, eyeball output.
+   Fixtures live in `test-books/` (gitignored, local) — start with `test-books/被讨厌的勇气.azw3` (~6 MB Kindle/KF8).
 3. **Explicit go-ahead.** Per the project's design/feature-workflow rule, implementation does
    not start without an explicit decision to proceed.
 
@@ -210,7 +211,7 @@ This draft sets direction; the following rule-47 Gate-1 sections still need to b
 
 ### First-cut WI sketch (indicative, not final)
 
-1. WI-0: decision spikes — libmobi LGPL strategy + a libmobi→EPUB fidelity corpus spike.
+1. WI-0: decision spikes — libmobi LGPL strategy + a libmobi→EPUB fidelity corpus spike (corpus: `test-books/`, e.g. `被讨厌的勇气.azw3`).
 2. WI-1: `VReaderLocator` model + SwiftData migration (foundational).
 3. WI-2: import/conversion service (libmobi binding) + validated pipeline + keep-original.
 4. WI-3: Readium Navigator host for EPUB; route `ReaderEngine.resolve` reflowable → Readium.

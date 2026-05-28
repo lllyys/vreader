@@ -8,6 +8,8 @@ Last regenerated: 2026-04-12. Last tested: 2026-04-04 (simulator interactive pas
 - 被讨厌的勇气 (AZW3) -- blue cover visible
 - 道诡异仙 (EPUB) -- dark fantasy cover visible
 
+**Source files**: `test-books/` (gitignored, local-only) — the books above plus more (`《黑暗血时代》…` EPUB, a TXT). Import to the simulator with the `sim-transfer` skill.
+
 ---
 
 ## Library
