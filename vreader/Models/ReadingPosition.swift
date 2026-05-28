@@ -1,5 +1,12 @@
 // Purpose: Stores the current reading position for a book.
 // Uses Locator for universal position representation.
+//
+// Key decisions:
+// - vreaderLocatorData is the SchemaV8 additive optional column holding the
+//   JSON-encoded VReaderLocator envelope (Feature #42). Stored as raw Data? to
+//   mirror Highlight.anchorData — a SwiftData-safe blob that legacy rows can
+//   lack without a decode crash. The legacy `locator` field is kept untouched
+//   for back-compat / dual-write during the two-engine era.
 
 import Foundation
 import SwiftData
@@ -12,6 +19,13 @@ final class ReadingPosition {
     /// Full locator for the current reading position.
     /// Mutate via `updateLocator(_:)` — SwiftData `didSet` is unreliable.
     private(set) var locator: Locator
+
+    /// Raw JSON bytes of the engine-agnostic `VReaderLocator` envelope (SchemaV8,
+    /// Feature #42). Stored as a simple Data? column — like Highlight.anchorData —
+    /// so legacy rows that predate the column read back as nil instead of
+    /// crashing. Decode with `VReaderLocator` for typed access. nil until a save
+    /// populates it (lazy dual-write; the legacy `locator` is always written too).
+    var vreaderLocatorData: Data?
 
     /// When the position was last updated.
     var updatedAt: Date
