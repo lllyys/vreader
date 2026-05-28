@@ -310,6 +310,14 @@ targets:
           - "ViewModels/LibraryViewModelPersistenceTests.swift"
     dependencies:
       - target: vreader
+      # Feature #42 WI-1: the Readium open-smoke test imports ReadiumShared +
+      # ReadiumStreamer directly, so the test target must link them explicitly
+      # (relying on host-app transitive exposure is fragile — Gate-4 audit).
+      # ReadiumNavigator stays app-only (the test doesn't render).
+      - package: Readium
+        product: ReadiumShared
+      - package: Readium
+        product: ReadiumStreamer
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.tests
