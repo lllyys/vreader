@@ -226,7 +226,9 @@ This clears the licensing blocker that previously "could block Option B outright
 2. **Kindle conversion fidelity** — still wants a pre-commit spike (convert a real `.azw3`/`.mobi`
    corpus, EPUB-validate, eyeball), but the *engine* is now the proven MIT Foliate-js `mobi.js`
    (same parser already rendering Kindle in-app), substantially lowering this risk. If
-   "keep-Foliate-rendering-Kindle" is chosen, conversion fidelity is moot.
+   "keep-Foliate-rendering-Kindle" is chosen, conversion fidelity is moot. Fixtures live in
+   `test-books/` (gitignored, local — see AGENTS.md) — start with `test-books/被讨厌的勇气.azw3`
+   (~6 MB Kindle/KF8); import via the `sim-transfer` skill.
 3. **Explicit go-ahead.** Per the project's design/feature-workflow rule, implementation does
    not start without an explicit decision to proceed — **this is now the gating blocker.** The
    change replaces the VERIFIED `EPUBWebViewBridge` (6 VERIFIED features + ~40 bug fixes ride on
@@ -348,8 +350,9 @@ _(Order reflects round-1 High-2: the DebugBridge probe lands BEFORE the first re
 ### Later phases (lower resolution — re-enter Gate-1 before their TDD)
 
 - **Phase 2 — Kindle convert-on-import**: AZW3/MOBI/KF8 → EPUB at import (engine = libmobi
-  [now unblocked] OR reuse MIT Foliate-js `mobi.js`; pick at that phase's WI-0 fidelity spike) +
-  validated pipeline + keep-original + `converterVersion`. Then Kindle routes to the Readium engine.
+  [now unblocked] OR reuse MIT Foliate-js `mobi.js`; pick at that phase's WI-0 fidelity spike,
+  corpus = `test-books/` e.g. `被讨厌的勇气.azw3`) + validated pipeline + keep-original +
+  `converterVersion`. Then Kindle routes to the Readium engine.
 - **Phase 3 — TXT/MD → generated EPUB** through the same Readium path (windowed); retire the
   TextKit readers.
 - **Phase 4 — legacy deletion (Gate G3)**: delete `EPUBWebViewBridge`, `FoliateSpikeView`, the

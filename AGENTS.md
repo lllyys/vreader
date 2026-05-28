@@ -24,6 +24,7 @@ Shared instructions for all AI agents (Claude, Codex, etc.).
     - Exceptions: CSS-only, docs, config. See `.claude/rules/10-tdd.md` for full scope.
   - Run `xcodebuild test -only-testing:vreaderTests` for unit test gates. Skip UI tests during development.
   - Default simulator: **iPhone 17 Pro** (Dynamic Island — catches safe area bugs).
+  - **Test-book fixtures**: real EPUB/TXT/AZW3 books for manual/device testing live in `test-books/` (gitignored, local-only — not in CI). Includes `被讨厌的勇气.azw3` (Kindle/KF8), large CJK EPUBs (`道诡异仙`, `《黑暗血时代》…`), and a TXT. Import to the simulator via the `sim-transfer` skill.
   - **Verification harness** (DEBUG only): `vreader-debug://` URL scheme drives reset / seed / open / settle / snapshot / eval from `xcrun simctl openurl`, so verification runs don't need computer-use for reproduction or assertion. See `docs/subsystems/debug-bridge.md`.
   - **Version bump per PR**: every PR must include a `chore: bump version to X.Y.Z` commit as its last commit before opening — patch for fixes/docs/chores, minor for new features, major for breaking changes. Tag is cut from the merge commit on `main` post-merge. See `.claude/rules/40-version-bump.md`.
   - **Docs sync per PR**: when a PR adds a service, schema, notification, environment key, or user-visible feature, update `docs/architecture.md` and/or `README.md` in the same PR (separate commit before the version bump). Triggers + checklist in `.claude/rules/24-doc-sync.md`.
