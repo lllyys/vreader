@@ -95,6 +95,16 @@ final class SearchService: SearchProviding, @unchecked Sendable {
         }
     }
 
+    /// Marks a book as indexed in memory WITHOUT re-indexing or restoring
+    /// offsets — for formats that persist FTS content but no segment offsets
+    /// (EPUB/PDF). On reopen the persistent store already holds the content
+    /// rows, so `isIndexed()` should reflect that without a wasteful re-index.
+    /// (Bug #264)
+    func markPersistentlyIndexed(fingerprint: DocumentFingerprint) {
+        let key = fingerprint.canonicalKey
+        state.withLock { $0.indexedKeys.insert(key) }
+    }
+
     func indexBook(
         fingerprint: DocumentFingerprint,
         textUnits: [TextUnit],

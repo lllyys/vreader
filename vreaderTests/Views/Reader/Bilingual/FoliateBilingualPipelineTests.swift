@@ -160,24 +160,28 @@ struct FoliateBilingualPipelineTests {
         #expect(table["b2"] == "Monde")
     }
 
-    @Test("translationsByBid truncates extra translation segments")
-    func translationsByBidTruncatesExtras() {
+    @Test("translationsByBid is source-only when there are MORE segments than blocks (Bug #266)")
+    func translationsByBidMoreSegmentsIsSourceOnly() {
         let blocks = [
             BilingualBlock(bid: "b1", text: "Hello"),
             BilingualBlock(bid: "b2", text: "World")
         ]
+        // Count mismatch → positional pairing can't be trusted → source-only
+        // (a wrong-paragraph translation is worse than none). Shared contract
+        // with EPUB via BilingualPairing.
         let table = FoliateBilingualPipeline.translationsByBid(
             blocks: blocks,
             translatedSegments: ["Bonjour", "Monde", "Extra"]
         )
-        #expect(table.count == 2)
-        #expect(table["b1"] == "Bonjour")
-        #expect(table["b2"] == "Monde")
-        #expect(!table.keys.contains("b3"))
+        #expect(table.isEmpty)
     }
 
-    @Test("translationsByBid short translation arrays emit a partial map")
-    func translationsByBidShortArrayPartialMap() {
+    @Test("translationsByBid is source-only when there are FEWER segments than blocks (Bug #266)")
+    func translationsByBidFewerSegmentsIsSourceOnly() {
+        // Foliate shares EPUB's nested-block double-count (foliate-host.js
+        // walks getElementsByTagName('*')), so blocks > segments on nested
+        // chapters → source-only fail-safe until the host enumerate is
+        // leaf-fixed (follow-up).
         let blocks = [
             BilingualBlock(bid: "b1", text: "Hello"),
             BilingualBlock(bid: "b2", text: "World"),
@@ -187,10 +191,7 @@ struct FoliateBilingualPipelineTests {
             blocks: blocks,
             translatedSegments: ["Bonjour", "Monde"]
         )
-        #expect(table.count == 2)
-        #expect(table["b1"] == "Bonjour")
-        #expect(table["b2"] == "Monde")
-        #expect(table["b3"] == nil)
+        #expect(table.isEmpty)
     }
 
     // MARK: - parseEnumeratePayload — Round-3 audit fix

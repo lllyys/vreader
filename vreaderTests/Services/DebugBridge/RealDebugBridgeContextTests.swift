@@ -114,6 +114,36 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertEqual(afterCount, 0)
     }
 
+    // Bug #272: `reset` must clear leaked reader settings so `open?position=`
+    // verification is deterministic. A `readerAutoPageTurn=true` persisted from a
+    // prior session made the AutoPageTurner advance the paged reader on open
+    // (page 0 → last page), masking the seek and producing a "stale position"
+    // snapshot that the prior cron ticks chased as a navigate/persistence bug.
+    @MainActor
+    func test_reset_clearsLeakedReaderSettings() async throws {
+        let suiteName = "test.bug272.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // Simulate a prior session leaking auto-page-turn + a custom layout.
+        defaults.set(true, forKey: ReaderSettingsStore.autoPageTurnKey)
+        defaults.set("paged", forKey: ReaderSettingsStore.epubLayoutKey)
+        XCTAssertTrue(defaults.bool(forKey: ReaderSettingsStore.autoPageTurnKey))
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        try await context.reset()
+
+        // Keys removed → a fresh reader mount reads deterministic defaults.
+        XCTAssertNil(
+            defaults.object(forKey: ReaderSettingsStore.autoPageTurnKey),
+            "reset must clear the leaked autoPageTurn key (Bug #272)"
+        )
+        XCTAssertNil(defaults.object(forKey: ReaderSettingsStore.epubLayoutKey))
+        let store = ReaderSettingsStore(defaults: defaults)
+        XCTAssertFalse(store.autoPageTurn, "a fresh store over the reset defaults must read autoPageTurn=false")
+    }
+
     // MARK: - seed
 
     @MainActor
@@ -658,6 +688,235 @@ final class RealDebugBridgeContextTests: XCTestCase {
         try await context.open(bookId: key, position: nil)
         await fulfillment(of: [exp], timeout: 2.0)
         XCTAssertEqual(receivedKey, key)
+    }
+
+    @MainActor
+    func test_seekFraction_postsSeekFractionNotificationWithClampedValue() async throws {
+        // Bug #267: seekFraction posts .debugBridgeSeekFraction carrying the
+        // (already parser-clamped) fraction; the live Foliate container forwards
+        // it to .foliateRequestSeekFraction with its own key.
+        let exp = expectation(description: "seekFraction notification posted")
+        nonisolated(unsafe) var receivedFraction: Double?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeSeekFraction,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedFraction = notification.userInfo?["fraction"] as? Double
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.seekFraction(fraction: 0.5)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedFraction, 0.5)
+    }
+
+    @MainActor
+    func test_scrollSheet_postsScrollSheetNotificationWithTarget() async throws {
+        // Bug #271: scrollSheet posts .debugBridgeScrollSheet carrying the
+        // target rawValue; the presented sheet's observer (TranslationResultCard)
+        // drives its ScrollViewReader proxy to the matching anchor.
+        let exp = expectation(description: "scrollSheet notification posted")
+        nonisolated(unsafe) var receivedTo: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeScrollSheet,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedTo = notification.userInfo?["to"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.scrollSheet(target: .bottom)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedTo, "bottom")
+    }
+
+    @MainActor
+    func test_navigate_postsNavigateCommandWithSpineAndFraction() async throws {
+        // Bug #273: navigate posts .debugBridgeNavigateCommand carrying the
+        // spine index + clamped fraction; the live EPUBReaderContainerView
+        // observer resolves index → href and re-posts .readerNavigateToLocator.
+        let exp = expectation(description: "navigate notification posted")
+        nonisolated(unsafe) var receivedSpine: Int?
+        nonisolated(unsafe) var receivedFraction: Double?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeNavigateCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedSpine = notification.userInfo?["spineIndex"] as? Int
+            receivedFraction = notification.userInfo?["fraction"] as? Double
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.navigate(spineIndex: 3, fraction: 0.25)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedSpine, 3)
+        XCTAssertEqual(receivedFraction, 0.25)
+    }
+
+    @MainActor
+    func test_navigate_withNilFraction_omitsFractionFromUserInfo() async throws {
+        // Bug #273: absent fraction ⇒ chapter start; the key is omitted so the
+        // observer's `as? Double` cleanly yields nil.
+        let exp = expectation(description: "navigate notification posted")
+        nonisolated(unsafe) var hasFractionKey = true
+        nonisolated(unsafe) var receivedSpine: Int?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeNavigateCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedSpine = notification.userInfo?["spineIndex"] as? Int
+            hasFractionKey = notification.userInfo?["fraction"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.navigate(spineIndex: 0, fraction: nil)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedSpine, 0)
+        XCTAssertFalse(hasFractionKey)
+    }
+
+    @MainActor
+    func test_scrollBoundary_postsScrollBoundaryCommandWithSpineAndNear() async throws {
+        // Feature #71 WI-6b: scrollBoundary posts .debugBridgeScrollBoundaryCommand
+        // carrying the spine index + edge; the live EPUBReaderContainerView
+        // observer builds an EPUBScrollBoundarySignal and calls
+        // coordinator.handleBoundarySignal — bypassing the rAF-throttled JS
+        // observer (rAF is paused on the headless test environment).
+        let exp = expectation(description: "scroll-boundary notification posted")
+        nonisolated(unsafe) var receivedSpine: Int?
+        nonisolated(unsafe) var receivedNear: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeScrollBoundaryCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedSpine = notification.userInfo?["spineIndex"] as? Int
+            receivedNear = notification.userInfo?["near"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.scrollBoundary(spineIndex: 3, near: .bottom)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedSpine, 3)
+        XCTAssertEqual(receivedNear, "bottom")
+    }
+
+    @MainActor
+    func test_pdfHighlight_postsPDFHighlightCommandWithPageRectAndColor() async throws {
+        // Feature #17: pdfHighlight posts .debugBridgePDFHighlightCommand carrying
+        // the page index, normalized rect (x,y,w,h), and color; the live
+        // PDFReaderContainerView observer builds a ReaderSelectionEvent with a
+        // .pdf anchor and calls the SAME handleHighlightAction the gesture uses.
+        let exp = expectation(description: "pdf-highlight notification posted")
+        nonisolated(unsafe) var receivedPage: Int?
+        nonisolated(unsafe) var receivedRect: [Double]?
+        nonisolated(unsafe) var receivedColor: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePDFHighlightCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedPage = notification.userInfo?["page"] as? Int
+            receivedRect = notification.userInfo?["rect"] as? [Double]
+            receivedColor = notification.userInfo?["color"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.pdfHighlight(
+            page: 2,
+            rect: NormalizedRect(x: 0.1, y: 0.2, w: 0.3, h: 0.4),
+            color: "pink"
+        )
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedPage, 2)
+        XCTAssertEqual(receivedRect, [0.1, 0.2, 0.3, 0.4])
+        XCTAssertEqual(receivedColor, "pink")
+    }
+
+    @MainActor
+    func test_pdfHighlight_withNilColor_postsWithoutColorKey() async throws {
+        let exp = expectation(description: "pdf-highlight notification posted")
+        nonisolated(unsafe) var hasColorKey = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgePDFHighlightCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            hasColorKey = notification.userInfo?["color"] != nil
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.pdfHighlight(
+            page: 0,
+            rect: NormalizedRect(x: 0, y: 0, w: 1, h: 1),
+            color: nil
+        )
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertFalse(hasColorKey)
+    }
+
+    @MainActor
+    func test_scrollSheet_recordsPendingTargetForReplay() async throws {
+        // Bug #271 (Gate-4 round-1 Medium): scrollSheet records the target in
+        // the shared replay buffer so a scroll requested BEFORE the result card
+        // mounts (the card only exists once translation completes) is applied
+        // on the card's onAppear — making the harness order-independent.
+        DebugBridgeScrollSheetState.shared.pendingTarget = nil
+        defer { DebugBridgeScrollSheetState.shared.pendingTarget = nil }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.scrollSheet(target: .bottom)
+        XCTAssertEqual(DebugBridgeScrollSheetState.shared.pendingTarget, .bottom)
     }
 
     @MainActor

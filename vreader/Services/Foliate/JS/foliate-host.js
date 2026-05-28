@@ -452,6 +452,11 @@ window.readerAPI = {
             const BLOCK_TAGS = {
                 p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1,
             }
+            // Bug #268: the CSS selector for "any block tag", used to detect a
+            // NON-leaf block (a block element that contains another block).
+            // Mirrors the EPUB leaf-enumerate (Bug #266) so the AZW3/MOBI host
+            // counts the same unit model — see the `querySelector` skip below.
+            const BLOCK_SELECTOR = Object.keys(BLOCK_TAGS).join(',')
             const TRUSTED_BID = /^fb\d+$/
             const out = []
             for (const entry of contents) {
@@ -474,6 +479,15 @@ window.readerAPI = {
                     if (el.hasAttribute && el.hasAttribute('data-vreader-decoration')) {
                         continue
                     }
+                    // Bug #268: enumerate LEAF blocks only. A block element that
+                    // contains another block (e.g. <blockquote><p>…</p></blockquote>,
+                    // <li><p>…</p></li>) would otherwise enumerate BOTH the
+                    // container and its child, double-counting against the
+                    // plain-text paragraph segmentation and drifting every later
+                    // translation pairing into a count mismatch (→ source-only).
+                    // Enumerate the inner leaf; skip the container (its text is
+                    // covered by its block descendants). Mirrors the EPUB fix (#266).
+                    if (el.querySelector && el.querySelector(BLOCK_SELECTOR)) continue
                     let txt = el.textContent || ''
                     txt = txt.replace(/\s+/g, ' ').trim()
                     if (!txt) continue

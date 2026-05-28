@@ -350,4 +350,56 @@ struct ChapterTranslationServiceTests {
         #expect(result.segments.isEmpty)
         #expect(await sender.requestCount == 0)
     }
+
+    // MARK: - translatePreSegmented (Bug #268 — block-text-direct translation)
+
+    @Test func translatePreSegmented_translatesGivenSegments1to1_andDoesNotCache() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        // Two source segments → one chunk → one 2-element JSON-array response.
+        // Two responses queued for the two calls below.
+        let sender = MockTranslationSender(responses: [#"["译一","译二"]"#, #"["译一","译二"]"#])
+        let service = makeService(sender: sender, store: store)
+
+        let result = try await service.translatePreSegmented(
+            segments: ["Para one.", "Para two."],
+            targetLanguage: "Chinese", config: config, style: .natural)
+        #expect(result.count == 2)            // 1:1 with input, by construction
+        #expect(result == ["译一", "译二"])
+        #expect(await sender.requestCount == 1)
+
+        // No disk cache — a second identical call re-translates (sender hit again).
+        _ = try await service.translatePreSegmented(
+            segments: ["Para one.", "Para two."],
+            targetLanguage: "Chinese", config: config, style: .natural)
+        #expect(await sender.requestCount == 2)
+    }
+
+    @Test func translatePreSegmented_emptyInput_returnsEmpty_withNoRequest() async throws {
+        let store = try Self.makeStore()
+        let sender = MockTranslationSender(responses: [])
+        let service = makeService(sender: sender, store: store)
+        let result = try await service.translatePreSegmented(
+            segments: [], targetLanguage: "Chinese", config: Self.makeConfig(), style: .natural)
+        #expect(result.isEmpty)
+        #expect(await sender.requestCount == 0)
+    }
+
+    @Test func translatePreSegmented_malformedChunkDecode_fallsBackPerSegment_stays1to1() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        // Whole-chunk response is malformed (not a 2-element array) → translateChunk
+        // falls back to one request per segment; the result must still be 1:1.
+        let sender = MockTranslationSender(responses: [
+            "not-a-json-array",   // whole-chunk decode fails
+            #"["译一"]"#,          // per-segment fallback #1
+            #"["译二"]"#,          // per-segment fallback #2
+        ])
+        let service = makeService(sender: sender, store: store)
+        let result = try await service.translatePreSegmented(
+            segments: ["One.", "Two."], targetLanguage: "Chinese", config: config, style: .natural)
+        #expect(result.count == 2)   // 1:1 preserved through the per-segment fallback
+        #expect(result == ["译一", "译二"])
+        #expect(await sender.requestCount == 3)  // 1 whole-chunk attempt + 2 per-segment
+    }
 }

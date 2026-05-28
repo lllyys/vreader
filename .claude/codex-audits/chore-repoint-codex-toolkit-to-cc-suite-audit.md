@@ -11,8 +11,9 @@ date: 2026-05-28
 Docs/instruction-only change: repoints the repo's agent-workflow files from
 the retired `codex-toolkit` Codex **MCP** plugin to **`cc-suite`** (which
 drives Codex via `codex exec`, no MCP). No Swift source changed; the
-`project.pbxproj` delta is the rule-40 version bump (3.39.11/632 →
-3.39.12/633) that trips this audit-gate hook.
+`project.pbxproj` delta is the rule-40 version bump (3.40.1/682 →
+3.40.2/683, after rebasing onto main which had advanced to v3.40.1) that
+trips this audit-gate hook.
 
 Files changed (12): `.claude/skills/fix-issue/SKILL.md`,
 `.claude/commands/fix-issue.md`, `.claude/skills/feature-workflow/SKILL.md`,

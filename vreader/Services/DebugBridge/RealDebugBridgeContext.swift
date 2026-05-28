@@ -114,8 +114,35 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         for book in books {
             try await persistence.deleteBook(fingerprintKey: book.fingerprintKey)
         }
+        // Bug #264: the persistent FTS store lives outside SwiftData
+        // (Application Support/SearchIndex/search.sqlite3). Deleting only the
+        // library books leaves stale `search_metadata` rows behind, so a
+        // reset+seed can resume a half-indexed book whose indexed-search wait
+        // never completes. Wipe the FTS store too so reset is a true clean
+        // slate.
+        ReaderSearchCoordinator.wipeSearchIndex(
+            at: ReaderSearchCoordinator.searchIndexDirectoryURL
+        )
         NotificationCenter.default.post(name: .debugBridgeLibraryChanged, object: nil)
-        log.info("reset: removed \(books.count) book(s)")
+        // Bug #271: reset is the verifier's hard session boundary — clear any
+        // unconsumed `scroll-sheet` target so a scroll requested in a prior
+        // session (whose result card never mounted) can't replay onto a later
+        // session's `TranslationResultCard`.
+        DebugBridgeScrollSheetState.shared.pendingTarget = nil
+        // Bug #272: the library wipe did NOT clear persisted READER SETTINGS, so
+        // a `readerAutoPageTurn=true` leaked from a prior session made the
+        // AutoPageTurner advance the paged reader on open — surfacing as a "stale
+        // position" (the reader auto-advanced to the last page) that masked
+        // `open?position=` verification and produced non-deterministic position
+        // snapshots across cron runs. Reset is the verifier's clean slate, so
+        // clear the reader-settings keys too; each fresh reader mount
+        // (`ReaderContainerView`'s `@State ReaderSettingsStore`) then reads
+        // deterministic defaults (same "takes effect on next open" pattern as the
+        // `theme` command). NSArgumentDomain launch args still override per-run.
+        for key in ReaderSettingsStore.allPersistedDefaultsKeys {
+            userDefaults.removeObject(forKey: key)
+        }
+        log.info("reset: removed \(books.count) book(s) + wiped search index + reader settings")
     }
 
     /// Import a bundled fixture book by name. Idempotent — if a book with

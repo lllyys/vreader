@@ -86,12 +86,18 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     let onLoadError: @MainActor (String) -> Void
     /// Called when the user selects text in the EPUB content.
     var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
-    /// Feature #56 WI-10: receives the `[{bid, text}]` payload posted
-    /// by `EPUBBilingualJS.bilingualEnumerateJS` after a chapter
-    /// loads. Optional — call sites that don't enable bilingual mode
-    /// simply leave it `nil` and the handler short-circuits inside
-    /// the coordinator.
-    var onBilingualEnumerate: (@MainActor ([BilingualBlock]) -> Void)?
+    /// Feature #56 WI-10: receives the enumerate payload posted by
+    /// `EPUBBilingualJS.bilingualEnumerateJS` after a chapter loads.
+    /// Optional — call sites that don't enable bilingual mode simply
+    /// leave it `nil` and the handler short-circuits inside the
+    /// coordinator.
+    ///
+    /// Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1): the callback carries the
+    /// parsed `EPUBBilingualEnumeratePayload` (blocks + requested section)
+    /// rather than a bare `[BilingualBlock]`, so the container can route an
+    /// EMPTY scoped enumerate to `clearBlocks(forSection:)` instead of clearing
+    /// every bucket.
+    var onBilingualEnumerate: (@MainActor (EPUBBilingualEnumeratePayload) -> Void)?
     /// Called after a page finishes loading (for highlight restoration).
     /// The closure receives a JS evaluator that runs JavaScript on the WKWebView.
     var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?
@@ -101,6 +107,14 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     var pendingJS: String?
     /// Called after pendingJS has been evaluated so the container can clear state.
     var onPendingJSCompleted: (@MainActor () -> Void)?
+    /// Feature #71 WI-5: continuous cross-chapter scroll config. `nil` ⇒ the
+    /// legacy one-chapter-per-`loadFileURL` path (paged + the existing
+    /// single-chapter scroll behaviour), unchanged. When non-nil, `makeUIView`
+    /// injects the section-aware observer (in place of `progressTrackingJS`),
+    /// registers the `continuousScrollHandler` channel, and the coordinator
+    /// routes each boundary signal to `config.coordinator` (window transitions)
+    /// while feeding the windowed spine-index + fraction to `onProgressChange`.
+    var continuousScroll: EPUBContinuousScrollConfig?
     /// Whether paged layout is enabled (CSS multi-column pagination).
     var isPaged: Bool = false
     /// Page index to navigate to in paged mode (0-based).
@@ -136,15 +150,36 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         )
         userContentController.addUserScript(preprocessScript)
 
-        // Add scroll progress tracking script (throttled)
-        let script = WKUserScript(
-            source: Self.progressTrackingJS,
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-        userContentController.addUserScript(script)
         let weakHandler = WeakScriptMessageHandler(context.coordinator)
-        userContentController.add(weakHandler, name: "progressHandler")
+        // Feature #71 WI-5: mode-branched scroll observer. In continuous-scroll
+        // mode the section-aware observer (reporting {visibleSpineIndex,
+        // intraFraction, nearTop/BottomBoundary}) REPLACES the single-document
+        // `progressTrackingJS` so the two don't both fire on the stitched
+        // bootstrap doc and race the windowed progress (Gate-2 round-1 [H3]).
+        // The nil-config (legacy paged + single-chapter scroll) path is byte-
+        // identical to before.
+        if continuousScroll != nil {
+            let observerScript = WKUserScript(
+                source: EPUBContinuousScrollJS.continuousScrollObserverJS,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+            userContentController.addUserScript(observerScript)
+            userContentController.add(weakHandler, name: "continuousScrollHandler")
+            // WI-6b-ii: per-section lifecycle channel — each materialized section
+            // posts {spineIndex, href} so the container restores its highlights
+            // (appended sections never fire didFinish).
+            userContentController.add(weakHandler, name: "sectionMaterialized")
+        } else {
+            // Add scroll progress tracking script (throttled)
+            let script = WKUserScript(
+                source: Self.progressTrackingJS,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+            userContentController.addUserScript(script)
+            userContentController.add(weakHandler, name: "progressHandler")
+        }
 
         // Add content tap tracking for toolbar toggle
         let tapScript = WKUserScript(
@@ -219,6 +254,14 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.isPaged = isPaged
         context.coordinator.previousIsPaged = isPaged
         context.coordinator.onPaginationReady = onPaginationReady
+        context.coordinator.continuousScroll = continuousScroll
+        // Feature #71 WI-6b-i: bind the late-binding evaluator handle to this
+        // freshly-created webView so the coordinator's `evaluate` closure (which
+        // captured the same handle) can stitch chapter sections into it. The
+        // bootstrap load in `updateUIView` happens after this, and the bootstrap's
+        // `didFinish` triggers the coordinator's initial materialize — by then the
+        // handle's `webView` is bound.
+        continuousScroll?.handle.webView = webView
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
         webView.accessibilityIdentifier = "epubWebView"
@@ -243,9 +286,30 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.onPageDidFinishLoad = onPageDidFinishLoad
         context.coordinator.isPaged = isPaged
         context.coordinator.onPaginationReady = onPaginationReady
+        context.coordinator.continuousScroll = continuousScroll
 
         // Update scroll enabled state when layout mode changes
         webView.scrollView.isScrollEnabled = !isPaged
+
+        // Feature #71 WI-6b-i: continuous mode loads ONE bootstrap document and
+        // then stitches chapter sections into it via the coordinator's evaluator
+        // (driven from the bootstrap's `didFinish`). The single-chapter
+        // `loadFileURL` path below never runs in this mode. Load the bootstrap
+        // exactly once — re-loading would wipe the stitched DOM. (Live theme
+        // re-inject + mode-switch teardown are WI-6b-iii.)
+        if continuousScroll != nil {
+            if !context.coordinator.didLoadContinuousBootstrap {
+                context.coordinator.didLoadContinuousBootstrap = true
+                loadContinuousBootstrap(into: webView)
+            }
+            // Deliberately do NOT record `currentURL` here. Leaving it unchanged
+            // means a later switch OUT of continuous mode (→ paged) sees
+            // `currentURL != contentURL`, so the legacy path force-reloads the
+            // real chapter and wipes the stitched bootstrap. (Full mode-switch
+            // teardown — coordinator generation bump + observer-script swap — is
+            // WI-6b-iii; this only guarantees the DOM is replaced on switch.)
+            return
+        }
 
         // Issue 5: When isPaged toggles without a URL change, inject/remove pagination CSS live.
         let isPagedChanged = context.coordinator.previousIsPaged != isPaged
@@ -409,6 +473,38 @@ struct EPUBWebViewBridge: UIViewRepresentable {
             Task { @MainActor in
                 onPendingJSCompleted?()
             }
+        }
+    }
+
+    /// Feature #71 WI-6b-i: load the continuous-scroll bootstrap document.
+    ///
+    /// Re-audit finding 3: WKWebView's navigation policy cancels non-`file://`
+    /// navigations and `loadHTMLString(_:baseURL:)` sandboxes `file://`
+    /// subresource access, so a string-loaded bootstrap can't read the rewriter's
+    /// absolute `file://` image / stylesheet refs. We therefore write a
+    /// file-backed bootstrap under the extracted root and `loadFileURL` it with
+    /// `allowingReadAccessTo: baseDirectory`, which grants the document read
+    /// access to the whole extracted tree (chapters + resources). The theme CSS
+    /// is baked into the bootstrap at construction (`bootstrapDocumentHTML`).
+    private func loadContinuousBootstrap(into webView: WKWebView) {
+        let html = EPUBContinuousScrollJS.bootstrapDocumentHTML(themeCSS: themeCSS ?? "")
+        let bootstrapURL = baseDirectory.appendingPathComponent("__vreader_continuous_bootstrap.html")
+        guard let data = html.data(using: .utf8) else {
+            AppLogger.epub.error("continuous bootstrap: failed to encode HTML")
+            onLoadError("Failed to prepare continuous scroll document")
+            return
+        }
+        do {
+            try data.write(to: bootstrapURL)
+            AppLogger.epub.info(
+                "loadContinuousBootstrap: \(bootstrapURL.lastPathComponent, privacy: .public)"
+            )
+            webView.loadFileURL(bootstrapURL, allowingReadAccessTo: baseDirectory)
+        } catch {
+            AppLogger.epub.error(
+                "continuous bootstrap write failed: \(String(describing: error), privacy: .public)"
+            )
+            onLoadError("Failed to prepare continuous scroll document")
         }
     }
 

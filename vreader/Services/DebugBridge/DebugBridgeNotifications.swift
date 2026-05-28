@@ -156,6 +156,107 @@ extension Notification.Name {
     ///   command included a non-empty `text=`.
     static let debugBridgeAIAction = Notification.Name("vreader.debugBridge.aiAction")
 
+    /// Posted by RealDebugBridgeContext.seekFraction (Bug #267) to drive the
+    /// active Foliate (AZW3/MOBI) reader to a fractional position so the
+    /// harness can reach a *distinguishable non-start* position for Bug #265's
+    /// save→reopen→restore round-trip. The live `FoliateBilingualContainerView`
+    /// observer re-posts `.foliateRequestSeekFraction` (the SAME channel the
+    /// bottom-chrome scrubber uses → `readerAPI.goToFraction`) with its own
+    /// `fingerprintKey` injected, because the spike's seek observer filters by
+    /// key. If no Foliate reader is loaded, no observer fires — the URL is
+    /// silently a no-op (mirrors `present` / `tts` / `search`).
+    ///
+    /// userInfo:
+    /// - `"fraction"`: Double — the target reading fraction, clamped 0...1 by
+    ///   the parser.
+    static let debugBridgeSeekFraction = Notification.Name("vreader.debugBridge.seekFraction")
+
+    /// Posted by RealDebugBridgeContext.scrollSheet (Bug #271) to scroll the
+    /// active presented sheet's scrollable content to a requested end so
+    /// below-fold content becomes CU-free capturable. Today the only observer
+    /// is `TranslationResultCard` (Feature #65 row-11 verification): its
+    /// `ScrollViewReader` proxy scrolls to its top / bottom anchor. `detent=large`
+    /// (Bug #256) reveals the larger AI sheet, but the tall ORIGINAL card alone
+    /// exceeds even the `.large` height, so the accent translation card needs a
+    /// scroll to come into view. Issued AFTER `ai?action=translate` completes
+    /// (the result card only exists in the `.complete` state). If no scrollable
+    /// sheet observes it, no observer fires — the URL is silently a no-op
+    /// (mirrors `present` / `tts` / `search`).
+    ///
+    /// userInfo:
+    /// - `"to"`: String — one of `DebugCommand.ScrollTarget`'s rawValues
+    ///   (`top` / `bottom`), validated by the parser.
+    static let debugBridgeScrollSheet = Notification.Name("vreader.debugBridge.scrollSheet")
+
+    /// Posted by RealDebugBridgeContext.navigate (Bug #273) to drive
+    /// `.readerNavigateToLocator` CU-free — the verification harness for
+    /// feature #71 WI-8 (EPUB continuous-mode TOC/bookmark/search navigation),
+    /// which the `search` driver cannot exercise in continuous mode. The live
+    /// `EPUBReaderContainerView` observer resolves the spine index to its
+    /// `href` against `viewModel.metadata`, builds a `Locator` with the active
+    /// book's fingerprint, and re-posts `.readerNavigateToLocator` — re-entering
+    /// the SAME WI-8 handler a real TOC/bookmark/search tap hits (no parallel
+    /// navigation path). If no EPUB reader with matching metadata is loaded, no
+    /// observer fires — the URL is silently a no-op (mirrors `seek` / `search`).
+    ///
+    /// userInfo:
+    /// - `"spineIndex"`: Int — the target spine index (non-negative, validated
+    ///   by the parser; the observer additionally range-checks against the
+    ///   loaded spine count).
+    /// - `"fraction"`: Double (optional) — the intra-chapter landing position,
+    ///   clamped 0...1 by the parser. Absent ⇒ chapter start.
+    static let debugBridgeNavigateCommand = Notification.Name("vreader.debugBridge.navigateCommand")
+
+    /// Posted by RealDebugBridgeContext.scrollBoundary (feature #71 WI-6b) to
+    /// drive `EPUBContinuousScrollCoordinator.handleBoundarySignal(_:)` CU-free —
+    /// the verification harness for the WI-6b scroll-driven window extension +
+    /// eviction. The production `continuousScrollObserverJS` is rAF-throttled and
+    /// rAF is paused on the headless/virtual-display test environment, so a
+    /// synthetic touch scroll never fires a boundary report; this bypasses the
+    /// rAF observer. The live `EPUBReaderContainerView` observer builds an
+    /// `EPUBScrollBoundarySignal` (`intraFraction` 1.0 at the bottom / 0.0 at the
+    /// top; `nearTopBoundary` / `nearBottomBoundary` set from `near`) and calls
+    /// `coordinator.handleBoundarySignal` — re-entering the SAME WI-6b extension
+    /// path a real scroll boundary hits (no parallel logic). Guarded on
+    /// continuous mode (`continuousScrollConfig != nil`); if no continuous-mode
+    /// EPUB reader is loaded, no observer fires — the URL is silently a no-op
+    /// (mirrors `navigate` / `seek` / `search`).
+    ///
+    /// userInfo:
+    /// - `"spineIndex"`: Int — the visible spine index (non-negative, validated
+    ///   by the parser).
+    /// - `"near"`: String — one of `DebugCommand.ScrollBoundaryEdge`'s rawValues
+    ///   (`top` / `bottom`), validated by the parser. `top` ⇒ extend backward,
+    ///   `bottom` ⇒ extend forward.
+    static let debugBridgeScrollBoundaryCommand = Notification.Name("vreader.debugBridge.scrollBoundaryCommand")
+
+    /// Posted by RealDebugBridgeContext.pdfHighlight (feature #17) to create a
+    /// PDF highlight CU-free, bypassing the long-press-drag text-selection
+    /// gesture path (which needs a real touch / CU, unavailable on the
+    /// virtual-display test environment). The live `PDFReaderContainerView`
+    /// observer builds a `ReaderSelectionEvent` with a `.pdf` anchor
+    /// (`AnnotationAnchor.pdf(page:, rects:)`, the rect denormalized 0...1 →
+    /// page space downstream by `PDFAnnotationBridge`) and calls the SAME
+    /// `handleHighlightAction` the gesture uses — coordinator →
+    /// `PersistenceActor.addHighlight` → `PDFHighlightRenderer.apply` →
+    /// `PDFAnnotationBridge.createHighlightFromAnchor` — so the annotation
+    /// renders AND persists. EPUB / TXT / MD / AZW3 hosts don't register this
+    /// observer, so a stray URL fired while they're mounted is silently a
+    /// no-op (the same format-scoping posture as the TXT/MD `highlight`
+    /// observer). If no reader is loaded, no observer fires.
+    ///
+    /// userInfo:
+    /// - `"page"`: Int — the 0-based page index (non-negative, validated by
+    ///   the parser; the observer additionally range-checks against the loaded
+    ///   page count).
+    /// - `"rect"`: [Double] — the normalized highlight rect as `[x, y, w, h]`,
+    ///   each component in 0...1 (validated by the parser).
+    /// - `"color"`: String? — optional NamedHighlightColor rawValue
+    ///   (`yellow` / `pink` / `green` / `blue`). Present only when the bridge
+    ///   command included the `color=` parameter; the observer falls back to
+    ///   `"yellow"` when absent.
+    static let debugBridgePDFHighlightCommand = Notification.Name("vreader.debugBridge.pdfHighlightCommand")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker

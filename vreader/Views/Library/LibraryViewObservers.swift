@@ -61,11 +61,19 @@ struct LibraryViewObservers: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .bookDidImport)) { _ in
                 Task { await viewModel.refresh(force: true) }
             }
+            // Bug #254: the DebugBridge observers attach ONLY in DEBUG. Both
+            // this call site AND the `LibraryDebugBridgeObservers` struct are
+            // `#if DEBUG`-gated so the symbol is entirely absent from Release
+            // (rule 50 §11; `verify-release-no-debugbridge.sh`). Previously
+            // only `body()` was gated, leaving the (inert) struct symbol in
+            // the Release binary.
+            #if DEBUG
             .modifier(LibraryDebugBridgeObservers(
                 viewModel: viewModel,
                 isPushingReader: $isPushingReader,
                 navigationPath: $navigationPath
             ))
+            #endif
     }
 
     // MARK: - Feature #47 lazy-download row-tap
@@ -138,16 +146,17 @@ struct LibraryViewObservers: ViewModifier {
     }
 }
 
-/// DEBUG-only DebugBridge observers — split into a separate modifier so
-/// the `#if DEBUG` guard wraps a single, self-contained surface (rule
-/// 50 §11: DEBUG-only code in dedicated `#if DEBUG` blocks).
+#if DEBUG
+/// DEBUG-only DebugBridge observers — the ENTIRE struct (not just `body()`)
+/// is `#if DEBUG`-gated so the symbol is absent from Release (Bug #254 /
+/// rule 50 §11). The call site in `LibraryViewObservers.body` is gated to
+/// match.
 private struct LibraryDebugBridgeObservers: ViewModifier {
     let viewModel: LibraryViewModel
     @Binding var isPushingReader: Bool
     @Binding var navigationPath: NavigationPath
 
     func body(content: Content) -> some View {
-        #if DEBUG
         content
             // Feature #44 DebugBridge — vreader-debug://open posts this
             // so automated tests can navigate without tapping. Refresh
@@ -168,8 +177,6 @@ private struct LibraryDebugBridgeObservers: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .debugBridgeLibraryChanged)) { _ in
                 Task { await viewModel.refresh(force: true) }
             }
-        #else
-        content
-        #endif
     }
 }
+#endif

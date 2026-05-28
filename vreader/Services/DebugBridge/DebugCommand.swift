@@ -87,6 +87,20 @@ import Foundation
 ///   (optional for `translate`; absent → the panel's current target
 ///   language); ignored for `summarize`. No-op when no AI sheet is
 ///   presented (mirrors `present`).
+/// - `scroll-sheet?to=<top|bottom>` — scroll the active presented sheet's
+///   scrollable content to the requested end (Bug #271 verification harness).
+///   `detent=large` (Bug #256) reveals the larger AI sheet, but on the
+///   Translate tab the tall auto-extracted ORIGINAL card alone exceeds even
+///   the `.large` height, so the accent translation card stays below the fold;
+///   `to=bottom` drives the `TranslationResultCard` ScrollView's
+///   `ScrollViewReader` to its bottom anchor so `simctl io screenshot` captures
+///   the translation card without a drag gesture. `to=top` returns to the
+///   ORIGINAL card. The handler posts `.debugBridgeScrollSheet`; the presented
+///   sheet's observer maps it to a `scrollTo(_:anchor:)` — no parallel scroll
+///   logic. Issued AFTER `ai?action=translate` completes (the result card only
+///   exists in the `.complete` state), which is why it is a standalone command
+///   rather than a `present` parameter. No-op when no scrollable sheet observes
+///   it (mirrors `tts` / `search` / `present`). `#if DEBUG`-gated.
 /// - `seed-sessions?book=<fingerprintKey>[&seconds=<n>]` — seed a
 ///   deterministic spread of synthetic `ReadingSession` rows so the reading
 ///   dashboard (Feature #58) renders non-zero per-window totals CU-free
@@ -113,8 +127,65 @@ enum DebugCommand: Equatable {
     case highlight(startUTF16: Int, endUTF16: Int, color: String?)
     case provider(action: ProviderAction)
     case present(sheet: SheetKind, tab: String?, detent: SheetDetent?)
+    /// Bug #267 — `seek?fraction=<0...1>` drives the active Foliate (AZW3/MOBI)
+    /// reader to a fractional position (`readerAPI.goToFraction`) so the
+    /// harness can reach a distinguishable non-start position. `fraction` is
+    /// clamped to 0...1; a non-finite value is rejected by the parser.
+    case seekFraction(fraction: Double)
     case aiAction(action: AIActionKind, scope: SummaryScope?, text: String?)
     case seedSessions(bookFingerprintKey: String, secondsPerSession: Int)
+    /// Bug #271 — `scroll-sheet?to=<top|bottom>` scrolls the active presented
+    /// sheet's scrollable content so below-fold content becomes CU-free
+    /// capturable. `detent=large` (Bug #256) reveals the larger AI sheet, but
+    /// on the Translate tab the tall auto-extracted ORIGINAL card alone exceeds
+    /// even the `.large` height, leaving the accent translation card below the
+    /// fold; this command drives the `TranslationResultCard` ScrollView's
+    /// `ScrollViewReader` to the requested end. Issued AFTER the translation
+    /// completes (the result card only exists in the `.complete` state), which
+    /// is why it is a standalone command rather than a `present` parameter.
+    case scrollSheet(target: ScrollTarget)
+
+    /// Bug #273 — `navigate?spine=<N>[&fraction=<0...1>]` drives
+    /// `.readerNavigateToLocator` CU-free (the verification harness for feature
+    /// #71 WI-8 continuous-mode navigation, which the `search` driver cannot
+    /// exercise in continuous mode). `spine` (required, ≥0) is the target spine
+    /// index; `fraction` (optional, finite, clamped 0...1) is the intra-chapter
+    /// landing position (absent ⇒ chapter start). The handler posts
+    /// `.debugBridgeNavigateCommand`; the live `EPUBReaderContainerView` observer
+    /// resolves the index → href + builds the `Locator` + re-posts
+    /// `.readerNavigateToLocator`.
+    case navigate(spineIndex: Int, fraction: Double?)
+
+    /// Feature #71 WI-6b — `scroll-boundary?spine=<N>&near=<top|bottom>` drives
+    /// `EPUBContinuousScrollCoordinator.handleBoundarySignal(_:)` CU-free. The
+    /// production `continuousScrollObserverJS` is rAF-throttled and rAF is paused
+    /// on the headless/virtual-display test environment, so a synthetic touch
+    /// scroll never triggers a boundary report; this command posts a boundary
+    /// signal directly. `spine` (required, ≥0) is the visible spine index; `near`
+    /// is which materialized-doc boundary the viewport is near (`top` ⇒ extend
+    /// backward, `bottom` ⇒ extend forward). The handler posts
+    /// `.debugBridgeScrollBoundaryCommand`; the live `EPUBReaderContainerView`
+    /// observer builds an `EPUBScrollBoundarySignal` and calls
+    /// `coordinator.handleBoundarySignal` — bypassing the rAF observer.
+    case scrollBoundary(spineIndex: Int, near: ScrollBoundaryEdge)
+
+    /// Feature #17 — `pdf-highlight?page=<N>&rect=<x,y,w,h>[&color=<name>]`
+    /// drives PDF highlight CREATION CU-free so feature #17's
+    /// selection-driven highlight → PDFAnnotation render + persist can be
+    /// device-verified WITHOUT a real long-press-drag text selection (which
+    /// needs a real touch / CU, unavailable on the virtual-display test
+    /// environment). `page` (required, ≥0) is the 0-based page index; `rect`
+    /// (required) is the normalized highlight rect in page coordinate space
+    /// (each of `x,y,w,h` a finite Double in 0...1); `color` (optional;
+    /// defaults to yellow downstream) is one of the four
+    /// `NamedHighlightColor` rawValues (`yellow`/`pink`/`green`/`blue`),
+    /// matching the `highlight` command's allowlist. The handler posts
+    /// `.debugBridgePDFHighlightCommand`; the live `PDFReaderContainerView`
+    /// observer builds a `ReaderSelectionEvent` with a `.pdf` anchor and calls
+    /// the SAME `handleHighlightAction` the gesture uses (coordinator →
+    /// `addHighlight` → `PDFAnnotationBridge.createHighlightFromAnchor`) so the
+    /// annotation renders AND persists.
+    case pdfHighlight(page: Int, rect: NormalizedRect, color: String?)
 
     /// Which AI action the `ai` command fires (Bug #255 — verification
     /// harness AI-action driver). The handler posts `.debugBridgeAIAction`;
@@ -232,6 +303,39 @@ enum DebugCommand: Equatable {
         case large
     }
 
+    /// Which end the `scroll-sheet` command drives the active presented sheet's
+    /// scrollable content to (Bug #271 — below-fold content reveal). The
+    /// handler posts the rawValue in `.debugBridgeScrollSheet`'s `userInfo`; the
+    /// presented sheet's observer (today `TranslationResultCard`) maps it to a
+    /// `ScrollViewReader` `scrollTo(_:anchor:)` against its own top/bottom
+    /// anchor — no parallel scroll logic. `bottom` reveals the accent
+    /// translation card sitting below the tall ORIGINAL card; `top` returns to
+    /// the ORIGINAL card.
+    ///
+    /// Kept local (mirroring `ThemeMode` / `SheetKind` / `SheetDetent`) so this
+    /// file stays a pure value-type parser with no SwiftUI import.
+    enum ScrollTarget: String, Equatable, CaseIterable {
+        case top
+        case bottom
+    }
+
+    /// Which materialized-doc boundary the `scroll-boundary` command reports the
+    /// viewport is near (feature #71 WI-6b — CU-free continuous-scroll boundary
+    /// driver). `top` ⇒ the viewport is within the prefetch margin of the TOP of
+    /// the materialized window (extend backward); `bottom` ⇒ near the BOTTOM
+    /// (extend forward). The handler posts the rawValue in
+    /// `.debugBridgeScrollBoundaryCommand`'s `userInfo`; the
+    /// `EPUBReaderContainerView` observer maps it to the
+    /// `EPUBScrollBoundarySignal`'s `nearTopBoundary` / `nearBottomBoundary`
+    /// flags + `intraFraction` (0.0 at top, 1.0 at bottom).
+    ///
+    /// Kept local (mirroring `ThemeMode` / `ScrollTarget`) so this file stays a
+    /// pure value-type parser with no reader-layer import.
+    enum ScrollBoundaryEdge: String, Equatable, CaseIterable {
+        case top
+        case bottom
+    }
+
     /// Discriminated action carried by `provider`. `add` carries every
     /// field needed to materialize a `ProviderProfile` plus an `active`
     /// flag (`true` → set as active on insert). `remove` keys on display
@@ -249,6 +353,19 @@ enum DebugCommand: Equatable {
         case remove(name: String)
         case clear
     }
+}
+
+/// A normalized highlight rect in PDF page coordinate space — each component
+/// in 0...1, relative to the page bounds (feature #17, the `pdf-highlight`
+/// command). Mirrors the small command-local value types `ScrollBoundaryEdge`
+/// / `ScrollTarget` rather than reaching for `CGRect` at the URL parse
+/// boundary (the parser stays free of CoreGraphics interpolation concerns;
+/// the observer converts to `CGRect` when building the `.pdf` anchor).
+struct NormalizedRect: Equatable, Sendable {
+    let x: Double
+    let y: Double
+    let w: Double
+    let h: Double
 }
 
 /// Errors produced by `DebugCommand.parse(_:)`.
@@ -660,6 +777,113 @@ extension DebugCommand {
             }
             return .seedSessions(bookFingerprintKey: book, secondsPerSession: secondsPerSession)
 
+        case "seek":
+            // Bug #267: drive the active Foliate reader to a fractional
+            // position. `fraction` is required; must be a finite number; it is
+            // clamped to 0...1 (a verifier passing 0.5 reaches mid-book even if
+            // it slightly overshoots, rather than erroring).
+            let rawFraction = try requireParam("fraction", in: params)
+            guard let parsed = Double(rawFraction), parsed.isFinite else {
+                throw DebugCommandError.invalidParam(
+                    "fraction",
+                    reason: "expected a finite number in 0...1, got \(rawFraction)"
+                )
+            }
+            return .seekFraction(fraction: min(max(parsed, 0), 1))
+
+        case "navigate":
+            // Bug #273: drive `.readerNavigateToLocator` CU-free — the
+            // verification harness for feature #71 WI-8 continuous-mode
+            // navigation. `spine` is required and must be a non-negative
+            // integer (the observer additionally range-checks against the
+            // loaded spine count). `fraction` is optional; when present it must
+            // be a finite number and is clamped to 0...1 (mirrors `seek`).
+            let rawSpine = try requireParam("spine", in: params)
+            guard let spine = Int(rawSpine), spine >= 0 else {
+                throw DebugCommandError.invalidParam(
+                    "spine",
+                    reason: "expected a non-negative integer, got \(rawSpine)"
+                )
+            }
+            let fraction: Double?
+            if let rawFraction = params["fraction"] {
+                guard !rawFraction.isEmpty else {
+                    throw DebugCommandError.invalidParam(
+                        "fraction",
+                        reason: "expected a finite number in 0...1, got empty value"
+                    )
+                }
+                guard let parsedFraction = Double(rawFraction), parsedFraction.isFinite else {
+                    throw DebugCommandError.invalidParam(
+                        "fraction",
+                        reason: "expected a finite number in 0...1, got \(rawFraction)"
+                    )
+                }
+                fraction = min(max(parsedFraction, 0), 1)
+            } else {
+                fraction = nil
+            }
+            return .navigate(spineIndex: spine, fraction: fraction)
+
+        case "scroll-boundary":
+            // Feature #71 WI-6b: drive `handleBoundarySignal` CU-free. `spine` is
+            // required and must be a non-negative integer (same validation as
+            // `navigate`'s `spine`). `near` is required; one of top|bottom (mirrors
+            // the ScrollTarget allowlist posture) — anything else is a caller bug
+            // the parser rejects rather than silently no-op.
+            let rawSpine = try requireParam("spine", in: params)
+            guard let spine = Int(rawSpine), spine >= 0 else {
+                throw DebugCommandError.invalidParam(
+                    "spine",
+                    reason: "expected a non-negative integer, got \(rawSpine)"
+                )
+            }
+            let nearRaw = try requireParam("near", in: params)
+            guard let near = ScrollBoundaryEdge(rawValue: nearRaw) else {
+                let valid = ScrollBoundaryEdge.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam("near", reason: "expected \(valid), got \(nearRaw)")
+            }
+            return .scrollBoundary(spineIndex: spine, near: near)
+
+        case "pdf-highlight":
+            // Feature #17: CU-free PDF highlight-creation harness. `page` is
+            // required and must be a non-negative integer (the observer
+            // additionally range-checks against the loaded page count). `rect`
+            // is required and must be exactly four comma-separated finite
+            // Doubles `x,y,w,h`, each in 0...1 (normalized page coordinate
+            // space). `color` is optional; when present it must be one of the
+            // four NamedHighlightColor rawValues (same allowlist as the
+            // `highlight` command); absent ⇒ the observer falls back to yellow.
+            let rawPage = try requireParam("page", in: params)
+            guard let page = Int(rawPage) else {
+                throw DebugCommandError.invalidParam(
+                    "page",
+                    reason: "expected a non-negative integer, got \(rawPage)"
+                )
+            }
+            guard page >= 0 else {
+                throw DebugCommandError.invalidParam(
+                    "page",
+                    reason: "must be ≥ 0, got \(page)"
+                )
+            }
+            let rawRect = try requireParam("rect", in: params)
+            let rect = try parseNormalizedRect(rawRect)
+            let color = try parseHighlightColor(params)
+            return .pdfHighlight(page: page, rect: rect, color: color)
+
+        case "scroll-sheet":
+            // Bug #271: scroll the active presented sheet's scrollable content.
+            // `to` is required; one of top|bottom (mirrors the SheetDetent
+            // allowlist posture). Empty `to=` is treated as missing by
+            // requireParam — same as every other command.
+            let toRaw = try requireParam("to", in: params)
+            guard let target = ScrollTarget(rawValue: toRaw) else {
+                let valid = ScrollTarget.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam("to", reason: "expected \(valid), got \(toRaw)")
+            }
+            return .scrollSheet(target: target)
+
         default:
             throw DebugCommandError.unknownCommand(host)
         }
@@ -731,6 +955,109 @@ extension DebugCommand {
             text = nonEmpty(params["text"])
         }
         return .aiAction(action: action, scope: scope, text: text)
+    }
+
+    /// Allowlist for the highlight `color` parameter — the four
+    /// `NamedHighlightColor` rawValues (feature #60 WI-7c). Shared by the
+    /// `highlight` (Bug #237) and `pdf-highlight` (feature #17) commands.
+    /// Kept literal here rather than referencing the presenter type so the
+    /// parser stays a pure value-type with no presentation-layer coupling.
+    static let validHighlightColors: Set<String> = ["yellow", "pink", "green", "blue"]
+
+    /// Parse the optional `color` parameter common to `highlight` /
+    /// `pdf-highlight`. An empty `color=` is a caller bug (rejected); a value
+    /// outside the allowlist is rejected; an absent `color` returns nil
+    /// (observers fall back to yellow).
+    private static func parseHighlightColor(_ params: [String: String]) throws -> String? {
+        guard let rawColor = params["color"] else { return nil }
+        guard !rawColor.isEmpty else {
+            throw DebugCommandError.invalidParam(
+                "color",
+                reason: "expected one of yellow|pink|green|blue, got empty value"
+            )
+        }
+        guard validHighlightColors.contains(rawColor) else {
+            throw DebugCommandError.invalidParam(
+                "color",
+                reason: "expected one of yellow|pink|green|blue, got \(rawColor)"
+            )
+        }
+        return rawColor
+    }
+
+    /// Parse the `pdf-highlight` `rect=<x,y,w,h>` parameter (feature #17).
+    /// Requires exactly four comma-separated components, each a finite Double
+    /// in 0...1 (normalized page coordinate space). A wrong component count,
+    /// a non-numeric / non-finite component, or an out-of-range component is
+    /// rejected with `invalidParam("rect", …)` so a malformed verification URL
+    /// surfaces rather than silently creating a bogus annotation.
+    ///
+    /// Codex Gate-4 round-1 HIGH 2: also reject a rect that overflows the page
+    /// (`x + w > 1` or `y + h > 1`). The gesture path runs every anchor through
+    /// `PDFAnnotationBridge.normalizeRects`, which clamps `w <= 1 - x` /
+    /// `h <= 1 - y`; an unclamped overflow rect denormalizes OFF the page and
+    /// can never be produced by a real selection. Rejecting (rather than
+    /// silently clamping) keeps the verification harness faithful — a
+    /// caller-side mistake surfaces instead of mutating into a different rect.
+    ///
+    /// Codex Gate-4 round-2 HIGH: also reject a ZERO-AREA rect (`w <= 0` or
+    /// `h <= 0`). A real text selection always covers glyphs and therefore has
+    /// strictly positive width AND height; `PDFAnnotationBridge.createHighlight`
+    /// accepts `>= 0` dimensions, so a zero-area rect would persist an
+    /// invisible (non-rendering) annotation — a library-contaminating record
+    /// with no visible counterpart, which a gesture can never produce.
+    /// The full-page boundary (`x + w == 1` / `y + h == 1`) stays accepted —
+    /// it's a positive-area rect at the legitimate maximum.
+    private static func parseNormalizedRect(_ raw: String) throws -> NormalizedRect {
+        let parts = raw.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 4 else {
+            throw DebugCommandError.invalidParam(
+                "rect",
+                reason: "expected four comma-separated values x,y,w,h, got \(parts.count) component(s)"
+            )
+        }
+        var values: [Double] = []
+        for part in parts {
+            guard let value = Double(part), value.isFinite else {
+                throw DebugCommandError.invalidParam(
+                    "rect",
+                    reason: "expected a finite number in 0...1, got \(part)"
+                )
+            }
+            guard value >= 0, value <= 1 else {
+                throw DebugCommandError.invalidParam(
+                    "rect",
+                    reason: "each component must be in 0...1, got \(value)"
+                )
+            }
+            values.append(value)
+        }
+        let (x, y, w, h) = (values[0], values[1], values[2], values[3])
+        guard w > 0 else {
+            throw DebugCommandError.invalidParam(
+                "rect",
+                reason: "width must be > 0 (a zero-area rect has no glyphs under it and can't be produced by a real selection), got w=\(w)"
+            )
+        }
+        guard h > 0 else {
+            throw DebugCommandError.invalidParam(
+                "rect",
+                reason: "height must be > 0 (a zero-area rect has no glyphs under it and can't be produced by a real selection), got h=\(h)"
+            )
+        }
+        guard x + w <= 1 else {
+            throw DebugCommandError.invalidParam(
+                "rect",
+                reason: "x + w must be ≤ 1 (rect overflows the page width), got x=\(x), w=\(w)"
+            )
+        }
+        guard y + h <= 1 else {
+            throw DebugCommandError.invalidParam(
+                "rect",
+                reason: "y + h must be ≤ 1 (rect overflows the page height), got y=\(y), h=\(h)"
+            )
+        }
+        return NormalizedRect(x: x, y: y, w: w, h: h)
     }
 
     private static func queryParams(_ url: URL) throws -> [String: String] {

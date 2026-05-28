@@ -136,4 +136,34 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         )
         return result.segments
     }
+
+    /// Bug #268: translate the render's OWN enumerated block texts directly
+    /// (1:1 by construction), bypassing the unit's plain-text segmentation.
+    /// Same provider snapshot + resolve + error contract as `translatedSegments`,
+    /// then `ChapterTranslationService.translatePreSegmented` (no disk cache).
+    func translatedSegmentsDirect(
+        for unit: TranslationUnitID,
+        sourceSegments: [String],
+        targetLanguage: String
+    ) async throws -> [String] {
+        guard !sourceSegments.isEmpty else { return [] }
+        // Snapshot the active profile + resolve its config (mirrors
+        // `translatedSegments` so a provider switch can't straddle).
+        guard let activeProfile = await ProviderProfileStore.shared
+            .activeProfileSnapshot() else {
+            throw ChapterTranslationError.providerFailed("no active provider profile")
+        }
+        let config: ResolvedAIProviderConfig
+        do {
+            config = try await aiService.resolveProviderConfig(
+                profileID: activeProfile.id, modelOverride: nil)
+        } catch {
+            throw ChapterTranslationError.providerFailed("provider config unavailable")
+        }
+        return try await translationService.translatePreSegmented(
+            segments: sourceSegments,
+            targetLanguage: targetLanguage,
+            config: config,
+            style: style)
+    }
 }

@@ -141,11 +141,60 @@ struct FeatureFlagsTests {
     // MARK: - Flag Enum
 
     @Test func flagKeysAreExhaustive() {
-        #expect(FeatureFlagKey.allCases.count == 4)
+        #expect(FeatureFlagKey.allCases.count == 5)
         #expect(FeatureFlagKey.allCases.contains(.aiAssistant))
         #expect(FeatureFlagKey.allCases.contains(.sync))
         #expect(FeatureFlagKey.allCases.contains(.searchIndexingVerboseLogs))
         #expect(FeatureFlagKey.allCases.contains(.bilingualReading))
+        #expect(FeatureFlagKey.allCases.contains(.epubContinuousScroll))
+    }
+
+    // MARK: - Feature #71: epubContinuousScroll
+
+    @Test func epubContinuousScrollDefaultsOnInAllEnvironments() {
+        // Feature #71's terminal WI flipped the default ON (2026-05-28): after
+        // real-touch-scroll device verification confirmed the rAF observer fires
+        // and the cross-chapter materialize/evict works end-to-end, continuous
+        // scroll became the default EPUB scroll-mode reading experience.
+        for env in AppEnvironment.allCases {
+            let flags = FeatureFlags(environment: env)
+            #expect(flags.epubContinuousScroll == true)
+            #expect(flags.isEnabled(.epubContinuousScroll) == true)
+        }
+    }
+
+    @Test func epubContinuousScrollOverrideCanDisable() {
+        // Now that the default is ON, a user/debug override can still turn it OFF;
+        // removing the override restores the new default (ON).
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(false, for: .epubContinuousScroll)
+        #expect(flags.epubContinuousScroll == false)
+        flags.removeOverride(for: .epubContinuousScroll)
+        #expect(flags.epubContinuousScroll == true)
+    }
+
+    @Test func epubContinuousScrollOverridePersists() {
+        // Persisted (aiAssistant pattern) so a `defaults write` override survives
+        // across launches — the device-verification recipe relies on this.
+        // Persist `false` (NOT the new ON default) so the reload assertion is
+        // discriminating: a `true` here would now match the default and pass even
+        // if init ignored persisted values (Codex Gate-4 Low). A persisted `false`
+        // surviving a reload proves the persisted-override load path works.
+        let suiteName = "test.epubContinuousScroll.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let flags = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        flags.setOverride(false, for: .epubContinuousScroll)
+        #expect(defaults.bool(forKey: "com.vreader.featureFlags.epubContinuousScroll") == false)
+
+        // A fresh instance over the same defaults reads the persisted OFF override,
+        // beating the new ON default.
+        let reloaded = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        #expect(reloaded.epubContinuousScroll == false)
+        // Removing the persisted override restores the new ON default.
+        reloaded.removeOverride(for: .epubContinuousScroll)
+        #expect(reloaded.epubContinuousScroll == true)
     }
 
     // MARK: - Shared Singleton (Issue 1)

@@ -78,11 +78,13 @@ extension EPUBWebViewBridge {
         #endif
         /// Callback for text selection events.
         var onSelectionEvent: (@MainActor (ReaderSelectionEvent) -> Void)?
-        /// Feature #56 WI-10: receives the `[BilingualBlock]` parsed
-        /// from the JS `bilingualEnumerate` channel after a chapter
-        /// loads. `nil` for non-bilingual call sites; the message
-        /// handler short-circuits there.
-        var onBilingualEnumerate: (@MainActor ([BilingualBlock]) -> Void)?
+        /// Feature #56 WI-10: receives the `EPUBBilingualEnumeratePayload`
+        /// parsed from the JS `bilingualEnumerate` channel after a chapter
+        /// loads. `nil` for non-bilingual call sites; the message handler
+        /// short-circuits there. Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1):
+        /// carries the requested-section identity so an empty scoped enumerate
+        /// clears only that section.
+        var onBilingualEnumerate: (@MainActor (EPUBBilingualEnumeratePayload) -> Void)?
         /// Callback to restore highlights after page loads.
         /// Provides a JS evaluator so the container can inject restore scripts.
         var onPageDidFinishLoad: (@MainActor (@escaping (String) -> Void) -> Void)?
@@ -92,6 +94,16 @@ extension EPUBWebViewBridge {
         var previousIsPaged = false
         /// Called when pagination is ready with total page count.
         var onPaginationReady: (@MainActor (Int) -> Void)?
+        /// Feature #71 WI-5: non-nil in continuous-scroll mode. The
+        /// `continuousScrollHandler` channel routes each boundary signal to
+        /// `config.coordinator` (window transitions) and feeds the windowed
+        /// whole-book progress to `onProgressChange`. Nil ⇒ legacy single-doc
+        /// `progressHandler` path.
+        var continuousScroll: EPUBContinuousScrollConfig?
+        /// Feature #71 WI-6b-i: set once the bootstrap document has been requested
+        /// so `updateUIView` loads it exactly once (a reload would wipe the
+        /// stitched multi-chapter DOM).
+        var didLoadContinuousBootstrap = false
         private let onProgressChange: @MainActor (Double) -> Void
         private let onLoadError: @MainActor (String) -> Void
 
@@ -173,11 +185,54 @@ extension EPUBWebViewBridge {
                 handleBilingualEnumerateMessage(message.body)
                 return
             }
+            if message.name == "continuousScrollHandler" {
+                handleContinuousScrollMessage(message.body)
+                return
+            }
+            if message.name == "sectionMaterialized" {
+                handleSectionMaterializedMessage(message.body)
+                return
+            }
             guard message.name == "progressHandler",
                   let progress = message.body as? Double else { return }
             Task { @MainActor in
                 onProgressChange(progress)
             }
+        }
+
+        /// Feature #71 WI-5: parse a `continuousScrollHandler` boundary signal,
+        /// forward it to the window-transition coordinator (WI-4 — materialize /
+        /// evict adjacent chapters), and feed the windowed whole-book progress
+        /// (`(visibleSpineIndex + intraFraction)/spineCount`) to the existing
+        /// `onProgressChange` contract. No-op when the config is absent (the
+        /// channel is only registered in continuous mode, but the guard keeps a
+        /// stray message safe).
+        private func handleContinuousScrollMessage(_ body: Any) {
+            guard let config = continuousScroll,
+                  let signal = EPUBScrollBoundarySignal.parse(body) else { return }
+            let progress = config.windowedProgress(for: signal)
+            // WI-6b-i (re-audit finding 1): hand the container the windowed
+            // {visibleSpineIndex, intraFraction} so it can persist the chapter
+            // the reader scrolled into — `onProgressChange` only carries the
+            // whole-book Double, which can't say which section is on screen.
+            // Fired synchronously (no Task hop) so the position update isn't
+            // reordered behind the window-transition await below.
+            config.onWindowedPosition(signal.visibleSpineIndex, signal.intraFraction)
+            Task { @MainActor in
+                onProgressChange(progress)
+                await config.coordinator.handleBoundarySignal(signal)
+            }
+        }
+
+        /// Feature #71 WI-6b-ii: a chapter section was stitched into the DOM.
+        /// Appended/prepended sections never fire `webView(_:didFinish:)` (only
+        /// the bootstrap doc does), so this is the per-section lifecycle hook the
+        /// container uses to restore that section's highlights (re-rooted into
+        /// the section). No-op when the config is absent.
+        private func handleSectionMaterializedMessage(_ body: Any) {
+            guard let config = continuousScroll,
+                  let signal = EPUBSectionMaterialized.parse(body) else { return }
+            config.onSectionMaterialized(signal.spineIndex, signal.href)
         }
 
         /// Parses a `{id, rect}` payload from the JS `highlightTapHandler`
@@ -210,16 +265,26 @@ extension EPUBWebViewBridge {
         /// invokes the enumerate JS will still receive (and drop) any
         /// stray payload.
         private func handleBilingualEnumerateMessage(_ body: Any) {
-            let blocks = EPUBBilingualPipeline.parseEnumerateMessage(body)
+            // Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1): parse the FULL payload
+            // (blocks + requested section). The continuous-scroll scoped
+            // enumerate posts `{sectionIndex, blocks}`; the paged path posts the
+            // bare array. Forwarding the requested section lets the container
+            // clear ONLY an emptied section's bucket.
+            let payload = EPUBBilingualPipeline.parseEnumeratePayload(body)
             guard let callback = onBilingualEnumerate else { return }
             Task { @MainActor in
-                callback(blocks)
+                callback(payload)
             }
         }
 
         private func handleSelectionMessage(_ body: Any) {
             guard let parsed = EPUBHighlightBridge.parseSelectionMessage(body) else { return }
-            let href = currentHref ?? ""
+            // Feature #71 WI-5: in continuous-scroll mode the selection JS reports
+            // the section's href (`closest('[data-vreader-href]')`); attribute the
+            // anchor to THAT section, not the global current chapter. Legacy
+            // single-chapter mode reports no section href → falls back to
+            // `currentHref` (unchanged behaviour).
+            let href = parsed.sectionHref ?? currentHref ?? ""
             let event = EPUBHighlightBridge.makeSelectionEvent(
                 selectedText: parsed.selectedText,
                 href: href,
@@ -385,7 +450,16 @@ extension EPUBWebViewBridge {
                 }
             }
 
-            if isPaged {
+            if let cs = continuousScroll {
+                // Feature #71 WI-6b-i: the bootstrap document finished loading.
+                // Materialize the initial window (anchor chapter ±1) by stitching
+                // sections through the coordinator's evaluator. No single-chapter
+                // scroll-fraction / chapter-top offset restore here — section
+                // seeking against the inner scroll root is WI-6b-iii's job.
+                Task { @MainActor in
+                    await cs.coordinator.materializeInitialWindow()
+                }
+            } else if isPaged {
                 // Paged mode: inject pagination CSS, then query total pages
                 setupPagination(webView: webView)
             } else {

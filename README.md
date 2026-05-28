@@ -40,6 +40,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 - **CJK encoding** — Auto-detect GBK, Big5, Shift-JIS, EUC-KR (8KB sample-based)
 - **Large file support** — Chunked UITableView for TXT files >500K characters
 - **Paginated mode** — CSS columns (EPUB), TextKit containers (TXT/MD), PDFKit pages
+- **Continuous cross-chapter scroll** — EPUB scroll layout flows past a chapter's end straight into the next (lazy ±1-chapter window stitched into one document), matching TXT/AZW3 continuous reading — no manual chapter tap
 - **Page turn animations** — Slide, cover-flip, or instant
 - **Auto page turning** — Timer-based advancement with configurable interval
 

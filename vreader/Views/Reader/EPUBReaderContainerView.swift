@@ -90,6 +90,17 @@ struct EPUBReaderContainerView: View {
     /// for Photo with "Custom Background" off).
     @State private var photoBackgroundDataURL: URL?
 
+    /// Feature #71 WI-6b-i: continuous cross-chapter scroll config — the window
+    /// coordinator + late-binding evaluator handle, built ONCE per open (in the
+    /// open `.task`) when `epubLayout == .scroll`. Nil in paged mode, before
+    /// metadata loads, or for an empty spine. Passed into `EPUBWebViewBridge`;
+    /// nil ⇒ the legacy one-chapter-per-`loadFileURL` path.
+    // Feature #71 WI-7: `internal` (not `private`) so the
+    // `+ContinuousBilingual` extension can route per-section bilingual
+    // enumerate / inject JS through the live evaluator handle instead of the
+    // single `pendingHighlightJS` slot (Gate-4 round-2 MEDIUM 1).
+    @State var continuousScrollConfig: EPUBContinuousScrollConfig?
+
     // MARK: - Feature #56 WI-10: bilingual reading state
 
     /// The bilingual VM for the open book — created lazily once
@@ -193,6 +204,10 @@ struct EPUBReaderContainerView: View {
                     // Ensure chapter file exists before WKWebView loads it (bug #102)
                     await ensureChapterExtracted(href: firstItem.href)
                     contentURL = base.appendingPathComponent(firstItem.href)
+                    // Feature #71 WI-6b-i: build the continuous-scroll config
+                    // (window coordinator + evaluator handle) once, AFTER metadata
+                    // + initial position are resolved. No-op in paged mode.
+                    buildContinuousScrollConfig(resourceBase: base)
                 } catch {
                     if !Task.isCancelled {
                         webViewError = "Failed to resolve book resources."
@@ -265,6 +280,27 @@ struct EPUBReaderContainerView: View {
                   let meta = viewModel.metadata,
                   let base = resourceBase else { return }
             if let spineIndex = meta.spineItems.firstIndex(where: { $0.href == href }) {
+                // WI-8: continuous scroll drives the coordinator (scroll within the
+                // window, or rebuild the window around an out-of-window target)
+                // instead of the single-chapter `loadFileURL` path, which the
+                // bridge ignores in continuous mode. Without this, TOC / bookmark /
+                // search-result jumps no-op (the WI-6b-i Critical that gated the
+                // feature behind a flag). `progression` carries the intra-chapter
+                // landing fraction; a search `textQuote` highlight in continuous
+                // mode lands by fraction only (the find-in-section highlight is the
+                // deferred GH #1200-adjacent work). The persisted position is
+                // updated ONLY if the coordinator actually navigated (Gate-4
+                // round-2): a jump dropped because the mutation lane was busy must
+                // not move `currentPosition` while the DOM stays put.
+                if let config = continuousScrollConfig {
+                    let fraction = locator.progression ?? 0
+                    Task {
+                        if await config.coordinator.navigate(toSpineIndex: spineIndex, fraction: fraction) {
+                            viewModel.navigateToSpine(index: spineIndex)
+                        }
+                    }
+                    return
+                }
                 viewModel.navigateToSpine(index: spineIndex)
                 webViewError = nil
                 // Issue 6: Reset pagination on locator navigation (same as chapter nav).
@@ -299,6 +335,27 @@ struct EPUBReaderContainerView: View {
                 }
             }
         }
+        #if DEBUG
+        // Bug #273: CU-free harness for WI-8 continuous-mode navigation. The
+        // `navigate` DebugBridge command can't build a Locator itself (it has
+        // no spine metadata / fingerprint), so it posts the spine index here;
+        // we resolve index → href against the loaded metadata, build a Locator
+        // with the active book's fingerprint, and re-post the SAME
+        // `.readerNavigateToLocator` a real TOC/bookmark/search tap uses — so
+        // the WI-8 handler above performs the jump (no parallel path).
+        .onReceive(NotificationCenter.default.publisher(for: .debugBridgeNavigateCommand)) { notification in
+            guard let spineIndex = notification.userInfo?["spineIndex"] as? Int,
+                  let meta = viewModel.metadata,
+                  spineIndex >= 0, spineIndex < meta.spineItems.count,
+                  let fingerprint = DocumentFingerprint(canonicalKey: viewModel.bookFingerprintKey) else { return }
+            let fraction = notification.userInfo?["fraction"] as? Double
+            let href = meta.spineItems[spineIndex].href
+            guard let locator = Locator.validated(
+                bookFingerprint: fingerprint, href: href, progression: fraction
+            ) else { return }
+            NotificationCenter.default.post(name: .readerNavigateToLocator, object: locator)
+        }
+        #endif
         // Bug #88: re-render highlights after annotation import
         .onReceive(NotificationCenter.default.publisher(for: .readerHighlightsDidImport)) { _ in
             if let coordinator = highlightCoordinator {
@@ -381,6 +438,21 @@ struct EPUBReaderContainerView: View {
         .onChange(of: settingsStore?.theme) { _, _ in refreshPhotoBackgroundImage() }
         .onChange(of: settingsStore?.useCustomBackground) { _, _ in refreshPhotoBackgroundImage() }
         .onChange(of: settingsStore?.customBackgroundRevision) { _, _ in refreshPhotoBackgroundImage() }
+        // Feature #71 WI-6b-i hard-block (Gate-4 round-2): live mode-switching is
+        // not supported until WI-6b-iii (coordinator teardown + observer-script
+        // swap + window rebuild). If the reader leaves `.scroll` after continuous
+        // engaged, retire the config ONE-WAY this open: invalidate the coordinator
+        // (cancels any in-flight materialization) and nil it so the bridge reverts
+        // to the legacy single-chapter path. Re-entering `.scroll` this open lands
+        // on legacy single-chapter scroll rather than a stale stitched document; a
+        // fresh continuous session requires reopening the book. No-op when the
+        // continuous flag is off (config was never built).
+        .onChange(of: settingsStore?.epubLayout) { _, newLayout in
+            if newLayout != .scroll, continuousScrollConfig != nil {
+                continuousScrollConfig?.coordinator.invalidate()
+                continuousScrollConfig = nil
+            }
+        }
         // Feature #56 WI-10: bilingual reading wiring lives in a
         // dedicated `ViewModifier` to keep this body under the
         // compiler's type-inference budget.
@@ -395,6 +467,12 @@ struct EPUBReaderContainerView: View {
         // PR #1047 — Release builds replace the modifier with an
         // `EmptyModifier` so no DebugBridge symbols leak.
         .modifier(debugBridgeHighlightObserverModifier)
+        // Feature #71 WI-6b — DebugBridge scroll-boundary-driver observer.
+        // DEBUG-only; lives in its own `ViewModifier` (like the highlight
+        // observer above) so this body stays within the compiler's
+        // type-inference budget. Release builds replace it with an
+        // `EmptyModifier` so no DebugBridge symbols leak.
+        .modifier(debugBridgeScrollBoundaryObserverModifier)
     }
 
     // MARK: - Subviews
@@ -452,6 +530,148 @@ struct EPUBReaderContainerView: View {
     }
 
     @ViewBuilder
+    /// Feature #71 WI-6b-i: build the continuous-scroll config once per open when
+    /// `epubLayout == .scroll`. Wires the WI-6a chapter provider (spine index →
+    /// rewritten body) into the WI-4 window coordinator behind a fresh
+    /// late-binding `EPUBWebViewEvaluatorHandle` the bridge binds to the live
+    /// webView. Sets `continuousScrollConfig = nil` (legacy single-chapter path)
+    /// for paged mode, an empty spine, or before metadata loads.
+    @MainActor
+    private func buildContinuousScrollConfig(resourceBase base: URL) {
+        // Feature #71 continuous cross-chapter scroll. `FeatureFlags.epubContinuousScroll`
+        // now defaults ON (terminal WI, 2026-05-28); the guard still honours an
+        // explicit persisted `false` override (a user/QA who turned it off) and
+        // restricts continuous mode to EPUB `.scroll` layout — paged mode keeps
+        // the legacy single-chapter path. `nil` config before metadata loads or
+        // when the flag/layout don't qualify.
+        guard FeatureFlags.shared.epubContinuousScroll,
+              settingsStore?.epubLayout == .scroll,
+              let metadata = viewModel.metadata else {
+            continuousScrollConfig = nil
+            return
+        }
+        let spineItems = metadata.spineItems
+        let spineCount = metadata.spineCount
+        let anchorIndex: Int = {
+            guard let href = viewModel.currentPosition?.href,
+                  let idx = spineItems.firstIndex(where: { $0.href == href }) else {
+                return 0
+            }
+            return idx
+        }()
+        guard let initialWindow = EPUBSpineWindow.initial(
+            anchor: anchorIndex, spineCount: spineCount
+        ) else {
+            continuousScrollConfig = nil
+            return
+        }
+        // Absolute `file://` prefix the rewriter rewrites relative resource refs
+        // against (e.g. "file:///.../OEBPS/"). Ensure a trailing slash so the
+        // rewriter's path join produces a valid URL.
+        var prefix = base.absoluteString
+        if !prefix.hasSuffix("/") { prefix += "/" }
+        let provider = EPUBContinuousChapterProvider(
+            spineItems: spineItems,
+            parser: parser,
+            resourceBaseAbsolutePrefix: prefix,
+            linkedStylesheetLoader: { resolvedHref in
+                // `resolvedHref` is already resource-root-relative: the rewriter
+                // joins the bare `<link>` href onto the chapter's directory before
+                // calling this (so a nested chapter's `../css/x.css` resolves
+                // against the chapter, not the root — feature-#71 flag-flip Gate-4
+                // fix). We just anchor it to the resource base and read it.
+                let url = URL(fileURLWithPath: resolvedHref, relativeTo: base).standardized
+                return try? String(contentsOf: url, encoding: .utf8)
+            }
+        )
+        let handle = EPUBWebViewEvaluatorHandle()
+        let coordinator = EPUBContinuousScrollCoordinator(
+            initialWindow: initialWindow,
+            chapterBodyProvider: provider.makeClosure(),
+            evaluate: { [handle] js in try await handle.evaluate(js) },
+            dividerTitle: { idx in
+                guard idx >= 0, idx < spineItems.count else { return nil }
+                return spineItems[idx].title
+            },
+            // WI-6b-iii: restore the saved intra-chapter position. `anchorIndex`
+            // is the saved chapter's spine index, so the coordinator scrolls it
+            // to this fraction once the initial window materializes.
+            restoreFraction: viewModel.currentPosition?.progression,
+            // Feature #71 WI-7 (Gate-4 round-2 MEDIUM 2): on eviction, post the
+            // per-section evicted signal so the bilingual surfaces modifier
+            // drops that section's stale block bucket. Captures only the book
+            // key by value (no View / weak viewModel) so this long-lived
+            // coordinator closure holds no View snapshot. No-op downstream when
+            // bilingual is off.
+            onSectionEvicted: { [bookKey = viewModel.bookFingerprintKey] spineIndex in
+                NotificationCenter.default.post(
+                    name: .readerBilingualSectionEvicted,
+                    object: nil,
+                    userInfo: ["fingerprintKey": bookKey, "spineIndex": spineIndex]
+                )
+            }
+        )
+        continuousScrollConfig = EPUBContinuousScrollConfig(
+            coordinator: coordinator,
+            totalSpineCount: spineCount,
+            handle: handle,
+            onWindowedPosition: { [weak viewModel] visibleSpineIndex, intraFraction in
+                guard let viewModel,
+                      visibleSpineIndex >= 0,
+                      visibleSpineIndex < spineItems.count else { return }
+                let href = spineItems[visibleSpineIndex].href
+                let totalProg = EPUBProgressCalculator.progress(
+                    spineIndex: visibleSpineIndex,
+                    scrollFraction: intraFraction,
+                    totalSpineItems: spineCount
+                )
+                let newPosition = EPUBPosition(
+                    href: href,
+                    progression: intraFraction,
+                    totalProgression: totalProg,
+                    cfi: nil
+                )
+                viewModel.updatePosition(newPosition)
+                if let locator = viewModel.makeCurrentLocator() {
+                    NotificationCenter.default.post(
+                        name: .readerPositionDidChange, object: locator
+                    )
+                }
+            },
+            // WI-6b-ii: a chapter section was stitched in. Appended sections
+            // never fire `didFinish`, so restore THIS section's highlights here,
+            // re-rooted into the section via `__vreader_createHighlightInSection`.
+            // Captures the book key + container by value (not the View / weak
+            // viewModel) so the long-lived config closure holds no View snapshot.
+            onSectionMaterialized: { [handle, container = modelContainer, bookKey = viewModel.bookFingerprintKey] spineIndex, href in
+                // Feature #71 WI-7: post the per-section materialize signal so
+                // the bilingual surfaces modifier (which has View context) can
+                // drive a SECTION-SCOPED enumerate for THIS stitched chapter
+                // without this long-lived config closure capturing the View.
+                // The enumerate namespaces bids `s{N}b…` and tags each posted
+                // block `sectionIndex: N`, so translations inject per section
+                // with no cross-section bid bleed. No-op downstream when
+                // bilingual is off.
+                NotificationCenter.default.post(
+                    name: .readerBilingualSectionMaterialized,
+                    object: nil,
+                    userInfo: ["fingerprintKey": bookKey, "spineIndex": spineIndex]
+                )
+                guard let container else { return }
+                Task { @MainActor in
+                    let persistence = PersistenceActor(modelContainer: container)
+                    let highlights = (try? await persistence.fetchHighlights(
+                        forBookWithKey: bookKey
+                    )) ?? []
+                    let js = EPUBHighlightActions.restoreHighlightsInSectionJS(
+                        highlights: highlights, href: href, spineIndex: spineIndex
+                    )
+                    if !js.isEmpty { try? await handle.evaluate(js) }
+                }
+            }
+        )
+    }
+
     private func readerContent(contentURL: URL, accessRoot: URL) -> some View {
         // Bug #163: GeometryReader gives us the SwiftUI safe-area top
         // (Dynamic Island + status-bar). Threaded into the bridge so the
@@ -493,6 +713,16 @@ struct EPUBReaderContainerView: View {
                 fingerprintKey: fingerprintKey,
                 readerToken: readerToken,
             onProgressChange: { scrollFraction in
+                // Feature #71 WI-6b-i: in continuous mode the bridge already
+                // sends WHOLE-BOOK progress (the section-aware observer folds in
+                // the spine offset), and the persisted position is updated via
+                // `onWindowedPosition` (visibleSpineIndex + intraFraction). Drive
+                // ONLY the scrubber here — re-deriving from `currentPosition.href`
+                // would double-count the spine offset.
+                if continuousScrollConfig != nil {
+                    readingProgress = scrollFraction
+                    return
+                }
                 guard let position = viewModel.currentPosition,
                       let metadata = viewModel.metadata else { return }
                 let spineIndex = metadata.spineItems.firstIndex(
@@ -544,8 +774,8 @@ struct EPUBReaderContainerView: View {
             // current unit; on `.readerBilingualDidChange` the
             // observer builds the inject JS and pushes it through
             // `pendingHighlightJS`.
-            onBilingualEnumerate: { blocks in
-                handleBilingualBlocks(blocks)
+            onBilingualEnumerate: { payload in
+                handleBilingualEnumeratePayload(payload)
             },
             // Feature #64 WI-8: the EPUB highlight tap still posts
             // `.readerHighlightTapped` (from the JS `highlightTapHandler`
@@ -571,8 +801,27 @@ struct EPUBReaderContainerView: View {
                 // or a re-render of the same chapter) does not
                 // enumerate ahead of the user's confirm. The
                 // confirm path pushes its own enumerate.
+                //
+                // Feature #71 WI-7 (Gate-4 round-3 HIGH 1): the GLOBAL
+                // (paged) enumerate must NEVER run in continuous-scroll
+                // mode. In continuous mode `didFinish` fires for the
+                // bootstrap doc (empty body OR the whole stitched DOM);
+                // a global enumerate posts an UNTAGGED payload that
+                // routes through the paged `updateBlocks(_:)` and
+                // clobbers the per-section buckets (or creates a flat
+                // `-1` cache). Continuous enumerate is driven PER SECTION
+                // off `.readerBilingualSectionMaterialized`
+                // (`enumerateBilingualSection(spineIndex:)`), so gate the
+                // global enumerate to paged mode only.
+                // The continuous-mode test mirrors the bridge's own
+                // `continuousScroll: isPaged ? nil : continuousScrollConfig`
+                // gate exactly (a stale config under a paged layout is NOT
+                // continuous), so the global enumerate runs iff the bridge is
+                // actually rendering one-chapter-per-document.
+                let isContinuous = (isPaged ? nil : continuousScrollConfig) != nil
                 if bilingualViewModel?.isEnabled == true,
-                   !showBilingualSetupSheet {
+                   !showBilingualSetupSheet,
+                   !isContinuous {
                     evaluateJS(bilingualOrchestrator.enumerateJS())
                 }
             },
@@ -580,6 +829,11 @@ struct EPUBReaderContainerView: View {
             onPendingJSCompleted: {
                 pendingHighlightJS = nil
             },
+            // Feature #71 WI-6b-i: non-nil only in continuous (scroll) mode —
+            // the bridge then loads the bootstrap doc + stitches chapter
+            // sections instead of one-chapter-per-loadFileURL. Guarded by
+            // `!isPaged` so a stale config can't leak into paged mode.
+            continuousScroll: isPaged ? nil : continuousScrollConfig,
             isPaged: isPaged,
             paginationPage: currentPaginationPage,
             onPaginationReady: { totalPages in

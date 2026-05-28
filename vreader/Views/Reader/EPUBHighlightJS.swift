@@ -83,6 +83,33 @@ extension EPUBHighlightBridge {
                 if (!text || !text.trim()) return;
 
                 var rect = range.getBoundingClientRect();
+                // Feature #71 WI-5: attribute the selection to its section's href
+                // in continuous-scroll mode (the stitched DOM holds many chapters).
+                // closest('[data-vreader-href]') of the START / END containers'
+                // elements; both null in legacy single-chapter mode (no such
+                // ancestor) → Swift reads nil and falls back to the global
+                // currentHref, leaving the one-chapter path unchanged.
+                var startEl = range.startContainer.nodeType === 1
+                    ? range.startContainer
+                    : range.startContainer.parentElement;
+                var endEl = range.endContainer.nodeType === 1
+                    ? range.endContainer
+                    : range.endContainer.parentElement;
+                var startSection = startEl ? startEl.closest('[data-vreader-href]') : null;
+                var endSection = endEl ? endEl.closest('[data-vreader-href]') : null;
+                // Gate-2 [C1]: a drag can cross a chapter boundary in the stitched
+                // DOM. A mixed-section range (start in section A, end in B) can't be
+                // restored/painted per-section, so CLAMP the range to the END of the
+                // START section — the popover then operates on that single section's
+                // text. If the clamp empties the selection (degenerate), REJECT it
+                // (no popover). In legacy mode startSection/endSection are null so
+                // this never runs.
+                if (startSection && endSection && startSection !== endSection) {
+                    range.setEnd(startSection, startSection.childNodes.length);
+                    text = range.toString();
+                    if (!text || !text.trim()) return;
+                    rect = range.getBoundingClientRect();
+                }
                 var msg = {
                     selectedText: text,
                     startPath: getXPath(range.startContainer),
@@ -92,7 +119,8 @@ extension EPUBHighlightBridge {
                     rectX: rect.x,
                     rectY: rect.y,
                     rectWidth: rect.width,
-                    rectHeight: rect.height
+                    rectHeight: rect.height,
+                    sectionHref: startSection ? startSection.getAttribute('data-vreader-href') : null
                 };
                 window.webkit.messageHandlers.selectionChanged.postMessage(msg);
             }, 300);
@@ -116,50 +144,64 @@ extension EPUBHighlightBridge {
             'purple': 'rgba(156, 39, 176, 0.35)'
         };
 
+        // Bug #159 / GH #472: EPUB chapters load as `application/xhtml+xml`, so
+        // `documentElement.namespaceURI` is the XHTML namespace. XPath 1.0
+        // element names without a prefix do NOT match default-namespaced
+        // elements, so unqualified `getXPath` paths (e.g. `/html/body/p[3]`)
+        // returned null and highlights silently failed to paint. Rewrite each
+        // element-name segment to `*[local-name()="name"]` so the path resolves
+        // regardless of namespace; preserve the axis tokens text()/comment()/node().
+        // Also tolerates prefix-qualified names (`svg:svg`) by emitting the local
+        // part. Extracted (WI-6b-ii) so the document-rooted resolver AND the
+        // section-scoped resolver share one rewrite.
+        function rewriteXPathNS(xpath) {
+            var docNS = document.documentElement && document.documentElement.namespaceURI;
+            if (!docNS) return xpath;
+            return xpath.replace(/\\/([A-Za-z_][A-Za-z0-9_-]*(?::[A-Za-z_][A-Za-z0-9_-]*)?)/g, function(_, name) {
+                if (name === 'text' || name === 'comment' || name === 'node') {
+                    return '/' + name;
+                }
+                var colon = name.indexOf(':');
+                var local = colon >= 0 ? name.substring(colon + 1) : name;
+                return '/*[local-name()="' + local + '"]';
+            });
+        }
+
         function resolveNodeFromXPath(xpath) {
             try {
-                // Bug #159 / GH #472: EPUB chapters load as
-                // `application/xhtml+xml`, so `documentElement.namespaceURI`
-                // is `http://www.w3.org/1999/xhtml`. XPath 1.0 element
-                // names without a prefix do NOT match elements that have
-                // a default namespace, so the unqualified paths produced
-                // by `getXPath` (e.g. `/html/body/p[3]/text()[1]`)
-                // returned null on EPUB pages and the highlight render
-                // pipeline silently failed (data persisted, but visual
-                // paint never happened). Rewrite element-name segments to
-                // `*[local-name()="name"]` so the same path resolves
-                // regardless of the element's namespace; preserve the
-                // axis tokens `text()`, `comment()`, `node()` so the
-                // selection-path shape continues to work.
-                var query = xpath;
-                var docNS = document.documentElement && document.documentElement.namespaceURI;
-                if (docNS) {
-                    // Codex audit fix: also tolerate prefix-qualified element
-                    // names like `svg:svg` or `math:mfrac` that can appear in
-                    // mixed-namespace XHTML (e.g. an EPUB with inline SVG
-                    // declared via `xmlns:svg=...`). The regex now accepts
-                    // a single optional colon inside the captured name; the
-                    // replacement strips the prefix and emits the local part.
-                    query = query.replace(/\\/([A-Za-z_][A-Za-z0-9_-]*(?::[A-Za-z_][A-Za-z0-9_-]*)?)/g, function(_, name) {
-                        if (name === 'text' || name === 'comment' || name === 'node') {
-                            return '/' + name;
-                        }
-                        var colon = name.indexOf(':');
-                        var local = colon >= 0 ? name.substring(colon + 1) : name;
-                        return '/*[local-name()="' + local + '"]';
-                    });
-                }
                 var result = document.evaluate(
-                    query, document, null,
+                    rewriteXPathNS(xpath), document, null,
                     XPathResult.FIRST_ORDERED_NODE_TYPE, null
                 );
                 return result.singleNodeValue;
             } catch (e) { return null; }
         }
 
-        function buildRange(startPath, startOffset, endPath, endOffset) {
-            var startNode = resolveNodeFromXPath(startPath);
-            var endNode = resolveNodeFromXPath(endPath);
+        // WI-6b-ii: resolve a chapter-document XPath (e.g. `/html/body/p[3]/text()[1]`)
+        // RELATIVE to a continuous-scroll chapter-content root. In scroll mode the
+        // rewriter places the chapter body's children inside
+        // `<section data-vreader-spine-index="N"> … <div class="vreader-chapter-content">`,
+        // so strip the `/html/body` document prefix and evaluate the remainder
+        // against `contentRoot` (whose child-index space matches the original
+        // `<body>`). Returns null when the path is not document-rooted (the
+        // section-scoped resolve only handles chapter-document paths).
+        function resolveNodeFromXPathInSection(xpath, contentRoot) {
+            try {
+                // Require the literal `/html/body` document prefix (optional [1]
+                // positional predicates) — reject anything else so a malformed or
+                // corrupted persisted path can't silently re-root to the wrong
+                // node (Codex Gate-4 Low). Reduce it to a section-relative `.` base.
+                var rel = xpath.replace(/^\\/html(?:\\[1\\])?\\/body(?:\\[1\\])?(?=\\/|$)/, '.');
+                if (rel === xpath || rel.charAt(0) !== '.') return null;
+                var result = document.evaluate(
+                    rewriteXPathNS(rel), contentRoot, null,
+                    XPathResult.FIRST_ORDERED_NODE_TYPE, null
+                );
+                return result.singleNodeValue;
+            } catch (e) { return null; }
+        }
+
+        function makeRange(startNode, startOffset, endNode, endOffset) {
             if (!startNode || !endNode) return null;
             try {
                 var range = document.createRange();
@@ -167,6 +209,22 @@ extension EPUBHighlightBridge {
                 range.setEnd(endNode, Math.min(endOffset, endNode.length || 0));
                 return range;
             } catch (e) { return null; }
+        }
+
+        function buildRange(startPath, startOffset, endPath, endOffset) {
+            return makeRange(
+                resolveNodeFromXPath(startPath), startOffset,
+                resolveNodeFromXPath(endPath), endOffset
+            );
+        }
+
+        // WI-6b-ii: build a range from chapter-document paths re-rooted into a
+        // continuous-scroll chapter-content element.
+        function buildRangeInSection(startPath, startOffset, endPath, endOffset, contentRoot) {
+            return makeRange(
+                resolveNodeFromXPathInSection(startPath, contentRoot), startOffset,
+                resolveNodeFromXPathInSection(endPath, contentRoot), endOffset
+            );
         }
 
         // === Highlight: CSS Highlight API primary, foliate SVG Overlayer fallback ===
@@ -190,12 +248,13 @@ extension EPUBHighlightBridge {
         // doesn't expose Range membership in a tap-time-cheap way).
         window.__vreader_highlightRanges = window.__vreader_highlightRanges || {};
 
-        window.__vreader_createHighlight = function(id, startPath, startOffset, endPath, endOffset, color) {
-            var range = buildRange(startPath, startOffset, endPath, endOffset);
-            if (!range) return;
+        // WI-6b-ii: apply a resolved Range as a highlight — CSS Highlight API
+        // primary (layout-aware; survives column transforms), foliate SVG
+        // Overlayer fallback (older WebKit without the CSS Highlight API).
+        // Extracted from `__vreader_createHighlight` so the document-rooted and
+        // section-rooted (continuous-scroll) paths share one implementation.
+        function applyHighlightRange(id, range, color) {
             var cssColor = colorMap[color] || color;
-
-            // Primary: CSS Highlight API (layout-aware; survives column transforms)
             if (typeof CSS !== 'undefined' && CSS.highlights) {
                 try {
                     var highlight = new Highlight(range);
@@ -207,14 +266,11 @@ extension EPUBHighlightBridge {
                         style.textContent = '::highlight(vreader-' + id + ') { background-color: ' + cssColor + '; }';
                         document.head.appendChild(style);
                     }
-                    // WI-4: remember the live Range so the click handler
-                    // can hit-test against it.
+                    // WI-4: remember the live Range so the click handler can hit-test.
                     window.__vreader_highlightRanges[id] = range;
                     return;
                 } catch (e) { /* fall through to SVG Overlayer */ }
             }
-
-            // Fallback: foliate SVG Overlayer (older WebKit without CSS Highlight API)
             if (window.__foliate && window.__foliate.overlayer) {
                 try {
                     window.__foliate.overlayer.add(
@@ -222,11 +278,30 @@ extension EPUBHighlightBridge {
                         window.__foliate.Overlayer.highlight,
                         { color: cssColor }
                     );
-                    // WI-4: registry tracks fallback ranges too so the
-                    // click hit-test works on older WebKit.
                     window.__vreader_highlightRanges[id] = range;
                 } catch (e) {}
             }
+        }
+
+        window.__vreader_createHighlight = function(id, startPath, startOffset, endPath, endOffset, color) {
+            var range = buildRange(startPath, startOffset, endPath, endOffset);
+            if (!range) return;
+            applyHighlightRange(id, range, color);
+        };
+
+        // WI-6b-ii: section-scoped highlight restore for continuous scroll mode.
+        // Resolves the stored chapter-document XPaths relative to the matching
+        // section's `.vreader-chapter-content` wrapper, so a range captured in the
+        // single-chapter document re-roots into the correct stitched section.
+        // No-op when the section (or its content wrapper) is not currently
+        // materialized in the window.
+        window.__vreader_createHighlightInSection = function(spineIndex, id, startPath, startOffset, endPath, endOffset, color) {
+            var section = document.querySelector('[data-vreader-spine-index="' + spineIndex + '"]');
+            if (!section) return;
+            var contentRoot = section.querySelector('.vreader-chapter-content') || section;
+            var range = buildRangeInSection(startPath, startOffset, endPath, endOffset, contentRoot);
+            if (!range) return;
+            applyHighlightRange(id, range, color);
         };
 
         // Bug #212 / GH #828: deleting a CSS Highlight API entry does

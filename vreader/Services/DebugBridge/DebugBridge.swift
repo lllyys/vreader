@@ -85,6 +85,54 @@ protocol DebugBridgeContext {
     /// `ReadingStats` aggregate. NOT idempotent — each call ADDS another
     /// six-session spread (totals grow), so a verify run should `reset` first.
     func seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int) async throws
+    /// Bug #267 — drive the active Foliate (AZW3/MOBI) reader to a fractional
+    /// position so the harness can reach a *distinguishable non-start* position
+    /// for the Bug #265 save→reopen→restore round-trip. The handler posts
+    /// `.debugBridgeSeekFraction`; the live `FoliateBilingualContainerView`
+    /// observer forwards it to the SAME `.foliateRequestSeekFraction` channel
+    /// the bottom-chrome scrubber uses (`readerAPI.goToFraction`), injecting its
+    /// own `fingerprintKey`. If no Foliate reader is loaded, the action is a
+    /// no-op (matches `tts` / `search` / `present`). `fraction` is clamped to
+    /// 0...1 by the parser.
+    func seekFraction(fraction: Double) async throws
+    /// Bug #271 — scroll the active presented sheet's scrollable content to a
+    /// requested end so below-fold content becomes CU-free capturable. The
+    /// handler posts `.debugBridgeScrollSheet`; the presented sheet's observer
+    /// (today `TranslationResultCard`) maps the target to a `ScrollViewReader`
+    /// `scrollTo(_:anchor:)` against its own top/bottom anchor — no parallel
+    /// scroll logic. If no scrollable sheet observes it, the action is a no-op
+    /// (matches `present` / `tts` / `search`).
+    func scrollSheet(target: DebugCommand.ScrollTarget) async throws
+    /// Bug #273 — drive `.readerNavigateToLocator` CU-free (the verification
+    /// harness for feature #71 WI-8 continuous-mode navigation). The handler
+    /// posts `.debugBridgeNavigateCommand`; the live `EPUBReaderContainerView`
+    /// observer resolves `spineIndex` → href against `viewModel.metadata`,
+    /// builds a `Locator`, and re-posts `.readerNavigateToLocator` — the SAME
+    /// channel a TOC/bookmark/search tap uses. If no matching EPUB reader is
+    /// loaded, the action is a no-op (matches `seek` / `search` / `present`).
+    func navigate(spineIndex: Int, fraction: Double?) async throws
+    /// Feature #71 WI-6b — drive `EPUBContinuousScrollCoordinator.handleBoundarySignal`
+    /// CU-free. The production `continuousScrollObserverJS` is rAF-throttled and
+    /// rAF is paused on the headless/virtual-display test environment, so a
+    /// synthetic touch scroll never triggers a boundary report; this posts the
+    /// signal directly. The handler posts `.debugBridgeScrollBoundaryCommand`;
+    /// the live `EPUBReaderContainerView` observer builds an
+    /// `EPUBScrollBoundarySignal` and calls `coordinator.handleBoundarySignal`.
+    /// If no matching continuous-mode EPUB reader is loaded, the action is a
+    /// no-op (matches `navigate` / `seek` / `search`).
+    func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws
+    /// Feature #17 — drive PDF highlight CREATION CU-free so the
+    /// selection-driven highlight → PDFAnnotation render + persist can be
+    /// device-verified WITHOUT a real long-press-drag text selection. The
+    /// handler posts `.debugBridgePDFHighlightCommand` carrying the page index,
+    /// the normalized rect (as a 4-element `[Double]` `[x, y, w, h]`), and the
+    /// optional color; the live `PDFReaderContainerView` observer builds a
+    /// `ReaderSelectionEvent` with a `.pdf` anchor and calls the SAME
+    /// `handleHighlightAction` the gesture uses (coordinator → `addHighlight`
+    /// → `PDFAnnotationBridge.createHighlightFromAnchor`) so the annotation
+    /// renders AND persists. If no PDF reader is loaded, no observer fires —
+    /// the URL is silently a no-op (matches `highlight` / `navigate` / `seek`).
+    func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -217,6 +265,16 @@ final class DebugBridge {
                 bookFingerprintKey: bookFingerprintKey,
                 secondsPerSession: secondsPerSession
             )
+        case .seekFraction(let fraction):
+            try await context.seekFraction(fraction: fraction)
+        case .scrollSheet(let target):
+            try await context.scrollSheet(target: target)
+        case .navigate(let spineIndex, let fraction):
+            try await context.navigate(spineIndex: spineIndex, fraction: fraction)
+        case .scrollBoundary(let spineIndex, let near):
+            try await context.scrollBoundary(spineIndex: spineIndex, near: near)
+        case .pdfHighlight(let page, let rect, let color):
+            try await context.pdfHighlight(page: page, rect: rect, color: color)
         }
     }
 }

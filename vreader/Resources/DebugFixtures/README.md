@@ -10,6 +10,9 @@ deterministic on-device test setup.
 | `war-and-peace.txt` | hand-authored synthetic | n/a | 1,708 | 1,708 | Project-internal | n/a |
 | `mini-epub3.epub` | hand-authored synthetic (3 paragraphs, EPUB 3.x) | n/a | 2,198 | 2,198 | Project-internal | n/a |
 | `mini-azw3.azw3` | [Project Gutenberg ebook 1064](https://www.gutenberg.org/ebooks/1064) — *The Masque of the Red Death* by Edgar Allan Poe | `1064.kindle.noimages` (Mobipocket E-book, version 6, codepage 65001) | 128,650 | 37,894 | Public domain in the USA per [Project Gutenberg licence](https://www.gutenberg.org/policy/license.html) | 2026-05-07 |
+| `mini-markdown.md` | hand-authored synthetic Markdown (feature #70 cross-format calibration) | n/a | 925 | 925 | Project-internal | n/a |
+| `multi-chapter-epub.epub` | hand-authored synthetic (4 chapters × 40 paragraphs, viewport-tall, EPUB 3.x) — feature #71 continuous-scroll navigation harness (Bug #273) | n/a | 4,270 | 52,662 | Project-internal | n/a |
+| `multi-page-pdf.pdf` | synthetic text-layer PDF generated via `cupsfilter` (6 pages, selectable text) — feature #17 PDF render/theme harness | PDF 1.3, 6 pages | 23,685 | 23,685 | Project-internal | n/a |
 
 ## Notes
 

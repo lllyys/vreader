@@ -114,6 +114,32 @@ extension BilingualReadingViewModel {
         }
     }
 
+    // MARK: - Unit-scoped prefetch (Feature #71 WI-7)
+
+    /// Prefetch ONE explicit unit's translation without touching the
+    /// visible-locator trigger state (`lastTriggerUnit` / `triggerRequestSeq`).
+    ///
+    /// Feature #71 WI-7 (Gate-4 round-2 HIGH 1): continuous-scroll EPUB stitches
+    /// multiple chapter sections into one document; an adjacent section that
+    /// materializes is frequently OFF-SCREEN relative to the visible locator
+    /// (the ±1 initial fill, lazy append/prepend). The whole-book
+    /// `handlePositionChange` trigger resolves its prefetch targets from the
+    /// CURRENT visible locator and dedupes against `lastTriggerUnit`, so reusing
+    /// it for an off-screen section would either no-op (wrong unit) or clobber
+    /// the dedupe anchor. This seam prefetches exactly the named unit through
+    /// the same `startPrefetch` internals (cache-guarded, in-flight-guarded,
+    /// epoch-stamped) so a section-materialize can warm its OWN unit's
+    /// translation independent of where the reader is looking.
+    ///
+    /// No-op when bilingual is disabled, no prefetcher is attached, or the unit
+    /// is already cached / already in flight (`startPrefetch` guards the latter
+    /// two). Does NOT mark the unit unavailable on its own — the existing
+    /// `finishPrefetch` outcome handling applies.
+    func prefetchUnitIfNeeded(_ unit: TranslationUnitID) {
+        guard isEnabled, prefetcher != nil else { return }
+        startPrefetch(unit: unit, epoch: epoch)
+    }
+
     // MARK: - Unit-scoped retry (Feature #56 WI-13)
 
     /// Retry one unit's translation fetch. Designed for the PDF
@@ -145,6 +171,29 @@ extension BilingualReadingViewModel {
         if lastTriggerUnit == unit { lastTriggerUnit = nil }
         epoch += 1
         startPrefetch(unit: unit, epoch: epoch)
+    }
+
+    /// Bug #268: when the EPUB plain-text prefetch's segment count diverges from
+    /// the DOM leaf-enumerate's block count (nested `<pre>` / mixed-content
+    /// `<blockquote>` → the shared 1:1 pairing falls back to source-only),
+    /// translate the enumerate's OWN block texts directly so blocks↔segments are
+    /// 1:1 BY CONSTRUCTION. Stores the result for the unit so the next inject
+    /// pairs every block. A no-op when a matching-count translation already
+    /// exists; never worse than source-only on failure (the divergence-fallback
+    /// can only improve the divergent case, never regress the common one).
+    func translateBlocksDirectly(_ blockTexts: [String], for unit: TranslationUnitID) async {
+        guard isEnabled, let prefetcher, !blockTexts.isEmpty else { return }
+        // Already have a translation that pairs 1:1 with these blocks → nothing to do.
+        if let existing = translationsByUnit[unit], existing.count == blockTexts.count { return }
+        do {
+            let translated = try await prefetcher.translatedSegmentsDirect(
+                for: unit, sourceSegments: blockTexts, targetLanguage: targetLanguage)
+            guard isEnabled, translated.count == blockTexts.count else { return }
+            translationsByUnit[unit] = translated
+            postDidChange()
+        } catch {
+            // Leave the unit source-only — never worse than the current behavior.
+        }
     }
 
     // MARK: - Reset + notification (called from the main file's toggle setters)

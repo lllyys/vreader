@@ -19,6 +19,13 @@ struct EPUBSelectionMessage: Sendable {
     let selectedText: String
     let range: EPUBSerializedRange
     let sourceRect: CGRect
+    /// Feature #71 WI-5: in continuous-scroll mode the stitched DOM holds many
+    /// chapters, so a selection must be attributed to *its* section's href
+    /// (`closest('[data-vreader-spine-index]')`'s `data-vreader-href`), not the
+    /// global "current" chapter. The selection JS reports it; nil in legacy
+    /// single-chapter mode (no `data-vreader-href` ancestor) so the coordinator
+    /// falls back to `currentHref` — keeping the one-chapter path unchanged.
+    let sectionHref: String?
 }
 
 /// Bridge for EPUB text selection and highlight JS interop.
@@ -59,10 +66,17 @@ enum EPUBHighlightBridge {
             endOffset: endOffset
         )
 
+        // Feature #71 WI-5: optional section href (continuous-scroll attribution).
+        // Absent in legacy single-chapter mode; an empty string (degenerate
+        // clamp — selection start had no section ancestor) is treated as nil so
+        // the coordinator falls back to `currentHref`.
+        let sectionHref = (dict["sectionHref"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+
         return EPUBSelectionMessage(
             selectedText: selectedText,
             range: range,
-            sourceRect: CGRect(x: rectX, y: rectY, width: rectWidth, height: rectHeight)
+            sourceRect: CGRect(x: rectX, y: rectY, width: rectWidth, height: rectHeight),
+            sectionHref: sectionHref
         )
     }
 
@@ -182,6 +196,45 @@ enum EPUBHighlightBridge {
         return """
         (function() {
             if (typeof window.__vreader_createHighlight === 'function') {
+                \(calls.joined(separator: "\n            "))
+            }
+        })();
+        """
+    }
+
+    /// Feature #71 WI-6b-ii: section-scoped restore for continuous scroll mode.
+    /// Like `restoreHighlightsJS` but targets one stitched section by
+    /// `spineIndex`, re-rooting each stored chapter-document range into that
+    /// section's `.vreader-chapter-content` wrapper via
+    /// `__vreader_createHighlightInSection`. Returns "" for an empty set.
+    static func restoreHighlightsInSectionJS(
+        spineIndex: Int,
+        highlights: [(id: String, range: EPUBSerializedRange, color: String)]
+    ) -> String {
+        guard !highlights.isEmpty else { return "" }
+
+        var calls: [String] = []
+        for hl in highlights {
+            let escapedId = jsEscape(hl.id)
+            let escapedStartPath = jsEscape(hl.range.startContainerPath)
+            let escapedEndPath = jsEscape(hl.range.endContainerPath)
+            let escapedColor = jsEscape(hl.color)
+            calls.append("""
+                window.__vreader_createHighlightInSection(
+                    \(spineIndex),
+                    '\(escapedId)',
+                    '\(escapedStartPath)',
+                    \(hl.range.startOffset),
+                    '\(escapedEndPath)',
+                    \(hl.range.endOffset),
+                    '\(escapedColor)'
+                );
+            """)
+        }
+
+        return """
+        (function() {
+            if (typeof window.__vreader_createHighlightInSection === 'function') {
                 \(calls.joined(separator: "\n            "))
             }
         })();

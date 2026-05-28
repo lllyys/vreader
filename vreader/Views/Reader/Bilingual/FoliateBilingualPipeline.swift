@@ -159,29 +159,19 @@ enum FoliateBilingualPipeline {
     }
 
     /// Maps an ordered `[String]` translation cache onto a `[bid: text]`
-    /// table by position. The two arrays are paired by index — the
-    /// enumerate JS and the chapter-translation service share the same
-    /// "ordered source segments" contract.
+    /// table via the shared `BilingualPairing` contract: paired by position
+    /// ONLY when `blocks.count == segments.count`.
     ///
-    /// Mismatched lengths fall back to a partial map: the renderer
-    /// injects what it has and leaves the rest as source-only
-    /// (silent-source-fallback semantics — plan Decision 2).
-    ///
-    /// `translatedSegments == nil` means "no cached translation"; the
-    /// returned map is empty so the renderer paints source-only.
+    /// Bug #266: a count mismatch (or `translatedSegments == nil`) returns an
+    /// empty map → source-only. AZW3/MOBI shares EPUB's nested-block
+    /// double-count (`foliate-host.js` walks `getElementsByTagName('*')`), so
+    /// on a nested chapter `blocks > segments` and this returns source-only —
+    /// fail-safe (never a wrong pairing) until the host enumerate is leaf-fixed.
     static func translationsByBid(
         blocks: [BilingualBlock],
         translatedSegments: [String]?
     ) -> [String: String] {
-        guard let segments = translatedSegments, !segments.isEmpty else {
-            return [:]
-        }
-        let count = min(blocks.count, segments.count)
-        var map: [String: String] = [:]
-        map.reserveCapacity(count)
-        for i in 0..<count {
-            map[blocks[i].bid] = segments[i]
-        }
-        return map
+        BilingualPairing.translationsByBid(
+            blocks: blocks, translatedSegments: translatedSegments)
     }
 }

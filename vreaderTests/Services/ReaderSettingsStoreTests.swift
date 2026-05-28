@@ -231,4 +231,25 @@ import UIKit
         #expect(s.typography.fontSize == globalSize, "reconcile should reset font size to global")
         d.removePersistentDomain(forName: n)
     }
+
+    // Bug #272: `allPersistedDefaultsKeys` is the single source the DebugBridge
+    // `reset` uses to clear reader settings for deterministic verification.
+    // Guard it against drift — every individual `*Key` constant must be present,
+    // and the list must hold exactly those keys with no duplicates.
+    @Test func allPersistedDefaultsKeysCoversEveryKey() {
+        let expected: Set<String> = [
+            ReaderSettingsStore.themeKey,
+            ReaderSettingsStore.typographyKey,
+            ReaderSettingsStore.useCustomBackgroundKey,
+            ReaderSettingsStore.backgroundOpacityKey,
+            ReaderSettingsStore.epubLayoutKey,
+            ReaderSettingsStore.autoPageTurnKey,
+            ReaderSettingsStore.autoPageTurnIntervalKey,
+            ReaderSettingsStore.pageTurnAnimationKey,
+            ReaderSettingsStore.chineseConversionKey,
+        ]
+        let actual = ReaderSettingsStore.allPersistedDefaultsKeys
+        #expect(Set(actual) == expected, "allPersistedDefaultsKeys drifted from the *Key constants")
+        #expect(actual.count == expected.count, "allPersistedDefaultsKeys has duplicates")
+    }
 }

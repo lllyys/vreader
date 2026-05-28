@@ -15,6 +15,18 @@ final class ReaderSettingsStore {
     static let autoPageTurnIntervalKey = "readerAutoPageTurnInterval"
     static let pageTurnAnimationKey = "readerPageTurnAnimation"
     static let chineseConversionKey = "readerChineseConversion"
+
+    /// Canonical list of every UserDefaults key this store persists. Single
+    /// source of truth so consumers that need to clear/enumerate reader settings
+    /// (e.g. the DebugBridge `reset` clean-slate — Bug #272) stay in sync as
+    /// settings are added. A drift test (`ReaderSettingsStoreKeysTests`) asserts
+    /// this matches the individual `*Key` constants.
+    static let allPersistedDefaultsKeys: [String] = [
+        themeKey, typographyKey, useCustomBackgroundKey, backgroundOpacityKey,
+        epubLayoutKey, autoPageTurnKey, autoPageTurnIntervalKey,
+        pageTurnAnimationKey, chineseConversionKey,
+    ]
+
     /// The reader color theme. Feature #60 WI-11: migrated from the
     /// legacy 3-case `ReaderTheme` to the 5-case `ReaderThemeV2`
     /// (Paper / Sepia / Dark / OLED / Photo) so all 5 themes are

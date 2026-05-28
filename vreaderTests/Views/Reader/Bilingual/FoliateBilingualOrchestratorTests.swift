@@ -82,23 +82,17 @@ struct FoliateBilingualOrchestratorTests {
         #expect(js.contains("Monde"))
     }
 
-    @Test("buildInjectJS shorter translation array maps a prefix and drops the rest")
-    func buildInjectJSShortArrayPartial() throws {
+    @Test("buildInjectJS is nil on a count mismatch — source-only, never a wrong pairing (Bug #266)")
+    func buildInjectJSMismatchIsSourceOnly() {
         let orchestrator = FoliateBilingualOrchestrator()
         orchestrator.updateBlocks([
             BilingualBlock(bid: "b1", text: "Hello"),
             BilingualBlock(bid: "b2", text: "World"),
             BilingualBlock(bid: "b3", text: "Goodbye")
         ])
-        let js = try #require(orchestrator.buildInjectJS(
-            translatedSegments: ["Bonjour"]))
-        #expect(js.contains("Bonjour"))
-        #expect(js.contains("b1"))
-        let occurrences = js.components(separatedBy: "': '").count - 1
-        #expect(
-            occurrences == 1,
-            "Inject JS should carry exactly one bid → translation entry when the translation array has one element and the enumerate had three blocks."
-        )
+        // 3 blocks vs 1 segment → no inject (source-only). Shared contract with
+        // EPUB via BilingualPairing; never a partial position-trusting inject.
+        #expect(orchestrator.buildInjectJS(translatedSegments: ["Bonjour"]) == nil)
     }
 
     @Test("updateBlocks replaces prior blocks")

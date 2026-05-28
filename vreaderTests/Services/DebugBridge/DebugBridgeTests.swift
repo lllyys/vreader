@@ -33,6 +33,97 @@ final class DebugBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func test_handle_seekURL_callsSeekFractionHandler() async {
+        // Bug #267: seek?fraction routes to the seekFraction handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://seek?fraction=0.5")!)
+
+        XCTAssertEqual(context.calls, [.seekFraction(fraction: 0.5)])
+    }
+
+    @MainActor
+    func test_handle_scrollSheetURL_callsScrollSheetHandler() async {
+        // Bug #271: scroll-sheet?to routes to the scrollSheet handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://scroll-sheet?to=bottom")!)
+
+        XCTAssertEqual(context.calls, [.scrollSheet(target: .bottom)])
+    }
+
+    @MainActor
+    func test_handle_navigateURL_withFraction_callsNavigateHandler() async {
+        // Bug #273: navigate?spine&fraction routes to the navigate handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://navigate?spine=2&fraction=0.5")!)
+
+        XCTAssertEqual(context.calls, [.navigate(spineIndex: 2, fraction: 0.5)])
+    }
+
+    @MainActor
+    func test_handle_navigateURL_withoutFraction_callsNavigateHandlerWithNil() async {
+        // Bug #273: fraction is optional — absent ⇒ chapter start (nil).
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://navigate?spine=0")!)
+
+        XCTAssertEqual(context.calls, [.navigate(spineIndex: 0, fraction: nil)])
+    }
+
+    @MainActor
+    func test_handle_scrollBoundaryURL_callsHandler() async {
+        // Feature #71 WI-6b: scroll-boundary?spine&near routes to the
+        // scrollBoundary handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://scroll-boundary?spine=2&near=bottom")!)
+
+        XCTAssertEqual(context.calls, [.scrollBoundary(spineIndex: 2, near: .bottom)])
+    }
+
+    @MainActor
+    func test_handle_pdfHighlightURL_callsPDFHighlightHandlerWithNilColor() async {
+        // Feature #17: pdf-highlight?page&rect routes to the pdfHighlight handler.
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://pdf-highlight?page=0&rect=0.1,0.2,0.3,0.4")!)
+
+        XCTAssertEqual(
+            context.calls,
+            [.pdfHighlight(
+                page: 0,
+                rect: NormalizedRect(x: 0.1, y: 0.2, w: 0.3, h: 0.4),
+                color: nil
+            )]
+        )
+    }
+
+    @MainActor
+    func test_handle_pdfHighlightURLWithColor_callsPDFHighlightHandler() async {
+        let context = RecordingDebugBridgeContext()
+        let bridge = DebugBridge(context: context)
+
+        await bridge.handle(URL(string: "vreader-debug://pdf-highlight?page=2&rect=0,0,1,1&color=green")!)
+
+        XCTAssertEqual(
+            context.calls,
+            [.pdfHighlight(
+                page: 2,
+                rect: NormalizedRect(x: 0, y: 0, w: 1, h: 1),
+                color: "green"
+            )]
+        )
+    }
+
+    @MainActor
     func test_handle_searchURLWithQueryOnly_callsSearchHandlerWithNilIndex() async {
         let context = RecordingDebugBridgeContext()
         let bridge = DebugBridge(context: context)
@@ -351,6 +442,21 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int) async throws {
         await record("seed-sessions:\(bookFingerprintKey):\(secondsPerSession)")
     }
+    func seekFraction(fraction: Double) async throws {
+        await record("seek:\(fraction)")
+    }
+    func scrollSheet(target: DebugCommand.ScrollTarget) async throws {
+        await record("scroll-sheet:\(target.rawValue)")
+    }
+    func navigate(spineIndex: Int, fraction: Double?) async throws {
+        await record("navigate:\(spineIndex):\(fraction.map { String($0) } ?? "nil")")
+    }
+    func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws {
+        await record("scroll-boundary:\(spineIndex):\(near.rawValue)")
+    }
+    func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws {
+        await record("pdf-highlight:\(page):\(rect.x),\(rect.y),\(rect.w),\(rect.h):\(color ?? "nil")")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -383,6 +489,11 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case present(sheet: DebugCommand.SheetKind, tab: String?, detent: DebugCommand.SheetDetent?)
         case aiAction(action: DebugCommand.AIActionKind, scope: SummaryScope?, text: String?)
         case seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int)
+        case seekFraction(fraction: Double)
+        case scrollSheet(target: DebugCommand.ScrollTarget)
+        case navigate(spineIndex: Int, fraction: Double?)
+        case scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge)
+        case pdfHighlight(page: Int, rect: NormalizedRect, color: String?)
     }
 
     private(set) var calls: [Call] = []
@@ -420,6 +531,21 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func seedReadingSessions(bookFingerprintKey: String, secondsPerSession: Int) async throws {
         calls.append(.seedReadingSessions(bookFingerprintKey: bookFingerprintKey, secondsPerSession: secondsPerSession))
+    }
+    func seekFraction(fraction: Double) async throws {
+        calls.append(.seekFraction(fraction: fraction))
+    }
+    func scrollSheet(target: DebugCommand.ScrollTarget) async throws {
+        calls.append(.scrollSheet(target: target))
+    }
+    func navigate(spineIndex: Int, fraction: Double?) async throws {
+        calls.append(.navigate(spineIndex: spineIndex, fraction: fraction))
+    }
+    func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws {
+        calls.append(.scrollBoundary(spineIndex: spineIndex, near: near))
+    }
+    func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws {
+        calls.append(.pdfHighlight(page: page, rect: rect, color: color))
     }
 }
 
