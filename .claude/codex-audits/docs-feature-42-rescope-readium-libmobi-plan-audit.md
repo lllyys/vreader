@@ -11,8 +11,8 @@ date: 2026-05-28
 Docs/planning only. Moves the converged reader-engine architecture (developed across this
 session via web research + four Codex consults) into the repo as the **re-scoped Feature #42
 Gate-1 plan**, and updates the `docs/features.md` #42 row to reflect the re-scope. No Swift,
-no app behavior. The `project.pbxproj` delta is the rule-40 version bump (3.40.4/685 →
-3.40.5/686) which trips this audit-gate hook.
+no app behavior. The `project.pbxproj` delta is the rule-40 version bump (3.40.8/689 →
+3.40.9/690, after rebasing onto main which advanced to v3.40.8) which trips this audit-gate hook.
 
 Files:
 - NEW `dev-docs/plans/20260528-feature-42-readium-libmobi-reader-engine.md` — Gate-1 plan
@@ -47,7 +47,7 @@ surface for Codex to audit. (The plan's *content* was itself developed through f
 5. **Naming convention** — plan filename follows rule-47 `YYYYMMDD-feature-N-<slug>.md`.
 6. **Clean authoring** — the plan was authored fresh (clean Markdown), NOT copied from the
    linter-mangled `/tmp` scratch (which had escaped bold + `&#xA;` entities).
-7. **Version bump** — 3.40.5 / build 686 (patch — docs/plan). `xcodegen generate` succeeded;
+7. **Version bump** — 3.40.9 / build 690 (patch — docs/plan; rebased over main's v3.40.8). `xcodegen generate` succeeded;
    pbxproj reflects the bump. No Swift changed.
 
 ## Verdict

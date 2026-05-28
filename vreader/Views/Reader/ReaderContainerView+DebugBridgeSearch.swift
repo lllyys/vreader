@@ -272,43 +272,50 @@ extension ReaderContainerView {
         // every poll (thrashing) or stop after one extra page (round-1
         // posture — Medium #3 of round 2).
         var lastObservedCount = -1
+        // Bug #1226: setting `viewModel.query` kicks off a 300ms-DEBOUNCED FTS
+        // search, so the first poll(s) observe the PRE-search default state
+        // (isSearching=false, results empty, hasMore=false). Concluding "no
+        // result" then is a false negative — the driver returned nil in ~106ms
+        // before the search even started. Gate the give-up on a search having
+        // actually run (`searchObserved`) OR a grace window longer than the
+        // debounce having elapsed.
+        let graceDeadline = Date().addingTimeInterval(min(0.8, timeout))
+        var searchObserved = false
         while Date() < deadline {
             if Task.isCancelled { return nil }
 
             // Query-divergence guard. Trimmed compare matches the VM's
             // own search-input normalisation in `performSearch`.
-            let currentQuery = viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
-            let wantedQuery = expectedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-            if currentQuery != wantedQuery {
-                return nil
-            }
-
+            let queryMatches = viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
+                == expectedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             let results = viewModel.results
             let isSearching = viewModel.isSearching
-            let hasMore = viewModel.hasMore
+            if isSearching { searchObserved = true }
 
-            if !isSearching {
-                if results.count > index {
-                    return results[index]
+            switch Self.searchResultPollAction(
+                queryMatches: queryMatches,
+                isSearching: isSearching,
+                resultCount: results.count,
+                index: index,
+                hasMore: viewModel.hasMore,
+                searchObserved: searchObserved,
+                graceElapsed: Date() >= graceDeadline,
+                lastObservedCount: lastObservedCount
+            ) {
+            case .abandon, .giveUp:
+                return nil
+            case .resolved:
+                return results[index]
+            case .loadMore:
+                // Trigger another `loadMore()`, but only once per landed page
+                // (track the count so we don't re-fire while a prior load is
+                // still in flight).
+                lastObservedCount = results.count
+                Task { @MainActor in
+                    await viewModel.loadMore()
                 }
-                // No more pages and we still don't have enough results —
-                // fail fast.
-                if !hasMore {
-                    return nil
-                }
-                // Out-of-range but more pages exist: trigger another
-                // `loadMore()`, but only once per landed page (track the
-                // count so we don't re-fire while a prior `loadMore` is
-                // still in flight — `isSearching` covers immediate
-                // re-entrancy, `lastObservedCount` covers the gap
-                // between awaits where `isSearching` flips back to
-                // false before the next page lands).
-                if results.count != lastObservedCount {
-                    lastObservedCount = results.count
-                    Task { @MainActor in
-                        await viewModel.loadMore()
-                    }
-                }
+            case .keepPolling:
+                break
             }
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
         }
