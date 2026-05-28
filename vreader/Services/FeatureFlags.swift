@@ -6,7 +6,8 @@
 // - Reference type (class) so AIService/SyncService see live changes via .shared.
 // - Thread-safe via OSAllocatedUnfairLock (iOS 16+, os framework).
 // - `static let shared` singleton configured once at startup via configure(environment:).
-// - `aiAssistant` override is persisted to UserDefaults for cross-launch stickiness.
+// - Persisted flags (`aiAssistant`, `epubContinuousScroll`) write their overrides
+//   to UserDefaults for cross-launch stickiness; see `persistedFlags`.
 // - Non-persisted overrides remain session-scoped.
 // - Convenience init(environment:) creates standalone instances for testing.
 //
@@ -21,12 +22,13 @@ enum FeatureFlagKey: String, Sendable, CaseIterable {
     case sync
     case searchIndexingVerboseLogs
     case bilingualReading
-    /// Feature #71: EPUB continuous cross-chapter scroll. Ships dark while the
-    /// multi-WI build is in flight (WI-6b-i renders; navigation / position
-    /// restore / mode-switch arrive in WI-6b-ii/iii). Gating it off by default
-    /// keeps the live default `.scroll` mode on its existing single-chapter
-    /// behaviour, so the in-progress feature never regresses navigation. The
-    /// final WI flips the default on.
+    /// Feature #71: EPUB continuous cross-chapter scroll. Shipped through a
+    /// multi-WI build (window/coordinator/JS/bridge/container/navigation/
+    /// bilingual); the terminal WI (2026-05-28) flipped the default ON after
+    /// real-touch-scroll device verification confirmed the rAF observer fires
+    /// and the cross-chapter materialize/evict works end-to-end. EPUB `.scroll`
+    /// layout now flows continuously across chapters by default; the persisted
+    /// override can still disable it per-user.
     case epubContinuousScroll
 }
 
@@ -135,14 +137,16 @@ nonisolated final class FeatureFlags: Sendable {
     var bilingualReading: Bool { isEnabled(.bilingualReading) }
 
     /// Whether EPUB continuous cross-chapter scroll is enabled (feature #71).
-    /// Ships dark; overridable per-launch via the persisted UserDefaults key
-    /// `com.vreader.featureFlags.epubContinuousScroll` (aiAssistant pattern).
+    /// Default ON (terminal WI, 2026-05-28); overridable per-launch via the
+    /// persisted UserDefaults key `com.vreader.featureFlags.epubContinuousScroll`
+    /// (aiAssistant pattern) — a user/debug `false` override still disables it.
     var epubContinuousScroll: Bool { isEnabled(.epubContinuousScroll) }
 
     // MARK: - Override Management
 
     /// Sets a runtime override for a feature flag.
-    /// Persisted flags (aiAssistant) are written to UserDefaults.
+    /// Persisted flags (`aiAssistant`, `epubContinuousScroll` — see `persistedFlags`)
+    /// are written to UserDefaults; others remain session-scoped.
     ///
     /// - Parameters:
     ///   - value: The override value.
@@ -203,8 +207,13 @@ nonisolated final class FeatureFlags: Sendable {
             // Ships dark — enabled progressively via override (aiAssistant pattern).
             return false
         case .epubContinuousScroll:
-            // Feature #71 ships dark until the final WI — see the enum doc.
-            return false
+            // Feature #71 terminal WI (2026-05-28): default ON in every
+            // environment. Real-touch-scroll device verification confirmed the
+            // rAF observer fires and cross-chapter materialize/evict works
+            // end-to-end, so continuous scroll is now the default EPUB
+            // scroll-mode reading experience. Users can still disable it via the
+            // persisted override (see the enum doc).
+            return true
         }
     }
 }

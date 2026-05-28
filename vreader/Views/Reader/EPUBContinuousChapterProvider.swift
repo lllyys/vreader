@@ -32,9 +32,11 @@ struct EPUBContinuousChapterProvider {
     /// Absolute `file://` (or foliate URL-scheme) prefix the rewriter rewrites
     /// relative resource URLs against (`EPUBChapterBodyRewriter.rewrite`).
     let resourceBaseAbsolutePrefix: String
-    /// Loads a linked stylesheet's bytes by relative href (or nil to skip),
-    /// forwarded to the rewriter's `linkedStylesheetLoader`.
-    let linkedStylesheetLoader: (_ relativeHref: String) -> String?
+    /// Loads a linked stylesheet's bytes by its resource-root-relative href (the
+    /// rewriter resolves the bare `<link>` href against the chapter dir before
+    /// calling this), or nil to skip. Forwarded to the rewriter's
+    /// `linkedStylesheetLoader`.
+    let linkedStylesheetLoader: (_ resolvedHref: String) -> String?
 
     enum ProviderError: Error, Equatable {
         /// The requested spine index is outside `0..<spineItems.count`.

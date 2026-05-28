@@ -79,14 +79,16 @@ enum EPUBChapterBodyRewriter {
     ///     resolving relative resource URLs.
     ///   - resourceBaseAbsolutePrefix: absolute prefix the resolved path is
     ///     appended to (e.g. `file:///<extractedRoot>/`).
-    ///   - linkedStylesheetLoader: resolves a `<link>`'s href (relative to the
-    ///     chapter dir) to its CSS source, or `nil` to skip it.
+    ///   - linkedStylesheetLoader: loads a `<link>`'s CSS source by its
+    ///     resource-root-relative href (the rewriter resolves the bare `<link>`
+    ///     href against the chapter dir first, so a nested chapter's
+    ///     `../css/x.css` arrives already joined), or `nil` to skip it.
     static func rewrite(
         xhtml: String,
         spineIndex: Int,
         href: String,
         resourceBaseAbsolutePrefix: String,
-        linkedStylesheetLoader: (_ relativeHref: String) -> String?
+        linkedStylesheetLoader: (_ resolvedHref: String) -> String?
     ) -> EPUBChapterBody {
         let sectionSelector = "[data-vreader-spine-index=\"\(spineIndex)\"]"
         let chapterDir = EPUBChapterResourceURL.directory(ofHref: href)
@@ -107,13 +109,18 @@ enum EPUBChapterBodyRewriter {
             )
         }
         for linkHref in matchStylesheetLinks(in: xhtml) {
-            guard let css = linkedStylesheetLoader(linkHref) else {
+            // Resolve the `<link>` href against the CHAPTER's directory before the
+            // loader fetches it — a nested chapter's `../css/x.css` must resolve
+            // relative to the chapter, not the resource root (otherwise the loader
+            // gets a root-escaping path and the chapter renders unstyled). Mirrors
+            // how `url(...)` refs resolve via `join(dir:relative:)`. Flat EPUBs
+            // (chapterDir == "") are unchanged: join("", "x.css") == "x.css".
+            let resolvedHref = EPUBChapterResourceURL.join(dir: chapterDir, relative: linkHref)
+            guard let css = linkedStylesheetLoader(resolvedHref) else {
                 log.notice("skipped unresolved stylesheet \(linkHref, privacy: .public)")
                 continue
             }
-            let linkDir = EPUBChapterResourceURL.directory(
-                ofHref: EPUBChapterResourceURL.join(dir: chapterDir, relative: linkHref)
-            )
+            let linkDir = EPUBChapterResourceURL.directory(ofHref: resolvedHref)
             cssBlocks.append(
                 EPUBChapterCSSScoper.scope(
                     css: css,

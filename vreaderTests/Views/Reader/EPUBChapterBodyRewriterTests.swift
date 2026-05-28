@@ -209,15 +209,53 @@ struct EPUBChapterBodyRewriterTests {
 
     @Test("linked stylesheet is loaded, inlined, scoped, and the link removed")
     func linkedStylesheetInlined() {
+        // The loader is handed the CHAPTER-RESOLVED href, not the bare `<link>`
+        // href: chapter dir OEBPS/text + ../css/style.css -> OEBPS/css/style.css.
         let body = rewrite(
             #"""
             <html><head><link rel="stylesheet" href="../css/style.css"/></head><body><p>x</p></body></html>
             """#,
-            loader: { rel in rel == "../css/style.css" ? "p { color: red; }" : nil }
+            loader: { rel in rel == "OEBPS/css/style.css" ? "p { color: red; }" : nil }
         )
         #expect(body.scopedStyleHTML.contains(#"[data-vreader-spine-index="3"] p"#))
         #expect(body.scopedStyleHTML.contains("color: red"))
         #expect(!body.bodyHTML.contains("<link"))
+    }
+
+    @Test("linked stylesheet href is resolved against the chapter dir before the loader sees it")
+    func linkedStylesheetResolvedAgainstChapterDir() {
+        // Regression for the feature-#71 flag-flip Gate-4 Medium: a nested chapter
+        // with a cross-directory `<link href="../css/style.css">` must resolve the
+        // href against the chapter's directory (NOT the resource root) before the
+        // loader fetches it — otherwise the loader gets a root-escaping path and
+        // the chapter renders unstyled. Capture exactly what the loader receives.
+        nonisolated(unsafe) var seen: [String] = []
+        let body = rewrite(
+            #"""
+            <html><head><link rel="stylesheet" href="../css/style.css"/></head><body><p>x</p></body></html>
+            """#,
+            href: "OEBPS/text/sub/c.xhtml",
+            loader: { rel in seen.append(rel); return "p { color: blue; }" }
+        )
+        // OEBPS/text/sub + ../css/style.css -> OEBPS/text/css/style.css
+        #expect(seen == ["OEBPS/text/css/style.css"])
+        #expect(body.scopedStyleHTML.contains("color: blue"))
+    }
+
+    @Test("flat-EPUB linked stylesheet href is unchanged (no chapter dir)")
+    func flatLinkedStylesheetUnchanged() {
+        // A flat EPUB (chapter at the root) must keep passing the bare href — the
+        // fix must not regress the common case. chapterDir == "" so the resolved
+        // href equals the bare href.
+        nonisolated(unsafe) var seen: [String] = []
+        _ = rewrite(
+            #"""
+            <html><head><link rel="stylesheet" href="style.css"/></head><body><p>x</p></body></html>
+            """#,
+            href: "chapter1.xhtml",
+            loader: { rel in seen.append(rel); return "p { color: red; }" }
+        )
+        #expect(seen == ["style.css"])
     }
 
     @Test("nested CSS url(...) in a linked stylesheet is absolutized against the stylesheet dir")

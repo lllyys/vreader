@@ -538,12 +538,12 @@ struct EPUBReaderContainerView: View {
     /// for paged mode, an empty spine, or before metadata loads.
     @MainActor
     private func buildContinuousScrollConfig(resourceBase base: URL) {
-        // Feature #71 ships dark behind a feature flag (default off) while the
-        // multi-WI build is in flight: WI-6b-i renders continuous chapters, but
-        // cross-chapter navigation / position restore / mode-switch land in
-        // WI-6b-ii/iii. Gating keeps the live default `.scroll` mode on its
-        // existing single-chapter path so navigation never regresses. The final
-        // WI flips the flag's default on.
+        // Feature #71 continuous cross-chapter scroll. `FeatureFlags.epubContinuousScroll`
+        // now defaults ON (terminal WI, 2026-05-28); the guard still honours an
+        // explicit persisted `false` override (a user/QA who turned it off) and
+        // restricts continuous mode to EPUB `.scroll` layout — paged mode keeps
+        // the legacy single-chapter path. `nil` config before metadata loads or
+        // when the flag/layout don't qualify.
         guard FeatureFlags.shared.epubContinuousScroll,
               settingsStore?.epubLayout == .scroll,
               let metadata = viewModel.metadata else {
@@ -574,17 +574,13 @@ struct EPUBReaderContainerView: View {
             spineItems: spineItems,
             parser: parser,
             resourceBaseAbsolutePrefix: prefix,
-            linkedStylesheetLoader: { relativeHref in
-                // KNOWN LIMITATION (6b-i): the WI-6a provider seam passes only
-                // the bare `<link>` href, no chapter directory, so we resolve
-                // against the OPF base (`resourceBase`). Correct for flat EPUBs
-                // (the common case + the fixtures); a nested chapter with a
-                // cross-directory `<link href="../css/x.css">` would mis-resolve.
-                // A full fix means threading chapter context into the provider
-                // seam — tracked as a follow-up for WI-6b-ii (section resources).
-                // Acceptable here because continuous mode ships dark behind a
-                // flag, so this path is not user-reachable until the feature lands.
-                let url = URL(fileURLWithPath: relativeHref, relativeTo: base).standardized
+            linkedStylesheetLoader: { resolvedHref in
+                // `resolvedHref` is already resource-root-relative: the rewriter
+                // joins the bare `<link>` href onto the chapter's directory before
+                // calling this (so a nested chapter's `../css/x.css` resolves
+                // against the chapter, not the root — feature-#71 flag-flip Gate-4
+                // fix). We just anchor it to the resource base and read it.
+                let url = URL(fileURLWithPath: resolvedHref, relativeTo: base).standardized
                 return try? String(contentsOf: url, encoding: .utf8)
             }
         )
