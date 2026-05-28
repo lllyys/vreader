@@ -11,6 +11,17 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
 
+# Feature #42 (Readium reader engine, Phase 1 WI-1): the Readium Swift Toolkit
+# (BSD-3-Clause) is vreader's first third-party SPM dependency. Phase 1 opens
+# EPUB publications via AssetRetriever + PublicationOpener (Readium 3.x) — no
+# app-owned HTTP-server adapter. Only ReadiumShared (model/Locator) +
+# ReadiumStreamer (parsing/opening) + ReadiumNavigator (rendering) are linked;
+# ReadiumLCP and the GCDWebServer adapter are intentionally NOT linked.
+packages:
+  Readium:
+    url: https://github.com/readium/swift-toolkit
+    exactVersion: "3.9.0"
+
 targets:
   vreader:
     type: application
@@ -50,6 +61,18 @@ targets:
           # into the BUILT Info.plist so the vreader-debug:// URL scheme actually
           # registers with iOS.
           - "SupportingFiles/DebugBridge.plist"
+    dependencies:
+      # Feature #42 Phase 1: Readium Swift Toolkit products. ReadiumShared
+      # supplies the Locator/Publication model; ReadiumStreamer supplies
+      # AssetRetriever / PublicationOpener / DefaultPublicationParser (opening);
+      # ReadiumNavigator supplies EPUBNavigatorViewController (rendering, used
+      # from WI-5). No GCDWebServer adapter, no ReadiumLCP.
+      - package: Readium
+        product: ReadiumShared
+      - package: Readium
+        product: ReadiumStreamer
+      - package: Readium
+        product: ReadiumNavigator
     preBuildScripts:
       # Bug #111: Copy DebugFixtures into the bundle ONLY when building Debug.
       # Release builds get nothing — verified by running `find vreader.app -name

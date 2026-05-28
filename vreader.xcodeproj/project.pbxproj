@@ -574,6 +574,7 @@
 		68BEE555698E2ECAE8536655 /* MDReaderReplacementRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7672B4D5423E0D3AAE16343 /* MDReaderReplacementRulesTests.swift */; };
 		68F25FD5B04A5CE2EC41E895 /* AnnotationStreamBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C930176EDA59BA6AE769B8C /* AnnotationStreamBuilder.swift */; };
 		691280DF99A2E74DE49D6D94 /* SettingsIconRowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96C994418AB3E9CCF1914CA9 /* SettingsIconRowTests.swift */; };
+		6A1321CE165723A3531ECCE5 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = BD4466456EBD017A56F147F0 /* ReadiumShared */; };
 		6A82598FAC95114A1E5CF06B /* footnotes.js in Resources */ = {isa = PBXBuildFile; fileRef = 7D068D6691FC6690BF3341B1 /* footnotes.js */; };
 		6AD3803A580B3AEB73E77AA1 /* BookRowViewVisualTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9EA3D76ECCD1B0E7205FBC4 /* BookRowViewVisualTests.swift */; };
 		6B0F05AB79459B346E22C825 /* DebugReaderProbeAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B98DA0DED4325E7AE1BEF59 /* DebugReaderProbeAdapter.swift */; };
@@ -660,6 +661,7 @@
 		78D60642EBBFC160B21C140F /* StatsTimeWindowBarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19BCC62165C1D43307C2778F /* StatsTimeWindowBarTests.swift */; };
 		78DD5C0C8082DE162A83B0A9 /* BookTranslationProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC65B4AF0602473F3F11C161 /* BookTranslationProgress.swift */; };
 		792681509B48600C93D01C39 /* ReaderTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4581A94B5099D15743DC02F3 /* ReaderTheme.swift */; };
+		792FA8647985692CC1ED5694 /* ReadiumOpenSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3101BC67249AD8280F55AFA /* ReadiumOpenSmokeTests.swift */; };
 		793A39541D8253B1CA8984A5 /* ScrollProgressHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7024E7AEAC9AEAA028952C46 /* ScrollProgressHelper.swift */; };
 		794FD606545B9368CD9CF18F /* legado_source_minimal.json in Resources */ = {isa = PBXBuildFile; fileRef = DE360E19106AAA7A1FCEEEB9 /* legado_source_minimal.json */; };
 		79ACFB3DD40281B2A3B9AE8B /* DebugSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94C32FCAEDE0062125F6A51E /* DebugSnapshot.swift */; };
@@ -727,6 +729,7 @@
 		860C6626A5AC805B4C622E70 /* EPUBFileLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5487566F93AB8376D1BD1F1B /* EPUBFileLoaderTests.swift */; };
 		8617A3EAA2D7BEB5AEE82047 /* DebugReaderRegistry+WebViewWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1351525282D8D0C13B726F85 /* DebugReaderRegistry+WebViewWait.swift */; };
 		863103455E8B23D20B97F192 /* EPUBHighlightRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3650C684EB90A5D7E2F8059A /* EPUBHighlightRenderer.swift */; };
+		8657F27C8CB44F8E8771FAA0 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = 486194008CF2C34F53F2B60B /* ReadiumNavigator */; };
 		869CA53E6485C219A21E048C /* chapter_list_paginated.html in Resources */ = {isa = PBXBuildFile; fileRef = E78552E9E45095C4887A2EC0 /* chapter_list_paginated.html */; };
 		86A548B15E20C496319D524B /* TestSeederMDMultiPagePaginationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDEB28B2CAB1481C73FBE351 /* TestSeederMDMultiPagePaginationTests.swift */; };
 		86AB97CD6CC05A3EEADE5F00 /* MDAttributedStringRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36686A80222AD7613951C900 /* MDAttributedStringRenderer.swift */; };
@@ -1346,6 +1349,7 @@
 		FF361AAF1D317E6C783E9E98 /* PersistenceActorReadingWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C238AE2F5B4FE9D769CD29 /* PersistenceActorReadingWindowTests.swift */; };
 		FF8D6FA65D0840E3F87E5701 /* TXTChunkedHighlightHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6639753CB33EAECD6CF3010 /* TXTChunkedHighlightHelper.swift */; };
 		FF9607783B575CF7715CAAC0 /* Bug93GeneralChatPersistenceVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00DE93DBD2142D882858486F /* Bug93GeneralChatPersistenceVerificationTests.swift */; };
+		FF9EB4889B98DA03A72C6AFE /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = 0148A3222F2C6F8DDB3154EA /* ReadiumStreamer */; };
 		FFA194178E9956EF14C4B8DD /* overlayer.js in Resources */ = {isa = PBXBuildFile; fileRef = 1ABFAC14455C6F7DE43C1ABC /* overlayer.js */; };
 		FFA99A696DC411A0D8A0C969 /* ChapterReTranslateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFE15DA4C0FC8B57E3B4728B /* ChapterReTranslateViewModel.swift */; };
 		FFC1BF2B3E0963AAD120E93E /* AnthropicProvider+Streaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = C682F2AF644C10CEC95208AE /* AnthropicProvider+Streaming.swift */; };
@@ -2380,6 +2384,7 @@
 		C2997AAAB34DF84E64DC0DB4 /* MOBICoverExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBICoverExtractor.swift; sourceTree = "<group>"; };
 		C2D49361893EE9956D6EC5DB /* TXTOffsetMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTOffsetMapper.swift; sourceTree = "<group>"; };
 		C2E89BEB1454E17061367313 /* Feature64EPUBMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feature64EPUBMigrationTests.swift; sourceTree = "<group>"; };
+		C3101BC67249AD8280F55AFA /* ReadiumOpenSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumOpenSmokeTests.swift; sourceTree = "<group>"; };
 		C344E898312308F197E6EF5E /* BookTranslationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookTranslationViewModel.swift; sourceTree = "<group>"; };
 		C3C15E361FF460BCE57B8675 /* EPUBParserProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBParserProtocol.swift; sourceTree = "<group>"; };
 		C3EF8CE8D52815CF5156953C /* WebDAVProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProvider.swift; sourceTree = "<group>"; };
@@ -2720,6 +2725,19 @@
 		FFD1AE78FBFF38B3616352FF /* AIConsentManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConsentManagerTests.swift; sourceTree = "<group>"; };
 		FFE1146B1851B4122B5187A1 /* TXTServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTServiceProtocol.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		37D2002EDDBE5FC1D6B197AE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6A1321CE165723A3531ECCE5 /* ReadiumShared in Frameworks */,
+				FF9EB4889B98DA03A72C6AFE /* ReadiumStreamer in Frameworks */,
+				8657F27C8CB44F8E8771FAA0 /* ReadiumNavigator in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		05198A5DC2B193BFACC2EFF5 /* Fixtures */ = {
@@ -3151,6 +3169,7 @@
 				ED6B181E2C41086F3E3943C3 /* BilingualParagraphRangesTests.swift */,
 				59C9E78D6768871560C6C7CB /* ChapterTextProviderTests.swift */,
 				608AC905654D9F01D8A39855 /* FoliateChapterTextProviderTests.swift */,
+				C3101BC67249AD8280F55AFA /* ReadiumOpenSmokeTests.swift */,
 				BFC96A0B7273BB922335B1B0 /* TXTLoaderBackedChapterTextProviderTests.swift */,
 			);
 			path = Reader;
@@ -5060,6 +5079,7 @@
 				50BDD7D268D53AEC3863C4E2 /* Sources */,
 				0EB4E7C1282F0082F0677DA7 /* Inject DebugBridge URL types (DEBUG only) */,
 				AAE6A9967BDF359CCF50BD13 /* Resources */,
+				37D2002EDDBE5FC1D6B197AE /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -5067,6 +5087,9 @@
 			);
 			name = vreader;
 			packageProductDependencies = (
+				BD4466456EBD017A56F147F0 /* ReadiumShared */,
+				0148A3222F2C6F8DDB3154EA /* ReadiumStreamer */,
+				486194008CF2C34F53F2B60B /* ReadiumNavigator */,
 			);
 			productName = vreader;
 			productReference = C8E7C46539D19C4B3CFCD766 /* vreader.app */;
@@ -5095,6 +5118,9 @@
 			);
 			mainGroup = E630D3048A0AF78632A66A2B;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D7AA73DC59084585FC730EDE /* XCRemoteSwiftPackageReference "swift-toolkit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1DC89D462A6E6000C5FE89F8 /* Products */;
 			projectDirPath = "";
@@ -5623,6 +5649,7 @@
 				6BCE6D641047BA2A3BAFDC14 /* ReadingStatsModelsTests.swift in Sources */,
 				7D0B1A054D3897CAD9D768A6 /* ReadingStatsTests.swift in Sources */,
 				800F472661AB1030CC54DB46 /* ReadingTimeFormatterTests.swift in Sources */,
+				792FA8647985692CC1ED5694 /* ReadiumOpenSmokeTests.swift in Sources */,
 				75F2C31298F0C62115778DED /* RealDebugBridgeContextTests.swift in Sources */,
 				6B7F71BDB5ECEA83F19496FC /* ReflowableTextSourceTests.swift in Sources */,
 				C65606FD56FC3CE3BF958B71 /* RemoteBookCatalogIntegrationTests.swift in Sources */,
@@ -6815,6 +6842,35 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D7AA73DC59084585FC730EDE /* XCRemoteSwiftPackageReference "swift-toolkit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/readium/swift-toolkit";
+			requirement = {
+				kind = exactVersion;
+				version = 3.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0148A3222F2C6F8DDB3154EA /* ReadiumStreamer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D7AA73DC59084585FC730EDE /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumStreamer;
+		};
+		486194008CF2C34F53F2B60B /* ReadiumNavigator */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D7AA73DC59084585FC730EDE /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumNavigator;
+		};
+		BD4466456EBD017A56F147F0 /* ReadiumShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D7AA73DC59084585FC730EDE /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumShared;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 129D78E813BC175F78820E46 /* Project object */;
 }
