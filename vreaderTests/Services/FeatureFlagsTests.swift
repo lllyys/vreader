@@ -141,12 +141,36 @@ struct FeatureFlagsTests {
     // MARK: - Flag Enum
 
     @Test func flagKeysAreExhaustive() {
-        #expect(FeatureFlagKey.allCases.count == 5)
+        #expect(FeatureFlagKey.allCases.count == 6)
         #expect(FeatureFlagKey.allCases.contains(.aiAssistant))
         #expect(FeatureFlagKey.allCases.contains(.sync))
         #expect(FeatureFlagKey.allCases.contains(.searchIndexingVerboseLogs))
         #expect(FeatureFlagKey.allCases.contains(.bilingualReading))
         #expect(FeatureFlagKey.allCases.contains(.epubContinuousScroll))
+        #expect(FeatureFlagKey.allCases.contains(.readiumEPUBEngine))
+    }
+
+    // MARK: - Feature #42: readiumEPUBEngine
+
+    @Test func readiumEPUBEngineDefaultsOffInAllEnvironments() {
+        // Feature #42 Phase 1: default OFF everywhere — EPUBWebViewBridge stays
+        // the live EPUB engine until the Readium host reaches parity. The WI-14
+        // flip (human-gated G2) is what moves this default ON.
+        for env in AppEnvironment.allCases {
+            let flags = FeatureFlags(environment: env)
+            #expect(flags.readiumEPUBEngine == false)
+            #expect(flags.isEnabled(.readiumEPUBEngine) == false)
+        }
+    }
+
+    @Test func readiumEPUBEngineOverrideCanEnable() {
+        // The Readium host (WI-5+) is exercised in DEBUG/test by flipping this
+        // override ON; removing the override restores the default (OFF).
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .readiumEPUBEngine)
+        #expect(flags.readiumEPUBEngine == true)
+        flags.removeOverride(for: .readiumEPUBEngine)
+        #expect(flags.readiumEPUBEngine == false)
     }
 
     // MARK: - Feature #71: epubContinuousScroll

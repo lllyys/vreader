@@ -6,7 +6,7 @@
 // - Reference type (class) so AIService/SyncService see live changes via .shared.
 // - Thread-safe via OSAllocatedUnfairLock (iOS 16+, os framework).
 // - `static let shared` singleton configured once at startup via configure(environment:).
-// - Persisted flags (`aiAssistant`, `epubContinuousScroll`) write their overrides
+// - Persisted flags (`aiAssistant`, `epubContinuousScroll`, `readiumEPUBEngine`) write their overrides
 //   to UserDefaults for cross-launch stickiness; see `persistedFlags`.
 // - Non-persisted overrides remain session-scoped.
 // - Convenience init(environment:) creates standalone instances for testing.
@@ -30,6 +30,16 @@ enum FeatureFlagKey: String, Sendable, CaseIterable {
     /// layout now flows continuously across chapters by default; the persisted
     /// override can still disable it per-user.
     case epubContinuousScroll
+    /// Feature #42 Phase 1: route EPUB rendering to the Readium Swift Toolkit
+    /// engine instead of the legacy `EPUBWebViewBridge`. Default OFF — the
+    /// Readium host (WI-5) is built behind this flag and `EPUBWebViewBridge`
+    /// stays the live default until full parity (incl. bilingual #56 +
+    /// continuous-scroll #71) is verified; only then does the WI-14 flip move
+    /// the default ON (human-gated G2). Persisted so the override sticks across
+    /// launches for testing + so it can be turned back OFF after the Readium
+    /// engine has written data (the dual-write to the legacy `Locator` keeps
+    /// that safe).
+    case readiumEPUBEngine
 }
 
 /// Runtime feature flags with environment-based defaults, override support,
@@ -55,7 +65,7 @@ nonisolated final class FeatureFlags: Sendable {
     private static let persistenceKeyPrefix = "com.vreader.featureFlags."
 
     /// Flags that are persisted to UserDefaults when overridden.
-    private static let persistedFlags: Set<FeatureFlagKey> = [.aiAssistant, .epubContinuousScroll]
+    private static let persistedFlags: Set<FeatureFlagKey> = [.aiAssistant, .epubContinuousScroll, .readiumEPUBEngine]
 
     // MARK: - Shared Singleton
 
@@ -142,10 +152,15 @@ nonisolated final class FeatureFlags: Sendable {
     /// (aiAssistant pattern) — a user/debug `false` override still disables it.
     var epubContinuousScroll: Bool { isEnabled(.epubContinuousScroll) }
 
+    /// Feature #42: render EPUB via the Readium engine. Default OFF (see the
+    /// enum doc + `defaultValue`); the Readium host is built behind this until
+    /// parity, then the WI-14 G2 flip moves it ON.
+    var readiumEPUBEngine: Bool { isEnabled(.readiumEPUBEngine) }
+
     // MARK: - Override Management
 
     /// Sets a runtime override for a feature flag.
-    /// Persisted flags (`aiAssistant`, `epubContinuousScroll` — see `persistedFlags`)
+    /// Persisted flags (`aiAssistant`, `epubContinuousScroll`, `readiumEPUBEngine` — see `persistedFlags`)
     /// are written to UserDefaults; others remain session-scoped.
     ///
     /// - Parameters:
@@ -214,6 +229,12 @@ nonisolated final class FeatureFlags: Sendable {
             // scroll-mode reading experience. Users can still disable it via the
             // persisted override (see the enum doc).
             return true
+        case .readiumEPUBEngine:
+            // Feature #42 Phase 1: default OFF in every environment —
+            // `EPUBWebViewBridge` stays the live EPUB engine until the Readium
+            // host reaches full parity (incl. #56 bilingual + #71 continuous
+            // scroll). The WI-14 flip (human-gated G2) moves this default ON.
+            return false
         }
     }
 }
