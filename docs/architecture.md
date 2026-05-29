@@ -127,7 +127,7 @@ Cross-format coordinators that compose with multiple readers:
 | Coordinator                | Responsibility                                                      | Setup Timing                                                          |
 | -------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `ReaderAICoordinator`      | AI ViewModels, text loading, context extraction                     | On AI/TTS invoke                                                      |
-| `ReaderSearchCoordinator`  | Search service, indexing, FTS5                                      | Service+VM via `ensureSearchReady()` when the search sheet opens      |
+| `ReaderSearchCoordinator`  | Search service, indexing, FTS5                                      | Service+VM eagerly via `prepareEagerly()` on reader open (bug #79; cold SQLite open is `nonisolated`, off-MainActor); indexing still deferred to `setup()` on first sheet open |
 | `ReaderUnifiedCoordinator` | Unified renderer state, text transforms — retained but no longer dispatched (feature #54) | n/a (no dispatch path)                                     |
 | `HighlightCoordinator`     | Persists via `HighlightPersisting`, dispatches to `HighlightRenderer` adapters | On reader open per format (TXT/MD/PDF/EPUB)                          |
 
@@ -339,7 +339,7 @@ Each container creates its format-specific renderer and coordinator:
 2. **Coordinator** — Complex multi-subsystem flows managed by dedicated coordinator objects (AI, Search, Unified, Highlight)
 3. **Protocol injection** — `LibraryPersisting`, `BookImporting`, `PreferenceStoring`, `TTSProviderProtocol`, `HighlightRenderer` enable testing
 4. **Actor isolation** — `PersistenceActor` serializes all SwiftData writes; `TXTService` is actor-isolated
-5. **Deferred setup** — AI is wired on first AI/TTS invoke; the search service+VM are prepared via `ensureSearchReady()` only when the search sheet opens. TXT TOC is the exception — it's built eagerly on reader open so the chapter progress bar has data in legacy mode.
+5. **Deferred setup** — AI is wired on first AI/TTS invoke. The search service+VM are prepared eagerly on reader open (`ReaderSearchCoordinator.prepareEagerly()`, bug #79) so the first search shows the real field immediately rather than a "Preparing search…" placeholder; the cold SQLite open is `nonisolated` and runs off the MainActor (a detached task) so eager prep never stalls reader open (bug #89). Background full-text *indexing* is still deferred to `setup()` (fired by `ensureSearchReady()` when the search sheet first opens). TXT TOC is also eager on reader open so the chapter progress bar has data in legacy mode.
 6. **Observer** — NotificationCenter decouples format-specific readers from chrome and coordinators
 7. **Shared state extraction** — `TextReaderUIState` eliminates duplicated `@State` between TXT/MD containers (Phase R3)
 8. **Format adapters** — `HighlightRenderer` protocol with per-format adapters decouples highlight lifecycle from rendering mechanism (Phase R4a)
@@ -352,7 +352,7 @@ Each container creates its format-specific renderer and coordinator:
 | --------------------------------- | ------------------------------------------- |
 | Sample-based encoding (8KB)       | Fast TXT open for non-UTF-8 files           |
 | Chunked reader (UITableView)      | Large TXT files (>500K UTF-16)              |
-| Deferred coordinator setup        | AI wired on invoke; search prepared on sheet open. TXT TOC stays eager for the chapter progress bar |
+| Deferred coordinator setup        | AI wired on invoke; search service+VM prepared eagerly on reader open (off-MainActor cold open, bug #79/#89), indexing deferred to first sheet open. TXT TOC stays eager for the chapter progress bar |
 | Persistent FTS5 index             | Skip re-indexing on subsequent opens        |
 | Off-main-thread attributed string | Non-blocking TXT/MD rendering               |
 | PaginationCache                   | Avoid redundant TextKit layout passes       |
