@@ -277,6 +277,7 @@
 		30F0FC1144518F1FD72AAB6D /* EPUBBilingualJSTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D19C79EE604BFAB916EC630 /* EPUBBilingualJSTests.swift */; };
 		30F629136C9EED9FCD557222 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D14E222357346107CB34B750 /* SmokeTests.swift */; };
 		3119890EAA98096C06AAF1E3 /* EPUBPreExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE8B867BCF9BCDCF23941DB /* EPUBPreExtractorTests.swift */; };
+		312F05794F42FE26D1BF6203 /* ReadiumEPUBPreferencesMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65ADEC012EA6D486E647B7B8 /* ReadiumEPUBPreferencesMappingTests.swift */; };
 		3165DCCEDBA5A70FCCCE4C40 /* RealDebugBridgeContext+Snapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7703EBA1FB78FEA2CADBFB7F /* RealDebugBridgeContext+Snapshot.swift */; };
 		3175AC389AA08324899106EC /* TOCSheetRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80042D2F170FF72D3792F03E /* TOCSheetRows.swift */; };
 		319AE1251458BD5F7BFBF5A1 /* NotesRowStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40E27899DB05507AB2F13CDE /* NotesRowStateTests.swift */; };
@@ -1943,6 +1944,7 @@
 		64D6B83FC65D64C1271E28F4 /* BackupSectionDTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSectionDTOs.swift; sourceTree = "<group>"; };
 		655053889CBE2E90527473CD /* FontSizeCalibrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontSizeCalibrationTests.swift; sourceTree = "<group>"; };
 		656F8ADBF0BFC1AD8F999D47 /* SelectionPopoverPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionPopoverPresenter.swift; sourceTree = "<group>"; };
+		65ADEC012EA6D486E647B7B8 /* ReadiumEPUBPreferencesMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBPreferencesMappingTests.swift; sourceTree = "<group>"; };
 		660A657BC4712219BAF7858C /* TXTTocRuleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTTocRuleEngineTests.swift; sourceTree = "<group>"; };
 		66100437B6A815214E1D0004 /* BookSourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookSourceTests.swift; sourceTree = "<group>"; };
 		662756B2F0105F6DDB1E0241 /* BilingualReadingViewModel+Prefetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BilingualReadingViewModel+Prefetch.swift"; sourceTree = "<group>"; };
@@ -3092,6 +3094,7 @@
 				513AE679E0A5DBFFBB0AF6BD /* MDReaderViewModelTests.swift */,
 				5D7F4F4B985D58E03A78680D /* PDFReaderViewModelTests.swift */,
 				8180BC93B7839BF9878114F1 /* ReadingDashboardViewModelTests.swift */,
+				65ADEC012EA6D486E647B7B8 /* ReadiumEPUBPreferencesMappingTests.swift */,
 				30F27108727D22B92F94001C /* ReadiumEPUBReaderViewModelTests.swift */,
 				576F111E93E863C656BDEC70 /* SearchViewModelTests.swift */,
 				56912BE618BA41A3B17325C5 /* SettingsHeaderViewModelTests.swift */,
@@ -5701,6 +5704,7 @@
 				800F472661AB1030CC54DB46 /* ReadingTimeFormatterTests.swift in Sources */,
 				1B2EF4DD9E11CE736EDCAC1E /* ReadiumDebugProbeTests.swift in Sources */,
 				3C894F8ED6493D1DF6DB58D6 /* ReadiumEPUBHostTests.swift in Sources */,
+				312F05794F42FE26D1BF6203 /* ReadiumEPUBPreferencesMappingTests.swift in Sources */,
 				DEB5EABCE7824476D1E2B18F /* ReadiumEPUBReaderViewModelTests.swift in Sources */,
 				792FA8647985692CC1ED5694 /* ReadiumOpenSmokeTests.swift in Sources */,
 				75F2C31298F0C62115778DED /* RealDebugBridgeContextTests.swift in Sources */,

@@ -6,8 +6,10 @@
 // `@State`, opens the publication off-main in `.task`, and tears the reading
 // session down in `.onDisappear` (mirrors `EPUBReaderHost`'s bug-#252 lifecycle).
 //
-// Render scope (WI-5): open + render + scroll/paginate (`EPUBPreferences(scroll:)`
-// from `ReaderSettingsStore.epubLayout`). Position/highlight/theme/search/TTS
+// Render scope (WI-5): open + render + scroll/paginate. WI-7: full live
+// theme/font mapping — the body reads `ReaderSettingsStore.theme` +
+// `.typography` + `.epubLayout`, recomputes `EPUBPreferences` on any change, and
+// the representable re-submits them to the navigator. Highlight/search/TTS
 // parity land in later WIs. Loading + error states reuse the existing reader's
 // plain `ProgressView` + the dispatcher's `fingerprintErrorView`-style message
 // (no new UI chrome — rule 51: this is an engine swap behind a dark flag for the
@@ -53,10 +55,17 @@ struct ReadiumEPUBHost: View {
         Group {
             switch viewModel?.state {
             case .ready(let publication):
+                // WI-7: read `theme` + `typography` + `epubLayout` directly here
+                // so SwiftUI tracks all three as `@Observable` dependencies of
+                // this body — a Display-settings change mutates one of them,
+                // re-runs the body, and re-builds the representable with fresh
+                // preferences, which `updateUIViewController` then re-submits.
                 ReadiumNavigatorRepresentable(
                     publication: publication,
                     preferences: ReadiumEPUBReaderViewModel.epubPreferences(
-                        for: settingsStore.epubLayout
+                        theme: settingsStore.theme,
+                        typography: settingsStore.typography,
+                        layout: settingsStore.epubLayout
                     ),
                     fingerprintKey: fingerprint.canonicalKey,
                     readerToken: readerToken,
@@ -200,9 +209,10 @@ private struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIViewController, context: Context) {
-        // WI-5 renders a fixed layout preference; live preference updates
-        // (theme/font/scroll toggle) land in WI-7. Re-submit the current
-        // preference so a re-render after a settings change reflects it.
+        // WI-7: the host body reads `settingsStore.theme` + `.typography` +
+        // `.epubLayout` and recomputes `preferences` on every Display-settings
+        // change, so this re-submit applies the new theme/font/line-height/scroll
+        // to the live navigator without a reopen.
         if let navigator = controller as? EPUBNavigatorViewController {
             navigator.submitPreferences(preferences)
         }

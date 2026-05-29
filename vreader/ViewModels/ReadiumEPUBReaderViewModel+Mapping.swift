@@ -14,13 +14,99 @@
 // - `try?` everywhere — a serialization/decode failure degrades to nil, never
 //   throws (the SwiftData-safe posture documented on `VReaderLocator`).
 //
+// WI-7 (preferences): adds the FULL `EPUBPreferences` mapping that translates
+// vreader's existing reader settings — `ReaderThemeV2` + `TypographySettings` +
+// `EPUBLayoutPreference` — into the preferences the Readium navigator applies
+// live. Key decisions:
+// - Theme: vreader's 5 themes collapse onto Readium's 3 bases (`paper → .light`,
+//   `sepia → .sepia`, `dark`/`oled`/`photo → .dark`) AND each carries vreader's
+//   EXACT `backgroundColor`/`inkColor` as explicit `Color` overrides. Readium's
+//   `EPUBSettings.effectiveBackgroundColor` is `backgroundColor ?? theme.bg`, so
+//   the explicit color WINS over the base swatch — the base theme only seeds the
+//   CSS class (selection/link tinting, image filter) while vreader's warm paper /
+//   pure-black oled / photo overlay render faithfully. (`Color(uiColor:)` drops
+//   alpha; bg/ink tokens are all alpha 1.0 so no loss.)
+// - fontSize: Readium's `fontSize` is a MULTIPLIER (1.0 = 100% of the publisher
+//   base), not an absolute pt. vreader's `TypographySettings.fontSize` default is
+//   18pt, so we map `pt / 18 → multiplier` (18 → 1.0, 36 → 2.0, 12 → 0.66, 64 →
+//   3.55). This is independent of the legacy engine's calibrated-px CSS injection
+//   (a different model); a Phase-1 approximation refined by device verification.
+// - lineHeight = `lineSpacing` (both are multipliers in compatible ranges).
+// - fontFamily: `.system → nil` (publisher default), `.serif → .serif`,
+//   `.monospace → .monospace`. Bundled custom faces map to the closest Readium
+//   generic (`.sourceSerif4 → .serif`, `.inter → .sansSerif`) — registering the
+//   .otf with the navigator's `fontFamilyDeclarations` (a file-serving
+//   `CSSFontFamilyDeclaration`) is a documented Phase-1 follow-up.
+// - publisherStyles = false so vreader's font/theme overrides actually apply over
+//   the book's own CSS (Readium ignores most overrides when publisherStyles on).
+// - pageMargins = 1.0 (publisher default factor); the host's `.ignoresSafeArea()`
+//   + the navigator's own safe-area insets keep content off the Dynamic Island /
+//   home indicator (#163), so a modest factor is sufficient.
+//
 // @coordinates-with ReadiumEPUBReaderViewModel.swift, VReaderLocator.swift,
-//   Locator.swift
+//   Locator.swift, ReaderThemeV2.swift, TypographySettings.swift
 
 import Foundation
 import ReadiumShared
+import ReadiumNavigator
 
 extension ReadiumEPUBReaderViewModel {
+
+    // MARK: - Full preferences mapping (WI-7)
+
+    /// vreader's `TypographySettings.fontSize` default (pt) that anchors the
+    /// Readium font-size multiplier at 1.0 (= 100% of the publisher base).
+    nonisolated static var fontSizeBasePt: CGFloat { 18.0 }
+
+    /// Default horizontal page-margin factor (Readium publisher default). The
+    /// host's `.ignoresSafeArea()` + navigator safe-area insets handle #163.
+    nonisolated static var defaultPageMargins: Double { 1.0 }
+
+    /// Translates vreader's reader settings into a full Readium `EPUBPreferences`
+    /// the navigator applies live. Pure + `nonisolated static` so the mapping is
+    /// unit-testable without a render. See the file header for every decision.
+    nonisolated static func epubPreferences(
+        theme: ReaderThemeV2,
+        typography: TypographySettings,
+        layout: EPUBLayoutPreference
+    ) -> EPUBPreferences {
+        EPUBPreferences(
+            backgroundColor: Color(uiColor: theme.backgroundColor),
+            fontFamily: readiumFontFamily(for: typography.fontFamily),
+            fontSize: Double(typography.fontSize / fontSizeBasePt),
+            lineHeight: Double(typography.lineSpacing),
+            pageMargins: defaultPageMargins,
+            publisherStyles: false,
+            scroll: layout == .scroll,
+            textColor: Color(uiColor: theme.inkColor),
+            theme: readiumTheme(for: theme)
+        )
+    }
+
+    /// Collapses vreader's 5 themes onto Readium's 3 base themes. The base seeds
+    /// the CSS class; the explicit bg/ink colors (set alongside) carry the exact
+    /// vreader shade and win via `effectiveBackgroundColor`.
+    nonisolated static func readiumTheme(for theme: ReaderThemeV2) -> ReadiumNavigator.Theme {
+        switch theme {
+        case .paper: return .light
+        case .sepia: return .sepia
+        case .dark, .oled, .photo: return .dark
+        }
+    }
+
+    /// Maps vreader's `ReaderFontFamily` to a Readium `FontFamily`. `.system` →
+    /// nil (publisher default). Bundled custom faces map to the closest generic
+    /// class (Phase-1 follow-up: register the .otf via `fontFamilyDeclarations`).
+    nonisolated static func readiumFontFamily(
+        for family: ReaderFontFamily
+    ) -> ReadiumNavigator.FontFamily? {
+        switch family {
+        case .system: return nil
+        case .serif, .sourceSerif4: return .serif
+        case .monospace: return .monospace
+        case .inter: return .sansSerif
+        }
+    }
 
     /// Wraps a Readium `Locator` in a durable `VReaderLocator` envelope tagged
     /// `engine: .readium`. The authoritative leg is `readiumLocatorJSON` —

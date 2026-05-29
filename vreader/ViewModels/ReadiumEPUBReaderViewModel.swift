@@ -218,12 +218,19 @@ final class ReadiumEPUBReaderViewModel {
 
     // MARK: - Preferences mapping (pure)
 
-    /// Translates vreader's `EPUBLayoutPreference` into a Readium
-    /// `EPUBPreferences`. `.scroll` → continuous vertical scroll
+    /// WI-5 layout-only entry point, kept as a thin wrapper over the WI-7 full
+    /// mapping (default theme + typography) so existing callers and the WI-5
+    /// scroll tests stay green. `.scroll` → continuous vertical scroll
     /// (`scroll: true`); `.paged` → horizontal paginated (`scroll: false`).
-    /// Pure + static so the mapping is unit-testable without a render.
+    /// Prefer `epubPreferences(theme:typography:layout:)` (in +Mapping) for the
+    /// full theme/font mapping the host now submits. Pure + static so the mapping
+    /// is unit-testable without a render.
     nonisolated static func epubPreferences(for layout: EPUBLayoutPreference) -> EPUBPreferences {
-        EPUBPreferences(scroll: layout == .scroll)
+        epubPreferences(
+            theme: .default,
+            typography: TypographySettings(),
+            layout: layout
+        )
     }
 
     // MARK: - Position save / restore (WI-6)
