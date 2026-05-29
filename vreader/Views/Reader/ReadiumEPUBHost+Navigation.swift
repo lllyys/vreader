@@ -79,30 +79,33 @@ extension ReadiumReaderCoordinator {
 
     /// Turns to the next page (paginated) or scrolls forward (scroll mode) via
     /// the navigator's `goForward`. No-op + log when no navigator is attached.
+    ///
+    /// Gate-4 Medium: `boundNavigator` is re-read INSIDE the `Task`, not captured
+    /// before the async hop — so if `detach()` (from `dismantleUIViewController`)
+    /// nils it between the intent firing and the task executing, the task
+    /// no-ops instead of driving a torn-down navigator. `boundNavigator` is weak,
+    /// so a deallocated navigator also reads nil.
     func goToNextPage() {
-        guard let navigator = boundNavigator else {
-            log.error("ReadiumEPUB next-page: no navigator attached")
-            return
+        Task { [weak self] in
+            guard let navigator = self?.boundNavigator else { return }
+            _ = await navigator.goForward(options: NavigatorGoOptions(animated: true))
         }
-        Task { _ = await navigator.goForward(options: NavigatorGoOptions(animated: true)) }
     }
 
     /// Turns to the previous page / scrolls backward via `goBackward`.
     func goToPreviousPage() {
-        guard let navigator = boundNavigator else {
-            log.error("ReadiumEPUB previous-page: no navigator attached")
-            return
+        Task { [weak self] in
+            guard let navigator = self?.boundNavigator else { return }
+            _ = await navigator.goBackward(options: NavigatorGoOptions(animated: true))
         }
-        Task { _ = await navigator.goBackward(options: NavigatorGoOptions(animated: true)) }
     }
 
     /// Jumps to a Readium locator (TOC / bookmark / search result) via `go(to:)`.
     func navigate(to readiumLocator: ReadiumShared.Locator) {
-        guard let navigator = boundNavigator else {
-            log.error("ReadiumEPUB navigate: no navigator attached")
-            return
+        Task { [weak self] in
+            guard let navigator = self?.boundNavigator else { return }
+            _ = await navigator.go(to: readiumLocator, options: NavigatorGoOptions(animated: true))
         }
-        Task { _ = await navigator.go(to: readiumLocator, options: NavigatorGoOptions(animated: true)) }
     }
 }
 #endif
