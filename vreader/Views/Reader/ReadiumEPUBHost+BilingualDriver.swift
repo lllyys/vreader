@@ -1,10 +1,13 @@
-// Purpose: Feature #42 WI-11b (Gate-4 audit fixes) — the bilingual
-// enumerate→prefetch→inject DRIVER for the Readium EPUB host, split out of
-// `ReadiumEPUBHost+Bilingual.swift` for the 300-line budget. Owns the
-// location-change enumerate trigger, the forced toggle/confirm enumerate, the
-// shared enumerate→prefetch loop, the cached-translation inject, and the
-// prefetch-landed re-inject. PAGED path only — continuous-scroll bilingual is
-// WI-12.
+// Purpose: Feature #42 WI-11b/WI-12 — the bilingual enumerate→prefetch→inject
+// DRIVER for the Readium EPUB host, split out of `ReadiumEPUBHost+Bilingual.swift`
+// for the 300-line budget. Owns the location-change enumerate trigger, the forced
+// toggle/confirm enumerate, the shared enumerate→prefetch loop, the
+// cached-translation inject, the prefetch-landed re-inject, and the layout-change
+// re-enumerate. WI-12: works in BOTH paged and scroll, PER-SPINE — Readium emits
+// `locationDidChange` at spine boundaries in scroll mode, which drives the same
+// `handleBilingualLocationChange` enumerate the paged path uses. It does NOT
+// stitch translations across chapters the way legacy #71 does (see
+// `ReadiumBilingualChapterTracker.swift` for the full behavior delta).
 //
 // Gate-4 correctness fixes applied here:
 //   - HIGH-1: the forced toggle/confirm enumerate passes the host's
@@ -16,8 +19,9 @@
 //   - MED-3: same-chapter duplicate enumerates are gated SYNCHRONOUSLY via
 //     `ReadiumBilingualChapterTracker.shouldEnumerate(forHref:force:)` before the
 //     Task launches; a forced enumerate bypasses the dedupe.
-//   - MED-4: the enumerate path no-ops (after clearing) when the layout is not
-//     `.paged`.
+//   - WI-12: the enumerate path runs in BOTH paged and scroll (per-spine). The
+//     `isBilingualSupported` guard is retained as intent (it now returns true for
+//     both layouts) so a future layout addition fails closed.
 //   - MED-5: the in-flight enumerate rechecks `vm.isEnabled` after the async
 //     `enumerate()` returns, before mutating the orchestrator / prefetching, so a
 //     disable mid-flight does not paint stale decorations.
@@ -151,24 +155,27 @@ extension ReadiumEPUBHost {
         await bilingualCommander.inject(pairs)
     }
 
-    /// Gate-4 round-3 MED-3: `epubLayout` change handler. WI-11 gates enumerate to
-    /// paged, so if bilingual is ALREADY enabled and the user switches paged→scroll
-    /// the injected decorations would linger (enumerate just no-ops in scroll) and
-    /// the tracker would stay primed. Clear + reset on leaving paged; re-enumerate
-    /// the current chapter on returning to paged so translation reappears.
+    /// WI-12: `epubLayout` change handler. A paged↔scroll switch re-renders the
+    /// spine in Readium — the old `data-vreader-bid` stamps + injected decorations
+    /// are discarded with the DOM — so when bilingual is enabled we re-enumerate
+    /// the current spine in BOTH directions. Reset the tracker + clear any stale
+    /// decorations first (defensive: the new-layout DOM is fresh, but a clear keeps
+    /// the orchestrator/commander state consistent), then re-enumerate so the
+    /// translation reappears in the re-rendered layout.
     func handleEPUBLayoutChange() {
         guard let vm = bilingualViewModel else { return }
         switch ReadiumBilingualChapterTracker.layoutChangeAction(
             newLayout: settingsStore.epubLayout, isEnabled: vm.isEnabled
         ) {
-        case .clearAndReset:
-            bilingualChapterTracker.reset()
-            Task { await bilingualCommander.clear() }
         case .reEnumerate:
-            // Re-run the enumerate for the current chapter (via the host's
-            // last-known locator). Force past the dedupe — the tracker was reset
-            // when we left paged, but force keeps this robust if it was not.
-            runBilingualEnumerateForCurrentChapter()
+            // Clear stale decorations + reset the tracker, then re-enumerate the
+            // current spine. `runBilingualEnumerateForCurrentChapter` forces past
+            // the dedupe, so the reset is belt-and-suspenders for the commander.
+            bilingualChapterTracker.reset()
+            Task {
+                await bilingualCommander.clear()
+                runBilingualEnumerateForCurrentChapter()
+            }
         case .none:
             break
         }

@@ -1,6 +1,6 @@
-// Purpose: Feature #42 WI-11a (Gate-4 audit fixes) — pin the pure decision logic
-// the Readium bilingual driver depends on, factored out of the SwiftUI host so it
-// is unit-testable:
+// Purpose: Feature #42 WI-11a/WI-12 — pin the pure decision logic the Readium
+// bilingual driver depends on, factored out of the SwiftUI host so it is
+// unit-testable:
 //   - MED-3 same-chapter dedupe: `shouldEnumerate(forHref:force:)` records the
 //     in-flight href SYNCHRONOUSLY so a repeated `locationDidChange` for the same
 //     href before the async enumerate completes does NOT schedule a second
@@ -9,8 +9,12 @@
 //     Readium href, then the last-known locator href, then the last-enumerated
 //     href — so a first-enable on the currently-rendered chapter resolves a unit
 //     instead of nil.
-//   - MED-4 paged-only gate: `isBilingualSupported(forLayout:)` is true only for
-//     `.paged` (continuous-scroll bilingual is WI-12).
+//   - WI-12 per-spine parity: `isBilingualSupported(forLayout:)` is now true for
+//     BOTH `.paged` and `.scroll` (Readium scroll mode enumerates per-spine on
+//     scroll-into-view; it does NOT reproduce legacy #71's stitched cross-chapter
+//     continuous bilingual). A layout change while enabled RE-ENUMERATES in BOTH
+//     directions (Readium re-renders the spine on a layout change → stale stamps
+//     are gone).
 //
 // @coordinates-with: ReadiumEPUBHost+Bilingual.swift,
 //   ReadiumEPUBHost+BilingualDriver.swift, EPUBLayoutPreference.swift
@@ -21,7 +25,7 @@ import Foundation
 @testable import vreader
 
 @MainActor
-@Suite("Feature #42 WI-11a — ReadiumBilingualChapterTracker decision logic")
+@Suite("Feature #42 WI-11a/WI-12 — ReadiumBilingualChapterTracker decision logic")
 struct ReadiumBilingualChapterTrackerTests {
 
     // MARK: - MED-3 same-chapter dedupe
@@ -140,28 +144,33 @@ struct ReadiumBilingualChapterTrackerTests {
         #expect(href == nil)
     }
 
-    // MARK: - MED-4 paged-only gate
+    // MARK: - WI-12: per-spine bilingual supported in BOTH layouts
 
     @Test("bilingual is supported in the paged layout")
     func bilingualSupportedPaged() {
         #expect(ReadiumBilingualChapterTracker.isBilingualSupported(forLayout: .paged) == true)
     }
 
-    @Test("bilingual is NOT supported in the scroll layout (continuous is WI-12)")
-    func bilingualUnsupportedScroll() {
-        #expect(ReadiumBilingualChapterTracker.isBilingualSupported(forLayout: .scroll) == false)
+    @Test("bilingual is now supported in the scroll layout (WI-12 per-spine parity)")
+    func bilingualSupportedScroll() {
+        // WI-12: Readium scroll mode enumerates per-spine on scroll-into-view, so
+        // bilingual is supported in scroll too (was false in WI-11's paged-only gate).
+        #expect(ReadiumBilingualChapterTracker.isBilingualSupported(forLayout: .scroll) == true)
     }
 
-    // MARK: - Gate-4 round-3 MED-3: layout-change action decision
+    // MARK: - WI-12: layout-change re-enumerates in BOTH directions
 
-    @Test("paged→scroll while enabled clears decorations + resets the tracker")
-    func layoutChangePagedToScrollClears() {
+    @Test("paged→scroll while enabled re-enumerates the current spine (Readium re-renders)")
+    func layoutChangePagedToScrollReEnumerates() {
+        // WI-12: a layout change re-renders the spine, so the old data-vreader-bid
+        // stamps + decorations are gone — a fresh enumerate is required in BOTH
+        // directions (was `.clearAndReset` in WI-11's paged-only gate).
         let action = ReadiumBilingualChapterTracker.layoutChangeAction(
             newLayout: .scroll, isEnabled: true)
-        #expect(action == .clearAndReset)
+        #expect(action == .reEnumerate)
     }
 
-    @Test("scroll→paged while enabled re-enumerates the current chapter")
+    @Test("scroll→paged while enabled re-enumerates the current spine")
     func layoutChangeScrollToPagedReEnumerates() {
         let action = ReadiumBilingualChapterTracker.layoutChangeAction(
             newLayout: .paged, isEnabled: true)
@@ -176,67 +185,43 @@ struct ReadiumBilingualChapterTrackerTests {
             newLayout: .paged, isEnabled: false) == BilingualLayoutChangeAction.none)
     }
 
-    // MARK: - Gate-4 round-3 MED (Finding B): first-enable confirmation must
-    // ALWAYS precede enumeration. The unsupported-layout (scroll) enable path used
-    // to early-return AFTER clearing without presenting the setup sheet, so a later
-    // switch back to paged ran the `.reEnumerate` enumerate with the DEFAULT
-    // language/granularity — skipping the first-enable confirmation. The invariant:
-    // never enumerate while `needsSetupSheet == true`.
+    // MARK: - WI-12: first-enable confirmation must ALWAYS precede enumeration.
+    // The setup sheet is layout-independent; with both layouts now supported, an
+    // already-configured re-enable enumerates in BOTH layouts (no more scroll
+    // `.clearOnly`). The invariant: never enumerate while `needsSetupSheet == true`.
 
-    @Test("enable while NEEDS SETUP presents the setup sheet even in scroll (no enumerate)")
+    @Test("enable while NEEDS SETUP presents the setup sheet in scroll (no enumerate)")
     func enableInScrollPresentsSetupNoEnumerate() {
-        // First enable (needsSetupSheet) while the layout is scroll (unsupported).
-        // The sheet is layout-independent — it MUST be presented; enumerate is
-        // paged-gated and must NOT run.
-        let action = ReadiumBilingualChapterTracker.enableToggleAction(
-            needsSetupSheet: true, layoutSupported: false)
+        // First enable (needsSetupSheet) while the layout is scroll. The sheet is
+        // layout-independent — it MUST be presented; enumerate runs post-confirm.
+        let action = ReadiumBilingualChapterTracker.enableToggleAction(needsSetupSheet: true)
         #expect(action == .presentSetup)
     }
 
     @Test("enable while NEEDS SETUP in paged presents the setup sheet (no direct enumerate)")
     func enableInPagedNeedsSetupPresentsSetup() {
-        let action = ReadiumBilingualChapterTracker.enableToggleAction(
-            needsSetupSheet: true, layoutSupported: true)
+        let action = ReadiumBilingualChapterTracker.enableToggleAction(needsSetupSheet: true)
         #expect(action == .presentSetup)
     }
 
-    @Test("re-enable (already configured) in paged enumerates straight away")
-    func reEnableConfiguredPagedEnumerates() {
-        let action = ReadiumBilingualChapterTracker.enableToggleAction(
-            needsSetupSheet: false, layoutSupported: true)
+    @Test("re-enable (already configured) enumerates straight away in both layouts")
+    func reEnableConfiguredEnumerates() {
+        // WI-12: scroll no longer `.clearOnly` — both layouts enumerate per-spine.
+        let action = ReadiumBilingualChapterTracker.enableToggleAction(needsSetupSheet: false)
         #expect(action == .enumerate)
     }
 
-    @Test("re-enable (already configured) in scroll just clears (paged-gated, no enumerate)")
-    func reEnableConfiguredScrollClearsOnly() {
-        let action = ReadiumBilingualChapterTracker.enableToggleAction(
-            needsSetupSheet: false, layoutSupported: false)
-        #expect(action == .clearOnly)
-    }
-
-    @Test("reEnumerate is BLOCKED while setup is still pending (returning to paged before confirm)")
+    @Test("reEnumerate is BLOCKED while setup is still pending (first-enable not yet confirmed)")
     func reEnumerateBlockedWhileSetupPending() {
-        // The user first-enabled in scroll (setup raised), then switched back to
-        // paged before confirming. The `.reEnumerate` path must NOT enumerate while
-        // the setup sheet is still pending — that would use default settings.
+        // The user first-enabled (setup raised) then a layout change fired before
+        // confirming. The `.reEnumerate` path must NOT enumerate while the setup
+        // sheet is still pending — that would use default settings.
         #expect(ReadiumBilingualChapterTracker.reEnumerateAllowed(needsSetupSheet: true) == false)
     }
 
     @Test("reEnumerate is allowed once setup is no longer pending")
     func reEnumerateAllowedAfterSetup() {
         #expect(ReadiumBilingualChapterTracker.reEnumerateAllowed(needsSetupSheet: false) == true)
-    }
-
-    @Test("confirm in scroll commits settings only — enumerate deferred to return-to-paged")
-    func confirmInScrollCommitsOnly() {
-        let action = ReadiumBilingualChapterTracker.confirmAction(layoutSupported: false)
-        #expect(action == .commitOnly)
-    }
-
-    @Test("confirm in paged runs the first enumerate under the chosen settings")
-    func confirmInPagedEnumerates() {
-        let action = ReadiumBilingualChapterTracker.confirmAction(layoutSupported: true)
-        #expect(action == .enumerate)
     }
 }
 #endif

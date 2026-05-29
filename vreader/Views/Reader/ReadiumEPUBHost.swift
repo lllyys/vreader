@@ -65,12 +65,13 @@ struct ReadiumEPUBHost: View {
     /// `highlightAdapter`) so the same instance survives body recomputation.
     @State private var navCommander = ReadiumNavCommander()
 
-    // MARK: - WI-11b bilingual (paged interlinear via the eval channel)
+    // MARK: - WI-11b/WI-12 bilingual (per-spine interlinear via the eval channel)
 
     // All non-`private` so the `ReadiumEPUBHost+Bilingual` / `+BilingualDriver`
     // extensions (separate files) read/write them — `@State` cannot live in an
     // extension. Owned here (like `navCommander` / `highlightAdapter`) so the same
-    // instances survive body recomputation. PAGED path only (continuous is WI-12).
+    // instances survive body recomputation. WI-12: works in both paged and scroll,
+    // per-spine (no stitched cross-chapter bilingual — that stays legacy #71 only).
 
     /// Host-owned eval sink; the coordinator binds its production eval on `attach`
     /// and clears it on `detach`. Drives enumerate/inject/clear.

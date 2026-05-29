@@ -1,13 +1,26 @@
-// Purpose: Feature #42 WI-11b — chapter-change dedup state + pure decision logic
-// for the Readium bilingual enumerate/inject loop, split out of
+// Purpose: Feature #42 WI-11b/WI-12 — chapter-change dedup state + pure decision
+// logic for the Readium bilingual enumerate/inject loop, split out of
 // `ReadiumEPUBHost+Bilingual.swift` for the 300-line budget. A reference type so
 // the host's `onLocationChange` closure mutates the live instance rather than a
 // stale value snapshot; the static helpers are pure and unit-tested in
 // `ReadiumBilingualChapterTrackerTests`.
 //
+// WI-12 behavior delta (Readium engine, `readiumEPUBEngine` flag ON): Readium
+// scroll-mode bilingual enumerates PER-SPINE — one chapter at a time, on
+// scroll-into-view (Readium emits `locationDidChange` at spine boundaries in
+// scroll mode, which drives the same `handleBilingualLocationChange` enumerate
+// the paged path uses). It does NOT reproduce legacy #71's stitched
+// cross-chapter continuous bilingual: Readium has no multi-spine-stitch API, so
+// off-screen spines enumerate only when scrolled into view, not eagerly across
+// the whole book. Legacy #71 (EPUBWebViewBridge, `readiumEPUBEngine` flag OFF)
+// is unaffected and keeps its full continuous-scroll bilingual. A paged↔scroll
+// layout change re-renders the spine (stale `data-vreader-bid` stamps +
+// decorations are discarded), so the layout-change handler RE-ENUMERATES the
+// current spine in BOTH directions.
+//
 // @coordinates-with: ReadiumEPUBHost+Bilingual.swift,
 //   ReadiumEPUBHost+BilingualDriver.swift, EPUBLayoutPreference.swift,
-//   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-11)
+//   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-11/WI-12)
 
 #if canImport(UIKit)
 import Foundation
@@ -75,38 +88,39 @@ final class ReadiumBilingualChapterTracker {
         supplied ?? lastKnown ?? lastEnumerated
     }
 
-    /// MED-4: PAGED-only gate. Continuous-scroll bilingual is WI-12, so the
-    /// enumerate/inject path no-ops in `.scroll` (the paged single-spine block
-    /// assumptions do not hold there).
+    /// WI-12: bilingual is now supported in BOTH `.paged` and `.scroll`. Readium
+    /// scroll mode enumerates per-spine on scroll-into-view (the orchestrator's
+    /// single-bucket paged block model holds for one spine at a time), so the
+    /// enumerate/inject path is no longer paged-gated. (Was paged-only in WI-11.)
+    /// Retained as the single source of truth for "can the engine do bilingual in
+    /// this layout" so the driver guards read intent, not a bare literal.
     nonisolated static func isBilingualSupported(forLayout layout: EPUBLayoutPreference) -> Bool {
-        layout == .paged
+        layout == .paged || layout == .scroll
     }
 
-    /// Gate-4 round-3 MED-3: pure decision for an `epubLayout` change while
-    /// bilingual is enabled. Enumerate is paged-gated, so paged→scroll must CLEAR
-    /// the injected decorations + reset the tracker (else stale nodes linger), and
-    /// scroll→paged must RE-ENUMERATE so translation reappears. Disabled → no-op.
+    /// WI-12: pure decision for an `epubLayout` change while bilingual is enabled.
+    /// A paged↔scroll switch re-renders the spine in Readium (the old
+    /// `data-vreader-bid` stamps + injected decorations are gone), so a fresh
+    /// enumerate of the current spine is required in BOTH directions. The host's
+    /// `.reEnumerate` handler clears any stale decorations before re-enumerating
+    /// (defensive — the new-layout DOM is fresh). Disabled → no-op.
     nonisolated static func layoutChangeAction(
         newLayout: EPUBLayoutPreference, isEnabled: Bool
     ) -> BilingualLayoutChangeAction {
         guard isEnabled else { return .none }
-        return isBilingualSupported(forLayout: newLayout) ? .reEnumerate : .clearAndReset
+        return .reEnumerate
     }
 
     /// Gate-4 round-3 MED (Finding B): pure decision for the More-menu enable
     /// toggle. First-enable confirmation must ALWAYS precede enumeration, so a
-    /// first enable (`needsSetupSheet`) PRESENTS the setup sheet regardless of the
-    /// layout (the sheet is layout-independent; only the enumerate is paged-gated).
-    /// An already-configured re-enable ENUMERATES in paged, or just CLEARS in
-    /// scroll (paged-gated, no enumerate).
-    nonisolated static func enableToggleAction(
-        needsSetupSheet: Bool, layoutSupported: Bool
-    ) -> BilingualEnableAction {
-        if needsSetupSheet { return .presentSetup }
-        return layoutSupported ? .enumerate : .clearOnly
+    /// first enable (`needsSetupSheet`) PRESENTS the layout-independent setup sheet.
+    /// WI-12: an already-configured re-enable ENUMERATES in BOTH layouts (per-spine
+    /// bilingual is now supported in scroll too — no more scroll `.clearOnly`).
+    nonisolated static func enableToggleAction(needsSetupSheet: Bool) -> BilingualEnableAction {
+        needsSetupSheet ? .presentSetup : .enumerate
     }
 
-    /// Gate-4 round-3 MED (Finding B): the `.reEnumerate` (return-to-paged) path
+    /// Gate-4 round-3 MED (Finding B): the `.reEnumerate` (layout-change) path
     /// must NEVER enumerate while the first-enable setup sheet is still pending —
     /// that would prefetch/inject under the DEFAULT language/granularity, skipping
     /// confirmation. The sheet is already showing (raised at enable time); the
@@ -114,24 +128,14 @@ final class ReadiumBilingualChapterTracker {
     nonisolated static func reEnumerateAllowed(needsSetupSheet: Bool) -> Bool {
         !needsSetupSheet
     }
-
-    /// Gate-4 round-3 MED (Finding B): pure decision for the setup-sheet confirm.
-    /// After the user confirms language/granularity, run the first enumerate ONLY
-    /// when the layout is paged; in scroll, confirm just commits + dismisses and
-    /// the enumerate is deferred to the return-to-paged `.reEnumerate` path (now
-    /// allowed because `needsSetupSheet` is cleared post-confirm).
-    nonisolated static func confirmAction(layoutSupported: Bool) -> BilingualConfirmAction {
-        layoutSupported ? .enumerate : .commitOnly
-    }
 }
 
-/// Gate-4 round-3 MED-3: the action the host takes when `epubLayout` changes while
-/// bilingual is enabled. Pure value so the decision is unit-testable apart from the
-/// SwiftUI `.onChange` plumbing.
+/// WI-12: the action the host takes when `epubLayout` changes while bilingual is
+/// enabled. Pure value so the decision is unit-testable apart from the SwiftUI
+/// `.onChange` plumbing.
 enum BilingualLayoutChangeAction: Equatable {
-    /// Leaving paged: clear injected decorations + reset the chapter tracker.
-    case clearAndReset
-    /// Returning to paged: re-enumerate the current chapter so translation returns.
+    /// Enabled: re-enumerate the current spine so translation reappears in the
+    /// re-rendered (paged↔scroll) layout. The host clears stale decorations first.
     case reEnumerate
     /// Disabled, or no observable change — do nothing.
     case none
@@ -143,19 +147,7 @@ enum BilingualLayoutChangeAction: Equatable {
 enum BilingualEnableAction: Equatable {
     /// First enable: raise the setup sheet (layout-independent) — do NOT enumerate.
     case presentSetup
-    /// Re-enable, already configured, paged: enumerate the current chapter.
+    /// Re-enable, already configured: enumerate the current spine (both layouts).
     case enumerate
-    /// Re-enable, already configured, scroll: clear only (enumerate is paged-gated).
-    case clearOnly
-}
-
-/// Gate-4 round-3 MED (Finding B): the action the host takes after the user
-/// confirms the first-enable setup sheet. Enumerate only in paged; in scroll the
-/// settings commit and enumerate defers to the return-to-paged path.
-enum BilingualConfirmAction: Equatable {
-    /// Paged: run the first enumerate under the chosen settings.
-    case enumerate
-    /// Scroll: commit settings + dismiss; enumerate deferred to return-to-paged.
-    case commitOnly
 }
 #endif

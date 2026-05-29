@@ -1,6 +1,10 @@
-// Purpose: Feature #42 WI-11b — bilingual interlinear wiring for the Readium
-// EPUB host (PAGED path only — continuous-scroll bilingual parity is WI-12).
-// This file owns the parser/VM lifecycle, the More-menu toggle + setup sheet.
+// Purpose: Feature #42 WI-11b/WI-12 — bilingual interlinear wiring for the
+// Readium EPUB host. WI-12 lifted the WI-11 paged-only gate: bilingual now works
+// in BOTH paged and scroll, PER-SPINE (Readium scroll mode enumerates one chapter
+// at a time on scroll-into-view; it does NOT reproduce legacy #71's stitched
+// cross-chapter continuous bilingual — see `ReadiumBilingualChapterTracker.swift`
+// for the full delta). This file owns the parser/VM lifecycle, the More-menu
+// toggle + setup sheet.
 // The enumerate→prefetch→inject DRIVER methods live in
 // `ReadiumEPUBHost+BilingualDriver.swift`, and the chapter-tracker dedup state +
 // pure decision enums live in `Bilingual/ReadiumBilingualChapterTracker.swift`
@@ -41,8 +45,7 @@ import SwiftUI
 import ReadiumShared
 
 // `ReadiumBilingualChapterTracker` + its pure decision enums
-// (`BilingualLayoutChangeAction`, `BilingualEnableAction`,
-// `BilingualConfirmAction`) live in
+// (`BilingualLayoutChangeAction`, `BilingualEnableAction`) live in
 // `Bilingual/ReadiumBilingualChapterTracker.swift` (300-line budget).
 
 extension ReadiumEPUBHost {
@@ -123,15 +126,11 @@ extension ReadiumEPUBHost {
             return
         }
         // Finding B: first-enable confirmation must ALWAYS precede enumeration.
-        // The setup sheet is layout-independent (only the enumerate is paged-gated)
-        // so a first enable in scroll STILL raises the sheet — it does not early
-        // -return before presenting it. An already-configured re-enable enumerates
-        // in paged (MED-4: clears only in scroll, since continuous bilingual is
-        // WI-12; the per-book preference still persisted via `setEnabled`).
+        // The setup sheet is layout-independent so a first enable raises the sheet.
+        // WI-12: an already-configured re-enable enumerates the current spine in
+        // BOTH layouts (Readium scroll mode is per-spine bilingual now).
         switch ReadiumBilingualChapterTracker.enableToggleAction(
-            needsSetupSheet: vm.needsSetupSheet,
-            layoutSupported: ReadiumBilingualChapterTracker.isBilingualSupported(
-                forLayout: settingsStore.epubLayout)
+            needsSetupSheet: vm.needsSetupSheet
         ) {
         case .presentSetup:
             bilingualSetupState = BilingualSetupSheetState(
@@ -140,33 +139,20 @@ extension ReadiumEPUBHost {
             showBilingualSetupSheet = true
         case .enumerate:
             runBilingualEnumerateForCurrentChapter()
-        case .clearOnly:
-            bilingualChapterTracker.reset()
-            Task { await bilingualCommander.clear() }
         }
     }
 
     /// Commit the setup-sheet's language/granularity to the VM, dismiss it, and
-    /// run the first enumerate under the chosen settings.
+    /// run the first enumerate under the chosen settings. WI-12: bilingual is now
+    /// supported in both layouts, so the post-confirm enumerate runs for the
+    /// current spine regardless of paged/scroll.
     func confirmBilingualSetup() {
         guard let vm = bilingualViewModel else { return }
         vm.setTargetLanguage(bilingualSetupState.languageKey)
         vm.setGranularity(bilingualSetupState.granularity)
         vm.dismissSetupSheet()
         showBilingualSetupSheet = false
-        // Finding B: enumerate only when the layout is paged. If the user
-        // first-enabled in scroll, confirm just commits the language/granularity +
-        // dismisses; the enumerate happens when they return to paged (the
-        // `.reEnumerate` path, now allowed because `needsSetupSheet` is cleared).
-        switch ReadiumBilingualChapterTracker.confirmAction(
-            layoutSupported: ReadiumBilingualChapterTracker.isBilingualSupported(
-                forLayout: settingsStore.epubLayout)
-        ) {
-        case .enumerate:
-            runBilingualEnumerateForCurrentChapter()
-        case .commitOnly:
-            break
-        }
+        runBilingualEnumerateForCurrentChapter()
     }
 
     /// Dismiss the setup sheet without persisting and turn bilingual back off —
@@ -180,12 +166,12 @@ extension ReadiumEPUBHost {
 
     // MARK: - Body surfaces
 
-    /// Gate-4 round-3 MED-3: the bilingual body modifiers, factored out of
-    /// `ReadiumEPUBHost.body` for the 300-line budget. Owns the More-menu toggle
-    /// observer, the prefetch-landed re-inject observer, the first-enable setup
-    /// sheet, and the `epubLayout`-change handler (clear+reset on leaving paged /
-    /// re-enumerate on returning). PAGED path only — continuous bilingual is WI-12.
-    /// Reuses the designed `BilingualSetupSheet` (rule 51).
+    /// The bilingual body modifiers, factored out of `ReadiumEPUBHost.body` for the
+    /// 300-line budget. Owns the More-menu toggle observer, the prefetch-landed
+    /// re-inject observer, the first-enable setup sheet, and the `epubLayout`-change
+    /// handler (WI-12: re-enumerate the current spine on a paged↔scroll switch).
+    /// Works in both paged and scroll (per-spine). Reuses the designed
+    /// `BilingualSetupSheet` (rule 51).
     func bilingualSurfaces<Content: View>(_ content: Content) -> some View {
         content
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreBilingual)) { _ in
@@ -196,10 +182,9 @@ extension ReadiumEPUBHost {
                 guard key == fingerprint.canonicalKey else { return }
                 handleBilingualDidChange()
             }
-            // Gate-4 round-3 MED-3: a paged↔scroll switch while bilingual is enabled
-            // must clear stale decorations (leaving paged) or re-enumerate the
-            // current chapter (returning to paged) — enumerate is paged-gated, so
-            // without this the injected nodes linger or never reappear.
+            // WI-12: a paged↔scroll switch while bilingual is enabled re-renders the
+            // spine in Readium, discarding the injected decorations + bid stamps, so
+            // we re-enumerate the current spine in either direction.
             .onChange(of: settingsStore.epubLayout) { _, _ in
                 handleEPUBLayoutChange()
             }
