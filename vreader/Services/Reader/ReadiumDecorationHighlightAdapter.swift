@@ -16,7 +16,8 @@
 //   quote, so the legacy `serializedRange` XPath is never consulted here and is
 //   never mutated (flag-OFF returns to legacy XPath rendering losslessly).
 // - Spine href source: prefer the EPUB anchor's href, else the locator's href.
-//   A record with neither an href nor any selected text is unrenderable → SKIP
+//   A record without a non-empty selected-text quote, OR without a spine href,
+//   is unrenderable (Readium anchors by the text quote, not href/progression) → SKIP
 //   (never crash, never mutate the stored anchor).
 // - The pure mapping (`decoration(for:)` + `tintColor(for:)`) is `nonisolated
 //   static` so it unit-tests without a navigator.
@@ -115,16 +116,25 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
     // MARK: - Pure mapping (unit-testable without a navigator)
 
     /// Maps a `HighlightRecord` to a Readium `Decoration`, or `nil` when the
-    /// record is unrenderable (no href AND no selected text — see header).
+    /// record is unrenderable.
+    ///
+    /// Gate-4 round-1 Low: Readium re-anchors a decoration from the locator's
+    /// `text.highlight` quote (or a CSS-selector/fragment we don't supply) — NOT
+    /// from `href` + `progression` alone. So a record needs BOTH a spine href AND
+    /// a non-empty selected-text quote; without the quote the decoration is a
+    /// silent no-op + Readium log noise, so we SKIP it. The stored anchor is
+    /// never mutated (flag-OFF returns to legacy XPath rendering losslessly).
     nonisolated static func decoration(for record: HighlightRecord) -> Decoration? {
-        guard let href = spineHref(for: record),
+        let quote = record.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !quote.isEmpty,
+              let href = spineHref(for: record),
               let relative = RelativeURL(path: href) else {
             return nil
         }
         let text = ReadiumShared.Locator.Text(
             after: record.locator.textContextAfter,
             before: record.locator.textContextBefore,
-            highlight: record.selectedText.isEmpty ? nil : record.selectedText
+            highlight: record.selectedText
         )
         let locator = ReadiumShared.Locator(
             href: relative,

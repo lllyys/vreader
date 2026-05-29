@@ -65,7 +65,8 @@ struct ReadiumEPUBHostTests {
     private func coordinator(returning value: Any?) -> ReadiumReaderCoordinator {
         let coord = ReadiumReaderCoordinator(
             fingerprintKey: "epub:\(String(repeating: "a", count: 64)):10",
-            readerToken: UUID()
+            readerToken: UUID(),
+            highlightAdapter: ReadiumDecorationHighlightAdapter()
         )
         coord.evaluatorForTests = { _ in value }
         return coord
@@ -167,7 +168,7 @@ struct ReadiumEPUBHostTests {
         let token = UUID()
         let key = "epub:\(String(repeating: "a", count: 64)):10"
         // Strong local ref — the registry holds the navigator weak.
-        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token)
+        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token, highlightAdapter: ReadiumDecorationHighlightAdapter())
         registry.setActiveReadiumNavigator(coord, for: key, token: token)
         #expect(registry.readiumNavigator(for: key, token: token) != nil)
 
@@ -183,7 +184,7 @@ struct ReadiumEPUBHostTests {
         let registry = DebugReaderRegistry.makeIsolatedForTests()
         let token = UUID()
         let key = "epub:\(String(repeating: "b", count: 64)):20"
-        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token)
+        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token, highlightAdapter: ReadiumDecorationHighlightAdapter())
         registry.setActiveReadiumNavigator(coord, for: key, token: token)
 
         registry.clearActiveReadiumNavigator(for: "epub:other:1", token: token)
@@ -203,7 +204,7 @@ struct ReadiumEPUBHostTests {
         let key = "epub:\(String(repeating: "c", count: 64)):30"
         let tokenA = UUID()
         let tokenB = UUID()
-        let coordA = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: tokenA)
+        let coordA = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: tokenA, highlightAdapter: ReadiumDecorationHighlightAdapter())
         // A registers first (no expected token yet), then B claims the slot
         // expectation + settles.
         registry.setActiveReadiumNavigator(coordA, for: key, token: tokenA)
@@ -222,7 +223,7 @@ struct ReadiumEPUBHostTests {
         let registry = DebugReaderRegistry.makeIsolatedForTests()
         let key = "epub:\(String(repeating: "d", count: 64)):40"
         let token = UUID()
-        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token)
+        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token, highlightAdapter: ReadiumDecorationHighlightAdapter())
         registry.setActiveReadiumNavigator(coord, for: key, token: token)
         registry.markReaderSettled(for: key, token: token)
         #expect(registry.settledKeys.contains(.init(fingerprintKey: key, token: token)))

@@ -106,11 +106,17 @@ struct ReadiumDecorationHighlightAdapterTests {
         #expect(ReadiumDecorationHighlightAdapter.decoration(for: rec) == nil)
     }
 
-    @Test func decoration_keepsRecordWithHrefButEmptyText() throws {
-        // href present (even with empty selectedText) → still renderable.
+    @Test func decoration_skipsWhenHrefButEmptyText() {
+        // Gate-4 round-1 Low: an href without a text quote is unrenderable —
+        // Readium anchors a decoration by the `text.highlight` quote, not by
+        // href/progression alone, so an empty-quote record is SKIPPED.
         let rec = record(anchorHref: nil, locatorHref: "ch.xhtml", selectedText: "")
-        let dec = try #require(ReadiumDecorationHighlightAdapter.decoration(for: rec))
-        #expect(dec.locator.href.string == "ch.xhtml")
+        #expect(ReadiumDecorationHighlightAdapter.decoration(for: rec) == nil)
+    }
+
+    @Test func decoration_skipsWhenWhitespaceOnlyText() {
+        let rec = record(anchorHref: nil, locatorHref: "ch.xhtml", selectedText: "   \n ")
+        #expect(ReadiumDecorationHighlightAdapter.decoration(for: rec) == nil)
     }
 
     @Test func decoration_nilProgressionStillMaps() throws {

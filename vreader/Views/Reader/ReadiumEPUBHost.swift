@@ -326,7 +326,11 @@ final class ReadiumReaderCoordinator: NSObject {
         fingerprintKey: String,
         readerToken: UUID,
         onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)? = nil,
-        highlightAdapter: ReadiumDecorationHighlightAdapter = ReadiumDecorationHighlightAdapter()
+        // Gate-4 round-1 Low: no default — the adapter MUST be the host-owned
+        // instance the `HighlightCoordinator` drives, else `detach()` would clear
+        // a different adapter than the one attached to the navigator. Explicit
+        // param removes that footgun; every call site passes the host's adapter.
+        highlightAdapter: ReadiumDecorationHighlightAdapter
     ) {
         self.fingerprintKey = fingerprintKey
         self.readerToken = readerToken
