@@ -1,5 +1,8 @@
 // Purpose: Feature #42 WI-11b — bilingual interlinear wiring for the Readium
 // EPUB host (PAGED path only — continuous-scroll bilingual parity is WI-12).
+// This file owns the parser/VM lifecycle, the More-menu toggle + setup sheet,
+// and the chapter-tracker decision type. The enumerate→prefetch→inject DRIVER
+// methods live in `ReadiumEPUBHost+BilingualDriver.swift` (300-line budget).
 // Mirrors `EPUBReaderContainerView+Bilingual.swift` but drives the
 // enumerate→prefetch→inject loop through Readium's one-way `evaluateJavaScript`
 // channel via `ReadiumBilingualCommander` instead of the legacy WKWebView's
@@ -33,25 +36,74 @@
 // is declared on the `ReadiumEPUBHost` struct in `ReadiumEPUBHost.swift`; this
 // file owns the methods + the surfaces modifier + the setup-sheet view.
 //
-// @coordinates-with: ReadiumEPUBHost.swift, ReadiumBilingualCommander.swift,
-//   EPUBBilingualOrchestrator.swift, BilingualReadingViewModel.swift,
-//   EPUBChapterTextProvider.swift, EPUBReaderContainerView+Bilingual.swift,
-//   ReaderNotifications.swift,
+// @coordinates-with: ReadiumEPUBHost.swift, ReadiumEPUBHost+BilingualDriver.swift,
+//   ReadiumBilingualCommander.swift, EPUBBilingualOrchestrator.swift,
+//   BilingualReadingViewModel.swift, EPUBChapterTextProvider.swift,
+//   EPUBReaderContainerView+Bilingual.swift, ReaderNotifications.swift,
+//   EPUBLayoutPreference.swift,
 //   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-11)
 
 #if canImport(UIKit)
 import SwiftUI
 import ReadiumShared
 
-/// Reference-type chapter-change dedup for the Readium bilingual loop. A class
-/// (not a value `@State`) so the `onLocationChange` closure — captured at
-/// body-eval — mutates the live instance rather than a stale value snapshot.
+/// Reference-type chapter-change dedup + pure decision logic for the Readium
+/// bilingual loop. A class (not a value `@State`) so the `onLocationChange`
+/// closure — captured at body-eval — mutates the live instance rather than a
+/// stale value snapshot. The static helpers are pure (unit-tested in
+/// `ReadiumBilingualChapterTrackerTests`).
 @MainActor
 final class ReadiumBilingualChapterTracker {
-    /// The spine href the bilingual loop last enumerated. `nil` until the first
-    /// enumerate. An intra-chapter location change (same href) is deduped.
-    var lastEnumeratedHref: String?
+    /// The spine href the bilingual loop last enumerated (or has IN FLIGHT). `nil`
+    /// until the first enumerate. An intra-chapter location change (same href) is
+    /// deduped. Gate-4 MED-3: this is written SYNCHRONOUSLY in `shouldEnumerate`
+    /// BEFORE the async enumerate launches, so a repeated `locationDidChange` for
+    /// the same href before the eval completes does not schedule a second run.
+    private(set) var lastEnumeratedHref: String?
     init() {}
+
+    /// MED-3: synchronous dedupe gate. Returns whether an enumerate should run for
+    /// `href` and, when it should, records the href immediately so a duplicate
+    /// organic trigger arriving before the async enumerate completes is deduped.
+    /// A `force` enumerate (the toggle/confirm path, where the user just enabled
+    /// bilingual on the chapter they were already reading) bypasses the dedupe and
+    /// still records the in-flight href.
+    @discardableResult
+    func shouldEnumerate(forHref href: String?, force: Bool) -> Bool {
+        if !force, let href, href == lastEnumeratedHref { return false }
+        lastEnumeratedHref = href
+        return true
+    }
+
+    /// Records the href an enumerate actually ran for (the resolved spine href),
+    /// keeping the dedupe key consistent after the async enumerate returns.
+    func markEnumerated(href: String?) {
+        if let href { lastEnumeratedHref = href }
+    }
+
+    /// Clears the dedupe state so the next location change re-enumerates (disable
+    /// + the prefetch-disabled path).
+    func reset() {
+        lastEnumeratedHref = nil
+    }
+
+    /// HIGH-1: resolve the visible-chapter href for the bilingual unit lookup.
+    /// Prefers the supplied Readium locator href, then the host's last-known
+    /// locator href (the toggle/confirm first-enable path), then the
+    /// last-enumerated href (a prefetch-landed inject that carries no locator).
+    /// Never resets the only available source before reading it.
+    nonisolated static func selectedHref(
+        supplied: String?, lastKnown: String?, lastEnumerated: String?
+    ) -> String? {
+        supplied ?? lastKnown ?? lastEnumerated
+    }
+
+    /// MED-4: PAGED-only gate. Continuous-scroll bilingual is WI-12, so the
+    /// enumerate/inject path no-ops in `.scroll` (the paged single-spine block
+    /// assumptions do not hold there).
+    nonisolated static func isBilingualSupported(forLayout layout: EPUBLayoutPreference) -> Bool {
+        layout == .paged
+    }
 }
 
 extension ReadiumEPUBHost {
@@ -127,7 +179,17 @@ extension ReadiumEPUBHost {
         let nextEnabled = !vm.isEnabled
         vm.setEnabled(nextEnabled)
         if !nextEnabled {
-            bilingualChapterTracker.lastEnumeratedHref = nil
+            bilingualChapterTracker.reset()
+            Task { await bilingualCommander.clear() }
+            return
+        }
+        // MED-4: continuous-scroll bilingual is WI-12. The VM toggle still flips
+        // (so the per-book preference persists), but skip enumerate/inject and
+        // keep the spine clear when the layout is not paged.
+        guard ReadiumBilingualChapterTracker.isBilingualSupported(
+            forLayout: settingsStore.epubLayout
+        ) else {
+            bilingualChapterTracker.reset()
             Task { await bilingualCommander.clear() }
             return
         }
@@ -159,121 +221,6 @@ extension ReadiumEPUBHost {
         vm.dismissSetupSheet()
         vm.setEnabled(false)
         showBilingualSetupSheet = false
-    }
-
-    // MARK: - Enumerate / inject driver
-
-    /// Runs a fresh enumerate for whatever spine is currently visible, forcing a
-    /// re-enumerate even within the same chapter (used by the toggle/confirm
-    /// paths where the user just enabled on an already-rendered chapter). Resets
-    /// the chapter tracker so the next location change is not mistaken for a
-    /// dedup hit.
-    func runBilingualEnumerateForCurrentChapter() {
-        guard let vm = bilingualViewModel, vm.isEnabled else { return }
-        bilingualChapterTracker.lastEnumeratedHref = nil
-        Task { await runBilingualEnumerate(currentReadiumLocator: nil) }
-    }
-
-    /// Drive the bilingual chapter-change enumerate off the navigator's
-    /// `locationDidChange`. A fresh enumerate runs only when the resolved spine
-    /// href changes AND bilingual is enabled; an intra-chapter scroll is deduped
-    /// against the chapter tracker so it does NOT re-enumerate.
-    func handleBilingualLocationChange(_ readiumLocator: ReadiumShared.Locator) {
-        guard let vm = bilingualViewModel, vm.isEnabled else { return }
-        let href = readiumLocator.href.string
-        guard href != bilingualChapterTracker.lastEnumeratedHref else { return }
-        Task { await runBilingualEnumerate(currentReadiumLocator: readiumLocator) }
-    }
-
-    /// The shared enumerate→prefetch driver. Enumerates the live spine via the
-    /// commander, replaces the orchestrator's PAGED block bucket, marks the
-    /// chapter as enumerated, and asks the VM to prefetch the current unit
-    /// (resolving the unit through the seam-#3 normalized locator). The actual
-    /// inject runs later, off `.readerBilingualDidChange`, once the prefetch
-    /// lands.
-    private func runBilingualEnumerate(
-        currentReadiumLocator: ReadiumShared.Locator?
-    ) async {
-        guard let vm = bilingualViewModel, vm.isEnabled else { return }
-        let blocks = await bilingualCommander.enumerate()
-        bilingualOrchestrator.updateBlocks(blocks)
-        // Mark the chapter enumerated so an intra-chapter scroll is deduped.
-        if let href = currentReadiumLocator?.href.string {
-            bilingualChapterTracker.lastEnumeratedHref = href
-        }
-        guard !blocks.isEmpty else { return }
-        await drivePrefetchAndInject(for: currentReadiumLocator)
-    }
-
-    /// Resolves the current unit (via the normalized locator) and asks the VM to
-    /// prefetch + inject if a translation is already cached.
-    private func drivePrefetchAndInject(
-        for readiumLocator: ReadiumShared.Locator?
-    ) async {
-        guard let vm = bilingualViewModel, vm.isEnabled,
-              let locator = currentVReaderLocator(from: readiumLocator) else { return }
-        await vm.handlePositionChange(locator)
-        await injectBilingualIfCached(for: locator)
-    }
-
-    /// Build + push inject JS for the current unit's cached translations.
-    /// Honors the Bug #268 mismatch fallback (translate the enumerate's OWN block
-    /// texts when the prefetch segment count diverges from the block count).
-    func injectBilingualIfCached(for locator: Locator) async {
-        guard let vm = bilingualViewModel, vm.isEnabled else { return }
-        guard let unit = await vm.textProvider?.unit(containing: locator),
-              let segments = vm.translations(for: unit) else { return }
-        let blocks = bilingualOrchestrator.currentBlocks
-        if !blocks.isEmpty, segments.count != blocks.count {
-            await vm.translateBlocksDirectly(blocks.map(\.text), for: unit)
-            return
-        }
-        // Pair segments → bids via the shared 1:1 contract (Bug #266 — a count
-        // mismatch yields an empty map → source-only). The commander builds +
-        // evaluates the escaped inject JS itself from the map.
-        let pairs = EPUBBilingualPipeline.translationsByBid(
-            blocks: blocks, translatedSegments: segments
-        )
-        guard !pairs.isEmpty else { return }
-        await bilingualCommander.inject(pairs)
-    }
-
-    /// `.readerBilingualDidChange` handler — the VM's prefetch landed (or it
-    /// disabled). On disable, clear decorations; otherwise inject the now-cached
-    /// translation for the current chapter.
-    func handleBilingualDidChange() {
-        guard let vm = bilingualViewModel else { return }
-        if !vm.isEnabled {
-            bilingualChapterTracker.lastEnumeratedHref = nil
-            Task { await bilingualCommander.clear() }
-            return
-        }
-        Task {
-            guard let locator = currentVReaderLocator(from: nil) else { return }
-            await injectBilingualIfCached(for: locator)
-        }
-    }
-
-    /// Builds the seam-#3-normalized vreader `Locator` for the current chapter.
-    /// Prefers the supplied Readium locator's href; falls back to the chapter
-    /// tracker's last-enumerated href (so an inject driven by a prefetch-landed
-    /// notification — which carries no locator — still resolves the unit).
-    private func currentVReaderLocator(
-        from readiumLocator: ReadiumShared.Locator?
-    ) -> Locator? {
-        let href = readiumLocator?.href.string ?? bilingualChapterTracker.lastEnumeratedHref
-        guard let href else { return nil }
-        let raw = Locator(
-            bookFingerprint: fingerprint,
-            href: href,
-            progression: readiumLocator?.locations.progression,
-            totalProgression: nil, cfi: nil, page: nil,
-            charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
-            textQuote: nil, textContextBefore: nil, textContextAfter: nil
-        )
-        return ReadiumBilingualCommander.normalizedLocator(
-            raw, toSpineHrefs: bilingualSpineHrefs
-        )
     }
 
     // MARK: - Setup sheet

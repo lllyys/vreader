@@ -67,49 +67,43 @@ struct ReadiumEPUBHost: View {
 
     // MARK: - WI-11b bilingual (paged interlinear via the eval channel)
 
-    /// WI-11b: host-owned bilingual eval sink. Passed into the representable;
-    /// the coordinator binds its production eval method on `attach` and clears it
-    /// on `detach`. The host's bilingual extension drives enumerate/inject/clear
-    /// through it. Owned here (like `navCommander` / `highlightAdapter`) so the
-    /// same instance survives body recomputation.
-    /// Not `private` — the `ReadiumEPUBHost+Bilingual` extension (a separate
-    /// file) reads/writes this bilingual state. `@State` properties cannot live
-    /// in an extension, so they stay on the struct at `internal` access.
+    // All non-`private` so the `ReadiumEPUBHost+Bilingual` / `+BilingualDriver`
+    // extensions (separate files) read/write them — `@State` cannot live in an
+    // extension. Owned here (like `navCommander` / `highlightAdapter`) so the same
+    // instances survive body recomputation. PAGED path only (continuous is WI-12).
+
+    /// Host-owned eval sink; the coordinator binds its production eval on `attach`
+    /// and clears it on `detach`. Drives enumerate/inject/clear.
     @State var bilingualCommander = ReadiumBilingualCommander()
-    /// WI-11b: the engine-agnostic block↔translation orchestrator (reused from
-    /// feature #56). PAGED path only — one spine per document, so the orchestrator's
-    /// global `-1` bucket via `updateBlocks(_:)` (NOT the `forSection:` continuous
-    /// variants, which are WI-12).
+    /// Engine-agnostic block↔translation orchestrator (reused from #56); the PAGED
+    /// global `-1` bucket via `updateBlocks(_:)`.
     @State var bilingualOrchestrator = EPUBBilingualOrchestrator()
-    /// WI-11b: per-book bilingual reading VM (toggle / language / granularity /
-    /// per-unit translation cache / prefetch trigger). Built lazily once the
-    /// EPUBParser spine is known.
+    /// Per-book bilingual VM (toggle / language / granularity / translation cache /
+    /// prefetch). Built once the EPUBParser spine is known.
     @State var bilingualViewModel: BilingualReadingViewModel?
-    /// WI-11b: vreader's own EPUB parser, opened alongside the Readium open so the
+    /// vreader's own EPUB parser, opened alongside the Readium open so the
     /// `EPUBChapterTextProvider` (keyed on OPF-relative spine hrefs) can extract
-    /// per-spine source text for translation. Readium's `Publication` does not
-    /// expose raw spine HTML to app code, so the bilingual source path uses this
-    /// parallel parser (the same one the legacy EPUB/search/AI coordinators use).
+    /// per-spine source text — Readium does not expose raw spine HTML to app code.
     @State var bilingualParser: EPUBParser?
-    /// WI-11b: the OPF-relative spine hrefs the `EPUBChapterTextProvider` keys on,
-    /// captured once the parser opens so the bilingual extension can normalize a
-    /// Readium container-relative locator href onto them (seam #3 — the WI-8
-    /// href-consistency finding class).
+    /// The OPF-relative spine hrefs the provider keys on, captured at parser open
+    /// so the extension can normalize a Readium container-relative href (seam #3).
     @State var bilingualSpineHrefs: [String] = []
-    /// WI-11b: first-enable setup-sheet presentation flag (reuses the designed
-    /// `BilingualSetupSheet` surface from feature #56 — rule 51 satisfied).
+    /// First-enable setup-sheet flag (reuses the designed `BilingualSetupSheet` —
+    /// rule 51 satisfied).
     @State var showBilingualSetupSheet = false
-    /// WI-11b: the setup-sheet's working language/granularity state.
+    /// The setup-sheet's working language/granularity state.
     @State var bilingualSetupState = BilingualSetupSheetState(
         languageKey: BilingualReadingViewModel.defaultTargetLanguage,
         granularity: .paragraph
     )
-    /// WI-11b: tracks the spine href the bilingual loop last enumerated so an
-    /// intra-chapter location change does NOT re-enumerate (only a real chapter
-    /// change re-runs enumerate). A reference-type `@State` so the
-    /// `onLocationChange` closure (captured at body-eval) mutates the live
-    /// instance, not a stale value snapshot.
+    /// Chapter-change dedupe + pure decision logic. A reference type so the
+    /// `onLocationChange` closure mutates the live instance, not a stale snapshot.
     @State var bilingualChapterTracker = ReadiumBilingualChapterTracker()
+    /// Gate-4 HIGH-1: the most recent Readium locator (captured in
+    /// `onLocationChange`). The toggle/confirm first-enable reads it so the
+    /// enumerate resolves the VISIBLE chapter instead of nil; also the locator for
+    /// a prefetch-landed inject that carries none of its own.
+    @State var lastKnownReadiumLocator: ReadiumShared.Locator?
 
     var body: some View {
         Group {
@@ -151,12 +145,15 @@ struct ReadiumEPUBHost: View {
                     // as `onNavigatorInitFailure`) so the coordinator stays
                     // decoupled from the VM type.
                     onLocationChange: { [weak viewModel] locator in
-                        viewModel?.save(readiumLocator: locator)
-                        // WI-11b: drive the bilingual chapter-change enumerate off
-                        // the SAME location-change callback (compose, don't replace
-                        // — the WI-6 position save above still runs). A fresh
-                        // enumerate runs only when the spine href changes AND
-                        // bilingual is enabled; intra-chapter scrolls are deduped.
+                        viewModel?.save(readiumLocator: locator)  // WI-6 save
+                        // Gate-4 HIGH-1: remember the live locator so a first-enable
+                        // toggle (no location change of its own) resolves the
+                        // VISIBLE chapter. Compose — the WI-6 save above still runs.
+                        lastKnownReadiumLocator = locator
+                        // WI-11b: drive the chapter-change enumerate off the same
+                        // callback (href change + enabled → enumerate; intra-chapter
+                        // deduped). HIGH-2: a persisted-on book enumerates on its
+                        // FIRST locator (lastEnumeratedHref nil → href differs).
                         handleBilingualLocationChange(locator)
                     },
                     // WI-8: attach the host-owned highlight adapter to the live
@@ -243,6 +240,11 @@ struct ReadiumEPUBHost: View {
             // `Publication` does not expose raw spine HTML to app code. Failure to
             // open is non-fatal — bilingual simply stays unavailable for the book.
             await openBilingualParser()
+            // WI-11b Gate-4 HIGH-2 / MED-6: build the VM on open (not only from the
+            // toggle) so a persisted-bilingual-on book publishes the text provider
+            // (MED-6) and its first `locationDidChange` finds an enabled VM and
+            // enumerates the visible chapter (HIGH-2). Idle for a disabled book.
+            ensureBilingualViewModel()
         }
         // WI-8: clear a removed highlight's decoration (the cross-format Bug #78
         // visual-clear pipeline `HighlightCoordinator.deleteHighlight` posts).

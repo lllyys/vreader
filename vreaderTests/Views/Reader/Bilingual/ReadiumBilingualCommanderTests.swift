@@ -189,6 +189,28 @@ struct ReadiumBilingualCommanderTests {
             mystery, toSpineHrefs: opfSpine)
         #expect(normalized.href == "totally/unknown.xhtml")
     }
+
+    @Test("LOW-7: an ambiguous basename (matches >1 spine entry) is left raw, never mis-resolved")
+    func ambiguousBasenameLeftRaw() {
+        // Two spine entries share the same basename `chapter.xhtml` under
+        // different directories. A Readium href whose basename matches both is
+        // ambiguous — `resolveHref` returns nil (suffix `/chapter.xhtml` matches
+        // both), so normalization keeps the RAW href rather than guessing the
+        // wrong chapter (which would translate the wrong unit).
+        let opfSpine = ["part1/chapter.xhtml", "part2/chapter.xhtml"]
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "d", count: 64),
+            fileByteCount: 10, format: .epub)
+        let ambiguous = Locator(
+            bookFingerprint: fp, href: "chapter.xhtml",
+            progression: 0.3, totalProgression: nil, cfi: nil, page: nil,
+            charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil)
+        let normalized = ReadiumBilingualCommander.normalizedLocator(
+            ambiguous, toSpineHrefs: opfSpine)
+        #expect(normalized.href == "chapter.xhtml")
+        #expect(normalized.progression == 0.3)
+    }
 }
 
 private enum TestEvalError: Error { case boom }
