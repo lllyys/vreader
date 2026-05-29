@@ -4,8 +4,9 @@ bug: 282
 gh_issue: 1259
 gate: 4
 auditor: codex (codex exec --sandbox read-only)
+threadId: codex-exec-bug282-toc
 rounds: 1
-verdict: ship-as-is
+final_verdict: ship-as-is
 date: 2026-05-29
 ---
 
