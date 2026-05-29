@@ -9,32 +9,23 @@
 // `bilingualEnumerate` message handler + `pendingHighlightJS` seam (Readium owns
 // its content controller — there is no message channel to app code).
 //
-// The pipeline:
-//   1. The More-menu bilingual row posts `.readerMoreBilingual` → the host
-//      toggles `BilingualReadingViewModel.isEnabled`. A FIRST enable raises the
-//      designed `BilingualSetupSheet`; confirm runs enumerate; a subsequent
-//      enable runs enumerate straight away.
-//   2. Enumerate awaits `bilingualCommander.enumerate()` (the navigator's
-//      `evaluateJavaScript(enumerateJS())` RETURN value parsed into
-//      `[BilingualBlock]`), replaces the orchestrator's PAGED `-1` bucket via
-//      `updateBlocks(_:)`, then asks the VM to prefetch the current unit.
-//   3. When the prefetch lands, the VM posts `.readerBilingualDidChange`; the
-//      host builds inject JS via the orchestrator and awaits
-//      `bilingualCommander.inject(...)`.
-//   4. A chapter change (spine href differs) re-enumerates; an intra-chapter
-//      location change is deduped by `ReadiumBilingualChapterTracker`.
+// The pipeline: the More-menu row posts `.readerMoreBilingual` → the host toggles
+// the VM (first enable raises the designed `BilingualSetupSheet`). Enumerate
+// awaits `bilingualCommander.enumerate()` (the navigator eval RETURN value parsed
+// into `[BilingualBlock]?`), replaces the orchestrator's PAGED `-1` bucket, then
+// prefetches; when the prefetch lands the VM posts `.readerBilingualDidChange` and
+// the host injects. A chapter change re-enumerates; an intra-chapter change is
+// deduped by `ReadiumBilingualChapterTracker`. (Driver in `+BilingualDriver`.)
 //
-// Seam #3 (the WI-8 href-consistency finding class): the vreader `Locator` the
-// Readium host produces carries Readium's CONTAINER-relative reading-order href;
-// the `EPUBChapterTextProvider` is keyed on vreader's OPF-relative spine hrefs.
-// `ReadiumBilingualCommander.normalizedLocator(_:toSpineHrefs:)` rewrites the
-// href onto the OPF spine before `vm.handlePositionChange(...)` so the unit
-// resolves (unit-pinned by `ReadiumBilingualCommanderTests`).
+// Seam #3 (the WI-8 href-consistency finding class): the Readium host's vreader
+// `Locator` carries Readium's CONTAINER-relative reading-order href, while the
+// `EPUBChapterTextProvider` keys on OPF-relative spine hrefs.
+// `ReadiumBilingualCommander.normalizedLocator(_:toSpineHrefs:)` rewrites the href
+// onto the OPF spine before `vm.handlePositionChange(...)` so the unit resolves.
 //
-// SwiftUI `@State` cannot live in an extension, so the stored bilingual state
-// (commander / orchestrator / VM / parser / setup-sheet flags / chapter tracker)
-// is declared on the `ReadiumEPUBHost` struct in `ReadiumEPUBHost.swift`; this
-// file owns the methods + the surfaces modifier + the setup-sheet view.
+// SwiftUI `@State` cannot live in an extension, so the stored bilingual state is
+// declared on the `ReadiumEPUBHost` struct in `ReadiumEPUBHost.swift`; this file
+// owns the methods + the surfaces modifier + the setup-sheet view.
 //
 // @coordinates-with: ReadiumEPUBHost.swift, ReadiumEPUBHost+BilingualDriver.swift,
 //   ReadiumBilingualCommander.swift, EPUBBilingualOrchestrator.swift,
@@ -87,6 +78,18 @@ final class ReadiumBilingualChapterTracker {
         lastEnumeratedHref = nil
     }
 
+    /// Gate-4 round-3 MED-2: reverts the in-flight mark recorded by
+    /// `shouldEnumerate` when that href's enumerate FAILED (eval returned nil), so
+    /// a later `locationDidChange` for the same chapter retries instead of being
+    /// permanently deduped (the chapter would otherwise stay blank forever). Only
+    /// reverts when the current in-flight href still matches — a newer chapter that
+    /// already moved on (its own enumerate legitimately in flight) is left intact.
+    func clearInFlight(href: String?) {
+        if lastEnumeratedHref == href {
+            lastEnumeratedHref = nil
+        }
+    }
+
     /// HIGH-1: resolve the visible-chapter href for the bilingual unit lookup.
     /// Prefers the supplied Readium locator href, then the host's last-known
     /// locator href (the toggle/confirm first-enable path), then the
@@ -104,6 +107,29 @@ final class ReadiumBilingualChapterTracker {
     nonisolated static func isBilingualSupported(forLayout layout: EPUBLayoutPreference) -> Bool {
         layout == .paged
     }
+
+    /// Gate-4 round-3 MED-3: pure decision for an `epubLayout` change while
+    /// bilingual is enabled. Enumerate is paged-gated, so paged→scroll must CLEAR
+    /// the injected decorations + reset the tracker (else stale nodes linger), and
+    /// scroll→paged must RE-ENUMERATE so translation reappears. Disabled → no-op.
+    nonisolated static func layoutChangeAction(
+        newLayout: EPUBLayoutPreference, isEnabled: Bool
+    ) -> BilingualLayoutChangeAction {
+        guard isEnabled else { return .none }
+        return isBilingualSupported(forLayout: newLayout) ? .reEnumerate : .clearAndReset
+    }
+}
+
+/// Gate-4 round-3 MED-3: the action the host takes when `epubLayout` changes while
+/// bilingual is enabled. Pure value so the decision is unit-testable apart from the
+/// SwiftUI `.onChange` plumbing.
+enum BilingualLayoutChangeAction: Equatable {
+    /// Leaving paged: clear injected decorations + reset the chapter tracker.
+    case clearAndReset
+    /// Returning to paged: re-enumerate the current chapter so translation returns.
+    case reEnumerate
+    /// Disabled, or no observable change — do nothing.
+    case none
 }
 
 extension ReadiumEPUBHost {
@@ -223,11 +249,39 @@ extension ReadiumEPUBHost {
         showBilingualSetupSheet = false
     }
 
+    // MARK: - Body surfaces
+
+    /// Gate-4 round-3 MED-3: the bilingual body modifiers, factored out of
+    /// `ReadiumEPUBHost.body` for the 300-line budget. Owns the More-menu toggle
+    /// observer, the prefetch-landed re-inject observer, the first-enable setup
+    /// sheet, and the `epubLayout`-change handler (clear+reset on leaving paged /
+    /// re-enumerate on returning). PAGED path only — continuous bilingual is WI-12.
+    /// Reuses the designed `BilingualSetupSheet` (rule 51).
+    func bilingualSurfaces<Content: View>(_ content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .readerMoreBilingual)) { _ in
+                handleMoreBilingualToggle()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .readerBilingualDidChange)) { notification in
+                let key = notification.userInfo?["fingerprintKey"] as? String
+                guard key == fingerprint.canonicalKey else { return }
+                handleBilingualDidChange()
+            }
+            // Gate-4 round-3 MED-3: a paged↔scroll switch while bilingual is enabled
+            // must clear stale decorations (leaving paged) or re-enumerate the
+            // current chapter (returning to paged) — enumerate is paged-gated, so
+            // without this the injected nodes linger or never reappear.
+            .onChange(of: settingsStore.epubLayout) { _, _ in
+                handleEPUBLayoutChange()
+            }
+            .sheet(isPresented: $showBilingualSetupSheet) { bilingualSetupSheetView }
+    }
+
     // MARK: - Setup sheet
 
     /// The first-enable `BilingualSetupSheet` (designed surface from #56). The
     /// More-menu toggle + prefetch-landed observers + `.sheet` presentation are
-    /// wired inline in `ReadiumEPUBHost.body`.
+    /// driven by `bilingualSurfaces(_:)`.
     @ViewBuilder
     var bilingualSetupSheetView: some View {
         BilingualSetupSheet(

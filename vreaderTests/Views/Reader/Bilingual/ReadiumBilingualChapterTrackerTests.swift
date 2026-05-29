@@ -68,6 +68,35 @@ struct ReadiumBilingualChapterTrackerTests {
         #expect(tracker.shouldEnumerate(forHref: "chapter1.xhtml", force: false) == false)
     }
 
+    // MARK: - Gate-4 round-3 MED-2: revert in-flight on a FAILED enumerate
+
+    @Test("clearInFlight after a FAILED same-href enumerate lets the next same-href change retry")
+    func clearInFlightAllowsRetryAfterFailure() {
+        let tracker = ReadiumBilingualChapterTracker()
+        // Organic change for chapter1 → enumerate scheduled, in-flight href recorded.
+        #expect(tracker.shouldEnumerate(forHref: "chapter1.xhtml", force: false) == true)
+        // The async enumerate FAILED (eval returned nil). The driver reverts the
+        // in-flight mark for that href so the chapter is not stuck blank forever.
+        tracker.clearInFlight(href: "chapter1.xhtml")
+        #expect(tracker.lastEnumeratedHref == nil)
+        // A later location change for the SAME chapter must now re-enumerate.
+        #expect(tracker.shouldEnumerate(forHref: "chapter1.xhtml", force: false) == true)
+    }
+
+    @Test("clearInFlight does NOT revert when a newer href already moved on (stale failure)")
+    func clearInFlightIgnoresStaleHref() {
+        let tracker = ReadiumBilingualChapterTracker()
+        #expect(tracker.shouldEnumerate(forHref: "chapter1.xhtml", force: false) == true)
+        // The user already navigated to chapter2 (a fresh enumerate is in flight)
+        // before chapter1's enumerate failed. Reverting chapter1 must NOT clobber
+        // the chapter2 in-flight mark.
+        #expect(tracker.shouldEnumerate(forHref: "chapter2.xhtml", force: false) == true)
+        tracker.clearInFlight(href: "chapter1.xhtml")
+        #expect(tracker.lastEnumeratedHref == "chapter2.xhtml")
+        // chapter2 still deduped (its enumerate is legitimately in flight).
+        #expect(tracker.shouldEnumerate(forHref: "chapter2.xhtml", force: false) == false)
+    }
+
     @Test("reset clears the dedupe state so the next change re-enumerates")
     func resetClears() {
         let tracker = ReadiumBilingualChapterTracker()
@@ -121,6 +150,30 @@ struct ReadiumBilingualChapterTrackerTests {
     @Test("bilingual is NOT supported in the scroll layout (continuous is WI-12)")
     func bilingualUnsupportedScroll() {
         #expect(ReadiumBilingualChapterTracker.isBilingualSupported(forLayout: .scroll) == false)
+    }
+
+    // MARK: - Gate-4 round-3 MED-3: layout-change action decision
+
+    @Test("paged→scroll while enabled clears decorations + resets the tracker")
+    func layoutChangePagedToScrollClears() {
+        let action = ReadiumBilingualChapterTracker.layoutChangeAction(
+            newLayout: .scroll, isEnabled: true)
+        #expect(action == .clearAndReset)
+    }
+
+    @Test("scroll→paged while enabled re-enumerates the current chapter")
+    func layoutChangeScrollToPagedReEnumerates() {
+        let action = ReadiumBilingualChapterTracker.layoutChangeAction(
+            newLayout: .paged, isEnabled: true)
+        #expect(action == .reEnumerate)
+    }
+
+    @Test("a layout change while DISABLED does nothing (no stale decorations to manage)")
+    func layoutChangeDisabledNoop() {
+        #expect(ReadiumBilingualChapterTracker.layoutChangeAction(
+            newLayout: .scroll, isEnabled: false) == BilingualLayoutChangeAction.none)
+        #expect(ReadiumBilingualChapterTracker.layoutChangeAction(
+            newLayout: .paged, isEnabled: false) == BilingualLayoutChangeAction.none)
     }
 }
 #endif

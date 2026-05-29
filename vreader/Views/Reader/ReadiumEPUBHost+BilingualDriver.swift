@@ -82,14 +82,26 @@ extension ReadiumEPUBHost {
         currentReadiumLocator: ReadiumShared.Locator?
     ) async {
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
-        let blocks = await bilingualCommander.enumerate()
+        let href = currentReadiumLocator?.href.string
+        let result = await bilingualCommander.enumerate()
+        // Gate-4 round-3 MED-2: distinguish eval FAILURE (nil) from a
+        // successful-but-empty enumerate ([]). On FAILURE revert the in-flight
+        // dedupe mark for this href so a later `locationDidChange` for the same
+        // chapter retries — otherwise a transient eval failure / too-early eval
+        // leaves the visible chapter blank forever. A genuinely-empty chapter ([])
+        // is a success: COMMIT so we do not retry-loop on it.
+        guard let blocks = result else {
+            bilingualChapterTracker.clearInFlight(href: href)
+            return
+        }
         // MED-5: the user may have disabled bilingual while the async enumerate
         // was in flight. Recheck before mutating the orchestrator / prefetching —
         // the disable path's `clear()` already removed any decorations.
         guard vm.isEnabled else { return }
         bilingualOrchestrator.updateBlocks(blocks)
-        // Mark the chapter enumerated so an intra-chapter scroll is deduped.
-        bilingualChapterTracker.markEnumerated(href: currentReadiumLocator?.href.string)
+        // Mark the chapter enumerated so an intra-chapter scroll is deduped (commit
+        // on success, including a real empty chapter).
+        bilingualChapterTracker.markEnumerated(href: href)
         guard !blocks.isEmpty else { return }
         await drivePrefetchAndInject(for: currentReadiumLocator)
     }
@@ -125,6 +137,29 @@ extension ReadiumEPUBHost {
         )
         guard !pairs.isEmpty else { return }
         await bilingualCommander.inject(pairs)
+    }
+
+    /// Gate-4 round-3 MED-3: `epubLayout` change handler. WI-11 gates enumerate to
+    /// paged, so if bilingual is ALREADY enabled and the user switches paged→scroll
+    /// the injected decorations would linger (enumerate just no-ops in scroll) and
+    /// the tracker would stay primed. Clear + reset on leaving paged; re-enumerate
+    /// the current chapter on returning to paged so translation reappears.
+    func handleEPUBLayoutChange() {
+        guard let vm = bilingualViewModel else { return }
+        switch ReadiumBilingualChapterTracker.layoutChangeAction(
+            newLayout: settingsStore.epubLayout, isEnabled: vm.isEnabled
+        ) {
+        case .clearAndReset:
+            bilingualChapterTracker.reset()
+            Task { await bilingualCommander.clear() }
+        case .reEnumerate:
+            // Re-run the enumerate for the current chapter (via the host's
+            // last-known locator). Force past the dedupe — the tracker was reset
+            // when we left paged, but force keeps this robust if it was not.
+            runBilingualEnumerateForCurrentChapter()
+        case .none:
+            break
+        }
     }
 
     /// `.readerBilingualDidChange` handler — the VM's prefetch landed (or it

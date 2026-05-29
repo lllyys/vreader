@@ -106,6 +106,14 @@ struct ReadiumEPUBHost: View {
     @State var lastKnownReadiumLocator: ReadiumShared.Locator?
 
     var body: some View {
+        // Gate-4 round-3 MED-3: bilingual body modifiers (toggle, re-inject, setup
+        // sheet, layout-change handler) live in `bilingualSurfaces(_:)` in
+        // `ReadiumEPUBHost+Bilingual` for the 300-line budget.
+        bilingualSurfaces(coreBody)
+    }
+
+    @ViewBuilder
+    private var coreBody: some View {
         Group {
             switch viewModel?.state {
             case .ready(let publication):
@@ -226,6 +234,19 @@ struct ReadiumEPUBHost: View {
             // navigator opens directly at the restored locator instead of the
             // start. nil → open at the start (first-open / nothing saved).
             restoredLocator = await vm.restoredReadiumLocator()
+            // WI-11b Gate-4 round-3 HIGH-1 (persisted-on open race): build the
+            // bilingual parser + VM BEFORE `vm.open()` flips `state = .ready` and
+            // mounts the navigator. The navigator emits its initial
+            // `locationDidChange` as soon as it renders; if `bilingualViewModel`
+            // were still nil then, a persisted-on book would DROP its only initial
+            // enumerate. Neither call depends on the Readium publication
+            // (`openBilingualParser` builds its own `EPUBParser` from `fileURL`;
+            // `ensureBilingualViewModel` needs only the parser spine), so both run
+            // first. When the first `locationDidChange` fires the VM is non-nil →
+            // `handleBilingualLocationChange` enumerates (lastEnumeratedHref nil →
+            // href differs). No toggle on open, so no double-enumerate.
+            await openBilingualParser()
+            ensureBilingualViewModel()
             await vm.open()
             // WI-8: restore stored highlights once the publication is open. The
             // adapter tracks the set even before the navigator attaches, so the
@@ -234,17 +255,6 @@ struct ReadiumEPUBHost: View {
             // decorations are book-wide; the navigator renders only those whose
             // locators fall on visible spine items.
             await highlightCoordinator?.restoreAll()
-            // WI-11b: open vreader's own EPUB parser alongside the Readium open
-            // so the `EPUBChapterTextProvider` (keyed on OPF-relative spine
-            // hrefs) can supply per-spine source text for translation. Readium's
-            // `Publication` does not expose raw spine HTML to app code. Failure to
-            // open is non-fatal — bilingual simply stays unavailable for the book.
-            await openBilingualParser()
-            // WI-11b Gate-4 HIGH-2 / MED-6: build the VM on open (not only from the
-            // toggle) so a persisted-bilingual-on book publishes the text provider
-            // (MED-6) and its first `locationDidChange` finds an enabled VM and
-            // enumerates the visible chapter (HIGH-2). Idle for a disabled book.
-            ensureBilingualViewModel()
         }
         // WI-8: clear a removed highlight's decoration (the cross-format Bug #78
         // visual-clear pipeline `HighlightCoordinator.deleteHighlight` posts).
@@ -258,18 +268,6 @@ struct ReadiumEPUBHost: View {
         .onReceive(NotificationCenter.default.publisher(for: .readerHighlightsDidImport)) { _ in
             Task { await highlightCoordinator?.restoreAll() }
         }
-        // WI-11b: bilingual surface hooks (More-menu toggle, prefetch-landed
-        // re-inject, first-enable setup sheet). Paged path only — continuous
-        // bilingual is WI-12. Reuses the designed `BilingualSetupSheet` (rule 51).
-        .onReceive(NotificationCenter.default.publisher(for: .readerMoreBilingual)) { _ in
-            handleMoreBilingualToggle()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .readerBilingualDidChange)) { notification in
-            let key = notification.userInfo?["fingerprintKey"] as? String
-            guard key == fingerprint.canonicalKey else { return }
-            handleBilingualDidChange()
-        }
-        .sheet(isPresented: $showBilingualSetupSheet) { bilingualSetupSheetView }
         .onDisappear {
             // High (bug #252 lesson): host-level close lifecycle. The host owns
             // the VM (and through `.ready` its `Publication`) via @State, so the

@@ -48,6 +48,22 @@ struct ReadiumBilingualCommanderTests {
         ])
     }
 
+    // MARK: - Gate-4 round-3 MED-2: failure (nil) vs success-empty ([]) contract.
+    // enumerate() returns `[BilingualBlock]?`: `nil` = eval FAILURE / unbound /
+    // detached (a transient that the driver must be free to RETRY); `[]` =
+    // a successful eval over a chapter with no translatable blocks (the driver
+    // COMMITS so it does not retry-loop forever on a genuinely-empty chapter).
+
+    @Test("enumerate returns a successful EMPTY array (not nil) for a chapter with no blocks")
+    func enumerateSuccessEmptyIsNonNil() async {
+        let commander = ReadiumBilingualCommander()
+        commander.setEvaluator { _ in .success([[String: Any]]()) }
+        let blocks = await commander.enumerate()
+        // A real array that parses to zero blocks is success-empty, NOT a failure.
+        #expect(blocks != nil)
+        #expect(blocks?.isEmpty == true)
+    }
+
     @Test("enumerate runs the adapter's return-value enumerate JS, not a message-handler post")
     func enumerateRunsReturnValueJS() async {
         let commander = ReadiumBilingualCommander()
@@ -61,29 +77,29 @@ struct ReadiumBilingualCommanderTests {
         #expect(seenScript?.contains("webkit.messageHandlers") == false)
     }
 
-    @Test("enumerate returns [] on a .failure eval result")
-    func enumerateFailureYieldsEmpty() async {
+    @Test("enumerate returns nil (FAILURE, retryable) on a .failure eval result")
+    func enumerateFailureYieldsNil() async {
         let commander = ReadiumBilingualCommander()
         commander.setEvaluator { _ in .failure(TestEvalError.boom) }
         let blocks = await commander.enumerate()
-        #expect(blocks.isEmpty)
+        #expect(blocks == nil)
     }
 
-    @Test("enumerate returns [] when no evaluator is bound (no navigator / after detach)")
-    func enumerateUnboundYieldsEmpty() async {
+    @Test("enumerate returns nil (FAILURE) when no evaluator is bound (no navigator / after detach)")
+    func enumerateUnboundYieldsNil() async {
         let commander = ReadiumBilingualCommander()
-        // never setEvaluator → unbound
+        // never setEvaluator → unbound → not a success, must be retryable
         let blocks = await commander.enumerate()
-        #expect(blocks.isEmpty)
+        #expect(blocks == nil)
     }
 
-    @Test("enumerate returns [] after clearEvaluator (late call after teardown no-ops)")
-    func enumerateAfterClearYieldsEmpty() async {
+    @Test("enumerate returns nil (FAILURE) after clearEvaluator (late call after teardown no-ops)")
+    func enumerateAfterClearYieldsNil() async {
         let commander = ReadiumBilingualCommander()
         commander.setEvaluator { _ in .success([["bid": "b1", "text": "x"]]) }
         commander.clearEvaluator()
         let blocks = await commander.enumerate()
-        #expect(blocks.isEmpty)
+        #expect(blocks == nil)
     }
 
     // MARK: - inject

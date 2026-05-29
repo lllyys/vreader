@@ -81,15 +81,24 @@ final class ReadiumBilingualCommander {
     // MARK: - Eval-channel loop
 
     /// Runs the return-value enumerate JS on the live spine and parses the
-    /// returned `[{bid,text}]` array into `[BilingualBlock]`. Returns `[]` on a
-    /// `.failure`, a `nil` result (no navigator), or no bound evaluator.
-    func enumerate() async -> [BilingualBlock] {
-        guard let evaluator else { return [] }
+    /// returned `[{bid,text}]` array into `[BilingualBlock]`.
+    ///
+    /// Gate-4 round-3 MED-2: distinguishes eval FAILURE from a successful-but-empty
+    /// enumerate so the driver can retry a transient failure without permanently
+    /// marking the chapter enumerated:
+    ///   - `nil`  → eval FAILURE / unbound evaluator / detached navigator. The
+    ///     driver must NOT commit the chapter as enumerated — a later
+    ///     `locationDidChange` for the same chapter retries.
+    ///   - `[]`   → a successful eval over a chapter that has no translatable
+    ///     blocks. The driver COMMITS so it does not retry-loop forever.
+    ///   - non-empty → success with blocks.
+    func enumerate() async -> [BilingualBlock]? {
+        guard let evaluator else { return nil }
         switch await evaluator(ReadiumBilingualEvalAdapter.enumerateJS()) {
         case let .success(value)?:
             return EPUBBilingualPipeline.parseEnumerateMessage(value)
         case .failure?, nil:
-            return []
+            return nil
         }
     }
 
