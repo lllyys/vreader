@@ -1,7 +1,7 @@
 ---
 branch: feat/feature-42-wi9a-readium-nav
 threadId: codex-exec-readonly
-rounds: 2
+rounds: 3
 final_verdict: ship-as-is
 date: 2026-05-29
 ---
@@ -45,6 +45,38 @@ re-read of `boundNavigator`, no retain cycle).
 href resolution exact/legacy/empty + progression + CJK text-quote + nil href; the
 `ReadiumNavCommander` bind/fire/clear/rebind lifecycle; + all WI-5/6/7/8 suites
 unchanged).
+
+## Gate-5 device finding → round-3 audit (page-turn trigger was missing)
+
+Device verification (mini-epub3, Readium ON) found page-turn-by-tap was DEAD:
+WI-9a wired the host to OBSERVE `.readerNextPage`/`.readerPreviousPage` →
+`goForward`/`goBackward`, but nothing POSTED them for the Readium host. Readium
+reports taps via `VisualNavigatorDelegate.navigator(_:didTapAt:)` and does NOT
+auto-navigate (the host decides — confirmed against the Readium sample's
+`DirectionalNavigationAdapter`); the legacy tap-zone trigger lives in the
+WKWebView bridge, which the Readium navigator doesn't have. So the observers had
+no trigger.
+
+**Fix (HEAD):** `ReadiumReaderCoordinator` implements `navigator(_:didTapAt:)` →
+`ReaderTapZoneRouter.dispatch(x: point.x, totalWidth: navigator.view.bounds.width,
+layout: currentLayout)` — the same dispatcher the legacy bridges use. Paged-mode
+left/right zones post `.readerPreviousPage`/`.readerNextPage` (→ WI-9a observers
+→ `goBackward`/`goForward`); center + all scroll-mode taps post
+`.readerContentTapped` (chrome toggle, observed by the shared
+`ReaderContainerView:284`). `currentLayout` is set by the representable from
+`preferences.scroll` in make + update.
+
+**Round-3 audit of the fix:** No new Critical/High/Medium. Confirmed: `didTapAt`
+point is navigator-view-relative (zone fraction correct); no double-turn (Readium
+doesn't auto-navigate); mixed delegate isolation valid (`didTapAt` @MainActor,
+`presentError` nonisolated); center/scroll chrome-toggle wired via the shared
+container observer; stale-layout-during-flip is at most a transient tap race
+(not Medium+).
+
+**Device-verified:** right-tap Chapter One → Chapter Two (`goForward`), left-tap
+→ Chapter One (`goBackward`), bidirectional. This is the navigation that was dead
+since WI-6's device finding — now working. Artifact
+`dev-docs/verification/artifacts/feature-42-wi9a-readium-pageturn-chapter2-20260529.png`.
 
 ## Scope notes carried forward
 
