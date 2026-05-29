@@ -38,18 +38,55 @@ final class ReadiumBilingualChapterTracker {
     /// BEFORE the async enumerate launches, so a repeated `locationDidChange` for
     /// the same href before the eval completes does not schedule a second run.
     private(set) var lastEnumeratedHref: String?
+
+    /// Gate-4 (WI-12 audit) Finding 1: monotonically-increasing token that
+    /// disambiguates concurrent in-flight enumerates. In scroll mode rapid spine
+    /// changes leave multiple `await enumerate()` tasks in flight at once; without
+    /// this guard a chapter-1 enumerate completing AFTER chapter-2 was scheduled
+    /// would overwrite the shared single-bucket orchestrator and inject chapter-1's
+    /// bid→translation pairs into the now-visible chapter-2 (stale cross-spine
+    /// injection). The driver captures `currentGeneration` SYNCHRONOUSLY at schedule
+    /// time and, after the `await` returns, discards the result if the captured
+    /// value no longer matches (`isCurrentGeneration(_:) == false`). This composes
+    /// with — but is separate from — the `lastEnumeratedHref` dedupe: the href
+    /// dedupe prevents DOUBLE-SCHEDULING the same chapter; the generation token
+    /// DISCARDS STALE RESULTS of superseded schedules. The token bumps only when a
+    /// NEW enumerate is actually scheduled (a `shouldEnumerate` that returns true)
+    /// or on a `reset()`; a deduped same-href trigger does NOT bump it, so a
+    /// legitimate retry is never blocked.
+    private(set) var currentGeneration: Int = 0
     init() {}
+
+    /// Bumps + returns the next generation. Called whenever a fresh enumerate is
+    /// scheduled (a superseding event for any older in-flight task).
+    @discardableResult
+    func nextGeneration() -> Int {
+        currentGeneration += 1
+        return currentGeneration
+    }
+
+    /// Whether `generation` (captured at an enumerate's schedule time) is still the
+    /// latest — i.e. no superseding enumerate / reset has happened since. A stale
+    /// result (an older spine's enumerate completing after a newer spine was
+    /// scheduled) returns false and is discarded by the driver.
+    func isCurrentGeneration(_ generation: Int) -> Bool {
+        generation == currentGeneration
+    }
 
     /// MED-3: synchronous dedupe gate. Returns whether an enumerate should run for
     /// `href` and, when it should, records the href immediately so a duplicate
     /// organic trigger arriving before the async enumerate completes is deduped.
     /// A `force` enumerate (the toggle/confirm path, where the user just enabled
     /// bilingual on the chapter they were already reading) bypasses the dedupe and
-    /// still records the in-flight href.
+    /// still records the in-flight href. Finding 1: a schedule that actually runs
+    /// (returns true) ALSO bumps the generation so any older in-flight enumerate
+    /// for a different spine is superseded; a deduped (returns false) trigger does
+    /// NOT bump, so a legitimate retry of the same chapter is never invalidated.
     @discardableResult
     func shouldEnumerate(forHref href: String?, force: Bool) -> Bool {
         if !force, let href, href == lastEnumeratedHref { return false }
         lastEnumeratedHref = href
+        nextGeneration()
         return true
     }
 
@@ -60,9 +97,12 @@ final class ReadiumBilingualChapterTracker {
     }
 
     /// Clears the dedupe state so the next location change re-enumerates (disable
-    /// + the prefetch-disabled path).
+    /// + the prefetch-disabled path). Finding 1: also bumps the generation so any
+    /// enumerate that was in flight before a layout-change reset / disable has its
+    /// captured generation invalidated and its (now-stale) result discarded.
     func reset() {
         lastEnumeratedHref = nil
+        nextGeneration()
     }
 
     /// Gate-4 round-3 MED-2: reverts the in-flight mark recorded by
@@ -104,10 +144,17 @@ final class ReadiumBilingualChapterTracker {
     /// enumerate of the current spine is required in BOTH directions. The host's
     /// `.reEnumerate` handler clears any stale decorations before re-enumerating
     /// (defensive — the new-layout DOM is fresh). Disabled → no-op.
+    ///
+    /// Gate-4 (WI-12 audit) Finding 2: `newLayout` is now load-bearing — it FAILS
+    /// CLOSED. A layout the engine cannot do bilingual in (a future
+    /// `EPUBLayoutPreference` case) returns `.none` even when enabled, rather than
+    /// re-enumerating into an unsupported layout. Both current cases
+    /// (`.paged`/`.scroll`) are supported, so today this returns `.reEnumerate`
+    /// when enabled — but a new case defaults to safe.
     nonisolated static func layoutChangeAction(
         newLayout: EPUBLayoutPreference, isEnabled: Bool
     ) -> BilingualLayoutChangeAction {
-        guard isEnabled else { return .none }
+        guard isEnabled, isBilingualSupported(forLayout: newLayout) else { return .none }
         return .reEnumerate
     }
 

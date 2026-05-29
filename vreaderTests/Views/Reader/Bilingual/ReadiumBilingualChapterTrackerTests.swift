@@ -223,5 +223,103 @@ struct ReadiumBilingualChapterTrackerTests {
     func reEnumerateAllowedAfterSetup() {
         #expect(ReadiumBilingualChapterTracker.reEnumerateAllowed(needsSetupSheet: false) == true)
     }
+
+    // MARK: - Gate-4 (WI-12 audit) Finding 1: generation token discards stale
+    // cross-spine enumerate results. In scroll mode rapid spine changes leave
+    // multiple `await enumerate()` tasks in flight; a result is committed only if
+    // its captured generation still matches the tracker's current generation.
+
+    @Test("a fresh tracker starts at generation 0 and recognizes it as current")
+    func generationStartsAtZero() {
+        let tracker = ReadiumBilingualChapterTracker()
+        #expect(tracker.currentGeneration == 0)
+        #expect(tracker.isCurrentGeneration(0) == true)
+    }
+
+    @Test("scheduling an enumerate for a NEW href bumps the generation")
+    func differentHrefBumpsGeneration() {
+        let tracker = ReadiumBilingualChapterTracker()
+        let g0 = tracker.currentGeneration
+        #expect(tracker.shouldEnumerate(forHref: "c1.xhtml", force: false) == true)
+        let g1 = tracker.currentGeneration
+        #expect(g1 > g0)
+        #expect(tracker.shouldEnumerate(forHref: "c2.xhtml", force: false) == true)
+        #expect(tracker.currentGeneration > g1)
+    }
+
+    @Test("a deduped same-href schedule does NOT bump the generation")
+    func dedupedScheduleDoesNotBumpGeneration() {
+        let tracker = ReadiumBilingualChapterTracker()
+        #expect(tracker.shouldEnumerate(forHref: "c1.xhtml", force: false) == true)
+        let g = tracker.currentGeneration
+        // Repeated same-href organic trigger is deduped — no new enumerate
+        // scheduled, so the generation must not advance.
+        #expect(tracker.shouldEnumerate(forHref: "c1.xhtml", force: false) == false)
+        #expect(tracker.currentGeneration == g)
+    }
+
+    @Test("a forced (toggle/confirm) re-enumerate bumps the generation even for the same href")
+    func forcedScheduleBumpsGeneration() {
+        let tracker = ReadiumBilingualChapterTracker()
+        #expect(tracker.shouldEnumerate(forHref: "c1.xhtml", force: false) == true)
+        let g = tracker.currentGeneration
+        #expect(tracker.shouldEnumerate(forHref: "c1.xhtml", force: true) == true)
+        #expect(tracker.currentGeneration > g)
+    }
+
+    @Test("reset bumps the generation (layout-change / disable invalidates in-flight tasks)")
+    func resetBumpsGeneration() {
+        let tracker = ReadiumBilingualChapterTracker()
+        _ = tracker.shouldEnumerate(forHref: "c1.xhtml", force: false)
+        let g = tracker.currentGeneration
+        tracker.reset()
+        #expect(tracker.currentGeneration > g)
+    }
+
+    @Test("chapter-1's STALE result is discarded after chapter-2 was scheduled (cross-spine guard)")
+    func staleCrossSpineResultDiscarded() {
+        let tracker = ReadiumBilingualChapterTracker()
+        // Scroll mode: chapter-1 enumerate is scheduled; capture its generation
+        // SYNCHRONOUSLY (this is what the driver does before the `await`).
+        #expect(tracker.shouldEnumerate(forHref: "c1.xhtml", force: false) == true)
+        let chapter1Generation = tracker.currentGeneration
+        // The user scrolls into chapter-2 before chapter-1's async enumerate
+        // returns — a newer enumerate is scheduled, bumping the generation.
+        #expect(tracker.shouldEnumerate(forHref: "c2.xhtml", force: false) == true)
+        // chapter-1's enumerate now returns. Its captured generation is stale, so
+        // the driver MUST discard the result (no updateBlocks/markEnumerated/inject).
+        #expect(tracker.isCurrentGeneration(chapter1Generation) == false)
+        // chapter-2's own result (captured at the current generation) still commits.
+        #expect(tracker.isCurrentGeneration(tracker.currentGeneration) == true)
+    }
+
+    // MARK: - Gate-4 (WI-12 audit) Finding 2: layoutChangeAction uses newLayout to
+    // FAIL CLOSED for any future unsupported layout case.
+
+    @Test("layoutChangeAction fails closed (.none) for an unsupported layout even when enabled")
+    func layoutChangeFailsClosedForUnsupportedLayout() {
+        // The two current EPUBLayoutPreference cases (.paged/.scroll) are both
+        // supported, so this asserts the supported branch returns .reEnumerate when
+        // enabled — and that the decision is keyed on `newLayout` via
+        // isBilingualSupported, so a future unsupported case would return .none.
+        for layout in EPUBLayoutPreference.allCases {
+            let supported = ReadiumBilingualChapterTracker.isBilingualSupported(forLayout: layout)
+            let action = ReadiumBilingualChapterTracker.layoutChangeAction(
+                newLayout: layout, isEnabled: true)
+            if supported {
+                #expect(action == .reEnumerate)
+            } else {
+                #expect(action == BilingualLayoutChangeAction.none)
+            }
+        }
+    }
+
+    @Test("layoutChangeAction is .none when disabled regardless of layout support")
+    func layoutChangeNoneWhenDisabledAllLayouts() {
+        for layout in EPUBLayoutPreference.allCases {
+            #expect(ReadiumBilingualChapterTracker.layoutChangeAction(
+                newLayout: layout, isEnabled: false) == BilingualLayoutChangeAction.none)
+        }
+    }
 }
 #endif

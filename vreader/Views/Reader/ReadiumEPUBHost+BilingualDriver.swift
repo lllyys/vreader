@@ -25,6 +25,13 @@
 //   - MED-5: the in-flight enumerate rechecks `vm.isEnabled` after the async
 //     `enumerate()` returns, before mutating the orchestrator / prefetching, so a
 //     disable mid-flight does not paint stale decorations.
+//   - WI-12 audit Finding 1: each enumerate captures the tracker's GENERATION
+//     synchronously at schedule time; after the async `enumerate()` returns, a
+//     result whose captured generation is no longer current is DISCARDED. In
+//     scroll mode rapid spine changes leave multiple enumerates in flight; this
+//     stops chapter-1's late result from overwriting the shared paged bucket and
+//     injecting its pairs into the now-visible chapter-2. Composes with — but is
+//     separate from — the MED-3 href dedupe (which prevents double-scheduling).
 //
 // @coordinates-with: ReadiumEPUBHost.swift, ReadiumEPUBHost+Bilingual.swift,
 //   ReadiumBilingualCommander.swift, EPUBBilingualOrchestrator.swift,
@@ -62,7 +69,14 @@ extension ReadiumEPUBHost {
         bilingualChapterTracker.shouldEnumerate(
             forHref: locator?.href.string, force: true
         )
-        Task { await runBilingualEnumerate(currentReadiumLocator: locator) }
+        // Finding 1: capture the generation SYNCHRONOUSLY (the forced schedule just
+        // bumped it) so a later spine change supersedes this in-flight enumerate.
+        let generation = bilingualChapterTracker.currentGeneration
+        Task {
+            await runBilingualEnumerate(
+                currentReadiumLocator: locator, generation: generation
+            )
+        }
     }
 
     /// Drive the bilingual chapter-change enumerate off the navigator's
@@ -80,7 +94,15 @@ extension ReadiumEPUBHost {
         guard bilingualChapterTracker.shouldEnumerate(
             forHref: readiumLocator.href.string, force: false
         ) else { return }
-        Task { await runBilingualEnumerate(currentReadiumLocator: readiumLocator) }
+        // Finding 1: capture the generation SYNCHRONOUSLY (the schedule just bumped
+        // it) so a newer spine's enumerate supersedes this one — chapter-1's result
+        // completing after chapter-2 was scheduled is discarded, not injected.
+        let generation = bilingualChapterTracker.currentGeneration
+        Task {
+            await runBilingualEnumerate(
+                currentReadiumLocator: readiumLocator, generation: generation
+            )
+        }
     }
 
     /// The shared enumerate→prefetch driver. Enumerates the live spine via the
@@ -90,7 +112,8 @@ extension ReadiumEPUBHost {
     /// inject runs later, off `.readerBilingualDidChange`, once the prefetch
     /// lands.
     func runBilingualEnumerate(
-        currentReadiumLocator: ReadiumShared.Locator?
+        currentReadiumLocator: ReadiumShared.Locator?,
+        generation: Int
     ) async {
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
         // Finding B (defense in depth): never enumerate while first-enable setup is
@@ -100,6 +123,14 @@ extension ReadiumEPUBHost {
         ) else { return }
         let href = currentReadiumLocator?.href.string
         let result = await bilingualCommander.enumerate()
+        // Finding 1: a newer spine's enumerate may have been scheduled while this
+        // one was in flight (scroll mode emits rapid spine boundary changes). If
+        // this result's captured generation is no longer current it is STALE —
+        // discard it WITHOUT touching the in-flight href dedupe (the superseding
+        // schedule owns the new href; clearing here would clobber it), without
+        // mutating the shared single-bucket orchestrator, and without injecting
+        // chapter-1's pairs into the now-visible chapter-2.
+        guard bilingualChapterTracker.isCurrentGeneration(generation) else { return }
         // Gate-4 round-3 MED-2: distinguish eval FAILURE (nil) from a
         // successful-but-empty enumerate ([]). On FAILURE revert the in-flight
         // dedupe mark for this href so a later `locationDidChange` for the same
