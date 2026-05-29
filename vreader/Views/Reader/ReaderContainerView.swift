@@ -626,6 +626,15 @@ struct ReaderContainerView: View {
             // sheet — it withholds the empty state until the build
             // resolves. `ensureTOCReady()` is idempotent.
             ensureTOCReady()
+            // Bug #79 (REOPENED): eagerly prepare the search pipeline on reader
+            // open so the FIRST search of a session shows the real search field
+            // immediately instead of the "Preparing search…" placeholder. The
+            // eager call was removed in fd12ab0e because the cold SQLite open
+            // ran on the MainActor (bug #89 stall); `prepareEagerly` now builds
+            // the store OFF the MainActor, so reader open is not blocked.
+            if let fp = DocumentFingerprint(canonicalKey: book.fingerprintKey) {
+                await searchCoordinator.prepareEagerly(fingerprint: fp)
+            }
         }
         .sheet(isPresented: $showSettings) {
             ReaderSettingsPanel(

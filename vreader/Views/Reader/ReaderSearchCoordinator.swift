@@ -26,6 +26,29 @@ final class ReaderSearchCoordinator {
     private(set) var searchViewModel: SearchViewModel?
     /// Whether full setup (indexing) has been started. Prevents double-indexing. (bug #79)
     private var setupStarted = false
+    /// In-flight prepare task — single-flight coalescing so concurrent callers
+    /// (reader-open `prepareEagerly` racing the search-sheet `setup`) share ONE
+    /// cold SQLite open instead of racing two. (Codex Gate-4 Medium, bug #79)
+    private var prepareTask: Task<Void, Never>?
+
+    /// Eager-prepare entry point called on reader open (bug #79).
+    ///
+    /// Restores the original bug #79 fix — preparing the search pipeline when
+    /// the reader opens so the FIRST search of a session shows the real search
+    /// field immediately instead of the "Preparing search…" placeholder.
+    ///
+    /// The regression history: the eager call was removed in fd12ab0e because
+    /// `prepareService` opened SQLite synchronously on the MainActor, adding a
+    /// 500ms–2s book-open stall (the bug #89 class). This restores eager prep
+    /// WITHOUT that stall: `prepareService` now builds the cold store off the
+    /// MainActor (the SQLite open + integrity_check + FTS5/table DDL run on a
+    /// detached task), so reader open is never blocked by the eager prep.
+    ///
+    /// Thin wrapper over `prepareService` so the reader-open call site reads as
+    /// intent ("prepare eagerly") and the unit test has a named seam.
+    func prepareEagerly(fingerprint: DocumentFingerprint) async {
+        await prepareService(fingerprint: fingerprint)
+    }
 
     /// Sets up the search pipeline for a book:
     /// creates the persistent index store, SearchService, and SearchViewModel,
@@ -34,19 +57,54 @@ final class ReaderSearchCoordinator {
     /// Call on reader open so the search panel has a VM immediately when opened.
     func prepareService(fingerprint: DocumentFingerprint) async {
         guard searchService == nil else { return }
+        // Single-flight (Codex Gate-4 Medium, bug #79): if a prepare is already
+        // in flight, await it instead of starting a second cold SQLite open. The
+        // coordinator is @MainActor, so reading/writing `prepareTask` is race-free
+        // and the first caller wins the assignment; concurrent callers join.
+        if let inFlight = prepareTask {
+            await inFlight.value
+            return
+        }
+        // Capture `self` strongly: the task is awaited inline below and the
+        // handle is cleared immediately after, so it cannot outlive this call
+        // and there is no retain cycle. (A `weak self` would make the task
+        // `Task<()?, Never>` and break the stored-handle type.)
+        let task = Task { @MainActor in
+            await self.runPrepare(fingerprint: fingerprint)
+        }
+        prepareTask = task
+        await task.value
+        prepareTask = nil
+    }
+
+    /// The actual prepare body, guaranteed to run at most once concurrently by
+    /// `prepareService`'s single-flight gate.
+    private func runPrepare(fingerprint: DocumentFingerprint) async {
+        guard searchService == nil else { return }
+        // Bug #89 / #79: build the cold store OFF the MainActor. `makePersistentStore`
+        // is `nonisolated` and `SearchIndexStore` is `@unchecked Sendable`, so the
+        // expensive `sqlite3_open` + integrity_check + FTS5/table DDL run on a
+        // detached task and never block reader open. Only the @MainActor-isolated
+        // state assignment + the (cheap, I/O-free) SearchViewModel init hop back here.
+        let store: SearchIndexStore
         do {
-            // Open SQLite — makePersistentStore is MainActor-isolated but fast after first call (bug #89)
-            let store = try Self.makePersistentStore()
-            let service = SearchService(store: store)
-            searchService = service
-            persistentStore = store
-            searchViewModel = SearchViewModel(
-                searchService: service,
-                bookFingerprint: fingerprint
-            )
+            store = try await Task.detached(priority: .userInitiated) {
+                try Self.makePersistentStore()
+            }.value
         } catch {
             Self.logger.error("Search prepare failed: \(error.localizedDescription)")
+            return
         }
+        // Re-check after the off-main hop (defensive — the single-flight gate
+        // already prevents a concurrent racer publishing a store first).
+        guard searchService == nil else { return }
+        let service = SearchService(store: store)
+        searchService = service
+        persistentStore = store
+        searchViewModel = SearchViewModel(
+            searchService: service,
+            bookFingerprint: fingerprint
+        )
     }
 
     /// Persistent store reference for deferred indexing. (bug #79)
@@ -173,7 +231,13 @@ final class ReaderSearchCoordinator {
 
     /// Creates a persistent file-backed SearchIndexStore.
     /// Falls back to in-memory if file creation fails.
-    private static func makePersistentStore() throws -> SearchIndexStore {
+    ///
+    /// `nonisolated` (bug #79 / #89): the cold SQLite open (`sqlite3_open` +
+    /// integrity_check + FTS5/table DDL) is the heavy part of search prep and
+    /// must run OFF the MainActor. This function touches no MainActor state and
+    /// returns an `@unchecked Sendable` store, so `prepareService` invokes it on
+    /// a detached task and only hops back to the actor for the state assignment.
+    nonisolated private static func makePersistentStore() throws -> SearchIndexStore {
         let dir = searchIndexDirectoryURL
         let dbPath = dir.appendingPathComponent("search.sqlite3")
         do {
