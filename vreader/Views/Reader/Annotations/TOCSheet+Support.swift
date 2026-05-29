@@ -96,6 +96,22 @@ extension TOCSheet {
         return nil
     }
 
+    // MARK: - Scroll retry schedule (Bug #282)
+
+    /// Cumulative *post-appear* delays (milliseconds) at which the Contents
+    /// list re-issues its scroll-to-current-chapter. The first entry is `0`
+    /// — an immediate, unanimated jump that lands the instant the active
+    /// row is materialized in the `LazyVStack`. The remaining entries are a
+    /// short fallback ladder for the long-TOC case where the target row is
+    /// not yet built on the first attempt (each is animated for a gentle
+    /// settle once the row exists).
+    ///
+    /// Bug #282 replaced the legacy `[100, 300, 600]` schedule, which slept
+    /// before *every* attempt — the authoritative scroll didn't fire until
+    /// ~1000ms in, and each attempt animated 0.3s, so the list visibly crept
+    /// to the chapter over ~1.3s. The new schedule front-loads the landing.
+    static let scrollRetryDelaysMilliseconds: [Int] = [0, 80, 240]
+
     /// The active TOC entry for `currentLocator` — `nil` when no reading
     /// position is known.
     var activeEntryIndex: Int? {

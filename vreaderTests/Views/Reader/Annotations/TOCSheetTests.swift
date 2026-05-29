@@ -249,6 +249,34 @@ struct TOCSheetTests {
         #expect(empty.currentChapterScrollTargetForTesting == nil)
     }
 
+    // MARK: - Scroll retry schedule timing (Bug #282 — the ~1.3s creep)
+
+    /// Bug #282: the old `.task(id:)` loop slept BEFORE every attempt
+    /// (`[100, 300, 600]`), so the authoritative scroll didn't fire until
+    /// ~1000ms in (each attempt then animated 0.3s → settle ~1.3s). The
+    /// schedule must now lead with an immediate t=0 attempt so a
+    /// materialized row lands the instant the sheet appears; later attempts
+    /// are a short fallback for the not-yet-materialized LazyVStack case.
+    @Test("Scroll retry schedule leads with an immediate t=0 attempt (Bug #282)")
+    func scrollRetryScheduleLeadsImmediate() {
+        let schedule = TOCSheet.scrollRetryDelaysMilliseconds
+        // First attempt must fire with no leading sleep.
+        #expect(schedule.first == 0)
+    }
+
+    @Test("Scroll retry schedule is non-decreasing and finishes fast (Bug #282)")
+    func scrollRetryScheduleMonotonicAndFast() {
+        let schedule = TOCSheet.scrollRetryDelaysMilliseconds
+        // A fallback is still present (at least one retry after t=0).
+        #expect(schedule.count >= 2)
+        // Cumulative delays are monotonically non-decreasing.
+        #expect(schedule == schedule.sorted())
+        // The last (authoritative) attempt fires well before the old ~1000ms
+        // — the perceived-slowness regression. Keep the whole schedule under
+        // half the old worst case so the chapter is on-screen near-instantly.
+        #expect(schedule.last! <= 500)
+    }
+
     // MARK: - Current-chapter row styling decision (Bug #248 — accent + bold)
 
     @Test("Current-chapter row styles accent + bold; others ink + regular (Bug #248)")

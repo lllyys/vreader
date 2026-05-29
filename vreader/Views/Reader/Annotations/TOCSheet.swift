@@ -217,11 +217,12 @@ struct TOCSheet: View {
     private var tocEntryList: some View {
         // `ScrollViewReader` + per-row `.id(entry.id)` restores the
         // auto-scroll-to-current-chapter capability feature #62 WI-5 dropped
-        // when it replaced the legacy `TOCListView` (Bug #248). On appear the
-        // proxy centers the active chapter's row; the `.task(id:)` retry loop
-        // (lifted from the legacy `edc550d0` hardening) re-issues the scroll
-        // at 100 / 300 / 600 ms so a row not yet materialised in the
-        // `LazyVStack` for a long TOC still lands centered.
+        // (Bug #248). The `.task(id:)` loop issues an immediate (t=0,
+        // unanimated) scroll so a materialized row lands the instant the
+        // sheet appears, then a short animated fallback ladder
+        // (`scrollRetryDelaysMilliseconds`) for the long-TOC case where the
+        // target row isn't yet built in the `LazyVStack`. Bug #282 replaced
+        // the legacy always-sleep-first schedule that crept over ~1.3s.
         ScrollViewReader { proxy in
             LazyVStack(spacing: 0) {
                 ForEach(Array(tocEntries.enumerated()), id: \.element.id) { index, entry in
@@ -241,11 +242,22 @@ struct TOCSheet: View {
             .padding(.vertical, 14)
             .task(id: currentChapterScrollTarget) {
                 guard let targetID = currentChapterScrollTarget else { return }
-                for delay in [100, 300, 600] {
-                    try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+                var elapsed = 0
+                for (attempt, cumulative) in Self.scrollRetryDelaysMilliseconds.enumerated() {
+                    // Sleep only the incremental gap to the next attempt so
+                    // the first (cumulative 0) attempt fires with no delay.
+                    let gap = cumulative - elapsed
+                    if gap > 0 {
+                        try? await Task.sleep(nanoseconds: UInt64(gap) * 1_000_000)
+                    }
+                    elapsed = cumulative
                     guard !Task.isCancelled else { return }
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        proxy.scrollTo(targetID, anchor: .center)
+                    if attempt == 0 {
+                        proxy.scrollTo(targetID, anchor: .center)   // instant (Bug #282)
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(targetID, anchor: .center)
+                        }
                     }
                 }
             }
