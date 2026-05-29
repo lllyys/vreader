@@ -64,6 +64,49 @@ struct ReadiumBilingualCommanderTests {
         #expect(blocks?.isEmpty == true)
     }
 
+    @Test("enumerate returns a successful EMPTY {blocks:[]} envelope (not nil)")
+    func enumerateSuccessEmptyEnvelopeIsNonNil() async {
+        let commander = ReadiumBilingualCommander()
+        commander.setEvaluator { _ in .success(["blocks": [[String: Any]]()]) }
+        let blocks = await commander.enumerate()
+        // A valid envelope whose `blocks` array is empty is success-empty, NOT a
+        // failure — the driver must COMMIT (no retry-loop on a real empty chapter).
+        #expect(blocks != nil)
+        #expect(blocks?.isEmpty == true)
+    }
+
+    // Gate-4 round-3 MED (Finding A): a MALFORMED `.success` payload (the eval
+    // returned garbage — a string, a number, or a dict with no `blocks` array) is
+    // a real PARSE FAILURE, not success-empty. `parseEnumerateMessage` tolerantly
+    // returns `[]` for garbage, so `enumerate()` must gate on a POSITIVE shape
+    // check (bare `[Any]` array OR `[String:Any]` envelope with a `blocks` array)
+    // and return `nil` otherwise — else the driver commits `lastEnumeratedHref`
+    // and the chapter is permanently deduped, never retried after a bad payload.
+
+    @Test("enumerate returns nil (PARSE FAILURE) for a malformed bare-string .success payload")
+    func enumerateMalformedStringYieldsNil() async {
+        let commander = ReadiumBilingualCommander()
+        commander.setEvaluator { _ in .success("oops") }
+        let blocks = await commander.enumerate()
+        #expect(blocks == nil)
+    }
+
+    @Test("enumerate returns nil (PARSE FAILURE) for a malformed numeric .success payload")
+    func enumerateMalformedNumberYieldsNil() async {
+        let commander = ReadiumBilingualCommander()
+        commander.setEvaluator { _ in .success(42) }
+        let blocks = await commander.enumerate()
+        #expect(blocks == nil)
+    }
+
+    @Test("enumerate returns nil (PARSE FAILURE) for a dict with no `blocks` array")
+    func enumerateMalformedDictNoBlocksYieldsNil() async {
+        let commander = ReadiumBilingualCommander()
+        commander.setEvaluator { _ in .success(["error": "boom"]) }
+        let blocks = await commander.enumerate()
+        #expect(blocks == nil)
+    }
+
     @Test("enumerate runs the adapter's return-value enumerate JS, not a message-handler post")
     func enumerateRunsReturnValueJS() async {
         let commander = ReadiumBilingualCommander()

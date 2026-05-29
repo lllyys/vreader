@@ -86,20 +86,45 @@ final class ReadiumBilingualCommander {
     /// Gate-4 round-3 MED-2: distinguishes eval FAILURE from a successful-but-empty
     /// enumerate so the driver can retry a transient failure without permanently
     /// marking the chapter enumerated:
-    ///   - `nil`  → eval FAILURE / unbound evaluator / detached navigator. The
-    ///     driver must NOT commit the chapter as enumerated — a later
-    ///     `locationDidChange` for the same chapter retries.
+    ///   - `nil`  → eval FAILURE / unbound evaluator / detached navigator / a
+    ///     MALFORMED `.success` payload (a real PARSE FAILURE — non-array,
+    ///     non-envelope). The driver must NOT commit the chapter as enumerated — a
+    ///     later `locationDidChange` for the same chapter retries.
     ///   - `[]`   → a successful eval over a chapter that has no translatable
-    ///     blocks. The driver COMMITS so it does not retry-loop forever.
+    ///     blocks (a genuinely valid-but-empty result). The driver COMMITS so it
+    ///     does not retry-loop forever.
     ///   - non-empty → success with blocks.
+    ///
+    /// Gate-4 round-3 MED (Finding A): `parseEnumerateMessage` tolerantly returns
+    /// `[]` for garbage too, so a parse failure would otherwise look like
+    /// success-empty and the chapter would be permanently deduped after a bad eval
+    /// payload. We gate on a POSITIVE shape check FIRST: the value must be a bare
+    /// `[Any]` array (the paged `[{bid,text}]` shape, incl. `[]`) or a
+    /// `[String:Any]` envelope carrying a `blocks` array (the continuous-scroll
+    /// shape, incl. `{blocks:[]}`). Anything else is a parse failure → `nil`.
     func enumerate() async -> [BilingualBlock]? {
         guard let evaluator else { return nil }
         switch await evaluator(ReadiumBilingualEvalAdapter.enumerateJS()) {
         case let .success(value)?:
+            guard ReadiumBilingualCommander.isValidEnumerateShape(value) else {
+                return nil
+            }
             return EPUBBilingualPipeline.parseEnumerateMessage(value)
         case .failure?, nil:
             return nil
         }
+    }
+
+    /// Gate-4 round-3 MED (Finding A): positive shape gate distinguishing a
+    /// valid-but-empty enumerate result from a malformed (unparseable) payload.
+    /// Valid: a bare `[Any]` array (paged `[{bid,text}]`, including empty) OR a
+    /// `[String:Any]` envelope with a `blocks` array (continuous-scroll, including
+    /// `{blocks:[]}`). Garbage (string / number / `blocks`-less dict) is NOT a
+    /// valid empty — it is a parse failure the driver must be free to retry.
+    nonisolated static func isValidEnumerateShape(_ value: Any) -> Bool {
+        if value is [Any] { return true }
+        if let dict = value as? [String: Any] { return dict["blocks"] is [Any] }
+        return false
     }
 
     /// Injects the `data-vreader-bid` → translation map as interlinear

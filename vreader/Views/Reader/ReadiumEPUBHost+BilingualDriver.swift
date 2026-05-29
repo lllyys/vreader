@@ -45,6 +45,13 @@ extension ReadiumEPUBHost {
         guard ReadiumBilingualChapterTracker.isBilingualSupported(
             forLayout: settingsStore.epubLayout
         ) else { return }
+        // Finding B (defense in depth): NEVER enumerate while the first-enable
+        // setup sheet is still pending — that would prefetch/inject under the
+        // default language/granularity, skipping confirmation. The sheet is
+        // already showing; enumerate runs from `confirmBilingualSetup`.
+        guard ReadiumBilingualChapterTracker.reEnumerateAllowed(
+            needsSetupSheet: vm.needsSetupSheet
+        ) else { return }
         let locator = lastKnownReadiumLocator
         // MED-3: force the enumerate (bypass dedupe) and record the in-flight href
         // synchronously, before the Task launches.
@@ -82,6 +89,11 @@ extension ReadiumEPUBHost {
         currentReadiumLocator: ReadiumShared.Locator?
     ) async {
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
+        // Finding B (defense in depth): never enumerate while first-enable setup is
+        // pending — that would prefetch under the default language/granularity.
+        guard ReadiumBilingualChapterTracker.reEnumerateAllowed(
+            needsSetupSheet: vm.needsSetupSheet
+        ) else { return }
         let href = currentReadiumLocator?.href.string
         let result = await bilingualCommander.enumerate()
         // Gate-4 round-3 MED-2: distinguish eval FAILURE (nil) from a

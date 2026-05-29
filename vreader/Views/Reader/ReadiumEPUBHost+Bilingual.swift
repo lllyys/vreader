@@ -1,8 +1,10 @@
 // Purpose: Feature #42 WI-11b — bilingual interlinear wiring for the Readium
 // EPUB host (PAGED path only — continuous-scroll bilingual parity is WI-12).
-// This file owns the parser/VM lifecycle, the More-menu toggle + setup sheet,
-// and the chapter-tracker decision type. The enumerate→prefetch→inject DRIVER
-// methods live in `ReadiumEPUBHost+BilingualDriver.swift` (300-line budget).
+// This file owns the parser/VM lifecycle, the More-menu toggle + setup sheet.
+// The enumerate→prefetch→inject DRIVER methods live in
+// `ReadiumEPUBHost+BilingualDriver.swift`, and the chapter-tracker dedup state +
+// pure decision enums live in `Bilingual/ReadiumBilingualChapterTracker.swift`
+// (300-line budget).
 // Mirrors `EPUBReaderContainerView+Bilingual.swift` but drives the
 // enumerate→prefetch→inject loop through Readium's one-way `evaluateJavaScript`
 // channel via `ReadiumBilingualCommander` instead of the legacy WKWebView's
@@ -38,99 +40,10 @@
 import SwiftUI
 import ReadiumShared
 
-/// Reference-type chapter-change dedup + pure decision logic for the Readium
-/// bilingual loop. A class (not a value `@State`) so the `onLocationChange`
-/// closure — captured at body-eval — mutates the live instance rather than a
-/// stale value snapshot. The static helpers are pure (unit-tested in
-/// `ReadiumBilingualChapterTrackerTests`).
-@MainActor
-final class ReadiumBilingualChapterTracker {
-    /// The spine href the bilingual loop last enumerated (or has IN FLIGHT). `nil`
-    /// until the first enumerate. An intra-chapter location change (same href) is
-    /// deduped. Gate-4 MED-3: this is written SYNCHRONOUSLY in `shouldEnumerate`
-    /// BEFORE the async enumerate launches, so a repeated `locationDidChange` for
-    /// the same href before the eval completes does not schedule a second run.
-    private(set) var lastEnumeratedHref: String?
-    init() {}
-
-    /// MED-3: synchronous dedupe gate. Returns whether an enumerate should run for
-    /// `href` and, when it should, records the href immediately so a duplicate
-    /// organic trigger arriving before the async enumerate completes is deduped.
-    /// A `force` enumerate (the toggle/confirm path, where the user just enabled
-    /// bilingual on the chapter they were already reading) bypasses the dedupe and
-    /// still records the in-flight href.
-    @discardableResult
-    func shouldEnumerate(forHref href: String?, force: Bool) -> Bool {
-        if !force, let href, href == lastEnumeratedHref { return false }
-        lastEnumeratedHref = href
-        return true
-    }
-
-    /// Records the href an enumerate actually ran for (the resolved spine href),
-    /// keeping the dedupe key consistent after the async enumerate returns.
-    func markEnumerated(href: String?) {
-        if let href { lastEnumeratedHref = href }
-    }
-
-    /// Clears the dedupe state so the next location change re-enumerates (disable
-    /// + the prefetch-disabled path).
-    func reset() {
-        lastEnumeratedHref = nil
-    }
-
-    /// Gate-4 round-3 MED-2: reverts the in-flight mark recorded by
-    /// `shouldEnumerate` when that href's enumerate FAILED (eval returned nil), so
-    /// a later `locationDidChange` for the same chapter retries instead of being
-    /// permanently deduped (the chapter would otherwise stay blank forever). Only
-    /// reverts when the current in-flight href still matches — a newer chapter that
-    /// already moved on (its own enumerate legitimately in flight) is left intact.
-    func clearInFlight(href: String?) {
-        if lastEnumeratedHref == href {
-            lastEnumeratedHref = nil
-        }
-    }
-
-    /// HIGH-1: resolve the visible-chapter href for the bilingual unit lookup.
-    /// Prefers the supplied Readium locator href, then the host's last-known
-    /// locator href (the toggle/confirm first-enable path), then the
-    /// last-enumerated href (a prefetch-landed inject that carries no locator).
-    /// Never resets the only available source before reading it.
-    nonisolated static func selectedHref(
-        supplied: String?, lastKnown: String?, lastEnumerated: String?
-    ) -> String? {
-        supplied ?? lastKnown ?? lastEnumerated
-    }
-
-    /// MED-4: PAGED-only gate. Continuous-scroll bilingual is WI-12, so the
-    /// enumerate/inject path no-ops in `.scroll` (the paged single-spine block
-    /// assumptions do not hold there).
-    nonisolated static func isBilingualSupported(forLayout layout: EPUBLayoutPreference) -> Bool {
-        layout == .paged
-    }
-
-    /// Gate-4 round-3 MED-3: pure decision for an `epubLayout` change while
-    /// bilingual is enabled. Enumerate is paged-gated, so paged→scroll must CLEAR
-    /// the injected decorations + reset the tracker (else stale nodes linger), and
-    /// scroll→paged must RE-ENUMERATE so translation reappears. Disabled → no-op.
-    nonisolated static func layoutChangeAction(
-        newLayout: EPUBLayoutPreference, isEnabled: Bool
-    ) -> BilingualLayoutChangeAction {
-        guard isEnabled else { return .none }
-        return isBilingualSupported(forLayout: newLayout) ? .reEnumerate : .clearAndReset
-    }
-}
-
-/// Gate-4 round-3 MED-3: the action the host takes when `epubLayout` changes while
-/// bilingual is enabled. Pure value so the decision is unit-testable apart from the
-/// SwiftUI `.onChange` plumbing.
-enum BilingualLayoutChangeAction: Equatable {
-    /// Leaving paged: clear injected decorations + reset the chapter tracker.
-    case clearAndReset
-    /// Returning to paged: re-enumerate the current chapter so translation returns.
-    case reEnumerate
-    /// Disabled, or no observable change — do nothing.
-    case none
-}
+// `ReadiumBilingualChapterTracker` + its pure decision enums
+// (`BilingualLayoutChangeAction`, `BilingualEnableAction`,
+// `BilingualConfirmAction`) live in
+// `Bilingual/ReadiumBilingualChapterTracker.swift` (300-line budget).
 
 extension ReadiumEPUBHost {
 
@@ -209,23 +122,27 @@ extension ReadiumEPUBHost {
             Task { await bilingualCommander.clear() }
             return
         }
-        // MED-4: continuous-scroll bilingual is WI-12. The VM toggle still flips
-        // (so the per-book preference persists), but skip enumerate/inject and
-        // keep the spine clear when the layout is not paged.
-        guard ReadiumBilingualChapterTracker.isBilingualSupported(
-            forLayout: settingsStore.epubLayout
-        ) else {
-            bilingualChapterTracker.reset()
-            Task { await bilingualCommander.clear() }
-            return
-        }
-        if vm.needsSetupSheet {
+        // Finding B: first-enable confirmation must ALWAYS precede enumeration.
+        // The setup sheet is layout-independent (only the enumerate is paged-gated)
+        // so a first enable in scroll STILL raises the sheet — it does not early
+        // -return before presenting it. An already-configured re-enable enumerates
+        // in paged (MED-4: clears only in scroll, since continuous bilingual is
+        // WI-12; the per-book preference still persisted via `setEnabled`).
+        switch ReadiumBilingualChapterTracker.enableToggleAction(
+            needsSetupSheet: vm.needsSetupSheet,
+            layoutSupported: ReadiumBilingualChapterTracker.isBilingualSupported(
+                forLayout: settingsStore.epubLayout)
+        ) {
+        case .presentSetup:
             bilingualSetupState = BilingualSetupSheetState(
                 languageKey: vm.targetLanguage, granularity: vm.granularity
             )
             showBilingualSetupSheet = true
-        } else {
+        case .enumerate:
             runBilingualEnumerateForCurrentChapter()
+        case .clearOnly:
+            bilingualChapterTracker.reset()
+            Task { await bilingualCommander.clear() }
         }
     }
 
@@ -237,7 +154,19 @@ extension ReadiumEPUBHost {
         vm.setGranularity(bilingualSetupState.granularity)
         vm.dismissSetupSheet()
         showBilingualSetupSheet = false
-        runBilingualEnumerateForCurrentChapter()
+        // Finding B: enumerate only when the layout is paged. If the user
+        // first-enabled in scroll, confirm just commits the language/granularity +
+        // dismisses; the enumerate happens when they return to paged (the
+        // `.reEnumerate` path, now allowed because `needsSetupSheet` is cleared).
+        switch ReadiumBilingualChapterTracker.confirmAction(
+            layoutSupported: ReadiumBilingualChapterTracker.isBilingualSupported(
+                forLayout: settingsStore.epubLayout)
+        ) {
+        case .enumerate:
+            runBilingualEnumerateForCurrentChapter()
+        case .commitOnly:
+            break
+        }
     }
 
     /// Dismiss the setup sheet without persisting and turn bilingual back off —
