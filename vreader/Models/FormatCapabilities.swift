@@ -25,13 +25,20 @@ struct FormatCapabilities: OptionSet, Sendable, Hashable {
     /// + `.onChange(fontSize)` and renders via `pagedReaderContent`
     /// (line 278) which observes `pageNavigator.currentPage`.
     /// TXT was previously included via the `reflowableBase` preset,
-    /// but bug #157 confirmed `TXTReaderContainerView.updatePaginationIfNeeded()`
-    /// is defined-but-never-called and there is no paged renderer that
-    /// observes `pageNavigator.currentPage` — so the toggle silently
-    /// no-op'd for every TXT file. Removed from the TXT capability set
-    /// to match the bug #156 / EPUB-PDF-AZW3 capability-gate pattern.
+    /// but bug #157 confirmed there was no paged renderer that observed
+    /// `pageNavigator.currentPage` — so the toggle silently no-op'd for
+    /// every TXT file. Removed from the TXT capability set to match the
+    /// bug #156 / EPUB-PDF-AZW3 capability-gate pattern.
     /// `ReaderSettingsPanel.autoPageTurnSection` keys off this flag
     /// to hide the toggle for formats that would silently no-op.
+    /// Bug #284 / GH #1261 wired a real TXT paged renderer
+    /// (`TXTReaderContainerView+Paged.swift`) + cross-chapter manual
+    /// page-turn, so the "no paged renderer" precondition no longer holds.
+    /// `.autoPageTurn` for TXT is nonetheless still intentionally OUT of
+    /// this set — bug #284 scoped to manual page-turn only; auto-page-turn
+    /// for TXT (timer-driven advance + the visible toggle) is a separate
+    /// follow-up that needs its own verification + the design's toggle
+    /// surface, not a free rider on the renderer wiring.
     static let autoPageTurn     = FormatCapabilities(rawValue: 1 << 9)
 
     // MARK: - Presets
@@ -40,10 +47,12 @@ struct FormatCapabilities: OptionSet, Sendable, Hashable {
     private static let universal: FormatCapabilities = [.search, .bookmarks]
 
     /// Base capabilities for reflowable text formats (TXT, MD).
-    /// `.autoPageTurn` is intentionally excluded — only MD has end-to-end
-    /// AutoPageTurner wiring (bug #157 / GH #461). Add it back to TXT only
-    /// when `TXTReaderContainerView` calls `updatePaginationIfNeeded()` and
-    /// has a paged renderer mirroring `MDReaderContainerView.pagedReaderContent`.
+    /// `.autoPageTurn` is intentionally excluded — only MD wires the
+    /// timer-driven AutoPageTurner end-to-end (bug #157 / GH #461). Bug #284
+    /// gave TXT a paged renderer + manual cross-chapter page-turn, but TXT
+    /// auto-page-turn (the timer + its visible toggle) is still a separate
+    /// follow-up; do NOT add `.autoPageTurn` to TXT until that ships with its
+    /// own verification + design surface.
     /// `.unifiedReflow` is also excluded — bug #158 / GH #468 found that the
     /// Unified renderer for TXT truncates content at ~12 lines, drops bottom
     /// chrome (progress, pager, percentage), bypasses the chapter detector

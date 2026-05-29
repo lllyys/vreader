@@ -38,7 +38,9 @@ struct TXTReaderContainerView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     /// Mirrors ReaderContainerView's chrome toggle so the bottom overlay hides with the nav bar.
-    @State private var isChromeVisible = true
+    /// Bug #284: `internal` (was `private`) so `TXTReaderContainerView+Paged.swift`
+    /// can read it for the chrome-aware paged viewport + indicator de-dup.
+    @State var isChromeVisible = true
 
     /// Files with more UTF-16 code units than this use chunked rendering.
     static let largeFileThreshold = 500_000
@@ -55,7 +57,9 @@ struct TXTReaderContainerView: View {
     /// Captured scroll position for one-shot restore. Set once after file opens.
     /// Using @State breaks the observation cycle that caused bug #15/#17:
     /// reading viewModel.currentOffsetUTF16 in body created a feedback loop.
-    @State private var initialRestoreOffset: Int?
+    /// Bug #284: `internal` (was `private`) so the paged extension reads it
+    /// for first-paginate position restore.
+    @State var initialRestoreOffset: Int?
     /// Navigation target from search results. Updated via notification.
     @State private var scrollToOffset: Int?
     // Bug #154 / GH #443: previously declared local @State `highlightRange` and
@@ -70,8 +74,15 @@ struct TXTReaderContainerView: View {
     @State private var annotationNoteText: String = ""
 
     /// Pre-built attributed string for chapter-based display (WI-6).
-    @State private var chapterAttrString: NSAttributedString?
+    /// Bug #284: `internal` (was `private`) so the paged extension paginates it.
+    @State var chapterAttrString: NSAttributedString?
     @State private var chapterScrollFraction: Double = 0
+
+    /// Bug #284 / GH #1261: when a paged cross-chapter turn fires, the VM loads
+    /// the adjacent chapter asynchronously; this queues which page the
+    /// freshly-loaded chapter should land on once it re-paginates. Cleared by
+    /// `repaginatePagedChapter`. Nil except during a cross-chapter transition.
+    @State var pendingPagedLanding: TXTPagedLanding?
 
     // MARK: - Shared UI State (Phase R3) + Highlight Coordination (Phase R4)
     @State var uiState = TextReaderUIState()
@@ -197,462 +208,13 @@ struct TXTReaderContainerView: View {
     }
 
     var body: some View {
-        ZStack {
-            // Bug #209 / GH #804: scope the `txtReaderContainer`
-            // identifier to the content subtree. A container
-            // `.accessibilityIdentifier` propagates onto every descendant
-            // accessibility element; applied to the whole `body` ZStack it
-            // also clobbered `ReaderBottomChrome`'s toolbar buttons
-            // (`readerDisplayButton` / `readerNotesButton`) so XCUITest
-            // could not resolve them. Scoped here it still propagates onto
-            // the inner UITextView — the TXT highlight/position tests look
-            // the content view up by `txtReaderContainer` — without
-            // reaching the bottom chrome, a separate ZStack sibling.
-            Group {
-                if viewModel.isLoading || isBuildingInitialAttrString {
-                    loadingView
-                } else if let errorMessage = viewModel.errorMessage,
-                          viewModel.textContent == nil && viewModel.currentChapterText == nil {
-                    errorView(message: errorMessage)
-                } else if isContinuousChaptered,
-                          let chunks = viewModel.continuousChunks,
-                          let offsets = viewModel.continuousChunkStartOffsets {
-                    // Bug #180: chaptered TXT in Scroll layout renders as one
-                    // continuous scrollable surface (the chunked UITableView
-                    // fed the whole book). Chapter awareness is layered via
-                    // TXTChapterOffsetIndex; chapter boundaries are invisible
-                    // in the scroll flow.
-                    continuousChapteredReaderContent(chunks: chunks, offsets: offsets)
-                } else if let chapterText = viewModel.currentChapterText,
-                          let attrStr = chapterAttrString {
-                    // Chapter-based display (WI-6) — Paged single-chapter path.
-                    chapterReaderContent(text: chapterText, attributedText: attrStr)
-                } else if viewModel.currentChapterText != nil {
-                    // Chapter text available but attributed string still building
-                    loadingView
-                } else if viewModel.textContent != nil && isLargeFile {
-                    // Legacy: large file → chunked renderer (fallback when no chapter index)
-                    if let chunks = textChunks, let offsets = chunkStartOffsets {
-                        chunkedReaderContent(chunks: chunks, offsets: offsets)
-                    } else {
-                        loadingView
-                    }
-                } else if let text = viewModel.textContent, let attrStr = preparedAttrString {
-                    // Legacy: small file → single UITextView (fallback when no chapter index)
-                    readerContent(text: text, attributedText: attrStr)
-                } else if viewModel.textContent != nil {
-                    loadingView
-                } else {
-                    Color.clear
-                }
-            }
-            .accessibilityIdentifier("txtReaderContainer")
-            .accessibilityValue(readerAccessibilityValue)
-
-            // Top overlay: chapter title (WI-6)
-            if hasChapterDisplay && isChromeVisible,
-               let title = viewModel.currentChapterTitle, !title.isEmpty {
-                VStack {
-                    ChapterTitleOverlay(title: title, settingsStore: settingsStore)
-                    Spacer()
-                }
-            }
-
-            // Bottom overlay for session time, progress, and scrubber (bug #33, WI-004b)
-            // Show when either full text or chapter text is loaded.
-            // Hidden when TTS is active to avoid overlap (bug #97)
-            if (viewModel.textContent != nil || viewModel.currentChapterText != nil)
-                && !viewModel.isLoading && isChromeVisible
-                && (ttsService?.state ?? .idle) == .idle {
-                // Feature #60 WI-6b: shared bottom chrome (scrubber +
-                // labels + Contents/Notes/Display/AI toolbar) replaces
-                // the legacy ReadingProgressBar + ChapterBottomOverlay /
-                // ReaderBottomOverlay. Chapter prev/next relocates to
-                // the Contents (TOC) toolbar button per the v2 design;
-                // chapter position is surfaced in the leading label.
-                if hasChapterDisplay {
-                    ReaderBottomChrome(
-                        theme: settingsStore?.theme ?? .paper,
-                        progress: $chapterScrollFraction,
-                        onSeek: { seekValue in
-                            guard let chapters = viewModel.chapterIndex?.chapters,
-                                  viewModel.currentChapterIdx < chapters.count else { return }
-                            let chapter = chapters[viewModel.currentChapterIdx]
-                            uiState.scrollToOffset = Self.chapterScrubberGlobalOffset(
-                                seekValue: seekValue, chapter: chapter
-                            )
-                        },
-                        leadingLabel: "Chapter \(viewModel.currentChapterIdx + 1)"
-                            + " of \(viewModel.totalChapterCount)",
-                        trailingLabel: viewModel.sessionTimeDisplay ?? ""
-                    )
-                } else {
-                    ReaderBottomChrome(
-                        theme: settingsStore?.theme ?? .paper,
-                        progress: $chapterScrollFraction,
-                        onSeek: { seekValue in
-                            // If TOC entries exist, seek within current chapter
-                            if tocChapterProgress != nil {
-                                let chapterLen = tocChapterLength
-                                let localTarget = Int(seekValue * Double(chapterLen))
-                                let globalTarget = tocChapterStartOffset + localTarget
-                                uiState.scrollToOffset = globalTarget
-                            } else {
-                                let charOffset = ScrollProgressHelper.charOffsetFromProgress(
-                                    progress: seekValue,
-                                    totalLengthUTF16: viewModel.totalTextLengthUTF16
-                                )
-                                uiState.scrollToOffset = charOffset
-                            }
-                        },
-                        leadingLabel: ScrollProgressHelper.percentageLabel(chapterScrollFraction),
-                        trailingLabel: viewModel.sessionTimeDisplay ?? ""
-                    )
-                }
-            }
-        }
-        // Feature #60 WI-7c2: present `SelectionPopoverView` (WI-7a)
-        // when a long-press selection finishes. The TXT non-chunked
-        // bridge (TXTTextViewBridgeCoordinator) posts
-        // `.readerSelectionPopoverRequested` from
-        // `editMenuForTextIn`; this modifier observes the
-        // notification and shows the sheet. Theme is the store's
-        // `ReaderThemeV2` (WI-11 migrated the type); falls back to
-        // `.paper` when no settings store is wired (preview / tests).
-        // WI-7c3..7c5 attach the same modifier to the chunked TXT /
-        // MD / EPUB containers.
-        .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
-        // Feature #64 WI-6: a tap on a highlight opens the unified
-        // highlight-action popover (color / note / copy / share / delete) —
-        // superseding feature #55's note preview and feature #53's long-press
-        // delete `UIMenu`. `mutating` is the TXT `HighlightCoordinator`.
-        .unifiedHighlightPopoverPresenterIfAvailable(
-            modelContainer: modelContainer,
-            bookFingerprintKey: viewModel.bookFingerprintKey,
-            mutating: highlightCoordinator,
-            theme: settingsStore?.theme ?? .paper
-        )
-        // Feature #56 WI-12: bilingual reading wiring lives in a
-        // separate extension to keep this file under the file-size
-        // budget (rule 50 §9).
-        .modifier(bilingualSurfacesModifier)
-        // Bug #237 — DebugBridge highlight-driver observer. DEBUG-only;
-        // attached inside the TXT host (not the generic ReaderContainerView)
-        // so the helper can build TXT-shaped Locators via LocatorFactory
-        // and re-paint atomically via HighlightCoordinator.create — the
-        // gesture path's full posture. Audit Round-1 High #1 / #2 fix.
-        .modifier(debugBridgeHighlightObserverModifier)
-        .task {
-            // Bug #258 / GH #1125: install the auto-page-turn position-persist
-            // side-effect before pagination creates the turner, mirroring
-            // MDReaderContainerView. (TXT shares `NativeTextPagedView` with MD;
-            // `FormatCapabilities.autoPageTurn` is MD-only today, but wiring is
-            // symmetric so a future TXT re-enable inherits a working sync.)
-            uiState.onAutoAdvancePersist = { [weak viewModel] offset in
-                guard let offset, let viewModel else { return }
-                viewModel.updateScrollPosition(charOffsetUTF16: offset)
-            }
-            // PERF: open already called by TXTReaderHost — skip if content loaded
-            if viewModel.textContent == nil && viewModel.currentChapterText == nil {
-                // Bug #180: chaptered TXT in Scroll layout opens as one
-                // continuous scrollable surface. Paged layout keeps the
-                // legacy single-chapter open path.
-                if Self.shouldOpenContinuous(epubLayout: settingsStore?.epubLayout) {
-                    await viewModel.openContinuous(url: fileURL)
-                } else {
-                    await viewModel.openChapterBased(url: fileURL)
-                }
-            }
-            // Bug #180: continuous mode restores via a document-global offset.
-            // GH #30: chapter (Paged) mode captures LOCAL offset.
-            if viewModel.isContinuousMode {
-                initialRestoreOffset = viewModel.currentOffsetUTF16
-            } else if viewModel.isChapterMode {
-                initialRestoreOffset = viewModel.currentChapterLocalUTF16
-            } else {
-                initialRestoreOffset = viewModel.currentOffsetUTF16
-            }
-            // Bug #160: instantiate the renderer + HighlightCoordinator so
-            // gesture-driven highlights actually reach the real PersistenceActor.
-            // Mirrors MDReaderContainerView's pattern. Without this, the
-            // .readerNotificationHandlers fallback (makeNoOpCoordinator with
-            // NoOpHighlightStore) silently dropped every Highlight UIAction.
-            let renderer = TextHighlightRenderer(uiState: uiState)
-            highlightRenderer = renderer
-            if let tts = ttsService, ttsHighlightCoordinator == nil {
-                ttsHighlightCoordinator = TTSHighlightCoordinator(ttsService: tts, uiState: uiState)
-            }
-            // Wire coordinator + restore persisted highlights into uiState
-            // (the renderer writes there; the bridge reads from there).
-            if let container = modelContainer {
-                let persistence = PersistenceActor(modelContainer: container)
-                let coordinator = HighlightCoordinator(
-                    renderer: renderer,
-                    persistence: persistence,
-                    bookFingerprintKey: viewModel.bookFingerprintKey
-                )
-                highlightCoordinator = coordinator
-                await coordinator.restoreAll()
-            }
-        }
-        .task(id: attrStringKey) {
-            // Bug #180: in continuous mode the chunked UITableView builds
-            // per-cell attributed strings lazily; no whole-document or
-            // per-chapter NSAttributedString is built here.
-            if viewModel.isContinuousMode {
-                // Bug #1218: this IS the surface the bug targets (scroll-layout
-                // chunked TXT). Surface the rendered chunk text to the
-                // DebugBridge probe so CU-free XCUITest can read it. `joined()`
-                // reconstructs exactly what the chunked UITableView renders.
-                // Bug #1230 / GH #1230: Simp→Trad now IS applied in scroll mode
-                // (per-chunk in the bridge), so post the CONVERTED joined text
-                // — this is what the UITableView actually renders, and it
-                // verifies Feature #28. The `attrStringKey` includes
-                // `chineseConversion`, so this re-fires when conversion changes.
-                #if DEBUG
-                // Codex Gate-4 (Low): convert PER-CHUNK via the same helper the
-                // bridge uses, so the probe matches the rendered cells exactly
-                // (a single joined-then-converted string could differ from
-                // per-chunk conversion at chunk boundaries) and the conversion
-                // logic isn't duplicated.
-                let conv = settingsStore?.chineseConversion ?? .none
-                let rendered = (viewModel.continuousChunks ?? [])
-                    .map { TXTChunkedReaderBridge.renderedChunkText($0, conversion: conv) }
-                    .joined()
-                postRenderedTextForDebug(rendered)
-                #endif
-                return
-            }
-
-            let config = settingsStore?.txtViewConfig ?? TXTViewConfig()
-            let conversion = settingsStore?.chineseConversion ?? .none
-
-            // Chapter-based path (WI-6): build attributed string for current chapter only.
-            // Much smaller text → typically <50ms, often synchronous for small chapters.
-            if let chapterText = viewModel.currentChapterText {
-                let isInitial = chapterAttrString == nil
-                if isInitial { isBuildingInitialAttrString = true }
-                defer { if isInitial { isBuildingInitialAttrString = false } }
-
-                // Feature #68: chapter-based rendering applies the design's
-                // chapter-start typography (drop-cap + heading restyle).
-                // `buildChapterStart` only adds attributes — the string is
-                // byte-identical, so offsets stay valid. `headingLineLength`
-                // is 0 for synthetic / "前言" chapters (drop-cap only).
-                let headingLineLength = viewModel.currentChapterHeadingLineLength
-                let typographedAttrString: NSAttributedString
-                if chapterText.utf16.count < 10_000 {
-                    // Small chapter (<10KB UTF-16): build synchronously.
-                    // SimpTradTransform is 1:1 UTF-16 for BMP CJK chars; offsetMap discarded —
-                    // reading positions and highlights in source-text coordinates remain valid.
-                    let displayText = conversion != .none
-                        ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
-                        : chapterText
-                    typographedAttrString = TXTAttributedStringBuilder.buildChapterStart(
-                        text: displayText, config: config,
-                        headingLineLength: headingLineLength
-                    )
-                    #if DEBUG
-                    postRenderedTextForDebug(displayText)
-                    #endif
-                } else {
-                    // The detached closure returns the converted display text
-                    // alongside the typography result so the bug #1218 debug
-                    // post can run on the main actor after the cancel check
-                    // (the post reads no detached state).
-                    let result = await Task.detached(priority: .userInitiated) { () -> (wrapped: SendableAttributedString, displayText: String) in
-                        let displayText = conversion != .none
-                            ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
-                            : chapterText
-                        let wrapped = TXTAttributedStringBuilder.buildChapterStartSendable(
-                            text: displayText, config: config,
-                            headingLineLength: headingLineLength
-                        )
-                        return (wrapped, displayText)
-                    }.value
-                    guard !Task.isCancelled else { return }
-                    typographedAttrString = result.wrapped.value
-                    #if DEBUG
-                    postRenderedTextForDebug(result.displayText)
-                    #endif
-                }
-
-                // Feature #56 WI-12b: when bilingual is on for this
-                // chapter (the VM has cached translations for the unit),
-                // interleave synthetic translation runs into the
-                // typographed attrString. The composer preserves the
-                // source-paragraph typography on each run; the resulting
-                // segment map routes every TXT display-offset touchpoint
-                // back to source via `BilingualOffsetRouter`. Off-mode is
-                // a byte-identical identity pass-through (the renderer +
-                // composer both short-circuit), so this branch is
-                // transparent when bilingual is off.
-                let unit = TranslationUnitID(
-                    kind: .txtChapterIndex,
-                    value: String(viewModel.currentChapterIdx)
-                )
-                let composed = BilingualDisplayPipeline.compose(
-                    sourceAttributed: typographedAttrString,
-                    unit: unit,
-                    viewModel: bilingualViewModel
-                )
-                chapterAttrString = composed.attributedString
-                bilingualSegmentMap = composed.segmentMap
-                bilingualBridgeDelegate = Self.makeBilingualDelegateIfNeeded(
-                    map: composed.segmentMap, wrapping: viewModel
-                )
-                return
-            }
-
-            // Legacy full-text path (no chapter index)
-            guard let rawText = viewModel.textContent else { return }
-
-            if rawText.utf16.count > Self.largeFileThreshold {
-                // Large file: split into chunks (fast, no attributed string needed here)
-                let isInitial = textChunks == nil
-                if isInitial { isBuildingInitialAttrString = true }
-                defer { if isInitial { isBuildingInitialAttrString = false } }
-
-                let splitResult = await Task.detached(priority: .userInitiated) {
-                    let text = conversion != .none
-                        ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: rawText).text
-                        : rawText
-                    let chunks = TXTTextChunker.split(text: text, targetChunkSize: 16384)
-                    var offsets: [Int] = []
-                    offsets.reserveCapacity(chunks.count)
-                    var cumulative = 0
-                    for chunk in chunks {
-                        offsets.append(cumulative)
-                        cumulative += chunk.utf16.count
-                    }
-                    return (chunks, offsets)
-                }.value
-                guard !Task.isCancelled else { return }
-                textChunks = splitResult.0
-                chunkStartOffsets = splitResult.1
-                // Bug #1218: legacy large-file chunked path (same flattened
-                // UITableView surface). The chunks are already converted
-                // (SimpTrad applied above), so joining them is the rendered text.
-                #if DEBUG
-                postRenderedTextForDebug(splitResult.0.joined())
-                #endif
-            } else {
-                // Small file: build full attributed string
-                let isInitial = preparedAttrString == nil
-                if isInitial { isBuildingInitialAttrString = true }
-                defer { if isInitial { isBuildingInitialAttrString = false } }
-
-                let built = await Task.detached(priority: .userInitiated) { () -> (wrapped: SendableAttributedString, text: String) in
-                    let text = conversion != .none
-                        ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: rawText).text
-                        : rawText
-                    return (TXTAttributedStringBuilder.buildSendable(text: text, config: config), text)
-                }.value
-                guard !Task.isCancelled else { return }
-                let wrapped = built.wrapped
-                // Bug #1218: legacy small-file path (single UITextView). Post the
-                // converted source text (before bilingual interleave) so the
-                // txt-content probe surfaces the rendered content here too.
-                #if DEBUG
-                postRenderedTextForDebug(built.text)
-                #endif
-                // Feature #56 WI-12b: legacy small-file path. The
-                // current-chapter unit is derived from the TXT VM's
-                // chapter index; an absent index yields a nil unit and
-                // the pipeline returns the identity pass-through.
-                let unit: TranslationUnitID? = {
-                    guard viewModel.chapterIndex != nil else { return nil }
-                    return TranslationUnitID(
-                        kind: .txtChapterIndex,
-                        value: String(viewModel.currentChapterIdx)
-                    )
-                }()
-                let composed = BilingualDisplayPipeline.compose(
-                    sourceAttributed: wrapped.value,
-                    unit: unit,
-                    viewModel: bilingualViewModel
-                )
-                preparedAttrString = composed.attributedString
-                bilingualSegmentMap = composed.segmentMap
-                bilingualBridgeDelegate = Self.makeBilingualDelegateIfNeeded(
-                    map: composed.segmentMap, wrapping: viewModel
-                )
-            }
-        }
-        .onDisappear {
-            let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
-            Task {
-                await viewModel.close()
-                if bgTaskID != .invalid {
-                    UIApplication.shared.endBackgroundTask(bgTaskID)
-                }
-            }
-        }
-        // Wire scroll progress to the ReadingProgressBar scrubber (bug #31).
-        .onChange(of: viewModel.currentOffsetUTF16) { _, _ in
-            updateChapterScrollFraction()
-        }
-        .onChange(of: viewModel.currentChapterIdx) { _, _ in
-            updateChapterScrollFraction()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            switch newPhase {
-            case .background, .inactive:
-                let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
-                Task {
-                    await viewModel.onBackground()
-                    if bgTaskID != .invalid {
-                        UIApplication.shared.endBackgroundTask(bgTaskID)
-                    }
-                }
-            case .active:
-                viewModel.onForeground()
-            @unknown default:
-                break
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .readerContentTapped)) { _ in
-            // Bug #131: pause auto-page-turner on tap so the user has time
-            // to read the chrome they just summoned, mirroring MDReaderContainerView.
-            isChromeVisible.toggle()
-            uiState.autoPageTurner?.pause()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .readerNextPage)) { _ in
-            // Bug #131: manual page-turn pauses auto-turner so the user
-            // doesn't get a second auto-turn one beat after their swipe.
-            guard isPagedMode else { return }
-            uiState.pageNavigator?.nextPage()
-            if let offset = uiState.syncPagedState() {
-                viewModel.updateScrollPosition(charOffsetUTF16: offset)
-            }
-            uiState.autoPageTurner?.pause()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .readerPreviousPage)) { _ in
-            guard isPagedMode else { return }
-            uiState.pageNavigator?.previousPage()
-            if let offset = uiState.syncPagedState() {
-                viewModel.updateScrollPosition(charOffsetUTF16: offset)
-            }
-            uiState.autoPageTurner?.pause()
-        }
-        .onChange(of: settingsStore?.autoPageTurn) { _, newValue in
-            // Bug #131: live-apply the autoPageTurn toggle without requiring
-            // the user to close + reopen the book.
-            uiState.updateAutoPageTurner(
-                enabled: newValue ?? false,
-                isPagedMode: isPagedMode,
-                interval: settingsStore?.autoPageTurnInterval ?? 5.0
-            )
-        }
-        .onChange(of: settingsStore?.autoPageTurnInterval) { _, _ in
-            // Bug #131: re-apply interval changes for an already-running turner.
-            guard settingsStore?.autoPageTurn == true else { return }
-            uiState.updateAutoPageTurner(
-                enabled: true,
-                isPagedMode: isPagedMode,
-                interval: settingsStore?.autoPageTurnInterval ?? 5.0
-            )
-        }
+        // Bug #284: split into the content stack + presenter modifiers
+        // (`decoratedContentStack`) and the trailing notification/lifecycle
+        // modifier chain (here) so neither expression alone exceeds the Swift
+        // type-checker's complexity budget. Adding the paged-chapter branch to
+        // the previously-monolithic `body` pushed it over the limit; splitting
+        // the chain at this seam keeps both halves type-checkable.
+        contentWithLifecycle
         // Bug #132: wire TTS sentence highlight + auto-scroll. Coordinator
         // is instantiated in `.task` above; this observation drives its
         // entry point.
@@ -673,6 +235,462 @@ struct TXTReaderContainerView: View {
             uiState: uiState,
             highlightCoordinator: highlightCoordinator ?? makeNoOpCoordinator()
         )
+    }
+
+    // MARK: - Lifecycle-decorated content
+
+    /// `decoratedContentStack` plus the open/rebuild `.task`s, `.onDisappear`
+    /// close, and the scroll-progress / scene-phase / page-turn / auto-page-turn
+    /// event handlers. Split from `body` (Bug #284) so the trailing TTS +
+    /// `.readerNotificationHandlers` modifiers in `body` type-check as a
+    /// separate, leaner expression.
+    private var contentWithLifecycle: some View {
+        decoratedContentStack
+            .task {
+                await openAndWireOnAppear()
+            }
+            .task(id: attrStringKey) {
+                await rebuildAttributedStringForCurrentKey()
+            }
+            .onDisappear {
+                let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
+                Task {
+                    await viewModel.close()
+                    if bgTaskID != .invalid {
+                        UIApplication.shared.endBackgroundTask(bgTaskID)
+                    }
+                }
+            }
+            // Wire scroll progress to the ReadingProgressBar scrubber (bug #31).
+            .onChange(of: viewModel.currentOffsetUTF16) { _, _ in
+                updateChapterScrollFraction()
+            }
+            .onChange(of: viewModel.currentChapterIdx) { _, _ in
+                updateChapterScrollFraction()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                switch newPhase {
+                case .background, .inactive:
+                    let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
+                    Task {
+                        await viewModel.onBackground()
+                        if bgTaskID != .invalid {
+                            UIApplication.shared.endBackgroundTask(bgTaskID)
+                        }
+                    }
+                case .active:
+                    viewModel.onForeground()
+                @unknown default:
+                    break
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .readerContentTapped)) { _ in
+                // Bug #131: pause auto-page-turner on tap so the user has time
+                // to read the chrome they just summoned.
+                isChromeVisible.toggle()
+                uiState.autoPageTurner?.pause()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .readerNextPage)) { _ in
+                // Bug #284 / GH #1261: in paged chapter mode the turn may cross
+                // a chapter boundary — route through the cross-chapter handler
+                // (which pauses the auto-turner itself per bug #131 semantics).
+                guard isPagedMode else { return }
+                handlePagedNextPage()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .readerPreviousPage)) { _ in
+                guard isPagedMode else { return }
+                handlePagedPreviousPage()
+            }
+            .onChange(of: settingsStore?.autoPageTurn) { _, newValue in
+                // Bug #131: live-apply the autoPageTurn toggle.
+                uiState.updateAutoPageTurner(
+                    enabled: newValue ?? false,
+                    isPagedMode: isPagedMode,
+                    interval: settingsStore?.autoPageTurnInterval ?? 5.0
+                )
+            }
+            .onChange(of: settingsStore?.autoPageTurnInterval) { _, _ in
+                // Bug #131: re-apply interval changes for an already-running turner.
+                guard settingsStore?.autoPageTurn == true else { return }
+                uiState.updateAutoPageTurner(
+                    enabled: true,
+                    isPagedMode: isPagedMode,
+                    interval: settingsStore?.autoPageTurnInterval ?? 5.0
+                )
+            }
+    }
+
+    // MARK: - Content Stack
+
+    /// The ZStack content (selector + overlays) decorated with the
+    /// selection-popover / highlight-popover / bilingual / DebugBridge
+    /// presenter modifiers. Split out of `body` (Bug #284) so the body's
+    /// trailing lifecycle/notification modifier chain type-checks as a
+    /// separate expression.
+    private var decoratedContentStack: some View {
+        ZStack {
+            // Bug #209 / GH #804: scope the `txtReaderContainer` identifier to
+            // the content subtree so it does not clobber `ReaderBottomChrome`'s
+            // toolbar button identifiers (a sibling ZStack child).
+            readerContentGroup
+                .accessibilityIdentifier("txtReaderContainer")
+                .accessibilityValue(readerAccessibilityValue)
+
+            chapterTitleOverlay
+            bottomChromeOverlay
+        }
+        // Feature #60 WI-7c2: present `SelectionPopoverView` (WI-7a) when a
+        // long-press selection finishes. Theme falls back to `.paper` when no
+        // settings store is wired (preview / tests).
+        .selectionPopoverPresenter(theme: settingsStore?.theme ?? .paper)
+        // Feature #64 WI-6: a tap on a highlight opens the unified
+        // highlight-action popover. `mutating` is the TXT `HighlightCoordinator`.
+        .unifiedHighlightPopoverPresenterIfAvailable(
+            modelContainer: modelContainer,
+            bookFingerprintKey: viewModel.bookFingerprintKey,
+            mutating: highlightCoordinator,
+            theme: settingsStore?.theme ?? .paper
+        )
+        // Feature #56 WI-12: bilingual reading surfaces (separate extension).
+        .modifier(bilingualSurfacesModifier)
+        // Bug #237 — DebugBridge highlight-driver observer (DEBUG-only).
+        .modifier(debugBridgeHighlightObserverModifier)
+    }
+
+    // MARK: - Content Selector
+
+    /// The multi-branch content selector for the TXT reader (loading / error /
+    /// continuous / paged-chapter / scroll-chapter / chunked / small-file).
+    /// Extracted from `body` (Bug #284) so the branch logic and the body's
+    /// modifier chain are type-checked as separate expressions — adding the
+    /// paged-chapter branch otherwise pushed the combined `body` expression
+    /// past the Swift type-checker's complexity limit.
+    @ViewBuilder
+    private var readerContentGroup: some View {
+        if viewModel.isLoading || isBuildingInitialAttrString {
+            loadingView
+        } else if let errorMessage = viewModel.errorMessage,
+                  viewModel.textContent == nil && viewModel.currentChapterText == nil {
+            errorView(message: errorMessage)
+        } else if isContinuousChaptered,
+                  let chunks = viewModel.continuousChunks,
+                  let offsets = viewModel.continuousChunkStartOffsets {
+            // Bug #180: chaptered TXT in Scroll layout renders as one
+            // continuous scrollable surface (the chunked UITableView fed the
+            // whole book). Chapter awareness is layered via
+            // TXTChapterOffsetIndex; chapter boundaries are invisible in the
+            // scroll flow.
+            continuousChapteredReaderContent(chunks: chunks, offsets: offsets)
+        } else if isPagedChapterMode,
+                  let chapterText = viewModel.currentChapterText,
+                  let attrStr = chapterAttrString {
+            // Bug #284 / GH #1261: paged layout renders the current chapter one
+            // page at a time via NativeTextPagedView, and page-turns cross
+            // chapter boundaries (design §2.2). Before this, paged TXT fell
+            // through to the scrollable chapterReaderContent below and could
+            // not advance past a chapter except via the TOC.
+            pagedChapterReaderContent(text: chapterText, attributedText: attrStr)
+        } else if let chapterText = viewModel.currentChapterText,
+                  let attrStr = chapterAttrString {
+            // Chapter-based display (WI-6) — scroll single-chapter path.
+            chapterReaderContent(text: chapterText, attributedText: attrStr)
+        } else if viewModel.currentChapterText != nil {
+            // Chapter text available but attributed string still building
+            loadingView
+        } else if viewModel.textContent != nil && isLargeFile {
+            // Legacy: large file → chunked renderer (fallback when no chapter index)
+            if let chunks = textChunks, let offsets = chunkStartOffsets {
+                chunkedReaderContent(chunks: chunks, offsets: offsets)
+            } else {
+                loadingView
+            }
+        } else if let text = viewModel.textContent, let attrStr = preparedAttrString {
+            // Legacy: small file → single UITextView (fallback when no chapter index)
+            readerContent(text: text, attributedText: attrStr)
+        } else if viewModel.textContent != nil {
+            loadingView
+        } else {
+            Color.clear
+        }
+    }
+
+    // MARK: - Overlays
+    //
+    // Extracted from `body`'s ZStack (Bug #284) so the ZStack stays a small
+    // three-child expression and the long trailing modifier chain has type-
+    // checker budget to spare.
+
+    /// Top overlay: chapter title (WI-6).
+    @ViewBuilder
+    private var chapterTitleOverlay: some View {
+        if hasChapterDisplay && isChromeVisible,
+           let title = viewModel.currentChapterTitle, !title.isEmpty {
+            VStack {
+                ChapterTitleOverlay(title: title, settingsStore: settingsStore)
+                Spacer()
+            }
+        }
+    }
+
+    /// Bottom overlay for session time, progress, and scrubber (bug #33,
+    /// WI-004b). Shown when text or chapter text is loaded and TTS is idle
+    /// (bug #97). Feature #60 WI-6b: the shared `ReaderBottomChrome`.
+    @ViewBuilder
+    private var bottomChromeOverlay: some View {
+        if (viewModel.textContent != nil || viewModel.currentChapterText != nil)
+            && !viewModel.isLoading && isChromeVisible
+            && (ttsService?.state ?? .idle) == .idle {
+            if hasChapterDisplay {
+                ReaderBottomChrome(
+                    theme: settingsStore?.theme ?? .paper,
+                    progress: $chapterScrollFraction,
+                    onSeek: { seekValue in
+                        guard let chapters = viewModel.chapterIndex?.chapters,
+                              viewModel.currentChapterIdx < chapters.count else { return }
+                        let chapter = chapters[viewModel.currentChapterIdx]
+                        uiState.scrollToOffset = Self.chapterScrubberGlobalOffset(
+                            seekValue: seekValue, chapter: chapter
+                        )
+                    },
+                    leadingLabel: "Chapter \(viewModel.currentChapterIdx + 1)"
+                        + " of \(viewModel.totalChapterCount)",
+                    trailingLabel: viewModel.sessionTimeDisplay ?? ""
+                )
+            } else {
+                ReaderBottomChrome(
+                    theme: settingsStore?.theme ?? .paper,
+                    progress: $chapterScrollFraction,
+                    onSeek: { seekValue in
+                        // If TOC entries exist, seek within current chapter
+                        if tocChapterProgress != nil {
+                            let chapterLen = tocChapterLength
+                            let localTarget = Int(seekValue * Double(chapterLen))
+                            let globalTarget = tocChapterStartOffset + localTarget
+                            uiState.scrollToOffset = globalTarget
+                        } else {
+                            let charOffset = ScrollProgressHelper.charOffsetFromProgress(
+                                progress: seekValue,
+                                totalLengthUTF16: viewModel.totalTextLengthUTF16
+                            )
+                            uiState.scrollToOffset = charOffset
+                        }
+                    },
+                    leadingLabel: ScrollProgressHelper.percentageLabel(chapterScrollFraction),
+                    trailingLabel: viewModel.sessionTimeDisplay ?? ""
+                )
+            }
+        }
+    }
+
+    // MARK: - On-Appear Open + Wiring
+
+    /// Opens the file (continuous or chapter-based), captures the restore
+    /// offset, and wires the highlight renderer / coordinator + TTS coordinator.
+    /// Extracted from the body's `.task` closure (Bug #284) so the body's
+    /// modifier chain stays within the Swift type-checker's complexity budget.
+    /// Behavior is unchanged.
+    @MainActor
+    private func openAndWireOnAppear() async {
+        // Bug #258 / GH #1125: install the auto-page-turn position-persist
+        // side-effect before pagination creates the turner.
+        uiState.onAutoAdvancePersist = { [weak viewModel] offset in
+            guard let offset, let viewModel else { return }
+            viewModel.updateScrollPosition(charOffsetUTF16: offset)
+        }
+        // PERF: open already called by TXTReaderHost — skip if content loaded.
+        if viewModel.textContent == nil && viewModel.currentChapterText == nil {
+            // Bug #180: Scroll layout opens continuous; Paged keeps the legacy
+            // single-chapter open path (now wired for cross-chapter paging).
+            if Self.shouldOpenContinuous(epubLayout: settingsStore?.epubLayout) {
+                await viewModel.openContinuous(url: fileURL)
+            } else {
+                await viewModel.openChapterBased(url: fileURL)
+            }
+        }
+        // Bug #180 / GH #30: continuous restores a document-global offset;
+        // chapter (Paged) mode captures the chapter-LOCAL offset.
+        if viewModel.isContinuousMode {
+            initialRestoreOffset = viewModel.currentOffsetUTF16
+        } else if viewModel.isChapterMode {
+            initialRestoreOffset = viewModel.currentChapterLocalUTF16
+        } else {
+            initialRestoreOffset = viewModel.currentOffsetUTF16
+        }
+        // Bug #160: wire the renderer + HighlightCoordinator so gesture-driven
+        // highlights reach the real PersistenceActor (mirrors MD).
+        let renderer = TextHighlightRenderer(uiState: uiState)
+        highlightRenderer = renderer
+        if let tts = ttsService, ttsHighlightCoordinator == nil {
+            ttsHighlightCoordinator = TTSHighlightCoordinator(ttsService: tts, uiState: uiState)
+        }
+        if let container = modelContainer {
+            let persistence = PersistenceActor(modelContainer: container)
+            let coordinator = HighlightCoordinator(
+                renderer: renderer,
+                persistence: persistence,
+                bookFingerprintKey: viewModel.bookFingerprintKey
+            )
+            highlightCoordinator = coordinator
+            await coordinator.restoreAll()
+        }
+    }
+
+    // MARK: - Attributed String Rebuild
+
+    /// Rebuilds the rendered attributed string for the current `attrStringKey`
+    /// (chapter text / config / conversion / bilingual nonce). Extracted from
+    /// the `.task(id:)` closure (Bug #284) so the body's modifier chain stays
+    /// within the Swift type-checker's complexity budget. Behavior is unchanged.
+    @MainActor
+    private func rebuildAttributedStringForCurrentKey() async {
+        // Bug #180: in continuous mode the chunked UITableView builds per-cell
+        // attributed strings lazily; no whole-document or per-chapter
+        // NSAttributedString is built here.
+        if viewModel.isContinuousMode {
+            // Bug #1218 / #1230: surface the converted joined chunk text to the
+            // DebugBridge probe (per-chunk conversion matches the rendered cells).
+            #if DEBUG
+            let conv = settingsStore?.chineseConversion ?? .none
+            let rendered = (viewModel.continuousChunks ?? [])
+                .map { TXTChunkedReaderBridge.renderedChunkText($0, conversion: conv) }
+                .joined()
+            postRenderedTextForDebug(rendered)
+            #endif
+            return
+        }
+
+        let config = settingsStore?.txtViewConfig ?? TXTViewConfig()
+        let conversion = settingsStore?.chineseConversion ?? .none
+
+        // Chapter-based path (WI-6): build attributed string for current chapter only.
+        if let chapterText = viewModel.currentChapterText {
+            let isInitial = chapterAttrString == nil
+            if isInitial { isBuildingInitialAttrString = true }
+            defer { if isInitial { isBuildingInitialAttrString = false } }
+
+            // Feature #68: chapter-start typography (drop-cap + heading restyle).
+            // `buildChapterStart` only adds attributes — byte-identical string.
+            let headingLineLength = viewModel.currentChapterHeadingLineLength
+            let typographedAttrString: NSAttributedString
+            if chapterText.utf16.count < 10_000 {
+                // Small chapter: build synchronously. SimpTradTransform is 1:1
+                // UTF-16 for BMP CJK; offsets stay valid.
+                let displayText = conversion != .none
+                    ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
+                    : chapterText
+                typographedAttrString = TXTAttributedStringBuilder.buildChapterStart(
+                    text: displayText, config: config,
+                    headingLineLength: headingLineLength
+                )
+                #if DEBUG
+                postRenderedTextForDebug(displayText)
+                #endif
+            } else {
+                // The detached closure returns the converted display text
+                // alongside the typography result so the #1218 debug post can
+                // run on the main actor after the cancel check.
+                let result = await Task.detached(priority: .userInitiated) { () -> (wrapped: SendableAttributedString, displayText: String) in
+                    let displayText = conversion != .none
+                        ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: chapterText).text
+                        : chapterText
+                    let wrapped = TXTAttributedStringBuilder.buildChapterStartSendable(
+                        text: displayText, config: config,
+                        headingLineLength: headingLineLength
+                    )
+                    return (wrapped, displayText)
+                }.value
+                guard !Task.isCancelled else { return }
+                typographedAttrString = result.wrapped.value
+                #if DEBUG
+                postRenderedTextForDebug(result.displayText)
+                #endif
+            }
+
+            // Feature #56 WI-12b: interleave bilingual translation runs when on
+            // for this chapter. Off-mode is a byte-identical identity pass-through.
+            let unit = TranslationUnitID(
+                kind: .txtChapterIndex,
+                value: String(viewModel.currentChapterIdx)
+            )
+            let composed = BilingualDisplayPipeline.compose(
+                sourceAttributed: typographedAttrString,
+                unit: unit,
+                viewModel: bilingualViewModel
+            )
+            chapterAttrString = composed.attributedString
+            bilingualSegmentMap = composed.segmentMap
+            bilingualBridgeDelegate = Self.makeBilingualDelegateIfNeeded(
+                map: composed.segmentMap, wrapping: viewModel
+            )
+            return
+        }
+
+        // Legacy full-text path (no chapter index)
+        guard let rawText = viewModel.textContent else { return }
+
+        if rawText.utf16.count > Self.largeFileThreshold {
+            // Large file: split into chunks (no attributed string built here).
+            let isInitial = textChunks == nil
+            if isInitial { isBuildingInitialAttrString = true }
+            defer { if isInitial { isBuildingInitialAttrString = false } }
+
+            let splitResult = await Task.detached(priority: .userInitiated) {
+                let text = conversion != .none
+                    ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: rawText).text
+                    : rawText
+                let chunks = TXTTextChunker.split(text: text, targetChunkSize: 16384)
+                var offsets: [Int] = []
+                offsets.reserveCapacity(chunks.count)
+                var cumulative = 0
+                for chunk in chunks {
+                    offsets.append(cumulative)
+                    cumulative += chunk.utf16.count
+                }
+                return (chunks, offsets)
+            }.value
+            guard !Task.isCancelled else { return }
+            textChunks = splitResult.0
+            chunkStartOffsets = splitResult.1
+            #if DEBUG
+            postRenderedTextForDebug(splitResult.0.joined())
+            #endif
+        } else {
+            // Small file: build full attributed string.
+            let isInitial = preparedAttrString == nil
+            if isInitial { isBuildingInitialAttrString = true }
+            defer { if isInitial { isBuildingInitialAttrString = false } }
+
+            let built = await Task.detached(priority: .userInitiated) { () -> (wrapped: SendableAttributedString, text: String) in
+                let text = conversion != .none
+                    ? TextMapper.apply(transforms: [SimpTradTransform(direction: conversion)], to: rawText).text
+                    : rawText
+                return (TXTAttributedStringBuilder.buildSendable(text: text, config: config), text)
+            }.value
+            guard !Task.isCancelled else { return }
+            let wrapped = built.wrapped
+            #if DEBUG
+            postRenderedTextForDebug(built.text)
+            #endif
+            // Feature #56 WI-12b: legacy small-file path; nil unit when no
+            // chapter index → identity pass-through.
+            let unit: TranslationUnitID? = {
+                guard viewModel.chapterIndex != nil else { return nil }
+                return TranslationUnitID(
+                    kind: .txtChapterIndex,
+                    value: String(viewModel.currentChapterIdx)
+                )
+            }()
+            let composed = BilingualDisplayPipeline.compose(
+                sourceAttributed: wrapped.value,
+                unit: unit,
+                viewModel: bilingualViewModel
+            )
+            preparedAttrString = composed.attributedString
+            bilingualSegmentMap = composed.segmentMap
+            bilingualBridgeDelegate = Self.makeBilingualDelegateIfNeeded(
+                map: composed.segmentMap, wrapping: viewModel
+            )
+        }
     }
 
     // MARK: - Notification Dependencies
@@ -1187,19 +1205,14 @@ struct TXTReaderContainerView: View {
         )
     }
 
-    func updatePaginationIfNeeded() {
-        uiState.updatePagination(
-            isPagedMode: isPagedMode,
-            attributedText: preparedAttrString,
-            initialRestoreOffset: initialRestoreOffset,
-            autoPageTurnEnabled: settingsStore?.autoPageTurn ?? false,
-            autoPageTurnInterval: settingsStore?.autoPageTurnInterval ?? 5.0
-        )
-        if let offset = uiState.syncPagedState() {
-            viewModel.updateScrollPosition(charOffsetUTF16: offset)
-        }
-    }
-
+    /// Bug #284 / GH #1261: paged TXT renders chaptered books one page at a
+    /// time. `isLargeFile` keeps the >500K-UTF-16 chunked path on scroll
+    /// rendering (it has no chapter index to page through). The actual
+    /// pagination + cross-chapter advance lives in
+    /// `TXTReaderContainerView+Paged.swift` (`repaginatePagedChapter`,
+    /// `handlePagedNextPage`, `handlePagedPreviousPage`); the former dead
+    /// `updatePaginationIfNeeded()` stub (never called — see bug #157) was
+    /// removed when the real renderer was wired.
     var isPagedMode: Bool {
         settingsStore?.epubLayout == .paged && !isLargeFile
     }
