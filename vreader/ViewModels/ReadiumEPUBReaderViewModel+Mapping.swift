@@ -43,16 +43,18 @@
 //   + the navigator's own safe-area insets keep content off the Dynamic Island /
 //   home indicator (#163), so a modest factor is sufficient.
 //
-// Known Phase-1 limitation (Gate-4 round-1 Medium — gates the WI-14 default-ON
-// flip, tracked for WI-13 acceptance): the `.photo` theme + `useCustomBackground`
-// render only as an OPAQUE theme color here. The legacy EPUB engine composites a
-// decorative background IMAGE behind semi-transparent reader content via a CSS
-// `background-image` + the SwiftUI `ThemeBackgroundView`; Readium applies our
-// opaque `backgroundColor` to the navigator view + CSS root, which occludes the
-// `ThemeBackgroundView` and does not reproduce the image. The result is readable
-// (opaque dark bg + light ink) but loses the photo overlay. Faithful parity needs
-// a transparent navigator/webview + image compositing (or background-image CSS
-// injection) — a deferred slice, NOT shipped behind this dark flag.
+// WI-7 photo/custom-background compositing (resolves the prior Phase-1
+// limitation that gated the WI-14 default-ON flip): the `.photo` theme +
+// `useCustomBackground` with a stored image now composites the decorative
+// background behind the rendered text, matching the legacy EPUB engine's
+// `ThemeBackgroundView`. `ReadiumEPUBHost` layers `ThemeBackgroundView` in a
+// `ZStack` behind the navigator, and when `shouldRenderTransparentBackground`
+// is true the host passes `transparentBackground: true` here (CLEAR HTML body
+// background) AND the representable sets the navigator view + its internal
+// spine `WKWebView`s transparent (`isOpaque = false` / `.clear`), so the
+// composited image/color shows through. The text color stays the theme ink for
+// legibility. Normal themes (no custom background, or enabled-but-no-image)
+// keep the unchanged opaque theme-color path — no regression.
 //
 // @coordinates-with ReadiumEPUBReaderViewModel.swift, VReaderLocator.swift,
 //   Locator.swift, ReaderThemeV2.swift, TypographySettings.swift
@@ -88,14 +90,39 @@ extension ReadiumEPUBReaderViewModel {
     /// size consistent across the legacy and Readium engines. The Readium
     /// `fontSize` is a MULTIPLIER of the publisher base, so we divide by
     /// `fontSizeBasePt`.
+    ///
+    /// `transparentBackground` (WI-7 refinement): when a custom decorative
+    /// background should show THROUGH the rendered text (the `.photo` / custom
+    /// path with an image stored for the theme), `backgroundColor` is set to NIL.
+    /// Readium's `ReadiumCSS` injects the `--USER__backgroundColor` HTML body
+    /// rule ONLY when `backgroundColor` is non-nil (see `ReadiumCSS.swift`), so a
+    /// nil leaves the body transparent over the already-`.clear` spine WebViews —
+    /// the SwiftUI `ThemeBackgroundView` composed behind the navigator then shows
+    /// through. (Readium's `Color` is RGB-only with no alpha, so an explicit
+    /// "clear" color is impossible — nil is the correct lever.) Paired with the
+    /// representable forcing the navigator container view `.clear` (Readium
+    /// otherwise paints it `effectiveBackgroundColor` = the theme swatch when the
+    /// pref is nil). The text color stays the theme ink for legibility over the
+    /// image. Default `false` → the unchanged opaque theme-color path.
     nonisolated static func epubPreferences(
         theme: ReaderThemeV2,
         typography: TypographySettings,
         layout: EPUBLayoutPreference,
-        calibratedFontSizePt: CGFloat
+        calibratedFontSizePt: CGFloat,
+        transparentBackground: Bool = false
     ) -> EPUBPreferences {
-        EPUBPreferences(
-            backgroundColor: Color(uiColor: theme.backgroundColor),
+        let bg: ReadiumNavigator.Color? = transparentBackground
+            ? nil
+            : Color(uiColor: theme.backgroundColor)
+        // The natural theme→base collapse is kept even when transparent: the
+        // OPAQUE `:root { background: --RS__backgroundColor !important }` that the
+        // night/sepia appearances inject (and which occludes the composited
+        // `ThemeBackgroundView` even when `body` is clear — device-verified) is
+        // overridden by the coordinator's `setupUserScripts` transparent-`:root`
+        // injection, not by swapping the base. This preserves the appearance's
+        // selection/link tinting + image handling and the explicit theme ink.
+        return EPUBPreferences(
+            backgroundColor: bg,
             fontFamily: readiumFontFamily(for: typography.fontFamily),
             fontSize: Double(calibratedFontSizePt / fontSizeBasePt),
             lineHeight: Double(typography.lineSpacing),
@@ -105,6 +132,18 @@ extension ReadiumEPUBReaderViewModel {
             textColor: Color(uiColor: theme.inkColor),
             theme: readiumTheme(for: theme)
         )
+    }
+
+    /// Pure decision: should the Readium navigator render with a transparent
+    /// background so the composed `ThemeBackgroundView` (decorative image + color)
+    /// shows through? True only when a custom background is enabled AND an image
+    /// actually exists for the theme — otherwise the opaque theme-color path is
+    /// unchanged (no regression for normal themes or enabled-but-no-image).
+    nonisolated static func shouldRenderTransparentBackground(
+        useCustomBackground: Bool,
+        hasBackgroundImage: Bool
+    ) -> Bool {
+        useCustomBackground && hasBackgroundImage
     }
 
     /// Collapses vreader's 5 themes onto Readium's 3 base themes. The base seeds

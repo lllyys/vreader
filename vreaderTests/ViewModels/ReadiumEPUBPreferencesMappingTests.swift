@@ -207,4 +207,56 @@ struct ReadiumEPUBPreferencesMappingTests {
         #expect(ReadiumEPUBReaderViewModel.epubPreferences(for: .scroll).scroll == true)
         #expect(ReadiumEPUBReaderViewModel.epubPreferences(for: .paged).scroll == false)
     }
+
+    // MARK: - WI-7 photo/custom-background compositing (transparent navigator)
+
+    /// When a custom decorative background should show through, the navigator's
+    /// HTML body must NOT paint an opaque color — the mapping returns a NIL
+    /// `backgroundColor`. Readium injects the `--USER__backgroundColor` body rule
+    /// only when this is non-nil, so nil leaves the body transparent over the
+    /// already-`.clear` spine WebViews and the composited `ThemeBackgroundView`
+    /// behind shows through. The text color stays the legible theme ink.
+    /// (Readium's `Color` is RGB-only with no alpha — nil is the only lever.)
+    @Test func transparentBackground_clearsBackgroundColor_keepsTextColor() {
+        let p = ReadiumEPUBReaderViewModel.epubPreferences(
+            theme: .photo, typography: TypographySettings(), layout: .paged,
+            calibratedFontSizePt: 18, transparentBackground: true
+        )
+        #expect(p.backgroundColor == nil)
+        // Text color must stay the theme ink for legibility over the image.
+        #expect(p.textColor == Color(uiColor: ReaderThemeV2.photo.inkColor))
+        // The natural theme→base collapse is preserved (`.photo → .dark`); the
+        // opaque `:root` background the night appearance would inject is cleared
+        // by the coordinator's `setupUserScripts` injection, not a base swap.
+        #expect(p.theme?.rawValue == "dark")
+    }
+
+    /// Default (no transparency) is unchanged — the opaque theme color path that
+    /// every existing test pins must keep rendering the solid theme background.
+    @Test func transparentBackground_defaultsFalse_keepsOpaqueThemeColor() {
+        let p = ReadiumEPUBReaderViewModel.epubPreferences(
+            theme: .photo, typography: TypographySettings(), layout: .paged,
+            calibratedFontSizePt: 18
+        )
+        #expect(p.backgroundColor == Color(uiColor: ReaderThemeV2.photo.backgroundColor))
+    }
+
+    /// The pure decision: transparency is requested only when a custom background
+    /// is enabled AND an image actually exists for the theme. Either missing →
+    /// opaque (no regression for normal themes / enabled-but-no-image).
+    @Test(arguments: [
+        (true, true, true),
+        (true, false, false),
+        (false, true, false),
+        (false, false, false),
+    ])
+    func shouldRenderTransparent_requiresBothEnabledAndImage(
+        _ useCustomBackground: Bool, _ hasImage: Bool, _ expected: Bool
+    ) {
+        #expect(
+            ReadiumEPUBReaderViewModel.shouldRenderTransparentBackground(
+                useCustomBackground: useCustomBackground, hasBackgroundImage: hasImage
+            ) == expected
+        )
+    }
 }

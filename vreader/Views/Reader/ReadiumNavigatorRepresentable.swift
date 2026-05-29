@@ -10,6 +10,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import UIKit
+import WebKit
 import ReadiumShared
 import ReadiumNavigator
 
@@ -47,6 +48,13 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     /// extension can drive enumerate/inject/clear on the live spine (same
     /// host → coordinator indirection as `navCommander`).
     let bilingualCommander: ReadiumBilingualCommander
+    /// WI-7 photo/custom-background compositing: when true, the navigator
+    /// container view is forced `.clear` (Readium's spine WebViews are already
+    /// clear) so the `ThemeBackgroundView` composited behind the navigator in the
+    /// host shows through. Paired with a NIL `EPUBPreferences.backgroundColor`
+    /// (no `--USER__backgroundColor` body rule injected). Default `false` keeps
+    /// the opaque theme-color path unchanged.
+    var transparentBackground: Bool = false
 
     func makeCoordinator() -> ReadiumReaderCoordinator {
         ReadiumReaderCoordinator(
@@ -68,6 +76,10 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> UIViewController {
+        // WI-7: set BEFORE the navigator builds so the coordinator's
+        // `setupUserScripts` (called as each spine WebView loads) injects the
+        // transparent-`:root` style for the photo/custom-bg path.
+        context.coordinator.transparentBackground = transparentBackground
         let config = EPUBNavigatorViewController.Configuration(preferences: preferences)
         do {
             let navigator = try EPUBNavigatorViewController(
@@ -93,6 +105,11 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
                 navigator: navigator,
                 spineHrefs: publication.readingOrder.map(\.href)
             )
+            // WI-7: make the navigator container transparent so a composited
+            // ThemeBackgroundView shows through. Internal spine WebViews are
+            // created lazily as spine items load, so `updateUIViewController`
+            // re-applies as they appear.
+            Self.applyTransparency(transparentBackground, to: navigator)
             return navigator
         } catch {
             context.coordinator.log.error(
@@ -119,7 +136,60 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
         // switch re-routes the tap behavior immediately.
         context.coordinator.currentLayout = resolvedLayout
         if let navigator = controller as? EPUBNavigatorViewController {
+            // Gate-4 audit High: drive the transparency state through the
+            // coordinator so a LIVE disable removes the injected style from
+            // already-loaded spreads (not just future ones). No-ops when the flag
+            // is unchanged.
+            context.coordinator.setTransparentBackground(transparentBackground)
+            // The pref re-submit (theme/font/scroll) must run before the
+            // container-view re-paint, since `submitPreferences` itself re-paints
+            // the navigator view to `effectiveBackgroundColor`.
             navigator.submitPreferences(preferences)
+            // WI-7: re-apply container/WebView opacity. Spine WebViews mount
+            // lazily as the reader paginates, and a Display-settings change can
+            // rebuild this representable with a new `transparentBackground` value.
+            Self.applyTransparency(transparentBackground, to: navigator)
+        }
+    }
+
+    /// WI-7 photo/custom-background compositing. Readium's spine `WKWebView`s are
+    /// already `.clear` (`EPUBSpreadView`), but the navigator CONTAINER view is
+    /// painted `settings.effectiveBackgroundColor.uiColor` on every preference
+    /// submit (`EPUBNavigatorViewController` `apply(settings:)`). When a nil
+    /// `backgroundColor` pref is in play that swatch is the theme color, which
+    /// would occlude the composited `ThemeBackgroundView` behind. SYMMETRIC
+    /// (Gate-4 audit Medium): when transparent, force the container view `.clear`;
+    /// when opaque, restore `effectiveBackgroundColor` (the value Readium just
+    /// re-applied via `submitPreferences`) + `isOpaque = true`, so a live disable
+    /// does not leave a stale-clear navigator over a now-removed background.
+    @MainActor
+    private static func applyTransparency(
+        _ transparent: Bool,
+        to navigator: EPUBNavigatorViewController
+    ) {
+        if transparent {
+            navigator.view.backgroundColor = .clear
+            navigator.view.isOpaque = false
+        } else {
+            // Readium's `submitPreferences` (called just before this) already set
+            // the container view to `effectiveBackgroundColor`; only the
+            // `isOpaque` flag could be stale-false from a prior transparent pass.
+            navigator.view.isOpaque = true
+        }
+        applyWebViewOpacity(transparent, in: navigator.view)
+    }
+
+    @MainActor
+    private static func applyWebViewOpacity(_ transparent: Bool, in view: UIView) {
+        for subview in view.subviews {
+            if let webView = subview as? WKWebView {
+                // Readium owns the WebView background (`.clear` in `EPUBSpreadView`);
+                // only re-assert the `isOpaque` flag so an opaque-path WebView is
+                // not left flagged transparent after a live disable. Leave the
+                // `backgroundColor` to Readium (the html/body CSS owns the paint).
+                webView.isOpaque = !transparent
+            }
+            applyWebViewOpacity(transparent, in: subview)
         }
     }
 

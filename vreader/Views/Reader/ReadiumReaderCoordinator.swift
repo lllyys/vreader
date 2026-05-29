@@ -11,6 +11,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import UIKit
+import WebKit
 import OSLog
 import ReadiumShared
 import ReadiumNavigator
@@ -35,6 +36,13 @@ final class ReadiumReaderCoordinator: NSObject {
     /// turns the page only in `.paged` layout (in `.scroll` every tap toggles
     /// chrome, matching the legacy reader's tap contract).
     var currentLayout: EPUBLayoutPreference = .paged
+
+    /// WI-7 photo/custom-background compositing: when true, `setupUserScripts`
+    /// injects a transparent-`:root` style into each spine WebView so the
+    /// composited `ThemeBackgroundView` behind the navigator shows through (set by
+    /// the representable; mutate via `setTransparentBackground` for live toggles).
+    /// Default `false` keeps the opaque theme-color path unchanged.
+    var transparentBackground = false
 
     /// WI-9a: the host-owned navigation sink. `attach` binds this coordinator's
     /// nav methods into it; `detach` clears it so a late page-turn / jump intent
@@ -187,6 +195,12 @@ extension ReadiumReaderCoordinator: EPUBNavigatorDelegate {
         // WI-6: forward the reported locator to the host VM's debounced save so
         // the reading position persists as the user navigates/scrolls.
         onLocationChange?(locator)
+        // WI-7 (Gate-4 round-3): a spread just rendered — assert the AUTHORITATIVE
+        // transparency state into its `localStorage` + style. This makes a fresh
+        // navigator open correct even when a prior session left stale storage for
+        // the same origin (the self-gating applier alone would honor the stale
+        // value). Idempotent + cheap; the `+Transparency` extension owns it.
+        syncTransparentState()
         // WI-4 probe wiring: register the active navigator + signal settle the
         // first time a spine is rendered and a location is reported, so the
         // DebugBridge eval/settle probes (eval?bridge=epub) reach this host.

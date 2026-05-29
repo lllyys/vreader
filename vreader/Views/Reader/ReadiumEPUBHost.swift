@@ -9,11 +9,13 @@
 // Render scope (WI-5): open + render + scroll/paginate. WI-7: full live
 // theme/font mapping — the body reads `ReaderSettingsStore.theme` +
 // `.typography` + `.epubLayout`, recomputes `EPUBPreferences` on any change, and
-// the representable re-submits them to the navigator. Highlight/search/TTS
-// parity land in later WIs. Loading + error states reuse the existing reader's
-// plain `ProgressView` + the dispatcher's `fingerprintErrorView`-style message
-// (no new UI chrome — rule 51: this is an engine swap behind a dark flag for the
-// already-designed EPUB reading surface).
+// the representable re-submits them to the navigator. WI-7 photo/custom-bg
+// compositing layers `ThemeBackgroundView` behind the navigator (a transparent
+// navigator over the decorative image) — wrapper + reload observers in
+// `ReadiumEPUBHost+Background`. Highlight/search/TTS parity land in later WIs.
+// Loading + error states reuse the existing reader's plain `ProgressView` + the
+// dispatcher's `fingerprintErrorView`-style message (no new UI chrome — rule 51:
+// this is an engine swap behind a dark flag for the designed EPUB surface).
 //
 // DebugBridge (WI-4 probe): the coordinator registers the active navigator on
 // `navigator(_:locationDidChange:)` via `setActiveReadiumNavigator(_:for:token:)`
@@ -106,11 +108,22 @@ struct ReadiumEPUBHost: View {
     /// a prefetch-landed inject that carries none of its own.
     @State var lastKnownReadiumLocator: ReadiumShared.Locator?
 
+    /// WI-7 photo/custom-background compositing: tracks whether a decorative
+    /// background image is stored for the current theme. Reloaded on appear and
+    /// whenever the theme / custom-background toggle / revision changes (mirrors
+    /// `ThemeBackgroundView`'s own reload triggers). Drives both the
+    /// `ThemeBackgroundView` composition and the transparent-navigator decision.
+    /// Non-`private` so the `+Background` extension's reload helper can write it.
+    @State var hasBackgroundImage = false
+
     var body: some View {
-        // Gate-4 round-3 MED-3: bilingual body modifiers (toggle, re-inject, setup
-        // sheet, layout-change handler) live in `bilingualSurfaces(_:)` in
-        // `ReadiumEPUBHost+Bilingual` for the 300-line budget.
-        bilingualSurfaces(coreBody)
+        // WI-7: compose the decorative background BEHIND the navigator, mirroring
+        // the legacy `ReaderContainerView` (`ZStack { if useCustomBackground {
+        // ThemeBackgroundView }; reader }`). When transparency is active the
+        // navigator renders clear-bodied over this layer. The compositing
+        // wrapper + reload observers live in `ReadiumEPUBHost+Background` for the
+        // 300-line budget; bilingual body modifiers live in `bilingualSurfaces`.
+        backgroundComposited(bilingualSurfaces(coreBody))
     }
 
     @ViewBuilder
@@ -135,23 +148,23 @@ struct ReadiumEPUBHost: View {
                         // across the legacy and Readium engines.
                         calibratedFontSizePt: settingsStore.calibrator.calibratedSize(
                             forUnified: settingsStore.typography.fontSize, target: .epub
-                        )
+                        ),
+                        // WI-7: clear the HTML body background so the composited
+                        // ThemeBackgroundView shows through (photo/custom-bg path).
+                        transparentBackground: shouldRenderTransparentBackground
                     ),
                     fingerprintKey: fingerprint.canonicalKey,
                     readerToken: readerToken,
                     initialLocation: restoredLocator,
-                    // Med-2: when `EPUBNavigatorViewController` init throws the
-                    // representable can only return a placeholder controller
-                    // synchronously — it routes the failure here so the host
-                    // flips to `.failed` and shows the error view instead of a
-                    // blank page. `[weak viewModel]` avoids capturing the View
-                    // struct + mutating @State during a render pass.
+                    // Med-2: a representable can only return a placeholder
+                    // controller synchronously, so a navigator-init throw routes
+                    // here to flip the host to `.failed`. `[weak viewModel]`
+                    // avoids mutating @State during a render pass.
                     onNavigatorInitFailure: { [weak viewModel] message in
                         viewModel?.markNavigatorInitFailed(message)
                     },
-                    // WI-6: forward the navigator's `locationDidChange` into the
-                    // VM's debounced save. `@MainActor @Sendable` (same posture
-                    // as `onNavigatorInitFailure`) so the coordinator stays
+                    // WI-6: forward `locationDidChange` into the VM's debounced
+                    // save. `@MainActor @Sendable` so the coordinator stays
                     // decoupled from the VM type.
                     onLocationChange: { [weak viewModel] locator in
                         viewModel?.save(readiumLocator: locator)  // WI-6 save
@@ -165,20 +178,19 @@ struct ReadiumEPUBHost: View {
                         // FIRST locator (lastEnumeratedHref nil → href differs).
                         handleBilingualLocationChange(locator)
                     },
-                    // WI-8: attach the host-owned highlight adapter to the live
-                    // navigator once it is built (inside the representable's
-                    // `makeUIViewController`), and detach it on teardown — so the
-                    // same adapter the host's coordinator drives for restore /
-                    // remove is the one bound to the rendered spine.
+                    // WI-8: the host-owned highlight adapter — bound to the live
+                    // navigator in the representable, detached on teardown — so the
+                    // adapter the host's coordinator drives is the one on-spine.
                     highlightAdapter: highlightAdapter,
                     navCommander: navCommander,
-                    bilingualCommander: bilingualCommander
+                    bilingualCommander: bilingualCommander,
+                    // WI-7: make the navigator view + spine WebViews transparent
+                    // so the ThemeBackgroundView composited behind shows through.
+                    transparentBackground: shouldRenderTransparentBackground
                 )
                 .ignoresSafeArea()
-                // WI-9a: capture the publication's container-relative reading-
-                // order hrefs so the jump observer can resolve a (legacy,
-                // OPF-relative) vreader `Locator` href against them — same
-                // migration concern WI-8 handles for highlight decorations.
+                // WI-9a: the jump observer resolves a (legacy, OPF-relative)
+                // vreader `Locator` href against the publication's reading-order.
                 .onReceive(NotificationCenter.default.publisher(for: .readerNextPage)) { _ in
                     navCommander.nextPage()
                 }
@@ -237,15 +249,9 @@ struct ReadiumEPUBHost: View {
             restoredLocator = await vm.restoredReadiumLocator()
             // WI-11b Gate-4 round-3 HIGH-1 (persisted-on open race): build the
             // bilingual parser + VM BEFORE `vm.open()` flips `state = .ready` and
-            // mounts the navigator. The navigator emits its initial
-            // `locationDidChange` as soon as it renders; if `bilingualViewModel`
-            // were still nil then, a persisted-on book would DROP its only initial
-            // enumerate. Neither call depends on the Readium publication
-            // (`openBilingualParser` builds its own `EPUBParser` from `fileURL`;
-            // `ensureBilingualViewModel` needs only the parser spine), so both run
-            // first. When the first `locationDidChange` fires the VM is non-nil →
-            // `handleBilingualLocationChange` enumerates (lastEnumeratedHref nil →
-            // href differs). No toggle on open, so no double-enumerate.
+            // mounts the navigator, so the navigator's initial `locationDidChange`
+            // sees a non-nil VM and a persisted-on book's only initial enumerate
+            // isn't dropped. Neither call depends on the Readium publication.
             await openBilingualParser()
             ensureBilingualViewModel()
             await vm.open()
@@ -270,18 +276,12 @@ struct ReadiumEPUBHost: View {
             Task { await highlightCoordinator?.restoreAll() }
         }
         .onDisappear {
-            // High (bug #252 lesson): host-level close lifecycle. The host owns
-            // the VM (and through `.ready` its `Publication`) via @State, so the
-            // close fires only when the host genuinely leaves the hierarchy (nav
-            // pop) — releasing the publication's file handles deterministically
-            // instead of waiting on @State teardown timing. The registry slot +
-            // navigator teardown is handled in the representable's
-            // `dismantleUIViewController` (it knows the coordinator's token).
-            //
-            // WI-6: `closeAndFlush()` awaits the final position save so a pending
-            // debounced write completes before iOS suspends. Wrapped in a
-            // background task like `EPUBReaderHost` so the save survives the
-            // dismiss transition.
+            // High (bug #252 lesson): host-level close lifecycle. The host owns the
+            // VM (+ its `Publication`) via @State, so the close fires only on a
+            // genuine nav pop — releasing file handles deterministically. Registry
+            // + navigator teardown live in `dismantleUIViewController`.
+            // WI-6: `closeAndFlush()` awaits the final position save in a
+            // background task (like `EPUBReaderHost`) so it survives the dismiss.
             guard let viewModel else { return }
             let bgTaskID = UIApplication.shared.beginBackgroundTask(
                 expirationHandler: nil
