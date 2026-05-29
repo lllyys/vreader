@@ -61,6 +61,62 @@ struct ReaderSettingsPanel: View {
     /// `ReaderThemeV2`, so no `asV2` projection is needed.)
     private var sheetTheme: ReaderThemeV2 { store.theme }
 
+    /// Bug #285 / GH #1265: the panel's native `List` chrome (Section
+    /// headers, `Toggle` / `Picker` / plain-`Text` labels, footers) was
+    /// never theme-tinted — it stayed on the system `label` /
+    /// `secondaryLabel` colours, which wash out against the fixed cream
+    /// sheet surface in the light-family themes (worst in Sepia). The
+    /// committed design `vreader-panels.jsx` colours every label from
+    /// theme tokens (`SectionLabel` → `t.sub`; primary control labels →
+    /// `t.ink`). This palette routes the native chrome through the
+    /// active theme's tokens to restore that designed colouring.
+    ///
+    /// Exposed (not private) so `ReaderSettingsPanelContrastTests` can
+    /// assert the resolved colours clear the project's two-bar WCAG
+    /// convention over the panel surface — the same composition-test
+    /// seam as `themePickerThemes`.
+    struct ChromeLabelPalette {
+        /// Primary row labels (Toggle / Picker / plain-Text) — the
+        /// theme's `ink` token (design's primary control colour).
+        let primary: UIColor
+        /// Section headers + footer captions — the theme's `sub` token
+        /// (design's `SectionLabel` / secondary colour).
+        let secondary: UIColor
+        /// Destructive-action label colour. The list-wide
+        /// `.foregroundStyle(primary)` would otherwise repaint the
+        /// destructive "Remove Background" button's system red in the
+        /// theme ink (Gate-4 round-1 Medium). The design's `SettingsSheet`
+        /// renders danger rows as `#c44` (`vreader-panels.jsx`:
+        /// `danger ? '#c44' : t.ink`) — a documented design value that
+        /// also clears 4.43:1 over the cream sheet (vs. ~3.35:1 for the
+        /// system red it replaces). Theme-independent, matching the design.
+        let destructive: UIColor
+
+        init(theme: ReaderThemeV2) {
+            self.primary = theme.inkColor
+            self.secondary = theme.subColor
+            // Design's danger colour `#c44` == `#cc4444`.
+            self.destructive = UIColor(
+                red: 0xcc / 255, green: 0x44 / 255, blue: 0x44 / 255, alpha: 1
+            )
+        }
+    }
+
+    /// The resolved chrome-label palette for the active sheet theme.
+    private var chromePalette: ChromeLabelPalette {
+        ChromeLabelPalette(theme: sheetTheme)
+    }
+
+    /// SwiftUI `Color` for primary native chrome labels (Toggle / Picker
+    /// / plain-Text row labels).
+    private var primaryLabelColor: Color { Color(chromePalette.primary) }
+    /// SwiftUI `Color` for secondary native chrome (Section headers, footers).
+    private var secondaryLabelColor: Color { Color(chromePalette.secondary) }
+    /// SwiftUI `Color` for destructive-action labels — keeps the
+    /// "Remove Background" affordance red despite the list-wide ink
+    /// `.foregroundStyle` (Gate-4 round-1 Medium; design's `#c44`).
+    private var destructiveLabelColor: Color { Color(chromePalette.destructive) }
+
     /// The re-skinned panel's `ReaderSheetChrome` title — exposed for
     /// the WI-10 composition test.
     var sheetChromeTitleForTesting: String? {
@@ -102,6 +158,16 @@ struct ReaderSettingsPanel: View {
             // Hide the grouped-List backdrop so the design's sheet
             // surface tint (`ReaderSheetChrome`) shows through.
             .scrollContentBackground(.hidden)
+            // Bug #285 / GH #1265: tint the native List chrome from the
+            // theme tokens (the design colours every label from
+            // `vreader-panels.jsx`). The list-wide `.foregroundStyle`
+            // sets primary row labels (Toggle / Picker / plain-Text) to
+            // the `ink` token; Section headers and footers carry an
+            // explicit `secondaryLabelColor` (`sub`) at their declaration
+            // sites. `.tint` carries the theme accent onto the control
+            // glyphs (Toggle knobs, selected segmented-Picker fill).
+            .foregroundStyle(primaryLabelColor)
+            .tint(Color(sheetTheme.accentColor))
         }
         .onAppear { loadPerBookState() }
         .onChange(of: store.typography.fontSize) { _, _ in syncPerBookIfEnabled() }
@@ -186,15 +252,35 @@ struct ReaderSettingsPanel: View {
         }
     }
 
+    /// A Section header tinted with the theme's `sub` token (Bug #285 /
+    /// GH #1265 — matches the design's `SectionLabel` = `t.sub`). Section
+    /// header `Text` ignores the list-wide `.foregroundStyle`, so the
+    /// colour is applied explicitly here.
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title).foregroundStyle(secondaryLabelColor)
+    }
+
+    /// A Section footer caption tinted with the theme's `sub` token
+    /// (Bug #285). Footers are secondary text per the design.
+    @ViewBuilder
+    private func sectionFooter(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(secondaryLabelColor)
+    }
+
     @ViewBuilder
     private var themeSection: some View {
-        Section("Theme") {
+        Section {
             HStack(spacing: 10) {
                 ForEach(Self.themePickerThemes, id: \.self) { theme in
                     themeSwatch(theme)
                 }
             }
             .padding(.vertical, 8)
+        } header: {
+            sectionHeader("Theme")
         }
     }
 
@@ -315,6 +401,7 @@ struct ReaderSettingsPanel: View {
                     Text("\(Int(store.backgroundOpacity * 100))%")
                         .font(.caption)
                         .monospacedDigit()
+                        .foregroundStyle(secondaryLabelColor)
                         .frame(width: 36)
                 }
 
@@ -333,6 +420,10 @@ struct ReaderSettingsPanel: View {
                     }
                 } label: {
                     Label("Remove Background", systemImage: "trash")
+                        // Bug #285 / GH #1265 (Gate-4 Medium): restore the
+                        // destructive red the list-wide ink `.foregroundStyle`
+                        // would otherwise repaint, using the design's `#c44`.
+                        .foregroundStyle(destructiveLabelColor)
                 }
                 .accessibilityLabel("Remove background image")
             }
@@ -351,8 +442,7 @@ struct ReaderSettingsPanel: View {
             .pickerStyle(.segmented)
             .accessibilityLabel("EPUB layout")
         } footer: {
-            Text("Scroll uses continuous vertical scrolling. Paged uses horizontal page turns.")
-                .font(.caption)
+            sectionFooter("Scroll uses continuous vertical scrolling. Paged uses horizontal page turns.")
         }
     }
 
@@ -395,12 +485,12 @@ struct ReaderSettingsPanel: View {
                     Text("\(Int(store.autoPageTurnInterval))s")
                         .font(.caption)
                         .monospacedDigit()
+                        .foregroundStyle(secondaryLabelColor)
                         .frame(width: 32)
                 }
             }
         } footer: {
-            Text("Automatically turn pages at the set interval. Pauses on user interaction.")
-                .font(.caption)
+            sectionFooter("Automatically turn pages at the set interval. Pauses on user interaction.")
         }
     }
 
@@ -410,7 +500,7 @@ struct ReaderSettingsPanel: View {
     /// (`vreader-panels.jsx` `SliderRow`) replaces the native `Slider`.
     @ViewBuilder
     private var fontSizeSection: some View {
-        Section("Font Size") {
+        Section {
             SettingsSliderRow(
                 value: Binding(
                     get: { store.typography.fontSize },
@@ -425,6 +515,8 @@ struct ReaderSettingsPanel: View {
             )
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
+        } header: {
+            sectionHeader("Font Size")
         }
     }
 
@@ -435,7 +527,7 @@ struct ReaderSettingsPanel: View {
     /// the closest stable SF Symbols (dense block vs three spaced lines).
     @ViewBuilder
     private var lineSpacingSection: some View {
-        Section("Line Spacing") {
+        Section {
             SettingsSliderRow(
                 value: Binding(
                     get: { store.typography.lineSpacing },
@@ -450,6 +542,8 @@ struct ReaderSettingsPanel: View {
             )
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
+        } header: {
+            sectionHeader("Line Spacing")
         }
     }
 
@@ -462,7 +556,7 @@ struct ReaderSettingsPanel: View {
     /// Monospace), not the design's 2-option reduction (plan §2).
     @ViewBuilder
     private var fontFamilySection: some View {
-        Section("Font") {
+        Section {
             TypefacePillToggle(
                 selection: $store.typography.fontFamily,
                 accessibilityLabel: "Font family",
@@ -470,6 +564,8 @@ struct ReaderSettingsPanel: View {
             )
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
+        } header: {
+            sectionHeader("Font")
         }
     }
 
@@ -481,8 +577,7 @@ struct ReaderSettingsPanel: View {
             Toggle("CJK Character Spacing", isOn: $store.typography.cjkSpacing)
                 .accessibilityLabel("CJK character spacing")
         } footer: {
-            Text("Adds extra spacing between CJK characters for improved readability.")
-                .font(.caption)
+            sectionFooter("Adds extra spacing between CJK characters for improved readability.")
         }
     }
 
@@ -561,16 +656,11 @@ struct ReaderSettingsPanel: View {
     private var chineseConversionFooter: some View {
         switch chineseConversionDisableReason {
         case nil:
-            Text("Convert Chinese text between Simplified and Traditional scripts.")
-                .font(.caption)
+            sectionFooter("Convert Chinese text between Simplified and Traditional scripts.")
         case .nativeMode:
-            Text("Chinese text conversion is not yet available for this book's format.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            sectionFooter("Chinese text conversion is not yet available for this book's format.")
         case .formatUnsupported:
-            Text("Not supported for this book's format.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            sectionFooter("Not supported for this book's format.")
         }
     }
 
@@ -585,10 +675,9 @@ struct ReaderSettingsPanel: View {
                     if newValue { savePerBookSnapshot() } else { deletePerBookOverride() }
                 }
         } footer: {
-            Text(isPerBookEnabled
+            sectionFooter(isPerBookEnabled
                 ? "Font, spacing, and theme changes apply only to this book."
                 : "All books share the same settings.")
-                .font(.caption)
         }
     }
 
@@ -631,7 +720,7 @@ struct ReaderSettingsPanel: View {
 
     @ViewBuilder
     private var previewSection: some View {
-        Section("Preview") {
+        Section {
             Text(previewText)
                 .font(previewFont)
                 .tracking(store.cjkLetterSpacing)
@@ -641,6 +730,8 @@ struct ReaderSettingsPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(store.uiBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+        } header: {
+            sectionHeader("Preview")
         }
     }
 
