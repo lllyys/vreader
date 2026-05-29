@@ -966,6 +966,7 @@ struct ReaderContainerView: View {
                 ReadiumEPUBHost(
                     fileURL: resolvedFileURL,
                     fingerprint: fingerprint,
+                    modelContainer: modelContext.container,
                     settingsStore: settingsStore,
                     readerToken: readerToken
                 )
@@ -985,6 +986,7 @@ struct ReaderContainerView: View {
             ReadiumEPUBHost(
                 fileURL: resolvedFileURL,
                 fingerprint: fingerprint,
+                modelContainer: modelContext.container,
                 settingsStore: settingsStore,
                 readerToken: readerToken
             )

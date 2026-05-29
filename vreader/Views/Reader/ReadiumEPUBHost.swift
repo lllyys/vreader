@@ -24,6 +24,7 @@
 
 #if canImport(UIKit)
 import SwiftUI
+import SwiftData
 import UIKit
 import OSLog
 import ReadiumShared
@@ -34,6 +35,9 @@ import ReadiumNavigator
 struct ReadiumEPUBHost: View {
     let fileURL: URL
     let fingerprint: DocumentFingerprint
+    /// WI-6: threaded so the VM can build a `PersistenceActor` for reading
+    /// position save/restore (mirrors `EPUBReaderHost`).
+    let modelContainer: ModelContainer
     let settingsStore: ReaderSettingsStore
     /// Bug #142 / WI-4: per-reader instance token threaded into the coordinator's
     /// registry registration so a stale callback from an outgoing reader cannot
@@ -41,6 +45,9 @@ struct ReadiumEPUBHost: View {
     var readerToken: UUID?
 
     @State private var viewModel: ReadiumEPUBReaderViewModel?
+    /// WI-6: the restored Readium locator, loaded before the navigator mounts so
+    /// it can be passed as `initialLocation`. nil = open at the start.
+    @State private var restoredLocator: ReadiumShared.Locator?
 
     var body: some View {
         Group {
@@ -53,6 +60,7 @@ struct ReadiumEPUBHost: View {
                     ),
                     fingerprintKey: fingerprint.canonicalKey,
                     readerToken: readerToken,
+                    initialLocation: restoredLocator,
                     // Med-2: when `EPUBNavigatorViewController` init throws the
                     // representable can only return a placeholder controller
                     // synchronously — it routes the failure here so the host
@@ -61,6 +69,13 @@ struct ReadiumEPUBHost: View {
                     // struct + mutating @State during a render pass.
                     onNavigatorInitFailure: { [weak viewModel] message in
                         viewModel?.markNavigatorInitFailed(message)
+                    },
+                    // WI-6: forward the navigator's `locationDidChange` into the
+                    // VM's debounced save. `@MainActor @Sendable` (same posture
+                    // as `onNavigatorInitFailure`) so the coordinator stays
+                    // decoupled from the VM type.
+                    onLocationChange: { [weak viewModel] locator in
+                        viewModel?.save(readiumLocator: locator)
                     }
                 )
                 .ignoresSafeArea()
@@ -83,8 +98,19 @@ struct ReadiumEPUBHost: View {
         }
         .task {
             guard viewModel == nil else { return }
-            let vm = ReadiumEPUBReaderViewModel(fileURL: fileURL)
+            let persistence = PersistenceActor(modelContainer: modelContainer)
+            let vm = ReadiumEPUBReaderViewModel(
+                fileURL: fileURL,
+                fingerprint: fingerprint,
+                persistence: persistence,
+                deviceId: ReaderContainerView.deviceId
+            )
             viewModel = vm
+            // WI-6: load the saved position BEFORE the navigator mounts (the
+            // representable is only built once `state == .ready`) so the
+            // navigator opens directly at the restored locator instead of the
+            // start. nil → open at the start (first-open / nothing saved).
+            restoredLocator = await vm.restoredReadiumLocator()
             await vm.open()
         }
         .onDisappear {
@@ -95,7 +121,21 @@ struct ReadiumEPUBHost: View {
             // instead of waiting on @State teardown timing. The registry slot +
             // navigator teardown is handled in the representable's
             // `dismantleUIViewController` (it knows the coordinator's token).
-            viewModel?.close()
+            //
+            // WI-6: `closeAndFlush()` awaits the final position save so a pending
+            // debounced write completes before iOS suspends. Wrapped in a
+            // background task like `EPUBReaderHost` so the save survives the
+            // dismiss transition.
+            guard let viewModel else { return }
+            let bgTaskID = UIApplication.shared.beginBackgroundTask(
+                expirationHandler: nil
+            )
+            Task {
+                await viewModel.closeAndFlush()
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                }
+            }
         }
     }
 }
@@ -109,17 +149,26 @@ private struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     let preferences: EPUBPreferences
     let fingerprintKey: String
     let readerToken: UUID?
+    /// WI-6: the restored reading position to open at, or nil to open at the
+    /// start. Passed straight into `EPUBNavigatorViewController(initialLocation:)`.
+    let initialLocation: ReadiumShared.Locator?
     /// Med-2: invoked (on the main actor, deferred past the current render
     /// pass) when `EPUBNavigatorViewController` init throws, so the host can
     /// flip to `.failed`. `@MainActor @Sendable` so capturing it into the
     /// deferral `Task` is clean under `SWIFT_STRICT_CONCURRENCY = complete`
     /// (Gate-4 round-2 Med).
     var onNavigatorInitFailure: (@MainActor @Sendable (String) -> Void)?
+    /// WI-6: invoked with the navigator's reported locator on every
+    /// `locationDidChange`, so the host's VM can debounce-save the position.
+    /// `@MainActor @Sendable` so the coordinator can hold it across the
+    /// navigator-delegate boundary under strict concurrency.
+    var onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)?
 
     func makeCoordinator() -> ReadiumReaderCoordinator {
         ReadiumReaderCoordinator(
             fingerprintKey: fingerprintKey,
-            readerToken: readerToken ?? UUID()
+            readerToken: readerToken ?? UUID(),
+            onLocationChange: onLocationChange
         )
     }
 
@@ -128,7 +177,7 @@ private struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
         do {
             let navigator = try EPUBNavigatorViewController(
                 publication: publication,
-                initialLocation: nil,
+                initialLocation: initialLocation,
                 config: config
             )
             navigator.delegate = context.coordinator
@@ -185,6 +234,10 @@ final class ReadiumReaderCoordinator: NSObject {
     /// lifecycle; the coordinator must not keep it alive past the host.
     private weak var navigator: EPUBNavigatorViewController?
 
+    /// WI-6: forwards `locationDidChange` to the host VM's debounced save.
+    /// Dropped in `detach()` so no stale callback fires after teardown.
+    private var onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)?
+
     #if DEBUG
     /// Test seam: when set, `evaluateJavaScriptValue` uses this instead of the
     /// real navigator's `evaluateJavaScript`, so the JSON-serialization contract
@@ -193,9 +246,14 @@ final class ReadiumReaderCoordinator: NSObject {
     var evaluatorForTests: ((String) async -> Any?)?
     #endif
 
-    init(fingerprintKey: String, readerToken: UUID) {
+    init(
+        fingerprintKey: String,
+        readerToken: UUID,
+        onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)? = nil
+    ) {
         self.fingerprintKey = fingerprintKey
         self.readerToken = readerToken
+        self.onLocationChange = onLocationChange
         super.init()
     }
 
@@ -219,6 +277,7 @@ final class ReadiumReaderCoordinator: NSObject {
         #endif
         navigator?.delegate = nil
         navigator = nil
+        onLocationChange = nil
     }
 }
 
@@ -233,6 +292,9 @@ extension ReadiumReaderCoordinator: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: ReadiumShared.Locator) {
+        // WI-6: forward the reported locator to the host VM's debounced save so
+        // the reading position persists as the user navigates/scrolls.
+        onLocationChange?(locator)
         // WI-4 probe wiring: register the active navigator + signal settle the
         // first time a spine is rendered and a location is reported, so the
         // DebugBridge eval/settle probes (eval?bridge=epub) reach this host.
