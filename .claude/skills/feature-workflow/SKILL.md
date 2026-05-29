@@ -214,6 +214,30 @@ Track audit rounds in the plan's revision history.
 **Status transition**: row → `PLANNED` (mirror rule fires; create GH
 issue if not present, stamp `GH: #N` in Notes).
 
+## 2e. Open the gate-progress timeline on the GH issue
+
+Per rule 47's "Gate progress is recorded in the GH issue", the issue is
+the running record of the feature's path through the six gates. Right
+after the issue exists, post the **first** timeline comment recording
+that Gate 2 passed:
+
+```bash
+gh issue comment <feature-gh-issue> --body "$(cat <<'EOF'
+**Gate 2 — plan audited.**
+- Plan: `dev-docs/plans/<plan-file>.md`
+- Audit: Codex threadId `<id>`, <N> round(s), verdict clean (or `manual-fallback`)
+- Work items (tier):
+  - WI-1 <slug> — foundational
+  - WI-2 <slug> — behavioral
+  - …
+EOF
+)"
+```
+
+Keep it short and factual — the plan file stays the source of truth;
+this comment points at it. Do not paste the plan's contents into the
+issue.
+
 > **Hard dependency**: Gate 3 cannot start on an unaudited plan.
 > Skipping Gate 2 and starting TDD anyway is the most likely failure
 > mode here. Don't.
@@ -570,6 +594,24 @@ git tag v<X.Y.Z>          # the version this WI's PR bumped to
 git push origin v<X.Y.Z>
 ```
 
+Then post the per-WI timeline comment on the GH issue (rule 47, "Gate
+progress is recorded in the GH issue"):
+
+```bash
+gh issue comment <feature-gh-issue> --body "$(cat <<'EOF'
+**WI-<n> merged** (<foundational | behavioral>).
+- PR #<pr>, merged as `<short-sha>`
+- Version: v<X.Y.Z>
+- Gate 4 audit: <ship-as-is | follow-up-recommended>
+- Gate 5a slice: <what was run / observed, or "unit + integration (foundational)">
+EOF
+)"
+```
+
+This makes the *middle* of the workflow visible on GitHub. The final
+WI's merge instead uses the existing "shipped, awaiting verification"
+comment in the Post-Merge Finalizer below — do not double-post.
+
 **Status transitions** (per merge):
 
 - WI lands but more remain → row stays `IN PROGRESS`.
@@ -587,6 +629,12 @@ git push origin v<X.Y.Z>
 
 **Do NOT auto-`gh issue close` on the GH issue when the final WI
 merges.** Per AGENTS.md "Close gate":
+
+> The "shipped, awaiting verification" comment (below) and the closure
+> comment after Gate 5b are the **last two rows** of the gate-progress
+> timeline from rule 47. Together with the Gate-2 comment (2e) and the
+> per-WI-merge comments (Gate 6), they make the issue a complete record
+> of the feature's path through all six gates.
 
 ## Right after final WI's `gh pr merge`
 

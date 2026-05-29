@@ -109,6 +109,27 @@ After merge:
 - `VERIFIED` is a separate post-implementation status, set after Gate 5's final-WI acceptance pass lands and is recorded in the row. Requires a `dev-docs/verification/feature-<id>-<YYYYMMDD>.md` evidence file (PreToolUse hook enforces).
 - GH issue closes per close-gate rule (closure comment cites the verification: commit SHA + what was tested + what was observed).
 
+## Gate progress is recorded in the GH issue (binding)
+
+The GH issue mirror is not just a creation-time pointer — it is the **running record** of the feature's path through the six gates. Once the issue exists (created at the Gate 2 → `PLANNED` flip), every gate transition posts a short, append-only comment so the issue reads as a verifiable timeline of the workflow. A reviewer who only sees GitHub can then audit gate compliance without cloning the repo.
+
+Post one comment at each of these transitions:
+
+| Transition | Comment records |
+| --- | --- |
+| Gate 2 passes (issue just created) | plan path + audit verdict (Codex threadId + rounds, or `manual-fallback`) + the WI list with foundational/behavioral tiers |
+| Each WI's PR merges (Gate 6) | WI number + tier, PR number, version bumped to, merge-commit SHA, Gate 4 audit verdict, Gate 5a slice result |
+| Final WI merges → row `DONE` | "shipped in vX.Y.Z (commit `<sha>`), awaiting verification" — this is the existing close-gate comment |
+| Gate 5b acceptance pass → row `VERIFIED` | evidence-file path + `result:` + a one-line acceptance-criteria summary — this is the existing closure comment, posted just before `gh issue close` |
+
+Rules for these comments:
+
+- **Append-only, short, factual.** Paths, SHAs, verdicts, version numbers — not prose. One comment per transition; do not edit prior comments.
+- **The markdown artifacts stay the source of truth.** The `dev-docs/plans/` plan, the `.claude/codex-audits/` logs, `docs/features.md`, and the `dev-docs/verification/` evidence file are authoritative. The issue comments are a timeline that *points at* them; never copy a plan's full contents into the issue.
+- **A skipped comment is a gate-process lapse, not a hard-blocked one.** No hook enforces these (they are post-action `gh issue comment` calls), so the discipline is the gate. If a transition happened without its comment, back-fill it before the next transition.
+
+The two bottom rows already exist in the close-gate / finalizer flow; this rule adds the Gate-2 and per-WI-merge rows so the *middle* of the workflow is visible on GitHub, not just its endpoints.
+
 ## Audit count by feature size
 
 To keep the audit cost honest:
