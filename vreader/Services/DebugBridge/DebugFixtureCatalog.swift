@@ -69,6 +69,24 @@ enum DebugFixtureCatalog {
         // fixture unblocks open / render / theme verification, not the
         // gesture-driven highlight criterion.
         DebugFixture(name: "multi-page-pdf", format: .pdf, resourceName: "multi-page-pdf", resourceExtension: "pdf"),
+        // Feature #42 WI-13: the Readium Phase-1 acceptance corpus. The
+        // English EPUB3 dimension is already covered by mini-epub3 +
+        // multi-chapter-epub; these three add the missing corpus dimensions so
+        // render / parse / position / theme / highlight / search are exercised
+        // across the layout classes that diverge under Readium:
+        //   • mini-epub2 — an OPF 2.0 package with an NCX `toc.ncx` (no
+        //     nav.xhtml), 2 spine items — exercises the legacy publication
+        //     graph the Readium streamer parses for EPUB 2.0.1 books.
+        //   • mini-rtl — `page-progression-direction="rtl"` + `dir="rtl"` +
+        //     Arabic body text, 2 spine items — exercises RTL reading
+        //     direction (render + position + bilingual).
+        //   • mini-cjk — Chinese body text, 2 spine items (chapter 2 sets
+        //     `writing-mode: vertical-rl` to exercise vertical CJK; chapter 1
+        //     stays horizontal). Chapter 1 also carries a footnote `noteref`
+        //     into chapter 2 for the footnote-navigation criterion.
+        DebugFixture(name: "mini-epub2", format: .epub, resourceName: "mini-epub2", resourceExtension: "epub"),
+        DebugFixture(name: "mini-rtl",   format: .epub, resourceName: "mini-rtl",   resourceExtension: "epub"),
+        DebugFixture(name: "mini-cjk",   format: .epub, resourceName: "mini-cjk",   resourceExtension: "epub"),
     ]
 
     /// All catalog entries.

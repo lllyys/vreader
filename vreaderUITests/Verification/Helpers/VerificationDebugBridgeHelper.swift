@@ -134,6 +134,76 @@ struct VerificationDebugBridgeHelper {
         return json
     }
 
+    // MARK: - Feature #42 WI-13 additions (Readium acceptance corpus)
+
+    /// Open a book by its fingerprint key. Fires
+    /// `vreader-debug://open?bookId=<key>[&position=<pos>]` and returns
+    /// immediately; caller settles after.
+    func open(bookId: String, position: String? = nil) {
+        guard let url = DebugCommand.openURL(bookId: bookId, position: position) else {
+            XCTFail("VerificationDebugBridgeHelper: could not construct open URL for '\(bookId)'")
+            return
+        }
+        send(url)
+    }
+
+    /// Apply a reader theme + optional font size. Fires
+    /// `vreader-debug://theme?mode=<mode>[&fontSize=<int>]`.
+    func theme(mode: String, fontSize: Int? = nil) {
+        guard let url = DebugCommand.themeURL(mode: mode, fontSize: fontSize) else {
+            XCTFail("VerificationDebugBridgeHelper: could not construct theme URL for '\(mode)'")
+            return
+        }
+        send(url)
+    }
+
+    /// Run a search + optionally tap result N. Fires
+    /// `vreader-debug://search?query=<q>[&index=<n>]`.
+    func search(query: String, index: Int? = nil) {
+        guard let url = DebugCommand.searchURL(query: query, index: index) else {
+            XCTFail("VerificationDebugBridgeHelper: could not construct search URL for '\(query)'")
+            return
+        }
+        send(url)
+    }
+
+    /// Evaluate `js` against the active reader's JS bridge (e.g. `epub` for
+    /// the Readium/legacy EPUB spine). Fires
+    /// `vreader-debug://eval?bridge=<bridge>&js=<base64>`. The app writes the
+    /// result to `DebugBridge/eval-<bridge>.json`; read it via `readEval`.
+    /// `js` MUST be a single expression — the eval seam wraps it, so
+    /// statement forms (`var`, function bodies) raise a JS syntax error.
+    func eval(bridge: String, js: String) {
+        let b64 = Data(js.utf8).base64EncodedString()
+        var c = URLComponents()
+        c.scheme = "vreader-debug"
+        c.host = "eval"
+        c.queryItems = [
+            URLQueryItem(name: "bridge", value: bridge),
+            URLQueryItem(name: "js", value: b64),
+        ]
+        guard let url = c.url else {
+            XCTFail("VerificationDebugBridgeHelper: could not construct eval URL")
+            return
+        }
+        send(url)
+    }
+
+    /// Read the eval result JSON written by `eval(bridge:js:)`. Returns the
+    /// parsed dictionary (`result` holds the JS value, or `error` a JS
+    /// exception), or nil if absent/malformed.
+    func readEval(bridge: String) -> [String: Any]? {
+        guard let containerPath = appDataContainerPath() else { return nil }
+        let path = containerPath
+            .appendingPathComponent("Library/Caches/DebugBridge")
+            .appendingPathComponent("eval-\(bridge).json")
+        guard let data = try? Data(contentsOf: path),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
     // MARK: - URL construction
 
     enum DebugCommand {
@@ -181,6 +251,42 @@ struct VerificationDebugBridgeHelper {
             ]
             if let color {
                 items.append(URLQueryItem(name: "color", value: color))
+            }
+            c.queryItems = items
+            return c.url
+        }
+
+        static func openURL(bookId: String, position: String?) -> URL? {
+            var c = URLComponents()
+            c.scheme = "vreader-debug"
+            c.host = "open"
+            var items = [URLQueryItem(name: "bookId", value: bookId)]
+            if let position {
+                items.append(URLQueryItem(name: "position", value: position))
+            }
+            c.queryItems = items
+            return c.url
+        }
+
+        static func themeURL(mode: String, fontSize: Int?) -> URL? {
+            var c = URLComponents()
+            c.scheme = "vreader-debug"
+            c.host = "theme"
+            var items = [URLQueryItem(name: "mode", value: mode)]
+            if let fontSize {
+                items.append(URLQueryItem(name: "fontSize", value: String(fontSize)))
+            }
+            c.queryItems = items
+            return c.url
+        }
+
+        static func searchURL(query: String, index: Int?) -> URL? {
+            var c = URLComponents()
+            c.scheme = "vreader-debug"
+            c.host = "search"
+            var items = [URLQueryItem(name: "query", value: query)]
+            if let index {
+                items.append(URLQueryItem(name: "index", value: String(index)))
             }
             c.queryItems = items
             return c.url

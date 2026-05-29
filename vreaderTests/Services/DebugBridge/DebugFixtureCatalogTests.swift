@@ -12,7 +12,28 @@ final class DebugFixtureCatalogTests: XCTestCase {
 
     func test_all_returnsKnownFixtureNames() {
         let names = DebugFixtureCatalog.all().map { $0.name }
-        XCTAssertEqual(Set(names), ["war-and-peace", "mini-epub3", "mini-azw3", "mini-markdown", "multi-chapter-epub", "multi-page-pdf"])
+        XCTAssertEqual(Set(names), [
+            "war-and-peace", "mini-epub3", "mini-azw3", "mini-markdown",
+            "multi-chapter-epub", "multi-page-pdf",
+            "mini-epub2", "mini-rtl", "mini-cjk",
+        ])
+    }
+
+    /// Feature #42 WI-13: the Readium Phase-1 acceptance corpus — EPUB2 / RTL /
+    /// CJK. Each must resolve to a real `.epub` bundle resource (the
+    /// `test_all_entriesResolveInTheTestBundle` gate enforces presence; these
+    /// pin the name/format/resource shape).
+    func test_find_readiumAcceptanceCorpus_returnsEPUBFixtures() throws {
+        for name in ["mini-epub2", "mini-rtl", "mini-cjk"] {
+            let entry = try XCTUnwrap(
+                DebugFixtureCatalog.find(name: name),
+                "catalog should contain the \(name) acceptance fixture"
+            )
+            XCTAssertEqual(entry.name, name)
+            XCTAssertEqual(entry.format, .epub)
+            XCTAssertEqual(entry.resourceName, name)
+            XCTAssertEqual(entry.resourceExtension, "epub")
+        }
     }
 
     /// Feature #70 WI-4: the MD fixture added so the `.md` reader path is
