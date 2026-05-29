@@ -60,6 +60,12 @@ final class ReadiumReaderCoordinator: NSObject {
     /// Dropped in `detach()` so no stale callback fires after teardown.
     private var onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)?
 
+    /// WI-8 (new-highlight): forwards a finalized text `Selection` to the host so
+    /// it can surface the designed `SelectionPopoverView` (color picker) and
+    /// create a highlight from the chosen color. Set from the representable;
+    /// dropped in `detach()` so no stale callback fires after teardown.
+    private var onSelection: (@MainActor (Selection) -> Void)?
+
     /// WI-8: the highlight adapter bound to this navigator. Detached on teardown
     /// so no stale decoration apply fires after the host leaves the hierarchy.
     private let highlightAdapter: ReadiumDecorationHighlightAdapter
@@ -76,6 +82,10 @@ final class ReadiumReaderCoordinator: NSObject {
         fingerprintKey: String,
         readerToken: UUID,
         onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)? = nil,
+        // WI-8 (new-highlight): the host's selection sink — surfaces the designed
+        // color-picker popover and creates a highlight on color tap. nil for a
+        // non-highlight call site (DebugBridge eval seam construction).
+        onSelection: (@MainActor (Selection) -> Void)? = nil,
         // Gate-4 round-1 Low: no default — the adapter MUST be the host-owned
         // instance the `HighlightCoordinator` drives, else `detach()` would clear
         // a different adapter than the one attached to the navigator. Explicit
@@ -92,6 +102,7 @@ final class ReadiumReaderCoordinator: NSObject {
         self.fingerprintKey = fingerprintKey
         self.readerToken = readerToken
         self.onLocationChange = onLocationChange
+        self.onSelection = onSelection
         self.highlightAdapter = highlightAdapter
         self.navCommander = navCommander
         self.bilingualCommander = bilingualCommander
@@ -106,7 +117,8 @@ final class ReadiumReaderCoordinator: NSObject {
         navCommander?.bind(
             next: { [weak self] in self?.goToNextPage() },
             previous: { [weak self] in self?.goToPreviousPage() },
-            navigate: { [weak self] locator in self?.navigate(to: locator) }
+            navigate: { [weak self] locator in self?.navigate(to: locator) },
+            clearSelection: { [weak self] in self?.clearActiveSelection() }
         )
         // WI-11b: bind the bilingual eval sink to this coordinator's production
         // eval method so the host's bilingual extension can drive the
@@ -133,6 +145,9 @@ final class ReadiumReaderCoordinator: NSObject {
         boundNavigator?.delegate = nil
         boundNavigator = nil
         onLocationChange = nil
+        // WI-8 (new-highlight): drop the selection sink so a late
+        // `shouldShowMenuForSelection` after teardown can't surface a popover.
+        onSelection = nil
         // WI-9a: clear the nav sink so a late page-turn / jump intent no-ops
         // after teardown (mirrors the navigator-weak discipline above).
         navCommander?.clear()
@@ -189,6 +204,22 @@ extension ReadiumReaderCoordinator: EPUBNavigatorDelegate {
         ReaderTapZoneRouter.dispatch(
             x: point.x, totalWidth: width, layout: currentLayout
         )
+    }
+
+    /// WI-8 (new-highlight): Readium fires this once when a text selection is
+    /// finalized, carrying the `Selection` (its `locator.text` highlight/before/
+    /// after quote + container-relative href + progression + the on-screen
+    /// `frame`). We forward it to the host's selection sink, which surfaces the
+    /// designed `SelectionPopoverView` color picker and creates a highlight on a
+    /// color tap. We return `true` so Readium STILL shows its native edit menu
+    /// (Copy / Look Up / Translate) — the popover is additive, the native menu
+    /// is untouched, and the existing legacy/non-highlight paths see no change.
+    func navigator(
+        _ navigator: SelectableNavigator,
+        shouldShowMenuForSelection selection: Selection
+    ) -> Bool {
+        onSelection?(selection)
+        return true
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: ReadiumShared.Locator) {

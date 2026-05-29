@@ -33,6 +33,11 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     /// `@MainActor @Sendable` so the coordinator can hold it across the
     /// navigator-delegate boundary under strict concurrency.
     var onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)?
+    /// WI-8 (new-highlight): invoked with a finalized Readium text `Selection`
+    /// when the user selects text, so the host can surface the designed
+    /// `SelectionPopoverView` color picker and create a highlight. The coordinator
+    /// binds this to its `shouldShowMenuForSelection` delegate callback.
+    var onSelection: (@MainActor (ReadiumNavigator.Selection) -> Void)?
     /// WI-8: the host-owned highlight adapter, bound to the navigator in
     /// `makeUIViewController` and released in `dismantleUIViewController`. The
     /// adapter is a `DecorableNavigator` client; the host's `HighlightCoordinator`
@@ -61,6 +66,7 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             fingerprintKey: fingerprintKey,
             readerToken: readerToken ?? UUID(),
             onLocationChange: onLocationChange,
+            onSelection: onSelection,
             highlightAdapter: highlightAdapter,
             navCommander: navCommander,
             bilingualCommander: bilingualCommander

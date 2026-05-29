@@ -46,6 +46,10 @@ final class ReadiumNavCommander {
     private var onNextPage: (@MainActor @Sendable () -> Void)?
     private var onPreviousPage: (@MainActor @Sendable () -> Void)?
     private var onNavigate: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)?
+    /// WI-8 (new-highlight): dismisses the navigator's live text selection after
+    /// a highlight is created, so the native Readium edit menu clears with the
+    /// popover. Bound by the coordinator on `attach`; no-op after `detach`.
+    private var onClearSelection: (@MainActor @Sendable () -> Void)?
 
     init() {}
 
@@ -53,11 +57,13 @@ final class ReadiumNavCommander {
     func bind(
         next: @escaping @MainActor @Sendable () -> Void,
         previous: @escaping @MainActor @Sendable () -> Void,
-        navigate: @escaping @MainActor @Sendable (ReadiumShared.Locator) -> Void
+        navigate: @escaping @MainActor @Sendable (ReadiumShared.Locator) -> Void,
+        clearSelection: @escaping @MainActor @Sendable () -> Void
     ) {
         onNextPage = next
         onPreviousPage = previous
         onNavigate = navigate
+        onClearSelection = clearSelection
     }
 
     /// Drops all handlers so a late intent no-ops after teardown. Called from
@@ -66,11 +72,13 @@ final class ReadiumNavCommander {
         onNextPage = nil
         onPreviousPage = nil
         onNavigate = nil
+        onClearSelection = nil
     }
 
     func nextPage() { onNextPage?() }
     func previousPage() { onPreviousPage?() }
     func navigate(to locator: ReadiumShared.Locator) { onNavigate?(locator) }
+    func clearSelection() { onClearSelection?() }
 }
 
 // MARK: - Coordinator nav methods
@@ -106,6 +114,14 @@ extension ReadiumReaderCoordinator {
             guard let navigator = self?.boundNavigator else { return }
             _ = await navigator.go(to: readiumLocator, options: NavigatorGoOptions(animated: true))
         }
+    }
+
+    /// WI-8 (new-highlight): clears the navigator's live text selection (a
+    /// `SelectableNavigator` API) so the native Readium edit menu dismisses after
+    /// a highlight is created. Synchronous (no async hop); no-op when no navigator
+    /// is bound (weak — a deallocated navigator also reads nil).
+    func clearActiveSelection() {
+        boundNavigator?.clearSelection()
     }
 }
 #endif

@@ -10,12 +10,11 @@
 // theme/font mapping — the body reads `ReaderSettingsStore.theme` +
 // `.typography` + `.epubLayout`, recomputes `EPUBPreferences` on any change, and
 // the representable re-submits them to the navigator. WI-7 photo/custom-bg
-// compositing layers `ThemeBackgroundView` behind the navigator (a transparent
-// navigator over the decorative image) — wrapper + reload observers in
-// `ReadiumEPUBHost+Background`. Highlight/search/TTS parity land in later WIs.
-// Loading + error states reuse the existing reader's plain `ProgressView` + the
-// dispatcher's `fingerprintErrorView`-style message (no new UI chrome — rule 51:
-// this is an engine swap behind a dark flag for the designed EPUB surface).
+// compositing layers `ThemeBackgroundView` behind the navigator — wrapper +
+// reload observers in `ReadiumEPUBHost+Background`. WI-8 highlight restore +
+// create (selection → designed color popover → decoration) lives in
+// `ReadiumEPUBHost+Highlights`. Loading + error states reuse the existing
+// reader's `ProgressView` + failure message (no new UI chrome — rule 51).
 //
 // DebugBridge (WI-4 probe): the coordinator registers the active navigator on
 // `navigator(_:locationDidChange:)` via `setActiveReadiumNavigator(_:for:token:)`
@@ -56,16 +55,23 @@ struct ReadiumEPUBHost: View {
     /// (via @State) so the same instance is both attached to the live navigator
     /// (in the representable's `makeUIViewController`) and driven by the host's
     /// `HighlightCoordinator` restore / `.readerHighlightRemoved` observer.
-    @State private var highlightAdapter = ReadiumDecorationHighlightAdapter()
+    /// Non-`private` so the `+Highlights` extension reads it (WI-8 new-highlight).
+    @State var highlightAdapter = ReadiumDecorationHighlightAdapter()
     /// WI-8: restore-on-open + create/remove plumbing through the shared
     /// highlight lifecycle (renderer = `highlightAdapter`). Built in `.task`
-    /// once a `modelContainer` is available.
-    @State private var highlightCoordinator: HighlightCoordinator?
-    /// WI-9a: host-owned navigation sink. Passed into the representable, where
-    /// the coordinator binds its nav methods on `attach`; the host's page-turn /
-    /// jump `.onReceive` observers post into it. Owned here (like
-    /// `highlightAdapter`) so the same instance survives body recomputation.
-    @State private var navCommander = ReadiumNavCommander()
+    /// once a `modelContainer` is available. Non-`private` for the `+Highlights`
+    /// extension.
+    @State var highlightCoordinator: HighlightCoordinator?
+    /// WI-9a: host-owned navigation sink. The coordinator binds its nav methods
+    /// on `attach`; the host's page-turn / jump observers post into it. Owned here
+    /// so the instance survives body recomputation. Non-`private` so the
+    /// `+Highlights` create handler can `clearSelection()` (WI-8 new-highlight).
+    @State var navCommander = ReadiumNavCommander()
+    /// WI-8 (new-highlight): single-entry token→Readium-`Selection` cache that
+    /// round-trips a live selection through the designed `SelectionPopoverView`
+    /// (the text-quote anchor can't ride a bare `TextSelectionInfo`). Mirrors the
+    /// legacy `EPUBSelectionTokenCache`; wiring in `ReadiumEPUBHost+Highlights`.
+    @State var readiumSelectionTokenCache = ReadiumSelectionTokenCache()
 
     // MARK: - WI-11b/WI-12 bilingual (per-spine interlinear via the eval channel)
 
@@ -178,6 +184,9 @@ struct ReadiumEPUBHost: View {
                         // FIRST locator (lastEnumeratedHref nil → href differs).
                         handleBilingualLocationChange(locator)
                     },
+                    // WI-8 (new-highlight): cache the finalized selection + surface
+                    // the designed color-picker popover (handler in `+Highlights`).
+                    onSelection: { handleReadiumSelection($0) },
                     // WI-8: the host-owned highlight adapter — bound to the live
                     // navigator in the representable, detached on teardown — so the
                     // adapter the host's coordinator drives is the one on-spine.
@@ -263,18 +272,10 @@ struct ReadiumEPUBHost: View {
             // locators fall on visible spine items.
             await highlightCoordinator?.restoreAll()
         }
-        // WI-8: clear a removed highlight's decoration (the cross-format Bug #78
-        // visual-clear pipeline `HighlightCoordinator.deleteHighlight` posts).
-        // Mirrors the legacy EPUB container's observer.
-        .onReceive(NotificationCenter.default.publisher(for: .readerHighlightRemoved)) { notification in
-            guard let idString = notification.object as? String,
-                  let id = UUID(uuidString: idString) else { return }
-            highlightAdapter.remove(id: id)
-        }
-        // WI-8: re-restore after an annotation import refreshes the set.
-        .onReceive(NotificationCenter.default.publisher(for: .readerHighlightsDidImport)) { _ in
-            Task { await highlightCoordinator?.restoreAll() }
-        }
+        // WI-8: highlight observers (selection-popover present + create,
+        // decoration clear, import re-restore) live in the `+Highlights`
+        // extension's `highlightObservers` modifier (300-line budget).
+        .modifier(highlightObservers)
         .onDisappear {
             // High (bug #252 lesson): host-level close lifecycle. The host owns the
             // VM (+ its `Publication`) via @State, so the close fires only on a

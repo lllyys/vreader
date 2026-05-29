@@ -30,20 +30,24 @@ struct ReadiumNavCommanderTests {
         var nextCount = 0
         var prevCount = 0
         var navigatedHrefs: [String] = []
+        var clearCount = 0
         commander.bind(
             next: { nextCount += 1 },
             previous: { prevCount += 1 },
-            navigate: { navigatedHrefs.append($0.href.string) }
+            navigate: { navigatedHrefs.append($0.href.string) },
+            clearSelection: { clearCount += 1 }
         )
 
         commander.nextPage()
         commander.nextPage()
         commander.previousPage()
         commander.navigate(to: makeLocator())
+        commander.clearSelection()
 
         #expect(nextCount == 2)
         #expect(prevCount == 1)
         #expect(navigatedHrefs == ["ch1.xhtml"])
+        #expect(clearCount == 1)
     }
 
     @Test func unbound_intentsNoOp() {
@@ -54,6 +58,7 @@ struct ReadiumNavCommanderTests {
         commander.nextPage()
         commander.previousPage()
         commander.navigate(to: makeLocator())
+        commander.clearSelection()
         // Reaching here without a crash is the assertion.
         #expect(Bool(true))
     }
@@ -64,13 +69,15 @@ struct ReadiumNavCommanderTests {
         commander.bind(
             next: { fired += 1 },
             previous: { fired += 1 },
-            navigate: { _ in fired += 1 }
+            navigate: { _ in fired += 1 },
+            clearSelection: { fired += 1 }
         )
         commander.clear()
 
         commander.nextPage()
         commander.previousPage()
         commander.navigate(to: makeLocator())
+        commander.clearSelection()
 
         #expect(fired == 0)
     }
@@ -79,8 +86,8 @@ struct ReadiumNavCommanderTests {
         let commander = ReadiumNavCommander()
         var firstFired = 0
         var secondFired = 0
-        commander.bind(next: { firstFired += 1 }, previous: {}, navigate: { _ in })
-        commander.bind(next: { secondFired += 1 }, previous: {}, navigate: { _ in })
+        commander.bind(next: { firstFired += 1 }, previous: {}, navigate: { _ in }, clearSelection: {})
+        commander.bind(next: { secondFired += 1 }, previous: {}, navigate: { _ in }, clearSelection: {})
 
         commander.nextPage()
 
