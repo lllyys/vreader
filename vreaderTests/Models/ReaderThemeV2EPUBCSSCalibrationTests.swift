@@ -32,21 +32,22 @@ struct ReaderThemeV2EPUBCSSCalibrationTests {
         #expect(css.contains(expected))
     }
 
-    /// For a non-`1.0` EPUB multiplier, the injected `html, body` font-size is
-    /// the *calibrated* value — strictly larger than the raw unified value
-    /// would have produced (the shipped `.epub` multiplier is `> 1.0`).
-    @Test func injectedFontSizeIsCalibratedNotRawUnified() {
+    /// The injected `html, body` font-size is the calibrator's `.epub`
+    /// mapping of the unified value — the routing seam, not a raw passthrough
+    /// of `typography.fontSize` by some other path.
+    ///
+    /// Bug #280: the shipped `.epub` multiplier is now `1.0` (sim-measured
+    /// cap-height parity with TXT — see `FontSizeCalibration.swift`), so the
+    /// calibrated EPUB value *equals* the raw unified value by design. This
+    /// test therefore asserts the value MATCHES the calibrator output (the
+    /// real invariant), not that it differs from raw (an assumption that only
+    /// held under the un-verified 1.12 estimate).
+    @Test func injectedFontSizeIsCalibratorEpubMapping() {
         let unified: CGFloat = 24
         let calibrated = calibrator.calibratedSize(forUnified: unified, target: .epub)
-        // Shipped .epub multiplier is > 1.0, so the calibrated value differs
-        // from the raw unified value.
-        #expect(calibrated != unified)
         let css = ReaderThemeV2.paper.epubOverrideCSS(fontSize: calibrated)
-        let rawString = "font-size: \(String(format: "%.1f", unified))px"
         let calibratedString = "font-size: \(String(format: "%.1f", calibrated))px"
         #expect(css.contains(calibratedString))
-        // The raw unified value must NOT appear as the html,body font-size.
-        #expect(!css.contains(rawString))
     }
 
     // MARK: - Bug #57 no-regression (the real selectors)
@@ -142,17 +143,21 @@ struct ReaderThemeV2EPUBCSSCalibrationTests {
         }
     }
 
-    /// The container helper's value is the *calibrated* value, NOT the raw
-    /// unified `typography.fontSize` — for a non-`1.0` `.epub` multiplier the
-    /// two differ.
-    @Test @MainActor func containerHelperValueDiffersFromRawUnified() {
+    /// The container helper's value is the calibrator's `.epub` mapping of the
+    /// store's unified `typography.fontSize` — the routing invariant.
+    ///
+    /// Bug #280: the `.epub` multiplier is now `1.0` (sim-measured cap-height
+    /// parity with TXT), so at unified 24 the helper correctly returns 24 —
+    /// equal to raw by design, not by a missing-calibration bug. The assertion
+    /// is against the calibrator output (the source of truth), which catches a
+    /// regression to a hard-coded constant or the wrong target just as a
+    /// `!= raw` check would have under a `> 1.0` multiplier.
+    @Test @MainActor func containerHelperMatchesCalibratorEpubMapping() {
         let store = ReaderSettingsStore(
             defaults: UserDefaults(suiteName: "EPUBCSSCalibTests-\(UUID().uuidString)")!
         )
         store.typography.fontSize = 24
         let helperValue = EPUBReaderContainerView.calibratedEPUBFontSize(for: store)
-        // Shipped .epub multiplier is > 1.0.
-        #expect(helperValue != 24)
         #expect(helperValue == store.calibrator.calibratedSize(forUnified: 24, target: .epub))
     }
 

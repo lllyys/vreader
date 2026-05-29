@@ -71,20 +71,30 @@ struct FontSizeCalibrationProfile: Sendable, Equatable {
     /// iPhone 17 Pro Simulator, at the default content-size category.
     /// `txt == 1.0` is the anchor by construction.
     ///
-    /// These are conservative, identity-leaning estimates: EPUB and Foliate
-    /// WebViews render CSS px slightly smaller than the equivalent UIKit
-    /// point at default font metrics, so their multipliers are `>= 1.0`. MD
-    /// is also a `UITextView` and renders close to TXT, so its multiplier is
-    /// near `1.0` (a small lift compensates for MD lacking the
-    /// `UIFontMetrics` wrap that TXT applies — at the default content-size
-    /// category that wrap is the identity, so the residual difference is the
-    /// raw system-font metric only). Gate-5 behavioral verification confirms
-    /// or re-tunes these four literals; the architecture is unaffected by a
-    /// re-tune.
+    /// **Bug #280 re-tune (sim-measured 2026-05-30, iPhone 17 Pro):** the
+    /// prior EPUB/Foliate multipliers were both `1.12`, a "conservative
+    /// estimate" that was never device-verified. A direct cap-height
+    /// measurement (`FontSizeCalibrationMeasurementTests`, a live WKWebView
+    /// rendering the SAME body CSS the engines inject, cap-height read via
+    /// Canvas `actualBoundingBoxAscent`, size-invariance control at 40px)
+    /// showed:
+    ///   - EPUB: `capHeight(txt 24pt) / capHeight(epub 24px)` =
+    ///     `16.910 / 16.906` = `1.0002` → the `-apple-system` CSS stack
+    ///     resolves to the SAME SF Pro face UIKit uses and 1 CSS px = 1 UIKit
+    ///     point, so EPUB is already at cap-height parity with TXT. The old
+    ///     `1.12` over-inflated EPUB by 12% — the "default body font too
+    ///     large" report (bug #280).
+    ///   - Foliate: `16.910 / 15.891` = `1.064` → the default UA font renders
+    ///     marginally smaller-capped than UIKit at the same px, so a small
+    ///     `> 1.0` lift restores parity. The old `1.12` over-inflated it ~5%.
+    /// MD is a `UITextView` like TXT, so it stays at `1.0` (at the default
+    /// content-size category the `UIFontMetrics` wrap TXT applies is the
+    /// identity, so MD and TXT share the same system-font metric). The
+    /// architecture is unaffected by the literal change.
     static let standard = FontSizeCalibrationProfile(
         txt: 1.0,
         md: 1.0,
-        epub: 1.12,
-        foliate: 1.12
+        epub: 1.0,
+        foliate: 1.06
     )
 }

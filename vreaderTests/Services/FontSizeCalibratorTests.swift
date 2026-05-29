@@ -13,13 +13,21 @@
 //   4. Encode the four ratios as the four Double fields of
 //      FontSizeCalibrationProfile.standard; txt is 1.0 by construction.
 //
-// The shipped multipliers are conservative, identity-leaning estimates
-// (EPUB/Foliate WebViews render CSS px slightly smaller than the equivalent
-// UIKit point at default metrics, so their multipliers are >= 1.0; MD is
-// also a UITextView so it is approximately 1.0). Gate-5 behavioral
-// verification confirms or re-tunes them; only the four field literals in
-// FontSizeCalibrationProfile.standard change if re-tuning is needed — the
-// architecture is unaffected.
+// The shipped multipliers are sim-measured (bug #280, iPhone 17 Pro,
+// 2026-05-30) via a direct cap-height comparison — see
+// FontSizeCalibrationMeasurementTests for the live-WKWebView measurement that
+// derives them. Measured at the reference unified size 24:
+//   - txt/md = 1.0 (UITextView anchor; at the default content-size category
+//     the UIFontMetrics wrap is the identity, so MD shares TXT's metric).
+//   - epub = 1.0 — the `-apple-system` CSS stack resolves to the SAME SF Pro
+//     face UIKit uses and 1 CSS px = 1 UIKit point, so EPUB is already at
+//     cap-height parity with TXT (measured 16.910 / 16.906 = 1.0002). The
+//     prior 1.12 over-inflated EPUB by 12% (bug #280's "too large" report).
+//   - foliate = 1.06 — the default UA font renders marginally smaller-capped
+//     than UIKit at the same px (measured 16.910 / 15.891 = 1.064), so a small
+//     > 1.0 lift restores parity. The prior 1.12 over-inflated it ~5%.
+// Only the four field literals in FontSizeCalibrationProfile.standard change
+// when re-tuning — the architecture is unaffected.
 
 import Testing
 import Foundation

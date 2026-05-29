@@ -112,9 +112,16 @@ struct ReadiumEPUBPreferencesMappingTests {
 
     /// Gate-4 round-1: the multiplier is computed from the CALIBRATED `.epub`
     /// size the host feeds (not the raw unified pt). The legacy EPUB engine
-    /// renders through `FontSizeCalibrator.calibratedSize(forUnified:target:.epub)`
-    /// (a multiplier > 1.0), so feeding the same calibrated value keeps perceived
-    /// size consistent across engines. Here: a calibrated 20.16pt → 20.16/18.
+    /// renders through `FontSizeCalibrator.calibratedSize(forUnified:target:.epub)`,
+    /// so feeding the same calibrated value keeps perceived size consistent
+    /// across engines.
+    ///
+    /// Bug #280: the `.epub` multiplier is now `1.0` (sim-measured cap-height
+    /// parity with TXT — see `FontSizeCalibration.swift`), so at the 18pt
+    /// default the calibrated value is 18 and the Readium relative multiplier
+    /// is exactly 1.0. The invariant under test is that the mapping consumes
+    /// the calibrated input (`fs == calibrated / 18`), not that the multiplier
+    /// exceeds 1.0 (which only held under the un-verified 1.12 estimate).
     @Test func fontSize_usesCalibratedInput_notRawUnified() {
         let calibrated = FontSizeCalibrator().calibratedSize(forUnified: 18, target: .epub)
         let p = ReadiumEPUBReaderViewModel.epubPreferences(
@@ -123,9 +130,9 @@ struct ReadiumEPUBPreferencesMappingTests {
         )
         let fs = try! #require(p.fontSize)
         #expect(fs == Double(calibrated / 18.0))
-        // The .epub band scales above the raw unified value, so the multiplier
-        // for an 18pt default is strictly greater than 1.0 (legacy parity).
-        #expect(fs > 1.0)
+        // The calibrated `.epub` value never drops below the raw unified value
+        // (the multiplier is >= 1.0), so the relative multiplier is >= 1.0.
+        #expect(fs >= 1.0)
     }
 
     // MARK: - lineHeight = lineSpacing multiplier

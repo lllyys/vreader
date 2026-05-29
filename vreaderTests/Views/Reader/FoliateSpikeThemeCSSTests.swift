@@ -142,9 +142,15 @@ struct FoliateSpikeThemeCSSTests {
         #expect(abs(mdRatio - txtRatio) <= tolerance)
         #expect(abs(epubRatio - txtRatio) <= tolerance)
         #expect(abs(foliateRatio - txtRatio) <= tolerance)
-        // Foliate and EPUB are both WebView CSS-px renderers — they should
-        // calibrate to the same ratio (sub-pixel rounding aside).
-        #expect(abs(foliateRatio - epubRatio) <= 0.5 / unified + 0.001)
+        // Bug #280: EPUB and Foliate are both WebView CSS-px renderers, but
+        // they do NOT share a multiplier. Sim-measured cap-heights at unified
+        // 24 (see `FontSizeCalibrationMeasurementTests`) show EPUB's
+        // `-apple-system` stack renders at TXT parity (multiplier 1.0) while
+        // Foliate's default UA font renders marginally smaller-capped
+        // (multiplier 1.06). The prior assertion that the two ratios are
+        // identical encoded the un-verified shared-1.12 estimate; the real
+        // invariant is that each web target sits within the ±25% band of the
+        // TXT anchor (asserted above), not that they equal each other.
     }
 
     // MARK: - WI-4 bridge seam: Coordinator state + setStyles JS
