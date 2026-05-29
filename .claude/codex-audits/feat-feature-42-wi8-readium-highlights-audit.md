@@ -1,7 +1,7 @@
 ---
 branch: feat/feature-42-wi8-readium-highlights
 threadId: codex-exec-readonly
-rounds: 1
+rounds: 2
 final_verdict: ship-as-is
 date: 2026-05-29
 ---
@@ -42,6 +42,34 @@ Changed files: `vreader/Services/Reader/ReadiumDecorationHighlightAdapter.swift`
 gate green: 69 tests / 4 suites (pure decoration mapping incl. href precedence,
 empty/whitespace skip, CJK, nil progression, tint mapping; set-rebuild via a
 fake `DecorableNavigator`).
+
+## Gate-5 device finding → round-2 audit (the migration href-mismatch)
+
+Device verification (Gate 5, iPhone 17 Pro Sim, v3.40.23) surfaced a defect that
+both the unit tests AND the round-1 audit missed: a legacy EPUB highlight stores
+its anchor href OPF-relative (`chapter1.xhtml`), but Readium's reading-order
+spine href is container-relative (`OEBPS/chapter1.xhtml`). The decoration's
+locator href matched no spine resource, so Readium **silently failed to render**
+the restored highlight — the highlight-parity gate (Risk 1) was not actually met
+despite green tests.
+
+**Fix (commit 139bc181):** the adapter resolves the stored href against the
+publication's reading-order spine hrefs (`publication.readingOrder.map(\.href)`,
+threaded into `attach(navigator:spineHrefs:)`) via a pure
+`resolveHref(_:against:)` (exact → unique-suffix → unique-basename). Re-verified
+on device: the legacy highlight `"raph of the fir"` renders as a yellow Readium
+decoration on the re-anchored text quote
+(`dev-docs/verification/artifacts/feature-42-wi8-readium-highlight-restore-20260529.png`).
+
+**Round-2 audit of the fix:** 1 Medium — basename fallback could mis-anchor when
+≥2 spine resources share a basename across directories. FIXED — both the suffix
+AND basename branches now require a UNIQUE match (a collision returns nil rather
+than guessing). Regression tests added (ambiguous-suffix→nil, ambiguous-basename
+→nil, unique-deeper-suffix→resolves). No other new Critical/High/Medium.
+
+This is why device verification is a binding gate: the green unit suite + a clean
+code audit still shipped a non-rendering parity gate until the real navigator
+exercised the actual spine-href format.
 
 ## Scope note carried forward
 
