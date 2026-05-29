@@ -29,6 +29,13 @@ final class ReadiumReaderCoordinator: NSObject {
     /// dispatch `goForward` / `goBackward` / `go(to:)` to the live navigator.
     weak var boundNavigator: EPUBNavigatorViewController?
 
+    /// WI-9a: the current reading layout, set by the representable from
+    /// `ReaderSettingsStore.epubLayout` (kept in sync on each preference update).
+    /// `navigator(_:didTapAt:)` passes it to `ReaderTapZoneRouter` so a side-tap
+    /// turns the page only in `.paged` layout (in `.scroll` every tap toggles
+    /// chrome, matching the legacy reader's tap contract).
+    var currentLayout: EPUBLayoutPreference = .paged
+
     /// WI-9a: the host-owned navigation sink. `attach` binds this coordinator's
     /// nav methods into it; `detach` clears it so a late page-turn / jump intent
     /// no-ops after teardown. Optional because a non-nav call site (DebugBridge
@@ -118,6 +125,24 @@ extension ReadiumReaderCoordinator: EPUBNavigatorDelegate {
         Task { @MainActor in
             self.log.error("ReadiumEPUB navigator error: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    /// WI-9a: Readium reports taps via the `VisualNavigatorDelegate` but does
+    /// NOT auto-navigate on tap (the host decides) — which is why a bare reader
+    /// tap did nothing before this. Route the tap through the shared
+    /// `ReaderTapZoneRouter` (the same dispatcher the legacy bridges use): in
+    /// `.paged` layout a left/right-zone tap posts `.readerNextPage` /
+    /// `.readerPreviousPage` (→ the host's WI-9a observers → `goForward` /
+    /// `goBackward`), a center tap posts `.readerContentTapped` (chrome toggle);
+    /// in `.scroll` layout every tap toggles chrome. `point` is in the
+    /// navigator view's coordinate space, so its `.x` against the view width is
+    /// the correct zone fraction.
+    func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
+        let width = boundNavigator?.view.bounds.width ?? 0
+        guard width > 0 else { return }
+        ReaderTapZoneRouter.dispatch(
+            x: point.x, totalWidth: width, layout: currentLayout
+        )
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: ReadiumShared.Locator) {

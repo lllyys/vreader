@@ -53,6 +53,14 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
         )
     }
 
+    /// WI-9a: the layout the coordinator's tap-router needs, derived from the
+    /// preferences' `scroll` flag (the host computes `preferences` from
+    /// `ReaderSettingsStore.epubLayout`, so this round-trips the enum without
+    /// threading it separately).
+    private var resolvedLayout: EPUBLayoutPreference {
+        preferences.scroll == true ? .scroll : .paged
+    }
+
     func makeUIViewController(context: Context) -> UIViewController {
         let config = EPUBNavigatorViewController.Configuration(preferences: preferences)
         do {
@@ -62,6 +70,9 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
                 config: config
             )
             navigator.delegate = context.coordinator
+            // WI-9a: tell the coordinator the current layout so `didTapAt`
+            // routes side-taps to page-turns only in `.paged` mode.
+            context.coordinator.currentLayout = resolvedLayout
             context.coordinator.attach(navigator: navigator)
             // WI-8: bind the highlight adapter to the same navigator + the
             // publication's spine hrefs so stored decorations render on the live
@@ -98,6 +109,9 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
         // `.epubLayout` and recomputes `preferences` on every Display-settings
         // change, so this re-submit applies the new theme/font/line-height/scroll
         // to the live navigator without a reopen.
+        // WI-9a: keep the coordinator's layout in sync so a live scroll↔paged
+        // switch re-routes the tap behavior immediately.
+        context.coordinator.currentLayout = resolvedLayout
         if let navigator = controller as? EPUBNavigatorViewController {
             navigator.submitPreferences(preferences)
         }
