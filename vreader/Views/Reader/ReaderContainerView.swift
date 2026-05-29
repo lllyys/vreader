@@ -968,7 +968,8 @@ struct ReaderContainerView: View {
                     fingerprint: fingerprint,
                     modelContainer: modelContext.container,
                     settingsStore: settingsStore,
-                    readerToken: readerToken
+                    readerToken: readerToken,
+                    ttsService: ttsService
                 )
             } else {
                 EPUBReaderHost(
@@ -988,7 +989,8 @@ struct ReaderContainerView: View {
                 fingerprint: fingerprint,
                 modelContainer: modelContext.container,
                 settingsStore: settingsStore,
-                readerToken: readerToken
+                readerToken: readerToken,
+                ttsService: ttsService
             )
         case .pdfKit:
             PDFReaderHost(

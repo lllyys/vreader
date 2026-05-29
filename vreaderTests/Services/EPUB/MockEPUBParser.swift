@@ -59,4 +59,11 @@ actor MockEPUBParser: EPUBParserProtocol {
         guard _isOpen else { throw EPUBParserError.notOpen }
         return URL(fileURLWithPath: "/tmp/mock-epub/")
     }
+
+    /// Test helper: force the open flag without driving `open(url:)` (which needs
+    /// metadata), so a test that calls `contentForSpineItem` directly doesn't trip
+    /// the `_isOpen` guard. Pairs with the existing `setSpineContent` extension.
+    func forceOpen() {
+        _isOpen = true
+    }
 }
