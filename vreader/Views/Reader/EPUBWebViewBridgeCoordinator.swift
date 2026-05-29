@@ -169,6 +169,10 @@ extension EPUBWebViewBridge {
                 }
                 return
             }
+            if message.name == "pagedSwipeHandler" {
+                handlePagedSwipeMessage(message.body)
+                return
+            }
             if message.name == "selectionChanged" {
                 handleSelectionMessage(message.body)
                 return
@@ -221,6 +225,37 @@ extension EPUBWebViewBridge {
             Task { @MainActor in
                 onProgressChange(progress)
                 await config.coordinator.handleBoundarySignal(signal)
+            }
+        }
+
+        /// Bug #281 / GH #1258: parse a `{dx, dy}` swipe payload from the
+        /// `pagedSwipeHandler` channel and, in paged layout, route a horizontal
+        /// swipe through `EPUBSwipeGestureClassifier` to the SAME
+        /// `.readerNextPage` / `.readerPreviousPage` notifications side-tap
+        /// produces (`ReaderTapZoneRouter`'s contract). Adds no new chrome — it
+        /// reaches the existing page-turn parity with the AZW3/Foliate paged
+        /// reader. In scroll mode (or when not paged) the payload is dropped so
+        /// a horizontal flick never turns a "page" that doesn't exist.
+        private func handlePagedSwipeMessage(_ body: Any) {
+            guard isPaged,
+                  let dict = body as? [String: Any],
+                  let dx = (dict["dx"] as? NSNumber)?.doubleValue,
+                  let dy = (dict["dy"] as? NSNumber)?.doubleValue else { return }
+            let outcome = EPUBSwipeGestureClassifier.classify(
+                deltaX: dx, deltaY: dy,
+                threshold: EPUBSwipeGestureClassifier.defaultThreshold
+            )
+            switch outcome {
+            case .nextPage:
+                Task { @MainActor in
+                    NotificationCenter.default.post(name: .readerNextPage, object: nil)
+                }
+            case .previousPage:
+                Task { @MainActor in
+                    NotificationCenter.default.post(name: .readerPreviousPage, object: nil)
+                }
+            case .none:
+                break
             }
         }
 

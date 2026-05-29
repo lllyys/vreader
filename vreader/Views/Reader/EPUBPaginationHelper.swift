@@ -143,6 +143,82 @@ enum EPUBPaginationHelper {
         """
     }
 
+    // MARK: - JS: Paged Swipe Tracking
+
+    /// JavaScript that detects a horizontal swipe in paged mode and posts the
+    /// total `{dx, dy}` of the gesture to the `pagedSwipeHandler` message
+    /// channel. Bug #281 / GH #1258: the custom EPUB host only had a `click`
+    /// (side-tap) listener, so paged mode had no swipe-to-turn — unlike the
+    /// AZW3/Foliate paged reader. The Swift coordinator parses the payload and
+    /// routes it through `EPUBSwipeGestureClassifier` →
+    /// `.readerNextPage` / `.readerPreviousPage` (the SAME notifications
+    /// side-tap produces), so this adds no new chrome, only an input affordance.
+    ///
+    /// `dx` follows the classifier's convention: `start.x - end.x` (positive =
+    /// finger swept right→left = advance forward). The payload is the GESTURE
+    /// total, not per-move — the classifier applies the dominance + threshold
+    /// guards, so the JS posts unconditionally on `touchend` (cheap; the Swift
+    /// side ignores sub-threshold / vertical gestures). When a real horizontal
+    /// swipe is detected the JS marks the gesture so the synthetic `click` that
+    /// WebKit fires after a touch sequence can be swallowed by the tap handler
+    /// (`window.__vreaderSwipeConsumedTap`) — otherwise a swipe would also
+    /// trigger a side-tap page-turn (double-advance).
+    ///
+    /// The swipe-consume threshold (`\(Int(EPUBSwipeGestureClassifier.defaultThreshold))`px)
+    /// and the horizontal-dominance test MUST match `EPUBSwipeGestureClassifier`
+    /// exactly — Codex Gate-4 round-1 [M1]: a looser JS threshold would swallow
+    /// the click for an 11-49px jitter that Swift does NOT turn on, making a
+    /// genuine side-tap / chrome-tap feel dropped. The flag is cleared on
+    /// `touchcancel` and auto-expires after a short window (round-1 [Low]) so a
+    /// consumed swipe that produces no synthetic click can't strand the flag and
+    /// swallow the NEXT genuine tap. The content is a fixed app-authored literal
+    /// with no interpolation — no injection surface.
+    static let pagedSwipeTrackingJS = """
+    (function() {
+        var startX = null, startY = null;
+        var SWIPE_PX = \(Int(EPUBSwipeGestureClassifier.defaultThreshold));
+        function clearConsumed() {
+            window.__vreaderSwipeConsumedTap = false;
+            window.__vreaderSwipeExpireTimer = null;
+        }
+        document.addEventListener('touchstart', function(e) {
+            if (!e.touches || e.touches.length !== 1) { startX = null; return; }
+            var t = e.touches[0];
+            startX = t.clientX; startY = t.clientY;
+        }, { passive: true });
+        document.addEventListener('touchcancel', function() {
+            startX = null; startY = null;
+        }, { passive: true });
+        document.addEventListener('touchend', function(e) {
+            if (startX === null) return;
+            var t = (e.changedTouches && e.changedTouches[0]) || null;
+            if (!t) { startX = null; return; }
+            var dx = startX - t.clientX;
+            var dy = startY - t.clientY;
+            startX = null; startY = null;
+            if (!isFinite(dx) || !isFinite(dy)) return;
+            // Mark the gesture as a consumed swipe ONLY when it matches what the
+            // Swift classifier will turn on (same threshold + dominance), so the
+            // click handler swallows the synthetic click for a real page-turn —
+            // never for a sub-threshold jitter that produces no turn.
+            if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy)) {
+                window.__vreaderSwipeConsumedTap = true;
+                // Self-expire so a swipe with no following synthetic click can't
+                // strand the flag and swallow the next genuine tap. Codex Gate-4
+                // round-2 [Low]: own the timer per swipe — cancel any prior
+                // pending expiry first so a stale timeout from an earlier swipe
+                // can't clear THIS swipe's flag before its synthetic click lands
+                // (rapid-swipe double-advance / link-activation reopener).
+                if (window.__vreaderSwipeExpireTimer) {
+                    clearTimeout(window.__vreaderSwipeExpireTimer);
+                }
+                window.__vreaderSwipeExpireTimer = setTimeout(clearConsumed, 700);
+            }
+            window.webkit.messageHandlers.pagedSwipeHandler.postMessage({ dx: dx, dy: dy });
+        }, { passive: true });
+    })();
+    """
+
     // MARK: - JS: CSS Injection/Removal
 
     /// Generates JavaScript to inject or replace the pagination CSS style element.

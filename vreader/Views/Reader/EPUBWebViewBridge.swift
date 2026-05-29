@@ -206,6 +206,20 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         userContentController.addUserScript(tapScript)
         userContentController.add(weakHandler, name: "contentTapHandler")
 
+        // Bug #281 / GH #1258: paged-mode swipe-to-turn. Inject the swipe
+        // detector + register its channel unconditionally — the JS only posts a
+        // `{dx, dy}` payload on `touchend` (cheap), and the coordinator gates on
+        // `isPaged` before routing through `EPUBSwipeGestureClassifier`. Adding
+        // it unconditionally avoids a teardown/re-add dance when the layout mode
+        // toggles at runtime; in scroll mode the coordinator drops the payload.
+        let swipeScript = WKUserScript(
+            source: EPUBPaginationHelper.pagedSwipeTrackingJS,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        userContentController.addUserScript(swipeScript)
+        userContentController.add(weakHandler, name: "pagedSwipeHandler")
+
         // Add selection tracking and highlight API JS (WI-007)
         let selectionScript = WKUserScript(
             source: EPUBHighlightBridge.selectionTrackingJS,

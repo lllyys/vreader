@@ -38,6 +38,7 @@ extension EPUBReaderContainerView {
         case .withinChapter:
             pageNavigator.nextPage()
             currentPaginationPage = pageNavigator.currentPage
+            recordPagedProgress()
         case .wrapToNextChapter:
             wrapForward()
         case .bounceAtEndOfBook:
@@ -52,6 +53,7 @@ extension EPUBReaderContainerView {
             // legacy clamp to avoid mis-navigating.
             pageNavigator.nextPage()
             currentPaginationPage = pageNavigator.currentPage
+            recordPagedProgress()
         }
     }
 
@@ -70,6 +72,7 @@ extension EPUBReaderContainerView {
         case .withinChapter:
             pageNavigator.previousPage()
             currentPaginationPage = pageNavigator.currentPage
+            recordPagedProgress()
         case .wrapToPreviousChapter:
             wrapBackward()
         case .bounceAtStartOfBook:
@@ -77,6 +80,55 @@ extension EPUBReaderContainerView {
         case .wrapToNextChapter, .bounceAtEndOfBook:
             pageNavigator.previousPage()
             currentPaginationPage = pageNavigator.currentPage
+            recordPagedProgress()
+        }
+    }
+
+    // MARK: - Within-chapter paged progress (bug #281 / GH #1258)
+
+    /// Bug #281 / GH #1258: after a WITHIN-CHAPTER paged page turn, update the
+    /// progress bar, "Chapter X of Y" position, and persisted `EPUBPosition`.
+    /// Paged mode disables vertical scroll and turns only change `scrollLeft`,
+    /// so the vertical-scroll `onProgressChange` producer never fires — progress
+    /// froze within a chapter. This mirrors the exact composition the
+    /// `onProgressChange` handler does (intra-chapter fraction →
+    /// `EPUBProgressCalculator.progress` → `readingProgress` +
+    /// `viewModel.updatePosition` + `.readerPositionDidChange`), matching the
+    /// AZW3/Foliate paged reader's relocate-per-turn contract.
+    ///
+    /// No-op until pagination is ready (`totalPages <= 0`) and in continuous
+    /// mode (which has its own windowed progress path); paged mode never runs
+    /// with a continuous config.
+    func recordPagedProgress() {
+        guard continuousScrollConfig == nil else { return }
+        guard pageNavigator.totalPages > 0,
+              let position = viewModel.currentPosition,
+              let metadata = viewModel.metadata,
+              metadata.spineCount > 0 else { return }
+        let fraction = EPUBPagedProgress.intraChapterFraction(
+            currentPage: pageNavigator.currentPage,
+            totalPages: pageNavigator.totalPages
+        )
+        let spineIndex = metadata.spineItems.firstIndex(
+            where: { $0.href == position.href }
+        ) ?? viewModel.currentSpineIndex
+        let totalProg = EPUBProgressCalculator.progress(
+            spineIndex: spineIndex,
+            scrollFraction: fraction,
+            totalSpineItems: metadata.spineCount
+        )
+        readingProgress = totalProg
+        let newPosition = EPUBPosition(
+            href: position.href,
+            progression: fraction,
+            totalProgression: totalProg,
+            cfi: nil
+        )
+        viewModel.updatePosition(newPosition)
+        if let locator = viewModel.makeCurrentLocator() {
+            NotificationCenter.default.post(
+                name: .readerPositionDidChange, object: locator
+            )
         }
     }
 

@@ -198,6 +198,12 @@ extension EPUBWebViewBridge {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: "contentTapHandler"
         )
+        // Bug #281 / GH #1258: matching teardown for the paged swipe handler
+        // registered in makeUIView. Removing an unregistered name is a safe
+        // no-op, so this is unconditional like the others.
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: "pagedSwipeHandler"
+        )
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: "selectionChanged"
         )
@@ -234,6 +240,31 @@ extension EPUBWebViewBridge {
     static let contentTapTrackingJS = """
     (function() {
         document.addEventListener('click', function(e) {
+            // Bug #281 / GH #1258: when a horizontal swipe was just detected
+            // (paged-mode swipe-to-turn), WebKit still fires a synthetic click
+            // at touchend. Swallow that single click so a swipe doesn't ALSO
+            // trigger a side-tap page-turn (double-advance) — OR activate a link
+            // the swipe happened to end on. Codex Gate-4 round-1 [M2]: this MUST
+            // run BEFORE the anchor guard so a swipe ending on an `<a>` both
+            // suppresses the link click AND clears the flag (a stranded flag
+            // would otherwise swallow the next genuine non-link tap). The flag
+            // is set by `pagedSwipeTrackingJS` (same threshold/dominance as the
+            // Swift classifier) and cleared here so the next genuine tap routes
+            // normally.
+            if (window.__vreaderSwipeConsumedTap) {
+                window.__vreaderSwipeConsumedTap = false;
+                // Codex Gate-4 round-2 [Low]: cancel the swipe's pending
+                // self-expiry timer now that the synthetic click has consumed
+                // the flag, so that timer can't later clear a fresh flag set by
+                // a subsequent rapid swipe before ITS click arrives.
+                if (window.__vreaderSwipeExpireTimer) {
+                    clearTimeout(window.__vreaderSwipeExpireTimer);
+                    window.__vreaderSwipeExpireTimer = null;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
             if (e.target.closest('a')) return;
             var x = (typeof e.clientX === 'number') ? e.clientX : null;
             var w = document.documentElement.clientWidth || window.innerWidth || 0;

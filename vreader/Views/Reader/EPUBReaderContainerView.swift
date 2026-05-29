@@ -848,6 +848,10 @@ struct EPUBReaderContainerView: View {
                 ) {
                     pageNavigator.jumpToPage(landingPage)
                     currentPaginationPage = landingPage
+                    // Bug #281 / GH #1258: a backward chapter-wrap lands on the
+                    // new chapter's LAST page; record that within-chapter
+                    // position so progress reflects it (not page 0).
+                    recordPagedProgress()
                 }
             }
             )
