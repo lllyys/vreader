@@ -293,6 +293,38 @@ struct ReadiumBilingualChapterTrackerTests {
         #expect(tracker.isCurrentGeneration(tracker.currentGeneration) == true)
     }
 
+    @Test("a generation captured before a chapter change is stale at EVERY post-await re-check (inject-chain guard)")
+    func generationCapturedBeforeChangeStaleAtEachInjectCheck() {
+        // Gate-4 round-2 MEDIUM (post-enumerate stale inject window): after a
+        // CURRENT enumerate result passes the enumerate-boundary guard and calls
+        // updateBlocks, the driver continues into drivePrefetchAndInject →
+        // injectBilingualIfCached, which have MORE suspension points
+        // (handlePositionChange, textProvider.unit, inject). If a newer spine is
+        // scheduled DURING one of those later awaits, the older task can resume
+        // and inject stale pairs into the now-visible chapter. The fix threads the
+        // captured generation through the whole post-enumerate chain and re-checks
+        // isCurrentGeneration after EACH suspension. This pins the decision: a
+        // generation captured for chapter-1 is NOT current after chapter-2 was
+        // scheduled, so EVERY downstream re-check (handlePositionChange,
+        // textProvider.unit, pre-inject) discards.
+        let tracker = ReadiumBilingualChapterTracker()
+        #expect(tracker.shouldEnumerate(forHref: "c1.xhtml", force: false) == true)
+        let chapter1Generation = tracker.currentGeneration
+        // The enumerate-boundary check (round 2) passes: chapter-1 is still current
+        // here, so the driver proceeds into the inject chain.
+        #expect(tracker.isCurrentGeneration(chapter1Generation) == true)
+        // The user scrolls into chapter-2 DURING the inject chain's first await
+        // (handlePositionChange). A newer enumerate is scheduled.
+        #expect(tracker.shouldEnumerate(forHref: "c2.xhtml", force: false) == true)
+        // EVERY subsequent re-check in the chain — after handlePositionChange,
+        // after textProvider.unit, immediately before inject — must now report
+        // chapter-1 as stale and discard rather than inject c1's pairs into c2.
+        #expect(tracker.isCurrentGeneration(chapter1Generation) == false)
+        // A further spine change (chapter-3) keeps it stale at all later checks too.
+        #expect(tracker.shouldEnumerate(forHref: "c3.xhtml", force: false) == true)
+        #expect(tracker.isCurrentGeneration(chapter1Generation) == false)
+    }
+
     // MARK: - Gate-4 (WI-12 audit) Finding 2: layoutChangeAction uses newLayout to
     // FAIL CLOSED for any future unsupported layout case.
 

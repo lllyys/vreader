@@ -32,6 +32,16 @@
 //     stops chapter-1's late result from overwriting the shared paged bucket and
 //     injecting its pairs into the now-visible chapter-2. Composes with — but is
 //     separate from — the MED-3 href dedupe (which prevents double-scheduling).
+//   - WI-12 audit round-2 MED (post-enumerate stale inject window): round-1 guards
+//     only the `enumerate()` boundary; the CURRENT result then flows through the
+//     inject chain (`drivePrefetchAndInject` → `injectBilingualIfCached`) whose
+//     LATER awaits (`handlePositionChange`, `textProvider.unit`, inject) could let
+//     an older task resume after a newer spine was scheduled and inject stale pairs.
+//     Fix: thread the captured generation through the chain and re-check
+//     `isCurrentGeneration(generation)` after EACH suspension (see the per-method
+//     docs). The two inject ENTRY POINTS differ: the enumerate chain is generation-
+//     guarded; `.readerBilingualDidChange` (no generation) is not enumerate-
+//     scheduled — it resolves the CURRENT locator from live state, so it is current.
 //
 // @coordinates-with: ReadiumEPUBHost.swift, ReadiumEPUBHost+Bilingual.swift,
 //   ReadiumBilingualCommander.swift, EPUBBilingualOrchestrator.swift,
@@ -150,29 +160,56 @@ extension ReadiumEPUBHost {
         // on success, including a real empty chapter).
         bilingualChapterTracker.markEnumerated(href: href)
         guard !blocks.isEmpty else { return }
-        await drivePrefetchAndInject(for: currentReadiumLocator)
+        // Gate-4 round-2 MED: thread the captured generation through the inject
+        // chain so a newer spine scheduled during its later awaits supersedes this
+        // task (see the chain's per-method docs).
+        await drivePrefetchAndInject(for: currentReadiumLocator, generation: generation)
     }
 
     /// Resolves the current unit (via the normalized locator) and asks the VM to
-    /// prefetch + inject if a translation is already cached.
+    /// prefetch + inject if a translation is already cached. Gate-4 round-2 MED:
+    /// the enumerate-chain inject path is generation-guarded end to end — after the
+    /// `handlePositionChange` suspension (and inside `injectBilingualIfCached` after
+    /// each of ITS awaits) the captured `generation` is re-checked, so a spine
+    /// change mid-chain discards before mutating orchestrator state / injecting.
     private func drivePrefetchAndInject(
-        for readiumLocator: ReadiumShared.Locator?
+        for readiumLocator: ReadiumShared.Locator?,
+        generation: Int
     ) async {
         guard let vm = bilingualViewModel, vm.isEnabled,
               let locator = currentVReaderLocator(from: readiumLocator) else { return }
         await vm.handlePositionChange(locator)
-        await injectBilingualIfCached(for: locator)
+        // A newer spine may have been scheduled while `handlePositionChange` was in
+        // flight (scroll mode emits rapid spine changes). Re-check before injecting.
+        guard bilingualChapterTracker.isCurrentGeneration(generation) else { return }
+        await injectBilingualIfCached(for: locator, generation: generation)
     }
 
     /// Build + push inject JS for the current unit's cached translations.
     /// Honors the Bug #268 mismatch fallback (translate the enumerate's OWN block
     /// texts when the prefetch segment count diverges from the block count).
-    func injectBilingualIfCached(for locator: Locator) async {
+    ///
+    /// `generation` (Gate-4 round-2 MED) is the enumerate-chain's captured token, or
+    /// `nil` for the `.readerBilingualDidChange` entry point (NOT enumerate-scheduled
+    /// — it resolves the CURRENT locator from live tracker state, so it is inherently
+    /// current). When non-nil it is re-checked after EACH suspension so a spine change
+    /// mid-chain discards before mutating orchestrator state / injecting stale pairs.
+    func injectBilingualIfCached(for locator: Locator, generation: Int? = nil) async {
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
-        guard let unit = await vm.textProvider?.unit(containing: locator),
-              let segments = vm.translations(for: unit) else { return }
+        guard let unit = await vm.textProvider?.unit(containing: locator) else { return }
+        // After resolving the unit (a suspension point) re-check the enumerate-chain
+        // generation: a newer spine scheduled during the lookup makes this stale.
+        if let generation, !bilingualChapterTracker.isCurrentGeneration(generation) {
+            return
+        }
+        guard let segments = vm.translations(for: unit) else { return }
         let blocks = bilingualOrchestrator.currentBlocks
         if !blocks.isEmpty, segments.count != blocks.count {
+            // Bug #268 fallback: re-check the generation before this path mutates
+            // shared orchestrator/commander state via translateBlocksDirectly.
+            if let generation, !bilingualChapterTracker.isCurrentGeneration(generation) {
+                return
+            }
             await vm.translateBlocksDirectly(blocks.map(\.text), for: unit)
             return
         }
@@ -183,6 +220,8 @@ extension ReadiumEPUBHost {
             blocks: blocks, translatedSegments: segments
         )
         guard !pairs.isEmpty else { return }
+        // The pipeline build above is synchronous, so the unit re-check is the
+        // inject-path's final generation gate (no await intervenes before here).
         await bilingualCommander.inject(pairs)
     }
 
