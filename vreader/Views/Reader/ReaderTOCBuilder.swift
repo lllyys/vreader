@@ -2,7 +2,8 @@
 // Extracted from ReaderContainerView to reduce file size (pure refactor).
 // Static methods - no instance state.
 //
-// @coordinates-with ReaderContainerView.swift, TOCBuilder.swift, EPUBParser.swift
+// @coordinates-with ReaderContainerView.swift, TOCBuilder.swift, EPUBParser.swift,
+//   TXTService.swift (TXT TOC derives from the reader's chapter index — bug #286)
 
 import Foundation
 import PDFKit
@@ -41,18 +42,17 @@ enum ReaderTOCFactory {
             }.value
 
         case "txt":
-            // GH #30: Use same full-text decode + regex as chapter builder.
-            // This ensures TOC entries and chapters are perfectly aligned.
+            // Bug #286 / GH #30: derive TOC entries from the reader's full-text
+            // chapter index — a single source of truth. `buildTXTTOCEntries`
+            // decodes via `decodeForDisplayAndSearch` (the reader's decoder) and
+            // runs `buildChapterIndexFromFullText` (the reader's chapter pass), so
+            // every TOC entry offset lands exactly on a reader chapter start.
+            // Pre-fix this path decoded via raw `String(data:encoding:)` with a
+            // UTF-8-only fallback and a SECOND `detectBestRule` over the TOC's own
+            // decoded string, so on non-UTF-8 files the offsets diverged from the
+            // reader's chapters and TOC taps navigated to the wrong chapter.
             guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else { return [] }
-            let hintName = TXTService.detectEncodingFromSample(data)
-            if let enc = TXTService.encodingFromName(hintName),
-               let text = String(data: data, encoding: enc) {
-                return TOCBuilder.forTXT(text: text, fingerprint: fingerprint)
-            } else if let text = String(data: data, encoding: .utf8) {
-                return TOCBuilder.forTXT(text: text, fingerprint: fingerprint)
-            } else {
-                return []
-            }
+            return TXTService.buildTXTTOCEntries(data: data, fingerprint: fingerprint)
 
         case "md":
             do {

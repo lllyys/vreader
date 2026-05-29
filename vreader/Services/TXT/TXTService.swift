@@ -149,9 +149,15 @@ actor TXTService: TXTServiceProtocol {
                 // (which has subtle differences from raw String(data:encoding:)).
                 let fullString = decodedFullText
                 let fullText = fullString as NSString
-                // GH #30: Detect rule from full text (not a sample) to match the
-                // TOC path. A 512K sample can pick a different rule than full-text,
-                // producing different chapter counts.
+                // GH #30 / bug #286: select the rule from the same decoded full
+                // string the chapter index is built over (detectBestRule still
+                // samples the first 512K UTF-16 for the *decision*, then extracts
+                // over the full text). The TOC path (`buildTXTTOCEntries`) now
+                // derives its entries from THIS same chapter index, so both share
+                // one decode + one rule-selection. Pre-fix the TOC ran its own
+                // decode + rule pass, so a non-UTF-8 decode (or sample misdetect)
+                // could diverge from the reader's chapters, sending TOC taps to
+                // the wrong chapter.
                 let rule = TXTTocRuleEngine.detectBestRule(
                     text: fullString, rules: TXTTocRuleEngine.defaultRules
                 )
@@ -190,7 +196,10 @@ actor TXTService: TXTServiceProtocol {
     /// Builds chapter index by running regex on the full decoded text.
     /// UTF-16 offsets are exact (from NSRegularExpression match positions).
     /// This is the same text the TOC uses, guaranteeing perfect alignment.
-    private static func buildChapterIndexFromFullText(
+    ///
+    /// Internal (not private) so `buildTXTTOCEntries` — and the TOC path that
+    /// calls it — can share this single chapter-detection pass (bug #286).
+    static func buildChapterIndexFromFullText(
         fullText: NSString,
         totalBytes: Int64,
         encodingName: String,
@@ -323,6 +332,77 @@ actor TXTService: TXTServiceProtocol {
             pos = split
         }
         return chapters
+    }
+
+    // MARK: - TOC Entries (Bug #286: single source of truth with the reader)
+
+    /// Decodes TXT bytes for the TOC path using the SAME entry point the reader
+    /// uses for display + search (`decodeForDisplayAndSearch`). Bug #286: the
+    /// pre-fix TOC builder decoded via `detectEncodingFromSample` + raw
+    /// `String(data:encoding:)` with a UTF-8-only fallback, so on a non-UTF-8
+    /// (GBK/Big5/…) file the TOC string could differ from the reader's string,
+    /// shifting every UTF-16 offset. Routing both through one decoder makes the
+    /// asserted "TOC and chapters are perfectly aligned" invariant true.
+    static func decodeTXTForTOC(_ data: Data) -> (String, String)? {
+        decodeForDisplayAndSearch(data)
+    }
+
+    /// Builds TOC entries from the reader's full-text chapter index — the single
+    /// source of truth (bug #286). Each emitted entry's `charOffsetUTF16` equals
+    /// a chapter's `globalStartUTF16` in `buildChapterIndexFromFullText`, so a
+    /// TOC tap resolved via `navigateToGlobalOffset` floor-snaps to exactly that
+    /// chapter. The synthetic "前言" preamble (offset 0, inserted by the chapter
+    /// builder when the first detected chapter doesn't start at 0) is NOT emitted
+    /// as a tappable entry, preserving the prior TOC semantics (detected chapters
+    /// only).
+    ///
+    /// Returns `[]` when no rule matches (matching the pre-fix `TOCBuilder.forTXT`
+    /// behavior — `detectBestRule` returns nil for fewer than 2 sample matches).
+    static func buildTXTTOCEntries(
+        data: Data,
+        fingerprint: DocumentFingerprint
+    ) -> [TOCEntry] {
+        guard !data.isEmpty,
+              let (fullString, encodingName) = decodeTXTForTOC(data),
+              !fullString.isEmpty else { return [] }
+
+        // Same rule-selection the reader runs in `openChapterBased`: detectBestRule
+        // samples the first 512K UTF-16 to pick the rule, run over the same decoded
+        // full string, so the TOC and the reader's chapter index choose identically.
+        guard let rule = TXTTocRuleEngine.detectBestRule(
+            text: fullString, rules: TXTTocRuleEngine.defaultRules
+        ) else { return [] }
+
+        let index = buildChapterIndexFromFullText(
+            fullText: fullString as NSString,
+            totalBytes: Int64(data.count),
+            encodingName: encodingName,
+            rule: rule
+        )
+
+        var entries: [TOCEntry] = []
+        for chapter in index.chapters {
+            // Skip the synthetic preamble: a chapter starting at offset 0 with
+            // the builder-assigned "前言" title is not a detected chapter and
+            // was never tappable in the pre-fix TOC.
+            if chapter.globalStartUTF16 == 0 && chapter.title == "前言" { continue }
+            guard chapter.globalStartUTF16 >= 0 else { continue }
+
+            let locator = LocatorFactory.txtPosition(
+                fingerprint: fingerprint,
+                charOffsetUTF16: chapter.globalStartUTF16,
+                sourceText: fullString
+            )
+            guard let locator else { continue }
+
+            entries.append(TOCEntry(
+                title: chapter.title,
+                level: 0,
+                locator: locator,
+                sequenceIndex: entries.count
+            ))
+        }
+        return entries
     }
 
     // MARK: - File Helpers
