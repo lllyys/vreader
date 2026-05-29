@@ -65,6 +65,37 @@ extension EPUBWebViewBridge {
         scrollView.contentOffset = CGPoint(x: 0, y: -clamped)
     }
 
+    // MARK: - Scroll Lock (bug #279)
+
+    /// Bug #279 / GH #1256: pins the WKWebView scroll view so legacy EPUB content
+    /// can't be pinch-zoomed or dragged off-axis. WebKit's default config allows
+    /// pinch-zoom and horizontal rubber-band, so the raw-spine `loadFileURL` path
+    /// (whose document `<head>` we don't author) had no constraint — the Foliate
+    /// spike and the continuous bootstrap pin `maximum-scale=1` in their own HTML,
+    /// but the legacy single-chapter path loads the EPUB's own XHTML.
+    ///
+    /// Pinning zoom on the scroll view works regardless of the chapter's viewport
+    /// meta; `viewportLockJS` is injected as defense in depth at the document
+    /// level. Idempotent — safe to call on every `makeUIView` / theme refresh.
+    static func applyScrollLock(to scrollView: UIScrollView) {
+        // Lock zoom to 1x in both directions so pinch-zoom is impossible.
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 1
+        // No rubber-band overshoot past the pinned scale.
+        scrollView.bouncesZoom = false
+        // Constrain dragging to a single axis at a time: once a vertical drag
+        // begins, horizontal movement is suppressed for that gesture, so the
+        // page can't be dragged diagonally. This is the lever that actually
+        // locks pan direction — `alwaysBounceHorizontal` below only governs
+        // rubber-band when there is no horizontal content to scroll.
+        scrollView.isDirectionalLockEnabled = true
+        // Suppress horizontal rubber-band so an over-wide chapter can't be
+        // bounced sideways. Vertical bounce (`alwaysBounceVertical` / the
+        // default `bounces`) is intentionally left untouched so the themed
+        // overscroll from bug #167 still works for the natural vertical scroll.
+        scrollView.alwaysBounceHorizontal = false
+    }
+
     // MARK: - Scroll to Fraction
 
     /// Generates JavaScript that scrolls the page to a vertical fraction (0.0-1.0).
@@ -254,6 +285,26 @@ extension EPUBWebViewBridge {
                 }
             } catch(e) { /* cross-origin stylesheet, skip */ }
         }
+    })();
+    """
+
+    /// Bug #279 / GH #1256: forces a non-scalable viewport meta into the legacy
+    /// EPUB chapter document so pinch-zoom is disabled at the document level too
+    /// (defense in depth alongside `applyScrollLock`). The EPUB's own XHTML
+    /// `<head>` may carry no viewport meta, or one that permits scaling; this
+    /// upserts the same `maximum-scale=1, user-scalable=no` pin the Foliate spike
+    /// and the continuous-scroll bootstrap bake into their constructed documents.
+    /// The content string is a fixed app-authored literal — no interpolation, so
+    /// no injection surface.
+    static let viewportLockJS = """
+    (function() {
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) {
+            meta = document.createElement('meta');
+            meta.setAttribute('name', 'viewport');
+            (document.head || document.documentElement).appendChild(meta);
+        }
+        meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
     })();
     """
 

@@ -9,6 +9,9 @@
 // - Injects selection tracking and highlight API JS for text highlighting (WI-007).
 // - Supports paged layout via CSS multi-column pagination (WI-B06).
 //   In paged mode, pagination CSS is injected and navigation uses scrollLeft.
+// - Bug #279: locks content gestures — pins the scroll view zoom (applyScrollLock)
+//   and injects a non-scalable viewport meta (viewportLockJS) so EPUB content
+//   can't be pinch-zoomed or dragged off-axis, matching the other render engines.
 // - Coordinator handles WKScriptMessageHandler for progress, tap, and selection callbacks.
 // - Navigation delegate reports load errors to the container via onLoadError.
 // - Only file:// URLs are allowed for all navigation types.
@@ -150,6 +153,19 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         )
         userContentController.addUserScript(preprocessScript)
 
+        // Bug #279 / GH #1256: force a non-scalable viewport meta into every
+        // loaded chapter so pinch-zoom is disabled at the document level, matching
+        // the meta the Foliate spike + continuous bootstrap already bake in. The
+        // raw-spine `loadFileURL` path loads the EPUB's own XHTML (whose <head> may
+        // permit scaling), so this upsert runs at document end on each load. Pairs
+        // with the `applyScrollLock` scroll-view pin below (defense in depth).
+        let viewportLockScript = WKUserScript(
+            source: Self.viewportLockJS,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        userContentController.addUserScript(viewportLockScript)
+
         let weakHandler = WeakScriptMessageHandler(context.coordinator)
         // Feature #71 WI-5: mode-branched scroll observer. In continuous-scroll
         // mode the section-aware observer (reporting {visibleSpineIndex,
@@ -233,6 +249,12 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         // the white-bleed regression because the call-site wiring is not
         // covered by tests (representable-context plumbing is too deep to mock).
         Self.applyScrollViewBackground(to: webView.scrollView, color: themeBackgroundColor)
+        // Bug #279 / GH #1256 wiring: pin zoom + lock horizontal pan so EPUB
+        // content can't be pinch-zoomed or dragged off-axis. Like the bug #167 /
+        // #163 seams, the contract is unit-tested in EPUBWebViewBridgeScrollLockTests
+        // but this call site is not (representable-context plumbing is too deep to
+        // mock) — deleting this line would silently re-introduce the free pan/zoom.
+        Self.applyScrollLock(to: webView.scrollView)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         // Bug #163 wiring: keep this call. The seam is unit-tested in
         // EPUBWebViewBridgeSafeAreaInsetTests; deleting this line would

@@ -8,6 +8,7 @@
 import Testing
 import Foundation
 import UIKit
+import WebKit
 @testable import vreader
 
 @Suite("EPUBWebViewBridge - scrollToFractionJS")
@@ -416,6 +417,247 @@ struct EPUBWebViewBridgeContinuousThemeReinjectTests {
     @Test("both nil returns nil")
     func bothNilReturnsNil() {
         #expect(EPUBWebViewBridge.continuousThemeReinjectJS(previousCSS: nil, newCSS: nil) == nil)
+    }
+}
+
+// MARK: - Bug #279: EPUB content pan/zoom lock
+
+/// Bug #279 / GH #1256: legacy EPUB content (raw-spine `loadFileURL` path) could
+/// be freely pinch-zoomed and dragged on both axes, instead of being locked to
+/// clean vertical scroll / discrete page-turns. The Foliate spike
+/// (`FoliateSpikeView`) and the continuous-scroll bootstrap
+/// (`EPUBContinuousScrollJS.bootstrapDocumentHTML`) already pin
+/// `maximum-scale=1, user-scalable=no` in their constructed documents; the legacy
+/// single-chapter path loads the EPUB's own XHTML (whose `<head>` we don't
+/// control) with WebKit's default gesture/zoom config, so nothing constrained it.
+///
+/// Fix = two seams, both pinned here:
+///   1. `applyScrollLock(to:)` — pins the WKWebView scrollView's zoom + bounce
+///      config directly (works regardless of the chapter's own viewport meta).
+///   2. `viewportLockJS` — injects a `user-scalable=no, maximum-scale=1` viewport
+///      `<meta>` so the rendered content's CSS-pixel mapping also forbids zoom
+///      (defense in depth, consistent with the other engines).
+///
+/// Same coverage-gap caveat as the bug #163 / #167 seams: these tests lock the
+/// seam contracts, not the `makeUIView` call-site wiring (representable-context
+/// plumbing is too deep to mock). Device verification is the wiring lock.
+@Suite("EPUBWebViewBridge - applyScrollLock (bug #279)")
+struct EPUBWebViewBridgeScrollLockTests {
+
+    @MainActor
+    @Test("applyScrollLock pins maximum and minimum zoom scale to 1 (no pinch-zoom)")
+    func applyScrollLockPinsZoomScale() {
+        let scrollView = UIScrollView()
+        // Pre-existing values to confirm overwrite — WebKit's default
+        // maximumZoomScale is permissive, which is the bug.
+        scrollView.maximumZoomScale = 4
+        scrollView.minimumZoomScale = 0.5
+
+        EPUBWebViewBridge.applyScrollLock(to: scrollView)
+
+        #expect(scrollView.maximumZoomScale == 1,
+                "maximumZoomScale must be pinned to 1 so the user cannot pinch-zoom the EPUB content")
+        #expect(scrollView.minimumZoomScale == 1,
+                "minimumZoomScale must be pinned to 1 so the content cannot be pinched smaller either")
+    }
+
+    @MainActor
+    @Test("applyScrollLock disables bouncesZoom (no rubber-band zoom past the pin)")
+    func applyScrollLockDisablesBouncesZoom() {
+        let scrollView = UIScrollView()
+        scrollView.bouncesZoom = true
+        EPUBWebViewBridge.applyScrollLock(to: scrollView)
+        #expect(scrollView.bouncesZoom == false,
+                "bouncesZoom must be off so the content can't rubber-band-zoom past the pinned scale")
+    }
+
+    @MainActor
+    @Test("applyScrollLock enables directional lock (a vertical drag suppresses horizontal movement)")
+    func applyScrollLockEnablesDirectionalLock() {
+        let scrollView = UIScrollView()
+        scrollView.isDirectionalLockEnabled = false
+        EPUBWebViewBridge.applyScrollLock(to: scrollView)
+        #expect(scrollView.isDirectionalLockEnabled == true,
+                "Directional lock is the lever that actually pins pan to one axis — without it the page can drift diagonally even with bounce off")
+    }
+
+    @MainActor
+    @Test("applyScrollLock disables horizontal bounce (no sideways rubber-band)")
+    func applyScrollLockDisablesHorizontalBounce() {
+        let scrollView = UIScrollView()
+        scrollView.alwaysBounceHorizontal = true
+        EPUBWebViewBridge.applyScrollLock(to: scrollView)
+        // Codex Gate-4 finding 1: this flag only governs rubber-band when there
+        // is no horizontal content to scroll; directional lock (above) is what
+        // pins the pan axis. We assert it is off so an over-wide chapter can't
+        // be bounced sideways.
+        #expect(scrollView.alwaysBounceHorizontal == false,
+                "alwaysBounceHorizontal must be off so an over-wide chapter can't rubber-band sideways")
+    }
+
+    @MainActor
+    @Test("applyScrollLock is idempotent (re-applying keeps the locked config)")
+    func applyScrollLockIsIdempotent() {
+        let scrollView = UIScrollView()
+        EPUBWebViewBridge.applyScrollLock(to: scrollView)
+        EPUBWebViewBridge.applyScrollLock(to: scrollView)
+        #expect(scrollView.maximumZoomScale == 1)
+        #expect(scrollView.minimumZoomScale == 1)
+        #expect(scrollView.bouncesZoom == false)
+        #expect(scrollView.isDirectionalLockEnabled == true)
+        #expect(scrollView.alwaysBounceHorizontal == false)
+    }
+}
+
+/// Bug #279 / GH #1256: the JS that forces a non-scalable viewport meta into the
+/// legacy chapter document so the content's CSS-pixel mapping forbids zoom,
+/// matching the meta the Foliate spike and continuous bootstrap already bake in.
+@Suite("EPUBWebViewBridge - viewportLockJS (bug #279)")
+struct EPUBWebViewBridgeViewportLockJSTests {
+
+    @Test("viewportLockJS pins maximum-scale=1 and user-scalable=no")
+    func viewportLockPinsScale() {
+        let js = EPUBWebViewBridge.viewportLockJS
+        #expect(js.contains("maximum-scale=1"),
+                "The injected viewport meta must pin maximum-scale=1 — the same value the Foliate spike and continuous bootstrap use.")
+        #expect(js.contains("user-scalable=no"),
+                "The injected viewport meta must forbid user scaling so pinch-zoom is disabled at the document level too.")
+        #expect(js.contains("width=device-width"),
+                "The viewport must still map to device width so layout isn't broken.")
+    }
+
+    @Test("viewportLockJS targets the viewport meta element")
+    func viewportLockTargetsViewportMeta() {
+        let js = EPUBWebViewBridge.viewportLockJS
+        #expect(js.contains("viewport"),
+                "The JS must locate/create the name=viewport meta element.")
+        #expect(js.contains("setAttribute") || js.contains("content"),
+                "The JS must write the content attribute on the meta element.")
+    }
+
+    @Test("viewportLockJS is wrapped as an IIFE (consistent with the other bridge scripts)")
+    func viewportLockIsIIFE() {
+        let js = EPUBWebViewBridge.viewportLockJS
+        #expect(js.contains("(function()") && js.contains("})();"),
+                "Bridge JS snippets run as self-invoking functions so injected globals don't leak.")
+    }
+
+    @Test("viewportLockJS contains no unescaped string-breaking characters")
+    func viewportLockHasNoInjectionRisk() {
+        let js = EPUBWebViewBridge.viewportLockJS
+        // The meta content is a fixed, app-authored literal (no interpolation),
+        // so there is no untrusted input — but assert it stays a single clean
+        // literal so a future edit can't smuggle in a quote that breaks the eval.
+        #expect(!js.contains("\\(") ,
+                "viewportLockJS must remain a static literal with no Swift string interpolation of untrusted input.")
+    }
+}
+
+/// Bug #279 / GH #1256 — Codex Gate-4 finding 2: behavioral DOM coverage for
+/// `viewportLockJS`. String-shape assertions can't catch a regression where the
+/// upsert creates a duplicate meta, fails to overwrite a permissive viewport, or
+/// crashes on a head-less document. These run the actual JS in a live WKWebView
+/// and assert the resulting `meta[name=viewport]` content / count.
+@MainActor
+@Suite("EPUBWebViewBridge - viewportLockJS DOM behavior (bug #279)")
+struct EPUBWebViewBridgeViewportLockDOMTests {
+
+    /// Loads `html` into a fresh WKWebView, runs `viewportLockJS`, then returns
+    /// the evaluated result of `readback` (a JS expression). Drives navigation
+    /// completion off the WebView's `didFinish` via a continuation.
+    private func runLock(html: String, readback: String) async throws -> String? {
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let delegate = LoadWaiter()
+        webView.navigationDelegate = delegate
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            delegate.onFinish = { cont.resume() }
+            webView.loadHTMLString(html, baseURL: nil)
+        }
+        // Run the injection IIFE raw (it evaluates to `undefined`); only the
+        // readback expression is wrapped in `String(...)` for a Sendable result.
+        try await webView.run(EPUBWebViewBridge.viewportLockJS)
+        return try await webView.evaluateString(readback)
+    }
+
+    private let expectedContent =
+        "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    private let viewportSelector = "meta[name=\"viewport\"]"
+
+    @Test("upserts the pin into a document that has NO viewport meta")
+    func upsertsWhenAbsent() async throws {
+        let html = "<!DOCTYPE html><html><head><title>t</title></head><body><p>hi</p></body></html>"
+        let count = try await runLock(html: html, readback: "document.querySelectorAll('\(viewportSelector)').length")
+        #expect(count == "1", "Exactly one viewport meta must exist after the upsert")
+        let content = try await runLock(html: html, readback: "document.querySelector('\(viewportSelector)').getAttribute('content')")
+        #expect(content == expectedContent)
+    }
+
+    @Test("overwrites an EXISTING permissive viewport meta in place (no duplicate)")
+    func overwritesPermissiveInPlace() async throws {
+        // A chapter that explicitly allows zoom — the exact case the bug describes.
+        let html = """
+        <!DOCTYPE html><html><head>
+        <meta name="viewport" content="width=device-width, user-scalable=yes, maximum-scale=5">
+        </head><body><p>hi</p></body></html>
+        """
+        let count = try await runLock(html: html, readback: "document.querySelectorAll('\(viewportSelector)').length")
+        #expect(count == "1",
+                "The upsert must reuse the existing meta, not append a second one")
+        let content = try await runLock(html: html, readback: "document.querySelector('\(viewportSelector)').getAttribute('content')")
+        #expect(content == expectedContent,
+                "The permissive content must be replaced with the locked pin")
+    }
+
+    @Test("does not throw on a head-less document (meta still pinned)")
+    func handlesHeadlessDocument() async throws {
+        // WKWebView synthesizes a <head>, but assert the upsert still yields the
+        // pinned meta even when the source markup omits an explicit <head>.
+        let html = "<html><body><p>hi</p></body></html>"
+        let content = try await runLock(html: html, readback: "(function(){var m=document.querySelector('\(viewportSelector)');return m?m.getAttribute('content'):'MISSING';})()")
+        #expect(content == expectedContent,
+                "Even without an authored <head>, the viewport pin must be present")
+    }
+}
+
+/// Minimal navigation delegate that fires a callback on load completion, so the
+/// DOM-harness tests can `await` a fully-loaded document before evaluating JS.
+@MainActor
+private final class LoadWaiter: NSObject, WKNavigationDelegate {
+    var onFinish: (() -> Void)?
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        onFinish?()
+        onFinish = nil
+    }
+}
+
+private extension WKWebView {
+    /// Runs a JS statement/IIFE for its side effects, discarding the (possibly
+    /// non-Sendable) result so nothing crosses the actor boundary. Used to run
+    /// the multi-statement injection JS, which evaluates to `undefined`.
+    func run(_ js: String) async throws {
+        _ = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Bool, Error>) in
+            evaluateJavaScript("{ \(js) }; true") { _, error in
+                if let error { cont.resume(throwing: error) }
+                else { cont.resume(returning: true) }
+            }
+        }
+    }
+
+    /// Async wrapper over `evaluateJavaScript` that coerces the result to a
+    /// `String` inside JS first. Returning a concrete `Sendable` `String?`
+    /// (rather than the non-Sendable `Any?` WebKit yields) keeps the
+    /// continuation resume free of Swift 6 data-race diagnostics. The DOM-harness
+    /// tests only read back string/number values, so the `String(...)` coercion
+    /// is lossless for their assertions (`"1"`, the meta content, or `"null"`).
+    /// `js` MUST be a single expression (no trailing `;`), since it is spliced
+    /// inside `String(...)`.
+    func evaluateString(_ js: String) async throws -> String? {
+        try await withCheckedThrowingContinuation { cont in
+            evaluateJavaScript("String(\(js))") { value, error in
+                if let error { cont.resume(throwing: error) }
+                else { cont.resume(returning: value as? String) }
+            }
+        }
     }
 }
 #endif
