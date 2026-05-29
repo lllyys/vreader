@@ -702,9 +702,55 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
                 fractionOfDistanceBetweenInsertionPoints: nil
             )
             let globalCharIndex = chunkOffset + chunkLocalCharIndex
-            guard let hit = TextHighlightHitTester.hitTest(
+            // Bug #287 / GH #1268: exact char-index membership first, then a
+            // 44pt-minimum tolerance band over each highlight's chunk-local
+            // glyph rect — so a near-miss tap resolves (and is absorbed)
+            // instead of falling through to the page-turn router. The
+            // tolerance candidates are built from THIS chunk's local extent
+            // of each highlight, matching the source-rect clipping below.
+            let chunkLengthForCandidates = textView.textStorage.length
+            let hit: PersistedHighlightLookupEntry
+            if let exact = TextHighlightHitTester.hitTest(
                 charIndex: globalCharIndex, in: lookup
-            ) else { return nil }
+            ) {
+                hit = exact
+            } else {
+                var candidates: [(id: UUID, rect: CGRect)] = []
+                for entry in lookup where entry.range.length > 0 {
+                    let entryLocalStart = max(0, entry.range.location - chunkOffset)
+                    let entryLocalEnd = min(
+                        chunkLengthForCandidates,
+                        entry.range.location + entry.range.length - chunkOffset
+                    )
+                    let entryLocalLen = entryLocalEnd - entryLocalStart
+                    guard entryLocalLen > 0 else { continue }
+                    let candidateGlyphRange = lm.glyphRange(
+                        forCharacterRange: NSRange(
+                            location: entryLocalStart, length: entryLocalLen
+                        ),
+                        actualCharacterRange: nil
+                    )
+                    guard candidateGlyphRange.length > 0 else { continue }
+                    // Per-line-fragment rects (not the union bounding box) so a
+                    // multi-line highlight's ragged-edge whitespace is not
+                    // absorbed — only the painted fragments get a slop band.
+                    lm.enumerateEnclosingRects(
+                        forGlyphRange: candidateGlyphRange,
+                        withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                        in: textView.textContainer
+                    ) { candidateRect, _ in
+                        if candidateRect.width > 0, candidateRect.height > 0 {
+                            candidates.append((entry.id, candidateRect))
+                        }
+                    }
+                }
+                guard let nearestID = HighlightHitTolerance.nearestHit(
+                    point: containerPoint, candidates: candidates
+                ), let resolved = lookup.first(where: { $0.id == nearestID }) else {
+                    return nil
+                }
+                hit = resolved
+            }
             // The global range may straddle chunk boundaries; clip to this
             // chunk's local extent so the source rect anchors above the
             // visible slice in THIS cell, not above content the user can't

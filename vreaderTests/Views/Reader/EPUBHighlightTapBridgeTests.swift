@@ -168,6 +168,55 @@ struct EPUBHighlightTapBridgeJSTests {
     }
 
     @Test
+    func highlightAPIJS_tapHitTest_appliesToleranceBandFallback() {
+        // Bug #287 / GH #1268: the exact caret-membership test
+        // (`compareBoundaryPoints`) hits only the ~17-22pt glyph extent,
+        // below Apple's 44pt minimum touch target — a near-miss tap turns
+        // the page instead of opening the highlight popover. The JS must
+        // fall back to a tolerance band: when no range contains the caret,
+        // inflate each registered range's bounding rect by a px tolerance
+        // (`VREADER_HL_TAP_SLOP_PX`) and test the raw click point against
+        // the inflated rect, choosing the nearest on overlap. On any such
+        // tolerance hit the handler must STILL `stopImmediatePropagation`
+        // + `preventDefault` so the chrome/page-turn listener does not fire.
+        //
+        // JS-bundle string guard (no JS-execution harness): pin the slop
+        // constant + the rect-inflate fallback marker.
+        let js = EPUBHighlightBridge.highlightAPIJS
+        #expect(js.contains("VREADER_HL_TAP_SLOP_PX"))
+        #expect(js.contains("getBoundingClientRect"))
+        // The fallback must inflate the rect (left/top minus slop,
+        // right/bottom plus slop) — pin the marker used in production.
+        #expect(js.contains("__vreader_tapSlopHit"))
+    }
+
+    @Test
+    func highlightAPIJS_tapSlopHit_usesPerFragmentClientRects() {
+        // Bug #287 audit (M2): the slop fallback must hit-test per visual
+        // line fragment (`getClientRects`), NOT the single union bounding box
+        // — otherwise a multi-line highlight's ragged whitespace gap would be
+        // tappable. The union rect is kept only for popover anchoring.
+        let js = EPUBHighlightBridge.highlightAPIJS
+        #expect(js.contains("getClientRects"))
+    }
+
+    @Test
+    func highlightAPIJS_tapHitTest_caretFailureFallsThroughToSlop() {
+        // Bug #287 audit (M1): when the caret APIs fail or return no node
+        // (common in line gaps / adjacent whitespace), the handler must NOT
+        // bail before the tolerance fallback. Pin the markers that encode the
+        // fall-through: caret-failure sets `hitNode = null` (no early return)
+        // and the exact membership loop is guarded by `probe`.
+        let js = EPUBHighlightBridge.highlightAPIJS
+        #expect(js.contains("catch (err) { hitNode = null; }"))
+        #expect(js.contains("probe && i >= 0"))
+        // The exact membership loop must be probe-guarded so a null probe
+        // (caret failure) skips it and reaches the slop fallback. The old
+        // unconditional `if (!hitNode) return;` bail is gone.
+        #expect(!js.contains("if (!hitNode) return;"))
+    }
+
+    @Test
     func highlightAPIJS_removeHighlight_forcesRepaintOfAffectedRange() {
         // Bug #212 / GH #828: tapping "Delete Highlight" on an EPUB
         // highlight cleared persistence AND all JS/CSS highlight state

@@ -461,17 +461,22 @@ extension EPUBHighlightBridge {
                     var cr = document.caretRangeFromPoint(e.clientX, e.clientY);
                     if (cr) { hitNode = cr.startContainer; hitOffset = cr.startOffset; }
                 }
-            } catch (err) { return; }
-            if (!hitNode) return;
+            } catch (err) { hitNode = null; }
             // Build a degenerate range at the tap point so we can use
-            // Range.compareBoundaryPoints for membership testing.
-            var probe;
-            try {
-                probe = document.createRange();
-                probe.setStart(hitNode, hitOffset);
-                probe.setEnd(hitNode, hitOffset);
-            } catch (err) { return; }
-            for (var i = ids.length - 1; i >= 0; i--) {
+            // Range.compareBoundaryPoints for membership testing. Bug #287:
+            // if the caret APIs fail or return no node — common in line gaps
+            // and adjacent whitespace, exactly where a near-miss tap lands —
+            // do NOT return; skip the exact loop and fall through to the
+            // tolerance band below.
+            var probe = null;
+            if (hitNode) {
+                try {
+                    probe = document.createRange();
+                    probe.setStart(hitNode, hitOffset);
+                    probe.setEnd(hitNode, hitOffset);
+                } catch (err) { probe = null; }
+            }
+            for (var i = ids.length - 1; probe && i >= 0; i--) {
                 var id = ids[i];
                 var range = window.__vreader_highlightRanges[id];
                 if (!range) continue;
@@ -508,6 +513,71 @@ extension EPUBHighlightBridge {
                         return;
                     }
                 } catch (err) { /* skip stale Range entries */ }
+            }
+            // Bug #287 / GH #1268: exact caret membership above hits only the
+            // ~17-22px glyph extent, below the 44px minimum touch target — a
+            // near-miss tap turns the page instead of opening the highlight
+            // popover. Fall back to a tolerance band: inflate each registered
+            // range's bounding rect toward 44px (zero inflation for a range
+            // already that large, so legit page-turn taps next to a tall
+            // highlight are NOT captured) and test the raw click point against
+            // the inflated rect, choosing the nearest center on overlap.
+            var VREADER_HL_TAP_SLOP_PX = 44;
+            function __vreader_slop(dim) {
+                var deficit = VREADER_HL_TAP_SLOP_PX - dim;
+                return deficit > 0 ? deficit / 2 : 0;
+            }
+            function __vreader_tapSlopHit(px, py) {
+                var bestId = null;
+                var bestDist = Infinity;
+                for (var j = ids.length - 1; j >= 0; j--) {
+                    var rid = ids[j];
+                    var rrange = window.__vreader_highlightRanges[rid];
+                    if (!rrange) continue;
+                    // Per-fragment client rects (not the union bounding box):
+                    // a multi-line highlight's ragged-edge whitespace gaps are
+                    // NOT tappable — only the painted line fragments get a
+                    // slop band. (Bug #287 M2.)
+                    var rects;
+                    try { rects = rrange.getClientRects(); } catch (e2) { continue; }
+                    if (!rects) continue;
+                    for (var k = 0; k < rects.length; k++) {
+                        var rr = rects[k];
+                        if (!rr || (rr.width <= 0 && rr.height <= 0)) continue;
+                        var sx = __vreader_slop(rr.width);
+                        var sy = __vreader_slop(rr.height);
+                        if (px < rr.left - sx || px > rr.right + sx ||
+                            py < rr.top - sy || py > rr.bottom + sy) continue;
+                        var cx = (rr.left + rr.right) / 2;
+                        var cy = (rr.top + rr.bottom) / 2;
+                        var d = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+                        if (d < bestDist) { bestDist = d; bestId = rid; }
+                    }
+                }
+                return bestId;
+            }
+            var slopId = __vreader_tapSlopHit(e.clientX, e.clientY);
+            if (slopId) {
+                var srange = window.__vreader_highlightRanges[slopId];
+                var spayload = { id: slopId };
+                try {
+                    var srect = srange.getBoundingClientRect();
+                    if (srect) {
+                        spayload.rectX = srect.x;
+                        spayload.rectY = srect.y;
+                        spayload.rectWidth = srect.width;
+                        spayload.rectHeight = srect.height;
+                    }
+                } catch (e3) {}
+                try {
+                    window.webkit.messageHandlers.highlightTapHandler
+                        .postMessage(spayload);
+                } catch (e3) {}
+                // Absorb the tap so the chrome-toggle / page-turn listener
+                // does not also fire on this near-miss.
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                return;
             }
         }, true);
 

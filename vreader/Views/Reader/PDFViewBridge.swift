@@ -493,19 +493,33 @@ struct PDFViewBridge: UIViewRepresentable {
                   let page = pdfView.page(for: location, nearest: false)
             else { return nil }
             let pagePoint = pdfView.convert(location, to: page)
-            guard let highlightID = PDFHighlightTapResolver.resolveHighlightID(
+            // Bug #287 / GH #1268: tolerance-aware hit-test — a near-miss
+            // within slop of a thin highlight annotation resolves (and is
+            // absorbed) instead of falling through to the page-turn router.
+            guard let highlightID = PDFHighlightTapResolver.resolveHighlightIDWithTolerance(
                 atPagePoint: pagePoint,
                 onPage: page,
                 annotationMap: renderer.annotationMap
             ) else { return nil }
-            // Screen rect for popover anchoring: the first annotation whose
-            // bounds contain the point, converted to PDFView coords.
+            // Screen rect for popover anchoring: prefer the annotation whose
+            // exact bounds contain the point; on a slop-only hit (the tap
+            // landed just outside the glyph), anchor to the nearest annotation
+            // of the resolved highlight on this page so the popover still has
+            // a sensible source rect.
             var sourceRect: CGRect = .zero
-            if let annotations = renderer.annotationMap[highlightID],
-               let hit = annotations.first(where: {
-                   $0.page === page && $0.bounds.contains(pagePoint)
-               }) {
-                sourceRect = pdfView.convert(hit.bounds, from: page)
+            if let annotations = renderer.annotationMap[highlightID] {
+                let onPage = annotations.filter { $0.page === page }
+                let anchor = onPage.first(where: { $0.bounds.contains(pagePoint) })
+                    ?? onPage.min(by: { lhs, rhs in
+                        let dl = hypot(lhs.bounds.midX - pagePoint.x,
+                                       lhs.bounds.midY - pagePoint.y)
+                        let dr = hypot(rhs.bounds.midX - pagePoint.x,
+                                       rhs.bounds.midY - pagePoint.y)
+                        return dl < dr
+                    })
+                if let anchor {
+                    sourceRect = pdfView.convert(anchor.bounds, from: page)
+                }
             }
             return ReaderHighlightTapEvent(highlightID: highlightID, sourceRect: sourceRect)
         }

@@ -289,13 +289,11 @@ extension TXTTextViewBridge {
                 y: tapPoint.y - inset.top
             )
             let lm = textView.layoutManager
-            let charIndex = lm.characterIndex(
-                for: containerPoint,
-                in: textView.textContainer,
-                fractionOfDistanceBetweenInsertionPoints: nil
-            )
-            guard let hit = TextHighlightHitTester.hitTest(
-                charIndex: charIndex, in: lookup
+            guard let hit = TextHighlightHitResolver.resolve(
+                containerPoint: containerPoint,
+                layoutManager: lm,
+                textContainer: textView.textContainer,
+                lookup: lookup
             ) else { return nil }
             let glyphRange = lm.glyphRange(
                 forCharacterRange: hit.range, actualCharacterRange: nil

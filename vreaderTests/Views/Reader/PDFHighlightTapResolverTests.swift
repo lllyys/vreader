@@ -125,6 +125,134 @@ struct PDFHighlightTapResolverTests {
     }
 
     @Test
+    func resolveWithTolerance_nearMissWithinSlop_returnsHighlightID() {
+        // Bug #287 / GH #1268: a thin 18pt-tall highlight annotation gets
+        // a slop band toward the 44pt minimum touch target. A tap a few
+        // points below the annotation (a near-miss the exact `bounds.contains`
+        // would reject) must resolve so the popover opens.
+        let page = makePage()
+        let id = UUID()
+        let annotation = makeHighlightAnnotation(
+            bounds: CGRect(x: 50, y: 100, width: 200, height: 18),  // [100,118]
+            page: page
+        )
+        let map: [UUID: [PDFAnnotation]] = [id: [annotation]]
+        // height 18 → slop (44-18)/2 = 13 → band [87,131]. Tap at y=126.
+        let resolved = PDFHighlightTapResolver.resolveHighlightIDWithTolerance(
+            atPagePoint: CGPoint(x: 100, y: 126),
+            onPage: page,
+            annotationMap: map
+        )
+        #expect(resolved == id)
+    }
+
+    @Test
+    func resolveWithTolerance_beyondSlop_returnsNil() {
+        // Same 18pt annotation; band tops out at y=131. A tap at y=150 is
+        // beyond the slop → nil, so the caller routes the tap to page-turn.
+        let page = makePage()
+        let id = UUID()
+        let annotation = makeHighlightAnnotation(
+            bounds: CGRect(x: 50, y: 100, width: 200, height: 18),
+            page: page
+        )
+        let map: [UUID: [PDFAnnotation]] = [id: [annotation]]
+        let resolved = PDFHighlightTapResolver.resolveHighlightIDWithTolerance(
+            atPagePoint: CGPoint(x: 100, y: 150),
+            onPage: page,
+            annotationMap: map
+        )
+        #expect(resolved == nil)
+    }
+
+    @Test
+    func resolveWithTolerance_exactHitStillWorks() {
+        // A tap squarely inside the annotation still resolves (tolerance is
+        // additive, never subtractive).
+        let page = makePage()
+        let id = UUID()
+        let annotation = makeHighlightAnnotation(
+            bounds: CGRect(x: 50, y: 100, width: 200, height: 30),
+            page: page
+        )
+        let map: [UUID: [PDFAnnotation]] = [id: [annotation]]
+        let resolved = PDFHighlightTapResolver.resolveHighlightIDWithTolerance(
+            atPagePoint: CGPoint(x: 100, y: 115),
+            onPage: page,
+            annotationMap: map
+        )
+        #expect(resolved == id)
+    }
+
+    @Test
+    func resolveWithTolerance_exactHitBeatsNearerToleranceBand() {
+        // Bug #287 audit (H1): a tap squarely inside highlight A must resolve
+        // to A even if a nearby highlight B's slop band also covers the point
+        // and B's center is closer. Exact membership wins over tolerance.
+        let page = makePage()
+        let idA = UUID()
+        let idB = UUID()
+        // A contains the tap exactly; B is a thin line just above whose slop
+        // band reaches down to the tap and whose center is nearer.
+        let annA = makeHighlightAnnotation(
+            bounds: CGRect(x: 50, y: 100, width: 200, height: 40),  // [100,140], tap inside
+            page: page
+        )
+        let annB = makeHighlightAnnotation(
+            bounds: CGRect(x: 50, y: 80, width: 200, height: 16),   // [80,96], center 88
+            page: page
+        )
+        let map: [UUID: [PDFAnnotation]] = [idA: [annA], idB: [annB]]
+        // Tap at y=102 — inside A's exact bounds; B's slop band (16pt → 14
+        // slop → [66,110]) also covers 102, and B's center (88) is nearer
+        // than A's (120). Exact-first must still return A.
+        let resolved = PDFHighlightTapResolver.resolveHighlightIDWithTolerance(
+            atPagePoint: CGPoint(x: 100, y: 102),
+            onPage: page,
+            annotationMap: map
+        )
+        #expect(resolved == idA)
+    }
+
+    @Test
+    func resolveWithTolerance_zeroAreaAnnotation_doesNotBecomeTappable() {
+        // Bug #287 audit (L1): a malformed zero-area annotation must NOT be
+        // inflated into a 44x44 tappable region.
+        let page = makePage()
+        let id = UUID()
+        let annotation = makeHighlightAnnotation(
+            bounds: CGRect(x: 100, y: 100, width: 0, height: 0),
+            page: page
+        )
+        let map: [UUID: [PDFAnnotation]] = [id: [annotation]]
+        let resolved = PDFHighlightTapResolver.resolveHighlightIDWithTolerance(
+            atPagePoint: CGPoint(x: 110, y: 110),  // would be inside a 44x44 band
+            onPage: page,
+            annotationMap: map
+        )
+        #expect(resolved == nil)
+    }
+
+    @Test
+    func resolveWithTolerance_differentPageStillExcluded() {
+        // The tolerance path must still honor page identity.
+        let pageA = makePage()
+        let pageB = makePage()
+        let id = UUID()
+        let annotation = makeHighlightAnnotation(
+            bounds: CGRect(x: 50, y: 100, width: 200, height: 18),
+            page: pageA
+        )
+        let map: [UUID: [PDFAnnotation]] = [id: [annotation]]
+        let resolved = PDFHighlightTapResolver.resolveHighlightIDWithTolerance(
+            atPagePoint: CGPoint(x: 100, y: 110),
+            onPage: pageB,
+            annotationMap: map
+        )
+        #expect(resolved == nil)
+    }
+
+    @Test
     func resolve_overlappingHighlights_firstFoundWins() {
         // Edge: two highlights whose bounds overlap at the tap point —
         // the resolver returns SOME UUID; order is implementation-defined
