@@ -231,7 +231,16 @@ struct ReaderContainerViewEngineDispatchTests {
         let wiring: [(caseLabel: String, host: String)] = [
             ("case .textNative:",    "TXTReaderHost("),
             ("case .markdownNative:", "MDReaderHost("),
+            // Feature #42 Phase 1 WI-5: the `.epubWKWebView` case now branches
+            // on the `readiumEPUBEngine` flag — `EPUBReaderHost(` (flag OFF,
+            // the live default) OR `ReadiumEPUBHost(` (flag ON). The guard
+            // pins the legacy default host stays wired in that case.
             ("case .epubWKWebView:", "EPUBReaderHost("),
+            // Feature #42 Phase 1 WI-5: `resolve` never returns `.epubReadium`
+            // (the dispatcher's `routeEPUB` makes the Readium choice), but the
+            // case is handled for switch totality and must construct the
+            // Readium host.
+            ("case .epubReadium:",   "ReadiumEPUBHost("),
             ("case .pdfKit:",        "PDFReaderHost("),
             // Feature #56 WI-11: the `.foliateWeb` dispatch now wraps
             // `FoliateSpikeView` inside `FoliateBilingualContainerView`
@@ -245,11 +254,16 @@ struct ReaderContainerViewEngineDispatchTests {
                 continue
             }
             // The host construction must appear after this case label and
-            // before the next `case ` label (or the switch's close).
+            // before the NEXT top-level (8-space-indented) `case ` label or
+            // the switch's close. Feature #42 WI-5 widened this from the old
+            // `prefix(400)` fallback: the flag-gated `.epubWKWebView` branch is
+            // now longer than 400 chars (it constructs both hosts), so the
+            // slice must bound on the real case boundary, not a fixed length.
             let afterCase = source[caseIndex.upperBound...]
-            let nextCase = afterCase.range(of: "\n            case .")
+            let nextCase = afterCase.range(of: "\n        case .")
+                ?? afterCase.range(of: "\n        }")
             let caseBody = nextCase.map { String(afterCase[..<$0.lowerBound]) }
-                ?? String(afterCase.prefix(400))
+                ?? String(afterCase)
             #expect(
                 caseBody.contains(host),
                 "`engineReaderView` `\(caseLabel)` must construct `\(host)` — the engine-to-host wiring."

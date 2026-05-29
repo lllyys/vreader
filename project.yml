@@ -313,11 +313,15 @@ targets:
       # Feature #42 WI-1: the Readium open-smoke test imports ReadiumShared +
       # ReadiumStreamer directly, so the test target must link them explicitly
       # (relying on host-app transitive exposure is fragile — Gate-4 audit).
-      # ReadiumNavigator stays app-only (the test doesn't render).
+      # WI-5: ReadiumNavigator is now also linked so ReadiumEPUBHostTests can
+      # assert the real `EPUBPreferences(scroll:)` mapping from the host's
+      # layout-preference translation (the render itself stays untested).
       - package: Readium
         product: ReadiumShared
       - package: Readium
         product: ReadiumStreamer
+      - package: Readium
+        product: ReadiumNavigator
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.tests

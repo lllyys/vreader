@@ -3,12 +3,15 @@
 // chosen entirely inside the app (feature #54).
 //
 // Key decisions:
-// - Five engines, one per current rendering host. `epubWKWebView` and
-//   `foliateWeb` both exist now; `resolve(format:)` maps EPUB to
-//   `epubWKWebView` unconditionally until feature #42 introduces a
-//   Foliate-EPUB flag that differentiates the two.
-// - `resolve(format:)` is a pure, total function over BookFormat — the
-//   typed replacement for the previous `book.format.lowercased()` switch.
+// - Six engines, one per current rendering host plus the Readium EPUB engine
+//   (feature #42 Phase 1, flag-gated). `epubWKWebView` is the live EPUB default;
+//   `epubReadium` is the Readium-Navigator host selected only when the
+//   `readiumEPUBEngine` flag is ON.
+// - `resolve(format:)` stays a pure, total function over BookFormat and maps
+//   EPUB to `epubWKWebView` UNCONDITIONALLY (the typed replacement for the old
+//   `book.format.lowercased()` switch). The Readium flag branch is a SEPARATE
+//   pure helper — `routeEPUB(readiumFlagEnabled:)` — so `resolve` never reads a
+//   feature flag (the flag check lives in the dispatcher; feature #42 plan).
 // - String-backed RawRepresentable so the value is stable and debuggable;
 //   it is NOT persisted (no UserDefaults key) — the engine is derived from
 //   the book's format on every open.
@@ -26,8 +29,11 @@ enum ReaderEngine: String, Sendable, Hashable, CaseIterable {
     case textNative
     /// Native Markdown reader (UITextView with attributed string).
     case markdownNative
-    /// Legacy EPUB reader (custom WKWebView + JS bridge).
+    /// Legacy EPUB reader (custom WKWebView + JS bridge). The live default.
     case epubWKWebView
+    /// Readium Swift Toolkit EPUB reader (`EPUBNavigatorViewController`).
+    /// Selected only when the `readiumEPUBEngine` flag is ON (feature #42).
+    case epubReadium
     /// Foliate-js based reader (WKWebView + Foliate bundle) — AZW3/MOBI today.
     case foliateWeb
     /// PDF reader (PDFKit `PDFView`).
@@ -36,8 +42,9 @@ enum ReaderEngine: String, Sendable, Hashable, CaseIterable {
     /// Selects the rendering engine for a book format.
     ///
     /// Total over `BookFormat` — every case maps to exactly one engine. EPUB
-    /// resolves to `epubWKWebView` unconditionally; feature #42 will later
-    /// route EPUB to `foliateWeb` behind a flag.
+    /// resolves to `epubWKWebView` unconditionally; the Readium-vs-legacy EPUB
+    /// choice is made by `routeEPUB(readiumFlagEnabled:)` in the dispatcher so
+    /// this function never reads a feature flag.
     static func resolve(format: BookFormat) -> ReaderEngine {
         switch format {
         case .txt:  return .textNative
@@ -46,5 +53,13 @@ enum ReaderEngine: String, Sendable, Hashable, CaseIterable {
         case .azw3: return .foliateWeb
         case .pdf:  return .pdfKit
         }
+    }
+
+    /// Picks the EPUB rendering engine given the `readiumEPUBEngine` flag state.
+    /// Pure (no flag read inside — the caller passes the resolved flag value) so
+    /// the dispatcher's routing decision is unit-testable. Feature #42 Phase 1:
+    /// flag ON → the Readium host; flag OFF → the legacy `EPUBWebViewBridge`.
+    static func routeEPUB(readiumFlagEnabled: Bool) -> ReaderEngine {
+        readiumFlagEnabled ? .epubReadium : .epubWKWebView
     }
 }

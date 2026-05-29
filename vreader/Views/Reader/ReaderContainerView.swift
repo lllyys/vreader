@@ -735,7 +735,21 @@ struct ReaderContainerView: View {
             if resolvedBookFormat == .epub {
                 let key = book.fingerprintKey
                 let token = readerToken
+                // Feature #42 WI-5: when the Readium engine is active, route
+                // eval to the Readium navigator's `evaluateJavaScriptValue`
+                // (which already JSON-serializes the `Result<Any, Error>` per
+                // the WI-4 `ReadiumNavigatorEvaluating` seam) instead of the
+                // legacy keyed `epubWebView`. Selected on the same flag the
+                // dispatcher routes on, so eval reaches whichever engine is
+                // actually rendering this book.
+                let readiumActive = FeatureFlags.shared.isEnabled(.readiumEPUBEngine)
                 probe.jsEvaluator = { @MainActor script in
+                    if readiumActive {
+                        guard let navigator = DebugReaderRegistry.shared.readiumNavigator(for: key, token: token) else {
+                            throw DebugReaderProbeError.evalUnsupported(format: "epub")
+                        }
+                        return try await navigator.evaluateJavaScriptValue(script)
+                    }
                     guard let webView = DebugReaderRegistry.shared.epubWebView(for: key, token: token) else {
                         throw DebugReaderProbeError.evalUnsupported(format: "epub")
                     }
@@ -926,12 +940,39 @@ struct ReaderContainerView: View {
     func engineReaderView(fingerprint: DocumentFingerprint) -> some View {
         switch ReaderEngine.resolve(format: fingerprint.format) {
         case .epubWKWebView:
-            EPUBReaderHost(
+            // Feature #42 Phase 1: route EPUB to the Readium engine when the
+            // `readiumEPUBEngine` flag is ON (default OFF → `EPUBReaderHost`
+            // stays the live default). The flag read lives here in the
+            // dispatcher, not in the pure `ReaderEngine.resolve`. `if`/`else`
+            // (not an inner `switch`) so the EPUB dispatch keeps a single
+            // `case` label — the source-level dispatch guard slices on case
+            // boundaries.
+            if ReaderEngine.routeEPUB(
+                readiumFlagEnabled: FeatureFlags.shared.isEnabled(.readiumEPUBEngine)
+            ) == .epubReadium {
+                ReadiumEPUBHost(
+                    fileURL: resolvedFileURL,
+                    fingerprint: fingerprint,
+                    settingsStore: settingsStore,
+                    readerToken: readerToken
+                )
+            } else {
+                EPUBReaderHost(
+                    fileURL: resolvedFileURL,
+                    fingerprint: fingerprint,
+                    modelContainer: modelContext.container,
+                    settingsStore: settingsStore,
+                    ttsService: ttsService,
+                    readerToken: readerToken
+                )
+            }
+        case .epubReadium:
+            // `resolve(format:)` never returns this (the Readium choice is made
+            // by `routeEPUB` above); handled for switch totality.
+            ReadiumEPUBHost(
                 fileURL: resolvedFileURL,
                 fingerprint: fingerprint,
-                modelContainer: modelContext.container,
                 settingsStore: settingsStore,
-                ttsService: ttsService,
                 readerToken: readerToken
             )
         case .pdfKit:

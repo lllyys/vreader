@@ -43,8 +43,9 @@ struct ReaderEngineTests {
 
     // MARK: - CaseIterable
 
-    @Test func caseIterable_hasFiveCases() {
-        #expect(ReaderEngine.allCases.count == 5)
+    @Test func caseIterable_hasSixCases() {
+        // Six engines: feature #42 added `.epubReadium` (flag-gated EPUB).
+        #expect(ReaderEngine.allCases.count == 6)
     }
 
     @Test func caseIterable_containsAllExpectedCases() {
@@ -52,6 +53,7 @@ struct ReaderEngineTests {
         #expect(all.contains(.textNative))
         #expect(all.contains(.markdownNative))
         #expect(all.contains(.epubWKWebView))
+        #expect(all.contains(.epubReadium))
         #expect(all.contains(.foliateWeb))
         #expect(all.contains(.pdfKit))
     }
@@ -62,6 +64,7 @@ struct ReaderEngineTests {
         #expect(ReaderEngine.textNative.rawValue == "textNative")
         #expect(ReaderEngine.markdownNative.rawValue == "markdownNative")
         #expect(ReaderEngine.epubWKWebView.rawValue == "epubWKWebView")
+        #expect(ReaderEngine.epubReadium.rawValue == "epubReadium")
         #expect(ReaderEngine.foliateWeb.rawValue == "foliateWeb")
         #expect(ReaderEngine.pdfKit.rawValue == "pdfKit")
     }
@@ -82,7 +85,7 @@ struct ReaderEngineTests {
             set.insert(engine)
         }
         set.insert(.textNative) // duplicate
-        #expect(set.count == 5)
+        #expect(set.count == 6)
     }
 
     // MARK: - Sendable
