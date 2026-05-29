@@ -59,6 +59,11 @@ struct ReadiumEPUBHost: View {
     /// highlight lifecycle (renderer = `highlightAdapter`). Built in `.task`
     /// once a `modelContainer` is available.
     @State private var highlightCoordinator: HighlightCoordinator?
+    /// WI-9a: host-owned navigation sink. Passed into the representable, where
+    /// the coordinator binds its nav methods on `attach`; the host's page-turn /
+    /// jump `.onReceive` observers post into it. Owned here (like
+    /// `highlightAdapter`) so the same instance survives body recomputation.
+    @State private var navCommander = ReadiumNavCommander()
 
     var body: some View {
         Group {
@@ -107,9 +112,28 @@ struct ReadiumEPUBHost: View {
                     // `makeUIViewController`), and detach it on teardown — so the
                     // same adapter the host's coordinator drives for restore /
                     // remove is the one bound to the rendered spine.
-                    highlightAdapter: highlightAdapter
+                    highlightAdapter: highlightAdapter,
+                    navCommander: navCommander
                 )
                 .ignoresSafeArea()
+                // WI-9a: capture the publication's container-relative reading-
+                // order hrefs so the jump observer can resolve a (legacy,
+                // OPF-relative) vreader `Locator` href against them — same
+                // migration concern WI-8 handles for highlight decorations.
+                .onReceive(NotificationCenter.default.publisher(for: .readerNextPage)) { _ in
+                    navCommander.nextPage()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .readerPreviousPage)) { _ in
+                    navCommander.previousPage()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .readerNavigateToLocator)) { notification in
+                    guard let vLocator = notification.object as? Locator,
+                          let readiumLocator = ReadiumEPUBReaderViewModel.readiumLocator(
+                            fromVReader: vLocator,
+                            spineHrefs: publication.readingOrder.map(\.href)
+                          ) else { return }
+                    navCommander.navigate(to: readiumLocator)
+                }
             case .failed:
                 // Reuse the existing reader's failure messaging (rule 51 — no
                 // new chrome): the same copy the dispatcher shows when a book
@@ -228,13 +252,19 @@ private struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     /// adapter is a `DecorableNavigator` client; the host's `HighlightCoordinator`
     /// drives its restore / apply / remove.
     let highlightAdapter: ReadiumDecorationHighlightAdapter
+    /// WI-9a: the host-owned navigation sink the coordinator binds its nav
+    /// methods into on `attach`, so the host's page-turn / jump observers reach
+    /// the live navigator (host → coordinator indirection, mirror of WI-8's
+    /// host-owned-adapter wiring).
+    let navCommander: ReadiumNavCommander
 
     func makeCoordinator() -> ReadiumReaderCoordinator {
         ReadiumReaderCoordinator(
             fingerprintKey: fingerprintKey,
             readerToken: readerToken ?? UUID(),
             onLocationChange: onLocationChange,
-            highlightAdapter: highlightAdapter
+            highlightAdapter: highlightAdapter,
+            navCommander: navCommander
         )
     }
 
@@ -308,11 +338,21 @@ private struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
 final class ReadiumReaderCoordinator: NSObject {
     private let fingerprintKey: String
     private let readerToken: UUID
-    fileprivate let log = Logger(subsystem: "com.vreader.app", category: "ReadiumEPUB")
+    // Not `private`/`fileprivate` so the WI-9a `+Navigation` extension's nav
+    // methods can log a no-navigator dispatch.
+    let log = Logger(subsystem: "com.vreader.app", category: "ReadiumEPUB")
 
     /// Weak — the navigator is owned by the SwiftUI representable's controller
-    /// lifecycle; the coordinator must not keep it alive past the host.
-    private weak var navigator: EPUBNavigatorViewController?
+    /// lifecycle; the coordinator must not keep it alive past the host. Exposed
+    /// (not `private`) so the WI-9a `+Navigation` extension's nav methods can
+    /// dispatch `goForward` / `goBackward` / `go(to:)` to the live navigator.
+    weak var boundNavigator: EPUBNavigatorViewController?
+
+    /// WI-9a: the host-owned navigation sink. `attach` binds this coordinator's
+    /// nav methods into it; `detach` clears it so a late page-turn / jump intent
+    /// no-ops after teardown. Optional because a non-nav call site (DebugBridge
+    /// eval seam construction) need not supply one.
+    private let navCommander: ReadiumNavCommander?
 
     /// WI-6: forwards `locationDidChange` to the host VM's debounced save.
     /// Dropped in `detach()` so no stale callback fires after teardown.
@@ -338,17 +378,29 @@ final class ReadiumReaderCoordinator: NSObject {
         // instance the `HighlightCoordinator` drives, else `detach()` would clear
         // a different adapter than the one attached to the navigator. Explicit
         // param removes that footgun; every call site passes the host's adapter.
-        highlightAdapter: ReadiumDecorationHighlightAdapter
+        highlightAdapter: ReadiumDecorationHighlightAdapter,
+        // WI-9a: the host-owned nav sink the coordinator binds its nav methods
+        // into on `attach`. nil for non-nav construction.
+        navCommander: ReadiumNavCommander? = nil
     ) {
         self.fingerprintKey = fingerprintKey
         self.readerToken = readerToken
         self.onLocationChange = onLocationChange
         self.highlightAdapter = highlightAdapter
+        self.navCommander = navCommander
         super.init()
     }
 
     func attach(navigator: EPUBNavigatorViewController) {
-        self.navigator = navigator
+        self.boundNavigator = navigator
+        // WI-9a: bind the host's nav sink to this coordinator's nav methods so
+        // the host's `.readerNextPage` / `.readerPreviousPage` /
+        // `.readerNavigateToLocator` observers drive the live navigator.
+        navCommander?.bind(
+            next: { [weak self] in self?.goToNextPage() },
+            previous: { [weak self] in self?.goToPreviousPage() },
+            navigate: { [weak self] locator in self?.navigate(to: locator) }
+        )
     }
 
     /// High (bug #252 lesson): host-teardown hook called from the
@@ -365,9 +417,12 @@ final class ReadiumReaderCoordinator: NSObject {
             for: fingerprintKey, token: readerToken
         )
         #endif
-        navigator?.delegate = nil
-        navigator = nil
+        boundNavigator?.delegate = nil
+        boundNavigator = nil
         onLocationChange = nil
+        // WI-9a: clear the nav sink so a late page-turn / jump intent no-ops
+        // after teardown (mirrors the navigator-weak discipline above).
+        navCommander?.clear()
         // WI-8: drop the adapter's navigator ref so no stale decoration apply
         // fires after teardown (mirrors the navigator-weak discipline above).
         highlightAdapter.detach()
@@ -418,7 +473,7 @@ extension ReadiumReaderCoordinator: ReadiumNavigatorEvaluating {
         if let stub = evaluatorForTests {
             raw = await stub(script)
         } else {
-            guard let navigator else {
+            guard let navigator = boundNavigator else {
                 throw DebugReaderProbeError.evalUnsupported(format: "epub")
             }
             switch await navigator.evaluateJavaScript(script) {
