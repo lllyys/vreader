@@ -21,6 +21,9 @@
 
 import XCTest
 import Foundation
+#if canImport(WebKit)
+import WebKit
+#endif
 @testable import vreader
 
 @MainActor
@@ -184,6 +187,79 @@ final class ReadiumDebugProbeTests: XCTestCase {
         } catch {
             XCTFail("wrong error: \(error)")
         }
+    }
+
+    // MARK: - Bug #277: Stage-2 WebView gate accepts the Readium navigator slot
+    //
+    // The settle Stage-2 gate (`awaitWebViewRegistered(for:format:)`, bug #250)
+    // only knew the legacy EPUB/Foliate WebView slots. A Readium-rendered EPUB
+    // fills the `activeReadiumNavigator` slot instead — so settle always wrote
+    // `error=webview not registered` even though the reader rendered. The fix
+    // teaches the gate to accept EITHER slot for `.epub`, under the same
+    // key+token guard. Uses an isolated registry (bug #227/#228 pattern) so the
+    // parallel Swift-Testing/XCTest run can't trip on shared-singleton state.
+
+    func test_awaitWebViewRegistered_epub_resolvesWhenOnlyReadiumNavigatorRegistered() async throws {
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let nav = FakeReadiumNavigator()
+        let key = "epub:readium:2048"
+        let token = UUID()
+        // Match the production lifecycle: expected token is set before the
+        // navigator registers, exactly as ReaderContainerView.onAppear does.
+        registry.setExpectedReaderToken(token)
+        registry.setActiveReadiumNavigator(nav, for: key, token: token)
+        // No EPUB WebView slot is ever populated by the Readium host. Pre-fix
+        // this throws settleTimeout → settle reports `webview not registered`.
+        try await registry.awaitWebViewRegistered(for: key, format: "epub", timeout: 1.0)
+    }
+
+    func test_hasActiveWebView_epub_trueForReadiumNavigatorSlot() {
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let nav = FakeReadiumNavigator()
+        let token = UUID()
+        registry.setExpectedReaderToken(token)
+        registry.setActiveReadiumNavigator(nav, for: "k1", token: token)
+        XCTAssertTrue(registry.hasActiveWebView(for: "k1", format: "epub"))
+    }
+
+    func test_hasActiveWebView_epub_falseForReadiumNavigatorWrongKey() {
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let nav = FakeReadiumNavigator()
+        let token = UUID()
+        registry.setExpectedReaderToken(token)
+        registry.setActiveReadiumNavigator(nav, for: "k1", token: token)
+        XCTAssertFalse(registry.hasActiveWebView(for: "other-key", format: "epub"))
+    }
+
+    func test_hasActiveWebView_epub_falseForReadiumNavigatorStaleToken() {
+        // A late navigator binding under an outgoing token must not satisfy the
+        // gate for the incoming reader: the slot's token != expectedReaderToken.
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let nav = FakeReadiumNavigator()
+        let outgoingToken = UUID()
+        let incomingToken = UUID()
+        // Outgoing token registers the navigator (no expected token yet).
+        registry.setActiveReadiumNavigator(nav, for: "k1", token: outgoingToken)
+        // Incoming reader takes over and sets its expected token.
+        registry.setExpectedReaderToken(incomingToken)
+        XCTAssertFalse(
+            registry.hasActiveWebView(for: "k1", format: "epub"),
+            "Slot token (outgoing) must match expectedReaderToken (incoming) to satisfy the gate"
+        )
+    }
+
+    func test_hasActiveWebView_epub_stillTrueForLegacyEPUBWebViewSlot() {
+        // The legacy path must keep working: an EPUB WebView slot satisfies the
+        // gate without any Readium navigator registered.
+        #if canImport(WebKit)
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let webView = WKWebView()
+        let token = UUID()
+        registry.setExpectedReaderToken(token)
+        registry.setActiveEPUBWebView(webView, for: "k1", token: token)
+        XCTAssertTrue(registry.hasActiveWebView(for: "k1", format: "epub"))
+        XCTAssertNil(registry.readiumNavigator(for: "k1", token: token))
+        #endif
     }
 }
 

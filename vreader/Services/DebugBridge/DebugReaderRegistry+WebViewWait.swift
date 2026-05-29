@@ -22,8 +22,16 @@
 // so the gate is also a no-op for the formats that wouldn't satisfy it
 // anyway (TXT/MD/PDF).
 //
+// Bug #277: EPUB has two render engines. The legacy EPUBWebViewBridge fills the
+// `activeEPUBWebView` slot; the Readium engine (`readiumEPUBEngine` flag) fills
+// the `activeReadiumNavigator` slot instead (Readium owns its internal spine
+// webviews, so there is no single app-owned WKWebView to register). The `.epub`
+// branch of the gate is therefore satisfied by EITHER slot, under the same
+// key+token guard — without this, a Readium-rendered EPUB never satisfied the
+// gate and `settle` always returned `webview not registered`.
+//
 // @coordinates-with DebugReaderRegistry.swift, DebugReaderRegistry+Settle.swift,
-//   RealDebugBridgeContext+Settle.swift
+//   RealDebugBridgeContext+Settle.swift, ReadiumDebugProbe.swift
 // DEBUG-only.
 
 #if DEBUG
@@ -81,14 +89,18 @@ extension DebugReaderRegistry {
         guard Self.formatRequiresWebView(format) else { return false }
         switch format.lowercased() {
         case "epub":
-            // Token-keyed match — see `epubWebView(for:token:)` for the
-            // production-equivalent guard.
-            guard activeEPUBWebViewKeyInternal == fingerprintKey,
-                  rawActiveEPUBWebViewForTests != nil,
-                  let activeToken = rawActiveEPUBWebViewTokenForTests,
-                  expectedReaderTokenForTests == activeToken
-            else { return false }
-            return true
+            // Bug #277: EPUB can be rendered by EITHER the legacy
+            // EPUBWebViewBridge (which fills the `activeEPUBWebView` slot) OR
+            // the Readium engine (`readiumEPUBEngine` flag ON, which fills the
+            // `activeReadiumNavigator` slot — Readium owns its internal spine
+            // webviews, so there is no app-owned WKWebView to register). The
+            // Stage-2 settle gate is satisfied when EITHER slot is populated
+            // for this key, under the same `expectedReaderToken` guard the
+            // legacy path uses. Without the Readium branch, a Readium-rendered
+            // EPUB never satisfied the gate and `settle` always reported
+            // `webview not registered` despite the reader rendering.
+            return hasActiveEPUBWebView(for: fingerprintKey)
+                || hasActiveReadiumNavigator(for: fingerprintKey)
         case "azw3", "azw", "mobi", "prc":
             guard activeFoliateWebViewKeyInternal == fingerprintKey,
                   rawActiveFoliateWebViewForTests != nil,
@@ -102,6 +114,37 @@ extension DebugReaderRegistry {
         #else
         return false
         #endif
+    }
+
+    #if canImport(WebKit)
+    /// Legacy EPUB WebView slot satisfier — token-keyed match mirroring
+    /// `epubWebView(for:token:)`'s production guard.
+    private func hasActiveEPUBWebView(for fingerprintKey: String) -> Bool {
+        guard activeEPUBWebViewKeyInternal == fingerprintKey,
+              rawActiveEPUBWebViewForTests != nil,
+              let activeToken = rawActiveEPUBWebViewTokenForTests,
+              expectedReaderTokenForTests == activeToken
+        else { return false }
+        return true
+    }
+    #endif
+
+    /// Readium navigator slot satisfier (bug #277). Same key+token guard as
+    /// the legacy EPUB slot: the navigator's stored key must match
+    /// `fingerprintKey`, the weak ref must still be live, and the slot's token
+    /// must equal the active `expectedReaderToken` (closing the same-key reopen
+    /// race — a late navigator binding under an outgoing reader's token must
+    /// not satisfy the gate for the incoming reader). Not WebKit-gated — the
+    /// `ReadiumNavigatorEvaluating` slot is available unconditionally in the
+    /// target (the navigator type comes from the Readium toolkit), matching the
+    /// posture of the Readium clears in `unregister(_:)` / `reset()`.
+    private func hasActiveReadiumNavigator(for fingerprintKey: String) -> Bool {
+        guard readiumNavigatorKeyInternal == fingerprintKey,
+              readiumNavigatorRefInternal != nil,
+              let activeToken = readiumNavigatorTokenInternal,
+              expectedReaderTokenForTests == activeToken
+        else { return false }
+        return true
     }
 
     /// Bounded poll waiting for `hasActiveWebView(for:format:)` to become
