@@ -58,7 +58,7 @@ final class ReadiumEPUBReaderViewModel {
     // MARK: - Position persistence (WI-6)
 
     private let fingerprint: DocumentFingerprint
-    private let persistence: (any ReadingPositionPersisting)?
+    private let persistence: (any VReaderLocatorPersisting)?
     private let deviceId: String
     private let positionSaveDebounceNs: UInt64
 
@@ -88,7 +88,7 @@ final class ReadiumEPUBReaderViewModel {
     init(
         fileURL: URL,
         fingerprint: DocumentFingerprint,
-        persistence: any ReadingPositionPersisting,
+        persistence: any VReaderLocatorPersisting,
         deviceId: String,
         positionSaveDebounceNs: UInt64 = 2_000_000_000
     ) {
@@ -170,37 +170,42 @@ final class ReadiumEPUBReaderViewModel {
     func close() {
         isClosed = true
         state = .loading
-        // Flush a still-pending debounced save (fire-and-forget): cancel the
-        // timer and persist the last reported locator immediately so a dismiss
-        // before the debounce fires does not lose the final position. The
-        // awaitable `closeAndFlush()` is preferred from the host so the save is
-        // guaranteed to complete before suspension; this synchronous variant is
-        // the WI-5 test seam + a best-effort fallback.
-        let pending = takePendingForFlush()
-        if let pending {
-            persistNow(pending)
-        }
-    }
-
-    /// Awaitable teardown for the host's `.onDisappear`: resets state + flushes a
-    /// pending debounced save, AWAITING the persist so iOS does not suspend the
-    /// app mid-write (mirrors `EPUBReaderViewModel.close()` / `onBackground()`).
-    /// The host wraps the call in `beginBackgroundTask`.
-    func closeAndFlush() async {
-        isClosed = true
-        state = .loading
-        guard let pending = takePendingForFlush() else { return }
-        await persist(pending)
-    }
-
-    /// Cancels the debounce timer, bumps the version (so any in-flight debounced
-    /// write is dropped), and returns the last pending locator to flush (if any).
-    private func takePendingForFlush() -> ReadiumShared.Locator? {
+        // Synchronous close() is the WI-5 render-only test seam — `persistence`
+        // is nil there, so nothing is ever pending. Just cancel the timer. The
+        // host uses the awaitable `closeAndFlush()` so the final position is
+        // guaranteed to persist before suspension.
         saveVersion &+= 1
         saveTask?.cancel()
         saveTask = nil
-        defer { pendingReadiumLocator = nil }
-        return pendingReadiumLocator
+        pendingReadiumLocator = nil
+    }
+
+    /// Awaitable teardown for the host's `.onDisappear`: resets state, flushes a
+    /// still-pending debounced save, AND awaits any in-flight persist, so the
+    /// final position is guaranteed written before iOS suspends the app (the
+    /// host wraps this in `beginBackgroundTask`). Mirrors `EPUBReaderViewModel`.
+    ///
+    /// Gate-4 round-1 High: the debounce task can already have consumed the
+    /// pending locator and be mid-`persist` when teardown fires. Cancelling the
+    /// task only stops its `Task.sleep`, not an already-running DB write — so we
+    /// both flush a still-pending locator AND `await` the in-flight task's value.
+    /// Exactly one of the two paths fires (pending is nil once the task consumes
+    /// it), so there is no double-persist; all state is `@MainActor`-serialized.
+    func closeAndFlush() async {
+        isClosed = true
+        state = .loading
+        saveVersion &+= 1
+        let inFlight = saveTask
+        saveTask?.cancel()
+        saveTask = nil
+        let pending = pendingReadiumLocator
+        pendingReadiumLocator = nil
+        if let pending {
+            // The debounce hadn't fired yet (locator still pending) — persist now.
+            await persist(pending)
+        }
+        // Await a persist the debounce task already started before we cancelled.
+        await inFlight?.value
     }
 
     /// Surface an `EPUBNavigatorViewController` init failure (thrown from the
@@ -238,8 +243,9 @@ final class ReadiumEPUBReaderViewModel {
         saveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: debounce)
             guard !Task.isCancelled, let self, self.saveVersion == capturedVersion else { return }
+            let loc = self.pendingReadiumLocator
             self.pendingReadiumLocator = nil
-            self.persistNow(readiumLocator)
+            if let loc { await self.persist(loc) }
         }
     }
 
@@ -254,13 +260,6 @@ final class ReadiumEPUBReaderViewModel {
         )
         guard let envelope else { return nil }
         return ReadiumEPUBReaderViewModel.readiumLocator(from: envelope)
-    }
-
-    /// Persists a Readium locator through the envelope dual-write (fire-and-forget
-    /// wrapper around `persist`). Used by the debounced save path — a failed
-    /// save must never block reading.
-    private func persistNow(_ readiumLocator: ReadiumShared.Locator) {
-        Task { await persist(readiumLocator) }
     }
 
     /// Awaitable envelope dual-write. Maps the Readium locator → envelope +

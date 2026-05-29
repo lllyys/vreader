@@ -49,6 +49,13 @@ extension PersistenceActor: ReadingPositionPersisting {
 
         if let existing = book.readingPosition {
             existing.updateLocator(locator)
+            // Gate-4 round-1 High (#42 WI-6): the legacy engine just wrote a
+            // fresh position, so any previously-saved Readium `VReaderLocator`
+            // envelope is now stale. Clear it so a later flag-ON reopen does NOT
+            // restore a stale Readium position that predates this legacy write
+            // (`loadVReaderLocator` then returns nil → Readium opens at start).
+            // The authoritative position for the legacy engine lives in `locator`.
+            existing.vreaderLocatorData = nil
             existing.updatedAt = Date()
             existing.deviceId = deviceId
         } else {
@@ -81,6 +88,16 @@ extension PersistenceActor: ReadingPositionPersisting {
         legacyLocator: Locator,
         deviceId: String
     ) async throws {
+        // Gate-4 round-1 Medium: mirror savePosition's fingerprint guard so a
+        // caller cannot write book X's envelope/legacy locator into book Y's
+        // ReadingPosition (which would corrupt both restore paths).
+        guard vreaderLocator.fingerprintKey == bookFingerprintKey,
+              legacyLocator.bookFingerprint.canonicalKey == bookFingerprintKey else {
+            throw PersistenceError.recordNotFound(
+                "VReaderLocator/legacy fingerprint does not match book key"
+            )
+        }
+
         let envelopeData = try JSONEncoder().encode(vreaderLocator)
 
         let context = ModelContext(modelContainer)
@@ -150,3 +167,11 @@ extension PersistenceActor: ReadingPositionPersisting {
         try context.save()
     }
 }
+
+// MARK: - VReaderLocatorPersisting (Feature #42 WI-6)
+
+/// `PersistenceActor` is the sole real envelope store. The `saveVReaderLocator`
+/// / `loadVReaderLocator` witnesses are defined in the extension above; this
+/// declares the conformance so `ReadiumEPUBReaderViewModel` can take a narrow
+/// `any VReaderLocatorPersisting` (no silent-drop default — Gate-4 round-1 Med).
+extension PersistenceActor: VReaderLocatorPersisting {}

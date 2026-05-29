@@ -350,4 +350,84 @@ struct PersistenceActorVReaderLocatorTests {
         let legacyLoaded = try await persistence.loadPosition(bookFingerprintKey: fp.canonicalKey)
         #expect(legacyLoaded?.href == "ch9.xhtml")
     }
+
+    /// Gate-4 round-1 High: after a Readium envelope is saved, a legacy
+    /// `savePosition` (flag flipped OFF, legacy engine writes a newer position)
+    /// must CLEAR the stale envelope — otherwise a later flag-ON reopen would
+    /// restore the stale Readium position that predates the legacy write.
+    @Test func legacySavePosition_clearsStaleReadiumEnvelope() async throws {
+        let persistence = PersistenceActor(modelContainer: try makeContainer())
+        let fp = fingerprint()
+        try await insertBook(persistence, fp: fp)
+        let (envelope, legacy) = makeEnvelope(fp)
+
+        try await persistence.saveVReaderLocator(
+            bookFingerprintKey: fp.canonicalKey,
+            vreaderLocator: envelope, legacyLocator: legacy, deviceId: "dev-1"
+        )
+        #expect(try await persistence.loadVReaderLocator(bookFingerprintKey: fp.canonicalKey) != nil)
+
+        // Legacy engine writes a newer position.
+        let newer = vreader.Locator(
+            bookFingerprint: fp, href: "ch7.xhtml", progression: 0.7,
+            totalProgression: nil, cfi: nil, page: nil,
+            charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
+            textQuote: nil, textContextBefore: nil, textContextAfter: nil
+        )
+        try await persistence.savePosition(
+            bookFingerprintKey: fp.canonicalKey, locator: newer, deviceId: "dev-1"
+        )
+
+        // Envelope cleared → flag-ON restore won't resurrect the stale position.
+        #expect(try await persistence.loadVReaderLocator(bookFingerprintKey: fp.canonicalKey) == nil)
+        // The legacy position is the newer one.
+        let legacyLoaded = try await persistence.loadPosition(bookFingerprintKey: fp.canonicalKey)
+        #expect(legacyLoaded?.href == "ch7.xhtml")
+    }
+
+    /// Gate-4 round-1 Medium: a fingerprint mismatch (book X's envelope written
+    /// to book Y) is rejected, mirroring `savePosition`'s guard.
+    @Test func saveVReaderLocator_mismatchedFingerprint_throws() async throws {
+        let persistence = PersistenceActor(modelContainer: try makeContainer())
+        let fp = fingerprint()
+        try await insertBook(persistence, fp: fp)
+        let (envelope, legacy) = makeEnvelope(fp)
+
+        await #expect(throws: (any Error).self) {
+            try await persistence.saveVReaderLocator(
+                bookFingerprintKey: "epub:\(String(repeating: "f", count: 64)):99",
+                vreaderLocator: envelope, legacyLocator: legacy, deviceId: "dev-1"
+            )
+        }
+    }
+
+    /// Gate-4 round-1 High (fix 1): `closeAndFlush()` persists a still-pending
+    /// debounced save WITHOUT waiting out the debounce — a dismiss before the
+    /// timer fires must not lose the final position. Drives the VM's real
+    /// save→pending→flush path through a real PersistenceActor.
+    @MainActor
+    @Test func closeAndFlush_persistsPendingDebouncedSave() async throws {
+        let persistence = PersistenceActor(modelContainer: try makeContainer())
+        let fp = fingerprint()
+        try await insertBook(persistence, fp: fp)
+
+        let vm = ReadiumEPUBReaderViewModel(
+            fileURL: URL(fileURLWithPath: "/dev/null/x.epub"),
+            fingerprint: fp,
+            persistence: persistence,
+            deviceId: "dev-1",
+            positionSaveDebounceNs: 60_000_000_000  // 60s — far longer than the test
+        )
+        let loc = ReadiumShared.Locator(
+            href: RelativeURL(path: "ch3.xhtml")!,
+            mediaType: .xhtml,
+            locations: ReadiumShared.Locator.Locations(progression: 0.33)
+        )
+        vm.save(readiumLocator: loc)  // schedules the (60s) debounce; pending set
+        await vm.closeAndFlush()      // must flush the pending save immediately
+
+        let loaded = try await persistence.loadVReaderLocator(bookFingerprintKey: fp.canonicalKey)
+        #expect(loaded?.engine == .readium)
+        #expect(loaded?.legacyLocator?.progression == 0.33)
+    }
 }
