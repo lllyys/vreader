@@ -50,6 +50,15 @@ struct ReadiumEPUBHost: View {
     /// WI-6: the restored Readium locator, loaded before the navigator mounts so
     /// it can be passed as `initialLocation`. nil = open at the start.
     @State private var restoredLocator: ReadiumShared.Locator?
+    /// WI-8: renders stored highlights as Readium decorations. Owned by the host
+    /// (via @State) so the same instance is both attached to the live navigator
+    /// (in the representable's `makeUIViewController`) and driven by the host's
+    /// `HighlightCoordinator` restore / `.readerHighlightRemoved` observer.
+    @State private var highlightAdapter = ReadiumDecorationHighlightAdapter()
+    /// WI-8: restore-on-open + create/remove plumbing through the shared
+    /// highlight lifecycle (renderer = `highlightAdapter`). Built in `.task`
+    /// once a `modelContainer` is available.
+    @State private var highlightCoordinator: HighlightCoordinator?
 
     var body: some View {
         Group {
@@ -92,7 +101,13 @@ struct ReadiumEPUBHost: View {
                     // decoupled from the VM type.
                     onLocationChange: { [weak viewModel] locator in
                         viewModel?.save(readiumLocator: locator)
-                    }
+                    },
+                    // WI-8: attach the host-owned highlight adapter to the live
+                    // navigator once it is built (inside the representable's
+                    // `makeUIViewController`), and detach it on teardown — so the
+                    // same adapter the host's coordinator drives for restore /
+                    // remove is the one bound to the rendered spine.
+                    highlightAdapter: highlightAdapter
                 )
                 .ignoresSafeArea()
             case .failed:
@@ -122,12 +137,41 @@ struct ReadiumEPUBHost: View {
                 deviceId: ReaderContainerView.deviceId
             )
             viewModel = vm
+            // WI-8: build the highlight coordinator over the host-owned adapter
+            // so restore-on-open + the `.readerHighlightRemoved` observer route
+            // through the shared highlight lifecycle (mirrors the legacy EPUB
+            // container). The adapter binds to the navigator separately (in the
+            // representable) once `state == .ready`.
+            highlightCoordinator = HighlightCoordinator(
+                renderer: highlightAdapter,
+                persistence: persistence,
+                bookFingerprintKey: fingerprint.canonicalKey
+            )
             // WI-6: load the saved position BEFORE the navigator mounts (the
             // representable is only built once `state == .ready`) so the
             // navigator opens directly at the restored locator instead of the
             // start. nil → open at the start (first-open / nothing saved).
             restoredLocator = await vm.restoredReadiumLocator()
             await vm.open()
+            // WI-8: restore stored highlights once the publication is open. The
+            // adapter tracks the set even before the navigator attaches, so the
+            // decorations submit as soon as `attach(navigator:)` runs in the
+            // representable's `makeUIViewController`. `forHref: nil` — Readium
+            // decorations are book-wide; the navigator renders only those whose
+            // locators fall on visible spine items.
+            await highlightCoordinator?.restoreAll()
+        }
+        // WI-8: clear a removed highlight's decoration (the cross-format Bug #78
+        // visual-clear pipeline `HighlightCoordinator.deleteHighlight` posts).
+        // Mirrors the legacy EPUB container's observer.
+        .onReceive(NotificationCenter.default.publisher(for: .readerHighlightRemoved)) { notification in
+            guard let idString = notification.object as? String,
+                  let id = UUID(uuidString: idString) else { return }
+            highlightAdapter.remove(id: id)
+        }
+        // WI-8: re-restore after an annotation import refreshes the set.
+        .onReceive(NotificationCenter.default.publisher(for: .readerHighlightsDidImport)) { _ in
+            Task { await highlightCoordinator?.restoreAll() }
         }
         .onDisappear {
             // High (bug #252 lesson): host-level close lifecycle. The host owns
@@ -179,12 +223,18 @@ private struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     /// `@MainActor @Sendable` so the coordinator can hold it across the
     /// navigator-delegate boundary under strict concurrency.
     var onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)?
+    /// WI-8: the host-owned highlight adapter, bound to the navigator in
+    /// `makeUIViewController` and released in `dismantleUIViewController`. The
+    /// adapter is a `DecorableNavigator` client; the host's `HighlightCoordinator`
+    /// drives its restore / apply / remove.
+    let highlightAdapter: ReadiumDecorationHighlightAdapter
 
     func makeCoordinator() -> ReadiumReaderCoordinator {
         ReadiumReaderCoordinator(
             fingerprintKey: fingerprintKey,
             readerToken: readerToken ?? UUID(),
-            onLocationChange: onLocationChange
+            onLocationChange: onLocationChange,
+            highlightAdapter: highlightAdapter
         )
     }
 
@@ -198,6 +248,11 @@ private struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             )
             navigator.delegate = context.coordinator
             context.coordinator.attach(navigator: navigator)
+            // WI-8: bind the highlight adapter to the same navigator so stored
+            // decorations render on the live spine. The adapter already holds
+            // the restored set (the host's coordinator called `restoreAll()`
+            // before the navigator mounted), so `attach` re-submits it.
+            highlightAdapter.attach(navigator: navigator)
             return navigator
         } catch {
             context.coordinator.log.error(
@@ -255,6 +310,10 @@ final class ReadiumReaderCoordinator: NSObject {
     /// Dropped in `detach()` so no stale callback fires after teardown.
     private var onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)?
 
+    /// WI-8: the highlight adapter bound to this navigator. Detached on teardown
+    /// so no stale decoration apply fires after the host leaves the hierarchy.
+    private let highlightAdapter: ReadiumDecorationHighlightAdapter
+
     #if DEBUG
     /// Test seam: when set, `evaluateJavaScriptValue` uses this instead of the
     /// real navigator's `evaluateJavaScript`, so the JSON-serialization contract
@@ -266,11 +325,13 @@ final class ReadiumReaderCoordinator: NSObject {
     init(
         fingerprintKey: String,
         readerToken: UUID,
-        onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)? = nil
+        onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)? = nil,
+        highlightAdapter: ReadiumDecorationHighlightAdapter = ReadiumDecorationHighlightAdapter()
     ) {
         self.fingerprintKey = fingerprintKey
         self.readerToken = readerToken
         self.onLocationChange = onLocationChange
+        self.highlightAdapter = highlightAdapter
         super.init()
     }
 
@@ -295,6 +356,9 @@ final class ReadiumReaderCoordinator: NSObject {
         navigator?.delegate = nil
         navigator = nil
         onLocationChange = nil
+        // WI-8: drop the adapter's navigator ref so no stale decoration apply
+        // fires after teardown (mirrors the navigator-weak discipline above).
+        highlightAdapter.detach()
     }
 }
 
