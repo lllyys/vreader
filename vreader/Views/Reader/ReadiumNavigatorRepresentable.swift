@@ -42,6 +42,11 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     /// the live navigator (host → coordinator indirection, mirror of WI-8's
     /// host-owned-adapter wiring).
     let navCommander: ReadiumNavCommander
+    /// WI-11b: the host-owned bilingual eval-channel sink the coordinator binds
+    /// its production eval method into on `attach`, so the host's bilingual
+    /// extension can drive enumerate/inject/clear on the live spine (same
+    /// host → coordinator indirection as `navCommander`).
+    let bilingualCommander: ReadiumBilingualCommander
 
     func makeCoordinator() -> ReadiumReaderCoordinator {
         ReadiumReaderCoordinator(
@@ -49,7 +54,8 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             readerToken: readerToken ?? UUID(),
             onLocationChange: onLocationChange,
             highlightAdapter: highlightAdapter,
-            navCommander: navCommander
+            navCommander: navCommander,
+            bilingualCommander: bilingualCommander
         )
     }
 

@@ -65,6 +65,52 @@ struct ReadiumEPUBHost: View {
     /// `highlightAdapter`) so the same instance survives body recomputation.
     @State private var navCommander = ReadiumNavCommander()
 
+    // MARK: - WI-11b bilingual (paged interlinear via the eval channel)
+
+    /// WI-11b: host-owned bilingual eval sink. Passed into the representable;
+    /// the coordinator binds its production eval method on `attach` and clears it
+    /// on `detach`. The host's bilingual extension drives enumerate/inject/clear
+    /// through it. Owned here (like `navCommander` / `highlightAdapter`) so the
+    /// same instance survives body recomputation.
+    /// Not `private` — the `ReadiumEPUBHost+Bilingual` extension (a separate
+    /// file) reads/writes this bilingual state. `@State` properties cannot live
+    /// in an extension, so they stay on the struct at `internal` access.
+    @State var bilingualCommander = ReadiumBilingualCommander()
+    /// WI-11b: the engine-agnostic block↔translation orchestrator (reused from
+    /// feature #56). PAGED path only — one spine per document, so the orchestrator's
+    /// global `-1` bucket via `updateBlocks(_:)` (NOT the `forSection:` continuous
+    /// variants, which are WI-12).
+    @State var bilingualOrchestrator = EPUBBilingualOrchestrator()
+    /// WI-11b: per-book bilingual reading VM (toggle / language / granularity /
+    /// per-unit translation cache / prefetch trigger). Built lazily once the
+    /// EPUBParser spine is known.
+    @State var bilingualViewModel: BilingualReadingViewModel?
+    /// WI-11b: vreader's own EPUB parser, opened alongside the Readium open so the
+    /// `EPUBChapterTextProvider` (keyed on OPF-relative spine hrefs) can extract
+    /// per-spine source text for translation. Readium's `Publication` does not
+    /// expose raw spine HTML to app code, so the bilingual source path uses this
+    /// parallel parser (the same one the legacy EPUB/search/AI coordinators use).
+    @State var bilingualParser: EPUBParser?
+    /// WI-11b: the OPF-relative spine hrefs the `EPUBChapterTextProvider` keys on,
+    /// captured once the parser opens so the bilingual extension can normalize a
+    /// Readium container-relative locator href onto them (seam #3 — the WI-8
+    /// href-consistency finding class).
+    @State var bilingualSpineHrefs: [String] = []
+    /// WI-11b: first-enable setup-sheet presentation flag (reuses the designed
+    /// `BilingualSetupSheet` surface from feature #56 — rule 51 satisfied).
+    @State var showBilingualSetupSheet = false
+    /// WI-11b: the setup-sheet's working language/granularity state.
+    @State var bilingualSetupState = BilingualSetupSheetState(
+        languageKey: BilingualReadingViewModel.defaultTargetLanguage,
+        granularity: .paragraph
+    )
+    /// WI-11b: tracks the spine href the bilingual loop last enumerated so an
+    /// intra-chapter location change does NOT re-enumerate (only a real chapter
+    /// change re-runs enumerate). A reference-type `@State` so the
+    /// `onLocationChange` closure (captured at body-eval) mutates the live
+    /// instance, not a stale value snapshot.
+    @State var bilingualChapterTracker = ReadiumBilingualChapterTracker()
+
     var body: some View {
         Group {
             switch viewModel?.state {
@@ -106,6 +152,12 @@ struct ReadiumEPUBHost: View {
                     // decoupled from the VM type.
                     onLocationChange: { [weak viewModel] locator in
                         viewModel?.save(readiumLocator: locator)
+                        // WI-11b: drive the bilingual chapter-change enumerate off
+                        // the SAME location-change callback (compose, don't replace
+                        // — the WI-6 position save above still runs). A fresh
+                        // enumerate runs only when the spine href changes AND
+                        // bilingual is enabled; intra-chapter scrolls are deduped.
+                        handleBilingualLocationChange(locator)
                     },
                     // WI-8: attach the host-owned highlight adapter to the live
                     // navigator once it is built (inside the representable's
@@ -113,7 +165,8 @@ struct ReadiumEPUBHost: View {
                     // same adapter the host's coordinator drives for restore /
                     // remove is the one bound to the rendered spine.
                     highlightAdapter: highlightAdapter,
-                    navCommander: navCommander
+                    navCommander: navCommander,
+                    bilingualCommander: bilingualCommander
                 )
                 .ignoresSafeArea()
                 // WI-9a: capture the publication's container-relative reading-
@@ -184,6 +237,12 @@ struct ReadiumEPUBHost: View {
             // decorations are book-wide; the navigator renders only those whose
             // locators fall on visible spine items.
             await highlightCoordinator?.restoreAll()
+            // WI-11b: open vreader's own EPUB parser alongside the Readium open
+            // so the `EPUBChapterTextProvider` (keyed on OPF-relative spine
+            // hrefs) can supply per-spine source text for translation. Readium's
+            // `Publication` does not expose raw spine HTML to app code. Failure to
+            // open is non-fatal — bilingual simply stays unavailable for the book.
+            await openBilingualParser()
         }
         // WI-8: clear a removed highlight's decoration (the cross-format Bug #78
         // visual-clear pipeline `HighlightCoordinator.deleteHighlight` posts).
@@ -197,6 +256,18 @@ struct ReadiumEPUBHost: View {
         .onReceive(NotificationCenter.default.publisher(for: .readerHighlightsDidImport)) { _ in
             Task { await highlightCoordinator?.restoreAll() }
         }
+        // WI-11b: bilingual surface hooks (More-menu toggle, prefetch-landed
+        // re-inject, first-enable setup sheet). Paged path only — continuous
+        // bilingual is WI-12. Reuses the designed `BilingualSetupSheet` (rule 51).
+        .onReceive(NotificationCenter.default.publisher(for: .readerMoreBilingual)) { _ in
+            handleMoreBilingualToggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerBilingualDidChange)) { notification in
+            let key = notification.userInfo?["fingerprintKey"] as? String
+            guard key == fingerprint.canonicalKey else { return }
+            handleBilingualDidChange()
+        }
+        .sheet(isPresented: $showBilingualSetupSheet) { bilingualSetupSheetView }
         .onDisappear {
             // High (bug #252 lesson): host-level close lifecycle. The host owns
             // the VM (and through `.ready` its `Publication`) via @State, so the

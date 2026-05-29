@@ -42,6 +42,12 @@ final class ReadiumReaderCoordinator: NSObject {
     /// eval seam construction) need not supply one.
     private let navCommander: ReadiumNavCommander?
 
+    /// WI-11b: the host-owned bilingual eval-channel sink. `attach` binds this
+    /// coordinator's production `evaluateForBilingual` method into it; `detach`
+    /// clears it so a late enumerate/inject/clear no-ops after teardown. Optional
+    /// — a non-bilingual call site need not supply one. Mirrors `navCommander`.
+    private let bilingualCommander: ReadiumBilingualCommander?
+
     /// WI-6: forwards `locationDidChange` to the host VM's debounced save.
     /// Dropped in `detach()` so no stale callback fires after teardown.
     private var onLocationChange: (@MainActor @Sendable (ReadiumShared.Locator) -> Void)?
@@ -69,13 +75,18 @@ final class ReadiumReaderCoordinator: NSObject {
         highlightAdapter: ReadiumDecorationHighlightAdapter,
         // WI-9a: the host-owned nav sink the coordinator binds its nav methods
         // into on `attach`. nil for non-nav construction.
-        navCommander: ReadiumNavCommander? = nil
+        navCommander: ReadiumNavCommander? = nil,
+        // WI-11b: the host-owned bilingual eval sink the coordinator binds its
+        // production eval method into on `attach`. nil for non-bilingual
+        // construction.
+        bilingualCommander: ReadiumBilingualCommander? = nil
     ) {
         self.fingerprintKey = fingerprintKey
         self.readerToken = readerToken
         self.onLocationChange = onLocationChange
         self.highlightAdapter = highlightAdapter
         self.navCommander = navCommander
+        self.bilingualCommander = bilingualCommander
         super.init()
     }
 
@@ -89,6 +100,12 @@ final class ReadiumReaderCoordinator: NSObject {
             previous: { [weak self] in self?.goToPreviousPage() },
             navigate: { [weak self] locator in self?.navigate(to: locator) }
         )
+        // WI-11b: bind the bilingual eval sink to this coordinator's production
+        // eval method so the host's bilingual extension can drive the
+        // enumerate/inject/clear loop on the live navigator's visible spine.
+        bilingualCommander?.setEvaluator { [weak self] script in
+            await self?.evaluateForBilingual(script)
+        }
     }
 
     /// High (bug #252 lesson): host-teardown hook called from the
@@ -111,9 +128,30 @@ final class ReadiumReaderCoordinator: NSObject {
         // WI-9a: clear the nav sink so a late page-turn / jump intent no-ops
         // after teardown (mirrors the navigator-weak discipline above).
         navCommander?.clear()
+        // WI-11b: clear the bilingual eval sink so a late enumerate/inject/clear
+        // no-ops after teardown (same navigator-weak discipline).
+        bilingualCommander?.clearEvaluator()
         // WI-8: drop the adapter's navigator ref so no stale decoration apply
         // fires after teardown (mirrors the navigator-weak discipline above).
         highlightAdapter.detach()
+    }
+}
+
+// MARK: - Bilingual eval seam (WI-11b, production)
+
+extension ReadiumReaderCoordinator {
+    /// WI-11b: PRODUCTION (non-DEBUG) eval that the `ReadiumBilingualCommander`
+    /// binds on `attach`. Runs `script` on the live navigator's currently-visible
+    /// spine HTML and returns Readium's raw `Result<Any, Error>`. Returns `nil`
+    /// when no navigator is bound (before mount / after `detach`) so a late
+    /// bilingual enumerate/inject/clear no-ops — the navigator is `weak`, so a
+    /// deallocated navigator also reads nil. Unlike the DEBUG
+    /// `evaluateJavaScriptValue` (which JSON-serializes into `Data` for the probe
+    /// contract), this hands the raw value back so the commander can parse the
+    /// `[{bid,text}]` array directly via `EPUBBilingualPipeline`.
+    func evaluateForBilingual(_ script: String) async -> Result<Any, Error>? {
+        guard let navigator = boundNavigator else { return nil }
+        return await navigator.evaluateJavaScript(script)
     }
 }
 
