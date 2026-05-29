@@ -278,6 +278,11 @@ final class DebugReaderRegistry {
         set { activeReadiumNavigatorToken = newValue }
     }
 
+    /// Internal read accessor for `expectedReaderToken` (which is `private`)
+    /// so the `ReadiumDebugProbe.swift` extension can mirror `unregister(_:)`'s
+    /// `preservingToken` posture when clearing settle state on Readium detach.
+    var expectedReaderTokenInternal: UUID? { expectedReaderToken }
+
     /// Test seam — raw stored key without match checks (mirrors the
     /// EPUB/Foliate `rawActive…KeyForTests`).
     var rawActiveReadiumNavigatorKeyForTests: String? { activeReadiumNavigatorKey }

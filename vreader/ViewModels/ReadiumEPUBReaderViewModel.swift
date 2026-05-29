@@ -40,6 +40,15 @@ final class ReadiumEPUBReaderViewModel {
     private let fileURL: URL
     private let log = Logger(subsystem: "com.vreader.app", category: "ReadiumEPUB")
 
+    /// High (Gate-4 round 2): set by `close()` to invalidate an in-flight
+    /// `open()`. The host's `.onDisappear` calls `close()` while a suspended
+    /// `open()` (inside the SwiftUI `.task`) may still resume and assign
+    /// `.ready(publication)` after the close — re-leaking a fresh `Publication`
+    /// past teardown. `open()` re-checks this after every `await` before
+    /// mutating `state`, so a dismiss-during-open never installs a publication
+    /// into a closed VM. `@MainActor`-isolated so the read/write is serialized.
+    private var isClosed = false
+
     init(fileURL: URL) {
         self.fileURL = fileURL
     }
@@ -53,6 +62,7 @@ final class ReadiumEPUBReaderViewModel {
     /// stored back on this @MainActor VM.
     func open() async {
         if case .ready = state { return }
+        guard !isClosed else { return }
 
         guard let assetURL = FileURL(url: fileURL) else {
             state = .failed("invalid file URL")
@@ -72,18 +82,48 @@ final class ReadiumEPUBReaderViewModel {
 
         switch await assetRetriever.retrieve(url: assetURL) {
         case let .failure(error):
+            guard !isClosed else { return }
             state = .failed(String(describing: error))
             log.error("ReadiumEPUB retrieve failed: \(String(describing: error), privacy: .public)")
         case let .success(asset):
             switch await opener.open(asset: asset, allowUserInteraction: false) {
             case let .failure(error):
+                guard !isClosed else { return }
                 state = .failed(String(describing: error))
                 log.error("ReadiumEPUB open failed: \(String(describing: error), privacy: .public)")
             case let .success(publication):
+                // High (Gate-4 round 2): the host disappeared mid-open — do
+                // NOT install the freshly-opened publication into a closed VM.
+                guard !isClosed else { return }
                 state = .ready(publication)
                 log.info("ReadiumEPUB opened: \(publication.metadata.title ?? "untitled", privacy: .public)")
             }
         }
+    }
+
+    // MARK: - Teardown
+
+    /// Releases the open `Publication` (dropping Readium's container + the
+    /// EPUB's open file handles) and returns to the loading state. Called from
+    /// the host's `.onDisappear` when the reader genuinely leaves the hierarchy
+    /// (nav pop) so the publication is freed deterministically rather than
+    /// waiting on `@State` teardown timing — the bug-#252 lesson applied to the
+    /// Readium engine: tie the close to the resource owner (the host). The
+    /// navigator/registry side of teardown is handled by the representable's
+    /// `dismantleUIViewController`. Idempotent. Sets `isClosed` first so an
+    /// in-flight `open()` that resumes after this point cannot re-install a
+    /// publication (Gate-4 round-2 High).
+    func close() {
+        isClosed = true
+        state = .loading
+    }
+
+    /// Surface an `EPUBNavigatorViewController` init failure (thrown from the
+    /// representable's `makeUIViewController`) into the host's render state so
+    /// the host swaps in its `.failed` error view instead of leaving an empty
+    /// placeholder controller on screen.
+    func markNavigatorInitFailed(_ message: String) {
+        state = .failed(message)
     }
 
     // MARK: - Preferences mapping (pure)

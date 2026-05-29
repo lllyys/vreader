@@ -110,4 +110,126 @@ struct ReadiumEPUBHostTests {
         let data = try await coordinator(returning: "被讨厌的勇气").evaluateJavaScriptValue("title")
         #expect(try decode(data) as? String == "被讨厌的勇气")
     }
+
+    // MARK: - VM teardown + init-failure state (Codex Gate-4 round 2)
+
+    /// Med-2: a thrown navigator init is surfaced into the VM's render state so
+    /// the host shows its error view instead of a blank placeholder controller.
+    @MainActor @Test func markNavigatorInitFailed_setsFailedWithMessage() {
+        let vm = ReadiumEPUBReaderViewModel(fileURL: URL(fileURLWithPath: "/dev/null"))
+        vm.markNavigatorInitFailed("navigator init threw")
+        guard case let .failed(message) = vm.state else {
+            Issue.record("expected .failed state, got \(vm.state)")
+            return
+        }
+        #expect(message == "navigator init threw")
+    }
+
+    /// High: `close()` drops whatever the VM was holding (releasing the
+    /// publication's file handles in the `.ready` case) and returns to loading.
+    /// Driven from `.failed` here because constructing a real `.ready`
+    /// `Publication` needs a fixture open; the state reassignment is the same
+    /// code path that drops a `.ready(Publication)`.
+    @MainActor @Test func close_resetsToLoading() {
+        let vm = ReadiumEPUBReaderViewModel(fileURL: URL(fileURLWithPath: "/dev/null"))
+        vm.markNavigatorInitFailed("boom")
+        vm.close()
+        guard case .loading = vm.state else {
+            Issue.record("close should reset to .loading, got \(vm.state)")
+            return
+        }
+    }
+
+    /// High (Gate-4 round 2): a dismiss-during-open must not install a result.
+    /// `close()` (host `.onDisappear`) runs before a still-suspended `open()`
+    /// resumes; the `isClosed` guard makes `open()` a no-op so no `.ready` /
+    /// `.failed` is written into the closed VM.
+    @MainActor @Test func open_afterClose_isNoOp() async {
+        let vm = ReadiumEPUBReaderViewModel(
+            fileURL: URL(fileURLWithPath: "/nonexistent/missing.epub")
+        )
+        vm.close()
+        await vm.open()
+        guard case .loading = vm.state else {
+            Issue.record("open() after close() must not mutate state, got \(vm.state)")
+            return
+        }
+    }
+
+    #if DEBUG
+    // MARK: - Registry deterministic teardown (Codex Gate-4 round 2 — High)
+
+    /// `clearActiveReadiumNavigator` drops the slot when the key+token match,
+    /// so a Readium host (which registers no `DebugReaderProbe`) can tear its
+    /// registry binding down deterministically on dismantle.
+    @MainActor @Test func clearActiveReadiumNavigator_clearsMatchingSlot() {
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let token = UUID()
+        let key = "epub:\(String(repeating: "a", count: 64)):10"
+        // Strong local ref — the registry holds the navigator weak.
+        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token)
+        registry.setActiveReadiumNavigator(coord, for: key, token: token)
+        #expect(registry.readiumNavigator(for: key, token: token) != nil)
+
+        registry.clearActiveReadiumNavigator(for: key, token: token)
+        #expect(registry.readiumNavigator(for: key, token: token) == nil)
+        #expect(registry.rawActiveReadiumNavigatorKeyForTests == nil)
+        _ = coord // keep alive across the clear
+    }
+
+    /// A late detach from an outgoing reader (mismatched key) must not wipe the
+    /// current reader's binding (bug #142 stale-write class).
+    @MainActor @Test func clearActiveReadiumNavigator_ignoresNonMatchingKey() {
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let token = UUID()
+        let key = "epub:\(String(repeating: "b", count: 64)):20"
+        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token)
+        registry.setActiveReadiumNavigator(coord, for: key, token: token)
+
+        registry.clearActiveReadiumNavigator(for: "epub:other:1", token: token)
+        #expect(registry.readiumNavigator(for: key, token: token) != nil)
+
+        registry.clearActiveReadiumNavigator(for: key, token: UUID())
+        #expect(registry.readiumNavigator(for: key, token: token) != nil)
+        _ = coord
+    }
+
+    /// Med (Gate-4 round 2): in a same-book quick reopen, the outgoing reader A
+    /// still owns the slot while `expectedReaderToken` belongs to incoming
+    /// reader B. A's detach must clear its OWN settle state without clobbering
+    /// B's (mirrors `unregister(_:)`'s `preservingToken` posture).
+    @MainActor @Test func clearActiveReadiumNavigator_preservesIncomingTokenSettleState() {
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let key = "epub:\(String(repeating: "c", count: 64)):30"
+        let tokenA = UUID()
+        let tokenB = UUID()
+        let coordA = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: tokenA)
+        // A registers first (no expected token yet), then B claims the slot
+        // expectation + settles.
+        registry.setActiveReadiumNavigator(coordA, for: key, token: tokenA)
+        registry.setExpectedReaderToken(tokenB)
+        registry.markReaderSettled(for: key, token: tokenB)
+        #expect(registry.settledKeys.contains(.init(fingerprintKey: key, token: tokenB)))
+
+        registry.clearActiveReadiumNavigator(for: key, token: tokenA)
+        #expect(registry.settledKeys.contains(.init(fingerprintKey: key, token: tokenB)))
+        _ = coordA
+    }
+
+    /// When the leaving reader IS the last reader for the key (no incoming
+    /// `expectedReaderToken`), its detach clears ALL of the key's settle state.
+    @MainActor @Test func clearActiveReadiumNavigator_clearsOwnSettleWhenLastReader() {
+        let registry = DebugReaderRegistry.makeIsolatedForTests()
+        let key = "epub:\(String(repeating: "d", count: 64)):40"
+        let token = UUID()
+        let coord = ReadiumReaderCoordinator(fingerprintKey: key, readerToken: token)
+        registry.setActiveReadiumNavigator(coord, for: key, token: token)
+        registry.markReaderSettled(for: key, token: token)
+        #expect(registry.settledKeys.contains(.init(fingerprintKey: key, token: token)))
+
+        registry.clearActiveReadiumNavigator(for: key, token: token)
+        #expect(!registry.settledKeys.contains(.init(fingerprintKey: key, token: token)))
+        _ = coord
+    }
+    #endif
 }

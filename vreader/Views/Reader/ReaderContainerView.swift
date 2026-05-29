@@ -732,7 +732,7 @@ struct ReaderContainerView: View {
             // from being matched against an incoming probe (Codex audit
             // 2026-05-06). Compare on the typed enum, not raw string, so
             // case/aliasing drift can't silently disable the wiring.
-            if resolvedBookFormat == .epub {
+            if resolvedFingerprintFormat == .epub {
                 let key = book.fingerprintKey
                 let token = readerToken
                 // Feature #42 WI-5: when the Readium engine is active, route
@@ -770,7 +770,7 @@ struct ReaderContainerView: View {
                         for: key, token: token, timeout: timeout
                     )
                 }
-            } else if resolvedBookFormat == .azw3 {
+            } else if resolvedFingerprintFormat == .azw3 {
                 // BookFormat.azw3 covers all Foliate-rendered formats
                 // (azw3/azw/mobi/prc per FormatCapabilities); the
                 // FoliateViewBridge is the single host for all of them.
@@ -845,6 +845,19 @@ struct ReaderContainerView: View {
     /// The resolved book format enum value.
     var resolvedBookFormat: BookFormat {
         BookFormat(rawValue: book.format.lowercased()) ?? .txt
+    }
+
+    /// Feature #42 WI-5 (Codex Med-3): the canonical book format parsed from
+    /// `book.fingerprintKey` (the structural primary key), falling back to the
+    /// `book.format` String column only when the key is unparseable. The DEBUG
+    /// eval-gate routes on THIS, not `resolvedBookFormat` — bug #246 / GH #1072
+    /// hardened `engineReaderView` to dispatch on `fingerprint.format`, and the
+    /// eval wiring must agree, or a stale `book.format` column (a SwiftData
+    /// migration / restore edit that updated one column but not the other)
+    /// could wire the wrong engine's eval bridge while the reader renders the
+    /// engine the fingerprint dictates.
+    var resolvedFingerprintFormat: BookFormat {
+        DocumentFingerprint(canonicalKey: book.fingerprintKey)?.format ?? resolvedBookFormat
     }
 
     /// Lazily creates the AI coordinator on first access.

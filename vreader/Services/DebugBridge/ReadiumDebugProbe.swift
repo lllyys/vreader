@@ -91,6 +91,37 @@ extension DebugReaderRegistry {
               readiumNavigatorTokenInternal == token else { return nil }
         return readiumNavigatorRefInternal
     }
+
+    /// Clear the Readium navigator slot iff it currently holds
+    /// `(fingerprintKey, token)`, and drop that key's render-settled state.
+    /// Called from the Readium host's `dismantleUIViewController` via the
+    /// coordinator's `detach()`. The slot holds the navigator `weak`, so the
+    /// ref auto-nils on dealloc — but the key/token + settle state otherwise
+    /// linger until that happens, and during a same-key reader switch a stale
+    /// settled flag could fast-path a freshly-mounted reader (bug #141 class).
+    /// The legacy EPUB/Foliate slots get this deterministic clear from
+    /// `unregister(_:)`, but the Readium host registers no `DebugReaderProbe`,
+    /// so it needs its own explicit teardown. Guarded on an exact key+token
+    /// match so a late detach from an outgoing reader cannot wipe an incoming
+    /// reader's binding.
+    func clearActiveReadiumNavigator(for fingerprintKey: String, token: UUID) {
+        guard readiumNavigatorKeyInternal == fingerprintKey,
+              readiumNavigatorTokenInternal == token else { return }
+        readiumNavigatorRefInternal = nil
+        readiumNavigatorKeyInternal = nil
+        readiumNavigatorTokenInternal = nil
+        // Mirror `unregister(_:)`'s posture: in a same-book quick reopen the
+        // outgoing reader A can still own the slot while `expectedReaderToken`
+        // already belongs to the incoming reader B. A's detach must clear its
+        // OWN settle state without clobbering B's pending/settled state.
+        // Preserve the expected token unless it IS the clearing token (A is
+        // genuinely the last reader for the key → clear everything).
+        let expected = expectedReaderTokenInternal
+        clearSettleState(
+            forFingerprintKey: fingerprintKey,
+            preservingToken: expected == token ? nil : expected
+        )
+    }
 }
 
 #endif
