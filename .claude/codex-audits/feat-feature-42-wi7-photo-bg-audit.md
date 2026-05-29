@@ -1,3 +1,11 @@
+---
+branch: feat/feature-42-wi7-photo-bg
+threadId: codex-exec-wi7-r1..r4
+rounds: 4
+final_verdict: ship-as-is
+date: 2026-05-29
+---
+
 # Codex audit — feat/feature-42-wi7-photo-bg (Feature #42 WI-7 photo/custom-bg compositing)
 
 Verdict: **ship-as-is** (round-4 confirm)
