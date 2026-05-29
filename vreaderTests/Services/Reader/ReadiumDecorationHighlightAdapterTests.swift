@@ -101,6 +101,53 @@ struct ReadiumDecorationHighlightAdapterTests {
         #expect(dec.locator.href.string == "only-locator.xhtml")
     }
 
+    // MARK: - Gate-5 fix: legacy href → Readium spine href resolution
+
+    @Test func resolveHref_suffixMatch_addsContainerPrefix() {
+        // Legacy stores `chapter1.xhtml` (OPF-relative); Readium's spine href is
+        // `OEBPS/chapter1.xhtml` (container-relative) — suffix match resolves it.
+        let spine = ["OEBPS/chapter1.xhtml", "OEBPS/chapter2.xhtml"]
+        #expect(ReadiumDecorationHighlightAdapter.resolveHref("chapter1.xhtml", against: spine) == "OEBPS/chapter1.xhtml")
+    }
+
+    @Test func resolveHref_exactMatch_returnsAsIs() {
+        let spine = ["OEBPS/chapter1.xhtml"]
+        #expect(ReadiumDecorationHighlightAdapter.resolveHref("OEBPS/chapter1.xhtml", against: spine) == "OEBPS/chapter1.xhtml")
+    }
+
+    @Test func resolveHref_basenameMatch_whenNoSuffix() {
+        // Different directory prefixes on both sides → basename fallback.
+        let spine = ["text/ch1.xhtml"]
+        #expect(ReadiumDecorationHighlightAdapter.resolveHref("OPS/ch1.xhtml", against: spine) == "text/ch1.xhtml")
+    }
+
+    @Test func resolveHref_noMatch_returnsNil() {
+        let spine = ["OEBPS/chapter1.xhtml"]
+        #expect(ReadiumDecorationHighlightAdapter.resolveHref("nonexistent.xhtml", against: spine) == nil)
+    }
+
+    @Test func resolveHref_emptySpine_returnsNil() {
+        #expect(ReadiumDecorationHighlightAdapter.resolveHref("chapter1.xhtml", against: []) == nil)
+    }
+
+    /// End-to-end of the fix: decoration built with spineHrefs uses the RESOLVED
+    /// container-relative href so Readium can route it to the spine resource.
+    @Test func decoration_resolvesLegacyHrefAgainstSpine() throws {
+        let rec = record(anchorHref: "chapter1.xhtml", locatorHref: nil, selectedText: "hello")
+        let dec = try #require(ReadiumDecorationHighlightAdapter.decoration(
+            for: rec, spineHrefs: ["OEBPS/chapter1.xhtml", "OEBPS/chapter2.xhtml"]
+        ))
+        #expect(dec.locator.href.string == "OEBPS/chapter1.xhtml")
+    }
+
+    /// No spine list (e.g. before the publication is bound) → raw stored href,
+    /// preserving the prior behavior the other mapping tests assert.
+    @Test func decoration_emptySpine_keepsRawHref() throws {
+        let rec = record(anchorHref: "chapter1.xhtml", locatorHref: nil, selectedText: "hello")
+        let dec = try #require(ReadiumDecorationHighlightAdapter.decoration(for: rec))
+        #expect(dec.locator.href.string == "chapter1.xhtml")
+    }
+
     @Test func decoration_skipsWhenNoHrefAndEmptyText() {
         let rec = record(anchorHref: nil, locatorHref: nil, selectedText: "")
         #expect(ReadiumDecorationHighlightAdapter.decoration(for: rec) == nil)
@@ -175,7 +222,7 @@ struct ReadiumDecorationHighlightAdapterTests {
     @Test func apply_thenRemove_rebuildsGroup() {
         let nav = FakeDecorableNavigator()
         let adapter = ReadiumDecorationHighlightAdapter()
-        adapter.attach(navigator: nav)
+        adapter.attach(navigator: nav, spineHrefs: [])
 
         let a = record(id: UUID(), locatorHref: "ch1.xhtml")
         let b = record(id: UUID(), locatorHref: "ch2.xhtml")
@@ -191,7 +238,7 @@ struct ReadiumDecorationHighlightAdapterTests {
     @Test func apply_sameId_replacesNotDuplicates() {
         let nav = FakeDecorableNavigator()
         let adapter = ReadiumDecorationHighlightAdapter()
-        adapter.attach(navigator: nav)
+        adapter.attach(navigator: nav, spineHrefs: [])
         let id = UUID()
         adapter.apply(record: record(id: id, color: "yellow"))
         adapter.apply(record: record(id: id, color: "pink"))
@@ -201,7 +248,7 @@ struct ReadiumDecorationHighlightAdapterTests {
     @Test func restore_replacesEntireSet() {
         let nav = FakeDecorableNavigator()
         let adapter = ReadiumDecorationHighlightAdapter()
-        adapter.attach(navigator: nav)
+        adapter.attach(navigator: nav, spineHrefs: [])
         adapter.apply(record: record(id: UUID()))
 
         let r1 = record(id: UUID(), locatorHref: "x.xhtml")
@@ -213,7 +260,7 @@ struct ReadiumDecorationHighlightAdapterTests {
     @Test func restore_skipsUnsupportedRecords() {
         let nav = FakeDecorableNavigator()
         let adapter = ReadiumDecorationHighlightAdapter()
-        adapter.attach(navigator: nav)
+        adapter.attach(navigator: nav, spineHrefs: [])
         let good = record(id: UUID(), locatorHref: "ch.xhtml", selectedText: "x")
         let bad = record(id: UUID(), anchorHref: nil, locatorHref: nil, selectedText: "")
         adapter.restore(records: [good, bad], forHref: nil, using: nil)
@@ -223,7 +270,7 @@ struct ReadiumDecorationHighlightAdapterTests {
     @Test func removeUnknownId_isNoOpButReapplies() {
         let nav = FakeDecorableNavigator()
         let adapter = ReadiumDecorationHighlightAdapter()
-        adapter.attach(navigator: nav)
+        adapter.attach(navigator: nav, spineHrefs: [])
         let a = record(id: UUID())
         adapter.apply(record: a)
         adapter.remove(id: UUID())  // not in the set

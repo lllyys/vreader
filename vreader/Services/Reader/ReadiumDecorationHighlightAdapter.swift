@@ -60,12 +60,24 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
     /// the whole group declaratively.
     private var records: [UUID: HighlightRecord] = [:]
 
+    /// The publication's reading-order hrefs (full container-relative form, e.g.
+    /// `OEBPS/chapter1.xhtml`). Set on `attach` from `publication.readingOrder`.
+    /// A stored highlight's anchor href is the LEGACY engine's spine href (e.g.
+    /// `chapter1.xhtml`, relative to the OPF), which does NOT match Readium's
+    /// container-relative spine href — so each stored href is resolved against
+    /// this list before a decoration's locator is built, else Readium can't
+    /// route the decoration to a resource and it silently doesn't render
+    /// (the migration href-mismatch — Risk 1 / the highlight-parity gate).
+    private var spineHrefs: [String] = []
+
     init() {}
 
-    /// Binds the adapter to the live navigator and submits the current set.
-    /// Called from the host's representable once the navigator is built.
-    func attach(navigator: any DecorableNavigator) {
+    /// Binds the adapter to the live navigator + the publication's spine hrefs
+    /// and submits the current set. Called from the host's representable once
+    /// the navigator is built (the publication is in scope there).
+    func attach(navigator: any DecorableNavigator, spineHrefs: [String]) {
         self.navigator = navigator
+        self.spineHrefs = spineHrefs
         rebuildAndApply()
     }
 
@@ -109,7 +121,8 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
     /// attached (the set is still tracked, applied on the next `attach`).
     private func rebuildAndApply() {
         guard let navigator else { return }
-        let decorations = records.values.compactMap(Self.decoration(for:))
+        let hrefs = spineHrefs
+        let decorations = records.values.compactMap { Self.decoration(for: $0, spineHrefs: hrefs) }
         navigator.apply(decorations: decorations, in: Self.group)
     }
 
@@ -124,11 +137,19 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
     /// a non-empty selected-text quote; without the quote the decoration is a
     /// silent no-op + Readium log noise, so we SKIP it. The stored anchor is
     /// never mutated (flag-OFF returns to legacy XPath rendering losslessly).
-    nonisolated static func decoration(for record: HighlightRecord) -> Decoration? {
+    nonisolated static func decoration(
+        for record: HighlightRecord,
+        spineHrefs: [String] = []
+    ) -> Decoration? {
         let quote = record.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !quote.isEmpty,
-              let href = spineHref(for: record),
-              let relative = RelativeURL(path: href) else {
+        guard !quote.isEmpty, let storedHref = spineHref(for: record) else {
+            return nil
+        }
+        // Resolve the legacy stored href to Readium's container-relative spine
+        // href (falls back to the raw stored href when no spine list is supplied
+        // — e.g. unit tests — or when no match is found).
+        let href = resolveHref(storedHref, against: spineHrefs) ?? storedHref
+        guard let relative = RelativeURL(path: href) else {
             return nil
         }
         let text = ReadiumShared.Locator.Text(
@@ -161,6 +182,25 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
             return href
         }
         return nil
+    }
+
+    /// Resolves a LEGACY stored spine href (e.g. `chapter1.xhtml`, relative to
+    /// the OPF) to Readium's container-relative reading-order href (e.g.
+    /// `OEBPS/chapter1.xhtml`) so a decoration's locator matches a real spine
+    /// resource. Match precedence: exact → a spine href ending in `/<stored>`
+    /// (suffix) → last-path-component (basename). Returns `nil` when no spine
+    /// list is supplied or no match is found (caller falls back to the raw
+    /// stored href). The reverse direction (Readium-form stored href against
+    /// the same list) also resolves via the exact/suffix branches.
+    nonisolated static func resolveHref(_ stored: String, against spineHrefs: [String]) -> String? {
+        guard !spineHrefs.isEmpty else { return nil }
+        if spineHrefs.contains(stored) { return stored }
+        if let suffixMatch = spineHrefs.first(where: { $0.hasSuffix("/" + stored) }) {
+            return suffixMatch
+        }
+        let storedBase = (stored as NSString).lastPathComponent
+        guard !storedBase.isEmpty else { return nil }
+        return spineHrefs.first { ($0 as NSString).lastPathComponent == storedBase }
     }
 
     /// Maps the stored color string to a tint `UIColor`, reusing the existing

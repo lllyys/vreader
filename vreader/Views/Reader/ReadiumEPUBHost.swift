@@ -248,11 +248,19 @@ private struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             )
             navigator.delegate = context.coordinator
             context.coordinator.attach(navigator: navigator)
-            // WI-8: bind the highlight adapter to the same navigator so stored
-            // decorations render on the live spine. The adapter already holds
-            // the restored set (the host's coordinator called `restoreAll()`
-            // before the navigator mounted), so `attach` re-submits it.
-            highlightAdapter.attach(navigator: navigator)
+            // WI-8: bind the highlight adapter to the same navigator + the
+            // publication's spine hrefs so stored decorations render on the live
+            // spine. The spine hrefs let the adapter resolve a LEGACY stored href
+            // (`chapter1.xhtml`) to Readium's container-relative form
+            // (`OEBPS/chapter1.xhtml`) — without it Readium can't route the
+            // decoration and it silently doesn't render (the migration
+            // href-mismatch). The adapter already holds the restored set (the
+            // host's coordinator called `restoreAll()` before the navigator
+            // mounted), so `attach` re-submits it with resolved hrefs.
+            highlightAdapter.attach(
+                navigator: navigator,
+                spineHrefs: publication.readingOrder.map(\.href)
+            )
             return navigator
         } catch {
             context.coordinator.log.error(
