@@ -226,10 +226,15 @@ final class ReadiumEPUBReaderViewModel {
     /// full theme/font mapping the host now submits. Pure + static so the mapping
     /// is unit-testable without a render.
     nonisolated static func epubPreferences(for layout: EPUBLayoutPreference) -> EPUBPreferences {
+        // Default typography is 18pt = `fontSizeBasePt`, so the calibrated EPUB
+        // size of the default is the base itself → a 1.0 multiplier. (Callers
+        // wanting the calibrated production value use the full overload + the
+        // host's `calibrator`.)
         epubPreferences(
             theme: .default,
             typography: TypographySettings(),
-            layout: layout
+            layout: layout,
+            calibratedFontSizePt: fontSizeBasePt
         )
     }
 

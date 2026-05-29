@@ -65,7 +65,14 @@ struct ReadiumEPUBHost: View {
                     preferences: ReadiumEPUBReaderViewModel.epubPreferences(
                         theme: settingsStore.theme,
                         typography: settingsStore.typography,
-                        layout: settingsStore.epubLayout
+                        layout: settingsStore.epubLayout,
+                        // Gate-4 round-1: feed the per-format-calibrated `.epub`
+                        // size (the same calibration band the legacy EPUB engine
+                        // renders through) so perceived font size stays consistent
+                        // across the legacy and Readium engines.
+                        calibratedFontSizePt: settingsStore.calibrator.calibratedSize(
+                            forUnified: settingsStore.typography.fontSize, target: .epub
+                        )
                     ),
                     fingerprintKey: fingerprint.canonicalKey,
                     readerToken: readerToken,

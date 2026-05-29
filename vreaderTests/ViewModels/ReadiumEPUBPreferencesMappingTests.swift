@@ -23,13 +23,18 @@ struct ReadiumEPUBPreferencesMappingTests {
 
     // MARK: - Helpers
 
+    /// Drives the pure mapping. `calibratedFontSizePt` defaults to the raw
+    /// `typography.fontSize` so the fontSize→multiplier math (18→1.0, 36→2.0) is
+    /// asserted directly on the mapping; the host's `.epub`-calibration of that
+    /// input is the host's concern (Gate-4 round-1 — verified at the call site).
     private func prefs(
         theme: ReaderThemeV2 = .paper,
         typography: TypographySettings = TypographySettings(),
         layout: EPUBLayoutPreference = .scroll
     ) -> EPUBPreferences {
         ReadiumEPUBReaderViewModel.epubPreferences(
-            theme: theme, typography: typography, layout: layout
+            theme: theme, typography: typography, layout: layout,
+            calibratedFontSizePt: typography.fontSize
         )
     }
 
@@ -105,6 +110,24 @@ struct ReadiumEPUBPreferencesMappingTests {
         #expect(fs == 64.0 / 18.0)
     }
 
+    /// Gate-4 round-1: the multiplier is computed from the CALIBRATED `.epub`
+    /// size the host feeds (not the raw unified pt). The legacy EPUB engine
+    /// renders through `FontSizeCalibrator.calibratedSize(forUnified:target:.epub)`
+    /// (a multiplier > 1.0), so feeding the same calibrated value keeps perceived
+    /// size consistent across engines. Here: a calibrated 20.16pt → 20.16/18.
+    @Test func fontSize_usesCalibratedInput_notRawUnified() {
+        let calibrated = FontSizeCalibrator().calibratedSize(forUnified: 18, target: .epub)
+        let p = ReadiumEPUBReaderViewModel.epubPreferences(
+            theme: .paper, typography: TypographySettings(fontSize: 18),
+            layout: .paged, calibratedFontSizePt: calibrated
+        )
+        let fs = try! #require(p.fontSize)
+        #expect(fs == Double(calibrated / 18.0))
+        // The .epub band scales above the raw unified value, so the multiplier
+        // for an 18pt default is strictly greater than 1.0 (legacy parity).
+        #expect(fs > 1.0)
+    }
+
     // MARK: - lineHeight = lineSpacing multiplier
 
     @Test(arguments: [1.0, 1.4, 2.0])
@@ -116,8 +139,9 @@ struct ReadiumEPUBPreferencesMappingTests {
     // MARK: - fontFamily mapping
 
     @Test func fontFamily_system_isNil() {
-        // .system → publisher default (nil), so the book's own face shows.
-        #expect(prefs(typography: TypographySettings(fontFamily: .system)).fontFamily == nil)
+        // .system → .sansSerif (Gate-4 round-1): with publisherStyles=false a nil
+        // family would fall back to Readium's old-style serif, not vreader's SF.
+        #expect(prefs(typography: TypographySettings(fontFamily: .system)).fontFamily == .sansSerif)
     }
 
     @Test func fontFamily_serif_isReadiumSerif() {
@@ -164,8 +188,8 @@ struct ReadiumEPUBPreferencesMappingTests {
 
     @Test func mapping_isDeterministic_sameInputsEqualOutput() {
         let typo = TypographySettings(fontSize: 24, lineSpacing: 1.6, fontFamily: .serif)
-        let a = ReadiumEPUBReaderViewModel.epubPreferences(theme: .sepia, typography: typo, layout: .paged)
-        let b = ReadiumEPUBReaderViewModel.epubPreferences(theme: .sepia, typography: typo, layout: .paged)
+        let a = ReadiumEPUBReaderViewModel.epubPreferences(theme: .sepia, typography: typo, layout: .paged, calibratedFontSizePt: 24)
+        let b = ReadiumEPUBReaderViewModel.epubPreferences(theme: .sepia, typography: typo, layout: .paged, calibratedFontSizePt: 24)
         #expect(a.theme == b.theme)
         #expect(a.backgroundColor == b.backgroundColor)
         #expect(a.textColor == b.textColor)

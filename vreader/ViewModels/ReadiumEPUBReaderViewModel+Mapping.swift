@@ -43,6 +43,17 @@
 //   + the navigator's own safe-area insets keep content off the Dynamic Island /
 //   home indicator (#163), so a modest factor is sufficient.
 //
+// Known Phase-1 limitation (Gate-4 round-1 Medium — gates the WI-14 default-ON
+// flip, tracked for WI-13 acceptance): the `.photo` theme + `useCustomBackground`
+// render only as an OPAQUE theme color here. The legacy EPUB engine composites a
+// decorative background IMAGE behind semi-transparent reader content via a CSS
+// `background-image` + the SwiftUI `ThemeBackgroundView`; Readium applies our
+// opaque `backgroundColor` to the navigator view + CSS root, which occludes the
+// `ThemeBackgroundView` and does not reproduce the image. The result is readable
+// (opaque dark bg + light ink) but loses the photo overlay. Faithful parity needs
+// a transparent navigator/webview + image compositing (or background-image CSS
+// injection) — a deferred slice, NOT shipped behind this dark flag.
+//
 // @coordinates-with ReadiumEPUBReaderViewModel.swift, VReaderLocator.swift,
 //   Locator.swift, ReaderThemeV2.swift, TypographySettings.swift
 
@@ -54,8 +65,11 @@ extension ReadiumEPUBReaderViewModel {
 
     // MARK: - Full preferences mapping (WI-7)
 
-    /// vreader's `TypographySettings.fontSize` default (pt) that anchors the
-    /// Readium font-size multiplier at 1.0 (= 100% of the publisher base).
+    /// The font-size pt that anchors the Readium multiplier at 1.0 (= 100% of
+    /// the publisher base). vreader's unified `TypographySettings.fontSize`
+    /// default is 18pt, so a CALIBRATED `.epub` size equal to this base maps to
+    /// 1.0. (Gate-4 round-1: the multiplier is computed from the calibrated
+    /// `.epub` size, not the raw unified pt — see `epubPreferences`.)
     nonisolated static var fontSizeBasePt: CGFloat { 18.0 }
 
     /// Default horizontal page-margin factor (Readium publisher default). The
@@ -65,15 +79,25 @@ extension ReadiumEPUBReaderViewModel {
     /// Translates vreader's reader settings into a full Readium `EPUBPreferences`
     /// the navigator applies live. Pure + `nonisolated static` so the mapping is
     /// unit-testable without a render. See the file header for every decision.
+    ///
+    /// `calibratedFontSizePt` is the per-format-calibrated EPUB point size the
+    /// host computes via `ReaderSettingsStore.calibrator.calibratedSize(
+    /// forUnified: typography.fontSize, target: .epub)` (Gate-4 round-1 Medium):
+    /// the legacy EPUB engine renders through that same `.epub` calibration band,
+    /// so feeding the calibrated value (not the raw unified pt) keeps perceived
+    /// size consistent across the legacy and Readium engines. The Readium
+    /// `fontSize` is a MULTIPLIER of the publisher base, so we divide by
+    /// `fontSizeBasePt`.
     nonisolated static func epubPreferences(
         theme: ReaderThemeV2,
         typography: TypographySettings,
-        layout: EPUBLayoutPreference
+        layout: EPUBLayoutPreference,
+        calibratedFontSizePt: CGFloat
     ) -> EPUBPreferences {
         EPUBPreferences(
             backgroundColor: Color(uiColor: theme.backgroundColor),
             fontFamily: readiumFontFamily(for: typography.fontFamily),
-            fontSize: Double(typography.fontSize / fontSizeBasePt),
+            fontSize: Double(calibratedFontSizePt / fontSizeBasePt),
             lineHeight: Double(typography.lineSpacing),
             pageMargins: defaultPageMargins,
             publisherStyles: false,
@@ -94,14 +118,22 @@ extension ReadiumEPUBReaderViewModel {
         }
     }
 
-    /// Maps vreader's `ReaderFontFamily` to a Readium `FontFamily`. `.system` →
-    /// nil (publisher default). Bundled custom faces map to the closest generic
-    /// class (Phase-1 follow-up: register the .otf via `fontFamilyDeclarations`).
+    /// Maps vreader's `ReaderFontFamily` to a Readium `FontFamily`.
+    ///
+    /// Gate-4 round-1 Medium: `.system` maps to `.sansSerif`, NOT nil. Because
+    /// these preferences set `publisherStyles = false`, a nil `fontFamily` makes
+    /// Readium fall back to its OWN base stack (an old-style serif), not the
+    /// platform/system sans-serif vreader's `.system` means everywhere else
+    /// (`UIFont.systemFont` → San Francisco). `.sansSerif` is the closest Readium
+    /// generic to SF (Readium has no SF face). Bundled custom faces map to the
+    /// closest generic class — registering the .otf via the navigator's
+    /// `fontFamilyDeclarations` (a file-serving `CSSFontFamilyDeclaration`) is a
+    /// documented Phase-1 follow-up.
     nonisolated static func readiumFontFamily(
         for family: ReaderFontFamily
     ) -> ReadiumNavigator.FontFamily? {
         switch family {
-        case .system: return nil
+        case .system: return .sansSerif
         case .serif, .sourceSerif4: return .serif
         case .monospace: return .monospace
         case .inter: return .sansSerif
