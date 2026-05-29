@@ -71,7 +71,7 @@ struct ReadiumEPUBHost: View {
     /// round-trips a live selection through the designed `SelectionPopoverView`
     /// (the text-quote anchor can't ride a bare `TextSelectionInfo`). Mirrors the
     /// legacy `EPUBSelectionTokenCache`; wiring in `ReadiumEPUBHost+Highlights`.
-    @State var readiumSelectionTokenCache = ReadiumSelectionTokenCache()
+    @State var readiumSelectionTokenCache = ReadiumSelectionTokenCache<Selection>()
 
     // MARK: - WI-11b/WI-12 bilingual (per-spine interlinear via the eval channel)
 

@@ -1116,6 +1116,7 @@
 		C90F581D922CB5FC37C94EFA /* AnnotationsSheetRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003C8D1A2BD41B14B248D7E7 /* AnnotationsSheetRoute.swift */; };
 		C911F3E129D88BA29AB3BBF4 /* LibraryContainerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 196BB1CA9C490A623D63EDE4 /* LibraryContainerModel.swift */; };
 		C941DFD16C7CE7CF5ACC770D /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BD36F5CC483659F962BFB3A /* TTSService.swift */; };
+		C978209FEA8EB29B0FE063C8 /* ReadiumSelectionTokenCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD909811249AF108809A8E38 /* ReadiumSelectionTokenCacheTests.swift */; };
 		C999EC3BE3EA4ECBC2EF7F5B /* FoliateSelectionDispatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EE89998FF9D71667B4B83C /* FoliateSelectionDispatcherTests.swift */; };
 		C9CBB4436EA4DDE7757EA3F4 /* TOCProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C65E5FD23C2800C87ADD82A /* TOCProvider.swift */; };
 		C9D2AE1A81222E67A05CA05C /* BackgroundIndexingCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0CDD04120BFF39B61E8418 /* BackgroundIndexingCoordinatorTests.swift */; };
@@ -2508,6 +2509,7 @@
 		CCBA2A70DA3EE6E28FAB3FFE /* foliate-bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "foliate-bridge.js"; sourceTree = "<group>"; };
 		CCD94377A04A96ED513DC62F /* FileURLImportRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileURLImportRouterTests.swift; sourceTree = "<group>"; };
 		CD3507D70A2497BA857E5A49 /* plain_utf8.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = plain_utf8.txt; sourceTree = "<group>"; };
+		CD909811249AF108809A8E38 /* ReadiumSelectionTokenCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumSelectionTokenCacheTests.swift; sourceTree = "<group>"; };
 		CD97F86BA5BFD30A9383B800 /* RemoteBookCatalogIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteBookCatalogIntegrationTests.swift; sourceTree = "<group>"; };
 		CDA405FACBF0D3E321B1AAB2 /* ReaderContainerView+DebugBridgePresent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReaderContainerView+DebugBridgePresent.swift"; sourceTree = "<group>"; };
 		CE0A04AB9B449BA91C980DCD /* Inter-Medium.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Medium.otf"; sourceTree = "<group>"; };
@@ -3396,6 +3398,7 @@
 				63E4737FA3A880C3CC2BA07D /* ReadingProgressBarTests.swift */,
 				0690CFD7EBDB5EFF481F2202 /* ReadiumEPUBHostTests.swift */,
 				03321A13C86F9E69BE338864 /* ReadiumNavCommanderTests.swift */,
+				CD909811249AF108809A8E38 /* ReadiumSelectionTokenCacheTests.swift */,
 				BE6616756D16593398F889C8 /* ResolveHighlightColorTests.swift */,
 				62569DC663E2BDD2DC0155C3 /* SearchHighlightDismissTests.swift */,
 				AB8FC6D57843EAC26DB980D3 /* SearchResultHighlightTests.swift */,
@@ -5780,6 +5783,7 @@
 				010552D4E12A8F6FC2A333F5 /* ReadiumNavCommanderTests.swift in Sources */,
 				792FA8647985692CC1ED5694 /* ReadiumOpenSmokeTests.swift in Sources */,
 				ADAE727D686AD80CE38A4D42 /* ReadiumSelectionHighlightBuilderTests.swift in Sources */,
+				C978209FEA8EB29B0FE063C8 /* ReadiumSelectionTokenCacheTests.swift in Sources */,
 				75F2C31298F0C62115778DED /* RealDebugBridgeContextTests.swift in Sources */,
 				6B7F71BDB5ECEA83F19496FC /* ReflowableTextSourceTests.swift in Sources */,
 				C65606FD56FC3CE3BF958B71 /* RemoteBookCatalogIntegrationTests.swift in Sources */,

@@ -211,15 +211,16 @@ extension ReadiumReaderCoordinator: EPUBNavigatorDelegate {
     /// after quote + container-relative href + progression + the on-screen
     /// `frame`). We forward it to the host's selection sink, which surfaces the
     /// designed `SelectionPopoverView` color picker and creates a highlight on a
-    /// color tap. We return `true` so Readium STILL shows its native edit menu
-    /// (Copy / Look Up / Translate) — the popover is additive, the native menu
-    /// is untouched, and the existing legacy/non-highlight paths see no change.
+    /// color tap. We return `false` so Readium SUPPRESSES its own native edit
+    /// menu — the designed popover is the sole selection-action surface (Gate-4
+    /// audit: showing both is overlapping/undesigned UI; rule 51). This matches
+    /// the legacy reader, which never shows the system selection menu either.
     func navigator(
         _ navigator: SelectableNavigator,
         shouldShowMenuForSelection selection: Selection
     ) -> Bool {
         onSelection?(selection)
-        return true
+        return false
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: ReadiumShared.Locator) {

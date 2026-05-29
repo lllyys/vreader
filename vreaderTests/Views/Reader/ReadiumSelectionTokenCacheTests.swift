@@ -2,73 +2,61 @@
 // single-entry `ReadiumSelectionTokenCache` (store/resolve/clear identity +
 // consume-on-hit), the Readium counterpart of `EPUBSelectionTokenCacheTests`.
 //
+// The cache is generic over the stored value; production specializes it to
+// `<Selection>` (whose initializer is `internal`, so it can't be built in tests).
+// These tests exercise the token round-trip with a `String` stand-in — the
+// round-trip logic is value-type-agnostic, so a stand-in fully covers it.
+//
 // @coordinates-with vreader/Views/Reader/ReadiumSelectionTokenCache.swift
 
-#if canImport(UIKit)
 import Testing
 import Foundation
-import ReadiumShared
-import ReadiumNavigator
 @testable import vreader
 
-@MainActor
 @Suite("ReadiumSelectionTokenCache (WI-8 new-highlight)")
 struct ReadiumSelectionTokenCacheTests {
 
-    private func selection(highlight: String) -> Selection {
-        Selection(
-            locator: ReadiumShared.Locator(
-                href: RelativeURL(path: "OEBPS/ch1.xhtml")!,
-                mediaType: .xhtml,
-                locations: .init(progression: 0.5),
-                text: .init(highlight: highlight)
-            ),
-            frame: .zero
-        )
-    }
-
     @Test func storeReturnsTokenAndResolves() {
-        var cache = ReadiumSelectionTokenCache()
+        var cache = ReadiumSelectionTokenCache<String>()
         #expect(cache.isEmpty)
-        let token = cache.store(selection(highlight: "phrase"))
+        let token = cache.store("phrase")
         #expect(!cache.isEmpty)
         let resolved = cache.resolve(token: token)
-        #expect(resolved?.locator.text.highlight == "phrase")
+        #expect(resolved == "phrase")
         // Consumed on hit — a replayed notification can't double-fire.
         #expect(cache.isEmpty)
         #expect(cache.resolve(token: token) == nil)
     }
 
     @Test func resolveNilTokenMisses() {
-        var cache = ReadiumSelectionTokenCache()
-        _ = cache.store(selection(highlight: "x"))
+        var cache = ReadiumSelectionTokenCache<String>()
+        _ = cache.store("x")
         #expect(cache.resolve(token: nil) == nil)
         // Miss must NOT consume the pending entry.
         #expect(!cache.isEmpty)
     }
 
     @Test func resolveMismatchedTokenMisses() {
-        var cache = ReadiumSelectionTokenCache()
-        _ = cache.store(selection(highlight: "x"), token: UUID())
+        var cache = ReadiumSelectionTokenCache<String>()
+        _ = cache.store("x", token: UUID())
         #expect(cache.resolve(token: UUID()) == nil)
         #expect(!cache.isEmpty)
     }
 
     @Test func storeReplacesPriorEntry() {
-        var cache = ReadiumSelectionTokenCache()
-        let first = cache.store(selection(highlight: "first"))
-        let second = cache.store(selection(highlight: "second"))
+        var cache = ReadiumSelectionTokenCache<String>()
+        let first = cache.store("first")
+        let second = cache.store("second")
         // The superseded token no longer resolves.
         #expect(cache.resolve(token: first) == nil)
-        #expect(cache.resolve(token: second)?.locator.text.highlight == "second")
+        #expect(cache.resolve(token: second) == "second")
     }
 
     @Test func clearDropsEntry() {
-        var cache = ReadiumSelectionTokenCache()
-        let token = cache.store(selection(highlight: "x"))
+        var cache = ReadiumSelectionTokenCache<String>()
+        let token = cache.store("x")
         cache.clear()
         #expect(cache.isEmpty)
         #expect(cache.resolve(token: token) == nil)
     }
 }
-#endif
