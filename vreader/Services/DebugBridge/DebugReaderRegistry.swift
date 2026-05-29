@@ -245,6 +245,44 @@ final class DebugReaderRegistry {
     var activeFoliateWebViewKeyInternal: String? { activeFoliateWebViewKey }
     #endif
 
+    /// Feature #42 Phase 1 (WI-4): weak side-channel ref to the active
+    /// Readium EPUB navigator, paired with the book's fingerprintKey + the
+    /// per-reader token. The Readium `EPUBNavigatorViewController` manages its
+    /// own (possibly multiple) internal WKWebView(s) — there is no single
+    /// app-owned webview to register like `EPUBWebViewBridge`/Foliate. So the
+    /// slot stores a `ReadiumNavigatorEvaluating` seam (which the navigator
+    /// conforms to in WI-5) and exposes JS eval through the navigator's public
+    /// `evaluateJavaScript` API (the WI-4 spike confirmed this exists in 3.9).
+    /// Same keyed + per-reader-token stale-write protection as the EPUB/Foliate
+    /// slots (bug #126 / #142). `AnyObject`-constrained so the registry can
+    /// hold it `weak` without keeping the navigator (a UIViewController) alive
+    /// past its host. The accessor methods live in `ReadiumDebugProbe.swift`
+    /// (a sibling extension); the stored properties live here because Swift
+    /// extensions cannot add stored properties.
+    private weak var activeReadiumNavigatorRef: ReadiumNavigatorEvaluating?
+    private var activeReadiumNavigatorKey: String?
+    private var activeReadiumNavigatorToken: UUID?
+
+    /// Internal accessors for the `ReadiumDebugProbe.swift` extension (Swift
+    /// extensions can read these but cannot declare the stored properties).
+    var readiumNavigatorRefInternal: ReadiumNavigatorEvaluating? {
+        get { activeReadiumNavigatorRef }
+        set { activeReadiumNavigatorRef = newValue }
+    }
+    var readiumNavigatorKeyInternal: String? {
+        get { activeReadiumNavigatorKey }
+        set { activeReadiumNavigatorKey = newValue }
+    }
+    var readiumNavigatorTokenInternal: UUID? {
+        get { activeReadiumNavigatorToken }
+        set { activeReadiumNavigatorToken = newValue }
+    }
+
+    /// Test seam — raw stored key without match checks (mirrors the
+    /// EPUB/Foliate `rawActive…KeyForTests`).
+    var rawActiveReadiumNavigatorKeyForTests: String? { activeReadiumNavigatorKey }
+    var rawActiveReadiumNavigatorTokenForTests: UUID? { activeReadiumNavigatorToken }
+
     /// Per-key waiters added by `awaitReader(fingerprintKey:timeout:)`.
     /// Each waiter carries a UUID token so timeouts remove by identity, not
     /// by first-match — eliminating the race where two callers waiting on
@@ -353,6 +391,17 @@ final class DebugReaderRegistry {
                 activeFoliateWebViewToken = nil
             }
             #endif
+            // Feature #42 (WI-4): drop the Readium navigator side-channel when
+            // its owning probe leaves. Not WebKit-gated — the navigator type
+            // comes from the Readium toolkit, available unconditionally in the
+            // target. Same posture as the EPUB/Foliate clears above: an
+            // outgoing book's navigator must not be matched against an incoming
+            // reader's key.
+            if activeReadiumNavigatorKey == reader.fingerprintKey {
+                activeReadiumNavigatorRef = nil
+                activeReadiumNavigatorKey = nil
+                activeReadiumNavigatorToken = nil
+            }
             // Bug #141: the leaving probe IS the active reader and
             // nothing replaced it — clear ALL render-settled state +
             // pending settle waiters for its key (no token preserved).
@@ -377,6 +426,11 @@ final class DebugReaderRegistry {
         activeFoliateWebViewKey = nil
         activeFoliateWebViewToken = nil
         #endif
+        // Feature #42 (WI-4): clear the Readium navigator slot too (not
+        // WebKit-gated — see the stored-property doc above).
+        activeReadiumNavigatorRef = nil
+        activeReadiumNavigatorKey = nil
+        activeReadiumNavigatorToken = nil
         let pendingByKey = waiters
         waiters = [:]
         for (key, bucket) in pendingByKey {
