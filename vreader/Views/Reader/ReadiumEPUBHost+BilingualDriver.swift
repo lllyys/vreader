@@ -9,39 +9,30 @@
 // stitch translations across chapters the way legacy #71 does (see
 // `ReadiumBilingualChapterTracker.swift` for the full behavior delta).
 //
-// Gate-4 correctness fixes applied here:
-//   - HIGH-1: the forced toggle/confirm enumerate passes the host's
-//     `lastKnownReadiumLocator` (NOT nil), so a first-enable on the chapter the
-//     user is reading resolves the visible unit instead of nil.
-//   - HIGH-2 / MED-6: `ensureBilingualViewModel()` is called on open (in the
-//     host `.task`), so a persisted-bilingual-on book publishes the text provider
-//     and the FIRST `locationDidChange` (lastEnumeratedHref == nil) enumerates.
+// Gate-4 correctness fixes applied here (see per-method docs + the tracker for
+// the pure-logic detail):
+//   - HIGH-1: the forced toggle/confirm enumerate passes `lastKnownReadiumLocator`
+//     (NOT nil) so first-enable resolves the visible unit.
+//   - HIGH-2 / MED-6: `ensureBilingualViewModel()` runs on open, so a persisted-on
+//     book enumerates on its FIRST `locationDidChange`.
 //   - MED-3: same-chapter duplicate enumerates are gated SYNCHRONOUSLY via
-//     `ReadiumBilingualChapterTracker.shouldEnumerate(forHref:force:)` before the
-//     Task launches; a forced enumerate bypasses the dedupe.
-//   - WI-12: the enumerate path runs in BOTH paged and scroll (per-spine). The
-//     `isBilingualSupported` guard is retained as intent (it now returns true for
-//     both layouts) so a future layout addition fails closed.
-//   - MED-5: the in-flight enumerate rechecks `vm.isEnabled` after the async
-//     `enumerate()` returns, before mutating the orchestrator / prefetching, so a
-//     disable mid-flight does not paint stale decorations.
-//   - WI-12 audit Finding 1: each enumerate captures the tracker's GENERATION
-//     synchronously at schedule time; after the async `enumerate()` returns, a
-//     result whose captured generation is no longer current is DISCARDED. In
-//     scroll mode rapid spine changes leave multiple enumerates in flight; this
-//     stops chapter-1's late result from overwriting the shared paged bucket and
-//     injecting its pairs into the now-visible chapter-2. Composes with — but is
-//     separate from — the MED-3 href dedupe (which prevents double-scheduling).
-//   - WI-12 audit round-2 MED (post-enumerate stale inject window): round-1 guards
-//     only the `enumerate()` boundary; the CURRENT result then flows through the
-//     inject chain (`drivePrefetchAndInject` → `injectBilingualIfCached`) whose
-//     LATER awaits (`handlePositionChange`, `textProvider.unit`, inject) could let
-//     an older task resume after a newer spine was scheduled and inject stale pairs.
-//     Fix: thread the captured generation through the chain and re-check
-//     `isCurrentGeneration(generation)` after EACH suspension (see the per-method
-//     docs). The two inject ENTRY POINTS differ: the enumerate chain is generation-
-//     guarded; `.readerBilingualDidChange` (no generation) is not enumerate-
-//     scheduled — it resolves the CURRENT locator from live state, so it is current.
+//     `shouldEnumerate(forHref:force:)`; a forced enumerate bypasses the dedupe.
+//   - WI-12: enumerate runs in BOTH paged + scroll (per-spine); the
+//     `isBilingualSupported` guard fails closed for a future layout.
+//   - MED-5: the in-flight enumerate rechecks `vm.isEnabled` after `enumerate()`
+//     before mutating the orchestrator / prefetching.
+//   - Round-1/2 generation guards (defense in depth): each enumerate captures the
+//     tracker GENERATION at schedule time and DISCARDS a result whose generation is
+//     no longer current after `enumerate()` + each later inject-chain suspension.
+//     Covers only the enumerate-scheduled entry.
+//   - Round-4 ROOT CAUSE (block-ownership invariant): the shared orchestrator holds
+//     ONE block set; the tracker records the href the CURRENT blocks belong to at
+//     the `updateBlocks` commit, and `injectBilingualIfCached` BAILS unless the
+//     blocks belong to the inject locator's chapter (`blocksMatch(locatorHref:)`).
+//     One check closes BOTH inject entry points — the enumerate chain AND the
+//     nil-generation `.readerBilingualDidChange` path — since an owner mismatch
+//     always implies stale blocks. Lives on the Readium-side tracker, NOT the
+//     shared orchestrator (legacy #71 untouched).
 //
 // @coordinates-with: ReadiumEPUBHost.swift, ReadiumEPUBHost+Bilingual.swift,
 //   ReadiumBilingualCommander.swift, EPUBBilingualOrchestrator.swift,
@@ -133,20 +124,15 @@ extension ReadiumEPUBHost {
         ) else { return }
         let href = currentReadiumLocator?.href.string
         let result = await bilingualCommander.enumerate()
-        // Finding 1: a newer spine's enumerate may have been scheduled while this
-        // one was in flight (scroll mode emits rapid spine boundary changes). If
-        // this result's captured generation is no longer current it is STALE —
-        // discard it WITHOUT touching the in-flight href dedupe (the superseding
-        // schedule owns the new href; clearing here would clobber it), without
-        // mutating the shared single-bucket orchestrator, and without injecting
-        // chapter-1's pairs into the now-visible chapter-2.
+        // Finding 1: if a newer spine's enumerate was scheduled while this one was in
+        // flight, this result's captured generation is no longer current → STALE.
+        // Discard WITHOUT touching the in-flight href dedupe (the superseding schedule
+        // owns the new href), the orchestrator, or the inject.
         guard bilingualChapterTracker.isCurrentGeneration(generation) else { return }
         // Gate-4 round-3 MED-2: distinguish eval FAILURE (nil) from a
-        // successful-but-empty enumerate ([]). On FAILURE revert the in-flight
-        // dedupe mark for this href so a later `locationDidChange` for the same
-        // chapter retries — otherwise a transient eval failure / too-early eval
-        // leaves the visible chapter blank forever. A genuinely-empty chapter ([])
-        // is a success: COMMIT so we do not retry-loop on it.
+        // successful-but-empty enumerate ([]). On FAILURE revert the in-flight dedupe
+        // mark for this href so a later `locationDidChange` retries (else the chapter
+        // stays blank forever). A genuinely-empty chapter ([]) is a success: COMMIT.
         guard let blocks = result else {
             bilingualChapterTracker.clearInFlight(href: href)
             return
@@ -156,6 +142,14 @@ extension ReadiumEPUBHost {
         // the disable path's `clear()` already removed any decorations.
         guard vm.isEnabled else { return }
         bilingualOrchestrator.updateBlocks(blocks)
+        // Round-4 ROOT CAUSE: record WHICH chapter these just-committed blocks belong
+        // to, in the SAME normalized (OPF-relative) href space the inject locator
+        // carries, so the inject choke point (`blocksMatch`) can reject a spine-A-
+        // blocks vs spine-B-locator mismatch. Set EXACTLY at the `updateBlocks`
+        // commit, after the generation guard, so it tracks the live bucket.
+        bilingualChapterTracker.setBlocksOwner(
+            href: currentVReaderLocator(from: currentReadiumLocator)?.href
+        )
         // Mark the chapter enumerated so an intra-chapter scroll is deduped (commit
         // on success, including a real empty chapter).
         bilingualChapterTracker.markEnumerated(href: href)
@@ -167,11 +161,10 @@ extension ReadiumEPUBHost {
     }
 
     /// Resolves the current unit (via the normalized locator) and asks the VM to
-    /// prefetch + inject if a translation is already cached. Gate-4 round-2 MED:
-    /// the enumerate-chain inject path is generation-guarded end to end — after the
-    /// `handlePositionChange` suspension (and inside `injectBilingualIfCached` after
-    /// each of ITS awaits) the captured `generation` is re-checked, so a spine
-    /// change mid-chain discards before mutating orchestrator state / injecting.
+    /// prefetch + inject if a translation is already cached. Round-2 defense in
+    /// depth: the captured `generation` is re-checked after the `handlePositionChange`
+    /// suspension (and again in `injectBilingualIfCached`) so a spine change mid-chain
+    /// discards (the round-4 owner-href invariant is the primary stale-blocks gate).
     private func drivePrefetchAndInject(
         for readiumLocator: ReadiumShared.Locator?,
         generation: Int
@@ -185,15 +178,16 @@ extension ReadiumEPUBHost {
         await injectBilingualIfCached(for: locator, generation: generation)
     }
 
-    /// Build + push inject JS for the current unit's cached translations.
-    /// Honors the Bug #268 mismatch fallback (translate the enumerate's OWN block
-    /// texts when the prefetch segment count diverges from the block count).
+    /// Build + push inject JS for the current unit's cached translations. Honors the
+    /// Bug #268 mismatch fallback (translate the enumerate's OWN block texts when the
+    /// prefetch segment count diverges from the block count). The choke point BOTH
+    /// inject entry points funnel through: the round-4 block-ownership invariant
+    /// (`blocksMatch`) here closes the whole stale-blocks-vs-locator class.
     ///
-    /// `generation` (Gate-4 round-2 MED) is the enumerate-chain's captured token, or
-    /// `nil` for the `.readerBilingualDidChange` entry point (NOT enumerate-scheduled
-    /// — it resolves the CURRENT locator from live tracker state, so it is inherently
-    /// current). When non-nil it is re-checked after EACH suspension so a spine change
-    /// mid-chain discards before mutating orchestrator state / injecting stale pairs.
+    /// `generation` is the enumerate-chain's captured token (round-2 defense in
+    /// depth), or `nil` for the `.readerBilingualDidChange` entry point (not
+    /// enumerate-scheduled). When non-nil it is re-checked after the unit-resolve
+    /// suspension; the owner-href invariant covers the nil-generation path.
     func injectBilingualIfCached(for locator: Locator, generation: Int? = nil) async {
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
         guard let unit = await vm.textProvider?.unit(containing: locator) else { return }
@@ -202,6 +196,13 @@ extension ReadiumEPUBHost {
         if let generation, !bilingualChapterTracker.isCurrentGeneration(generation) {
             return
         }
+        // Round-4 ROOT CAUSE (block-ownership invariant — see file header): the
+        // shared orchestrator holds ONE block set; bail unless it belongs to THIS
+        // locator's chapter, so neither the pairing path nor the Bug #268
+        // `translateBlocksDirectly` fallback pairs spine-B against spine-A's blocks.
+        // Covers BOTH inject entry points (generation-guarded enumerate chain + the
+        // nil-generation `.readerBilingualDidChange` path) with one check.
+        guard bilingualChapterTracker.blocksMatch(locatorHref: locator.href) else { return }
         guard let segments = vm.translations(for: unit) else { return }
         let blocks = bilingualOrchestrator.currentBlocks
         if !blocks.isEmpty, segments.count != blocks.count {

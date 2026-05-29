@@ -325,6 +325,91 @@ struct ReadiumBilingualChapterTrackerTests {
         #expect(tracker.isCurrentGeneration(chapter1Generation) == false)
     }
 
+    // MARK: - Gate-4 round-4 (WI-12 audit) ROOT CAUSE: block-ownership invariant.
+    // The shared `EPUBBilingualOrchestrator` holds ONE set of blocks in its paged
+    // `-1` bucket. In Readium scroll mode rapid spine changes can leave spine A's
+    // blocks committed while an inject runs for spine B's current locator — pairing
+    // spine-B translations against spine-A bids (or `translateBlocksDirectly` on
+    // spine-A block text for spine-B). The owner-href invariant records the href the
+    // CURRENT committed blocks belong to and rejects an inject whose locator href
+    // doesn't match. This closes BOTH inject entry points (the generation-guarded
+    // enumerate chain AND the nil-generation `.readerBilingualDidChange` path) with
+    // one invariant: an owner-href mismatch ALWAYS implies stale blocks.
+
+    @Test("a fresh tracker owns no blocks, so blocksMatch is false for any href")
+    func freshTrackerOwnsNoBlocks() {
+        let tracker = ReadiumBilingualChapterTracker()
+        #expect(tracker.blocksOwnerHref == nil)
+        #expect(tracker.blocksMatch(locatorHref: "chapter1.xhtml") == false)
+        #expect(tracker.blocksMatch(locatorHref: nil) == false)
+    }
+
+    @Test("after blocks committed for href A, an inject for A proceeds and for B is rejected")
+    func ownerHrefGatesInjectByChapter() {
+        let tracker = ReadiumBilingualChapterTracker()
+        // The driver commits spine A's blocks and records the owner href at the
+        // `updateBlocks` site.
+        tracker.setBlocksOwner(href: "chapterA.xhtml")
+        #expect(tracker.blocksOwnerHref == "chapterA.xhtml")
+        // A settled inject for the SAME chapter (owner == locator href) proceeds.
+        #expect(tracker.blocksMatch(locatorHref: "chapterA.xhtml") == true)
+        // An inject for chapter B (current locator moved on, but A's blocks are
+        // still in the shared bucket) is REJECTED — pairing B's translations
+        // against A's bids would be the stale-cross-spine bug.
+        #expect(tracker.blocksMatch(locatorHref: "chapterB.xhtml") == false)
+    }
+
+    @Test("blocksMatch is false against a nil locator href even when blocks are owned")
+    func ownerHrefRejectsNilLocator() {
+        let tracker = ReadiumBilingualChapterTracker()
+        tracker.setBlocksOwner(href: "chapterA.xhtml")
+        #expect(tracker.blocksMatch(locatorHref: nil) == false)
+    }
+
+    @Test("committing blocks for href B re-points the owner so B injects and A no longer matches")
+    func ownerHrefRepointsOnNewCommit() {
+        let tracker = ReadiumBilingualChapterTracker()
+        tracker.setBlocksOwner(href: "chapterA.xhtml")
+        // Scroll into B: the enumerate for B commits B's blocks + sets owner = B.
+        tracker.setBlocksOwner(href: "chapterB.xhtml")
+        #expect(tracker.blocksMatch(locatorHref: "chapterB.xhtml") == true)
+        #expect(tracker.blocksMatch(locatorHref: "chapterA.xhtml") == false)
+    }
+
+    @Test("reset clears the block owner so no inject proceeds until blocks are re-committed")
+    func resetClearsBlockOwner() {
+        let tracker = ReadiumBilingualChapterTracker()
+        tracker.setBlocksOwner(href: "chapterA.xhtml")
+        tracker.reset()
+        #expect(tracker.blocksOwnerHref == nil)
+        #expect(tracker.blocksMatch(locatorHref: "chapterA.xhtml") == false)
+    }
+
+    @Test("clearing the block owner (disable / clear decorations) blocks subsequent injects")
+    func clearBlockOwnerBlocksInject() {
+        let tracker = ReadiumBilingualChapterTracker()
+        tracker.setBlocksOwner(href: "chapterA.xhtml")
+        tracker.clearBlocksOwner()
+        #expect(tracker.blocksOwnerHref == nil)
+        #expect(tracker.blocksMatch(locatorHref: "chapterA.xhtml") == false)
+    }
+
+    @Test("owner-href mismatch closes the nil-generation (.readerBilingualDidChange) inject path")
+    func ownerHrefClosesNilGenerationPath() {
+        // The `.readerBilingualDidChange` inject entry point passes generation: nil,
+        // so the generation guards never fire for it. The owner-href invariant is
+        // what stops it from pairing the current spine's translations against an
+        // older spine's still-committed blocks: blocks owned by A, current locator
+        // resolves to B → reject regardless of generation.
+        let tracker = ReadiumBilingualChapterTracker()
+        tracker.setBlocksOwner(href: "chapterA.xhtml")
+        #expect(tracker.blocksMatch(locatorHref: "chapterB.xhtml") == false)
+        // Once B's enumerate commits B's blocks, the prefetch-landed re-inject for B
+        // proceeds.
+        tracker.setBlocksOwner(href: "chapterB.xhtml")
+        #expect(tracker.blocksMatch(locatorHref: "chapterB.xhtml") == true)
+    }
+
     // MARK: - Gate-4 (WI-12 audit) Finding 2: layoutChangeAction uses newLayout to
     // FAIL CLOSED for any future unsupported layout case.
 

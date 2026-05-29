@@ -55,6 +55,20 @@ final class ReadiumBilingualChapterTracker {
     /// or on a `reset()`; a deduped same-href trigger does NOT bump it, so a
     /// legitimate retry is never blocked.
     private(set) var currentGeneration: Int = 0
+
+    /// Gate-4 round-4 (WI-12 audit) ROOT CAUSE: the href the orchestrator's CURRENT
+    /// committed blocks belong to. The shared `EPUBBilingualOrchestrator` holds ONE
+    /// block set in its paged `-1` bucket (`currentBlocks`). In Readium scroll mode
+    /// spine changes are rapid, so that bucket can hold spine A's blocks while an
+    /// inject runs for spine B's current locator — pairing spine-B translations
+    /// against spine-A bids, or `translateBlocksDirectly` on spine-A block text for
+    /// spine-B. This records WHICH chapter the committed blocks are for so the inject
+    /// choke point can reject a mismatched inject. Lives Readium-side ONLY (NOT on
+    /// the shared orchestrator, which the legacy engine also uses). Set at the
+    /// driver's `updateBlocks` commit site, cleared on `reset()` / disable / clear.
+    /// `nil` = no blocks committed yet → no inject proceeds.
+    private(set) var blocksOwnerHref: String?
+
     init() {}
 
     /// Bumps + returns the next generation. Called whenever a fresh enumerate is
@@ -100,9 +114,45 @@ final class ReadiumBilingualChapterTracker {
     /// + the prefetch-disabled path). Finding 1: also bumps the generation so any
     /// enumerate that was in flight before a layout-change reset / disable has its
     /// captured generation invalidated and its (now-stale) result discarded.
+    /// Round-4: also clears the block-owner href — after a reset the orchestrator's
+    /// blocks are stale/cleared, so no inject may proceed until a fresh enumerate
+    /// commits new blocks and records their owner.
     func reset() {
         lastEnumeratedHref = nil
+        blocksOwnerHref = nil
         nextGeneration()
+    }
+
+    /// Gate-4 round-4 ROOT CAUSE: record the href the orchestrator's just-committed
+    /// blocks belong to. Called by the driver EXACTLY where it commits
+    /// `bilingualOrchestrator.updateBlocks(blocks)` (after the generation guard
+    /// passes), with the NORMALIZED (OPF-relative) href for the enumerated spine —
+    /// the same href space the inject locator carries — so `blocksMatch` compares
+    /// apples to apples.
+    func setBlocksOwner(href: String?) {
+        blocksOwnerHref = href
+    }
+
+    /// Clears the block-owner href when the committed blocks are no longer valid
+    /// (disable, clear decorations). After this no inject proceeds until a fresh
+    /// enumerate re-records the owner.
+    func clearBlocksOwner() {
+        blocksOwnerHref = nil
+    }
+
+    /// Gate-4 round-4 ROOT CAUSE: the inject-choke-point invariant. Whether the
+    /// orchestrator's CURRENT committed blocks belong to `locatorHref` — i.e. an
+    /// inject for `locatorHref` is pairing against the RIGHT chapter's blocks. A
+    /// `nil` owner (no blocks committed) or a `nil`/mismatched locator href returns
+    /// false: the inject must BAIL because the committed blocks aren't this
+    /// chapter's (the in-flight / next enumerate injects when it commits its own
+    /// blocks + owner). One check closes BOTH inject entry points — the
+    /// generation-guarded enumerate chain AND the nil-generation
+    /// `.readerBilingualDidChange` path — because an owner mismatch always implies
+    /// the committed blocks are stale for this locator.
+    func blocksMatch(locatorHref: String?) -> Bool {
+        guard let owner = blocksOwnerHref, let locatorHref else { return false }
+        return owner == locatorHref
     }
 
     /// Gate-4 round-3 MED-2: reverts the in-flight mark recorded by
