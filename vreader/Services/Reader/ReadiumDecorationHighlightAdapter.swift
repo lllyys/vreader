@@ -187,20 +187,30 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
     /// Resolves a LEGACY stored spine href (e.g. `chapter1.xhtml`, relative to
     /// the OPF) to Readium's container-relative reading-order href (e.g.
     /// `OEBPS/chapter1.xhtml`) so a decoration's locator matches a real spine
-    /// resource. Match precedence: exact → a spine href ending in `/<stored>`
-    /// (suffix) → last-path-component (basename). Returns `nil` when no spine
-    /// list is supplied or no match is found (caller falls back to the raw
-    /// stored href). The reverse direction (Readium-form stored href against
-    /// the same list) also resolves via the exact/suffix branches.
+    /// resource. Match precedence:
+    ///   1. exact;
+    ///   2. a spine href ending in `/<stored>` (suffix) — but ONLY when exactly
+    ///      ONE spine href matches;
+    ///   3. last-path-component (basename) — likewise ONLY when exactly ONE
+    ///      spine href has that basename.
+    /// Gate-4 round-2 Medium: an EPUB can have same-named resources in different
+    /// directories (`text/ch1.xhtml` vs `alt/ch1.xhtml`), so a first-match guess
+    /// on either the suffix or basename branch could mis-anchor a highlight onto
+    /// the wrong resource. Both fuzzy branches therefore require a UNIQUE match;
+    /// a non-unique match returns `nil` (never guess). Returns `nil` when no
+    /// spine list is supplied or no safe match is found — the caller falls back
+    /// to the raw stored href. The reverse direction (a Readium-form stored href
+    /// against the same list) resolves via the exact branch.
     nonisolated static func resolveHref(_ stored: String, against spineHrefs: [String]) -> String? {
         guard !spineHrefs.isEmpty else { return nil }
         if spineHrefs.contains(stored) { return stored }
-        if let suffixMatch = spineHrefs.first(where: { $0.hasSuffix("/" + stored) }) {
-            return suffixMatch
-        }
+        let suffixMatches = spineHrefs.filter { $0.hasSuffix("/" + stored) }
+        if suffixMatches.count == 1 { return suffixMatches[0] }
+        if suffixMatches.count > 1 { return nil }  // ambiguous — don't guess
         let storedBase = (stored as NSString).lastPathComponent
         guard !storedBase.isEmpty else { return nil }
-        return spineHrefs.first { ($0 as NSString).lastPathComponent == storedBase }
+        let basenameMatches = spineHrefs.filter { ($0 as NSString).lastPathComponent == storedBase }
+        return basenameMatches.count == 1 ? basenameMatches[0] : nil
     }
 
     /// Maps the stored color string to a tint `UIColor`, reusing the existing

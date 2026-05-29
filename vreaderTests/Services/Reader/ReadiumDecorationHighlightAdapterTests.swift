@@ -126,6 +126,30 @@ struct ReadiumDecorationHighlightAdapterTests {
         #expect(ReadiumDecorationHighlightAdapter.resolveHref("nonexistent.xhtml", against: spine) == nil)
     }
 
+    @Test func resolveHref_ambiguousBasename_returnsNil() {
+        // Gate-4 round-2 Medium: two spine items share the basename `ch1.xhtml`
+        // in different directories → basename fallback must NOT guess (it could
+        // mis-anchor onto the wrong resource), so the stored href that matches
+        // neither exactly nor by suffix resolves to nil.
+        let spine = ["text/ch1.xhtml", "alt/ch1.xhtml"]
+        #expect(ReadiumDecorationHighlightAdapter.resolveHref("OPS/ch1.xhtml", against: spine) == nil)
+    }
+
+    @Test func resolveHref_ambiguousSuffix_returnsNil() {
+        // Gate-4 round-2 Medium: both `text/ch1.xhtml` and `alt/ch1.xhtml` end
+        // with `/ch1.xhtml`, so a bare `ch1.xhtml` suffix-matches BOTH → don't
+        // guess, return nil (the suffix branch is uniqueness-guarded too).
+        let spine = ["text/ch1.xhtml", "alt/ch1.xhtml"]
+        #expect(ReadiumDecorationHighlightAdapter.resolveHref("ch1.xhtml", against: spine) == nil)
+    }
+
+    @Test func resolveHref_uniqueSuffix_resolvesEvenWithDeeperPath() {
+        // A more-specific stored path that suffix-matches exactly one resource
+        // resolves, even if the bare basename would be ambiguous.
+        let spine = ["OEBPS/text/ch1.xhtml", "OEBPS/alt/ch1.xhtml"]
+        #expect(ReadiumDecorationHighlightAdapter.resolveHref("text/ch1.xhtml", against: spine) == "OEBPS/text/ch1.xhtml")
+    }
+
     @Test func resolveHref_emptySpine_returnsNil() {
         #expect(ReadiumDecorationHighlightAdapter.resolveHref("chapter1.xhtml", against: []) == nil)
     }
