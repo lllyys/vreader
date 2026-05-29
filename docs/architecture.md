@@ -72,8 +72,14 @@ JSON files.
   bilingual wrapper from feature #56 WI-11 sits between the dispatcher
   and `FoliateSpikeView`, adding the bilingual VM / orchestrator / setup-
   sheet wiring without modifying the spike itself).
-- `resolve(format:)` maps `.epub` to `.epubWKWebView` unconditionally;
-  feature #42 will later route EPUB to `.foliateWeb` behind a flag.
+- `resolve(format:)` maps `.epub` to `.epubWKWebView` unconditionally (it
+  stays the pure format→default-engine map). Feature #42 (Phase 1) routes EPUB
+  to the Readium Swift Toolkit engine (`ReadiumEPUBHost`) behind the
+  default-OFF `FeatureFlags.readiumEPUBEngine`: the flag read lives in the
+  dispatcher (`ReaderContainerView.engineReaderView` → `ReaderEngine.routeEPUB`),
+  not in `resolve`, so a flag-unaware caller still gets the legacy
+  `EPUBReaderHost`. The `.epubReadium` engine case exists for switch totality;
+  `resolve` never returns it.
 
 #### Chrome
 
@@ -99,6 +105,7 @@ Each host owns its ViewModel lifecycle via `@State`:
 
 - `TXTReaderHost` → `TXTReaderContainerView` → `TXTTextViewBridge` (small single-chapter / Paged) or `TXTChunkedReaderBridge` (>500K UTF-16, **and** chaptered TXT in Scroll layout — bug #180). Chaptered TXT in Scroll layout renders as one continuous `UITableView` surface fed the whole book: `TXTContinuousChunkBuilder` splits the decoded book into document-global-offset chunks, `TXTChapterOffsetIndex` layers chapter awareness so `currentChapterIdx` is *derived* from scroll offset (no per-chapter render unit, no chapter-swap).
 - `EPUBReaderHost` → `EPUBReaderContainerView` → `EPUBWebViewBridge` (WKWebView + JS injection). **Paged** EPUB loads one spine item per `loadFileURL`. **Continuous scroll** (feature #71, the DEFAULT for EPUB scroll layout since the terminal-WI flag flip on 2026-05-28 — `FeatureFlags.epubContinuousScroll` defaults ON; a persisted user/debug override can still disable it) instead loads a single bootstrap document and stitches a lazy ±1-chapter window into it: `EPUBContinuousScrollCoordinator` owns an `EPUBSpineWindow` `[lo…hi]` anchored on the reading chapter and, on the section-aware scroll observer's boundary signals, materializes the adjacent chapter (`EPUBContinuousChapterProvider` → `EPUBChapterBodyRewriter` → `EPUBContinuousScrollJS.append/prependChapterSectionJS`) and evicts the far side (`maxSpan`) to bound memory. Per-section highlight restore hangs off a `sectionMaterialized` lifecycle message (appended sections never fire `didFinish`); saved-position restore + TOC/bookmark/search navigation drive the coordinator (`navigate(toSpineIndex:fraction:)` — scroll within the window, or rebuild around an out-of-window target). The evaluator reaches the live `WKWebView` through a late-binding `EPUBWebViewEvaluatorHandle` the bridge binds in `makeUIView`.
+- `ReadiumEPUBHost` (feature #42 Phase 1, WI-5) → `ReadiumNavigatorRepresentable` → Readium Swift Toolkit `EPUBNavigatorViewController`. Selected by the dispatcher in place of `EPUBReaderHost` only when `FeatureFlags.readiumEPUBEngine` is ON (default OFF). Opens the publication off-main via `ReadiumEPUBReaderViewModel` (`AssetRetriever` → `PublicationOpener`), then mounts the navigator; `EPUBPreferences(scroll:)` is mapped from `ReaderSettingsStore.epubLayout`. The `ReadiumReaderCoordinator` is the `EPUBNavigatorDelegate` + (DEBUG) `ReadiumNavigatorEvaluating` seam — it registers the active navigator with `DebugReaderRegistry.setActiveReadiumNavigator` and `markReaderSettled` on `locationDidChange`, and tears that registration down on `dismantleUIViewController` via `detach()` → `clearActiveReadiumNavigator` (the host registers no `DebugReaderProbe`, so it owns its own registry teardown). Render-only at WI-5; position / theme / highlights / search / TTS land in WI-6…WI-10.
 - `PDFReaderHost` → `PDFReaderContainerView` → `PDFViewBridge` (PDFKit)
 - `MDReaderHost` → `MDReaderContainerView` → reuses `TXTTextViewBridge` with NSAttributedString
 - AZW3/MOBI is dispatched directly to `FoliateSpikeView` (the AZW3 spike landed before the host abstraction; convergence is deferred). `FoliateReaderHost` / `FoliateReaderContainerView` exist but are not currently wired into `ReaderContainerView`.
