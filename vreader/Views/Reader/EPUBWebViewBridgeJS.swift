@@ -129,6 +129,37 @@ extension EPUBWebViewBridge {
     })();
     """
 
+    /// Bug #278 / GH #1255: pure decision seam for the continuous-scroll live
+    /// theme/typography re-inject. The continuous bootstrap bakes the theme CSS
+    /// into an anonymous `<style>` once; `updateUIView` returns early (bootstrap
+    /// load) before the paged theme-change cascade, so a font-size / line-height
+    /// / font-family change never reached the stitched DOM until reopen.
+    ///
+    /// Given the previously-applied CSS and the newly-computed CSS, returns the
+    /// JS the bridge must run on the live evaluator — or `nil` when nothing
+    /// changed (no redundant eval / no double-apply):
+    ///   - `newCSS` non-nil & differs from `previousCSS` → `injectThemeCSSJS`,
+    ///     which replaces/creates `#vreader-theme` in `document.head`. Its rules
+    ///     are document-wide (`html, body { font-size … }`), so injecting it into
+    ///     the bootstrap head cascades to EVERY materialized `<section>` in the
+    ///     single stitched document — not just one chapter.
+    ///   - `newCSS` nil & `previousCSS` non-nil → `removeThemeCSSJS`.
+    ///   - no effective change → `nil`.
+    ///
+    /// Mirrors the paged theme-change branch in `updateUIView` exactly, so paged
+    /// and continuous live-apply behave identically. The `#vreader-theme` element
+    /// injected here is appended AFTER the bootstrap's anonymous baked-in style,
+    /// so equal-specificity `!important` rules resolve to the fresh injection by
+    /// source order.
+    static func continuousThemeReinjectJS(previousCSS: String?, newCSS: String?) -> String? {
+        if let newCSS {
+            guard newCSS != previousCSS else { return nil }
+            return injectThemeCSSJS(newCSS)
+        }
+        // newCSS == nil: only emit a removal if something was previously applied.
+        return previousCSS == nil ? nil : removeThemeCSSJS
+    }
+
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: "progressHandler"

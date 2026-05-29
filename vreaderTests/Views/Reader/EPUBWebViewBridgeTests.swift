@@ -351,4 +351,71 @@ struct EPUBWebViewBridgeInitialContentOffsetTests {
                 "Negative inset is invalid; offset must clamp to 0 so content doesn't overshoot above the top chrome")
     }
 }
+
+// MARK: - Bug #278: continuous-scroll live theme/typography re-inject
+
+/// Bug #278 / GH #1255: in continuous-scroll mode the EPUB font-size slider had
+/// no live effect because `updateUIView` returned early (continuous bootstrap
+/// load) BEFORE the paged theme-change cascade that re-injects `#vreader-theme`.
+/// The pure decision seam below captures "given the old vs new theme CSS, what
+/// JS should the bridge run to live-apply the change to the stitched document?"
+/// — re-injecting `#vreader-theme` into the bootstrap `document.head` cascades
+/// document-wide (`html, body { font-size }`), reaching every materialized
+/// section in the single stitched DOM.
+@Suite("EPUBWebViewBridge - continuousThemeReinjectJS (bug #278)")
+struct EPUBWebViewBridgeContinuousThemeReinjectTests {
+
+    private func css(fontSizePx: Double) -> String {
+        // Minimal stand-in for `ReaderThemeV2.epubOverrideCSS` output: the part
+        // that matters for the decision is the `#vreader-theme` style wrapper
+        // carrying a `font-size` rule that the slider mutates.
+        "<style id=\"vreader-theme\">html, body { font-size: \(fontSizePx)px !important; }</style>"
+    }
+
+    @Test("font-size change emits inject JS carrying the NEW size (the bug #278 regression)")
+    func fontSizeChangeEmitsInject() throws {
+        let oldCSS = css(fontSizePx: 18)
+        let newCSS = css(fontSizePx: 28)
+
+        let js = try #require(
+            EPUBWebViewBridge.continuousThemeReinjectJS(previousCSS: oldCSS, newCSS: newCSS),
+            "A typography change in continuous mode MUST produce re-inject JS — the pre-fix bridge skipped it (early return), so the slider had no live effect."
+        )
+        #expect(js.contains("vreader-theme"),
+                "Re-inject must target the #vreader-theme style element so the document-wide font-size cascade reaches all materialized sections.")
+        #expect(js.contains("28"),
+                "The re-injected CSS must carry the NEW font size, not the stale baked-in bootstrap size.")
+        #expect(!js.contains("18.0") && !js.contains("18px"),
+                "The stale size must not survive in the re-injected CSS.")
+    }
+
+    @Test("no change returns nil (no redundant eval / no double-apply)")
+    func noChangeReturnsNil() {
+        let same = css(fontSizePx: 20)
+        #expect(EPUBWebViewBridge.continuousThemeReinjectJS(previousCSS: same, newCSS: same) == nil,
+                "An identical theme must not re-inject — guards against churn + double-apply on every unrelated updateUIView.")
+    }
+
+    @Test("theme cleared (newCSS nil) emits remove JS")
+    func clearedEmitsRemove() throws {
+        let js = try #require(
+            EPUBWebViewBridge.continuousThemeReinjectJS(previousCSS: css(fontSizePx: 20), newCSS: nil)
+        )
+        #expect(js == EPUBWebViewBridge.removeThemeCSSJS,
+                "Clearing the theme in continuous mode must remove the injected style, mirroring paged mode.")
+    }
+
+    @Test("first-time CSS (previous nil → non-nil) emits inject JS")
+    func firstApplicationEmitsInject() throws {
+        let js = try #require(
+            EPUBWebViewBridge.continuousThemeReinjectJS(previousCSS: nil, newCSS: css(fontSizePx: 22))
+        )
+        #expect(js.contains("vreader-theme") && js.contains("22"))
+    }
+
+    @Test("both nil returns nil")
+    func bothNilReturnsNil() {
+        #expect(EPUBWebViewBridge.continuousThemeReinjectJS(previousCSS: nil, newCSS: nil) == nil)
+    }
+}
 #endif

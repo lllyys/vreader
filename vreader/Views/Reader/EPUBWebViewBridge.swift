@@ -300,7 +300,28 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         if continuousScroll != nil {
             if !context.coordinator.didLoadContinuousBootstrap {
                 context.coordinator.didLoadContinuousBootstrap = true
+                // The bootstrap bakes the CURRENT themeCSS into an anonymous
+                // <style>; `coordinator.themeCSS` (set in makeUIView) already
+                // matches it, so the re-inject below is a no-op on this first
+                // pass and only fires on a LATER live theme/typography change.
                 loadContinuousBootstrap(into: webView)
+            } else if context.coordinator.themeCSS != themeCSS {
+                // Bug #278 / GH #1255: live theme/typography re-inject for
+                // continuous mode. The early `return` below skips the paged
+                // theme-change cascade, so a font-size / line-height / font
+                // change never reached the stitched DOM until reopen. Re-inject
+                // `#vreader-theme` into the bootstrap head via the live
+                // evaluator — its `html, body` rules cascade document-wide,
+                // reaching EVERY materialized <section>, not just one chapter.
+                let reinjectJS = Self.continuousThemeReinjectJS(
+                    previousCSS: context.coordinator.themeCSS, newCSS: themeCSS
+                )
+                context.coordinator.themeCSS = themeCSS
+                reinjectJS.map { js in
+                    webView.evaluateJavaScript(js) { _, error in
+                        if let error { AppLogger.epub.error("continuous theme reinject error: \(error)") }
+                    }
+                }
             }
             // Deliberately do NOT record `currentURL` here. Leaving it unchanged
             // means a later switch OUT of continuous mode (→ paged) sees
