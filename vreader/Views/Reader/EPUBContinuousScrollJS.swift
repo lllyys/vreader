@@ -49,10 +49,27 @@ enum EPUBContinuousScrollJS {
         <!DOCTYPE html>
         <html><head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+        <!-- Bug #279: user-scalable=no matches FoliateSpikeView; belt-and-suspenders with touch-action below. -->
+
         <style>
-        html, body { margin: 0; padding: 0; }
-        #\(scrollRootID) { overflow-y: auto; -webkit-overflow-scrolling: touch; height: 100vh; }
+        /* Bug #279 (REOPENED): the DEFAULT continuous-scroll path scrolls this
+           INNER #vreader-scroll-root, which the outer-WKWebView scrollView lock
+           (#1269) doesn't constrain — so content still panned off-axis + pinch-
+           zoomed. Lock the inner scroller to vertical-only: `touch-action: pan-y`
+           blocks horizontal pan AND pinch-zoom; `overflow-x: hidden` clips any
+           horizontal overflow; content width is capped so wide media can't force
+           a horizontal scroll. Gesture-constraint only, no visible chrome change. */
+        html, body { margin: 0; padding: 0; overflow-x: hidden; touch-action: pan-y; }
+        #\(scrollRootID) {
+            overflow-y: auto; overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            height: 100vh; width: 100%; max-width: 100%;
+            box-sizing: border-box; touch-action: pan-y;
+        }
+        #\(scrollRootID) img, #\(scrollRootID) video, #\(scrollRootID) table, #\(scrollRootID) pre {
+            max-width: 100%; height: auto;
+        }
         .vreader-chapter-divider { display: flex; align-items: center; gap: 14px; margin: 36px 0 28px; }
         .vreader-chapter-divider .vreader-divider-rule { flex: 1; height: 0.5px; background: currentColor; opacity: 0.3; }
         .vreader-chapter-divider .vreader-divider-label {

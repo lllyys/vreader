@@ -42,6 +42,20 @@ struct EPUBContinuousScrollJSTests {
         #expect(html.lowercased().contains("overflow"))
     }
 
+    @Test("Bug #279: the inner scroll root is locked to vertical-only (no off-axis pan / pinch-zoom)")
+    func bootstrapInnerScrollLock() {
+        let html = EPUBContinuousScrollJS.bootstrapDocumentHTML(themeCSS: "")
+        // touch-action: pan-y blocks horizontal pan AND pinch-zoom on the inner
+        // DOM scroller (the outer-WKWebView scrollView lock from #1269 doesn't
+        // reach it). overflow-x: hidden clips any horizontal overflow.
+        #expect(html.contains("touch-action: pan-y"))
+        #expect(html.contains("overflow-x: hidden"))
+        // wide media can't force a horizontal scroll.
+        #expect(html.contains("max-width: 100%"))
+        // the strict viewport pin is still present.
+        #expect(html.contains("maximum-scale=1"))
+    }
+
     // MARK: - append / prepend section markup + identity
 
     @Test("appendChapterSectionJS carries the section's spine index + href data attributes")
