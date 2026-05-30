@@ -383,6 +383,11 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         private var restoreRetryCount = 0
         private static let maxRestoreRetries = 5
 
+        /// Bug #289: true while a programmatic position restore is in flight, so
+        /// the scroll callbacks it triggers don't persist a transient position.
+        /// Mirrors the non-chunked bridge's restore-suppression guard.
+        private var isRestoringPosition = false
+
         /// Tracks last processed scrollToOffset to avoid redundant scrolls (bug #52).
         var lastScrollToOffset: Int?
 
@@ -490,8 +495,12 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         ) {
             guard index >= 0, index < chunks.count else { return }
 
+            // Bug #289: suppress position SAVE while the programmatic restore +
+            // its layout-driven scroll callbacks run; cleared once they settle.
+            isRestoringPosition = true
+
             guard tableView.bounds.width > 0 else {
-                guard restoreRetryCount < Self.maxRestoreRetries else { return }
+                guard restoreRetryCount < Self.maxRestoreRetries else { isRestoringPosition = false; return }
                 restoreRetryCount += 1
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak tableView] in
                     guard let self, let tableView else { return }
@@ -512,6 +521,11 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
                 if cellRect.height > 0 {
                     tableView.contentOffset.y += cellRect.height * fraction
                 }
+            }
+
+            // Release the suppression once the post-scroll layout callbacks settle.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.isRestoringPosition = false
             }
         }
 
@@ -902,20 +916,35 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
         private func reportScrollPosition(_ scrollView: UIScrollView) {
             guard let tableView = scrollView as? UITableView else { return }
-            guard let firstVisible = tableView.indexPathsForVisibleRows?.first else { return }
-            let chunkIndex = firstVisible.row
+            // Bug #289: skip while a programmatic restore is in flight — its
+            // scrollToRow / contentOffset adjustment fires scroll callbacks that
+            // would otherwise persist a transient position.
+            guard !isRestoringPosition else { return }
+            // Bug #289 (audit): resolve the row at the inset-adjusted VISIBLE top,
+            // not `indexPathsForVisibleRows?.first` (the row at the table-bounds
+            // top). Near a chunk boundary the bounds-top row can sit entirely in
+            // the inset-covered band, which would measure the previous chunk's end.
+            let visibleTopY = scrollView.contentOffset.y + tableView.contentInset.top
+            let topPoint = CGPoint(x: tableView.bounds.midX, y: visibleTopY)
+            guard let topIndexPath = tableView.indexPathForRow(at: topPoint)
+                    ?? tableView.indexPathsForVisibleRows?.first else { return }
+            let chunkIndex = topIndexPath.row
             guard chunkIndex < chunkStartOffsets.count, chunkIndex < chunks.count else { return }
 
-            // Estimate intra-chunk offset from scroll fraction through the cell
-            let cellRect = tableView.rectForRow(at: firstVisible)
-            var intraOffset = 0
-            if cellRect.height > 0 {
-                let scrolledPast = scrollView.contentOffset.y - cellRect.origin.y
-                let fraction = max(0, min(1, scrolledPast / cellRect.height))
-                intraOffset = Int(fraction * CGFloat(chunks[chunkIndex].utf16.count))
-            }
-
-            let offset = chunkStartOffsets[chunkIndex] + intraOffset
+            // Estimate intra-chunk offset from scroll fraction through the cell.
+            // Bug #289: measure at the table's VISIBLE top (contentOffset.y +
+            // contentInset.top) — the point RESTORE's scrollToRow(.top) aligns to —
+            // so SAVE and RESTORE agree. The pre-fix code omitted the inset and
+            // persisted a position ~contentInset.top px earlier each save.
+            let cellRect = tableView.rectForRow(at: topIndexPath)
+            let offset = TXTChunkedScrollOffset.topCharOffsetUTF16(
+                contentOffsetY: scrollView.contentOffset.y,
+                contentInsetTop: tableView.contentInset.top,
+                cellOriginY: cellRect.origin.y,
+                cellHeight: cellRect.height,
+                chunkStartOffset: chunkStartOffsets[chunkIndex],
+                chunkUTF16Count: chunks[chunkIndex].utf16.count
+            )
             delegate?.scrollPositionDidChange(topCharOffsetUTF16: offset)
         }
     }
