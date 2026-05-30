@@ -108,6 +108,23 @@ enum ReaderThemeV2: String, CaseIterable, Sendable {
         }
     }
 
+    /// The Display panel slider's UNFILLED rail. Bug #285 / #1273: the old
+    /// inline `isDark ? white@0.1 : black@0.1` computed to ~1.25:1 over the cream
+    /// panel (a cold pure-black smudge that "reads as no rail"). Per the landed
+    /// design (`dev-docs/designs/.../design-notes/slider-track-rail.md`): light
+    /// family = each theme's own `ink` at 22% (inherits the theme's warmth, lifts
+    /// the rail to ~1.6:1); dark family keeps its 12% weight (the white-on-dark
+    /// rail already reads). Exact design-specified values — not a hand-picked tint.
+    var sliderTrack: UIColor {
+        switch self {
+        case .paper: return Self.hex(0x1d, 0x1a, 0x14, alpha: 0.22)
+        case .sepia: return Self.hex(0x3a, 0x29, 0x13, alpha: 0.22)
+        case .dark:  return Self.hex(0xd8, 0xd2, 0xc5, alpha: 0.12)
+        case .oled:  return Self.hex(0xb9, 0xb6, 0xb0, alpha: 0.12)
+        case .photo: return Self.hex(0xe8, 0xe0, 0xd0, alpha: 0.12)
+        }
+    }
+
     /// Single restrained accent for chrome (selected pickers, primary
     /// actions, selection emphasis). Three-stop oxblood family per
     /// `AccentColor.swift` — but each theme picks its own stop because

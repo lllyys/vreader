@@ -252,11 +252,11 @@ struct SettingsSliderRow: View {
             : Color.black.opacity(0.04)
     }
 
-    /// The unfilled track color — the design's
-    /// `t.isDark ? rgba(255,255,255,0.1) : rgba(0,0,0,0.1)`.
+    /// The unfilled track color — the per-theme `sliderTrack` token (Bug #285 /
+    /// #1273). The old inline `isDark ? white@0.1 : black@0.1` was a cold
+    /// pure-black smudge over the cream panel (~1.25:1); `sliderTrack` is each
+    /// theme's `ink` at the design-specified weight (light family @22% → ~1.6:1).
     private var trackColor: Color {
-        theme.isDark
-            ? Color.white.opacity(0.1)
-            : Color.black.opacity(0.1)
+        Color(theme.sliderTrack)
     }
 }

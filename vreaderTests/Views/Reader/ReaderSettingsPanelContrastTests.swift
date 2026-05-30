@@ -174,5 +174,32 @@ struct ReaderSettingsPanelContrastTests {
             #expect(palette.secondary == theme.subColor)
         }
     }
+
+    // MARK: - Bug #285 / #1273: slider rail reads on the cream panel
+
+    /// The Display slider's unfilled rail (`sliderTrack`) over the cream panel
+    /// must clear the design's ~1.6:1 target (up from the old `black@0.1` ≈
+    /// 1.25:1 "no rail" smudge). The rail is decorative extent — WCAG 1.4.11 is
+    /// met by the fill+thumb — so the bar here is the design's legibility lift,
+    /// not 3:1.
+    @Test func sliderRailReadsOverCreamPanel() {
+        for theme in Self.lightThemes {
+            let surface = theme.sheetSurfaceColor
+            let ratio = contrastRatio(composite(theme.sliderTrack, over: surface), surface)
+            #expect(ratio >= 1.5, "\(theme) slider rail \(ratio) must clear the design ~1.6:1 lift")
+            // and it must be a real lift over the old black@0.1 rail.
+            let oldRail = contrastRatio(composite(UIColor.black.withAlphaComponent(0.1), over: surface), surface)
+            #expect(ratio > oldRail, "\(theme) sliderTrack (\(ratio)) must exceed the old rail (\(oldRail))")
+        }
+    }
+
+    /// Light family = each theme's own `ink` at 22% (design); dark family keeps
+    /// its 12% weight. Pins the design-specified token derivation.
+    @Test func sliderTrackMatchesDesignDerivation() {
+        #expect(ReaderThemeV2.paper.sliderTrack == ReaderThemeV2.paper.inkColor.withAlphaComponent(0.22))
+        #expect(ReaderThemeV2.sepia.sliderTrack == ReaderThemeV2.sepia.inkColor.withAlphaComponent(0.22))
+        #expect(ReaderThemeV2.dark.sliderTrack == ReaderThemeV2.dark.inkColor.withAlphaComponent(0.12))
+        #expect(ReaderThemeV2.oled.sliderTrack == ReaderThemeV2.oled.inkColor.withAlphaComponent(0.12))
+    }
 }
 #endif
