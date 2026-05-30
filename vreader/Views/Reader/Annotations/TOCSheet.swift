@@ -232,7 +232,12 @@ struct TOCSheet: View {
                         title: entry.title,
                         page: Self.displayPage(entry.locator.page),
                         isCurrent: index == activeEntryIndex,
-                        onTap: { onNavigate(entry.locator); onDismiss() }
+                        // Bug #288: dismiss BEFORE navigating so the sheet is
+                        // already animating out when `currentLocator` changes —
+                        // avoids the whole-list re-instantiation + re-animation
+                        // flash that a locator change on a still-visible sheet
+                        // triggers via the `.task(id:)` ladder.
+                        onTap: { onDismiss(); onNavigate(entry.locator) }
                     )
                     .id(entry.id)
                     .accessibilityIdentifier("tocRow-\(entry.id)")

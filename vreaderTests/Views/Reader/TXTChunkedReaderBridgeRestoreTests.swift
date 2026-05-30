@@ -134,5 +134,36 @@ struct TXTChunkedReaderBridgeRestoreTests {
         #expect(!TXTChunkedReaderBridge.hasPendingRestore(
             restoreGlobalOffset: nil, restoreChunkIndex: -1, chunkCount: 3))
     }
+
+    // MARK: - Bug #288: TOC nav broadcasts the target offset deterministically
+
+    private final class OffsetCaptureDelegate: TXTTextViewBridgeDelegate {
+        var lastOffset: Int?
+        func selectionDidChange(utf16Range: UTF16Range) {}
+        func scrollPositionDidChange(topCharOffsetUTF16: Int) { lastOffset = topCharOffsetUTF16 }
+    }
+
+    @Test("scrollToGlobalOffset reports the TARGET offset to the delegate (not the late scroll callback)")
+    func tocNavBroadcastsTargetOffset() {
+        let delegate = OffsetCaptureDelegate()
+        let coordinator = TXTChunkedReaderBridge.Coordinator(delegate: delegate)
+        coordinator.chunks = ["chunk zero", "chunk one", "chunk two"]
+        coordinator.chunkStartOffsets = [0, 100, 260]
+        // Offset 150 → chunk 1; even with a 0-bounds table (scroll defers), the
+        // position broadcast must fire synchronously so the TOC highlight +
+        // persisted position reflect the tapped chapter deterministically.
+        coordinator.scrollToGlobalOffset(150, in: UITableView())
+        #expect(delegate.lastOffset == 150) // pre-fix: nil (only the flaky scroll callback reported)
+    }
+
+    @Test("scrollToGlobalOffset with empty metadata does NOT broadcast (early return)")
+    func tocNavNoBroadcastOnEmptyMetadata() {
+        let delegate = OffsetCaptureDelegate()
+        let coordinator = TXTChunkedReaderBridge.Coordinator(delegate: delegate)
+        coordinator.chunks = []
+        coordinator.chunkStartOffsets = []
+        coordinator.scrollToGlobalOffset(150, in: UITableView())
+        #expect(delegate.lastOffset == nil)
+    }
 }
 #endif

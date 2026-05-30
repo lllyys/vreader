@@ -37,6 +37,16 @@ extension TXTChunkedReaderBridge.Coordinator {
             : 0
 
         attemptChunkRestore(in: tableView, toChunkIndex: chunkIndex, intraFraction: fraction)
+
+        // Bug #288: broadcast the TARGET offset as the reading position
+        // immediately + deterministically. The reader's `currentLocator` (and
+        // thus the TOC current-chapter highlight + the persisted position on
+        // reopen) otherwise depends only on the late, throttled, restore-
+        // suppressed (#289) `scrollViewDidScroll` callback, which can be dropped
+        // or compute a pre-layout offset that resolves to the PREVIOUS chapter —
+        // leaving the highlight stale. Reporting the target here makes a TOC tap's
+        // position update authoritative regardless of when the physical scroll lands.
+        delegate?.scrollPositionDidChange(topCharOffsetUTF16: globalOffset)
     }
 
     // MARK: - Highlight (Bug #53)
