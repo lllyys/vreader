@@ -49,7 +49,10 @@ final class HighlightPopoverViewModel {
     private(set) var presentedInitialMode: HighlightPopoverMode = .reading
 
     private let persistence: any HighlightLookup
-    private let bookFingerprintKey: String
+    /// The book this reader resolves highlights against. Feature #1121: the
+    /// modifier reads it to ignore an edit-request targeting a different book
+    /// (a same-book multi-window guard; cross-book is already a lookup no-op).
+    let bookFingerprintKey: String
     private let log = Logger(subsystem: "com.vreader.app", category: "HighlightPopover")
 
     /// Monotonic tap token. Incremented on every `handleTap` and every

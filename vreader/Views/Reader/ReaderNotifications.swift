@@ -437,11 +437,12 @@ struct ReaderHighlightTapEvent: Sendable, Equatable {
 
 /// Feature #1121: a programmatic request to navigate to a highlight and then
 /// auto-open its editor. Posted by the HighlightsSheet "Edit" handoff; observed
-/// by the per-format reader bridge, which — once the highlight has re-rendered
-/// in the new scroll/page position — resolves its anchor and re-posts a
-/// `ReaderHighlightTapEvent(openInEditMode: true)`. Carries the book key + a
-/// single-flight token so a stale/superseded request (the user navigated away,
-/// tapped another highlight, or changed book) is ignored (plan-audit M7).
+/// by the mounted `HighlightPopoverModifier`, which — after a short navigation
+/// settle — resolves the highlight (book-scoped) and opens the unified card in
+/// editing mode via the `.zero`-rect sheet form (format-agnostic; no per-format
+/// anchor rect needed). Carries the book key + a single-flight token so a
+/// stale/superseded request (the user tapped another highlight, triggered a
+/// newer edit, or the request targets a different book) is ignored.
 struct ReaderHighlightEditRequest: Sendable, Equatable {
     let highlightID: UUID
     /// The book the request targets — observers ignore a mismatch.

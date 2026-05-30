@@ -96,6 +96,13 @@ enum HighlightPopoverRequest {
     nonisolated static func event(from notification: Notification) -> ReaderHighlightTapEvent? {
         notification.object as? ReaderHighlightTapEvent
     }
+
+    /// Feature #1121: extracts the `ReaderHighlightEditRequest` from a
+    /// `.readerHighlightEditRequested` notification (the Edit-handoff auto-open).
+    /// `nil` for a mis-posted / nil object.
+    nonisolated static func editRequest(from notification: Notification) -> ReaderHighlightEditRequest? {
+        notification.object as? ReaderHighlightEditRequest
+    }
 }
 
 // MARK: - Share channel

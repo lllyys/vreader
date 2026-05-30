@@ -99,11 +99,28 @@ extension HighlightsSheet {
     /// entry point yet).
     func edit(_ item: AnnotationStreamItem) {
         rowState = rowState.dismissed()
+        // Navigate to the passage (the #1080 handoff) …
         switch item {
         case .highlight(let record):  onNavigate(record.locator)
         case .standalone(let record): onNavigate(record.locator)
         }
         onDismiss()
+        // … then Feature #1121 WI-2: request the in-reader editor to auto-open.
+        // For a highlight we post `.readerHighlightEditRequested`; the mounted
+        // `HighlightPopoverModifier` resolves the record (book-scoped) and opens
+        // the unified card in editing mode. A standalone-note editor path is WI-3
+        // (still navigate-only). The book key + a single-flight token scope/order
+        // the request (HighlightEditHandoff + the VM's latest-token supersession).
+        switch HighlightEditHandoff.action(
+            for: item, bookFingerprintKey: bookFingerprintKey, token: UUID()
+        ) {
+        case .requestHighlightEdit(let request):
+            NotificationCenter.default.post(
+                name: .readerHighlightEditRequested, object: request
+            )
+        case .openStandaloneNote:
+            break // WI-3
+        }
     }
 
     // MARK: - Delete plumbing

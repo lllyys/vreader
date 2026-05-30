@@ -57,5 +57,23 @@ struct HighlightEditHandoffTests {
         let r2 = ReaderHighlightEditRequest(highlightID: id, bookFingerprintKey: "k", token: UUID())
         #expect(r1 != r2)
     }
+
+    // MARK: - WI-2: editRequest(from:) notification parse
+
+    @Test("editRequest(from:) round-trips the posted ReaderHighlightEditRequest")
+    func editRequestParseRoundTrips() {
+        let req = ReaderHighlightEditRequest(
+            highlightID: UUID(), bookFingerprintKey: "book-key", token: UUID())
+        let note = Notification(name: .readerHighlightEditRequested, object: req)
+        #expect(HighlightPopoverRequest.editRequest(from: note) == req)
+    }
+
+    @Test("editRequest(from:) returns nil for a mis-posted object")
+    func editRequestParseRejectsWrongType() {
+        let note = Notification(name: .readerHighlightEditRequested, object: "not a request")
+        #expect(HighlightPopoverRequest.editRequest(from: note) == nil)
+        let nilNote = Notification(name: .readerHighlightEditRequested, object: nil)
+        #expect(HighlightPopoverRequest.editRequest(from: nilNote) == nil)
+    }
 }
 #endif

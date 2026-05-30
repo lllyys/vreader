@@ -49,6 +49,14 @@ struct HighlightPopoverModifier: ViewModifier {
     /// present the share sheet only once the popover sheet has fully
     /// dismissed. `nil` ⇒ a plain dismissal.
     @State private var pendingPostSheetDismiss: (@MainActor () -> Void)?
+    /// Feature #1121 WI-2: the in-flight Edit-handoff auto-open task (a settle
+    /// delay before opening the editor). Cancelled + replaced by a newer edit
+    /// request, and cancelled by a real highlight tap, so a stale edit can never
+    /// win over what the user is doing now.
+    @State private var pendingEditTask: Task<Void, Never>?
+    /// The token of the latest accepted edit request — a delayed task only fires
+    /// if it still matches (single-flight supersession, audit High).
+    @State private var latestEditToken: UUID?
 
     let theme: ReaderThemeV2
     /// Optional chapter/location string for the meta row.
@@ -79,8 +87,40 @@ struct HighlightPopoverModifier: ViewModifier {
                 NotificationCenter.default.publisher(for: .readerHighlightTapped)
             ) { note in
                 guard let event = HighlightPopoverRequest.event(from: note) else { return }
+                // A real tap supersedes any pending Edit-handoff auto-open (audit High).
+                pendingEditTask?.cancel(); pendingEditTask = nil; latestEditToken = nil
                 Task { await viewModel.handleTap(event, chapter: chapter) }
             }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .readerHighlightEditRequested)
+            ) { note in
+                // Feature #1121 WI-2: the HighlightsSheet "Edit" handoff. Open the
+                // unified card in editing mode for the requested highlight. Book
+                // guard: ignore a request for a different book (a same-book
+                // multi-window guard; cross-book is already a lookup no-op).
+                // `sourceRect: .zero` → the card's sheet form (no per-format anchor
+                // needed) → format-agnostic. A short settle lets the navigation
+                // land; the task is cancellable + token-guarded so a stale edit
+                // never wins over a newer edit or a real tap (audit High).
+                guard let request = HighlightPopoverRequest.editRequest(from: note),
+                      request.bookFingerprintKey == viewModel.bookFingerprintKey
+                else { return }
+                pendingEditTask?.cancel()
+                latestEditToken = request.token
+                pendingEditTask = Task {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    guard !Task.isCancelled, latestEditToken == request.token else { return }
+                    await viewModel.handleTap(
+                        ReaderHighlightTapEvent(
+                            highlightID: request.highlightID,
+                            sourceRect: .zero,
+                            openInEditMode: true
+                        ),
+                        chapter: chapter
+                    )
+                }
+            }
+            .onDisappear { pendingEditTask?.cancel(); pendingEditTask = nil }
             .onChange(of: viewModel.presented) { _, newValue in
                 if let newValue {
                     // Feature #1121: open in `.editing` for an Edit-handoff
