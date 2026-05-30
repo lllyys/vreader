@@ -83,7 +83,9 @@ struct HighlightPopoverModifier: ViewModifier {
             }
             .onChange(of: viewModel.presented) { _, newValue in
                 if let newValue {
-                    router.present(newValue)
+                    // Feature #1121: open in `.editing` for an Edit-handoff
+                    // auto-open; `.reading` for a normal tap.
+                    router.present(newValue, initialMode: viewModel.presentedInitialMode)
                 } else {
                     router.dismiss()
                 }

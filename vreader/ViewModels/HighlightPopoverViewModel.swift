@@ -42,6 +42,12 @@ final class HighlightPopoverViewModel {
     /// shown. A popover surface observes this to mount/dismiss itself.
     private(set) var presented: HighlightPopoverContent?
 
+    /// Feature #1121: the sub-mode the popover should OPEN in for the pending
+    /// `presented` — `.editing` when the resolving tap carried `openInEditMode`
+    /// (the Edit-handoff auto-open), else `.reading`. The modifier passes this to
+    /// `router.present(_:initialMode:)`, fixing the lost-flag pipeline gap.
+    private(set) var presentedInitialMode: HighlightPopoverMode = .reading
+
     private let persistence: any HighlightLookup
     private let bookFingerprintKey: String
     private let log = Logger(subsystem: "com.vreader.app", category: "HighlightPopover")
@@ -64,6 +70,9 @@ final class HighlightPopoverViewModel {
     func handleTap(_ event: ReaderHighlightTapEvent, chapter: String?) async {
         latestTapToken &+= 1
         let myToken = latestTapToken
+        // Feature #1121: carry the open-in-edit intent so the modifier presents
+        // the resolved content in `.editing` (a normal tap leaves it `.reading`).
+        presentedInitialMode = event.openInEditMode ? .editing : .reading
 
         let record: HighlightRecord?
         do {

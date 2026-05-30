@@ -444,6 +444,7 @@
 		4CC9567091E0CABFDD800F6C /* AIConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C52103AEAF5528A9DD58625E /* AIConfiguration.swift */; };
 		4CCBF4F6E186A7363A995303 /* ReaderContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB42EEEFFCAD8D654D57AE7 /* ReaderContainerView.swift */; };
 		4CCE624D88A6301BB7A2E18C /* V6toV7MigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6832D0CE94B6D7181A2D82B0 /* V6toV7MigrationTests.swift */; };
+		4CDDE0625D290A614C772CF1 /* HighlightEditHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F32CF0D8EA1782A58090C09 /* HighlightEditHandoffTests.swift */; };
 		4D262FBAEBAC69E057B371DA /* SourceSerif4-It.otf in Resources */ = {isa = PBXBuildFile; fileRef = BDD31D89F9B0E622F58B6F5C /* SourceSerif4-It.otf */; };
 		4D323FB1DB077A50154AFC72 /* SummaryScopeResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4201BB3B1C117672C45389AE /* SummaryScopeResolverTests.swift */; };
 		4D4A49E8738329EC2B336683 /* TXTReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D998048CE6DE8DC3BC77C284 /* TXTReaderViewModelTests.swift */; };
@@ -724,6 +725,7 @@
 		7E84EE1334499F661728483E /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DE76057526BA48CAE2A83A /* UpdateChecker.swift */; };
 		7EE8C91043F4F20D39AF326B /* AITranslationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B992B24F86DF8CA23E1215 /* AITranslationViewModel.swift */; };
 		7F17555C4DA7C6845661BBB5 /* WebDAVBlobStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C74A4D9FF0F23D7D38DC185F /* WebDAVBlobStoreTests.swift */; };
+		7F7CBE37EB640B7FFA5CD0C9 /* HighlightEditHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C92C565A8031982C687338 /* HighlightEditHandoff.swift */; };
 		7F8BACA8231195C0465A126E /* StatsCustomRangePickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9BC667542D27D5073EC0C4 /* StatsCustomRangePickerState.swift */; };
 		7F9B63BF3B9DCB2C4ED34710 /* ReadingStatsCustomRange.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D8C2F300254BE19CB77776 /* ReadingStatsCustomRange.swift */; };
 		7FB5A34EF09FD38AB35BC2F4 /* ResolvedAIProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF4A6CC054CFA7E4E893F893 /* ResolvedAIProviderConfig.swift */; };
@@ -1444,6 +1446,7 @@
 		0069CA3A00998B13DE06E424 /* LocatorIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorIntegrationTests.swift; sourceTree = "<group>"; };
 		00814B9C69A0E1190146095E /* PersistenceActor+Collections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+Collections.swift"; sourceTree = "<group>"; };
 		00B189F7F32FF82BCF254923 /* TXTTextChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTTextChunker.swift; sourceTree = "<group>"; };
+		00C92C565A8031982C687338 /* HighlightEditHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightEditHandoff.swift; sourceTree = "<group>"; };
 		00DE93DBD2142D882858486F /* Bug93GeneralChatPersistenceVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bug93GeneralChatPersistenceVerificationTests.swift; sourceTree = "<group>"; };
 		00E65D537B445A7271390081 /* ChapterTranslationPrefetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterTranslationPrefetcher.swift; sourceTree = "<group>"; };
 		00FE0912FBC85E22DF8C637F /* ReadingTimeFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingTimeFormatter.swift; sourceTree = "<group>"; };
@@ -1873,6 +1876,7 @@
 		4EE30F08BFCC54CF8598180F /* LaunchArgParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchArgParsingTests.swift; sourceTree = "<group>"; };
 		4EF994B8B9C677990960D7F2 /* TXTChapterStartDecorator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterStartDecorator.swift; sourceTree = "<group>"; };
 		4F1348B555C6A2C90B03ED65 /* DebugBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBridge.swift; sourceTree = "<group>"; };
+		4F32CF0D8EA1782A58090C09 /* HighlightEditHandoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightEditHandoffTests.swift; sourceTree = "<group>"; };
 		4F472E419C207DEF572E322B /* NotesRowState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesRowState.swift; sourceTree = "<group>"; };
 		4F8AEC7D40405AE90840ABE4 /* HighlightRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightRenderer.swift; sourceTree = "<group>"; };
 		4FA36CFAC187DC7B25B7A920 /* ChapterStartTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterStartTypography.swift; sourceTree = "<group>"; };
@@ -4477,6 +4481,7 @@
 				BB4782896641E1278B54C247 /* AnnotationsSheetRouteTests.swift */,
 				3E3B2EC2A68566A49EFF1271 /* AnnotationStreamBuilderTests.swift */,
 				E4A1E377D377C7BFEE10AE14 /* HighlightAnnotationCardTests.swift */,
+				4F32CF0D8EA1782A58090C09 /* HighlightEditHandoffTests.swift */,
 				5F46FAD0B946CB839FF15BB6 /* HighlightsSheetDeleteTests.swift */,
 				494171D4E38F6498FC04AC2C /* HighlightsSheetTests.swift */,
 				40E27899DB05507AB2F13CDE /* NotesRowStateTests.swift */,
@@ -5127,6 +5132,7 @@
 				6C930176EDA59BA6AE769B8C /* AnnotationStreamBuilder.swift */,
 				FCC8C2B2EE71211499AA0EE4 /* AnnotationStreamItem.swift */,
 				D4793BFB8AB85773B1931C28 /* HighlightAnnotationCard.swift */,
+				00C92C565A8031982C687338 /* HighlightEditHandoff.swift */,
 				5E0196F7E5E8458281F5C896 /* HighlightsSheet.swift */,
 				92A21498B4BB8CCB388677F3 /* HighlightsSheet+Delete.swift */,
 				50988D487A861C52A06E6159 /* HighlightsSheet+Export.swift */,
@@ -5675,6 +5681,7 @@
 				CFF91208E4CD56126CC9FB8D /* HighlightCoordinatorMutationTests.swift in Sources */,
 				514822215748FA807FA36FE2 /* HighlightCoordinatorTests.swift in Sources */,
 				2509B7983AE76F5C85B71634 /* HighlightDedupeTests.swift in Sources */,
+				4CDDE0625D290A614C772CF1 /* HighlightEditHandoffTests.swift in Sources */,
 				FCDCB2D6F445BE64BFE95D03 /* HighlightHitToleranceTests.swift in Sources */,
 				51F370150CAD9A865053266C /* HighlightIntegrationTests.swift in Sources */,
 				7ACFB80A7A453D8665EA3E86 /* HighlightListViewModelFoliateOverlayStripTests.swift in Sources */,
@@ -6314,6 +6321,7 @@
 				CCADB57440392A88FAEAFBAF /* HighlightActionCardView.swift in Sources */,
 				3F171AACB1188132A688A94E /* HighlightAnnotationCard.swift in Sources */,
 				68334589D47C834C926DEF1C /* HighlightCoordinator.swift in Sources */,
+				7F7CBE37EB640B7FFA5CD0C9 /* HighlightEditHandoff.swift in Sources */,
 				61A73A3870F542FDEEDA92B7 /* HighlightHitTolerance.swift in Sources */,
 				4331E31295D932065A8E3DCB /* HighlightListViewModel.swift in Sources */,
 				D8653FB28D757A7EE29D0D37 /* HighlightLookup.swift in Sources */,
@@ -6892,13 +6900,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 732;
+				CURRENT_PROJECT_VERSION = 733;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.41.6;
+				MARKETING_VERSION = 3.41.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -7042,13 +7050,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 732;
+				CURRENT_PROJECT_VERSION = 733;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.41.6;
+				MARKETING_VERSION = 3.41.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

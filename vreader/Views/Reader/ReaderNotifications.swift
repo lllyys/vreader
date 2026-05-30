@@ -65,6 +65,11 @@ extension Notification.Name {
     /// torn down in feature #64 WI-10 — this notification is the surviving,
     /// now tap-triggered, entry point.)
     static let readerHighlightTapped = Notification.Name("vreader.readerHighlightTapped")
+    /// Feature #1121: a programmatic "navigate then auto-open the editor" request
+    /// from the HighlightsSheet Edit handoff. Object is a `ReaderHighlightEditRequest`.
+    /// The per-format bridge resolves the highlight after re-render and re-posts a
+    /// `readerHighlightTapped` with `openInEditMode: true`.
+    static let readerHighlightEditRequested = Notification.Name("vreader.readerHighlightEditRequested")
     /// Posted after annotation import completes (bug #88).
     /// Reader containers observe this to re-render persisted highlights.
     static let readerHighlightsDidImport = Notification.Name("vreader.readerHighlightsDidImport")
@@ -423,4 +428,24 @@ struct PDFHighlightNotificationPayload {
 struct ReaderHighlightTapEvent: Sendable, Equatable {
     let highlightID: UUID
     let sourceRect: CGRect
+    /// Feature #1121: when true the unified popover opens directly in `.editing`
+    /// mode (the "Edit handoff" auto-open from the HighlightsSheet Notes menu).
+    /// Defaults false so every existing tap-driven producer + behavior is
+    /// unchanged. A real user tap always leaves this false.
+    var openInEditMode: Bool = false
+}
+
+/// Feature #1121: a programmatic request to navigate to a highlight and then
+/// auto-open its editor. Posted by the HighlightsSheet "Edit" handoff; observed
+/// by the per-format reader bridge, which — once the highlight has re-rendered
+/// in the new scroll/page position — resolves its anchor and re-posts a
+/// `ReaderHighlightTapEvent(openInEditMode: true)`. Carries the book key + a
+/// single-flight token so a stale/superseded request (the user navigated away,
+/// tapped another highlight, or changed book) is ignored (plan-audit M7).
+struct ReaderHighlightEditRequest: Sendable, Equatable {
+    let highlightID: UUID
+    /// The book the request targets — observers ignore a mismatch.
+    let bookFingerprintKey: String
+    /// Monotonic per-session token; a newer request supersedes an older one.
+    let token: UUID
 }

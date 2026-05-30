@@ -64,14 +64,16 @@ final class HighlightPopoverActionRouter {
 
     // MARK: - Presentation
 
-    /// Presents (or replaces) the popover for `content`. Always resets the
-    /// interaction state: `mode` → `.reading`, `noteDraft` → `""` — so a rapid
-    /// second tap on a different highlight never carries the prior highlight's
-    /// stale draft or editing mode (R1-6).
-    func present(_ content: HighlightPopoverContent) {
+    /// Presents (or replaces) the popover for `content`. Resets the interaction
+    /// state — so a rapid second tap on a different highlight never carries the
+    /// prior highlight's stale draft (R1-6). `initialMode` selects the opening
+    /// sub-state: `.reading` for a normal tap (default); Feature #1121 passes
+    /// `.editing` for the "Edit handoff" auto-open, seeding `noteDraft` from the
+    /// content's note so the editor opens ready to type.
+    func present(_ content: HighlightPopoverContent, initialMode: HighlightPopoverMode = .reading) {
         self.content = content
-        mode = .reading
-        noteDraft = ""
+        mode = initialMode
+        noteDraft = initialMode == .editing ? (content.note ?? "") : ""
         pressedColor = nil
     }
 

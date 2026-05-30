@@ -127,6 +127,29 @@ struct HighlightPopoverActionRouterTests {
         #expect(router.noteDraft == "")
     }
 
+    // MARK: Feature #1121 — present(initialMode:)
+
+    @Test func present_defaultInitialModeIsReading() {
+        let router = makeRouter()
+        router.present(routerContent(note: "a note"))
+        #expect(router.mode == .reading)
+        #expect(router.noteDraft == "") // reading never seeds a draft
+    }
+
+    @Test func present_editingInitialMode_opensEditingAndSeedsDraftFromNote() {
+        let router = makeRouter()
+        router.present(routerContent(note: "existing note"), initialMode: .editing)
+        #expect(router.mode == .editing)
+        #expect(router.noteDraft == "existing note") // seeded so the editor is ready
+    }
+
+    @Test func present_editingInitialMode_emptyNote_seedsEmptyDraft() {
+        let router = makeRouter()
+        router.present(routerContent(note: nil), initialMode: .editing)
+        #expect(router.mode == .editing)
+        #expect(router.noteDraft == "")
+    }
+
     // MARK: changeColor
 
     @Test func changeColor_success_callsMutatingAndRefreshesContent() async {
