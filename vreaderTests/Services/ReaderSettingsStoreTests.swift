@@ -12,9 +12,9 @@ import UIKit
     // The default theme is `.paper` (was the legacy `ReaderTheme.light`,
     // which the migration alias maps to `.paper`).
     @Test func defaultTheme() { #expect(makeStore().theme == .paper) }
-    @Test func defaultTypography() { let s = makeStore(); #expect(s.typography.fontSize == 18) }
+    @Test func defaultTypography() { let s = makeStore(); #expect(s.typography.fontSize == 16) } // Bug #290
     #if canImport(UIKit)
-    @Test func uiFontForSystemFamily() { #expect(makeStore().uiFont.pointSize == 18) }
+    @Test func uiFontForSystemFamily() { #expect(makeStore().uiFont.pointSize == 16) } // Bug #290
     @Test func uiBackgroundColorMatchesTheme() {
         var s = makeStore(); s.theme = .dark; var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         s.uiBackgroundColor.getRed(&r, green: &g, blue: &b, alpha: &a); #expect(r < 0.2)

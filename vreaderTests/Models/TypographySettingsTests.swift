@@ -10,8 +10,19 @@ struct TypographySettingsTests {
     // MARK: - Defaults
 
     @Test func defaultFontSize() {
+        // Bug #290: lowered 18 → 16 (the default value read too large; #280's
+        // calibration is unchanged). Pinned to the named constant so init +
+        // Codable fallback stay in lockstep.
         let settings = TypographySettings()
-        #expect(settings.fontSize == 18)
+        #expect(settings.fontSize == 16)
+        #expect(settings.fontSize == TypographySettings.defaultFontSize)
+    }
+
+    @Test func defaultFontSizeUsedWhenDecodingWithoutFontSize() {
+        // An older persisted blob with no fontSize key falls back to the default.
+        let json = #"{"lineSpacing":1.4,"fontFamily":"system","cjkSpacing":false}"#.data(using: .utf8)!
+        let decoded = try! JSONDecoder().decode(TypographySettings.self, from: json)
+        #expect(decoded.fontSize == TypographySettings.defaultFontSize)
     }
 
     @Test func defaultLineSpacing() {
@@ -206,7 +217,7 @@ struct TypographySettingsTests {
         let data = try JSONEncoder().encode(settings)
         let decoded = try JSONDecoder().decode(TypographySettings.self, from: data)
 
-        #expect(decoded.fontSize == 18)
+        #expect(decoded.fontSize == 16) // Bug #290: default lowered 18 → 16
         #expect(decoded.lineSpacing == 1.4)
         #expect(decoded.fontFamily == .system)
         #expect(decoded.cjkSpacing == false)
@@ -258,7 +269,7 @@ struct TypographySettingsTests {
         let json = #"{}"#
         let data = Data(json.utf8)
         let decoded = try JSONDecoder().decode(TypographySettings.self, from: data)
-        #expect(decoded.fontSize == 18)
+        #expect(decoded.fontSize == 16) // Bug #290: default lowered 18 → 16
         #expect(decoded.lineSpacing == 1.4)
         #expect(decoded.fontFamily == .system)
         #expect(decoded.cjkSpacing == false)

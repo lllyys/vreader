@@ -56,6 +56,12 @@ struct TypographySettings: Codable, Sendable, Equatable {
     /// addressed by this raise.
     static let fontSizeRange: ClosedRange<CGFloat> = 12...64
 
+    /// Default reading body font size (points). Bug #290: lowered 18 → 16 — the
+    /// #280 calibration is correct (18pt == TXT cap-height parity), but the
+    /// default VALUE read uniformly too large out of the box. Single source for
+    /// the init default + the Codable fallback so they can't drift.
+    static let defaultFontSize: CGFloat = 16
+
     /// Allowed line spacing multiplier range.
     static let lineSpacingRange: ClosedRange<CGFloat> = 1.0...2.0
 
@@ -87,7 +93,7 @@ struct TypographySettings: Codable, Sendable, Equatable {
     // MARK: - Init
 
     init(
-        fontSize: CGFloat = 18,
+        fontSize: CGFloat = TypographySettings.defaultFontSize,
         lineSpacing: CGFloat = 1.4,
         fontFamily: ReaderFontFamily = .system,
         cjkSpacing: Bool = false
@@ -109,7 +115,7 @@ struct TypographySettings: Codable, Sendable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let rawFontSize = (try? container.decodeIfPresent(CGFloat.self, forKey: .fontSize)) ?? 18
+        let rawFontSize = (try? container.decodeIfPresent(CGFloat.self, forKey: .fontSize)) ?? Self.defaultFontSize
         let rawLineSpacing = (try? container.decodeIfPresent(CGFloat.self, forKey: .lineSpacing)) ?? 1.4
         self._fontSize = Self.clamp(rawFontSize, to: Self.fontSizeRange)
         self._lineSpacing = Self.clamp(rawLineSpacing, to: Self.lineSpacingRange)
