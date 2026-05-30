@@ -14,13 +14,17 @@ extension TXTChunkedReaderBridge.Coordinator {
     /// Scrolls the table view to the chunk containing the given document-global
     /// UTF-16 offset, with intra-chunk positioning.
     func scrollToGlobalOffset(_ globalOffset: Int, in tableView: UITableView) {
-        guard !chunkStartOffsets.isEmpty else { return }
+        // Bug #27 (audit): if the table was hidden for restore (alpha 0) and the
+        // metadata is empty/mismatched, reveal before the early return so the
+        // reader isn't left blank for the full 1.2s safety timeout. Idempotent +
+        // harmless for normal (already-visible) dynamic navigation.
+        guard !chunkStartOffsets.isEmpty else { revealContent(tableView); return }
 
         // Binary search for the chunk containing globalOffset — shared with the
         // continuous-scroll restore path (Bug #180).
         guard let chunkIndex = TXTChunkedReaderBridge.chunkIndex(
             forGlobalOffset: globalOffset, chunkStartOffsets: chunkStartOffsets
-        ), chunkIndex < chunks.count else { return }
+        ), chunkIndex < chunks.count else { revealContent(tableView); return }
 
         // Compute intra-chunk fraction for sub-cell positioning
         let chunkStart = chunkStartOffsets[chunkIndex]

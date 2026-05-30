@@ -119,6 +119,18 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             : raw
     }
 
+    /// Bug #27 (chunked regression): is there a saved position to restore on
+    /// open? When true the table is hidden (alpha 0) until restore lands, so the
+    /// reader never paints chapter 1 then visibly jumps. False (no restore, or an
+    /// out-of-range chunk index) → the table stays visible immediately.
+    static func hasPendingRestore(
+        restoreGlobalOffset: Int?, restoreChunkIndex: Int?, chunkCount: Int
+    ) -> Bool {
+        if let g = restoreGlobalOffset, g > 0 { return true }
+        if let c = restoreChunkIndex, c >= 0, c < chunkCount { return true }
+        return false
+    }
+
     /// Resolves a document-global UTF-16 offset to the index of the chunk
     /// containing it. Binary search over `chunkStartOffsets`; clamps to
     /// `[0, count-1]`. Returns `nil` for an empty offsets array.
@@ -217,6 +229,28 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         // fraction-based `restoreChunkIndex` path stays for the legacy
         // large-file caller (mutually exclusive — that caller leaves
         // `restoreGlobalOffset` nil).
+        // Bug #27 (chunked regression): if there's a saved position to restore,
+        // hide the table (alpha 0) so the deferred restore's scroll happens BEFORE
+        // the reader is ever painted — otherwise SwiftUI commits a frame at
+        // contentOffset 0 (chapter 1) and the user sees a flash + jump. Ported
+        // from #27's original (non-chunked) alpha gate. `attemptChunkRestore`
+        // reveals once the scroll settles; a safety timer guarantees the screen
+        // is never left blank if restore can't land.
+        let pendingRestore = Self.hasPendingRestore(
+            restoreGlobalOffset: restoreGlobalOffset,
+            restoreChunkIndex: restoreChunkIndex,
+            chunkCount: chunks.count
+        )
+        if pendingRestore {
+            tableView.alpha = 0
+            let coordinator = context.coordinator
+            // Safety net: never leave the content hidden if restore never lands.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak tableView] in
+                guard let tableView, tableView.alpha == 0 else { return }
+                coordinator.revealContent(tableView)
+            }
+        }
+
         if let globalOffset = restoreGlobalOffset, globalOffset > 0 {
             let coordinator = context.coordinator
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak tableView] in
@@ -493,14 +527,25 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             toChunkIndex index: Int,
             intraFraction: CGFloat? = nil
         ) {
-            guard index >= 0, index < chunks.count else { return }
+            guard index >= 0, index < chunks.count else {
+                restoreRetryCount = 0
+                revealContent(tableView); return
+            }
 
             // Bug #289: suppress position SAVE while the programmatic restore +
             // its layout-driven scroll callbacks run; cleared once they settle.
             isRestoringPosition = true
 
             guard tableView.bounds.width > 0 else {
-                guard restoreRetryCount < Self.maxRestoreRetries else { isRestoringPosition = false; return }
+                // Bug #27: exhausted retries → reveal so the screen isn't left blank.
+                guard restoreRetryCount < Self.maxRestoreRetries else {
+                    // Audit: reset so a LATER restore/navigation gets a full retry
+                    // budget (a stale exhausted count would re-introduce the flash).
+                    restoreRetryCount = 0
+                    isRestoringPosition = false
+                    revealContent(tableView)
+                    return
+                }
                 restoreRetryCount += 1
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak tableView] in
                     guard let self, let tableView else { return }
@@ -523,10 +568,24 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
                 }
             }
 
-            // Release the suppression once the post-scroll layout callbacks settle.
+            // Bug #27: the scroll has landed — reveal the table (it was hidden in
+            // makeUIView so chapter 1 never flashed). Bug #289: release the SAVE
+            // suppression once the post-scroll layout callbacks settle. Reset the
+            // retry budget so a later restore/navigation starts fresh (audit).
+            restoreRetryCount = 0
+            revealContent(tableView)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 self?.isRestoringPosition = false
             }
+        }
+
+        /// Bug #27: reveal the table after a restore lands (it was hidden in
+        /// `makeUIView` to suppress the chapter-1 flash). Idempotent; a brief fade
+        /// restores the designed open transition (Rule 51 carve-out — restoring
+        /// existing behavior, not new UI).
+        func revealContent(_ tableView: UITableView) {
+            guard tableView.alpha < 1 else { return }
+            UIView.animate(withDuration: 0.12) { tableView.alpha = 1 }
         }
 
         // MARK: UITableViewDataSource

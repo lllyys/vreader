@@ -103,5 +103,36 @@ struct TXTChunkedReaderBridgeRestoreTests {
         #expect(bridge.chapterOffsetIndex == offsetIndex)
         #expect(bridge.restoreGlobalOffset == 42)
     }
+
+    // MARK: - Bug #27: hide-until-restore predicate (chunked flash regression)
+
+    @Test("a positive global offset is a pending restore (hide the table)")
+    func pendingForGlobalOffset() {
+        #expect(TXTChunkedReaderBridge.hasPendingRestore(
+            restoreGlobalOffset: 42, restoreChunkIndex: nil, chunkCount: 3))
+    }
+
+    @Test("an in-range chunk index is a pending restore")
+    func pendingForChunkIndex() {
+        #expect(TXTChunkedReaderBridge.hasPendingRestore(
+            restoreGlobalOffset: nil, restoreChunkIndex: 2, chunkCount: 3))
+    }
+
+    @Test("no saved position → NOT pending (table stays visible, no needless hide)")
+    func notPendingWhenNothingToRestore() {
+        #expect(!TXTChunkedReaderBridge.hasPendingRestore(
+            restoreGlobalOffset: nil, restoreChunkIndex: nil, chunkCount: 3))
+        // global offset 0 = the very top → nothing to restore, don't hide.
+        #expect(!TXTChunkedReaderBridge.hasPendingRestore(
+            restoreGlobalOffset: 0, restoreChunkIndex: nil, chunkCount: 3))
+    }
+
+    @Test("an out-of-range chunk index is NOT pending (avoids hiding then blanking)")
+    func notPendingForOutOfRangeChunk() {
+        #expect(!TXTChunkedReaderBridge.hasPendingRestore(
+            restoreGlobalOffset: nil, restoreChunkIndex: 5, chunkCount: 3))
+        #expect(!TXTChunkedReaderBridge.hasPendingRestore(
+            restoreGlobalOffset: nil, restoreChunkIndex: -1, chunkCount: 3))
+    }
 }
 #endif
