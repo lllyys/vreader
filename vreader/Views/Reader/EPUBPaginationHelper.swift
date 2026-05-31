@@ -28,7 +28,9 @@ enum EPUBPaginationHelper {
     /// Column gap between pages (prevents text clipping at edges).
     static let columnGap: Int = 40
 
-    static func paginationCSS(viewportWidth: CGFloat, viewportHeight: CGFloat) -> String {
+    static func paginationCSS(
+        viewportWidth: CGFloat, viewportHeight: CGFloat, axis: PageAxis = .horizontalLTR
+    ) -> String {
         // Bug #171 fix: clamp the computed column-width to a positive
         // value. The pre-fix expression `Int(viewportWidth) - columnGap`
         // emits negative px values for very small viewports (e.g.
@@ -37,6 +39,10 @@ enum EPUBPaginationHelper {
         // gap; tightening it here while we're in the file.
         let colWidth = max(Int(viewportWidth) - columnGap, 1)
         let h = max(Int(viewportHeight), 0)
+        // Feature #75 WI-2: inject the axis direction/writing-mode only when
+        // non-LTR, so the LTR output is byte-identical to pre-#75.
+        let directionDecl = EPUBPagedAxis.directionCSS(axis: axis)
+        let directionLine = directionDecl.isEmpty ? "" : "\n            \(directionDecl)"
         // Bug #171: `column-width` alone is a HINT (minimum desired
         // width). The browser will fit as many columns as the available
         // body width permits — which produced a two-column "newspaper"
@@ -70,7 +76,7 @@ enum EPUBPaginationHelper {
             height: \(h)px !important;
             overflow: hidden !important;
             margin: 0;
-            -webkit-column-break-inside: avoid;
+            -webkit-column-break-inside: avoid;\(directionLine)
         }
         img, svg, video, figure {
             break-inside: avoid;
@@ -94,9 +100,14 @@ enum EPUBPaginationHelper {
     ///   - page: Zero-based page index. Negative values are treated as 0.
     ///   - viewportWidth: The viewport width used to compute scroll offset.
     /// - Returns: A JavaScript string that sets the horizontal scroll position.
-    static func navigateToPageJS(page: Int, viewportWidth: CGFloat) -> String {
-        let safePage = max(0, page)
-        let offset = safePage * Int(viewportWidth)
+    static func navigateToPageJS(
+        page: Int, viewportWidth: CGFloat, axis: PageAxis = .horizontalLTR
+    ) -> String {
+        // Feature #75 WI-2: axis-aware page→scrollLeft offset. LTR is unchanged
+        // (positive); RTL / vertical-rl negate (WebKit negative-scrollLeft).
+        let offset = EPUBPagedAxis.scrollOffset(
+            page: page, viewportWidth: Int(viewportWidth), axis: axis
+        )
         return """
         (function() {
             document.documentElement.scrollLeft = \(offset);
@@ -222,8 +233,12 @@ enum EPUBPaginationHelper {
     // MARK: - JS: CSS Injection/Removal
 
     /// Generates JavaScript to inject or replace the pagination CSS style element.
-    static func injectPaginationCSSJS(viewportWidth: CGFloat, viewportHeight: CGFloat) -> String {
-        let css = paginationCSS(viewportWidth: viewportWidth, viewportHeight: viewportHeight)
+    static func injectPaginationCSSJS(
+        viewportWidth: CGFloat, viewportHeight: CGFloat, axis: PageAxis = .horizontalLTR
+    ) -> String {
+        let css = paginationCSS(
+            viewportWidth: viewportWidth, viewportHeight: viewportHeight, axis: axis
+        )
         // Bug #136: delegate to the shared escape helper for parity with
         // FoliateJSEscaper-routed sites and the bug #135 fix.
         let escaped = FoliateJSEscaper.escapeForJSString(css)

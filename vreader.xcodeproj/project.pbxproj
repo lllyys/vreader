@@ -1198,6 +1198,7 @@
 		D35863F85B17FE883F4EABBF /* ChapterTranslationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 551DA6A3D645B1D9D72EE159 /* ChapterTranslationService.swift */; };
 		D36EEE178AE4BC41B7B4C650 /* FileAvailabilityBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4B7084FA4C129303F52CB8 /* FileAvailabilityBadge.swift */; };
 		D371F8D98EA9603C6BF3E6ED /* EPUBHighlightTapBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A8BD899A79BEB3964941631 /* EPUBHighlightTapBridgeTests.swift */; };
+		D3A9394A17D78A98DDF4E618 /* EPUBPagedAxis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8401AD7C7023A69BE9B68215 /* EPUBPagedAxis.swift */; };
 		D3AA14442F5D8686DD9BAA18 /* HTTPSpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 060D40EBDC75C3812596FB84 /* HTTPSpeechSynthesizer.swift */; };
 		D41473E2CF7AB980E43C6C54 /* BookFormatAZW3Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 627E42F1B1E8A59081CC6628 /* BookFormatAZW3Tests.swift */; };
 		D4332566CDFE7329E3709381 /* EPUBWebViewBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E536B950D178C97842DF52 /* EPUBWebViewBridge.swift */; };
@@ -1247,6 +1248,7 @@
 		DD1020F3F0A2D5BA7FFCB279 /* UnifiedScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0753D8C40DFE06B0323EE5B /* UnifiedScrollView.swift */; };
 		DD273808CA81E259EAC3F7C5 /* LocatorRestorerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10A08E980C92248337462DF /* LocatorRestorerTests.swift */; };
 		DD32F48A384939AC2389DCAE /* PersistenceHighlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEDD43BA2EC5C331FDF3A703 /* PersistenceHighlightTests.swift */; };
+		DD69A5306F3DA8F15F1091E0 /* EPUBPagedAxisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A56CF939EF4F69F9304BC332 /* EPUBPagedAxisTests.swift */; };
 		DD711E614DD2743B1CB0088E /* BookmarkFeedbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C85205257E8103AA80C08BAB /* BookmarkFeedbackTests.swift */; };
 		DD95745C7DEBB12D1A8067CF /* FoliateSpikeView+Restore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 597F6A9C185AEBABD1E8F21B /* FoliateSpikeView+Restore.swift */; };
 		DDAF2F7D65A07079EFE2A421 /* PDFReaderContainerView+Overlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDC88500940FCA638D86E8E4 /* PDFReaderContainerView+Overlays.swift */; };
@@ -2185,6 +2187,7 @@
 		83BEF8E9F5CAD4246490C06D /* AISummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISummaryCard.swift; sourceTree = "<group>"; };
 		83CA82E6D9E86220E10B3728 /* SchemaV8.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaV8.swift; sourceTree = "<group>"; };
 		83F36EF81271874A13417D45 /* OPDSEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPDSEntryView.swift; sourceTree = "<group>"; };
+		8401AD7C7023A69BE9B68215 /* EPUBPagedAxis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPagedAxis.swift; sourceTree = "<group>"; };
 		8404837D8FC686DDDB62EEC3 /* AccentColorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccentColorTests.swift; sourceTree = "<group>"; };
 		847DD24E5292D6B493E29C15 /* BilingualPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualPairing.swift; sourceTree = "<group>"; };
 		84BAC2CBFB7F533857E6A65B /* search_no_results.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = search_no_results.html; sourceTree = "<group>"; };
@@ -2364,6 +2367,7 @@
 		A4FC31294DE996929269182A /* ReadiumBilingualCommanderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumBilingualCommanderTests.swift; sourceTree = "<group>"; };
 		A504B80204BEC5B968087D02 /* PersistenceActorRemoteOnlyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceActorRemoteOnlyTests.swift; sourceTree = "<group>"; };
 		A53978A56FA1C7D888914503 /* MDChapterTextProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDChapterTextProvider.swift; sourceTree = "<group>"; };
+		A56CF939EF4F69F9304BC332 /* EPUBPagedAxisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPagedAxisTests.swift; sourceTree = "<group>"; };
 		A5717B0EFF152D86D07C5C0D /* EPUBSelectionTokenCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBSelectionTokenCacheTests.swift; sourceTree = "<group>"; };
 		A579625590B25F81679F1EA0 /* ReaderNotificationModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderNotificationModifier.swift; sourceTree = "<group>"; };
 		A61992F892AF73F530F54DAC /* FoliateHighlightMutatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateHighlightMutatorTests.swift; sourceTree = "<group>"; };
@@ -3385,6 +3389,7 @@
 				5C5EC86BB06D46DC9A5A4F6B /* EPUBHighlightBridgeTests.swift */,
 				59540377ED7FDB678914B972 /* EPUBHighlightRendererBug77Tests.swift */,
 				9A8BD899A79BEB3964941631 /* EPUBHighlightTapBridgeTests.swift */,
+				A56CF939EF4F69F9304BC332 /* EPUBPagedAxisTests.swift */,
 				002A1A054B82164581081351 /* EPUBPagedProgressTests.swift */,
 				B9500033AC714D470A3024F8 /* EPUBPaginationTests.swift */,
 				8FA15EA6877E3CA9421E1B59 /* EPUBProgressTests.swift */,
@@ -3958,6 +3963,7 @@
 				435C00E099B7F5D7A7821FDC /* EPUBHighlightBridge.swift */,
 				44423E8976A2B27C4B14617F /* EPUBHighlightJS.swift */,
 				3650C684EB90A5D7E2F8059A /* EPUBHighlightRenderer.swift */,
+				8401AD7C7023A69BE9B68215 /* EPUBPagedAxis.swift */,
 				43677A0B2B4A42609A2800ED /* EPUBPagedProgress.swift */,
 				E5EC9B0FFB09D08F65F205F3 /* EPUBPaginationHelper.swift */,
 				DBBB555BA86F7648ACBC780F /* EPUBProgressCalculator.swift */,
@@ -5616,6 +5622,7 @@
 				56A100BED3272494DE799F55 /* EPUBHighlightRendererBug77Tests.swift in Sources */,
 				D371F8D98EA9603C6BF3E6ED /* EPUBHighlightTapBridgeTests.swift in Sources */,
 				3D31B039400E1A83C4A1DF6D /* EPUBMetadataExtractorTests.swift in Sources */,
+				DD69A5306F3DA8F15F1091E0 /* EPUBPagedAxisTests.swift in Sources */,
 				E431016A81D6B202241B4275 /* EPUBPagedProgressTests.swift in Sources */,
 				5BA867B4591F0916810C91B8 /* EPUBPaginationTests.swift in Sources */,
 				EB3D180641036C8A6FA00030 /* EPUBParserTests.swift in Sources */,
@@ -6246,6 +6253,7 @@
 				EE8189DAD855D15887FBBCFA /* EPUBHighlightJS.swift in Sources */,
 				863103455E8B23D20B97F192 /* EPUBHighlightRenderer.swift in Sources */,
 				1D0B7D11E74A0E06F27A9F8B /* EPUBLayoutPreference.swift in Sources */,
+				D3A9394A17D78A98DDF4E618 /* EPUBPagedAxis.swift in Sources */,
 				3E445837C0B98903CFCC5AD7 /* EPUBPagedProgress.swift in Sources */,
 				39699408A91BBF24E36FCE53 /* EPUBPaginationHelper.swift in Sources */,
 				F78B9D218FBB628F31479271 /* EPUBParser.swift in Sources */,
@@ -6920,13 +6928,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 750;
+				CURRENT_PROJECT_VERSION = 751;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.41.24;
+				MARKETING_VERSION = 3.41.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -7070,13 +7078,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 750;
+				CURRENT_PROJECT_VERSION = 751;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.41.24;
+				MARKETING_VERSION = 3.41.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
