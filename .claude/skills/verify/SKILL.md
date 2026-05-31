@@ -65,6 +65,16 @@ harness, which synthesizes its own gestures via the accessibility API.
 - **Seed fixtures exist for TXT / MD / EPUB only.** `DebugFixtureCatalog` has
   no PDF or AZW3/MOBI fixture, so surfaces on those formats are not CU-free
   verifiable today.
+- **idb gesture driver — `scripts/sim-tap.sh`.** When a verification needs a
+  real tap / swipe the accessibility-synthesized XCUITest can't express, or a
+  quick interactive check you don't want to author a full test for, drive it
+  with `scripts/sim-tap.sh` (idb): `launch <bundle-id>`, `label "<AXLabel>"`,
+  `xy`, `swipe`, `tree` (read on-screen elements), `shot` (screenshot to
+  assert). It taps the simulator directly, so MCP-CU being unavailable does not
+  block it. Order of preference is unchanged — **DebugBridge command → XCUITest
+  → idb**; reach for idb only when the first two can't express the gesture.
+  Boundaries (WebView text isn't in the AX tree; Scroll vs Paged; can't conjure
+  fixtures) and the install step are in `docs/subsystems/sim-gesture-driver.md`.
 
 ## Mode A — bug close-gate verification
 
@@ -117,15 +127,24 @@ gap is not yet tracked in `docs/bugs.md`, file it as a `DevTools/Verification`
 bug (it is a real harness defect — same class as Bug #196 / #214) so it can be
 fixed and the surface unblocked.
 
-- **AI surfaces unreachable** — the `--enable-ai` launch arg is parsed into
-  `TestLaunchConfig` but never consumed in `VReaderApp`, so XCUITest cannot
-  satisfy the 3-gate `AIReaderAvailability` check. Blocks Bug #93 and features
-  #65 / #69.
-- **No search-driver DebugBridge command** — the harness cannot drive a
-  search-result tap, so cross-chapter search-result repros (Bug #182) are
-  unreachable CU-free.
 - **No PDF / AZW3 seed fixture** — `DebugFixtureCatalog` ships txt / md / epub
-  only.
+  only. **Still a real gap** — idb cannot conjure a book; a fixture must exist
+  before any tool can open it. PDF / AZW3 surfaces stay un-seedable CU-free.
+
+Two formerly-listed gaps are now closed — do not skip candidates for them:
+
+- **AI surfaces — RESOLVED (Bug #237).** The `--enable-ai` flag *is* now
+  consumed: `VReaderApp.swift` forwards `config.enableAI` to
+  `AITestOverride.forceAvailable`, which short-circuits the API-key + consent
+  gates a headless test can't satisfy. AI verification surfaces (Bug #93,
+  features #65 / #69) are reachable in XCUITest. idb is not the lever here
+  regardless — availability was code-gated, not gesture-gated.
+- **Search-result tap — idb-unblockable.** The search field and result rows
+  are native SwiftUI (`SearchView` / `SearchResultsGroupedList`), so
+  `scripts/sim-tap.sh` can `label`/`xy`-tap a result row directly, sidestepping
+  the absence of a search-driver DebugBridge command (Bug #182). Confirm the
+  rows with `sim-tap.sh tree` first; the *result text* inside an EPUB WebView
+  is still not in the AX tree, so assert the landed position via DebugBridge.
 
 ## Scope guardrail
 

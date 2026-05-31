@@ -10,6 +10,11 @@ DEBUG-only `vreader-debug://` URL scheme that drives the app from outside (e.g. 
 
 If you're writing user-facing code, this isn't your file.
 
+**Companion — real gestures.** DebugBridge drives *app state*; for *gestures*
+(taps / swipes / app launch) the bridge has no command for, use the idb-based
+`scripts/sim-tap.sh`. See [`sim-gesture-driver.md`](sim-gesture-driver.md).
+Preference order: DebugBridge command → XCUITest → idb.
+
 ## Quick start
 
 ```bash
