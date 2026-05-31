@@ -75,9 +75,12 @@ bundle id is deterministic. Use `label`/`xy` for in-app controls.
 - **Scroll vs. Paged matters.** In the reader's **Scroll** mode a *horizontal*
   swipe does nothing — advance with a *vertical* `swipe 201 680 201 180`. In
   **Paged** mode a horizontal swipe turns the page. Check the mode first.
-- **idb cannot conjure fixtures.** A book has to exist before you can open it;
-  seed it via DebugBridge (`seed=<fixture>`), which only ships TXT / MD / EPUB
-  today (no PDF / AZW3 fixture — that gap is unchanged).
+- **Real books first.** A book has to exist before you can open it. Import a
+  real book from `test-books/books/` via the `sim-transfer` skill and verify
+  against it — synthetic DebugBridge `seed=<fixture>` is the fallback, used only
+  when no real book satisfies the condition (no real PDF/MD; a deterministic
+  tiny structure a 13–18M book can't give cheaply; or CI, which can't read the
+  gitignored `test-books/`). Binding rule + inventory in AGENTS.md.
 - **Gestures aren't a regression test.** An idb-driven check is ad-hoc; for
   Gate-5 / close-gate verification that must re-run later, author the XCUITest.
 

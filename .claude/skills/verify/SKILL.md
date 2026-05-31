@@ -50,6 +50,17 @@ gaps**. If every candidate in both modes is blocked, that is `no_work_in_scope`.
 Computer-use is unavailable in cron contexts. Verify through the XCUITest
 harness, which synthesizes its own gestures via the accessibility API.
 
+**Real books first (binding).** When the verification needs a book, import a
+real book from `test-books/books/` via the `sim-transfer` skill and verify
+against it — browse the `azw3/`, `epub/`, `txt/` subdirs and pick the one whose
+format + trait matches the surface (AZW3/KF8, English EPUB, large CJK EPUB,
+large CJK TXT). Fall back to a synthetic DebugBridge
+`seed=<fixture>` **only** when no real book satisfies the condition — no real
+PDF/MD exists, the test needs a deterministic tiny structure (exact chapter
+count, RTL, controlled char offsets), or it's a CI unit test that can't read
+the gitignored `test-books/`. Note which exception applies. Synthetic fixtures
+pass while real CJK pagination / large-file / AZW3 quirks stay unverified.
+
 - **DebugBridge** — the `vreader-debug://` URL scheme drives reset / seed /
   open / settle / snapshot / eval from `xcrun simctl openurl`. Reference:
   `docs/subsystems/debug-bridge.md`.
