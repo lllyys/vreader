@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VReader — Standalone-note editor presentation (#1296)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: #f0eee9;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .hide-scroll::-webkit-scrollbar { display: none; }
+  .hide-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+  button { font-family: inherit; }
+  button:focus { outline: none; }
+  code { font-family: "SF Mono", "JetBrains Mono", Menlo, monospace; }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes popIn { from { transform: translate(-50%,-50%) scale(0.9); opacity: 0; } to { transform: translate(-50%,-50%) scale(1); opacity: 1; } }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  @keyframes ndMenuIn { from { transform: scale(0.94) translateY(-4px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+  @keyframes seCaret { 50% { opacity: 0; } }
+</style>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" fill="#1a1815"/>
+    <!-- dimmed list behind -->
+    <rect x="30" y="30" width="140" height="150" rx="10" fill="#3a352e"/>
+    <!-- editor sheet over -->
+    <rect x="22" y="78" width="156" height="92" rx="12" fill="#fcf8f0"/>
+    <rect x="86" y="86" width="28" height="4" rx="2" fill="#1d1a14" opacity="0.18"/>
+    <rect x="34" y="100" width="8" height="8" rx="2" fill="#8c2f2f" opacity="0.5"/>
+    <rect x="48" y="102" width="40" height="4" rx="2" fill="#5a554a"/>
+    <rect x="34" y="120" width="120" height="4" rx="2" fill="#1d1a14" opacity="0.55"/>
+    <rect x="34" y="130" width="104" height="4" rx="2" fill="#1d1a14" opacity="0.55"/>
+    <rect x="138" y="86" width="32" height="14" rx="7" fill="#8c2f2f"/>
+    <text x="100" y="194" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#d8d2c5" text-anchor="middle" letter-spacing="2">#1296 WI-3</text>
+  </svg>
+</template>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Canvas + base -->
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="vreader-themes.jsx"></script>
+<script type="text/babel" src="vreader-icons.jsx"></script>
+<script type="text/babel" src="vreader-panels.jsx"></script>
+
+<!-- Surfaces this design depends on -->
+<script type="text/babel" src="vreader-annotations.jsx"></script>
+<script type="text/babel" src="vreader-notes-unified.jsx"></script>
+<script type="text/babel" src="vreader-highlight-popover.jsx"></script>
+<script type="text/babel" src="vreader-note-editor.jsx"></script>
+<script type="text/babel" src="vreader-notes-delete.jsx"></script>
+
+<!-- This issue's design -->
+<script type="text/babel" src="standalone-note-editor-artboards.jsx"></script>
+
+<script type="text/babel">
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<StandaloneNoteEditorCanvas/>);
+</script>
+</body>
+</html>
