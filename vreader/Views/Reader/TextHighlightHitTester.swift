@@ -20,32 +20,46 @@ import Foundation
 struct PersistedHighlightLookupEntry: Sendable, Equatable {
     let id: UUID
     let range: NSRange
+    /// Whether this highlight carries a non-empty note. Bug #295: when a tap
+    /// is ambiguous between overlapping highlights, the noted one is preferred
+    /// so a tap never opens an empty editor over a note that was right there.
+    let hasNote: Bool
 
-    init(id: UUID, range: NSRange) {
+    init(id: UUID, range: NSRange, hasNote: Bool = false) {
         self.id = id
         self.range = range
+        self.hasNote = hasNote
     }
 }
 
 enum TextHighlightHitTester {
     /// Returns the lookup entry whose range contains `charIndex`. When
-    /// multiple ranges overlap (e.g., a highlight inside a longer
-    /// highlight), the most recently added entry wins — matches the
-    /// "topmost render order" rule documented in the plan's Risks section.
+    /// multiple ranges overlap (e.g., a highlight inside a longer highlight),
+    /// the topmost (most recently added) entry wins — EXCEPT that a noted
+    /// highlight is preferred over a note-less one (Bug #295): tapping an
+    /// overlap that includes a noted highlight opens that note rather than an
+    /// empty editor over a color-only highlight on top. When no candidate is
+    /// noted (or only one covers the index), the topmost wins as before, so a
+    /// genuine color-only highlight still shows its "Add a note…" state.
     ///
     /// Returns nil when no entry covers the index.
     static func hitTest(
         charIndex: Int,
         in lookup: [PersistedHighlightLookupEntry]
     ) -> PersistedHighlightLookupEntry? {
-        // Iterate in reverse so the last-added (visually topmost) range
-        // wins on overlap. `NSLocationInRange` excludes the upper bound,
-        // matching UITextView's character-index semantics where the
-        // index immediately after the range is "outside" the highlight.
+        // Iterate in reverse so the last-added (visually topmost) range is seen
+        // first. `NSLocationInRange` excludes the upper bound, matching
+        // UITextView's character-index semantics where the index immediately
+        // after the range is "outside" the highlight.
+        var topmostCovering: PersistedHighlightLookupEntry?
         for entry in lookup.reversed() {
             guard entry.range.length > 0 else { continue }
-            if NSLocationInRange(charIndex, entry.range) { return entry }
+            guard NSLocationInRange(charIndex, entry.range) else { continue }
+            // The topmost noted candidate wins outright (Bug #295).
+            if entry.hasNote { return entry }
+            // Otherwise remember the topmost covering entry as the fallback.
+            if topmostCovering == nil { topmostCovering = entry }
         }
-        return nil
+        return topmostCovering
     }
 }

@@ -303,7 +303,7 @@ extension TXTReaderContainerView {
             let routed = BilingualOffsetRouter.displayNSRange(
                 forSourceNSRange: entry.range, map: map
             )
-            return PersistedHighlightLookupEntry(id: entry.id, range: routed)
+            return PersistedHighlightLookupEntry(id: entry.id, range: routed, hasNote: entry.hasNote)
         }
     }
 

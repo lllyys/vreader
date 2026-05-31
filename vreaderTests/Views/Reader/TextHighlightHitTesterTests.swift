@@ -13,8 +13,8 @@ import Foundation
 @Suite("TextHighlightHitTester")
 struct TextHighlightHitTesterTests {
 
-    private func makeEntry(id: UUID = UUID(), start: Int, length: Int) -> PersistedHighlightLookupEntry {
-        PersistedHighlightLookupEntry(id: id, range: NSRange(location: start, length: length))
+    private func makeEntry(id: UUID = UUID(), start: Int, length: Int, hasNote: Bool = false) -> PersistedHighlightLookupEntry {
+        PersistedHighlightLookupEntry(id: id, range: NSRange(location: start, length: length), hasNote: hasNote)
     }
 
     @Test
@@ -67,6 +67,83 @@ struct TextHighlightHitTesterTests {
             in: [makeEntry(id: id1, start: 10, length: 5), makeEntry(id: id2, start: 11, length: 3)]
         )
         #expect(result?.id == id2)
+    }
+
+    // MARK: - Bug #295: noted-highlight preference on ambiguous overlap
+
+    @Test
+    func hitTest_overlapping_prefersNotedOverTopmostNoteless() {
+        // The topmost (newer) highlight [11..13] is note-less; the older
+        // [10..14] carries a note. A tap in the overlap must open the NOTED
+        // one (older), not an empty editor over the color-only top highlight.
+        let noted = UUID()
+        let noteless = UUID()
+        let result = TextHighlightHitTester.hitTest(
+            charIndex: 12,
+            in: [
+                makeEntry(id: noted, start: 10, length: 5, hasNote: true),
+                makeEntry(id: noteless, start: 11, length: 3, hasNote: false),
+            ]
+        )
+        #expect(result?.id == noted)
+    }
+
+    @Test
+    func hitTest_overlapping_bothNoted_returnsTopmost() {
+        // Both noted → topmost (most recent) still wins.
+        let older = UUID()
+        let newer = UUID()
+        let result = TextHighlightHitTester.hitTest(
+            charIndex: 12,
+            in: [
+                makeEntry(id: older, start: 10, length: 5, hasNote: true),
+                makeEntry(id: newer, start: 11, length: 3, hasNote: true),
+            ]
+        )
+        #expect(result?.id == newer)
+    }
+
+    @Test
+    func hitTest_overlapping_bothNoteless_returnsTopmost() {
+        // Neither noted → unchanged behavior: topmost (most recent) wins, and
+        // the editor shows its designed "Add a note…" empty state.
+        let older = UUID()
+        let newer = UUID()
+        let result = TextHighlightHitTester.hitTest(
+            charIndex: 12,
+            in: [
+                makeEntry(id: older, start: 10, length: 5, hasNote: false),
+                makeEntry(id: newer, start: 11, length: 3, hasNote: false),
+            ]
+        )
+        #expect(result?.id == newer)
+    }
+
+    @Test
+    func hitTest_singleNotelessHighlight_stillResolves() {
+        // A lone color-only highlight still resolves (its empty-note editor is
+        // the intended state, not a bug).
+        let id = UUID()
+        let result = TextHighlightHitTester.hitTest(
+            charIndex: 12, in: [makeEntry(id: id, start: 10, length: 5, hasNote: false)]
+        )
+        #expect(result?.id == id)
+    }
+
+    @Test
+    func hitTest_notedNotCoveringIndex_doesNotWin() {
+        // A noted highlight that does NOT cover the tapped index must not be
+        // preferred over a note-less one that does.
+        let notedElsewhere = UUID()
+        let notelessHere = UUID()
+        let result = TextHighlightHitTester.hitTest(
+            charIndex: 12,
+            in: [
+                makeEntry(id: notedElsewhere, start: 30, length: 5, hasNote: true),
+                makeEntry(id: notelessHere, start: 10, length: 5, hasNote: false),
+            ]
+        )
+        #expect(result?.id == notelessHere)
     }
 
     @Test

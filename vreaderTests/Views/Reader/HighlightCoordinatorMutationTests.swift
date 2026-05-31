@@ -44,6 +44,11 @@ private final class MutMockRenderer: HighlightRenderer {
     var restoreCalls = 0
     var lastRestoreHref: String?
     var lastRestoredRecords: [HighlightRecord]?
+    // Bug #295: track the narrow note-metadata refresh separately from the
+    // visual restore so a note edit can assert "no visual repaint, but the
+    // hasNote lookup was refreshed".
+    var refreshNoteMetadataCalls = 0
+    var lastNoteMetadataRecords: [HighlightRecord]?
 
     func apply(record: HighlightRecord) {}
     func remove(id: UUID) {}
@@ -53,6 +58,10 @@ private final class MutMockRenderer: HighlightRenderer {
         restoreCalls += 1
         lastRestoreHref = href
         lastRestoredRecords = records
+    }
+    func refreshNoteMetadata(records: [HighlightRecord]) {
+        refreshNoteMetadataCalls += 1
+        lastNoteMetadataRecords = records
     }
 }
 
@@ -340,8 +349,13 @@ struct HighlightCoordinatorMutationTests {
             return
         }
         #expect(returned.note == "new note")
-        // A note edit is invisible on the page — no reader-surface repaint.
+        // A note edit is invisible on the page — no visual reader-surface
+        // repaint (the broad `restore` is NOT called, so PDF can't duplicate).
         #expect(renderer.restoreCalls == 0)
+        // Bug #295: but the narrow note-presence lookup IS refreshed so a
+        // same-session ambiguous tap prefers the just-noted highlight.
+        #expect(renderer.refreshNoteMetadataCalls == 1)
+        #expect(renderer.lastNoteMetadataRecords?.contains(where: { $0.note == "new note" }) == true)
     }
 
     @Test @MainActor func updateNote_recordNotFound_returnsNotFound() async {

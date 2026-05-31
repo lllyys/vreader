@@ -59,7 +59,10 @@ final class TextHighlightRenderer: HighlightRenderer {
         // invisible to the hit-tester until the next reopen.
         uiState.persistedHighlightLookup.append(PersistedHighlightLookupEntry(
             id: record.highlightId,
-            range: range
+            range: range,
+            // Bug #295: a freshly-created highlight is usually note-less; a
+            // later note edit refreshes the lookup with hasNote = true.
+            hasNote: !(record.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         ))
     }
 
@@ -76,6 +79,14 @@ final class TextHighlightRenderer: HighlightRenderer {
         // go through a JS evaluator — it mutates UIKit state directly.
         // Both parameters are EPUB-specific; ignored here.
         _ = (href, evaluator)
+        uiState.refreshPersistedHighlights(from: records)
+    }
+
+    /// Bug #295: rebuild the persisted-highlight lookup so `hasNote` reflects a
+    /// just-saved/cleared note within the same session. Reuses the idempotent
+    /// `refreshPersistedHighlights` — the painted ranges/colors are unchanged
+    /// (same records), so this is a metadata refresh, not a visible repaint.
+    func refreshNoteMetadata(records: [HighlightRecord]) {
         uiState.refreshPersistedHighlights(from: records)
     }
 }

@@ -324,6 +324,23 @@ struct TXTChapterHighlightHelperTests {
         #expect(result[0].range == NSRange(location: 10, length: 30))
     }
 
+    @Test("lookupForChapter — preserves hasNote through chapter clipping (Bug #295)")
+    func testLookupForChapterPreservesHasNote() {
+        let notedID = UUID()
+        let notelessID = UUID()
+        let global = [
+            PersistedHighlightLookupEntry(id: notedID, range: NSRange(location: 110, length: 20), hasNote: true),
+            PersistedHighlightLookupEntry(id: notelessID, range: NSRange(location: 140, length: 20), hasNote: false),
+        ]
+        let result = TXTChapterHighlightHelper.lookupForChapter(
+            chapterIndex: 1,
+            chapters: Self.chapters,
+            globalLookup: global
+        )
+        #expect(result.first(where: { $0.id == notedID })?.hasNote == true)
+        #expect(result.first(where: { $0.id == notelessID })?.hasNote == false)
+    }
+
     @Test("lookupForChapter — entries outside chapter are filtered out")
     func testLookupForChapterFiltersOutsideEntries() {
         let inside = PersistedHighlightLookupEntry(id: UUID(), range: NSRange(location: 110, length: 20))

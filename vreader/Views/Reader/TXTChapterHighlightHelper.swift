@@ -105,7 +105,10 @@ enum TXTChapterHighlightHelper {
                 range: NSRange(
                     location: clippedStart - chapterStart,
                     length: clippedEnd - clippedStart
-                )
+                ),
+                // Bug #295: preserve note-presence through chapter clipping so
+                // the chapter-paged TXT tap path keeps the noted-preference.
+                hasNote: entry.hasNote
             )
         }
     }

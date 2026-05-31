@@ -48,6 +48,14 @@ protocol HighlightRenderer: AnyObject {
         forHref href: String?,
         using evaluator: ((String) -> Void)?
     )
+
+    /// Refresh note-presence metadata after a note edit, WITHOUT repainting
+    /// the highlight (the note text is never drawn on the page). Bug #295:
+    /// only the TXT/MD text renderer keeps a note-presence (`hasNote`) lookup
+    /// used to bias ambiguous taps toward the noted highlight, so only it
+    /// overrides this. The default is a no-op — calling the visual `restore`
+    /// here would, on PDF, duplicate annotations (PDF restore appends).
+    func refreshNoteMetadata(records: [HighlightRecord])
 }
 
 extension HighlightRenderer {
@@ -58,6 +66,10 @@ extension HighlightRenderer {
     func restore(records: [HighlightRecord]) {
         restore(records: records, forHref: nil, using: nil)
     }
+
+    /// Default: no metadata-only lookup to refresh (EPUB/PDF/Foliate). Text
+    /// renderers override this.
+    func refreshNoteMetadata(records: [HighlightRecord]) {}
 }
 
 /// A `HighlightRenderer` whose restore is scoped to a current chapter href.

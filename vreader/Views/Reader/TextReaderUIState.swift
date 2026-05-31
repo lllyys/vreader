@@ -194,7 +194,10 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
             highlights.append(PaintedHighlight(range: range, colorName: record.color))
             lookup.append(PersistedHighlightLookupEntry(
                 id: record.highlightId,
-                range: range
+                range: range,
+                // Bug #295: carry note-presence so an ambiguous tap prefers
+                // the noted highlight over an overlapping color-only one.
+                hasNote: !(record.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ))
         }
         persistedHighlightRanges = highlights

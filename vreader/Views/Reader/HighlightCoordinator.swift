@@ -168,9 +168,15 @@ final class HighlightCoordinator {
         return .success(record)
     }
 
-    /// Feature #64 WI-3 — persists a note edit on a highlight. No
-    /// reader-surface repaint — the note is not drawn on the page, so the
-    /// only UI to refresh is the popover card itself (handled by the caller).
+    /// Feature #64 WI-3 — persists a note edit on a highlight. The note is not
+    /// drawn on the page, so the highlight's visible paint is unchanged; the
+    /// popover card refresh is handled by the caller. Bug #295: we call the
+    /// narrow `renderer.refreshNoteMetadata` afterward so the TXT/MD
+    /// note-presence (`hasNote`) lookup rebuilds with the new value — otherwise
+    /// a highlight that just gained (or lost) a note would keep its stale
+    /// note-presence for later ambiguous taps within the same session until a
+    /// reopen. PDF/EPUB/Foliate no-op (they don't keep that lookup), avoiding
+    /// the PDF append-duplicate that a visual `restore` would cause.
     ///
     /// A trimmed-empty draft (`nil` / `""` / all-whitespace) is normalized to
     /// `nil` before persisting, so a note "cleared" to whitespace stores as no
@@ -200,6 +206,12 @@ final class HighlightCoordinator {
         guard let record = records.first(where: { $0.highlightId == highlightID }) else {
             return .notFound
         }
+        // Rebuild the note-presence lookup so `hasNote` reflects this mutation
+        // immediately (Bug #295). Narrow metadata refresh — NOT the visual
+        // `restore` (which on PDF appends/duplicates annotations); the note
+        // text is never drawn, so only the TXT/MD lookup needs updating and
+        // PDF/EPUB/Foliate no-op.
+        renderer.refreshNoteMetadata(records: records)
         return .success(record)
     }
 

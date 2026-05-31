@@ -50,6 +50,7 @@ enum TextHighlightHitResolver {
         // multi-line highlight's ragged-edge whitespace gaps are NOT
         // absorbed — only the actually-painted fragments get a slop band.
         var candidates: [(id: UUID, rect: CGRect)] = []
+        var notedCandidates: [(id: UUID, rect: CGRect)] = []
         for entry in lookup where entry.range.length > 0 {
             let glyphRange = layoutManager.glyphRange(
                 forCharacterRange: entry.range, actualCharacterRange: nil
@@ -62,8 +63,17 @@ enum TextHighlightHitResolver {
             ) { rect, _ in
                 if rect.width > 0, rect.height > 0 {
                     candidates.append((entry.id, rect))
+                    if entry.hasNote { notedCandidates.append((entry.id, rect)) }
                 }
             }
+        }
+        // Bug #295: prefer a noted highlight within tolerance over a nearer
+        // note-less one, so a near-miss tap doesn't open an empty editor when a
+        // noted highlight was also in range. Fall back to the nearest of all.
+        if let nearestNotedID = HighlightHitTolerance.nearestHit(
+            point: containerPoint, candidates: notedCandidates
+        ) {
+            return lookup.first(where: { $0.id == nearestNotedID })
         }
         guard let nearestID = HighlightHitTolerance.nearestHit(
             point: containerPoint, candidates: candidates
