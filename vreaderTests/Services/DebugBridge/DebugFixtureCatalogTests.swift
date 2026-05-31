@@ -15,7 +15,7 @@ final class DebugFixtureCatalogTests: XCTestCase {
         XCTAssertEqual(Set(names), [
             "war-and-peace", "mini-epub3", "mini-azw3", "mini-markdown",
             "multi-chapter-epub", "multi-page-pdf",
-            "mini-epub2", "mini-rtl", "mini-cjk",
+            "mini-epub2", "mini-rtl", "mini-cjk", "mini-cjk-vlong",
         ])
     }
 

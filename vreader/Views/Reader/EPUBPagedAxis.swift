@@ -24,6 +24,14 @@ enum EPUBPagedAxis {
         let magnitude = safePage * max(0, viewportWidth)
         switch axis {
         case .horizontalLTR: return magnitude
+        // Feature #75 WI-5 (OPEN device finding): on-device verification with the
+        // `mini-cjk-vlong` fixture showed vertical-rl paged navigation
+        // (initial position + turn direction) is WRONG under this shared
+        // negative-scrollLeft sign — `writing-mode: vertical-rl` column
+        // pagination does NOT follow horizontal-RTL's WebKit scroll convention.
+        // The correct sign/tap/swipe coupling needs iterative on-device tuning
+        // against the new fixture; tracked as remaining WI-5 work. (Rendering of
+        // both axes is already verified; this is the page-turn INPUT gap.)
         case .horizontalRTL, .verticalRL: return -magnitude
         }
     }

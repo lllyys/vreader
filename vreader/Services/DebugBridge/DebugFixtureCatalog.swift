@@ -87,6 +87,11 @@ enum DebugFixtureCatalog {
         DebugFixture(name: "mini-epub2", format: .epub, resourceName: "mini-epub2", resourceExtension: "epub"),
         DebugFixture(name: "mini-rtl",   format: .epub, resourceName: "mini-rtl",   resourceExtension: "epub"),
         DebugFixture(name: "mini-cjk",   format: .epub, resourceName: "mini-cjk",   resourceExtension: "epub"),
+        // Feature #75 WI-5: a single LONG `writing-mode: vertical-rl` chapter
+        // (24 CJK paragraphs) that overflows several horizontal pages, so the
+        // vertical-rl PAGE-TURN input (tap-zone + swipe) is device-verifiable.
+        // `mini-cjk` ch2 is single-page (renders but nothing to page through).
+        DebugFixture(name: "mini-cjk-vlong", format: .epub, resourceName: "mini-cjk-vlong", resourceExtension: "epub"),
     ]
 
     /// All catalog entries.

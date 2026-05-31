@@ -23,7 +23,12 @@ struct EPUBPagedAxisTests {
         #expect(EPUBPagedAxis.scrollOffset(page: 3, viewportWidth: 400, axis: .horizontalRTL) == -1200)
     }
 
-    @Test func verticalRL_usesNegativeScrollLikeRTL() {
+    @Test func verticalRL_currentSignMatchesRTL() {
+        // Current (shared with horizontal-RTL) sign. NOTE: Feature #75 WI-5
+        // device verification found this is NOT correct for vertical-rl paged
+        // navigation — the page-turn direction is the remaining open WI-5 gap
+        // (see dev-docs/verification/feature-75-20260531.md). Pinned here so a
+        // future fix is a deliberate, tested change.
         #expect(EPUBPagedAxis.scrollOffset(page: 2, viewportWidth: 400, axis: .verticalRL) == -800)
     }
 
