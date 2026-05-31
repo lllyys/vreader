@@ -205,6 +205,19 @@ enum DebugCommand: Equatable {
     /// annotation renders AND persists.
     case pdfHighlight(page: Int, rect: NormalizedRect, color: String?)
 
+    /// Feature #75 WI-5a — `set-layout?mode=<paged|scroll>` switches the active
+    /// EPUB reader's layout preference CU-free. Feature #75's RTL / vertical-rl
+    /// paging only manifests in PAGED mode, but XCUITest cannot tap the
+    /// segmented `Picker(.segmented)` layout control on iOS 26 (gh #576), and
+    /// the `--reader-default-layout=` launch arg only pre-seeds the default
+    /// before a book is opened — it does NOT switch an already-open reader. This
+    /// command posts `.debugBridgeSetLayoutCommand`; the live
+    /// `EPUBReaderContainerView` observer sets `settingsStore.epubLayout`, the
+    /// SAME binding the picker drives (its existing `.onChange` relayouts the
+    /// reader). No-op when no EPUB reader is presented (mirrors `navigate` /
+    /// `seek` / `present`).
+    case setLayout(layout: LayoutMode)
+
     /// Which AI action the `ai` command fires (Bug #255 — verification
     /// harness AI-action driver). The handler posts `.debugBridgeAIAction`;
     /// the AI panel's observer invokes the SAME view-model path the chrome
@@ -221,6 +234,16 @@ enum DebugCommand: Equatable {
         case summarize
         case chat
         case translate
+    }
+
+    /// EPUB layout selector for the `set-layout` command (feature #75 WI-5a).
+    /// Kept local — mirroring `ThemeMode` — so this file stays a pure
+    /// value-type parser. The handler maps it 1:1 to the in-app
+    /// `EPUBLayoutPreference` by rawValue, so the cases MUST match
+    /// `EPUBLayoutPreference`'s rawValues (`paged` / `scroll`).
+    enum LayoutMode: String, Equatable, CaseIterable {
+        case paged
+        case scroll
     }
 
     /// Reader theme selector for the `theme` command.
@@ -909,6 +932,18 @@ extension DebugCommand {
                 throw DebugCommandError.invalidParam("to", reason: "expected \(valid), got \(toRaw)")
             }
             return .scrollSheet(target: target)
+
+        case "set-layout":
+            // Feature #75 WI-5a: switch the active EPUB reader's layout CU-free.
+            // `mode` is required; one of paged|scroll (mirrors the `theme`/`near`
+            // allowlist posture). Empty `mode=` is treated as missing by
+            // requireParam — same as every other command.
+            let modeRaw = try requireParam("mode", in: params)
+            guard let layout = LayoutMode(rawValue: modeRaw) else {
+                let valid = LayoutMode.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam("mode", reason: "expected \(valid), got \(modeRaw)")
+            }
+            return .setLayout(layout: layout)
 
         default:
             throw DebugCommandError.unknownCommand(host)

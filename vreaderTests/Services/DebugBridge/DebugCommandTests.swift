@@ -2392,6 +2392,60 @@ final class DebugCommandTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - set-layout (feature #75 WI-5a — CU-free EPUB layout switch so
+    //   paged-mode vertical-rl / RTL paging can be device-verified without
+    //   driving the segmented Picker, which XCUITest can't tap on iOS 26)
+    //   `vreader-debug://set-layout?mode=<paged|scroll>`
+
+    func test_parse_setLayoutPaged_returnsCommand() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://set-layout?mode=paged")!)
+        XCTAssertEqual(cmd, .setLayout(layout: .paged))
+    }
+
+    func test_parse_setLayoutScroll_returnsCommand() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://set-layout?mode=scroll")!)
+        XCTAssertEqual(cmd, .setLayout(layout: .scroll))
+    }
+
+    func test_parse_setLayoutMissingMode_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://set-layout")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "mode")
+        }
+    }
+
+    func test_parse_setLayoutInvalidMode_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://set-layout?mode=sideways")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "mode")
+        }
+    }
+
+    func test_parse_setLayoutEmptyMode_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://set-layout?mode=")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "mode")
+        }
+    }
+
+    func test_parse_setLayoutDeepPath_throwsUnknownCommand() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://set-layout/extra?mode=paged")!)) { error in
+            guard case DebugCommandError.unknownCommand = error else {
+                XCTFail("expected unknownCommand, got \(error)")
+                return
+            }
+        }
+    }
 }
 
 #endif

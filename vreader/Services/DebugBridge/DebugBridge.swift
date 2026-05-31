@@ -142,6 +142,15 @@ protocol DebugBridgeContext {
     /// renders AND persists. If no PDF reader is loaded, no observer fires —
     /// the URL is silently a no-op (matches `highlight` / `navigate` / `seek`).
     func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws
+    /// Feature #75 WI-5a — switch the active EPUB reader's layout preference
+    /// CU-free so RTL / vertical-rl PAGED paging can be device-verified without
+    /// driving the segmented `Picker(.segmented)` (untappable under XCUITest on
+    /// iOS 26). The handler posts `.debugBridgeSetLayoutCommand`; the live
+    /// `EPUBReaderContainerView` observer sets `settingsStore.epubLayout` — the
+    /// SAME binding the picker drives. If no EPUB reader is presented, no
+    /// observer fires — the URL is silently a no-op (matches `navigate` /
+    /// `seek` / `present`).
+    func setLayout(layout: DebugCommand.LayoutMode) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -286,6 +295,8 @@ final class DebugBridge {
             try await context.scrollBoundary(spineIndex: spineIndex, near: near)
         case .pdfHighlight(let page, let rect, let color):
             try await context.pdfHighlight(page: page, rect: rect, color: color)
+        case .setLayout(let layout):
+            try await context.setLayout(layout: layout)
         }
     }
 }

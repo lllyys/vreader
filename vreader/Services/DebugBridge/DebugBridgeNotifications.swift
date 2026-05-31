@@ -257,6 +257,24 @@ extension Notification.Name {
     ///   `"yellow"` when absent.
     static let debugBridgePDFHighlightCommand = Notification.Name("vreader.debugBridge.pdfHighlightCommand")
 
+    /// Posted by RealDebugBridgeContext.setLayout (feature #75 WI-5a) to switch
+    /// the active EPUB reader's layout preference CU-free. Feature #75's RTL /
+    /// vertical-rl paging only manifests in PAGED mode, but XCUITest cannot tap
+    /// the segmented `Picker(.segmented)` layout control on iOS 26 (gh #576),
+    /// and the `--reader-default-layout=` launch arg only pre-seeds the default
+    /// before a book opens — it does not switch an already-open reader. The live
+    /// `EPUBReaderContainerView` observer sets `settingsStore.epubLayout` to the
+    /// requested mode — the SAME binding the picker drives, whose existing
+    /// `.onChange(of: settingsStore?.epubLayout)` relayouts the reader (no
+    /// parallel layout path). If no EPUB reader is presented, no observer fires —
+    /// the URL is silently a no-op (mirrors `navigate` / `seek` / `present`).
+    ///
+    /// userInfo:
+    /// - `"mode"`: String — one of `DebugCommand.LayoutMode`'s rawValues
+    ///   (`paged` / `scroll`), validated by the parser. The observer maps it 1:1
+    ///   to `EPUBLayoutPreference(rawValue:)`.
+    static let debugBridgeSetLayoutCommand = Notification.Name("vreader.debugBridge.setLayoutCommand")
+
     /// Posted by `TXTReaderContainerView` (bug #1218) whenever it computes
     /// the converted display text for the current chapter, so the
     /// DebugBridge probe can surface the rendered (post-Simp→Trad) text via

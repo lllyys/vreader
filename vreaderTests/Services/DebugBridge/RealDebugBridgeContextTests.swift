@@ -913,6 +913,60 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
+    func test_setLayout_postsSetLayoutCommandWithMode() async throws {
+        // Feature #75 WI-5a: setLayout posts .debugBridgeSetLayoutCommand
+        // carrying the mode rawValue; the live EPUBReaderContainerView observer
+        // sets settingsStore.epubLayout — the SAME binding the segmented picker
+        // drives (untappable under XCUITest on iOS 26).
+        let exp = expectation(description: "set-layout notification posted")
+        nonisolated(unsafe) var receivedMode: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeSetLayoutCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedMode = notification.userInfo?["mode"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.setLayout(layout: .paged)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedMode, "paged")
+    }
+
+    @MainActor
+    func test_setLayout_scroll_postsScrollMode() async throws {
+        // The scroll case round-trips the other rawValue so a future regression
+        // that hard-codes "paged" is caught.
+        let exp = expectation(description: "set-layout scroll notification posted")
+        nonisolated(unsafe) var receivedMode: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .debugBridgeSetLayoutCommand,
+            object: nil,
+            queue: .main
+        ) { notification in
+            receivedMode = notification.userInfo?["mode"] as? String
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.setLayout(layout: .scroll)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedMode, "scroll")
+    }
+
+    @MainActor
     func test_scrollBoundary_postsScrollBoundaryCommandWithSpineAndNear() async throws {
         // Feature #71 WI-6b: scrollBoundary posts .debugBridgeScrollBoundaryCommand
         // carrying the spine index + edge; the live EPUBReaderContainerView

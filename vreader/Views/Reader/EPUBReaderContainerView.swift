@@ -355,6 +355,16 @@ struct EPUBReaderContainerView: View {
             ) else { return }
             NotificationCenter.default.post(name: .readerNavigateToLocator, object: locator)
         }
+        // Feature #75 WI-5a: CU-free EPUB layout switch. XCUITest can't tap the
+        // segmented layout Picker on iOS 26 (gh #576), so the `set-layout`
+        // DebugBridge command posts the target mode; the observer sets
+        // `settingsStore.epubLayout` — the SAME binding the picker drives, whose
+        // `.onChange` relayouts the reader (no parallel layout path). Extracted
+        // to a ViewModifier so the trailing-closure type-inference stays out of
+        // this already-large body (mirrors ReaderDebugBridgePresentObserver).
+        .modifier(EPUBReaderDebugBridgeSetLayoutObserver { [weak settingsStore] layout in
+            settingsStore?.epubLayout = layout
+        })
         #endif
         // Bug #88: re-render highlights after annotation import
         .onReceive(NotificationCenter.default.publisher(for: .readerHighlightsDidImport)) { _ in

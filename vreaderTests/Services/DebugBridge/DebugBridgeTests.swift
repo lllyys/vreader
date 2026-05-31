@@ -471,6 +471,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws {
         await record("pdf-highlight:\(page):\(rect.x),\(rect.y),\(rect.w),\(rect.h):\(color ?? "nil")")
     }
+    func setLayout(layout: DebugCommand.LayoutMode) async throws {
+        await record("set-layout:\(layout.rawValue)")
+    }
 
     private func actionTag(_ action: DebugCommand.ProviderAction) -> String {
         switch action {
@@ -509,6 +512,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case navigate(spineIndex: Int, fraction: Double?)
         case scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge)
         case pdfHighlight(page: Int, rect: NormalizedRect, color: String?)
+        case setLayout(layout: DebugCommand.LayoutMode)
     }
 
     private(set) var calls: [Call] = []
@@ -564,6 +568,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func pdfHighlight(page: Int, rect: NormalizedRect, color: String?) async throws {
         calls.append(.pdfHighlight(page: page, rect: rect, color: color))
+    }
+    func setLayout(layout: DebugCommand.LayoutMode) async throws {
+        calls.append(.setLayout(layout: layout))
     }
 }
 
