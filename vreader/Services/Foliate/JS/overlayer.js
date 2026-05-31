@@ -49,6 +49,44 @@ export class Overlayer {
         }
         return []
     }
+    // Bug #287 / GH #1268: tolerant variant for AZW3/Foliate highlight taps.
+    // Mirrors the Swift `HighlightHitTolerance`: each annotation rect is
+    // expanded per-side toward Apple's 44pt minimum touch target
+    // (slop = max(0, (44 - dim) / 2), so a rect already ≥ 44pt gets none), and
+    // on overlap the nearest-center rect wins. Lets a near-miss tap open the
+    // highlight popover instead of falling through to a page-turn. Used as a
+    // fallback ONLY after the exact `hitTest` misses, so exact behavior is
+    // unchanged.
+    hitTestWithTolerance({ x, y }, minTarget = 44, skipPrefix = null) {
+        const arr = Array.from(this.#map.entries())
+        let best = null // { key, range, dist }
+        // Reverse so a tie at equal distance prefers the most recently added.
+        for (let i = arr.length - 1; i >= 0; i--) {
+            const [key, obj] = arr[i]
+            // Skip overlays whose key matches skipPrefix (e.g. search results),
+            // so a search overlay near the tap cannot shadow a real highlight
+            // that is also within tolerance (audit Medium).
+            if (skipPrefix && typeof key === 'string' && key.startsWith(skipPrefix))
+                continue
+            for (const { left, top, right, bottom } of obj.rects) {
+                const w = right - left
+                const h = bottom - top
+                if (w <= 0 || h <= 0) continue
+                const sx = Math.max(0, (minTarget - w) / 2)
+                const sy = Math.max(0, (minTarget - h) / 2)
+                // Inclusive on all expanded edges (matches Swift
+                // HighlightHitTolerance / the EPUB tolerance path).
+                if (left - sx <= x && x <= right + sx && top - sy <= y && y <= bottom + sy) {
+                    const cx = (left + right) / 2
+                    const cy = (top + bottom) / 2
+                    const dist = (x - cx) * (x - cx) + (y - cy) * (y - cy)
+                    if (best === null || dist < best.dist)
+                        best = { key, range: obj.range, dist }
+                }
+            }
+        }
+        return best === null ? [] : [best.key, best.range]
+    }
     static underline(rects, options = {}) {
         const { color = 'red', width: strokeWidth = 2, writingMode } = options
         const g = createSVGElement('g')

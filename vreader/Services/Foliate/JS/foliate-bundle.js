@@ -6118,6 +6118,38 @@ ${doc.querySelector("parsererror").innerText}`);
       }
       return [];
     }
+    // Bug #287 / GH #1268: tolerant variant for AZW3/Foliate highlight taps.
+    // Mirrors the Swift `HighlightHitTolerance`: each annotation rect is
+    // expanded per-side toward Apple's 44pt minimum touch target
+    // (slop = max(0, (44 - dim) / 2), so a rect already ≥ 44pt gets none), and
+    // on overlap the nearest-center rect wins. Lets a near-miss tap open the
+    // highlight popover instead of falling through to a page-turn. Used as a
+    // fallback ONLY after the exact `hitTest` misses, so exact behavior is
+    // unchanged.
+    hitTestWithTolerance({ x: x3, y: y3 }, minTarget = 44, skipPrefix = null) {
+      const arr = Array.from(this.#map.entries());
+      let best = null;
+      for (let i3 = arr.length - 1; i3 >= 0; i3--) {
+        const [key, obj] = arr[i3];
+        if (skipPrefix && typeof key === "string" && key.startsWith(skipPrefix))
+          continue;
+        for (const { left, top, right, bottom } of obj.rects) {
+          const w2 = right - left;
+          const h3 = bottom - top;
+          if (w2 <= 0 || h3 <= 0) continue;
+          const sx = Math.max(0, (minTarget - w2) / 2);
+          const sy = Math.max(0, (minTarget - h3) / 2);
+          if (left - sx <= x3 && x3 <= right + sx && top - sy <= y3 && y3 <= bottom + sy) {
+            const cx = (left + right) / 2;
+            const cy = (top + bottom) / 2;
+            const dist = (x3 - cx) * (x3 - cx) + (y3 - cy) * (y3 - cy);
+            if (best === null || dist < best.dist)
+              best = { key, range: obj.range, dist };
+          }
+        }
+      }
+      return best === null ? [] : [best.key, best.range];
+    }
     static underline(rects, options = {}) {
       const { color = "red", width: strokeWidth = 2, writingMode } = options;
       const g3 = createSVGElement("g");
@@ -6649,11 +6681,16 @@ ${doc.querySelector("parsererror").innerText}`);
     #createOverlayer({ doc, index }) {
       const overlayer = new Overlayer();
       doc.addEventListener("click", (e3) => {
-        const [value, range] = overlayer.hitTest(e3);
+        let [value, range] = overlayer.hitTest(e3);
+        if (!value || value.startsWith(SEARCH_PREFIX)) {
+          ;
+          [value, range] = overlayer.hitTestWithTolerance(e3, 44, SEARCH_PREFIX);
+        }
         if (value && !value.startsWith(SEARCH_PREFIX)) {
+          e3.__vreaderAnnotationHit = true;
           this.#emit("show-annotation", { value, index, range });
         }
-      }, false);
+      }, true);
       const list = this.#searchResults.get(index);
       if (list) for (const item of list) this.addAnnotation(item);
       this.#emit("create-overlay", { index });
@@ -6926,6 +6963,7 @@ ${doc.querySelector("parsererror").innerText}`);
   view.addEventListener("load", (e3) => {
     const doc = e3.detail.doc;
     doc.addEventListener("click", (event) => {
+      if (event.__vreaderAnnotationHit) return;
       if (event.target.closest("a[href]")) return;
       const sel = doc.getSelection();
       if (sel && !sel.isCollapsed) return;

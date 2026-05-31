@@ -403,12 +403,29 @@ export class View extends HTMLElement {
     }
     #createOverlayer({ doc, index }) {
         const overlayer = new Overlayer()
+        // Bug #287 / GH #1268: run in the CAPTURE phase (true) so this fires
+        // BEFORE foliate-host.js's bubble-phase page-turn `tap` handler on the
+        // same click. On an annotation hit (exact, then a 44pt-tolerance
+        // fallback for a near-miss) we mark the shared event object so the host
+        // handler absorbs the tap (no page-turn / chrome-toggle) and the
+        // popover is the sole action — capture-before-bubble on one event makes
+        // this order-deterministic without a shared flag.
         doc.addEventListener('click', e => {
-            const [value, range] = overlayer.hitTest(e)
+            let [value, range] = overlayer.hitTest(e)
+            // Fall back to the tolerant lookup when the exact pass found nothing
+            // OR found only a search overlay — in the latter case a real
+            // highlight under/near the same point would otherwise be shadowed by
+            // the search result and fall through to a page-turn. The tolerant
+            // pass skips search overlays (SEARCH_PREFIX) so it returns the
+            // nearest real highlight within the 44pt target.
+            if (!value || value.startsWith(SEARCH_PREFIX)) {
+                ;[value, range] = overlayer.hitTestWithTolerance(e, 44, SEARCH_PREFIX)
+            }
             if (value && !value.startsWith(SEARCH_PREFIX)) {
+                e.__vreaderAnnotationHit = true
                 this.#emit('show-annotation', { value, index, range })
             }
-        }, false)
+        }, true)
 
         const list = this.#searchResults.get(index)
         if (list) for (const item of list) this.addAnnotation(item)

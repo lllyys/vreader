@@ -150,6 +150,11 @@ view.addEventListener('external-link', e => {
 view.addEventListener('load', e => {
     const doc = e.detail.doc
     doc.addEventListener('click', event => {
+        // Bug #287 / GH #1268: a highlight tap (exact OR within the 44pt
+        // tolerance) was marked by view.js's capture-phase annotation handler,
+        // which already emitted `show-annotation`. Absorb the tap here so it
+        // does NOT turn the page or toggle chrome — the popover is the action.
+        if (event.__vreaderAnnotationHit) return
         // Ignore link clicks
         if (event.target.closest('a[href]')) return
         // Ignore if text is selected
