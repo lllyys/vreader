@@ -85,4 +85,32 @@ enum FoliateScrolledWindowMath {
     static func containerOffset(rectTopWithinSection: Double, mountedIndex: Int, mountedSizes: [Double]) -> Double {
         offsetOfSection(mountedIndex, mountedSizes: mountedSizes) + rectTopWithinSection
     }
+
+    // MARK: - Feature #76 WI-1: canonical logical-offset conversion
+
+    /// Convert a RAW container scroll offset (what the DOM reports) into a
+    /// non-negative, reading-order LOGICAL offset that all the windowing math
+    /// above consumes — using the active scroll axis's `directionSign`.
+    ///
+    /// Vertical-scroll (horizontal-writing LTR/RTL — scrolled mode scrolls
+    /// `scrollTop`) and horizontal-writing-LTR use `sign = +1` (raw == logical).
+    /// Vertical-rl scrolls the horizontal axis right-to-left, where WebKit's
+    /// `scrollLeft` is `0` at the start and goes NEGATIVE toward later content,
+    /// so `sign = -1` maps the raw negative offset to a positive logical one.
+    /// This is the single normalization point (Gate-2 audit: one canonical
+    /// logical-offset API, so raw negative `scrollLeft` is never mixed with the
+    /// windowing math).
+    ///
+    /// - Note: idempotent for `sign == +1`; the existing vertical-scroll callers
+    ///   (Feature #73) pass `sign = +1` and are byte-for-byte unchanged.
+    static func logicalOffset(rawOffset: Double, sign: Int) -> Double {
+        sign < 0 ? -rawOffset : rawOffset
+    }
+
+    /// Inverse of `logicalOffset`: convert a reading-order LOGICAL offset back to
+    /// the RAW container offset for the axis (e.g. to assign `scrollLeft` for an
+    /// RTL / vertical-rl window). `logicalOffset(rawOffset(x, sign), sign) == x`.
+    static func rawOffset(logicalOffset: Double, sign: Int) -> Double {
+        sign < 0 ? -logicalOffset : logicalOffset
+    }
 }

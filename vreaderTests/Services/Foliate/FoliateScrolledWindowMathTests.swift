@@ -144,4 +144,42 @@ struct FoliateScrolledWindowMathTests {
         // a rect at top=10 in section 2 (starts at 300) → 310
         #expect(FoliateScrolledWindowMath.containerOffset(rectTopWithinSection: 10, mountedIndex: 2, mountedSizes: sizes) == 310)
     }
+
+    // MARK: - Feature #76 WI-1: logical-offset conversion
+
+    @Test("positive sign is identity (vertical-scroll / LTR — Feature #73 unchanged)")
+    func logicalOffset_positiveSign_identity() {
+        #expect(FoliateScrolledWindowMath.logicalOffset(rawOffset: 0, sign: 1) == 0)
+        #expect(FoliateScrolledWindowMath.logicalOffset(rawOffset: 250, sign: 1) == 250)
+        #expect(FoliateScrolledWindowMath.rawOffset(logicalOffset: 250, sign: 1) == 250)
+    }
+
+    @Test("negative sign maps RTL/vertical-rl negative scrollLeft to positive logical")
+    func logicalOffset_negativeSign_mapsRTL() {
+        #expect(FoliateScrolledWindowMath.logicalOffset(rawOffset: 0, sign: -1) == 0)
+        #expect(FoliateScrolledWindowMath.logicalOffset(rawOffset: -250, sign: -1) == 250)
+        #expect(FoliateScrolledWindowMath.logicalOffset(rawOffset: -1000, sign: -1) == 1000)
+    }
+
+    @Test("rawOffset is the inverse of logicalOffset")
+    func rawOffset_invertsLogical() {
+        for sign in [1, -1] {
+            for x in [0.0, 137.0, 999.5] {
+                let raw = FoliateScrolledWindowMath.rawOffset(logicalOffset: x, sign: sign)
+                #expect(FoliateScrolledWindowMath.logicalOffset(rawOffset: raw, sign: sign) == x)
+            }
+        }
+    }
+
+    @Test("logical offsets feed the existing windowing math unchanged")
+    func logicalOffset_feedsSectionMath() {
+        // An RTL window scrolled to scrollLeft -150 over sizes [100,200,300]:
+        // logical 150 falls in section 1, intra (150-100)/200 = 0.25.
+        let sizes = [100.0, 200.0, 300.0]
+        let logical = FoliateScrolledWindowMath.logicalOffset(rawOffset: -150, sign: -1)
+        let (idx, intra) = FoliateScrolledWindowMath.intraSectionFraction(
+            scrollOffset: logical, mountedSizes: sizes)
+        #expect(idx == 1)
+        #expect(intra == 0.25)
+    }
 }
