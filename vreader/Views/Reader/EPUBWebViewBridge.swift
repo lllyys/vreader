@@ -431,8 +431,11 @@ struct EPUBWebViewBridge: UIViewRepresentable {
             // Paged mode: navigate to specific page
             context.coordinator.pendingPaginationPage = page
             let viewportWidth = webView.bounds.width
+            // Feature #75 WI-3: honor the resolved per-document page axis (RTL /
+            // vertical) for the offset direction.
             let js = EPUBPaginationHelper.navigateToPageJS(
-                page: page, viewportWidth: viewportWidth
+                page: page, viewportWidth: viewportWidth,
+                axis: context.coordinator.currentPageAxis
             )
             webView.evaluateJavaScript(js) { _, error in
                 if let error { AppLogger.epub.error("page nav error: \(error)") }

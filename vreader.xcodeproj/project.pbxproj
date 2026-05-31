@@ -834,6 +834,7 @@
 		90D2C41C30E622E119877967 /* BackupViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5350DA755A0BB669AE8D3FBD /* BackupViewModelTests.swift */; };
 		915C38C106026EB4386107C5 /* FoliateChapterTextProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF17767136D4087D5F38F901 /* FoliateChapterTextProvider.swift */; };
 		916CF15735E1F170E2CE4695 /* HTTPTTSConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CD66C1E52331AC245386C9 /* HTTPTTSConfigStore.swift */; };
+		91B1FD3EEE9D392F1274E2C9 /* EPUBPageAxisProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11A6F4B5DD22F0A6EE84B48 /* EPUBPageAxisProbeTests.swift */; };
 		91B218D155D6760DBC8D733A /* EPUBReaderContainerView+Highlights.swift in Sources */ = {isa = PBXBuildFile; fileRef = A922B4886FE1CE378009FB1B /* EPUBReaderContainerView+Highlights.swift */; };
 		91B3A04F3B23BE09FCA9967C /* LazyDownloadDelegateStagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D4DDB55DA30E015172A16D /* LazyDownloadDelegateStagingTests.swift */; };
 		91B6BC18F3DE3D9A54B7C30B /* FontSizeCalibrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE9DA4CCA7E942838A838495 /* FontSizeCalibrator.swift */; };
@@ -949,6 +950,7 @@
 		A6AD2E80D9CF312EF3AB962C /* TapZoneConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20EBB13D56BE43A552188D9F /* TapZoneConfig.swift */; };
 		A6E44E99068166200DADB131 /* TXTTocRuleEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8A001ABD732F1E2FF24463 /* TXTTocRuleEngine.swift */; };
 		A72A8023369D98CC9A93D00F /* ReaderContainerView+DebugBridgePosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36B6C9DDFFC8DC87C03983B5 /* ReaderContainerView+DebugBridgePosition.swift */; };
+		A738D1DE426FA9E098381F98 /* EPUBPageAxisProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0847128AEF3C85341A6A24BF /* EPUBPageAxisProbe.swift */; };
 		A74E0B8A07E4DD90EB24B234 /* AIProviderPickerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43809A2F181DF2BBEAAD50C5 /* AIProviderPickerViewModel.swift */; };
 		A7C1006FE4BB21D62EA2C0AF /* TXTContinuousChunkBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85EEEA47C4E7D01D716EF2A4 /* TXTContinuousChunkBuilderTests.swift */; };
 		A7E0981C4B45F1FA7D8A9F91 /* ReadiumEPUBHost+Background.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB02D21C1EF95E878B2A1B5E /* ReadiumEPUBHost+Background.swift */; };
@@ -1494,6 +1496,7 @@
 		07B1C372BC384811003D5608 /* ReaderSettingsPanelChineseConversionGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsPanelChineseConversionGateTests.swift; sourceTree = "<group>"; };
 		07DE6A6AACF59EC026271CC3 /* PersistenceActor+ReadingWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+ReadingWindow.swift"; sourceTree = "<group>"; };
 		0802B8C85A3A602D945756B2 /* Feature62AnnotationsSplitVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feature62AnnotationsSplitVerificationTests.swift; sourceTree = "<group>"; };
+		0847128AEF3C85341A6A24BF /* EPUBPageAxisProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPageAxisProbe.swift; sourceTree = "<group>"; };
 		084985F81373662E33980955 /* ReadiumTTSFollowMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumTTSFollowMapperTests.swift; sourceTree = "<group>"; };
 		086557F549C56946CFD6194E /* FoliateSpikeView+HighlightTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FoliateSpikeView+HighlightTap.swift"; sourceTree = "<group>"; };
 		08710FD2531ABF39338B56E9 /* SearchSheetPlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchSheetPlaceholderTests.swift; sourceTree = "<group>"; };
@@ -2795,6 +2798,7 @@
 		F05F28A8422C4AB0951D9586 /* EPUBContinuousScrollBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBContinuousScrollBridge.swift; sourceTree = "<group>"; };
 		F069A328AA628585D86B52B2 /* SyncStatusViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusViewTests.swift; sourceTree = "<group>"; };
 		F114D9F3F59EEF655D5327EA /* EPUBCoverParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBCoverParsingTests.swift; sourceTree = "<group>"; };
+		F11A6F4B5DD22F0A6EE84B48 /* EPUBPageAxisProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPageAxisProbeTests.swift; sourceTree = "<group>"; };
 		F16AF7EAA6EC1F1D0D126E75 /* BasePageNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasePageNavigator.swift; sourceTree = "<group>"; };
 		F17C33D19BD1735676CA01BC /* TXTReaderContainerHighlightCoordinatorWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReaderContainerHighlightCoordinatorWiringTests.swift; sourceTree = "<group>"; };
 		F1B78961833B958737E550A6 /* FoliateBottomChromeLabels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateBottomChromeLabels.swift; sourceTree = "<group>"; };
@@ -3389,6 +3393,7 @@
 				5C5EC86BB06D46DC9A5A4F6B /* EPUBHighlightBridgeTests.swift */,
 				59540377ED7FDB678914B972 /* EPUBHighlightRendererBug77Tests.swift */,
 				9A8BD899A79BEB3964941631 /* EPUBHighlightTapBridgeTests.swift */,
+				F11A6F4B5DD22F0A6EE84B48 /* EPUBPageAxisProbeTests.swift */,
 				A56CF939EF4F69F9304BC332 /* EPUBPagedAxisTests.swift */,
 				002A1A054B82164581081351 /* EPUBPagedProgressTests.swift */,
 				B9500033AC714D470A3024F8 /* EPUBPaginationTests.swift */,
@@ -3963,6 +3968,7 @@
 				435C00E099B7F5D7A7821FDC /* EPUBHighlightBridge.swift */,
 				44423E8976A2B27C4B14617F /* EPUBHighlightJS.swift */,
 				3650C684EB90A5D7E2F8059A /* EPUBHighlightRenderer.swift */,
+				0847128AEF3C85341A6A24BF /* EPUBPageAxisProbe.swift */,
 				8401AD7C7023A69BE9B68215 /* EPUBPagedAxis.swift */,
 				43677A0B2B4A42609A2800ED /* EPUBPagedProgress.swift */,
 				E5EC9B0FFB09D08F65F205F3 /* EPUBPaginationHelper.swift */,
@@ -5622,6 +5628,7 @@
 				56A100BED3272494DE799F55 /* EPUBHighlightRendererBug77Tests.swift in Sources */,
 				D371F8D98EA9603C6BF3E6ED /* EPUBHighlightTapBridgeTests.swift in Sources */,
 				3D31B039400E1A83C4A1DF6D /* EPUBMetadataExtractorTests.swift in Sources */,
+				91B1FD3EEE9D392F1274E2C9 /* EPUBPageAxisProbeTests.swift in Sources */,
 				DD69A5306F3DA8F15F1091E0 /* EPUBPagedAxisTests.swift in Sources */,
 				E431016A81D6B202241B4275 /* EPUBPagedProgressTests.swift in Sources */,
 				5BA867B4591F0916810C91B8 /* EPUBPaginationTests.swift in Sources */,
@@ -6253,6 +6260,7 @@
 				EE8189DAD855D15887FBBCFA /* EPUBHighlightJS.swift in Sources */,
 				863103455E8B23D20B97F192 /* EPUBHighlightRenderer.swift in Sources */,
 				1D0B7D11E74A0E06F27A9F8B /* EPUBLayoutPreference.swift in Sources */,
+				A738D1DE426FA9E098381F98 /* EPUBPageAxisProbe.swift in Sources */,
 				D3A9394A17D78A98DDF4E618 /* EPUBPagedAxis.swift in Sources */,
 				3E445837C0B98903CFCC5AD7 /* EPUBPagedProgress.swift in Sources */,
 				39699408A91BBF24E36FCE53 /* EPUBPaginationHelper.swift in Sources */,
@@ -6928,13 +6936,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 751;
+				CURRENT_PROJECT_VERSION = 752;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.41.25;
+				MARKETING_VERSION = 3.41.26;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -7078,13 +7086,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 751;
+				CURRENT_PROJECT_VERSION = 752;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.41.25;
+				MARKETING_VERSION = 3.41.26;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

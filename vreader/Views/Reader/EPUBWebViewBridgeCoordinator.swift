@@ -32,6 +32,18 @@ extension EPUBWebViewBridge {
         var pendingScrollFraction: Double?
         /// Page index to navigate to after pagination setup (paged mode).
         var pendingPaginationPage: Int?
+        /// Feature #75 WI-3: the loaded spine document's resolved page axis
+        /// (RTL / vertical), set by the pre-pagination probe in
+        /// `setupPagination` and consumed by the pagination CSS + page nav.
+        /// Per-document — re-resolved on every chapter load. Defaults to LTR.
+        var currentPageAxis: PageAxis = .horizontalLTR
+        /// Feature #75 WI-3: monotonic token incremented on each
+        /// `setupPagination`. The async probe→paginate chain captures it and
+        /// bails if a newer pagination (chapter change, resize, theme re-paginate)
+        /// has started — so a stale chapter's probe can't write `currentPageAxis`
+        /// / inject CSS / publish a page count against the wrong load. A counter
+        /// (not `expectedURL`) because same-URL re-pagination also exists.
+        var paginationGeneration = 0
         /// Bug #182: highlight JS deferred from a URL-change update so it
         /// runs against the NEW chapter DOM, not the old/loading one. Set
         /// in `EPUBWebViewBridge.updateUIView` when `pendingJS` arrives in
@@ -586,8 +598,35 @@ extension EPUBWebViewBridge {
             // through the safe-area branch.
             lastPagedBounds = webView.bounds
 
+            // Feature #75 WI-3: probe the loaded document's COMPUTED writing
+            // direction BEFORE injecting pagination CSS, so we read the BOOK's
+            // direction (not our column CSS — Gate-2 High). Resolve + store the
+            // per-document `PageAxis`; this re-runs on every chapter load
+            // (setupPagination is called per load), so a mixed-direction book
+            // gets per-section axes. The coordinator has no book metadata, so
+            // the hint is `.auto` — the computed values are authoritative.
+            paginationGeneration &+= 1
+            let generation = paginationGeneration
+            webView.evaluateJavaScript(EPUBPageAxisProbe.computedStyleJS) { [weak self] probeResult, _ in
+                guard let self, self.paginationGeneration == generation else { return }
+                self.currentPageAxis = EPUBPageAxisProbe.resolve(from: probeResult, hint: .auto)
+                self.paginate(
+                    webView: webView, viewportWidth: viewportWidth,
+                    viewportHeight: viewportHeight, generation: generation
+                )
+            }
+        }
+
+        /// Inject the pagination CSS for the resolved `currentPageAxis`, query
+        /// the page count, and apply the restore / pending-page navigation.
+        /// Called by `setupPagination` after the page-axis probe resolves.
+        private func paginate(
+            webView: WKWebView, viewportWidth: CGFloat, viewportHeight: CGFloat,
+            generation: Int
+        ) {
             let injectJS = EPUBPaginationHelper.injectPaginationCSSJS(
-                viewportWidth: viewportWidth, viewportHeight: viewportHeight
+                viewportWidth: viewportWidth, viewportHeight: viewportHeight,
+                axis: currentPageAxis
             )
             webView.evaluateJavaScript(injectJS) { [weak self] _, error in
                 if let error {
@@ -596,12 +635,12 @@ extension EPUBWebViewBridge {
                 }
                 // Delay to allow column layout to settle before querying page count
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    guard let self else { return }
+                    guard let self, self.paginationGeneration == generation else { return }
                     let totalPagesJS = EPUBPaginationHelper.totalPagesJS(
                         viewportWidth: viewportWidth
                     )
                     webView.evaluateJavaScript(totalPagesJS) { [weak self] result, error in
-                        guard let self else { return }
+                        guard let self, self.paginationGeneration == generation else { return }
                         if let error {
                             AppLogger.epub.error("totalPages query error: \(error)")
                             return
@@ -628,17 +667,23 @@ extension EPUBWebViewBridge {
                         // The restore fraction is a one-shot intent consumed here.
                         self.pendingScrollFraction = nil
 
-                        Task { @MainActor in
+                        Task { @MainActor [weak self] in
+                            // WI-3: re-check the generation inside the hop — a
+                            // newer pagination may have started before this task runs.
+                            guard let self, self.paginationGeneration == generation else { return }
                             self.onPaginationReady?(totalPages, resumeFromFraction)
                         }
 
                         // Navigate to an explicit pending page if set (the
                         // container already owns that page state — only the
                         // fraction path needs the container-side sync above).
-                        if let page = self.pendingPaginationPage, page > 0 {
+                        // Re-guard the generation immediately before the nav eval.
+                        if self.paginationGeneration == generation,
+                           let page = self.pendingPaginationPage, page > 0 {
                             self.pendingPaginationPage = nil
                             let navJS = EPUBPaginationHelper.navigateToPageJS(
-                                page: page, viewportWidth: viewportWidth
+                                page: page, viewportWidth: viewportWidth,
+                                axis: self.currentPageAxis
                             )
                             webView.evaluateJavaScript(navJS) { _, error in
                                 if let error {
