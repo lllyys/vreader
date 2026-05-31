@@ -836,7 +836,7 @@ struct EPUBReaderContainerView: View {
             continuousScroll: isPaged ? nil : continuousScrollConfig,
             isPaged: isPaged,
             paginationPage: currentPaginationPage,
-            onPaginationReady: { totalPages in
+            onPaginationReady: { totalPages, resumePage in
                 pageNavigator.totalPages = totalPages
                 // Bug #165 / GH #489: a backward chapter-wrap armed
                 // `chapterWrapPendingTarget`; now that the new chapter
@@ -851,6 +851,16 @@ struct EPUBReaderContainerView: View {
                     // Bug #281 / GH #1258: a backward chapter-wrap lands on the
                     // new chapter's LAST page; record that within-chapter
                     // position so progress reflects it (not page 0).
+                    recordPagedProgress()
+                } else if let resumePage, resumePage > 0 {
+                    // Bug #293 / GH #1301: reopening to a persisted within-
+                    // chapter position. Sync the Swift page state — setting
+                    // `currentPaginationPage` drives the JS nav through
+                    // `updateUIView`, and `pageNavigator.currentPage` stays
+                    // correct so the next side-tap pages from `resumePage`,
+                    // not page 0.
+                    pageNavigator.jumpToPage(resumePage)
+                    currentPaginationPage = resumePage
                     recordPagedProgress()
                 }
             }

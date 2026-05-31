@@ -49,4 +49,22 @@ enum EPUBPagedProgress {
         let fraction = Double(clampedPage) / Double(maxPage)
         return min(max(fraction, 0.0), 1.0)
     }
+
+    /// Inverse of `intraChapterFraction`: the zero-based page index that best
+    /// represents `fraction` within a chapter of `totalPages` pages. Bug #293 /
+    /// GH #1301 — paged-mode reopen must resume the within-chapter page from the
+    /// persisted progress fraction (the save side already persists the fraction
+    /// post-#281; the paged load path never converted it back to a page).
+    ///
+    /// - Parameters:
+    ///   - fraction: intra-chapter progress (clamped to `0.0...1.0`).
+    ///   - totalPages: total pages in the chapter. `<= 1` (single-page, empty,
+    ///     or not-yet-paginated) resumes to page `0`.
+    /// - Returns: a zero-based page index in `0...(totalPages - 1)`.
+    static func pageForFraction(_ fraction: Double, totalPages: Int) -> Int {
+        guard totalPages > 1, fraction.isFinite else { return 0 }
+        let maxPage = totalPages - 1
+        let clamped = min(max(fraction, 0.0), 1.0)
+        return Int((clamped * Double(maxPage)).rounded())
+    }
 }

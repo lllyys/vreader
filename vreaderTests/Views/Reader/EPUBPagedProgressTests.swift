@@ -72,6 +72,62 @@ struct EPUBPagedProgressIntraChapterTests {
     }
 }
 
+// MARK: - pageForFraction (Bug #293 — the inverse, for paged within-chapter resume)
+
+@Suite("EPUBPagedProgress - pageForFraction")
+struct EPUBPagedProgressPageForFractionTests {
+
+    @Test("fraction 0 resumes to page 0")
+    func zeroFraction_isPageZero() {
+        #expect(EPUBPagedProgress.pageForFraction(0.0, totalPages: 10) == 0)
+    }
+
+    @Test("fraction 1 resumes to the last page")
+    func oneFraction_isLastPage() {
+        #expect(EPUBPagedProgress.pageForFraction(1.0, totalPages: 10) == 9)
+    }
+
+    @Test("mid fraction rounds to the nearest page")
+    func midFraction_roundsToNearestPage() {
+        // 0.5 * (10 - 1) = 4.5 → rounds to 5 (round-half-up via .rounded()).
+        #expect(EPUBPagedProgress.pageForFraction(0.5, totalPages: 10) == 5)
+        // 0.25 * (5 - 1) = 1.0 → page 1
+        #expect(EPUBPagedProgress.pageForFraction(0.25, totalPages: 5) == 1)
+    }
+
+    @Test("single-page / not-paginated chapter resumes to page 0")
+    func singleOrZeroPages_isPageZero() {
+        #expect(EPUBPagedProgress.pageForFraction(0.8, totalPages: 1) == 0)
+        #expect(EPUBPagedProgress.pageForFraction(0.8, totalPages: 0) == 0)
+        #expect(EPUBPagedProgress.pageForFraction(0.8, totalPages: -3) == 0)
+    }
+
+    @Test("out-of-range fractions clamp to valid pages")
+    func outOfRangeFraction_clamps() {
+        #expect(EPUBPagedProgress.pageForFraction(-0.5, totalPages: 10) == 0)
+        #expect(EPUBPagedProgress.pageForFraction(1.7, totalPages: 10) == 9)
+    }
+
+    @Test("non-finite fraction resumes to page 0 (no trap)")
+    func nonFiniteFraction_isPageZero() {
+        #expect(EPUBPagedProgress.pageForFraction(.nan, totalPages: 10) == 0)
+        #expect(EPUBPagedProgress.pageForFraction(.infinity, totalPages: 10) == 0)
+        #expect(EPUBPagedProgress.pageForFraction(-.infinity, totalPages: 10) == 0)
+    }
+
+    @Test("round-trips with intraChapterFraction for every page")
+    func roundTripsWithIntraChapterFraction() {
+        // pageForFraction(intraChapterFraction(p)) == p for all valid pages —
+        // the resume math is the exact inverse of the save math, so a saved
+        // within-chapter position reopens on the same page.
+        let totalPages = 12
+        for page in 0..<totalPages {
+            let fraction = EPUBPagedProgress.intraChapterFraction(currentPage: page, totalPages: totalPages)
+            #expect(EPUBPagedProgress.pageForFraction(fraction, totalPages: totalPages) == page)
+        }
+    }
+}
+
 // MARK: - Whole-book composition (the container's exact arithmetic)
 
 @Suite("EPUBPagedProgress + EPUBProgressCalculator composition")

@@ -122,8 +122,10 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     var isPaged: Bool = false
     /// Page index to navigate to in paged mode (0-based).
     var paginationPage: Int?
-    /// Called when pagination is set up with total page count (paged mode only).
-    var onPaginationReady: (@MainActor (Int) -> Void)?
+    /// Called when pagination is set up with the total page count and, when
+    /// reopening to a persisted within-chapter position (Bug #293), the
+    /// zero-based page to resume to (else `nil`). Paged mode only.
+    var onPaginationReady: (@MainActor (Int, Int?) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onProgressChange: onProgressChange, onLoadError: onLoadError)

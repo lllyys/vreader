@@ -92,8 +92,12 @@ extension EPUBWebViewBridge {
         var isPaged = false
         /// Tracks the previous value of isPaged for change detection in updateUIView.
         var previousIsPaged = false
-        /// Called when pagination is ready with total page count.
-        var onPaginationReady: (@MainActor (Int) -> Void)?
+        /// Called when pagination is ready with the total page count and, when
+        /// reopening to a persisted within-chapter position (Bug #293), the
+        /// zero-based page to resume to (else `nil`). The container syncs its
+        /// page state from the resume page so the actual JS nav flows through
+        /// the proven `updateUIView` path and stays in sync.
+        var onPaginationReady: (@MainActor (Int, Int?) -> Void)?
         /// Feature #71 WI-5: non-nil in continuous-scroll mode. The
         /// `continuousScrollHandler` channel routes each boundary signal to
         /// `config.coordinator` (window transitions) and feeds the windowed
@@ -603,10 +607,34 @@ extension EPUBWebViewBridge {
                             return
                         }
                         let totalPages = (result as? Int) ?? 1
-                        Task { @MainActor in
-                            self.onPaginationReady?(totalPages)
+
+                        // Bug #293 / GH #1301: paged reopen ignored the
+                        // persisted within-chapter progress fraction, so it
+                        // always landed on page 0. If no explicit page is
+                        // pending, convert the restore fraction to a page and
+                        // hand it to the container via `onPaginationReady` so it
+                        // syncs `pageNavigator`/`currentPaginationPage` (which
+                        // drives the actual JS nav through the proven
+                        // updateUIView path) — a JS-only nav here would leave
+                        // the Swift page state stale and the next side-tap would
+                        // navigate from page 0.
+                        var resumeFromFraction: Int?
+                        if self.pendingPaginationPage == nil || self.pendingPaginationPage == 0,
+                           let fraction = self.pendingScrollFraction, fraction > 0 {
+                            resumeFromFraction = EPUBPagedProgress.pageForFraction(
+                                fraction, totalPages: totalPages
+                            )
                         }
-                        // Navigate to pending page if set
+                        // The restore fraction is a one-shot intent consumed here.
+                        self.pendingScrollFraction = nil
+
+                        Task { @MainActor in
+                            self.onPaginationReady?(totalPages, resumeFromFraction)
+                        }
+
+                        // Navigate to an explicit pending page if set (the
+                        // container already owns that page state — only the
+                        // fraction path needs the container-side sync above).
                         if let page = self.pendingPaginationPage, page > 0 {
                             self.pendingPaginationPage = nil
                             let navJS = EPUBPaginationHelper.navigateToPageJS(
