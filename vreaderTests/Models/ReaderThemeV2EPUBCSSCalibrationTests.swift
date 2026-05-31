@@ -62,6 +62,25 @@ struct ReaderThemeV2EPUBCSSCalibrationTests {
         #expect(css.contains("font-size: inherit !important"))
     }
 
+    /// Bug #294: the flatten list must include the HTML5 semantic wrappers
+    /// (`section`/`article`/`aside`/`main`/`header`/`footer`/`figure`) and the
+    /// legacy `<font>` element — CJK EPUBs commonly wrap prose in such a
+    /// container carrying its own em/% size, which compounds past the 16px base
+    /// otherwise. Mirrors the FIXED Foliate #261 widening
+    /// (`FoliateStyleMapper`).
+    @Test func bug294CJKWrapperElementsFlattened() {
+        let css = ReaderThemeV2.paper.epubOverrideCSS(fontSize: 16)
+        // Assert the exact widened selector tail so a bare substring like
+        // "font" (which appears throughout the CSS as font-size/font-family)
+        // can't accidentally pass — the wrappers must be in the flatten rule.
+        #expect(
+            css.contains(
+                "blockquote, figcaption, section, article, aside, main, header, footer, figure, font"
+            ),
+            "EPUB flatten list must widen to the HTML5 wrappers + <font> (Foliate #261 parity)"
+        )
+    }
+
     /// Bug #57: headings keep the book's own relative sizing via
     /// `font-size: revert !important` inside the `h1..h6` rule.
     @Test func bug57HeadingRevertRuleStillPresent() {

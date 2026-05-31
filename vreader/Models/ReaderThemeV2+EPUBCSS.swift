@@ -119,7 +119,7 @@ extension ReaderThemeV2 {
           padding: 2em 16px !important; \
           margin: 0 !important; \
         }\
-        p, div, span, li, td, th, dd, dt, blockquote, figcaption { \
+        p, div, span, li, td, th, dd, dt, blockquote, figcaption, section, article, aside, main, header, footer, figure, font { \
           font-size: inherit !important; \
           line-height: inherit !important; \
           color: inherit !important; \
