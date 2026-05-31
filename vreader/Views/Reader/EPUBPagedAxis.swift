@@ -43,4 +43,40 @@ enum EPUBPagedAxis {
             return "writing-mode: vertical-rl !important; direction: rtl !important;"
         }
     }
+
+    /// The EPUB-paged tap-zone config for `axis` (Feature #75 WI-4). LTR returns
+    /// `base` unchanged; RTL / vertical-rl mirror the left↔right zone actions so
+    /// a tap on the leading edge advances and the trailing edge goes back — i.e.
+    /// tap zones follow reading order WITHOUT mutating the shared
+    /// `ReaderTapZoneRouter` default used by every other format.
+    static func tapZoneConfig(base: TapZoneConfig, axis: PageAxis) -> TapZoneConfig {
+        switch axis {
+        case .horizontalLTR:
+            return base
+        case .horizontalRTL, .verticalRL:
+            return TapZoneConfig(
+                leftAction: base.rightAction,
+                centerAction: base.centerAction,
+                rightAction: base.leftAction
+            )
+        }
+    }
+
+    /// Invert a swipe outcome for an RTL / vertical-rl axis (Feature #75 WI-4):
+    /// a leftward swipe advances in LTR but goes to the PREVIOUS page in RTL.
+    /// LTR returns the outcome unchanged.
+    static func swipeOutcome(
+        _ outcome: EPUBSwipeGestureClassifier.SwipeOutcome, axis: PageAxis
+    ) -> EPUBSwipeGestureClassifier.SwipeOutcome {
+        switch axis {
+        case .horizontalLTR:
+            return outcome
+        case .horizontalRTL, .verticalRL:
+            switch outcome {
+            case .nextPage: return .previousPage
+            case .previousPage: return .nextPage
+            case .none: return .none
+            }
+        }
+    }
 }

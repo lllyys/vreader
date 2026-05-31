@@ -84,4 +84,53 @@ struct EPUBPagedAxisTests {
             page: 2, viewportWidth: 400, axis: .horizontalRTL)
         #expect(js.contains("scrollLeft = -800"))
     }
+
+    // MARK: - WI-4: tap-zone mirror
+
+    @Test func tapZoneConfig_ltr_unchanged() {
+        let cfg = EPUBPagedAxis.tapZoneConfig(base: .default, axis: .horizontalLTR)
+        #expect(cfg == TapZoneConfig.default)
+        #expect(cfg.leftAction == .previousPage)
+        #expect(cfg.rightAction == .nextPage)
+    }
+
+    @Test func tapZoneConfig_rtl_mirrorsLeftRight() {
+        let cfg = EPUBPagedAxis.tapZoneConfig(base: .default, axis: .horizontalRTL)
+        #expect(cfg.leftAction == .nextPage)      // leading edge advances in RTL
+        #expect(cfg.rightAction == .previousPage)
+        #expect(cfg.centerAction == .toggleChrome) // center unchanged
+    }
+
+    @Test func tapZoneConfig_verticalRL_mirrors() {
+        let cfg = EPUBPagedAxis.tapZoneConfig(base: .default, axis: .verticalRL)
+        #expect(cfg.leftAction == .nextPage)
+        #expect(cfg.rightAction == .previousPage)
+    }
+
+    @Test func tapZoneConfig_preservesCustomBase() {
+        let base = TapZoneConfig(leftAction: .none, centerAction: .nextPage, rightAction: .previousPage)
+        let cfg = EPUBPagedAxis.tapZoneConfig(base: base, axis: .horizontalRTL)
+        #expect(cfg.leftAction == .previousPage)  // was rightAction
+        #expect(cfg.centerAction == .nextPage)    // unchanged
+        #expect(cfg.rightAction == .none)         // was leftAction
+    }
+
+    // MARK: - WI-4: swipe inversion
+
+    @Test func swipeOutcome_ltr_unchanged() {
+        #expect(EPUBPagedAxis.swipeOutcome(.nextPage, axis: .horizontalLTR) == .nextPage)
+        #expect(EPUBPagedAxis.swipeOutcome(.previousPage, axis: .horizontalLTR) == .previousPage)
+        #expect(EPUBPagedAxis.swipeOutcome(.none, axis: .horizontalLTR) == .none)
+    }
+
+    @Test func swipeOutcome_rtl_inverts() {
+        #expect(EPUBPagedAxis.swipeOutcome(.nextPage, axis: .horizontalRTL) == .previousPage)
+        #expect(EPUBPagedAxis.swipeOutcome(.previousPage, axis: .horizontalRTL) == .nextPage)
+        #expect(EPUBPagedAxis.swipeOutcome(.none, axis: .horizontalRTL) == .none)
+    }
+
+    @Test func swipeOutcome_verticalRL_inverts() {
+        #expect(EPUBPagedAxis.swipeOutcome(.nextPage, axis: .verticalRL) == .previousPage)
+        #expect(EPUBPagedAxis.swipeOutcome(.previousPage, axis: .verticalRL) == .nextPage)
+    }
 }

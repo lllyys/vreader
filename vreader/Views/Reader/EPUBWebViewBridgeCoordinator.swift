@@ -172,10 +172,16 @@ extension EPUBWebViewBridge {
                        let x = (dict["x"] as? NSNumber)?.doubleValue,
                        let w = (dict["w"] as? NSNumber)?.doubleValue,
                        w > 0 {
+                        // Feature #75 WI-4: mirror the tap zones for an RTL /
+                        // vertical-rl document so they follow reading order,
+                        // without changing the shared router default.
                         ReaderTapZoneRouter.dispatch(
                             x: CGFloat(x),
                             totalWidth: CGFloat(w),
-                            layout: self.isPaged ? .paged : .scroll
+                            layout: self.isPaged ? .paged : .scroll,
+                            config: EPUBPagedAxis.tapZoneConfig(
+                                base: .default, axis: self.currentPageAxis
+                            )
                         )
                     } else {
                         NotificationCenter.default.post(
@@ -257,9 +263,14 @@ extension EPUBWebViewBridge {
                   let dict = body as? [String: Any],
                   let dx = (dict["dx"] as? NSNumber)?.doubleValue,
                   let dy = (dict["dy"] as? NSNumber)?.doubleValue else { return }
-            let outcome = EPUBSwipeGestureClassifier.classify(
-                deltaX: dx, deltaY: dy,
-                threshold: EPUBSwipeGestureClassifier.defaultThreshold
+            // Feature #75 WI-4: invert the swipe outcome for an RTL / vertical-rl
+            // document (a leftward swipe goes to the PREVIOUS page in RTL).
+            let outcome = EPUBPagedAxis.swipeOutcome(
+                EPUBSwipeGestureClassifier.classify(
+                    deltaX: dx, deltaY: dy,
+                    threshold: EPUBSwipeGestureClassifier.defaultThreshold
+                ),
+                axis: currentPageAxis
             )
             switch outcome {
             case .nextPage:
