@@ -44,6 +44,10 @@ Describe issues in plain text below. The agent will triage them.
 
 ## Triaged
 
+2026-05-31 | triage batch (#63-#69, reader symptoms) | bug #292 (EPUB paged direction, GH #1300) · bug #293 (EPUB paged within-chapter resume, GH #1301) · bug #294 (CJK EPUB font / flatten-list gap, GH #1302) · REOPEN #283 (AZW3 scroll jump at chapter boundary, GH #1260) · REOPEN #287 (highlight tap tolerance — Foliate left out, GH #1268) · bug #295 (highlight tap opens empty panel — overlapping resolution, GH #1303) · bug #296 (annotations list can't scroll, #249 regression, GH #1304).
+
+> 2026-05-31 | NO-ACTION | "What's the diff between highlights and notes? the list shows All=10 but there are 7 highlights and 8 notes" — works-as-designed (OVERLAP, not dedup). The Highlights chip counts HighlightRecords (7); the Notes chip counts standalone annotations + highlights carrying a non-empty note (8); the two chips OVERLAP. All = highlights + standalone-annotations as a plain sum (no dedup — `AnnotationStreamBuilder`), so each highlight is counted once → 10. 7+8≠15 because the 5 noted-highlights are counted in BOTH chips, not because All de-dupes. No defect.
+
 2026-05-03 | feature #46 | WebDAV restore leaves library empty — backup is metadata-only by design (`BackupDataCollector.swift:12` "Books that no longer exist on the restoring device are silently skipped"). Inspected the user's ZIP (`2026-05-03T08-07-21Z_cfaff06e.vreader.zip`): 8 JSON sections, `metadata.json` records `bookCount: 5`, `positions.json` has 5 entries keyed by fingerprint, but no book files. On a fresh / empty library, restoration finds no matching books and silently no-ops. New feature scope: include book bytes in the archive so restore reconstructs the library.
 
 2026-05-03 | DUPLICATE OF bug #110 | WebDAV Tailscale URL — same ATS issue captured in screenshot. FIXED in v3.10.9 (PR #139); end-to-end verified 2026-05-03 against rclone-backed `vreader-webdav-host` over Tailscale on simulator (build 10) — connection succeeds once system HTTP-proxy bypass includes `*.ts.net`. GH #136 closed.
