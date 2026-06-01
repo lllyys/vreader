@@ -58,6 +58,32 @@ struct MobiEPUBConverterTests {
         #expect(extracted == original)
     }
 
+    /// Independent of ZIPWriter's own read helpers: parse the RAW first local
+    /// file header and assert the EPUB-critical OCF invariant — `mimetype` is
+    /// the first entry AND is Stored (compression method 0). If ZIPWriter ever
+    /// starts deflating, this fails before a non-compliant EPUB can ship
+    /// (Codex Gate-4 Medium — enforces the storage contract package() relies on).
+    @Test("the first archive entry is mimetype, written Stored (method 0)")
+    func mimetypeRawHeaderIsStored() throws {
+        let bytes = [UInt8](try MobiEPUBConverter.package(files: try sampleFiles))
+        try #require(bytes.count > 30)
+        // Local file header signature 0x04034b50 (little-endian) at offset 0.
+        #expect(le32(bytes, 0) == 0x0403_4b50)
+        // Compression method (offset 8, u16 LE) must be 0 = Stored.
+        #expect(le16(bytes, 8) == 0, "mimetype must be Stored, not deflated, for OCF")
+        // Filename (length at offset 26, bytes at offset 30) must be "mimetype".
+        let nameLen = Int(le16(bytes, 26))
+        try #require(bytes.count >= 30 + nameLen)
+        #expect(String(decoding: bytes[30..<(30 + nameLen)], as: UTF8.self) == "mimetype")
+    }
+
+    private func le16(_ b: [UInt8], _ o: Int) -> UInt16 {
+        UInt16(b[o]) | (UInt16(b[o + 1]) << 8)
+    }
+    private func le32(_ b: [UInt8], _ o: Int) -> UInt32 {
+        UInt32(b[o]) | (UInt32(b[o + 1]) << 8) | (UInt32(b[o + 2]) << 16) | (UInt32(b[o + 3]) << 24)
+    }
+
     // MARK: Real-book end-to-end (SKIPPED in CI)
 
     @Test("a real AZW3 converts to a structurally-valid epub",

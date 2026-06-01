@@ -23,6 +23,12 @@ enum MobiEPUBConverter {
     /// CPU- and memory-bound for a multi-megabyte book, so call off the main
     /// actor.
     ///
+    /// Peak memory note (Codex Gate-4 Low): the pipeline is fully in-memory —
+    /// the decoded parts, the assembled `EPUBFile` `Data` blobs, and the zip
+    /// archive coexist, so an image-heavy book sees ~2-3× its size in peak RAM.
+    /// Acceptable for the current fixture range (≤~18 MB); WI-4 may switch to a
+    /// file-backed archive path if larger Kindle books appear.
+    ///
     /// - Throws: `MobiDecodeError` (load/parse/corrupt/noMarkup) or
     ///   `MobiEPUBError` (assembly) or `ZIPWriterError` (packaging).
     static func convert(mobiPath: String, title: String) throws -> Data {
@@ -34,6 +40,13 @@ enum MobiEPUBConverter {
     /// Package already-assembled EPUB file entries into an OCF zip. Entry order
     /// is preserved, so the `mimetype` entry (first from `assemble`) lands first
     /// in the archive, as the OCF spec requires.
+    ///
+    /// OCF requires the `mimetype` entry be Stored (uncompressed). `ZIPWriter`
+    /// stores every entry, so this holds today; the invariant is CI-gated by
+    /// `MobiEPUBConverterTests.mimetypeRawHeaderIsStored`, which reads the raw
+    /// local-file-header compression-method field — if `ZIPWriter` ever starts
+    /// deflating, that test fails before this can ship a non-compliant EPUB
+    /// (Codex Gate-4 Medium).
     static func package(files: [EPUBFile]) throws -> Data {
         let entries = files.map { ZIPWriter.Entry(name: $0.path, data: $0.data) }
         return try ZIPWriter.createArchive(entries: entries)
