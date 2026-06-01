@@ -216,14 +216,19 @@ struct VReaderApp: App {
                 // value in the same process doesn't leak.
                 TTSTestOverride.useMockSynthesizer = config.ttsTestMode
 
-                // Bug #237: the --enable-ai launch flag was parsed into
-                // config.enableAI but never consumed, so AI verification
-                // surfaces stayed unreachable in XCUITest. Forward it to
-                // AITestOverride so AIReaderAvailability.isAvailable can
-                // short-circuit the API-key + consent gates a headless
-                // test can't satisfy. Written unconditionally so a prior
-                // launch's value in the same process doesn't leak.
-                AITestOverride.forceAvailable = config.enableAI
+                // Bug #237 (+ follow-up): the --enable-ai launch flag enables AI
+                // verification surfaces. Forwarding it to AITestOverride alone
+                // only short-circuits AIReaderAvailability (the UI gate) — but
+                // AIService.sendRequest gates DIRECTLY on featureFlags.aiAssistant
+                // + consentManager.hasConsent, so live AI requests (bilingual
+                // translate, summarize, chat) still threw featureDisabled/
+                // consentRequired. AITestSetup sets all three so CU-free AI
+                // verification exercises the full request path.
+                AITestSetup.apply(
+                    enableAI: config.enableAI,
+                    featureFlags: .shared,
+                    consentManager: AIConsentManager()
+                )
 
                 let persistence = PersistenceActor(modelContainer: container)
                 let seedConfig = config
