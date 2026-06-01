@@ -53,12 +53,19 @@ targets:
           # Feature #42 Phase-2 WI-1b (libmobi convert-on-import, LGPL-3.0):
           # the vendored libmobi C sources DO compile into the app target (so
           # their symbols link), exposed to Swift via Libmobi-Bridging-Header.h.
-          # Their compile flags (USE_LIBXML2, the libxml2 include path) + the
-          # libxml2 link live in this target's `settings` below. mobi.h is
-          # self-contained (stdlib includes only), so the bridge is trivial.
-          # Only the vendored docs/license are excluded here — globbing them
-          # would copy README/LICENSE into the app bundle as stray resources.
+          # The C is excluded from THIS (app-wide) source entry and re-added by
+          # the dedicated `Services/Libmobi/src` entry below with `-w` scoped to
+          # it — so third-party-C warning suppression never leaks onto the app's
+          # own (future) first-party ObjC/ObjC++ (Codex Gate-4 finding). mobi.h
+          # is self-contained (stdlib includes only), so the bridge is trivial.
+          # USE_LIBXML2 / the libxml2 include path + the -lxml2 link stay in this
+          # target's `settings` below (benign target-wide; needed so the Swift
+          # bridging-header view of mobi.h matches the .c). Libmobi.swift (first-
+          # party) stays in this glob and compiles with the app's normal flags.
+          # Docs/LICENSE excluded — globbing them would copy README/LICENSE into
+          # the app bundle as stray resources.
           # Recipe + remaining WIs: Services/Libmobi/BUILD-RECIPE.md.
+          - "Services/Libmobi/src/**"
           - "Services/Libmobi/LICENSE"
           - "Services/Libmobi/README.md"
           - "Services/Libmobi/BUILD-RECIPE.md"
@@ -73,6 +80,14 @@ targets:
           # into the BUILT Info.plist so the vreader-debug:// URL scheme actually
           # registers with iOS.
           - "SupportingFiles/DebugBridge.plist"
+      # Feature #42 Phase-2 WI-1b: the vendored libmobi C, compiled into the app
+      # target with `-w` scoped to ONLY these third-party sources. Keeping the
+      # suppression here (not target-wide via GCC_WARN_INHIBIT_ALL_WARNINGS)
+      # preserves the app target's own warning flags for first-party ObjC/ObjC++
+      # (Codex Gate-4 Medium). USE_LIBXML2 + the libxml2 header path come from
+      # the target settings below, which these files inherit.
+      - path: vreader/Services/Libmobi/src
+        compilerFlags: "-w"
     dependencies:
       # Feature #42 Phase 1: Readium Swift Toolkit products. ReadiumShared
       # supplies the Locator/Publication model; ReadiumStreamer supplies
@@ -204,15 +219,17 @@ targets:
         # the iOS SDK ships libxml2 headers at $(SDKROOT)/usr/include/libxml2
         # and a link stub reachable via -lxml2. The Libmobi src dir is on the
         # header path so the bridging header's #include "mobi.h" resolves.
-        # GCC_WARN_INHIBIT_ALL_WARNINGS scopes to C compilation only (the app
-        # is pure Swift), so it silences third-party libmobi warnings without
-        # hiding the app's own Swift warnings. miniz is bundled inside libmobi,
-        # so no zlib link is needed beyond what libxml2 itself pulls.
+        # USE_LIBXML2 / the libxml2 header path are benign target-wide (Swift
+        # ignores C preprocessor defs; first-party ObjC, if ever added, is
+        # unaffected by an unused macro + extra include dir). Warning
+        # suppression for the third-party C is NOT here — it's scoped to the
+        # `Services/Libmobi/src` source entry above via `-w` (Codex Gate-4
+        # Medium). miniz is bundled inside libmobi, so no zlib link is needed
+        # beyond what libxml2 itself pulls.
         GCC_PREPROCESSOR_DEFINITIONS: "$(inherited) USE_LIBXML2=1"
         HEADER_SEARCH_PATHS: "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src"
         SWIFT_OBJC_BRIDGING_HEADER: "vreader/SupportingFiles/Libmobi-Bridging-Header.h"
         OTHER_LDFLAGS: "$(inherited) -lxml2"
-        GCC_WARN_INHIBIT_ALL_WARNINGS: YES
     info:
       # XcodeGen writes vreader/SupportingFiles/Info.plist with this content.
       # We need a real Info.plist (not Xcode's auto-generated one) because
