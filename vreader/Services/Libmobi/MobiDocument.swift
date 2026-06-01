@@ -39,10 +39,17 @@ enum MobiDecodeError: Error, Equatable {
     case initFailed
     case loadFailed(Int32)
     case parseFailed(Int32)
-    case noMarkup   // parsed, but produced zero markup parts (nothing to read)
+    case noMarkup            // parsed, but produced zero markup parts
+    case corrupt(String)     // malformed part chain (cycle, or size>0 w/ null data)
 }
 
 extension Libmobi {
+
+    /// Defensive ceiling on the number of parts in a single section. A real
+    /// book has at most a few thousand parts across all sections; a count this
+    /// high can only come from a cyclic/corrupt `MOBIPart.next` chain, which we
+    /// reject (`.corrupt`) rather than loop on until OOM (Codex Gate-4 M1).
+    static let maxPartsPerSection = 100_000
 
     /// Load + fully reconstruct the Kindle file at `path` (AZW3/MOBI/KF8/PRC),
     /// returning its parts. Pure C interop with no shared mutable state, so it
@@ -50,9 +57,9 @@ extension Libmobi {
     /// multi-megabyte book is CPU-bound. Every libmobi allocation is freed
     /// before return (via `defer`), including on the throwing paths.
     ///
-    /// - Throws: `MobiDecodeError` on init/load/parse failure. A DRM-encrypted
-    ///   book typically loads but fails at `mobi_parse_rawml` with a libmobi
-    ///   error code → `.parseFailed`.
+    /// - Throws: `MobiDecodeError` on init/load/parse failure or a corrupt part
+    ///   chain. A DRM-encrypted book typically loads but fails at
+    ///   `mobi_parse_rawml` with a libmobi error code → `.parseFailed`.
     static func decodeParts(atPath path: String) throws -> [MobiPart] {
         guard let m = mobi_init() else { throw MobiDecodeError.initFailed }
         defer { mobi_free(m) }
@@ -71,9 +78,9 @@ extension Libmobi {
         }
 
         var parts: [MobiPart] = []
-        appendChain(rawml.pointee.markup, section: .markup, into: &parts)
-        appendChain(rawml.pointee.flow, section: .flow, into: &parts)
-        appendChain(rawml.pointee.resources, section: .resource, into: &parts)
+        try appendChain(rawml.pointee.markup, section: .markup, into: &parts)
+        try appendChain(rawml.pointee.flow, section: .flow, into: &parts)
+        try appendChain(rawml.pointee.resources, section: .resource, into: &parts)
 
         guard parts.contains(where: { $0.section == .markup }) else {
             throw MobiDecodeError.noMarkup
@@ -84,19 +91,35 @@ extension Libmobi {
     /// Walk a libmobi part linked list, copying each node's bytes into a value.
     /// `MOBIPart.data` is owned by the `MOBIRawml` (freed by `mobi_free_rawml`),
     /// so we copy into a Swift `Data` rather than alias the C buffer.
-    private static func appendChain(
+    ///
+    /// `internal` (not `private`) so the synthetic-chain tests can exercise the
+    /// defensive paths deterministically without a real libmobi parse.
+    ///
+    /// - Throws: `.corrupt` if the chain exceeds `maxPartsPerSection` (cyclic /
+    ///   corrupt `next`), or if a part declares a positive `size` but a null
+    ///   `data` pointer (Codex Gate-4 M1/M2).
+    static func appendChain(
         _ head: UnsafeMutablePointer<MOBIPart>?,
         section: MobiPart.Section,
         into parts: inout [MobiPart]
-    ) {
+    ) throws {
         var node = head
+        var count = 0
         while let p = node {
+            count += 1
+            guard count <= maxPartsPerSection else {
+                throw MobiDecodeError.corrupt(
+                    "\(section) chain exceeded \(maxPartsPerSection) parts (cyclic or corrupt next)")
+            }
             let part = p.pointee
             let data: Data
-            if let raw = part.data, part.size > 0 {
+            if part.size == 0 {
+                data = Data()                       // legitimately-empty part
+            } else if let raw = part.data {
                 data = Data(bytes: raw, count: part.size)
             } else {
-                data = Data()
+                throw MobiDecodeError.corrupt(
+                    "\(section) part uid \(part.uid) declares size \(part.size) but data is null")
             }
             parts.append(MobiPart(
                 section: section,
