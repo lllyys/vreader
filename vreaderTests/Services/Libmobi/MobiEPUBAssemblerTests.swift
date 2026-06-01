@@ -26,8 +26,8 @@ struct MobiEPUBAssemblerTests {
     }
 
     @Test("mimetype is first, stored, exactly application/epub+zip; nothing else stored")
-    func mimetypeFirstStored() {
-        let files = MobiEPUBAssembler.assemble(parts: sampleParts, title: "T")
+    func mimetypeFirstStored() throws {
+        let files = (try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T"))
         #expect(files.first?.path == "mimetype")
         #expect(files.first?.isStored == true)
         #expect(String(decoding: files[0].data, as: UTF8.self) == "application/epub+zip")
@@ -36,7 +36,7 @@ struct MobiEPUBAssemblerTests {
 
     @Test("container.xml points at OEBPS/content.opf and is well-formed XML")
     func containerXMLValid() throws {
-        let files = MobiEPUBAssembler.assemble(parts: sampleParts, title: "T")
+        let files = (try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T"))
         let container = try #require(files.first { $0.path == "META-INF/container.xml" })
         let s = String(decoding: container.data, as: UTF8.self)
         #expect(s.contains("full-path=\"OEBPS/content.opf\""))
@@ -45,7 +45,7 @@ struct MobiEPUBAssemblerTests {
 
     @Test("content.opf manifests every part + nav, spine is markup in decode order")
     func opfManifestAndSpine() throws {
-        let files = MobiEPUBAssembler.assemble(parts: sampleParts, title: "T")
+        let files = (try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T"))
         let opf = try #require(files.first { $0.path == "OEBPS/content.opf" })
         let s = String(decoding: opf.data, as: UTF8.self)
         #expect(isWellFormedXML(opf.data))
@@ -62,7 +62,7 @@ struct MobiEPUBAssemblerTests {
 
     @Test("part bytes land at the manifest hrefs; nav present")
     func partFilesPresent() throws {
-        let files = MobiEPUBAssembler.assemble(parts: sampleParts, title: "T")
+        let files = (try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T"))
         let p0 = try #require(files.first { $0.path == "OEBPS/text/part0000.xhtml" })
         #expect(String(decoding: p0.data, as: UTF8.self).contains("Chapter 1"))
         let css = try #require(files.first { $0.path == "OEBPS/styles/flow0000.css" })
@@ -71,38 +71,60 @@ struct MobiEPUBAssemblerTests {
         #expect(files.contains { $0.path == "OEBPS/nav.xhtml" })
     }
 
-    @Test("title is XML-escaped in the opf")
-    func titleEscaped() {
-        let files = MobiEPUBAssembler.assemble(parts: sampleParts, title: "A & B <c>")
-        let opf = String(decoding: files.first { $0.path == "OEBPS/content.opf" }!.data, as: UTF8.self)
-        #expect(opf.contains("A &amp; B &lt;c&gt;"))
-        #expect(!opf.contains("<dc:title>A & B <c></dc:title>"))
-        #expect(isWellFormedXML(files.first { $0.path == "OEBPS/content.opf" }!.data))
+    @Test("all five XML entities are escaped in BOTH content.opf and nav.xhtml")
+    func titleEscapedEverywhere() throws {
+        let nasty = "A & B < C > D \" E ' F"
+        let files = try MobiEPUBAssembler.assemble(parts: sampleParts, title: nasty)
+        for path in ["OEBPS/content.opf", "OEBPS/nav.xhtml"] {
+            let file = try #require(files.first { $0.path == path })
+            let s = String(decoding: file.data, as: UTF8.self)
+            #expect(s.contains("&amp;"))
+            #expect(s.contains("&lt;"))
+            #expect(s.contains("&gt;"))
+            #expect(s.contains("&quot;"))
+            #expect(s.contains("&apos;"))
+            // The raw, un-escaped title must not appear verbatim.
+            #expect(!s.contains(nasty))
+            // And the document stays well-formed after escaping.
+            #expect(isWellFormedXML(file.data))
+        }
     }
 
     @Test("assembly is deterministic — same parts yield byte-identical output")
-    func deterministic() {
-        #expect(MobiEPUBAssembler.assemble(parts: sampleParts, title: "T")
-                == MobiEPUBAssembler.assemble(parts: sampleParts, title: "T"))
+    func deterministic() throws {
+        #expect((try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T"))
+                == (try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T")))
     }
 
-    @Test("package identifier is content-addressed — different content → different id")
-    func contentAddressedID() {
-        let a = idFromOPF(MobiEPUBAssembler.assemble(parts: sampleParts, title: "T"))
-        var other = sampleParts
-        other[0] = part(.markup, 0, "html", "<html><body>different content entirely</body></html>")
-        let b = idFromOPF(MobiEPUBAssembler.assemble(parts: other, title: "T"))
-        #expect(!a.isEmpty && !b.isEmpty)
-        #expect(a != b)
+    @Test("package id depends on structure, not just bytes (section/uid/ext)")
+    func idDependsOnStructureNotJustBytes() throws {
+        // Same payload bytes, different section → must NOT collide on one id.
+        let a = idFromOPF(try MobiEPUBAssembler.assemble(
+            parts: [part(.markup, 0, "html", "<html/>"), part(.flow, 0, "css", "X")], title: "T"))
+        let b = idFromOPF(try MobiEPUBAssembler.assemble(
+            parts: [part(.markup, 0, "html", "<html/>"), part(.flow, 0, "css", "Y")], title: "T"))
+        let c = idFromOPF(try MobiEPUBAssembler.assemble(
+            parts: [part(.markup, 0, "html", "<html/>"), part(.flow, 1, "css", "X")], title: "T"))
+        #expect(a != b, "different flow bytes → different id")
+        #expect(a != c, "different uid (same bytes) → different id")
     }
 
-    @Test("no markup → empty spine, but still a valid package")
-    func noMarkup() throws {
+    @Test("zero markup is rejected with .noMarkup (invalid empty spine/TOC)")
+    func zeroMarkupThrows() {
         let resourceOnly = [part(.resource, 0, "png", "img")]
-        let files = MobiEPUBAssembler.assemble(parts: resourceOnly, title: "T")
-        let opf = try #require(files.first { $0.path == "OEBPS/content.opf" })
-        #expect(isWellFormedXML(opf.data))
-        #expect(String(decoding: opf.data, as: UTF8.self).contains("<spine>"))
+        #expect(throws: MobiEPUBError.noMarkup) {
+            _ = try MobiEPUBAssembler.assemble(parts: resourceOnly, title: "T")
+        }
+    }
+
+    @Test("nav.xhtml is well-formed and has one <li> per markup part")
+    func navStructure() throws {
+        let files = try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T")
+        let nav = try #require(files.first { $0.path == "OEBPS/nav.xhtml" })
+        #expect(isWellFormedXML(nav.data))
+        let s = String(decoding: nav.data, as: UTF8.self)
+        // sampleParts has 2 markup parts → 2 <li>.
+        #expect(s.components(separatedBy: "<li>").count - 1 == 2)
     }
 
     // MARK: helpers

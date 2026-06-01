@@ -25,6 +25,15 @@ struct EPUBFile: Equatable {
     let isStored: Bool
 }
 
+/// Errors from EPUB assembly.
+enum MobiEPUBError: Error, Equatable {
+    /// No markup parts → there is nothing to put in the spine or the TOC nav,
+    /// and an empty `<ol>` is invalid EPUB3. Mirrors the decode layer's
+    /// `MobiDecodeError.noMarkup`; in the real pipeline `decodeParts` already
+    /// rejects this, so reaching the assembler with zero markup is a bug.
+    case noMarkup
+}
+
 enum MobiEPUBAssembler {
 
     /// Lay out decoded MOBI `parts` into ordered EPUB file entries. Markup parts
@@ -36,7 +45,16 @@ enum MobiEPUBAssembler {
     /// The returned array is ordered `[mimetype, container.xml, content.opf,
     /// nav, …parts]` — WI-2c writes them in this order so `mimetype` lands
     /// first.
-    static func assemble(parts: [MobiPart], title: String) -> [EPUBFile] {
+    ///
+    /// - Throws: `MobiEPUBError.noMarkup` if there are no markup parts — an
+    ///   empty spine + empty TOC `<ol>` is invalid EPUB3, so reject rather than
+    ///   emit a malformed package (Codex Gate-4).
+    static func assemble(parts: [MobiPart], title: String) throws -> [EPUBFile] {
+        let markup = parts.filter { $0.section == .markup }
+        let flow = parts.filter { $0.section == .flow }
+        let resources = parts.filter { $0.section == .resource }
+        guard !markup.isEmpty else { throw MobiEPUBError.noMarkup }
+
         // Stable, content-addressed identifier — same MOBI → same EPUB id.
         let identifier = "urn:uuid:" + packageUUID(for: parts)
 
@@ -44,10 +62,6 @@ enum MobiEPUBAssembler {
         var manifest: [ManifestEntry] = []
         var spineIDs: [String] = []
         var files: [EPUBFile] = []
-
-        let markup = parts.filter { $0.section == .markup }
-        let flow = parts.filter { $0.section == .flow }
-        let resources = parts.filter { $0.section == .resource }
 
         for (i, part) in markup.enumerated() {
             let id = "html\(pad(i))"
@@ -161,7 +175,15 @@ enum MobiEPUBAssembler {
     /// same EPUB identity.
     private static func packageUUID(for parts: [MobiPart]) -> String {
         var hasher = SHA256()
-        for part in parts { hasher.update(data: part.data) }
+        for part in parts {
+            // Domain-separate each field so two part lists with identical bytes
+            // but different section / uid / extension cannot collide on one id
+            // (Codex Gate-4 High). The length-prefixed header + delimiter make
+            // the boundary between fields and payload unambiguous.
+            let header = "\(part.section)|\(part.uid)|\(part.fileExtension)|\(part.data.count)\n"
+            hasher.update(data: Data(header.utf8))
+            hasher.update(data: part.data)
+        }
         let hex = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         // Shape the first 32 hex chars as 8-4-4-4-12.
         let h = Array(hex.prefix(32))
@@ -181,6 +203,7 @@ enum MobiEPUBAssembler {
         case "otf":           return "font/otf"
         case "ttf":           return "font/ttf"
         case "mp3":           return "audio/mpeg"
+        case "mpg", "mpeg":   return "video/mpeg"
         case "pdf":           return "application/pdf"
         default:              return "application/octet-stream"
         }
