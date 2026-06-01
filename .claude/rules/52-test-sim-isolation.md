@@ -81,6 +81,37 @@ TIMEOUT_SECS=2400 scripts/run-tests.sh vreaderTests
    (NOT `pgrep -f xcodebuild` — `-f` matches the pattern inside your own grep
    command line and always returns ≥1, a false positive that has masked real
    state before). Zero = clean.
+5. **Never pipe `scripts/run-tests.sh` through `tail` / `grep` / `head`.** `tail
+   -N` on a PIPE emits NOTHING until EOF, so it buffers away every streaming `◇
+   Test case` marker AND the single `RUN-TESTS RESULT:` line the watchdog exists
+   to print. The output file stays empty mid-run, which makes a healthy run and a
+   wedged run look identical — you lose the only cheap liveness signal. Let the
+   watchdog's stdout go STRAIGHT to the output file (it already self-limits its
+   output); read the file or wait for the native completion notification. Origin:
+   2026-06-01, a `run-tests.sh … | tail -30` background invocation produced a
+   0-byte output file for ~5 min; the run looked ghosted but the empty file was
+   just `tail` buffering — the actual diagnosis required `ps`. (If you must
+   shorten a FOREGROUND, already-finished log, `tail` the output FILE after the
+   RESULT line lands — never insert `tail` into the live pipe.)
+
+### Diagnosing "is it hung?" — process liveness, NOT the output file
+
+When a backgrounded test run looks stalled, do NOT infer state from an empty or
+silent output file (see rule 5 — it may just be pipe buffering). Infer it from
+the **build process**:
+
+```bash
+# A genuine run ALWAYS has a live xcodebuild; during compile, also
+# swift-frontend / clang. Zero of these = no work happening, full stop.
+ps -Ao pid=,%cpu=,command= | grep -iE "xcodebuild|swift-frontend|clang|xctest|SWBBuildService" | grep -v grep
+```
+
+- **`xcodebuild` present (any CPU, even 0% briefly between phases)** → working;
+  wait for the native completion notification.
+- **`xcodebuild` totally absent + watchdog/wrapper still "alive"** → ghost. Kill
+  the wrapper tree, `pkill -9 -x SWBBuildService` (Cause B), re-run.
+- CoreSimulator runtime daemons (`…/RuntimeRoot/…` at 0%) are the booted sim's
+  idle background services — unrelated noise, never evidence of a build.
 
 ## Quick reference
 
