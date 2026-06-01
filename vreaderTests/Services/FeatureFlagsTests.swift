@@ -152,25 +152,50 @@ struct FeatureFlagsTests {
 
     // MARK: - Feature #42: readiumEPUBEngine
 
-    @Test func readiumEPUBEngineDefaultsOffInAllEnvironments() {
-        // Feature #42 Phase 1: default OFF everywhere — EPUBWebViewBridge stays
-        // the live EPUB engine until the Readium host reaches parity. The WI-14
-        // flip (human-gated G2) is what moves this default ON.
+    @Test func readiumEPUBEngineDefaultsOnInAllEnvironments() {
+        // Feature #42 WI-14 (human-gated G2, 2026-06-01): default ON everywhere —
+        // the Readium navigator is now the default reflowable EPUB engine. The
+        // pre-flip default was OFF (EPUBWebViewBridge); the G2 sign-off moved it.
         for env in AppEnvironment.allCases {
             let flags = FeatureFlags(environment: env)
-            #expect(flags.readiumEPUBEngine == false)
-            #expect(flags.isEnabled(.readiumEPUBEngine) == false)
+            #expect(flags.readiumEPUBEngine == true)
+            #expect(flags.isEnabled(.readiumEPUBEngine) == true)
         }
     }
 
-    @Test func readiumEPUBEngineOverrideCanEnable() {
-        // The Readium host (WI-5+) is exercised in DEBUG/test by flipping this
-        // override ON; removing the override restores the default (OFF).
+    @Test func readiumEPUBEngineOverrideCanDisable() {
+        // Post-WI-14 the default is ON; a user can still revert to the legacy
+        // `EPUBWebViewBridge` by setting the persisted override OFF. Removing the
+        // override restores the default (now ON).
         let flags = FeatureFlags(environment: .prod)
-        flags.setOverride(true, for: .readiumEPUBEngine)
-        #expect(flags.readiumEPUBEngine == true)
-        flags.removeOverride(for: .readiumEPUBEngine)
+        flags.setOverride(false, for: .readiumEPUBEngine)
         #expect(flags.readiumEPUBEngine == false)
+        flags.removeOverride(for: .readiumEPUBEngine)
+        #expect(flags.readiumEPUBEngine == true)
+    }
+
+    @Test func readiumEPUBEngineOverridePersists() {
+        // WI-14 (Codex audit Low): the persisted OFF override must survive a
+        // reload, beating the new ON default — this is the path a user who
+        // reverts to the legacy `EPUBWebViewBridge` relies on. Persist `false`
+        // (NOT the ON default) so the reload assertion is discriminating: a
+        // regression dropping `.readiumEPUBEngine` from `persistedFlags` would
+        // make the reload read the ON default and fail this test.
+        let suiteName = "test.readiumEPUBEngine.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let flags = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        flags.setOverride(false, for: .readiumEPUBEngine)
+        #expect(defaults.bool(forKey: "com.vreader.featureFlags.readiumEPUBEngine") == false)
+
+        // A fresh instance over the same defaults reads the persisted OFF
+        // override, beating the new ON default.
+        let reloaded = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        #expect(reloaded.readiumEPUBEngine == false)
+        // Removing the persisted override restores the new ON default.
+        reloaded.removeOverride(for: .readiumEPUBEngine)
+        #expect(reloaded.readiumEPUBEngine == true)
     }
 
     // MARK: - Feature #71: epubContinuousScroll

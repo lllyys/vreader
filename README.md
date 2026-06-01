@@ -104,7 +104,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 | ----------- | ----------------------------------------------------------------------------------------------- |
 | UI          | SwiftUI                                                                                         |
 | Persistence | SwiftData (SchemaV6)                                                                            |
-| EPUB        | WKWebView bridge with CSS theme injection + JS highlight API                                    |
+| EPUB        | [Readium Swift Toolkit](https://github.com/readium/swift-toolkit) navigator (default since #42 WI-14); legacy WKWebView bridge available via override |
 | AZW3/MOBI   | [Foliate-js](https://github.com/johnfactotum/foliate-js) in WKWebView (IIFE bundle via esbuild) |
 | PDF         | PDFKit + PDFAnnotation for highlights                                                           |
 | TXT         | TextKit 1 (UITextView) + chunked UITableView                                                    |
@@ -165,7 +165,7 @@ vreaderUITests/          # UI tests (XCUITest)
 ### Key Design Decisions
 
 - **Foliate-js for AZW3/MOBI** — Kindle books are parsed and rendered by [Foliate-js](https://github.com/johnfactotum/foliate-js) running in WKWebView. The entire library is bundled into a single 278KB IIFE via esbuild (WKWebView blocks ES modules on custom schemes). A `WKURLSchemeHandler` serves the JS bundle and book files from a single origin to avoid CORS issues.
-- **Three-renderer architecture** — Each format uses the best tool: Foliate-js in WKWebView (AZW3/MOBI), custom WKWebView bridge (EPUB), PDFKit (PDF), UITextView (TXT/MD). Shared services (Locator, Highlight, Search, TTS, Position) work across all renderers.
+- **Multi-renderer architecture** — Each format uses the best tool: Readium Swift Toolkit navigator (EPUB, default since feature #42 — legacy WKWebView bridge still available via override), Foliate-js in WKWebView (AZW3/MOBI), PDFKit (PDF), UITextView (TXT/MD). Shared services (Locator, Highlight, Search, TTS, Position) work across all renderers.
 - **CFI-based positions for EPUB/AZW3** — Foliate-js generates EPUB CFI strings for both EPUB and MOBI (fake CFIs for MOBI). These are stored in `Locator.cfi` as the authoritative position, enabling unified persistence and highlight anchoring.
 - **TextKit 1 for TXT rendering** — UITextView with `NSLayoutManager` for reliable offset-to-scroll mapping. TextKit 2 has better performance but lacks the `charOffset ↔ scrollOffset` APIs needed for position persistence.
 - **Chunked rendering for large files** — Files over 500K UTF-16 code units use a UITableView where each cell renders one \~16K chunk. Only visible cells build attributed strings (LRU cache of 20 chunks).

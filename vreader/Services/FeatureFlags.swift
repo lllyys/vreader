@@ -30,15 +30,12 @@ enum FeatureFlagKey: String, Sendable, CaseIterable {
     /// layout now flows continuously across chapters by default; the persisted
     /// override can still disable it per-user.
     case epubContinuousScroll
-    /// Feature #42 Phase 1: route EPUB rendering to the Readium Swift Toolkit
-    /// engine instead of the legacy `EPUBWebViewBridge`. Default OFF — the
-    /// Readium host (WI-5) is built behind this flag and `EPUBWebViewBridge`
-    /// stays the live default until full parity (incl. bilingual #56 +
-    /// continuous-scroll #71) is verified; only then does the WI-14 flip move
-    /// the default ON (human-gated G2). Persisted so the override sticks across
-    /// launches for testing + so it can be turned back OFF after the Readium
-    /// engine has written data (the dual-write to the legacy `Locator` keeps
-    /// that safe).
+    /// Feature #42: route EPUB rendering to the Readium Swift Toolkit engine
+    /// instead of the legacy `EPUBWebViewBridge`. **Default ON since the WI-14
+    /// human-gated G2 flip (2026-06-01)** — Readium is now the default reflowable
+    /// EPUB engine. Persisted so a user/debug override sticks across launches: a
+    /// persisted override OFF reverts to `EPUBWebViewBridge` (the dual-write to
+    /// the legacy `Locator` keeps positions safe when toggling back).
     case readiumEPUBEngine
 }
 
@@ -152,9 +149,9 @@ nonisolated final class FeatureFlags: Sendable {
     /// (aiAssistant pattern) — a user/debug `false` override still disables it.
     var epubContinuousScroll: Bool { isEnabled(.epubContinuousScroll) }
 
-    /// Feature #42: render EPUB via the Readium engine. Default OFF (see the
-    /// enum doc + `defaultValue`); the Readium host is built behind this until
-    /// parity, then the WI-14 G2 flip moves it ON.
+    /// Feature #42: render EPUB via the Readium engine. **Default ON since the
+    /// WI-14 G2 flip (2026-06-01)** (see the enum doc + `defaultValue`); a
+    /// persisted user/debug `false` override reverts to `EPUBWebViewBridge`.
     var readiumEPUBEngine: Bool { isEnabled(.readiumEPUBEngine) }
 
     // MARK: - Override Management
@@ -230,11 +227,18 @@ nonisolated final class FeatureFlags: Sendable {
             // persisted override (see the enum doc).
             return true
         case .readiumEPUBEngine:
-            // Feature #42 Phase 1: default OFF in every environment —
-            // `EPUBWebViewBridge` stays the live EPUB engine until the Readium
-            // host reaches full parity (incl. #56 bilingual + #71 continuous
-            // scroll). The WI-14 flip (human-gated G2) moves this default ON.
-            return false
+            // Feature #42 WI-14 (human-gated G2): default ON. The Readium Swift
+            // Toolkit `EPUBNavigatorViewController` is now the default reflowable
+            // EPUB engine. Parity is implemented: render / RTL / CJK-vertical /
+            // position save+restore (VReaderLocator) / theme+font / search-nav
+            // (all ✅ in the WI-13 acceptance pass) + bilingual (decorations) +
+            // both paged and scroll modes. Two WI-13 criteria are env-gated
+            // (highlight CREATE needs a real touch gesture; bilingual TRANSLATION
+            // needs an AI provider) — both implementation paths are unit-covered;
+            // only their end-to-end CU-free verification was deferred. Human G2
+            // sign-off given 2026-06-01. Users can revert to the legacy
+            // `EPUBWebViewBridge` via the persisted override (see the enum doc).
+            return true
         }
     }
 }

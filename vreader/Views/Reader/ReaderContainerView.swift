@@ -962,9 +962,10 @@ struct ReaderContainerView: View {
     func engineReaderView(fingerprint: DocumentFingerprint) -> some View {
         switch ReaderEngine.resolve(format: fingerprint.format) {
         case .epubWKWebView:
-            // Feature #42 Phase 1: route EPUB to the Readium engine when the
-            // `readiumEPUBEngine` flag is ON (default OFF → `EPUBReaderHost`
-            // stays the live default). The flag read lives here in the
+            // Feature #42: route EPUB to the Readium engine when the
+            // `readiumEPUBEngine` flag is ON (default ON since the WI-14 G2 flip
+            // 2026-06-01 → Readium is the default; a persisted override OFF
+            // reverts to `EPUBReaderHost`). The flag read lives here in the
             // dispatcher, not in the pure `ReaderEngine.resolve`. `if`/`else`
             // (not an inner `switch`) so the EPUB dispatch keeps a single
             // `case` label — the source-level dispatch guard slices on case
