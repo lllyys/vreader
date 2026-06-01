@@ -30,11 +30,19 @@
 //   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-10)
 
 import Foundation
+import OSLog
 
 /// Production adapter routing the bilingual VM's prefetch trigger
 /// through `ChapterTranslationService` + the active `AIService`
 /// provider. One per open book.
 struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
+
+    /// Observability for the prefetch path. The bilingual VM swallows a
+    /// prefetch failure as "retry later" (so the reader doesn't break), which
+    /// previously made a misconfigured provider / consent gate / failing AI
+    /// call invisible — the UI activated but no translation ever rendered, with
+    /// no signal. These error logs surface the underlying cause.
+    private static let log = Logger(subsystem: "com.vreader.app", category: "BilingualPrefetch")
 
     /// The book this adapter prefetches for. Matches the VM's
     /// `bookFingerprintKey` so the cache lookup key is built
@@ -81,6 +89,7 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         // 1:1 block↔segment contract holds.
         _ = granularity  // explicitly ignored
         let effectiveGranularity: TranslationGranularity = .paragraph
+        Self.log.debug("prefetch start: unit \(String(describing: unit), privacy: .public)")
 
         // Snapshot the active profile FIRST so the cache `lookupKey`
         // and the resolved config below come from the same point in
@@ -91,6 +100,7 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         // Codex Gate-4 audit finding [4].
         guard let activeProfile = await ProviderProfileStore.shared
             .activeProfileSnapshot() else {
+            Self.log.error("prefetch: no active provider profile")
             throw ChapterTranslationError.providerFailed("no active provider profile")
         }
         let providerProfileID = activeProfile.id
@@ -111,6 +121,7 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
             // the VM treats as "retry later", not as the offline
             // silent-source-fallback (that's `URLError.notConnected`
             // territory, handled below by the service).
+            Self.log.error("prefetch resolveProviderConfig failed: \(String(describing: error), privacy: .private)")
             throw ChapterTranslationError.providerFailed("provider config unavailable")
         }
 
@@ -121,20 +132,26 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         do {
             sourceText = try await textProvider.sourceText(for: unit)
         } catch {
+            Self.log.error("prefetch sourceText failed for unit \(String(describing: unit), privacy: .public): \(String(describing: error), privacy: .private)")
             throw ChapterTranslationError.providerFailed("chapter text unavailable")
         }
 
-        let result = try await translationService.translate(
-            bookFingerprintKey: bookFingerprintKey,
-            unit: unit,
-            sourceText: sourceText,
-            targetLanguage: targetLanguage,
-            providerProfileID: providerProfileID,
-            config: config,
-            style: style,
-            granularity: effectiveGranularity
-        )
-        return result.segments
+        do {
+            let result = try await translationService.translate(
+                bookFingerprintKey: bookFingerprintKey,
+                unit: unit,
+                sourceText: sourceText,
+                targetLanguage: targetLanguage,
+                providerProfileID: providerProfileID,
+                config: config,
+                style: style,
+                granularity: effectiveGranularity
+            )
+            return result.segments
+        } catch {
+            Self.log.error("prefetch translate call failed for unit \(String(describing: unit), privacy: .public): \(String(describing: error), privacy: .private)")
+            throw error
+        }
     }
 
     /// Bug #268: translate the render's OWN enumerated block texts directly
@@ -147,10 +164,12 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         targetLanguage: String
     ) async throws -> [String] {
         guard !sourceSegments.isEmpty else { return [] }
+        Self.log.debug("prefetchDirect start: unit \(String(describing: unit), privacy: .public), \(sourceSegments.count) segments")
         // Snapshot the active profile + resolve its config (mirrors
         // `translatedSegments` so a provider switch can't straddle).
         guard let activeProfile = await ProviderProfileStore.shared
             .activeProfileSnapshot() else {
+            Self.log.error("prefetchDirect: no active provider profile")
             throw ChapterTranslationError.providerFailed("no active provider profile")
         }
         let config: ResolvedAIProviderConfig
@@ -158,12 +177,20 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
             config = try await aiService.resolveProviderConfig(
                 profileID: activeProfile.id, modelOverride: nil)
         } catch {
+            Self.log.error("prefetchDirect resolveProviderConfig failed: \(String(describing: error), privacy: .private)")
             throw ChapterTranslationError.providerFailed("provider config unavailable")
         }
-        return try await translationService.translatePreSegmented(
-            segments: sourceSegments,
-            targetLanguage: targetLanguage,
-            config: config,
-            style: style)
+        do {
+            let out = try await translationService.translatePreSegmented(
+                segments: sourceSegments,
+                targetLanguage: targetLanguage,
+                config: config,
+                style: style)
+            Self.log.debug("prefetchDirect ok: \(out.count) translated segments")
+            return out
+        } catch {
+            Self.log.error("prefetchDirect translatePreSegmented failed: \(String(describing: error), privacy: .private)")
+            throw error
+        }
     }
 }

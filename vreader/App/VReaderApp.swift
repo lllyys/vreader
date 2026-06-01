@@ -177,6 +177,21 @@ struct VReaderApp: App {
             )
 
             #if DEBUG
+            // Bug #237 (+ follow-up): the --enable-ai launch flag enables AI
+            // verification surfaces. Run AITestSetup OUTSIDE the isUITesting gate
+            // so it also applies to CU-free DebugBridge verification (XCUITest
+            // passes --uitesting; `simctl openurl vreader-debug://…` runs do not).
+            // Forwarding to AITestOverride alone only short-circuits
+            // AIReaderAvailability (the UI gate) — but AIService.sendRequest gates
+            // DIRECTLY on featureFlags.aiAssistant + consentManager.hasConsent, so
+            // live AI requests (bilingual translate, summarize, chat) otherwise
+            // throw featureDisabled/consentRequired. AITestSetup sets all three.
+            AITestSetup.apply(
+                enableAI: config.enableAI,
+                featureFlags: .shared,
+                consentManager: AIConsentManager()
+            )
+
             // Seed test data before creating the ViewModel to avoid race with LibraryView.loadBooks().
             // Uses Task.detached + semaphore to block init until seeding completes.
             // Bounded timeout prevents indefinite hang if seeding fails.
@@ -224,11 +239,8 @@ struct VReaderApp: App {
                 // translate, summarize, chat) still threw featureDisabled/
                 // consentRequired. AITestSetup sets all three so CU-free AI
                 // verification exercises the full request path.
-                AITestSetup.apply(
-                    enableAI: config.enableAI,
-                    featureFlags: .shared,
-                    consentManager: AIConsentManager()
-                )
+                // (Applied above, OUTSIDE the isUITesting gate, so --enable-ai
+                //  also works for CU-free DebugBridge verification.)
 
                 let persistence = PersistenceActor(modelContainer: container)
                 let seedConfig = config
