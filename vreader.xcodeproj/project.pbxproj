@@ -452,6 +452,7 @@
 		4C47F172233199432FC289E3 /* ImportSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F84672A6E2EDD6E037AFD8 /* ImportSource.swift */; };
 		4C5F7C805D7702035CEA5837 /* NativeTextPaginatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 295669F5B358B6C7BE41952E /* NativeTextPaginatorTests.swift */; };
 		4CACC9F4BA8C17144C30C113 /* BackgroundDownloadSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A04EAFA37410DA616E33D6 /* BackgroundDownloadSession.swift */; };
+		4CBBDD4F06D00C0A4A6E1716 /* MobiEPUBAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD27A5C682FAD0ED96FD755A /* MobiEPUBAssemblerTests.swift */; };
 		4CBBDDA7BEECCFF853B1D90C /* memory.c in Sources */ = {isa = PBXBuildFile; fileRef = 33EA0E7BAE9970AB1E1CE063 /* memory.c */; settings = {COMPILER_FLAGS = "-w"; }; };
 		4CC9567091E0CABFDD800F6C /* AIConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C52103AEAF5528A9DD58625E /* AIConfiguration.swift */; };
 		4CCBF4F6E186A7363A995303 /* ReaderContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB42EEEFFCAD8D654D57AE7 /* ReaderContainerView.swift */; };
@@ -757,6 +758,7 @@
 		80C8BBADB032CF847DC6CE17 /* DebugCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2C3A426BB929B2462E439E /* DebugCommand.swift */; };
 		80CA0E4FF773CBEC357DF93D /* TOCBuilderMDTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 456FDDA03D7DEF3A4AEB01DB /* TOCBuilderMDTests.swift */; };
 		80CABDCB3569E07FE3AD3FD0 /* MockPositionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2355F0CDCE9B874D6BD148FB /* MockPositionStore.swift */; };
+		81335B193A21695719B19FC1 /* MobiEPUBAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52EC2FD8AA88F51D2C739C54 /* MobiEPUBAssembler.swift */; };
 		8146FBBF9AF55DA7C8B68FDB /* SourceSerif4-LICENSE.md in Resources */ = {isa = PBXBuildFile; fileRef = 0E32E90EB8316752FB90F6B5 /* SourceSerif4-LICENSE.md */; };
 		81498F908FAF97F421A3C35F /* AIReaderPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DF113D7E83A1CE51F417258 /* AIReaderPanel.swift */; };
 		8178696A12B2FC6B462D9C3A /* LibraryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B1563E77E28434568F45736 /* LibraryViewModelTests.swift */; };
@@ -1951,6 +1953,7 @@
 		529D0FB4C5C73B62F1C8D6D6 /* TXTChapterContentLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterContentLoader.swift; sourceTree = "<group>"; };
 		529E7234A3FC73811D573A6C /* SheetSectionContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetSectionContract.swift; sourceTree = "<group>"; };
 		52B46A5F229515020166A545 /* ReaderContainerView+DebugBridgeSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReaderContainerView+DebugBridgeSearch.swift"; sourceTree = "<group>"; };
+		52EC2FD8AA88F51D2C739C54 /* MobiEPUBAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobiEPUBAssembler.swift; sourceTree = "<group>"; };
 		533D2D4F8B5502E8D51A714E /* EPUBTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBTextExtractor.swift; sourceTree = "<group>"; };
 		53476F2A0426877FA297A911 /* TranslationStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationStyle.swift; sourceTree = "<group>"; };
 		5350DA755A0BB669AE8D3FBD /* BackupViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupViewModelTests.swift; sourceTree = "<group>"; };
@@ -2930,6 +2933,7 @@
 		FCC8C2B2EE71211499AA0EE4 /* AnnotationStreamItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationStreamItem.swift; sourceTree = "<group>"; };
 		FCDA968F8186B11859D8CCFE /* MDTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDTypes.swift; sourceTree = "<group>"; };
 		FD1989CF2F582B5C821059BA /* FoliateScrollModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateScrollModelTests.swift; sourceTree = "<group>"; };
+		FD27A5C682FAD0ED96FD755A /* MobiEPUBAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobiEPUBAssemblerTests.swift; sourceTree = "<group>"; };
 		FDEB28B2CAB1481C73FBE351 /* TestSeederMDMultiPagePaginationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSeederMDMultiPagePaginationTests.swift; sourceTree = "<group>"; };
 		FDF40785A923791B0241CF75 /* GlobalAccessibilityAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalAccessibilityAuditTests.swift; sourceTree = "<group>"; };
 		FDFAF8770F91837F0B3793E1 /* ImportProvenanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProvenanceTests.swift; sourceTree = "<group>"; };
@@ -3673,6 +3677,7 @@
 			children = (
 				89E60C649B564A45FD862030 /* LibmobiSmokeTests.swift */,
 				00FA26E476FF553131CD1EA7 /* MobiDocumentTests.swift */,
+				FD27A5C682FAD0ED96FD755A /* MobiEPUBAssemblerTests.swift */,
 			);
 			path = Libmobi;
 			sourceTree = "<group>";
@@ -3944,6 +3949,7 @@
 			children = (
 				02568BCB9C0024CD13E6B213 /* Libmobi.swift */,
 				E21A8FA98D52AD57B6C145B9 /* MobiDocument.swift */,
+				52EC2FD8AA88F51D2C739C54 /* MobiEPUBAssembler.swift */,
 			);
 			path = Libmobi;
 			sourceTree = "<group>";
@@ -5941,6 +5947,7 @@
 				1FC25DD5163814F8A1DF4EBF /* MigrationFixtureTests.swift in Sources */,
 				4930168887D85648F1EDA897 /* MigrationFixtures.swift in Sources */,
 				451D95C31492840BFA338F69 /* MobiDocumentTests.swift in Sources */,
+				4CBBDD4F06D00C0A4A6E1716 /* MobiEPUBAssemblerTests.swift in Sources */,
 				E057330B701161FF1AD06DB4 /* MockAnnotationStore.swift in Sources */,
 				7B9FDFE7688C6E45D59916CD /* MockBackupProvider.swift in Sources */,
 				A3B284AC778E4DC971B5E0A5 /* MockBookImporter.swift in Sources */,
@@ -6599,6 +6606,7 @@
 				15C15DFE4818EDE663481250 /* MarkdownExportFormatter.swift in Sources */,
 				AF7D99D9C0CEA266BFD976B8 /* MetadataExtractor.swift in Sources */,
 				38804060BFAD87B87936AF08 /* MobiDocument.swift in Sources */,
+				81335B193A21695719B19FC1 /* MobiEPUBAssembler.swift in Sources */,
 				8D6ECB8A09289C09C71F2047 /* ModelContainerFactory.swift in Sources */,
 				FE4AA790FC56F646C3E68DDE /* MonthBoundary.swift in Sources */,
 				1A7E58193D247BB8900BA5B3 /* NSUKVSBridge.swift in Sources */,
