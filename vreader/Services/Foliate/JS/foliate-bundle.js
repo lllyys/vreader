@@ -4152,7 +4152,7 @@ ${doc.querySelector("parsererror").innerText}`);
   __export(paginator_exports, {
     Paginator: () => Paginator
   });
-  var wait, debounce, lerp, easeOutQuad, animate, uncollapse, makeRange, bisectNode, SHOW_ELEMENT, SHOW_TEXT, SHOW_CDATA_SECTION, FILTER_ACCEPT, FILTER_REJECT, FILTER_SKIP, filter2, getBoundingClientRect, getVisibleRange, selectionIsBackward, setSelectionTo, getDirection, getBackground, makeMarginals, setStylesImportant, View, Paginator;
+  var wait, debounce, lerp, easeOutQuad, animate, uncollapse, makeRange, bisectNode, SHOW_ELEMENT, SHOW_TEXT, SHOW_CDATA_SECTION, FILTER_ACCEPT, FILTER_REJECT, FILTER_SKIP, filter2, getBoundingClientRect, getVisibleRange, selectionIsBackward, setSelectionTo, getDirection, scrollModelFor, getBackground, makeMarginals, setStylesImportant, View, Paginator;
   var init_paginator = __esm({
     "paginator.js"() {
       wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -4305,7 +4305,35 @@ ${doc.querySelector("parsererror").innerText}`);
         const { writingMode, direction } = defaultView.getComputedStyle(doc.body);
         const vertical = writingMode === "vertical-rl" || writingMode === "vertical-lr";
         const rtl = doc.body.dir === "rtl" || direction === "rtl" || doc.documentElement.dir === "rtl";
-        return { vertical, rtl };
+        return { vertical, rtl, writingMode };
+      };
+      scrollModelFor = (writingMode) => {
+        switch (writingMode) {
+          case "vertical-rl":
+            return {
+              axis: "horizontal",
+              scrollProp: "scrollLeft",
+              sizeProp: "width",
+              rectStartProp: "left",
+              directionSign: -1
+            };
+          case "vertical-lr":
+            return {
+              axis: "horizontal",
+              scrollProp: "scrollLeft",
+              sizeProp: "width",
+              rectStartProp: "left",
+              directionSign: 1
+            };
+          default:
+            return {
+              axis: "vertical",
+              scrollProp: "scrollTop",
+              sizeProp: "height",
+              rectStartProp: "top",
+              directionSign: 1
+            };
+        }
       };
       getBackground = (doc) => {
         const bodyStyle = doc.defaultView.getComputedStyle(doc.body);
@@ -4330,6 +4358,11 @@ ${doc.querySelector("parsererror").innerText}`);
         #overlayer;
         #vertical = false;
         #rtl = false;
+        // Feature #76 WI-1b: the loaded section's scroll model (axis/props/sign),
+        // mirroring Swift `FoliateScrollModel`. Defaults to the horizontal-tb model
+        // (Feature #73 vertical-scroll path). Stored additively here; the windowed
+        // primitives consume it in WI-3.
+        #scrollModel = scrollModelFor("horizontal-tb");
         #column = true;
         #size;
         #layout = {};
@@ -4365,6 +4398,11 @@ ${doc.querySelector("parsererror").innerText}`);
         get document() {
           return this.#iframe.contentDocument;
         }
+        // Feature #76 WI-1b: the loaded section's scroll model (axis/props/sign).
+        // Consumed by the windowed primitives in WI-3.
+        get scrollModel() {
+          return this.#scrollModel;
+        }
         async load(src, afterLoad, beforeRender) {
           if (typeof src !== "string") throw new Error(`${src} is not string`);
           return new Promise((resolve) => {
@@ -4372,11 +4410,12 @@ ${doc.querySelector("parsererror").innerText}`);
               const doc = this.document;
               afterLoad?.(doc);
               this.#iframe.style.display = "block";
-              const { vertical, rtl } = getDirection(doc);
+              const { vertical, rtl, writingMode } = getDirection(doc);
               const background = getBackground(doc);
               this.#iframe.style.display = "none";
               this.#vertical = vertical;
               this.#rtl = rtl;
+              this.#scrollModel = scrollModelFor(writingMode);
               this.#contentRange.selectNodeContents(doc.body);
               const layout = beforeRender?.({ vertical, rtl, background });
               this.#iframe.style.display = "block";

@@ -183,7 +183,31 @@ const getDirection = doc => {
     const rtl = doc.body.dir === 'rtl'
         || direction === 'rtl'
         || doc.documentElement.dir === 'rtl'
-    return { vertical, rtl }
+    // Feature #76 WI-1b: also surface the raw `writingMode` — `{vertical, rtl}`
+    // is lossy (vertical-rl vs -lr collapse; the windowing axis sign can't be
+    // recovered). Additive: existing `{vertical, rtl}` consumers are unchanged.
+    return { vertical, rtl, writingMode }
+}
+
+// Feature #76 WI-1b: the scrolled-mode scroll model derived from a section's
+// computed `writing-mode`. MIRRORS the Swift source-of-truth
+// `FoliateScrollModel.scrolled(writingMode:)` (pinned by FoliateScrollModelTests)
+// so the axis props + RTL/vertical-rl `directionSign` stay in lockstep across the
+// Swift seam (FoliateScrolledWindowMath.logicalOffset) and the JS windowing.
+// Scrolled mode only; the windowed primitives consume this in WI-3. Horizontal-tb
+// keeps sign +1 (Feature #73 path byte-unchanged); unknown modes fall back to it.
+const scrollModelFor = writingMode => {
+    switch (writingMode) {
+        case 'vertical-rl':
+            return { axis: 'horizontal', scrollProp: 'scrollLeft', sizeProp: 'width',
+                rectStartProp: 'left', directionSign: -1 }
+        case 'vertical-lr':
+            return { axis: 'horizontal', scrollProp: 'scrollLeft', sizeProp: 'width',
+                rectStartProp: 'left', directionSign: 1 }
+        default: // horizontal-tb and any non-vertical writing mode
+            return { axis: 'vertical', scrollProp: 'scrollTop', sizeProp: 'height',
+                rectStartProp: 'top', directionSign: 1 }
+    }
 }
 
 const getBackground = doc => {
@@ -215,6 +239,11 @@ class View {
     #overlayer
     #vertical = false
     #rtl = false
+    // Feature #76 WI-1b: the loaded section's scroll model (axis/props/sign),
+    // mirroring Swift `FoliateScrollModel`. Defaults to the horizontal-tb model
+    // (Feature #73 vertical-scroll path). Stored additively here; the windowed
+    // primitives consume it in WI-3.
+    #scrollModel = scrollModelFor('horizontal-tb')
     #column = true
     #size
     #layout = {}
@@ -250,6 +279,11 @@ class View {
     get document() {
         return this.#iframe.contentDocument
     }
+    // Feature #76 WI-1b: the loaded section's scroll model (axis/props/sign).
+    // Consumed by the windowed primitives in WI-3.
+    get scrollModel() {
+        return this.#scrollModel
+    }
     async load(src, afterLoad, beforeRender) {
         if (typeof src !== 'string') throw new Error(`${src} is not string`)
         return new Promise(resolve => {
@@ -259,12 +293,15 @@ class View {
 
                 // it needs to be visible for Firefox to get computed style
                 this.#iframe.style.display = 'block'
-                const { vertical, rtl } = getDirection(doc)
+                const { vertical, rtl, writingMode } = getDirection(doc)
                 const background = getBackground(doc)
                 this.#iframe.style.display = 'none'
 
                 this.#vertical = vertical
                 this.#rtl = rtl
+                // Feature #76 WI-1b (additive): derive + store the scroll model
+                // from the real writing-mode for the windowed primitives (WI-3).
+                this.#scrollModel = scrollModelFor(writingMode)
 
                 this.#contentRange.selectNodeContents(doc.body)
                 const layout = beforeRender?.({ vertical, rtl, background })
