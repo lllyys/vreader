@@ -89,6 +89,7 @@ struct AISettingsSection: View {
                 )
             }
         }
+        .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }
 
     // MARK: - Restyled provider row (feature #67 WI-5)

@@ -111,6 +111,34 @@ struct SheetReSkinSnapshotTests {
         }
     }
 
+    // MARK: - Grouped-section card surface (Bug #297 / GH #1328)
+
+    @Test("Sheet card surface is opaque white for light-family themes")
+    func sheetCardSurfaceLightForLightThemes() {
+        // Design `SettingsSheet` group card (`vreader-panels.jsx`):
+        // `t.isDark ? 'rgba(255,255,255,0.04)' : '#fff'`. The grouped
+        // Sections must carry this as their `.listRowBackground` so the
+        // App Settings rows don't fall through to the appearance-aware
+        // system `secondarySystemGroupedBackground` (charcoal in Dark Mode)
+        // while the sheet is pinned to the light `.paper` theme.
+        for theme in [ReaderThemeV2.paper, .sepia] {
+            assertColor(theme.sheetCardSurfaceColor, rgb: (0xff, 0xff, 0xff))
+            var a: CGFloat = 0
+            theme.sheetCardSurfaceColor.getRed(nil, green: nil, blue: nil, alpha: &a)
+            #expect(a == 1.0, "light-family card is opaque")
+        }
+    }
+
+    @Test("Sheet card surface is faint white-over-dark for dark-family themes")
+    func sheetCardSurfaceDarkForDarkThemes() {
+        for theme in [ReaderThemeV2.dark, .oled, .photo] {
+            assertColor(theme.sheetCardSurfaceColor, rgb: (0xff, 0xff, 0xff))
+            var a: CGFloat = 0
+            theme.sheetCardSurfaceColor.getRed(nil, green: nil, blue: nil, alpha: &a)
+            #expect((a * 100).rounded() == 4, "dark-family card is white @ 4%")
+        }
+    }
+
     @Test("Sheet chrome builds with a title bar")
     func sheetChromeBuildsWithTitle() {
         let chrome = ReaderSheetChrome(theme: .paper, title: "Display") {

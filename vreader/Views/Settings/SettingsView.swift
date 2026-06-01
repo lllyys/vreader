@@ -244,6 +244,7 @@ struct SettingsView: View {
             }
             .accessibilityIdentifier("settingsBookSources")
         }
+        .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }
 
     // MARK: - AI (design `SettingsSheet` group 2)
@@ -284,6 +285,7 @@ struct SettingsView: View {
             }
             .accessibilityIdentifier("settingsHTTPTTS")
         }
+        .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }
 
     // MARK: - About (design `SettingsSheet` group 4)
@@ -311,6 +313,7 @@ struct SettingsView: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settingsVersion")
         }
+        .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }
 
     // MARK: - Private

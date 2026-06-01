@@ -164,4 +164,19 @@ extension ReaderThemeV2 {
             ? UIColor(red: 0x22 / 255, green: 0x20 / 255, blue: 0x20 / 255, alpha: 1)
             : UIColor(red: 0xfc / 255, green: 0xf8 / 255, blue: 0xf0 / 255, alpha: 1)
     }
+
+    /// Grouped-section card fill — the surface the design's `SettingsSheet`
+    /// draws BEHIND each group of rows, elevated above `sheetSurfaceColor`
+    /// (`vreader-panels.jsx`: card `background: t.isDark ?
+    /// 'rgba(255,255,255,0.04)' : '#fff'`). App Settings pins the light
+    /// `.paper` theme, so without this the grouped `Section` rows fall
+    /// through to the appearance-aware system
+    /// `secondarySystemGroupedBackground` — charcoal in Dark Mode, which
+    /// renders the near-black `.paper` row labels nearly invisible
+    /// (Bug #297 / GH #1328). Set as each Section's `.listRowBackground`.
+    var sheetCardSurfaceColor: UIColor {
+        isDark
+            ? UIColor(white: 1, alpha: 0.04)
+            : UIColor(red: 1, green: 1, blue: 1, alpha: 1)
+    }
 }
