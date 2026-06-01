@@ -589,6 +589,24 @@ struct ReaderContainerView: View {
                 debugProbe?.renderedText = text
             }
         ))
+        // Feature #75 — CU-free EPUB layout switch (paged/scroll). Lives HERE at
+        // the dispatcher (not inside the EPUB host) so it sets the shared
+        // `settingsStore.epubLayout` that BOTH engines read reactively — the
+        // legacy `EPUBReaderContainerView` (.onChange) AND the Readium
+        // `ReadiumEPUBHost` (.onChange → re-renders the navigator with the new
+        // `EPUBPreferences(scroll:)`). The earlier host-scoped observer only
+        // reached the legacy engine; moving it up unblocks verifying paged
+        // vertical-rl / RTL page nav on the now-default Readium engine.
+        .modifier(ReaderDebugBridgeSetLayoutObserver { layout in
+            // Codex audit: this observer now mounts for EVERY format, so guard on
+            // EPUB — `epubLayout` is EPUB-specific and TXT/MD/Foliate/PDF also
+            // read it, so a `set-layout` fired while a non-EPUB reader is open
+            // must NOT mutate it (preserves the prior EPUB-only behavior). Both
+            // EPUB engines (legacy + Readium) are `.epub`, so the goal — reaching
+            // the Readium host — is unaffected.
+            guard DocumentFingerprint(canonicalKey: book.fingerprintKey)?.format == .epub else { return }
+            settingsStore.epubLayout = layout
+        })
         // Bug #237 — DebugBridge highlight-driver observer lives in the
         // TXT and MD format hosts, NOT here. Format hosts have the source
         // text + chapter index they need to build canonical Locators via
