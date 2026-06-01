@@ -50,14 +50,18 @@ targets:
           # build-bundle.sh is also a dev/build tool, not a runtime
           # asset; keep it out of the app bundle.
           - "Services/Foliate/JS/build-bundle.sh"
-          # Feature #42 Phase-2 WI-1a (libmobi convert-on-import, LGPL-3.0):
-          # the vendored libmobi C sources need their own compile flags
-          # (-DUSE_LIBXML2=1, the libxml2 include path, no -Werror) which differ
-          # from the app target's. Exclude them from the app's source glob so
-          # they don't auto-compile with the wrong flags; WI-1b wires them via a
-          # dedicated static-library target + module map. The build recipe that
-          # was verified for iOS lives in Services/Libmobi/BUILD-RECIPE.md.
-          - "Services/Libmobi/**"
+          # Feature #42 Phase-2 WI-1b (libmobi convert-on-import, LGPL-3.0):
+          # the vendored libmobi C sources DO compile into the app target (so
+          # their symbols link), exposed to Swift via Libmobi-Bridging-Header.h.
+          # Their compile flags (USE_LIBXML2, the libxml2 include path) + the
+          # libxml2 link live in this target's `settings` below. mobi.h is
+          # self-contained (stdlib includes only), so the bridge is trivial.
+          # Only the vendored docs/license are excluded here — globbing them
+          # would copy README/LICENSE into the app bundle as stray resources.
+          # Recipe + remaining WIs: Services/Libmobi/BUILD-RECIPE.md.
+          - "Services/Libmobi/LICENSE"
+          - "Services/Libmobi/README.md"
+          - "Services/Libmobi/BUILD-RECIPE.md"
           # Bug #111: DebugFixtures must NOT ship in Release. xcodegen `excludes`
           # is not per-build-config, so we strip the directory from the source
           # phase entirely and re-inject it via a Debug-only Run Script below.
@@ -195,6 +199,20 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
         CURRENT_PROJECT_VERSION: 779
         MARKETING_VERSION: 3.42.16
+        # Feature #42 Phase-2 WI-1b: compile + link the vendored libmobi C.
+        # USE_LIBXML2 turns on libmobi's OPF/XML writer (KF8→EPUB needs it);
+        # the iOS SDK ships libxml2 headers at $(SDKROOT)/usr/include/libxml2
+        # and a link stub reachable via -lxml2. The Libmobi src dir is on the
+        # header path so the bridging header's #include "mobi.h" resolves.
+        # GCC_WARN_INHIBIT_ALL_WARNINGS scopes to C compilation only (the app
+        # is pure Swift), so it silences third-party libmobi warnings without
+        # hiding the app's own Swift warnings. miniz is bundled inside libmobi,
+        # so no zlib link is needed beyond what libxml2 itself pulls.
+        GCC_PREPROCESSOR_DEFINITIONS: "$(inherited) USE_LIBXML2=1"
+        HEADER_SEARCH_PATHS: "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src"
+        SWIFT_OBJC_BRIDGING_HEADER: "vreader/SupportingFiles/Libmobi-Bridging-Header.h"
+        OTHER_LDFLAGS: "$(inherited) -lxml2"
+        GCC_WARN_INHIBIT_ALL_WARNINGS: YES
     info:
       # XcodeGen writes vreader/SupportingFiles/Info.plist with this content.
       # We need a real Info.plist (not Xcode's auto-generated one) because
