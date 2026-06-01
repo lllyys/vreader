@@ -50,6 +50,14 @@ targets:
           # build-bundle.sh is also a dev/build tool, not a runtime
           # asset; keep it out of the app bundle.
           - "Services/Foliate/JS/build-bundle.sh"
+          # Feature #42 Phase-2 WI-1a (libmobi convert-on-import, LGPL-3.0):
+          # the vendored libmobi C sources need their own compile flags
+          # (-DUSE_LIBXML2=1, the libxml2 include path, no -Werror) which differ
+          # from the app target's. Exclude them from the app's source glob so
+          # they don't auto-compile with the wrong flags; WI-1b wires them via a
+          # dedicated static-library target + module map. The build recipe that
+          # was verified for iOS lives in Services/Libmobi/BUILD-RECIPE.md.
+          - "Services/Libmobi/**"
           # Bug #111: DebugFixtures must NOT ship in Release. xcodegen `excludes`
           # is not per-build-config, so we strip the directory from the source
           # phase entirely and re-inject it via a Debug-only Run Script below.
@@ -185,8 +193,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
-        CURRENT_PROJECT_VERSION: 778
-        MARKETING_VERSION: 3.42.15
+        CURRENT_PROJECT_VERSION: 779
+        MARKETING_VERSION: 3.42.16
     info:
       # XcodeGen writes vreader/SupportingFiles/Info.plist with this content.
       # We need a real Info.plist (not Xcode's auto-generated one) because
