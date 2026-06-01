@@ -212,6 +212,7 @@
 		2464151C976B35F68DD2169A /* LazyDownloadReattachTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E124CB39746DB0B59D0390C3 /* LazyDownloadReattachTests.swift */; };
 		250865E2A2A7BC3DE436183F /* PDFReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7F4F4B985D58E03A78680D /* PDFReaderViewModelTests.swift */; };
 		2509B7983AE76F5C85B71634 /* HighlightDedupeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD56854A37D8EA2B318B926 /* HighlightDedupeTests.swift */; };
+		251259935FB92098FECCAC65 /* RealDebugBridgeContext+Page.swift in Sources */ = {isa = PBXBuildFile; fileRef = C780DC4B823286F5AD97E044 /* RealDebugBridgeContext+Page.swift */; };
 		252CB71020888B6952C2F69E /* ReaderBottomOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A983D06F916C51795A2223E7 /* ReaderBottomOverlay.swift */; };
 		25327C608F6719156A58C8B3 /* LaunchHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62D7DA128D4B2AC1F362D571 /* LaunchHelper.swift */; };
 		2568348E9159667C4193A0B6 /* ProviderKindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C46A3D7400CC956FA8D46D /* ProviderKindTests.swift */; };
@@ -2542,6 +2543,7 @@
 		C758F02F43A58CA4A2A8382D /* NotesDeleteRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesDeleteRow.swift; sourceTree = "<group>"; };
 		C76B2024F008B3A41C030585 /* ReaderBottomChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderBottomChrome.swift; sourceTree = "<group>"; };
 		C775619D3C0E4641505CE2B8 /* Highlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlight.swift; sourceTree = "<group>"; };
+		C780DC4B823286F5AD97E044 /* RealDebugBridgeContext+Page.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RealDebugBridgeContext+Page.swift"; sourceTree = "<group>"; };
 		C78DF73C0577F734E90ACB70 /* FoliateBottomChromeSeek.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateBottomChromeSeek.swift; sourceTree = "<group>"; };
 		C7CA57AE61E378A1980BFF60 /* UIKitHighlightPopoverPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitHighlightPopoverPresenter.swift; sourceTree = "<group>"; };
 		C80D6D1B18008B168D01FFF2 /* BookOpenPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookOpenPerformanceTests.swift; sourceTree = "<group>"; };
@@ -3261,6 +3263,7 @@
 				B29B89D96641AE245EA38B05 /* RealDebugBridgeContext+AIAction.swift */,
 				A3D74F5FB31BAB5089EB5022 /* RealDebugBridgeContext+Eval.swift */,
 				FDFF04928B66CAA00503B70A /* RealDebugBridgeContext+Navigate.swift */,
+				C780DC4B823286F5AD97E044 /* RealDebugBridgeContext+Page.swift */,
 				535F3D9734CC8A2C3E303580 /* RealDebugBridgeContext+PDFHighlight.swift */,
 				BB8C0771E06618E5F68C410D /* RealDebugBridgeContext+Present.swift */,
 				2E5C9F4DD3DE16D29E00E5F6 /* RealDebugBridgeContext+Provider.swift */,
@@ -6594,6 +6597,7 @@
 				2DCCDBB57F5086AF49FF8D99 /* RealDebugBridgeContext+Eval.swift in Sources */,
 				213C32619E2ABE94230B020A /* RealDebugBridgeContext+Navigate.swift in Sources */,
 				0A0E59E50351ED190E24D03D /* RealDebugBridgeContext+PDFHighlight.swift in Sources */,
+				251259935FB92098FECCAC65 /* RealDebugBridgeContext+Page.swift in Sources */,
 				2D22FEBD43A0354357992A28 /* RealDebugBridgeContext+Present.swift in Sources */,
 				009D566180EA91AB79A4F32C /* RealDebugBridgeContext+Provider.swift in Sources */,
 				195F279BFC30A19186455052 /* RealDebugBridgeContext+ScrollBoundary.swift in Sources */,
@@ -6944,13 +6948,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 764;
+				CURRENT_PROJECT_VERSION = 765;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.42.1;
+				MARKETING_VERSION = 3.42.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -7094,13 +7098,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 764;
+				CURRENT_PROJECT_VERSION = 765;
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.42.1;
+				MARKETING_VERSION = 3.42.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

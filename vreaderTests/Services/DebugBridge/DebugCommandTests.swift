@@ -2446,6 +2446,48 @@ final class DebugCommandTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - page (feature #42/#75 — CU-free page-turn driver via the shared
+    //   .readerNextPage / .readerPreviousPage bus; reliable where synthetic
+    //   swipes can't drive Readium's gesture recognizers)
+    //   `vreader-debug://page?dir=<next|prev>`
+
+    func test_parse_pageNext_returnsCommand() throws {
+        XCTAssertEqual(try DebugCommand.parse(URL(string: "vreader-debug://page?dir=next")!), .page(direction: .next))
+    }
+
+    func test_parse_pagePrev_returnsCommand() throws {
+        XCTAssertEqual(try DebugCommand.parse(URL(string: "vreader-debug://page?dir=prev")!), .page(direction: .prev))
+    }
+
+    func test_parse_pageMissingDir_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://page")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "dir")
+        }
+    }
+
+    func test_parse_pageInvalidDir_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://page?dir=forward")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "dir")
+        }
+    }
+
+    func test_parse_pageDeepPath_throwsUnknownCommand() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://page/extra?dir=next")!)) { error in
+            guard case DebugCommandError.unknownCommand = error else {
+                XCTFail("expected unknownCommand, got \(error)")
+                return
+            }
+        }
+    }
 }
 
 #endif

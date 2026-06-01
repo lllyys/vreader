@@ -967,6 +967,40 @@ final class RealDebugBridgeContextTests: XCTestCase {
     }
 
     @MainActor
+    func test_page_next_postsReaderNextPage() async throws {
+        // Feature #42/#75: page?dir=next posts .readerNextPage — the SAME
+        // notification every reader host observes (Readium goForward; legacy
+        // EPUB/Foliate paged nav). Reliable CU-free page-turn where synthetic
+        // swipes can't drive Readium's gesture recognizers.
+        let exp = expectation(description: "readerNextPage posted")
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerNextPage, object: nil, queue: .main
+        ) { _ in exp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        try await context.page(direction: .next)
+        await fulfillment(of: [exp], timeout: 2.0)
+    }
+
+    @MainActor
+    func test_page_prev_postsReaderPreviousPage() async throws {
+        let exp = expectation(description: "readerPreviousPage posted")
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerPreviousPage, object: nil, queue: .main
+        ) { _ in exp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence, importer: importer, userDefaults: defaults
+        )
+        try await context.page(direction: .prev)
+        await fulfillment(of: [exp], timeout: 2.0)
+    }
+
+    @MainActor
     func test_scrollBoundary_postsScrollBoundaryCommandWithSpineAndNear() async throws {
         // Feature #71 WI-6b: scrollBoundary posts .debugBridgeScrollBoundaryCommand
         // carrying the spine index + edge; the live EPUBReaderContainerView

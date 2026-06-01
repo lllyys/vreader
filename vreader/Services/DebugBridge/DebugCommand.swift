@@ -218,6 +218,16 @@ enum DebugCommand: Equatable {
     /// `seek` / `present`).
     case setLayout(layout: LayoutMode)
 
+    /// Feature #42/#75 verification — `page?dir=<next|prev>` drives a page turn
+    /// CU-free by posting the shared `.readerNextPage` / `.readerPreviousPage`
+    /// notification every native reader host observes (Readium →
+    /// `goForward`/`goBackward`; legacy EPUB/Foliate paged → their page nav).
+    /// XCUITest / synthetic swipes can't reliably drive Readium's own gesture
+    /// recognizers, so this bus-level driver is the reliable CU-free path to
+    /// verify page navigation (incl. RTL / vertical-rl reading order, feature
+    /// #75) regardless of engine. No-op when no reader is presented.
+    case page(direction: PageDirection)
+
     /// Which AI action the `ai` command fires (Bug #255 — verification
     /// harness AI-action driver). The handler posts `.debugBridgeAIAction`;
     /// the AI panel's observer invokes the SAME view-model path the chrome
@@ -244,6 +254,15 @@ enum DebugCommand: Equatable {
     enum LayoutMode: String, Equatable, CaseIterable {
         case paged
         case scroll
+    }
+
+    /// Page-turn direction for the `page` command (feature #42/#75 verification).
+    /// `next` / `prev` are reading-order (the host + engine resolve the physical
+    /// direction per the publication's reading direction — RTL / vertical-rl
+    /// "next" advances in reading order, not a fixed screen edge).
+    enum PageDirection: String, Equatable, CaseIterable {
+        case next
+        case prev
     }
 
     /// Reader theme selector for the `theme` command.
@@ -944,6 +963,17 @@ extension DebugCommand {
                 throw DebugCommandError.invalidParam("mode", reason: "expected \(valid), got \(modeRaw)")
             }
             return .setLayout(layout: layout)
+
+        case "page":
+            // Feature #42/#75: drive a page turn CU-free by posting the shared
+            // `.readerNextPage` / `.readerPreviousPage` notification. `dir` is
+            // required; one of next|prev (mirrors the allowlist posture).
+            let dirRaw = try requireParam("dir", in: params)
+            guard let direction = PageDirection(rawValue: dirRaw) else {
+                let valid = PageDirection.allCases.map(\.rawValue).joined(separator: "|")
+                throw DebugCommandError.invalidParam("dir", reason: "expected \(valid), got \(dirRaw)")
+            }
+            return .page(direction: direction)
 
         default:
             throw DebugCommandError.unknownCommand(host)

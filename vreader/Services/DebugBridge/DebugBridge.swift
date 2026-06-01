@@ -151,6 +151,14 @@ protocol DebugBridgeContext {
     /// observer fires — the URL is silently a no-op (matches `navigate` /
     /// `seek` / `present`).
     func setLayout(layout: DebugCommand.LayoutMode) async throws
+    /// Feature #42/#75 — drive a page turn CU-free by posting the shared
+    /// `.readerNextPage` / `.readerPreviousPage` notification every native reader
+    /// host observes (Readium → `goForward`/`goBackward`; legacy EPUB/Foliate
+    /// paged → their page nav). Synthetic swipes can't drive Readium's gesture
+    /// recognizers, so this bus-level driver is the reliable CU-free page-nav
+    /// path (incl. RTL / vertical-rl reading order). No-op when no reader is
+    /// presented.
+    func page(direction: DebugCommand.PageDirection) async throws
 }
 
 /// Routes parsed `DebugCommand` values to a `DebugBridgeContext`.
@@ -297,6 +305,8 @@ final class DebugBridge {
             try await context.pdfHighlight(page: page, rect: rect, color: color)
         case .setLayout(let layout):
             try await context.setLayout(layout: layout)
+        case .page(let direction):
+            try await context.page(direction: direction)
         }
     }
 }
