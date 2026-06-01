@@ -201,5 +201,49 @@ struct ReaderSettingsPanelContrastTests {
         #expect(ReaderThemeV2.dark.sliderTrack == ReaderThemeV2.dark.inkColor.withAlphaComponent(0.12))
         #expect(ReaderThemeV2.oled.sliderTrack == ReaderThemeV2.oled.inkColor.withAlphaComponent(0.12))
     }
+
+    // MARK: - Control-track token (Bug #298 / GH #1329)
+
+    /// Per the landed design (`control-track-token.md`): light family = each
+    /// theme's own `ink` at 30%; dark family = pure white at 16%
+    /// (`rgba(255,255,255,0.16)`). Photo follows the dark-family value (its
+    /// sheet is dark; `isDark == true`). One ink-derived rule for the light
+    /// family, mirroring `sliderTrack` (22%) and `sub` (55%).
+    @Test func controlTrackMatchesDesignDerivation() {
+        #expect(ReaderThemeV2.paper.controlTrack == ReaderThemeV2.paper.inkColor.withAlphaComponent(0.30))
+        #expect(ReaderThemeV2.sepia.controlTrack == ReaderThemeV2.sepia.inkColor.withAlphaComponent(0.30))
+        #expect(ReaderThemeV2.dark.controlTrack == UIColor(white: 1, alpha: 0.16))
+        #expect(ReaderThemeV2.oled.controlTrack == UIColor(white: 1, alpha: 0.16))
+        #expect(ReaderThemeV2.photo.controlTrack == UIColor(white: 1, alpha: 0.16))
+    }
+
+    /// The OFF toggle / segmented trough (`controlTrack`) over the cream panel
+    /// must read unmistakably as an inactive control — the design's ~1.9:1
+    /// target, far above the rejected `.systemFill` ≈ 1.19:1 "invisible" track.
+    /// The bar here is the design's legibility lift (the track is a visible
+    /// surface, deliberately below 3:1 per WCAG 1.4.11 rationale), not 3:1.
+    @Test func controlTrackReadsOverCreamPanel() {
+        for theme in Self.lightThemes {
+            let surface = theme.sheetSurfaceColor
+            let ratio = contrastRatio(composite(theme.controlTrack, over: surface), surface)
+            #expect(ratio >= 1.8, "\(theme) controlTrack \(ratio) must clear the design ~1.9:1 lift")
+            // and it must beat the rejected systemFill-class track (~1.19:1).
+            let systemFillish = contrastRatio(composite(UIColor.black.withAlphaComponent(0.10), over: surface), surface)
+            #expect(ratio > systemFillish, "\(theme) controlTrack (\(ratio)) must exceed the systemFill-class track (\(systemFillish))")
+        }
+    }
+
+    /// OFF track ≠ accent ON-track: the inactive surface must stay visually
+    /// distinct from the accent-filled ON state so on/off read apart
+    /// (design: Δ ≥ 2.5:1).
+    @Test func controlTrackStaysDistinctFromAccentOnTrack() {
+        for theme in Self.lightThemes {
+            let surface = theme.sheetSurfaceColor
+            let off = composite(theme.controlTrack, over: surface)
+            let on = theme.accentColor
+            let delta = contrastRatio(off, on)
+            #expect(delta >= 2.5, "\(theme) OFF track vs accent ON-track Δ \(delta) must be ≥ 2.5:1")
+        }
+    }
 }
 #endif

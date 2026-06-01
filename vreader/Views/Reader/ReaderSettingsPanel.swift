@@ -130,30 +130,7 @@ struct ReaderSettingsPanel: View {
             onClose: { dismiss() }
         ) {
             List {
-                themeSection
-                themeBackgroundSection
-                epubLayoutSection
-                if store.epubLayout == .paged {
-                    pageTurnAnimationSection
-                    // Bug #156 / GH #456: only render the Auto Page Turn
-                    // toggle for formats whose reader host actually wires
-                    // `AutoPageTurner`. Today that's TXT and MD only —
-                    // EPUB / PDF / AZW3 / MOBI / Unified hosts don't
-                    // observe `store.autoPageTurn`, so the toggle would
-                    // silently no-op for those formats. Defaulting to
-                    // "show" when capabilities aren't supplied keeps
-                    // tests/previews/legacy callers working.
-                    if formatCapabilities?.contains(.autoPageTurn) ?? true {
-                        autoPageTurnSection
-                    }
-                }
-                fontSizeSection
-                lineSpacingSection
-                fontFamilySection
-                cjkSection
-                chineseConversionSection
-                if bookFingerprintKey != nil { perBookSection }
-                previewSection
+                displaySectionList
             }
             // Hide the grouped-List backdrop so the design's sheet
             // surface tint (`ReaderSheetChrome`) shows through.
@@ -168,6 +145,11 @@ struct ReaderSettingsPanel: View {
             // glyphs (Toggle knobs, selected segmented-Picker fill).
             .foregroundStyle(primaryLabelColor)
             .tint(Color(sheetTheme.accentColor))
+            // OFF toggle tracks (and the segmented troughs below) use the
+            // `controlTrack` token (Bug #298 / GH #1329): the accent `.tint`
+            // only colors the ON / selected state, so the OFF surface fell
+            // through to the near-invisible system `.systemFill`.
+            .toggleStyle(ControlTrackToggleStyle(theme: sheetTheme))
         }
         .onAppear { loadPerBookState() }
         .onChange(of: store.typography.fontSize) { _, _ in syncPerBookIfEnabled() }
@@ -250,6 +232,37 @@ struct ReaderSettingsPanel: View {
         case .oled:  return "OLED"
         case .photo: return "Photo"
         }
+    }
+
+    /// The Display sheet's section list. Extracted from the `List` builder so
+    /// the 15-section tuple type is erased behind `some View`: inlining the
+    /// builder plus the `.foregroundStyle` / `.tint` / `.toggleStyle` modifier
+    /// chain on the `List` exceeded the Swift type-checker's single-expression
+    /// budget ("unable to type-check in reasonable time").
+    @ViewBuilder
+    private var displaySectionList: some View {
+        themeSection
+        themeBackgroundSection
+        epubLayoutSection
+        if store.epubLayout == .paged {
+            pageTurnAnimationSection
+            // Bug #156 / GH #456: only render the Auto Page Turn toggle for
+            // formats whose reader host actually wires `AutoPageTurner`. Today
+            // that's TXT and MD only — EPUB / PDF / AZW3 / MOBI / Unified hosts
+            // don't observe `store.autoPageTurn`, so the toggle would silently
+            // no-op for those formats. Defaulting to "show" when capabilities
+            // aren't supplied keeps tests/previews/legacy callers working.
+            if formatCapabilities?.contains(.autoPageTurn) ?? true {
+                autoPageTurnSection
+            }
+        }
+        fontSizeSection
+        lineSpacingSection
+        fontFamilySection
+        cjkSection
+        chineseConversionSection
+        if bookFingerprintKey != nil { perBookSection }
+        previewSection
     }
 
     /// A Section header tinted with the theme's `sub` token (Bug #285 /
@@ -435,12 +448,13 @@ struct ReaderSettingsPanel: View {
     @ViewBuilder
     private var epubLayoutSection: some View {
         Section {
-            Picker("EPUB Layout", selection: $store.epubLayout) {
-                Text("Scroll").tag(EPUBLayoutPreference.scroll)
-                Text("Paged").tag(EPUBLayoutPreference.paged)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("EPUB layout")
+            ThemedSegmentedPicker(
+                options: [("Scroll", EPUBLayoutPreference.scroll),
+                          ("Paged", EPUBLayoutPreference.paged)],
+                selection: $store.epubLayout,
+                theme: sheetTheme,
+                accessibilityLabel: "EPUB layout"
+            )
         } footer: {
             sectionFooter("Scroll uses continuous vertical scrolling. Paged uses horizontal page turns.")
         }
@@ -451,13 +465,14 @@ struct ReaderSettingsPanel: View {
     @ViewBuilder
     private var pageTurnAnimationSection: some View {
         Section {
-            Picker("Page Turn Animation", selection: $store.pageTurnAnimation) {
-                Text("None").tag(PageTurnAnimation.none)
-                Text("Slide").tag(PageTurnAnimation.slide)
-                Text("Cover").tag(PageTurnAnimation.cover)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Page turn animation")
+            ThemedSegmentedPicker(
+                options: [("None", PageTurnAnimation.none),
+                          ("Slide", PageTurnAnimation.slide),
+                          ("Cover", PageTurnAnimation.cover)],
+                selection: $store.pageTurnAnimation,
+                theme: sheetTheme,
+                accessibilityLabel: "Page turn animation"
+            )
         }
     }
 
@@ -626,15 +641,16 @@ struct ReaderSettingsPanel: View {
     @ViewBuilder
     private var chineseConversionSection: some View {
         Section {
-            Picker("Chinese Text", selection: $store.chineseConversion) {
-                Text("None").tag(ChineseConversionDirection.none)
-                Text("Simp \u{2192} Trad").tag(ChineseConversionDirection.simpToTrad)
-                Text("Trad \u{2192} Simp").tag(ChineseConversionDirection.tradToSimp)
-            }
-            .pickerStyle(.segmented)
+            ThemedSegmentedPicker(
+                options: [("None", ChineseConversionDirection.none),
+                          ("Simp \u{2192} Trad", ChineseConversionDirection.simpToTrad),
+                          ("Trad \u{2192} Simp", ChineseConversionDirection.tradToSimp)],
+                selection: $store.chineseConversion,
+                theme: sheetTheme,
+                accessibilityLabel: "Chinese text conversion",
+                accessibilityIdentifier: "chineseTextPicker"
+            )
             .disabled(chineseConversionDisableReason != nil)
-            .accessibilityIdentifier("chineseTextPicker")
-            .accessibilityLabel("Chinese text conversion")
             .accessibilityHint(chineseConversionAccessibilityHint)
         } footer: {
             chineseConversionFooter

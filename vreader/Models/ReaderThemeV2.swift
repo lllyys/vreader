@@ -125,6 +125,25 @@ enum ReaderThemeV2: String, CaseIterable, Sendable {
         }
     }
 
+    /// The OFF / inactive surface for stand-alone controls — the "Custom
+    /// Background" toggle's OFF track and the "Scroll / Paged" segmented
+    /// trough on the Reader Display panel. `.tint(accent)` only colors the
+    /// ON / selected state; the OFF surface fell through to iOS `.systemFill`
+    /// (~1.19:1 over the cream sheet — "no track"). Per the landed design
+    /// (`dev-docs/designs/.../design-notes/control-track-token.md`, Bug #298 /
+    /// GH #1329): light family = each theme's own `ink` at 30% (~1.9:1 — reads
+    /// unmistakably as inactive without rivalling the accent ON-track); dark
+    /// family = pure white at 16% (white tracks already read on the dark
+    /// sheet). Third ink-derived contrast token after `sliderTrack` (22%) and
+    /// `sub` (55%). A visible-extent surface deliberately tuned below 3:1 per
+    /// WCAG 1.4.11 (state is carried by the knob position + accent fill).
+    var controlTrack: UIColor {
+        switch self {
+        case .paper, .sepia:       return inkColor.withAlphaComponent(0.30)
+        case .dark, .oled, .photo: return UIColor(white: 1, alpha: 0.16)
+        }
+    }
+
     /// Single restrained accent for chrome (selected pickers, primary
     /// actions, selection emphasis). Three-stop oxblood family per
     /// `AccentColor.swift` — but each theme picks its own stop because
