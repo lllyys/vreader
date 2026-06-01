@@ -4958,18 +4958,53 @@ ${doc.querySelector("parsererror").innerText}`);
             this.#mountingIndices.delete(index);
           }
         }
-        // WI-6c: when a mounted neighbour's height changes after layout (fonts.ready,
-        // image load, reflow), shift `scrollTop` by the delta IF the neighbour sits
-        // above the current scroll position — so the visible content does not jump.
+        // Feature #76 WI-3: the active section's scroll model (axis/props/sign),
+        // mirroring Swift FoliateScrollModel. The windowed primitives below read the
+        // axis through these helpers instead of hardcoding scrollTop/height/top, so
+        // the horizontal-writing (#73) path resolves to the IDENTICAL expressions
+        // (scrollProp=scrollTop, sizeProp=height, rectStartProp=top, sign=+1) while a
+        // vertical-writing section can later drive the horizontal axis. Defaults to
+        // the horizontal-tb model when no view is mounted.
+        get #activeScrollModel() {
+          return this.#view?.scrollModel ?? scrollModelFor("horizontal-tb");
+        }
+        // Logical (non-negative, reading-order) scroll offset of the container along
+        // the active axis. For vertical-rl, WebKit's `scrollLeft` is negative toward
+        // later content, so the sign maps it positive. horizontal-tb: == scrollTop.
+        #axisScrollOffset() {
+          const m3 = this.#activeScrollModel;
+          const raw = this.#container[m3.scrollProp];
+          return m3.directionSign < 0 ? -raw : raw;
+        }
+        #setAxisScrollOffset(logical) {
+          const m3 = this.#activeScrollModel;
+          this.#container[m3.scrollProp] = m3.directionSign < 0 ? -logical : logical;
+        }
+        // Element extent along the active axis. horizontal-tb: == rect.height.
+        #elementAxisSize(el) {
+          return Math.max(0, el.getBoundingClientRect()[this.#activeScrollModel.sizeProp]);
+        }
+        // Element's logical start offset within the container's scroll content along
+        // the active axis (axis-aware generalization of the old #elementScrollTop).
+        // horizontal-tb: rect.top - container.top + scrollTop — byte-identical.
+        #elementAxisStart(el) {
+          const m3 = this.#activeScrollModel;
+          const rawDelta = el.getBoundingClientRect()[m3.rectStartProp] - this.#container.getBoundingClientRect()[m3.rectStartProp];
+          return (m3.directionSign < 0 ? -rawDelta : rawDelta) + this.#axisScrollOffset();
+        }
+        // WI-6c: when a mounted neighbour's size changes after layout (fonts.ready,
+        // image load, reflow), shift the axis scroll offset by the delta IF the
+        // neighbour sits before the current scroll position — so visible content
+        // does not jump. (#76 WI-3: axis-aware; horizontal-tb == the old scrollTop+height path.)
         #onNeighbourExpand(view2) {
           if (!this.#windowedScroll || !view2?.element) return;
           const prev = view2.wi73Height ?? 0;
-          const now = Math.max(0, view2.element.getBoundingClientRect().height);
+          const now = this.#elementAxisSize(view2.element);
           view2.wi73Height = now;
           const delta = now - prev;
           if (delta === 0) return;
-          if (this.#elementScrollTop(view2.element) < this.#container.scrollTop) {
-            this.#container.scrollTop = Math.max(0, this.#container.scrollTop + delta);
+          if (this.#elementAxisStart(view2.element) < this.#axisScrollOffset()) {
+            this.#setAxisScrollOffset(Math.max(0, this.#axisScrollOffset() + delta));
           }
         }
         async #ensureWindow() {
@@ -5005,20 +5040,22 @@ ${doc.querySelector("parsererror").innerText}`);
               continue;
             }
             if (idx < this.#index) {
-              scrollAdjust += Math.max(0, v3.element.getBoundingClientRect().height);
+              scrollAdjust += this.#elementAxisSize(v3.element);
             }
             v3.destroy();
             if (v3.element.parentNode === this.#container) this.#container.removeChild(v3.element);
             this.sections[idx]?.unload?.();
           }
           this.#scrolledViews = keep;
-          if (scrollAdjust > 0) this.#container.scrollTop = Math.max(0, this.#container.scrollTop - scrollAdjust);
+          if (scrollAdjust > 0) {
+            this.#setAxisScrollOffset(Math.max(0, this.#axisScrollOffset() - scrollAdjust));
+          }
         }
         // Feature #73 WI-3/WI-5: resolve the CURRENT section + intra-section fraction
         // from the live scroll position over the mounted views (the anchor `#view`
         // plus its neighbours), so windowed crossing is native scroll — no swap.
         #elementScrollTop(el) {
-          return el.getBoundingClientRect().top - this.#container.getBoundingClientRect().top + this.#container.scrollTop;
+          return this.#elementAxisStart(el);
         }
         #windowedViews() {
           return [this.#view, ...this.#scrolledViews].filter(Boolean).sort((a3, b3) => (a3.wi73Index ?? this.#index) - (b3.wi73Index ?? this.#index));
@@ -5027,13 +5064,13 @@ ${doc.querySelector("parsererror").innerText}`);
           const views = this.#windowedViews();
           if (!views.length) return { view: this.#view, index: this.#index, intra: 0 };
           if (this.#view && this.#view.wi73Index == null) this.#view.wi73Index = this.#index;
-          const scrollTop = this.#container.scrollTop;
+          const offset = this.#axisScrollOffset();
           for (const v3 of views) {
-            const top = this.#elementScrollTop(v3.element);
-            const h3 = v3.element.getBoundingClientRect().height;
-            if (scrollTop < top + h3 - 1) {
+            const start = this.#elementAxisStart(v3.element);
+            const size = this.#elementAxisSize(v3.element);
+            if (offset < start + size - 1) {
               const idx = v3.wi73Index ?? this.#index;
-              const intra = h3 > 0 ? Math.min(Math.max((scrollTop - top) / h3, 0), 1) : 0;
+              const intra = size > 0 ? Math.min(Math.max((offset - start) / size, 0), 1) : 0;
               return { view: v3, index: idx, intra };
             }
           }
