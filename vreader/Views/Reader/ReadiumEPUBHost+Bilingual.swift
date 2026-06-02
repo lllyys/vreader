@@ -188,6 +188,16 @@ extension ReadiumEPUBHost {
             .onChange(of: settingsStore.epubLayout) { _, _ in
                 handleEPUBLayoutChange()
             }
+            // Bug #304 (Codex Gate-4): a theme switch while bilingual is enabled
+            // must refresh the injected `.vreader-bilingual` `<style>` so the
+            // accent/sub colors track the new theme (parity with the legacy
+            // EPUBWebViewBridge, which reinjects its override CSS on theme change).
+            .onChange(of: settingsStore.theme) { _, _ in
+                guard bilingualViewModel?.isEnabled == true else { return }
+                Task { @MainActor in
+                    await bilingualCommander.setStyle(settingsStore.theme.bilingualBlockCSSRule())
+                }
+            }
             .sheet(isPresented: $showBilingualSetupSheet) { bilingualSetupSheetView }
     }
 
