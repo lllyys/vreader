@@ -217,7 +217,7 @@ struct SettingsView: View {
     /// Library nav bar, not this sheet, so it is not duplicated here.)
     @ViewBuilder
     private var cloudAndSyncSection: some View {
-        Section("Cloud & Sync") {
+        Section {
             NavigationLink {
                 WebDAVSettingsView()
             } label: {
@@ -243,6 +243,8 @@ struct SettingsView: View {
                 )
             }
             .accessibilityIdentifier("settingsBookSources")
+        } header: {
+            SettingsSectionHeader(theme: theme, title: "Cloud & Sync")
         }
         .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }
@@ -258,7 +260,7 @@ struct SettingsView: View {
     /// Reading-feature destinations — the design's "Reading" group.
     @ViewBuilder
     private var readingSection: some View {
-        Section("Reading") {
+        Section {
             NavigationLink {
                 ReplacementRulesView()
             } label: {
@@ -284,6 +286,8 @@ struct SettingsView: View {
                 )
             }
             .accessibilityIdentifier("settingsHTTPTTS")
+        } header: {
+            SettingsSectionHeader(theme: theme, title: "Reading")
         }
         .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }
@@ -292,7 +296,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var aboutSection: some View {
-        Section("About") {
+        Section {
             SettingsIconRow(
                 theme: theme,
                 icon: Image(systemName: SettingsRowPalette.helpFeedback.symbolName),
@@ -312,6 +316,8 @@ struct SettingsView: View {
             )
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settingsVersion")
+        } header: {
+            SettingsSectionHeader(theme: theme, title: "About")
         }
         .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }

@@ -56,7 +56,7 @@ struct AISettingsSection: View {
     private let theme: ReaderThemeV2 = .paper
 
     var body: some View {
-        Section("AI") {
+        Section {
             // Master gate — always visible (Variant A). The
             // `aiToggle` identifier lands on the underlying `Toggle`
             // (the actionable switch), not the row container.
@@ -88,6 +88,8 @@ struct AISettingsSection: View {
                     toggleAccessibilityIdentifier: "consentToggle"
                 )
             }
+        } header: {
+            SettingsSectionHeader(theme: theme, title: "AI")
         }
         .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }
