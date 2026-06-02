@@ -246,6 +246,22 @@ struct HighlightPopoverModifier: ViewModifier {
         let action = pendingPostSheetDismiss
         pendingPostSheetDismiss = nil
         action?()
+        // Bug #302 re-arm: only the in-card close button routes dismissal through
+        // `dismissEverything` (which resets the view model). An INTERACTIVE
+        // swipe-down lands here instead, leaving `viewModel.presented` /
+        // `router.content` at the just-dismissed highlight — so a same-highlight
+        // re-tap produces an unchanged `presented`, the `.onChange` is a no-op, and
+        // the popover never re-opens. (Readium highlights resolve to `.zero` rect →
+        // the sheet form, so the swipe-down path is their normal dismissal.) Reset
+        // here when stale so every dismissal re-arms. Ordering is safe for the
+        // share follow-up: `action?()` (which presents the share sheet) runs
+        // FIRST, so the share is already on screen before this cleanup; the reset
+        // is then a harmless idempotent state-clear regardless of whether the
+        // teardown originated from a share or a plain swipe-down.
+        if viewModel.presented != nil {
+            router.dismiss()
+            viewModel.dismiss()
+        }
     }
 
     // MARK: - Action dispatch

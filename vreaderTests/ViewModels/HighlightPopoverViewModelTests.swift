@@ -159,6 +159,31 @@ struct HighlightPopoverViewModelTests {
         #expect(vm.presented == nil)
     }
 
+    /// Bug #302 re-arm contract: after a dismiss, re-tapping the SAME highlight
+    /// re-publishes `presented`. The modifier's `.onChange(of: presented)` only
+    /// fires on a value change, so the popover re-opens only if `dismiss()`
+    /// cleared `presented` to nil first. The interactive swipe-down dismiss path
+    /// was NOT resetting the view model, leaving `presented` stale so a
+    /// same-highlight re-tap was a no-op. This locks the view-model side of the
+    /// contract the modifier fix (`sheetDidDismiss` re-arm) now triggers.
+    @Test func handleTap_afterDismiss_reArmsSameHighlight() async {
+        let lookup = PopoverLookupMock()
+        let record = makeRecord(note: "note")
+        await lookup.seed(record)
+        let vm = HighlightPopoverViewModel(persistence: lookup, bookFingerprintKey: "book-1")
+
+        await vm.handleTap(tapEvent(for: record.highlightId), chapter: nil)
+        #expect(vm.presented?.id == record.highlightId)
+
+        vm.dismiss()
+        #expect(vm.presented == nil)
+
+        // Re-tap the SAME highlight → `presented` is re-published (nil → content
+        // is a real change the modifier's `.onChange` observes).
+        await vm.handleTap(tapEvent(for: record.highlightId), chapter: nil)
+        #expect(vm.presented?.id == record.highlightId)
+    }
+
     @Test func handleTap_secondTap_replacesFirst() async {
         let lookup = PopoverLookupMock()
         let first = makeRecord(note: "first note")
