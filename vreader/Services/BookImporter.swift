@@ -14,6 +14,7 @@
 //   CustomCoverStore.swift
 
 import Foundation
+import OSLog
 
 extension Notification.Name {
     /// Posted by `BookImporter` after a successful import — both new-row and
@@ -56,13 +57,20 @@ final class BookImporter: BookImporting, Sendable {
     /// Metadata extractors by format.
     private let extractors: [BookFormat: any MetadataExtractor]
 
+    /// Feature flags — gates Kindle convert-on-import (#42 Phase 2 WI-4b).
+    private let featureFlags: FeatureFlags
+
+    private static let log = Logger(subsystem: "com.vreader.app", category: "BookImporter")
+
     init(
         persistence: any BookPersisting,
         sandboxBooksDirectory: URL,
-        extractors: [BookFormat: any MetadataExtractor]? = nil
+        extractors: [BookFormat: any MetadataExtractor]? = nil,
+        featureFlags: FeatureFlags = .shared
     ) {
         self.persistence = persistence
         self.sandboxBooksDirectory = sandboxBooksDirectory
+        self.featureFlags = featureFlags
         self.extractors = extractors ?? [
             .txt: TXTMetadataExtractor(),
             .epub: EPUBMetadataExtractor(),
@@ -136,11 +144,54 @@ final class BookImporter: BookImporting, Sendable {
             throw ImportError.fileNotReadable("File does not exist or is not readable")
         }
 
+        // Step 3.5 (Feature #42 Phase 2 WI-4b): Kindle convert-on-import (gated,
+        // default OFF). When ON and the file is a Kindle format, convert it to a
+        // self-describing EPUB and run the ENTIRE rest of the pipeline over the
+        // converted file — so identity/fingerprint/blob/metadata are all the
+        // EPUB's (a first-class EPUB; design decisions #1/#2). The source's own
+        // title/author/cover are baked into the EPUB (WI-4a), so the downstream
+        // EPUBMetadataExtractor recovers correct display metadata from the blob.
+        var workingURL = fileURL
+        var workingFormat = format
+        var convertedTempURL: URL? = nil
+        var kindleOriginExtension: String? = nil
+        defer {
+            // The converted EPUB is a temp file; it's copied into the sandbox by
+            // Step 8, so clean up the temp on every exit path.
+            if let temp = convertedTempURL { try? FileManager.default.removeItem(at: temp) }
+        }
+        if featureFlags.isEnabled(.kindleConvertOnImport), format.isKindleConvertible {
+            do {
+                let tempDir = FileManager.default.temporaryDirectory
+                let sourcePath = fileURL.path
+                // Off-main: libmobi decode + EPUB packaging is CPU-bound (design
+                // decision #6 — never block the @MainActor importer entry).
+                let converted = try await Task.detached(priority: .userInitiated) {
+                    try MobiEPUBConverter.convertToFile(mobiPath: sourcePath, destinationDir: tempDir)
+                }.value
+                convertedTempURL = converted
+                kindleOriginExtension = fileURL.pathExtension.lowercased()
+                workingURL = converted
+                workingFormat = .epub
+                Self.log.info("Kindle convert-on-import: converted source to EPUB")
+            } catch let error as MobiDecodeError {
+                // SEMANTIC failure (DRM/corrupt/no-markup) → import the original
+                // Kindle file natively; the user never loses the ability to
+                // import a book the converter can't yet handle (decision #8).
+                Self.log.warning("Kindle conversion failed semantically (\(String(describing: error), privacy: .public)) — importing native")
+            } catch let error as MobiEPUBError {
+                Self.log.warning("Kindle conversion failed (assembly: \(String(describing: error), privacy: .public)) — importing native")
+            }
+            // A filesystem/ZIPWriter write failure is NOT caught here → it
+            // propagates as a real import error (decision #8 — IO faults are not
+            // silently masked as a fallback).
+        }
+
         // Step 4: Text-specific validation (binary masquerade + encoding detection)
         // Only reads first 64KB for detection to avoid full-file memory spike.
         var detectedEncoding: String? = nil
-        if format == .txt || format == .md {
-            let sampleData = try readFileDataSample(at: fileURL, maxBytes: 64 * 1024)
+        if workingFormat == .txt || workingFormat == .md {
+            let sampleData = try readFileDataSample(at: workingURL, maxBytes: 64 * 1024)
             do {
                 let encodingResult = try EncodingDetector.detect(data: sampleData)
                 detectedEncoding = EncodingDetector.encodingName(encodingResult.encoding)
@@ -151,14 +202,15 @@ final class BookImporter: BookImporting, Sendable {
             }
         }
 
-        // Step 5: Compute content hash
-        let hashResult = try await ContentHasher.hash(fileAt: fileURL)
+        // Step 5: Compute content hash (of the working file — the converted EPUB
+        // when convert-on-import ran, else the original).
+        let hashResult = try await ContentHasher.hash(fileAt: workingURL)
 
         // Step 6: Build fingerprint
         guard let fingerprint = DocumentFingerprint.validated(
             contentSHA256: hashResult.sha256Hex,
             fileByteCount: hashResult.byteCount,
-            format: format
+            format: workingFormat
         ) else {
             throw ImportError.hashComputationFailed("Invalid hash result")
         }
@@ -220,11 +272,12 @@ final class BookImporter: BookImporting, Sendable {
             )
         }
 
-        // Step 8: Copy to sandbox (atomic: temp + rename)
+        // Step 8: Copy to sandbox (atomic: temp + rename). Copies the WORKING
+        // file — the converted EPUB when convert-on-import ran.
         let sandboxCopy = try atomicCopyToSandbox(
-            sourceURL: fileURL,
+            sourceURL: workingURL,
             fingerprintKey: fingerprintKey,
-            format: format
+            format: workingFormat
         )
         let sandboxURL = sandboxCopy.url
 
@@ -235,11 +288,14 @@ final class BookImporter: BookImporting, Sendable {
             try? FileManager.default.removeItem(at: sandboxURL)
         }
 
-        // Step 9: Extract metadata from original URL (sandbox filename is hash-based)
-        let extractor = extractors[format] ?? TXTMetadataExtractor()
+        // Step 9: Extract metadata from the working URL (sandbox filename is
+        // hash-based). For a converted Kindle book the working file is the
+        // self-describing EPUB, so EPUBMetadataExtractor recovers the source's
+        // title/author/cover (baked in by WI-4a) — correct display metadata.
+        let extractor = extractors[workingFormat] ?? TXTMetadataExtractor()
         let metadata: BookMetadata
         do {
-            metadata = try await extractor.extractMetadata(from: fileURL)
+            metadata = try await extractor.extractMetadata(from: workingURL)
         } catch let importErr as ImportError {
             rollbackSandboxIfOwned()
             throw importErr
@@ -255,11 +311,14 @@ final class BookImporter: BookImporting, Sendable {
             }
         }
 
-        // Step 10: Build provenance
+        // Step 10: Build provenance. When convert-on-import ran, record the
+        // Kindle origin (best-effort, non-load-bearing — design decision #5).
         let provenance = ImportProvenance(
             source: source,
             importedAt: Date(),
-            originalURLBookmarkData: nil
+            originalURLBookmarkData: nil,
+            convertedFromKindleExtension: kindleOriginExtension,
+            converterVersion: kindleOriginExtension == nil ? nil : MobiEPUBConverter.version
         )
 
         // Step 11: Persist book record
@@ -267,7 +326,11 @@ final class BookImporter: BookImporting, Sendable {
         // it on a fresh device. Particularly matters for MOBI/PRC/AZW which all
         // collapse to canonical BookFormat.azw3 — without this, restore loses
         // the user's original extension.
-        let pathExt = fileURL.pathExtension.lowercased()
+        // The canonical blob extension is the WORKING file's — "epub" for a
+        // converted Kindle book (the blob IS an EPUB; the original Kindle
+        // extension lives in provenance, Step 10). Restore reconstructs the
+        // blob from this, so it must match the stored bytes.
+        let pathExt = workingURL.pathExtension.lowercased()
         let originalExt: String? = pathExt.isEmpty ? nil : pathExt
         // Bug #247: when the caller (typically the WebDAV restore path)
         // supplies a non-empty title override, it wins over the extractor's

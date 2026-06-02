@@ -62,6 +62,42 @@ struct ImportProvenanceTests {
         #expect(decoded.source == .shareSheet)
     }
 
+    // MARK: - Feature #42 Phase 2 WI-4b: Kindle-origin fields (backward-compat)
+
+    /// A payload encoded BEFORE the Kindle-origin fields existed must still
+    /// decode (the new Optional fields → nil via `decodeIfPresent`). Encoding the
+    /// old shape with the same encoder guarantees an identical Date format etc.
+    @Test func decodesPreV3PayloadWithoutKindleFields() throws {
+        struct OldProvenance: Encodable {
+            let source: ImportSource
+            let importedAt: Date
+            let originalURLBookmarkData: Data?
+        }
+        let oldData = try JSONEncoder().encode(OldProvenance(
+            source: .filesApp,
+            importedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            originalURLBookmarkData: nil))
+
+        let decoded = try JSONDecoder().decode(ImportProvenance.self, from: oldData)
+        #expect(decoded.source == .filesApp)
+        #expect(decoded.convertedFromKindleExtension == nil)
+        #expect(decoded.converterVersion == nil)
+    }
+
+    @Test func codableRoundTripWithKindleOrigin() throws {
+        let original = ImportProvenance(
+            source: .filesApp,
+            importedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            originalURLBookmarkData: nil,
+            convertedFromKindleExtension: "azw3",
+            converterVersion: 1)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ImportProvenance.self, from: data)
+        #expect(decoded == original)
+        #expect(decoded.convertedFromKindleExtension == "azw3")
+        #expect(decoded.converterVersion == 1)
+    }
+
     // MARK: - Hashable
 
     @Test func equalProvenancesHaveSameHash() {

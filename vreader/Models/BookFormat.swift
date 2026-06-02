@@ -23,6 +23,13 @@ enum BookFormat: String, Codable, Hashable, Sendable, CaseIterable {
         true
     }
 
+    /// Feature #42 Phase 2: whether this format is a Kindle format eligible for
+    /// convert-on-import to EPUB. `.azw3` is the canonical Kindle format (it
+    /// subsumes azw/mobi/prc — see `fileExtensions`).
+    var isKindleConvertible: Bool {
+        self == .azw3
+    }
+
     /// Common file extensions for this format.
     var fileExtensions: [String] {
         switch self {

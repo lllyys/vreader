@@ -40,15 +40,115 @@ struct BookImporterTests {
 
     private func makeImporter(
         persistence: MockPersistenceActor? = nil,
-        sandboxDir: URL? = nil
+        sandboxDir: URL? = nil,
+        featureFlags: FeatureFlags? = nil
     ) async throws -> (BookImporter, MockPersistenceActor, URL) {
         let mock = persistence ?? MockPersistenceActor()
         let sandbox = try sandboxDir ?? makeSandboxDir()
         let importer = BookImporter(
             persistence: mock,
-            sandboxBooksDirectory: sandbox
+            sandboxBooksDirectory: sandbox,
+            featureFlags: featureFlags ?? FeatureFlags(environment: .prod)
         )
         return (importer, mock, sandbox)
+    }
+
+    /// First real AZW3 under `<repo>/test-books/books/azw3`, or nil in CI.
+    /// Repo root derived from this source file's path (no hard-coded username).
+    private static var realAzw3Path: String? {
+        let dir = URL(fileURLWithPath: #filePath)   // …/vreaderTests/Services/<this>
+            .deletingLastPathComponent()            // Services/
+            .deletingLastPathComponent()            // vreaderTests/
+            .deletingLastPathComponent()            // <repo root>
+            .appendingPathComponent("test-books/books/azw3")
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: dir.path),
+              let azw3 = items.first(where: { $0.lowercased().hasSuffix(".azw3") })
+        else { return nil }
+        return dir.appendingPathComponent(azw3).path
+    }
+
+    /// Copy the real AZW3 fixture to a temp `.azw3` the importer can consume.
+    private func copyRealAzw3ToTemp() throws -> URL? {
+        guard let path = Self.realAzw3Path else { return nil }
+        let dest = FileManager.default.temporaryDirectory
+            .appendingPathComponent("import-azw3-\(UUID().uuidString).azw3")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: path), to: dest)
+        return dest
+    }
+
+    // MARK: - Feature #42 Phase 2 WI-4b: Kindle convert-on-import (gated)
+
+    @Test("flag OFF + AZW3 → imported as native .azw3 (today's behavior)")
+    func convertOnImportFlagOffKeepsAzw3() async throws {
+        guard let azw3 = try copyRealAzw3ToTemp() else { return }  // CI / no fixture
+        defer { try? FileManager.default.removeItem(at: azw3) }
+        let flags = FeatureFlags(environment: .prod)  // kindleConvertOnImport default OFF
+        let (importer, _, sandbox) = try await makeImporter(featureFlags: flags)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let result = try await importer.importFile(at: azw3, source: .filesApp)
+        #expect(result.fingerprint.format == .azw3, "flag OFF must import natively")
+    }
+
+    @Test("flag ON + AZW3 → imported as a first-class .epub with Kindle origin recorded")
+    func convertOnImportFlagOnProducesEpub() async throws {
+        guard let azw3 = try copyRealAzw3ToTemp() else { return }
+        defer { try? FileManager.default.removeItem(at: azw3) }
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .kindleConvertOnImport)
+        let (importer, _, sandbox) = try await makeImporter(featureFlags: flags)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let result = try await importer.importFile(at: azw3, source: .filesApp)
+        // Identity is the converted EPUB's — format .epub, self-consistent.
+        #expect(result.fingerprint.format == .epub, "flag ON must convert to EPUB")
+        #expect(result.provenance.convertedFromKindleExtension == "azw3")
+        #expect(result.provenance.converterVersion == MobiEPUBConverter.version)
+        // Display metadata recovered from the self-describing EPUB.
+        #expect(!result.title.isEmpty)
+        // Re-import the same AZW3 dedupes (deterministic conversion → same key).
+        let again = try await importer.importFile(at: azw3, source: .filesApp)
+        #expect(again.fingerprintKey == result.fingerprintKey)
+        #expect(again.isDuplicate)
+    }
+
+    @Test("flag ON + non-Kindle (txt) → untouched, no conversion")
+    func convertOnImportIgnoresNonKindle() async throws {
+        let txt = try makeTempTxtFile(content: "plain text body for import")
+        defer { try? FileManager.default.removeItem(at: txt) }
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .kindleConvertOnImport)
+        let (importer, _, sandbox) = try await makeImporter(featureFlags: flags)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let result = try await importer.importFile(at: txt, source: .filesApp)
+        #expect(result.fingerprint.format == .txt)
+    }
+
+    @Test("flag ON + unconvertible .azw3 → semantic failure is caught, falls back to native")
+    func convertOnImportFallsBackOnSemanticFailure() async throws {
+        // A non-Kindle file masquerading as .azw3 → libmobi load fails →
+        // MobiDecodeError. The importer must CATCH it and fall back to native
+        // import, never propagate the conversion error. CI-safe (synthetic).
+        let fake = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fake-\(UUID().uuidString).azw3")
+        try Data("not a real kindle file, just text".utf8).write(to: fake)
+        defer { try? FileManager.default.removeItem(at: fake) }
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .kindleConvertOnImport)
+        let (importer, _, sandbox) = try await makeImporter(featureFlags: flags)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        do {
+            let result = try await importer.importFile(at: fake, source: .filesApp)
+            // Fallback succeeded → imported natively (still .azw3, NOT .epub).
+            #expect(result.fingerprint.format == .azw3)
+        } catch is MobiDecodeError {
+            Issue.record("conversion MobiDecodeError must NOT propagate — fallback should swallow it")
+        } catch {
+            // The native importer may itself reject the fake file; acceptable —
+            // the guarantee under test is that the conversion error was caught.
+        }
     }
 
     // MARK: - Happy Path: TXT Import
