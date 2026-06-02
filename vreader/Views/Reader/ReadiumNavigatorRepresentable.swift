@@ -140,6 +140,11 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
         // to the live navigator without a reopen.
         // WI-9a: keep the coordinator's layout in sync so a live scroll↔paged
         // switch re-routes the tap behavior immediately.
+        // Feature #83: a layout change clears the continuous-scroll in-flight
+        // guard (a scroll→paged→scroll switch must not carry a stale flag).
+        if context.coordinator.currentLayout != resolvedLayout {
+            context.coordinator.continuousScrollAdvancing = false
+        }
         context.coordinator.currentLayout = resolvedLayout
         if let navigator = controller as? EPUBNavigatorViewController {
             // Gate-4 audit High: drive the transparency state through the

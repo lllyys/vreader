@@ -37,6 +37,13 @@ final class ReadiumReaderCoordinator: NSObject {
     /// chrome, matching the legacy reader's tap contract).
     var currentLayout: EPUBLayoutPreference = .paged
 
+    /// Feature #83: a cross-chapter continuous-scroll auto-advance is in flight.
+    /// Set before `goForward`/`goBackward`, cleared when the navigation settles
+    /// (in the same Task) and on `locationDidChange` / detach / layout change.
+    /// Gates out stale-spread boundary messages so a single boundary drag
+    /// advances exactly once (no chapter skip) — Gate-4 fix.
+    var continuousScrollAdvancing: Bool = false
+
     /// WI-7 photo/custom-background compositing: when true, `setupUserScripts`
     /// injects a transparent-`:root` style into each spine WebView so the
     /// composited `ThemeBackgroundView` behind the navigator shows through (set by
@@ -137,6 +144,9 @@ final class ReadiumReaderCoordinator: NSObject {
     /// and drops the navigator delegate + ref so no stale delegate callback
     /// fires after the host leaves the hierarchy.
     func detach() {
+        // Feature #83: clear the continuous-scroll in-flight guard on teardown
+        // so a stale flag can't wedge a future navigator.
+        continuousScrollAdvancing = false
         #if DEBUG
         DebugReaderRegistry.shared.clearActiveReadiumNavigator(
             for: fingerprintKey, token: readerToken
@@ -224,6 +234,10 @@ extension ReadiumReaderCoordinator: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: ReadiumShared.Locator) {
+        // Feature #83: a new spread settled — clear the continuous-scroll
+        // in-flight guard (belt-and-suspenders; the advance Task also clears it)
+        // so the newly-landed resource's boundary can advance.
+        continuousScrollAdvancing = false
         // WI-6: forward the reported locator to the host VM's debounced save so
         // the reading position persists as the user navigates/scrolls.
         onLocationChange?(locator)

@@ -75,6 +75,11 @@ extension ReadiumReaderCoordinator {
             source: Self.transparentStyleApplyJS,
             injectionTime: .atDocumentEnd, forMainFrameOnly: false
         ))
+        // Feature #83: cross-chapter continuous scroll — install the boundary-
+        // intent observer + weak message-handler proxy so scroll mode auto-
+        // advances across spine boundaries (resolves Bug #309). Self-gating to
+        // scroll layout (the proxy + model re-check `currentLayout`).
+        installContinuousScroll(on: userContentController)
     }
 
     /// Authoritatively asserts the current `transparentBackground` flag into the
