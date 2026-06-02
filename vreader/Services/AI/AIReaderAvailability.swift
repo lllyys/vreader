@@ -38,7 +38,8 @@ enum AIReaderAvailability {
     static func isAvailable(
         featureFlags: FeatureFlags,
         keychainService: KeychainService,
-        consentManager: AIConsentManager
+        consentManager: AIConsentManager,
+        providerPreferences: any PreferenceStoring = UserDefaultsPreferenceStore()
     ) -> Bool {
         #if DEBUG
         // Bug #237: the --enable-ai XCUITest launch flag forces availability
@@ -48,21 +49,50 @@ enum AIReaderAvailability {
         if AITestOverride.forceAvailable { return true }
         #endif
         guard featureFlags.aiAssistant else { return false }
-        guard hasAPIKey(keychainService: keychainService) else { return false }
+        guard hasAPIKey(keychainService: keychainService, providerPreferences: providerPreferences) else { return false }
         return consentManager.hasConsent
     }
 
-    /// Returns true when a non-empty API key exists in the keychain.
+    /// Returns true when a usable API key exists — either the legacy single-key
+    /// account OR the **active provider profile's per-profile key**.
     ///
-    /// - Parameter keychainService: The keychain service to check.
-    /// - Returns: Whether an API key is saved.
-    static func hasAPIKey(keychainService: KeychainService) -> Bool {
-        guard let key = try? keychainService.readString(
-            forAccount: AIService.apiKeyAccount
-        ) else {
+    /// Feature #82 / Bug #308: the AI panel/button previously gated only on the
+    /// legacy `AIService.apiKeyAccount` key, so a user who configured a provider
+    /// through the multi-profile path (in-reader readiness flow, Library AI
+    /// settings) had no legacy key and the AI button stayed a silent no-op —
+    /// looping back to readiness forever. This now mirrors the gate the live
+    /// request path (`AIService` / `BilingualAIReadiness`) actually uses. The
+    /// active-provider lookup is a synchronous static read of the same
+    /// UserDefaults the shared `ProviderProfileStore` writes, so `isAvailable`
+    /// stays sync (no async ripple) and re-reads fresh on each access.
+    ///
+    /// - Parameters:
+    ///   - keychainService: The keychain to read keys from.
+    ///   - providerPreferences: The preference store the provider list lives in
+    ///     (defaults to the shared `UserDefaultsPreferenceStore`).
+    static func hasAPIKey(
+        keychainService: KeychainService,
+        providerPreferences: any PreferenceStoring = UserDefaultsPreferenceStore()
+    ) -> Bool {
+        // Active provider FIRST — mirror the live request gate
+        // (`AIService.resolveProvider` uses the active profile). When an active
+        // profile exists, ITS per-profile key is authoritative: a stale legacy
+        // key must NOT mask a key-less active profile (which would make
+        // `isAvailable` true while the request throws `apiKeyMissing`).
+        if let activeID = DefaultProviderProfileMigrator.readActiveID(preferences: providerPreferences) {
+            if let key = try? keychainService.readAPIKey(forProfile: activeID),
+               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return true
+            }
             return false
         }
-        return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // No active profile → legacy single-key fallback (pre-migration installs
+        // that never adopted the multi-profile store).
+        if let legacy = try? keychainService.readString(forAccount: AIService.apiKeyAccount),
+           !legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return false
     }
 }
 

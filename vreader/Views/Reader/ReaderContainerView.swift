@@ -82,6 +82,13 @@ struct ReaderContainerView: View {
     /// file is presented — driven by the More-menu's "Share book" row.
     @State var showShareSheet = false
     @State var showAIPanel = false
+    /// Bug #308 (Feature #82): the in-reader AI readiness sheet, presented from
+    /// the bottom-bar AI button when AI is unconfigured (instead of a no-op).
+    @State var showAIReadiness = false
+    /// Bug #308: when readiness completes, open the AI panel — but only AFTER
+    /// the readiness sheet fully dismisses (sibling-sheet handoff; opening both
+    /// in one update drops the panel). Set on ready, consumed in `onDismiss`.
+    @State var pendingOpenAIPanelAfterReadiness = false
     @State var aiInitialTab: AIReaderTab = .summarize
     #if DEBUG
     /// Bug #256 — the AI sheet's active detent, bound to its
@@ -310,11 +317,13 @@ struct ReaderContainerView: View {
             },
             onDisplay: { showSettings = true },
             onAI: {
-                // Mirrors the legacy chrome's AI gate — a no-op when
-                // AI isn't configured rather than presenting an empty
-                // sheet.
                 if resolvedAICoordinator.isAIAvailable {
                     showAIPanel = true
+                } else {
+                    // Bug #308 (Feature #82): instead of a silent no-op, route the
+                    // unconfigured tap to the in-reader AI readiness sheet so the
+                    // user can enable AI + grant consent + add a provider in place.
+                    showAIReadiness = true
                 }
             }
         )
@@ -354,6 +363,26 @@ struct ReaderContainerView: View {
             aiPanelDetent = .medium
             #endif
         }) { aiSheet }
+        // Bug #308 (Feature #82): the readiness sheet for the unconfigured
+        // AI-button tap. On the ready transition it dismisses + opens the AI
+        // panel — the availability gate now mirrors the active-provider
+        // per-profile key, so the panel actually opens (no loop back).
+        .sheet(isPresented: $showAIReadiness, onDismiss: {
+            // Sibling-sheet handoff: open the AI panel only after readiness has
+            // fully dismissed (matches the #81 .sheet(onDismiss:) pattern).
+            if pendingOpenAIPanelAfterReadiness {
+                pendingOpenAIPanelAfterReadiness = false
+                showAIPanel = true
+            }
+        }) {
+            ReaderAIReadinessSheet(
+                theme: settingsStore.theme,
+                onReady: {
+                    pendingOpenAIPanelAfterReadiness = true
+                    showAIReadiness = false
+                }
+            )
+        }
         .onReceive(NotificationCenter.default.publisher(for: .readerDefineRequested)) { notification in
             guard let info = notification.object as? TextSelectionInfo else { return }
             if let word = DictionaryLookup.extractWord(from: info.selectedText) {
