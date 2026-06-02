@@ -79,6 +79,36 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
         self.navigator = navigator
         self.spineHrefs = spineHrefs
         rebuildAndApply()
+        // Bug #302: make the highlights group tappable. Readium's
+        // `observeDecorationInteractions` calls `setActivable()` on the group
+        // (for current + future spreads), so a tap on a stored highlight
+        // activates its decoration. The id on each `Decoration` is the
+        // `HighlightRecord` UUID string, so the callback maps straight back to
+        // the record and posts the cross-format `.readerHighlightTapped` — the
+        // SAME event the legacy EPUB / Foliate / TXT paths post, which the host's
+        // `unifiedHighlightPopoverPresenter` observes to open the edit popover.
+        navigator.observeDecorationInteractions(inGroup: Self.group) { event in
+            guard let tapEvent = Self.tapEvent(
+                forDecorationId: event.decoration.id, rect: event.rect
+            ) else { return }
+            NotificationCenter.default.post(
+                name: .readerHighlightTapped, object: tapEvent
+            )
+        }
+    }
+
+    /// Pure mapping (unit-testable without a navigator): a decoration-activation
+    /// id + optional rect → the cross-format `ReaderHighlightTapEvent`. Returns
+    /// `nil` when the id is not a valid `HighlightRecord` UUID (a foreign
+    /// decoration / malformed id), so a stray activation is ignored rather than
+    /// posting a bogus tap. A missing rect degrades to `.zero` (the popover
+    /// anchors at a default, matching the Foliate tap path).
+    nonisolated static func tapEvent(
+        forDecorationId id: Decoration.Id,
+        rect: CGRect?
+    ) -> ReaderHighlightTapEvent? {
+        guard let highlightID = UUID(uuidString: id) else { return nil }
+        return ReaderHighlightTapEvent(highlightID: highlightID, sourceRect: rect ?? .zero)
     }
 
     /// Drops the navigator reference on host teardown so no stale apply fires

@@ -54,6 +54,19 @@ extension ReadiumEPUBHost {
         // and present the designed `AddNoteSheet` (rule 51 reuse). Lives in the
         // `+Annotations` extension's `annotationObservers` modifier.
         .modifier(annotationObservers)
+        // Bug #302: present the unified highlight-action popover (color / note /
+        // copy / share / delete) when a stored highlight is TAPPED. The adapter's
+        // `observeDecorationInteractions` posts `.readerHighlightTapped`; this
+        // presenter (the same one legacy EPUB / TXT / MD attach) observes it and
+        // opens the designed popover over `highlightCoordinator` (a
+        // `HighlightMutating`). Inert until the coordinator is built / in previews
+        // (the `IfAvailable` variant returns self when `mutating` is nil).
+        .unifiedHighlightPopoverPresenterIfAvailable(
+            modelContainer: modelContainer,
+            bookFingerprintKey: fingerprint.canonicalKey,
+            mutating: highlightCoordinator,
+            theme: settingsStore.theme
+        )
         .onDisappear { onHostDisappear() }
     }
 

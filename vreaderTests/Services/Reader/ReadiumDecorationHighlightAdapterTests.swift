@@ -243,6 +243,18 @@ struct ReadiumDecorationHighlightAdapterTests {
 
     // MARK: - Set rebuild via fake DecorableNavigator
 
+    /// Bug #302: attaching the adapter must register the decoration-tap observer
+    /// on the `"highlights"` group exactly once, so a tap on a stored highlight
+    /// reaches the `.readerHighlightTapped` → popover path. Guards a regression
+    /// that drops the `observeDecorationInteractions` call (which the pure
+    /// `tapEvent` tests would not catch).
+    @Test func attach_registersHighlightsTapObserverOnce() {
+        let nav = FakeDecorableNavigator()
+        let adapter = ReadiumDecorationHighlightAdapter()
+        adapter.attach(navigator: nav, spineHrefs: [])
+        #expect(nav.observedGroups == ["highlights"])
+    }
+
     @Test func apply_thenRemove_rebuildsGroup() {
         let nav = FakeDecorableNavigator()
         let adapter = ReadiumDecorationHighlightAdapter()
@@ -318,6 +330,9 @@ struct ReadiumDecorationHighlightAdapterTests {
 final class FakeDecorableNavigator: DecorableNavigator, @unchecked Sendable {
     private(set) nonisolated(unsafe) var lastDecorations: [Decoration] = []
     private(set) nonisolated(unsafe) var lastGroup: DecorationGroup?
+    /// Bug #302: records every `observeDecorationInteractions` group so a test can
+    /// assert the highlights tap-observer is registered exactly once on attach.
+    private(set) nonisolated(unsafe) var observedGroups: [DecorationGroup] = []
 
     func supports(decorationStyle style: Decoration.Style.Id) -> Bool { true }
 
@@ -329,5 +344,7 @@ final class FakeDecorableNavigator: DecorableNavigator, @unchecked Sendable {
     func observeDecorationInteractions(
         inGroup group: DecorationGroup,
         onActivated: @escaping OnActivatedCallback
-    ) {}
+    ) {
+        observedGroups.append(group)
+    }
 }
