@@ -4924,6 +4924,11 @@ ${doc.querySelector("parsererror").innerText}`);
               if (doc.head) {
                 const $styleBefore = doc.createElement("style");
                 doc.head.prepend($styleBefore);
+                if (window.__vreaderForceVerticalRL) {
+                  $styleBefore.textContent = ":root,html,body{writing-mode:vertical-rl!important;-webkit-writing-mode:vertical-rl!important}";
+                  doc.documentElement?.style.setProperty("writing-mode", "vertical-rl", "important");
+                  doc.body?.style.setProperty("writing-mode", "vertical-rl", "important");
+                }
                 const $style = doc.createElement("style");
                 doc.head.append($style);
                 this.#styleMap.set(doc, [$styleBefore, $style]);
@@ -5423,6 +5428,11 @@ ${doc.querySelector("parsererror").innerText}`);
               if (doc.head) {
                 const $styleBefore = doc.createElement("style");
                 doc.head.prepend($styleBefore);
+                if (window.__vreaderForceVerticalRL) {
+                  $styleBefore.textContent = ":root,html,body{writing-mode:vertical-rl!important;-webkit-writing-mode:vertical-rl!important}";
+                  doc.documentElement?.style.setProperty("writing-mode", "vertical-rl", "important");
+                  doc.body?.style.setProperty("writing-mode", "vertical-rl", "important");
+                }
                 const $style = doc.createElement("style");
                 doc.head.append($style);
                 this.#styleMap.set(doc, [$styleBefore, $style]);

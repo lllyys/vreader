@@ -239,6 +239,27 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
             config.userContentController.add(WeakScriptMessageHandler(coordinator), name: name)
         }
 
+        // Feature #76 WI-5 verification harness: with no real vertical-rl AZW3
+        // fixture, the DEBUG `--force-foliate-vertical-rl` launch flag makes the
+        // paginator's section `afterLoad` inject `writing-mode: vertical-rl` BEFORE
+        // `getDirection` runs — so a real (horizontal) AZW3 exercises the vertical
+        // windowed-scroll axis path on-device. The flag is only honored in DEBUG;
+        // in Release the value is hard-`false`. Gate-4 Medium: define the global
+        // NON-WRITABLE / NON-CONFIGURABLE in EVERY build (at document start) so a
+        // scripted book's iframe cannot set `parent.__vreaderForceVerticalRL` to
+        // force the debug path — only this launch flag can.
+        let forceVerticalRL: Bool = {
+            #if DEBUG
+            return ProcessInfo.processInfo.arguments.contains("--force-foliate-vertical-rl")
+            #else
+            return false
+            #endif
+        }()
+        config.userContentController.addUserScript(WKUserScript(
+            source: "Object.defineProperty(window,'__vreaderForceVerticalRL',"
+                + "{value:\(forceVerticalRL),writable:false,configurable:false});",
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isInspectable = true
         webView.navigationDelegate = coordinator

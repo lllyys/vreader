@@ -146,6 +146,46 @@ struct FoliateVerticalWindowBundleTests {
                 "foliate-bundle.js must carry the directionSign-based scroll sign — run build-bundle.sh.")
     }
 
+    // MARK: - WI-5 verification harness (force vertical-rl)
+
+    @Test("the WI-5 force-vertical-rl hook is in BOTH afterLoad sites (source + bundle)")
+    func wi5ForceVerticalHarness() throws {
+        for (label, text) in [("source", try loadSource()), ("bundle", try loadBundle())] {
+            // BOTH afterLoad sites (#mountSection neighbours + #display current) must
+            // gate on the LOCKED `window.` property — not `globalThis.`, which a
+            // scripted iframe could poison via `parent.globalThis = {...}` (Gate-4
+            // round-2 Medium) — so the whole windowed surface forces the same axis.
+            let hooks = text.components(separatedBy: "window.__vreaderForceVerticalRL").count - 1
+            #expect(hooks >= 2,
+                    "\(label) must gate BOTH section afterLoad sites on window.__vreaderForceVerticalRL (found \(hooks)).")
+            #expect(!text.contains("globalThis.__vreaderForceVerticalRL"),
+                    "\(label) must NOT read globalThis.__vreaderForceVerticalRL — globalThis can be poisoned; read the locked window property.")
+            #expect(text.contains("vertical-rl!important") || text.contains("vertical-rl !important"),
+                    "\(label) harness must inject `writing-mode: vertical-rl !important`.")
+        }
+    }
+
+    @Test("the Swift harness locks the global non-writable, honors the flag only in DEBUG, at document start")
+    func wi5SwiftHarnessLocked() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let swift = try String(
+            contentsOf: repoRoot.appendingPathComponent("vreader/Views/Reader/FoliateSpikeView.swift"),
+            encoding: .utf8)
+        // Gate-4 Medium: the global is defined non-writable/non-configurable in EVERY
+        // build so a scripted book iframe can't force the debug path.
+        #expect(swift.contains("Object.defineProperty(window,'__vreaderForceVerticalRL'"),
+                "the harness global must be Object.defineProperty'd (non-writable) so book content can't set it.")
+        #expect(swift.contains("writable:false") && swift.contains("configurable:false"),
+                "the harness global must be non-writable + non-configurable.")
+        // The flag is only honored in DEBUG.
+        #expect(swift.contains("#if DEBUG") && swift.contains("--force-foliate-vertical-rl"),
+                "the launch flag must be read only under #if DEBUG.")
+        #expect(swift.contains(".atDocumentStart") && swift.contains("forMainFrameOnly: true"),
+                "the user script must inject at document start, main frame only.")
+    }
+
     // MARK: - Helpers (balanced-brace extractor, mirrors ScrollBoundary tests)
 
     private func extractHelperBody(_ source: String, name: String) -> String {

@@ -885,6 +885,17 @@ export class Paginator extends HTMLElement {
             if (doc.head) {
                 const $styleBefore = doc.createElement('style')
                 doc.head.prepend($styleBefore)
+                // Feature #76 WI-5 verification harness (inert unless the DEBUG
+                // `--force-foliate-vertical-rl` flag set the global): force
+                // vertical-rl BEFORE getDirection reads it, so a real horizontal
+                // AZW3 exercises the vertical windowed-scroll axis path on-device.
+                // Inline `!important` on the root + body too (Gate-4 Low) so an
+                // author inline/`!important` writing-mode can't beat the forced one.
+                if (window.__vreaderForceVerticalRL) {
+                    $styleBefore.textContent = ':root,html,body{writing-mode:vertical-rl!important;-webkit-writing-mode:vertical-rl!important}'
+                    doc.documentElement?.style.setProperty('writing-mode', 'vertical-rl', 'important')
+                    doc.body?.style.setProperty('writing-mode', 'vertical-rl', 'important')
+                }
                 const $style = doc.createElement('style')
                 doc.head.append($style)
                 this.#styleMap.set(doc, [$styleBefore, $style])
@@ -1493,6 +1504,12 @@ export class Paginator extends HTMLElement {
                 if (doc.head) {
                     const $styleBefore = doc.createElement('style')
                     doc.head.prepend($styleBefore)
+                    // Feature #76 WI-5 verification harness (see #mountSection).
+                    if (window.__vreaderForceVerticalRL) {
+                        $styleBefore.textContent = ':root,html,body{writing-mode:vertical-rl!important;-webkit-writing-mode:vertical-rl!important}'
+                        doc.documentElement?.style.setProperty('writing-mode', 'vertical-rl', 'important')
+                        doc.body?.style.setProperty('writing-mode', 'vertical-rl', 'important')
+                    }
                     const $style = doc.createElement('style')
                     doc.head.append($style)
                     this.#styleMap.set(doc, [$styleBefore, $style])
