@@ -110,6 +110,9 @@ struct BookImporterTests {
         let again = try await importer.importFile(at: azw3, source: .filesApp)
         #expect(again.fingerprintKey == result.fingerprintKey)
         #expect(again.isDuplicate)
+        // Bug #307: the dedupe path must PRESERVE the Kindle origin, not wipe it.
+        #expect(again.provenance.convertedFromKindleExtension == "azw3")
+        #expect(again.provenance.converterVersion == MobiEPUBConverter.version)
     }
 
     @Test("flag ON + non-Kindle (txt) → untouched, no conversion")

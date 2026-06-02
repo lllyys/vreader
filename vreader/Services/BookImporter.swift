@@ -218,11 +218,17 @@ final class BookImporter: BookImporting, Sendable {
         // Step 7: Check for duplicate
         let fingerprintKey = fingerprint.canonicalKey
         if let existing = try await persistence.findBook(byFingerprintKey: fingerprintKey) {
-            // Replace provenance with the new import source
+            // Replace provenance with the new import source. Bug #307: carry the
+            // Kindle-origin fields (the conversion at Step 3.5 already ran for
+            // this re-import) so re-importing a converted book does NOT wipe the
+            // best-effort origin that the first import recorded — `kindleOrigin*`
+            // is nil for non-converted re-imports, so this is a no-op there.
             let provenance = ImportProvenance(
                 source: source,
                 importedAt: Date(),
-                originalURLBookmarkData: nil
+                originalURLBookmarkData: nil,
+                convertedFromKindleExtension: kindleOriginExtension,
+                converterVersion: kindleOriginExtension == nil ? nil : MobiEPUBConverter.version
             )
             try await persistence.replaceProvenance(provenance, toBookWithKey: fingerprintKey)
 
