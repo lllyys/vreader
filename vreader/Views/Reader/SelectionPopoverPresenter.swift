@@ -166,18 +166,6 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
     let onDismiss: (() -> Void)?
     @State private var pending: SelectionPopoverRequestPayload?
 
-    /// Maps `pending != nil` to a `Bool` binding the sheet API
-    /// requires. Setting to `false` clears the pending state —
-    /// covers iOS-driven dismissal (drag-down, tap-outside).
-    private var isPresentedBinding: Binding<Bool> {
-        Binding(
-            get: { pending != nil },
-            set: { presenting in
-                if !presenting { pending = nil }
-            }
-        )
-    }
-
     func body(content: Content) -> some View {
         content
             .onReceive(
@@ -188,14 +176,31 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
                 }
                 pending = payload
             }
-            .sheet(isPresented: isPresentedBinding, onDismiss: { onDismiss?() }) {
-                sheetContent
+            // Bug #317: present the designed FLOATING inset card — `left`/`right`
+            // 18, ~100pt above the bottom, rounded (the card chrome lives in
+            // `SelectionPopoverView`) — as an overlay, NOT a system `.sheet` with
+            // detents + grabber + dimmed backdrop. Mirrors `vreader-reader.jsx`'s
+            // `SelectionPopover` (`position:absolute; left:18; right:18; bottom:100;
+            // borderRadius:18`). Shared modifier → all formats (TXT/MD/EPUB-Readium).
+            .overlay(alignment: .bottom) {
+                if let payload = pending {
+                    floatingCard(payload)
+                }
             }
+            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: pending != nil)
     }
 
     @ViewBuilder
-    private var sheetContent: some View {
-        if let payload = pending {
+    private func floatingCard(_ payload: SelectionPopoverRequestPayload) -> some View {
+        ZStack(alignment: .bottom) {
+            // Tap-outside-to-dismiss catcher. The design floats the card over the
+            // live reader with no dimming, so the catcher is transparent — it only
+            // captures the outside tap that closes the popover.
+            Color.clear
+                .contentShape(Rectangle())
+                .ignoresSafeArea()
+                .onTapGesture { dismiss() }
+
             SelectionPopoverView(
                 selectionText: payload.selection.selectedText,
                 theme: theme,
@@ -204,18 +209,29 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
                         action: action,
                         payload: payload
                     )
-                    pending = SelectionPopoverDismissPolicy.nextPending(
+                    let next = SelectionPopoverDismissPolicy.nextPending(
                         after: result,
                         currentPayload: payload
                     )
+                    pending = next
+                    // Preserve the old `.sheet(onDismiss:)` contract: fire onDismiss
+                    // whenever the popover actually closes (here, the action path
+                    // resolved to no follow-up).
+                    if next == nil { onDismiss?() }
                 },
-                onClose: { pending = nil }
+                onClose: { dismiss() }
             )
-            .padding(.horizontal, 16)
-            .presentationDetents([.fraction(0.30), .medium])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(.clear)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 100)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+    }
+
+    /// Closes the popover by an outside tap or the close button, preserving the
+    /// `onDismiss` callback the EPUB container uses to drop its token-cache entry.
+    private func dismiss() {
+        pending = nil
+        onDismiss?()
     }
 }
 
@@ -223,11 +239,11 @@ extension View {
     /// Feature #60 WI-7c1: attach the SelectionPopover presenter to
     /// a reader-container view. The presenter observes
     /// `.readerSelectionPopoverRequested` (any object), filters
-    /// invalid payloads, and presents `SelectionPopoverView` as a
-    /// SwiftUI sheet. Production bridges post the notification per
-    /// WI-7c2..7c5.
+    /// invalid payloads, and presents `SelectionPopoverView` as the
+    /// designed floating inset card (Bug #317 — overlay, not a system
+    /// sheet). Production bridges post the notification per WI-7c2..7c5.
     ///
-    /// `onDismiss` (WI-7c5b) fires whenever the sheet closes — the
+    /// `onDismiss` (WI-7c5b) fires whenever the popover closes — the
     /// EPUB container passes `{ selectionTokenCache.clear() }` so an
     /// abandoned long-press selection doesn't linger. TXT / MD /
     /// chunked carry their selection identity in `TextSelectionInfo`
