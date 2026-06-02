@@ -127,6 +127,40 @@ struct MobiEPUBAssemblerTests {
         #expect(s.components(separatedBy: "<li>").count - 1 == 2)
     }
 
+    // MARK: WI-4a — self-describing OPF (author + cover)
+
+    @Test("author → dc:creator; first image resource → cover (meta + property)")
+    func selfDescribingOPF() throws {
+        // sampleParts has a jpg resource at res0000 → it becomes the cover.
+        let files = try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T", author: "Jane Doe")
+        let opf = try #require(files.first { $0.path == "OEBPS/content.opf" })
+        let s = String(decoding: opf.data, as: UTF8.self)
+        #expect(isWellFormedXML(opf.data))
+        #expect(s.contains("<dc:creator>Jane Doe</dc:creator>"))
+        #expect(s.contains("<meta name=\"cover\" content=\"res0000\"/>"))
+        #expect(s.contains("properties=\"cover-image\""))
+    }
+
+    @Test("no author + no image resource → no dc:creator, no cover meta")
+    func noAuthorNoCover() throws {
+        let files = try MobiEPUBAssembler.assemble(
+            parts: [part(.markup, 0, "html", "<html><body><p>x</p></body></html>")], title: "T")
+        let opf = try #require(files.first { $0.path == "OEBPS/content.opf" })
+        let s = String(decoding: opf.data, as: UTF8.self)
+        #expect(isWellFormedXML(opf.data))
+        #expect(!s.contains("dc:creator"))
+        #expect(!s.contains("name=\"cover\""))
+    }
+
+    @Test("author is XML-escaped in dc:creator")
+    func authorEscaped() throws {
+        let files = try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T", author: "A & B <c>")
+        let opf = try #require(files.first { $0.path == "OEBPS/content.opf" })
+        #expect(isWellFormedXML(opf.data))
+        let s = String(decoding: opf.data, as: UTF8.self)
+        #expect(s.contains("<dc:creator>A &amp; B &lt;c&gt;</dc:creator>"))
+    }
+
     // MARK: helpers
 
     private func isWellFormedXML(_ data: Data) -> Bool {

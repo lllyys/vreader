@@ -20,6 +20,19 @@ struct FeatureFlagsTests {
         #expect(flags.isEnabled(.sync) == false)
     }
 
+    // Feature #42 Phase 2 WI-4a: convert-on-import ships dark (default OFF).
+    @Test func kindleConvertOnImportDefaultOff() {
+        for env in [AppEnvironment.prod, .staging, .dev] {
+            #expect(FeatureFlags(environment: env).isEnabled(.kindleConvertOnImport) == false)
+        }
+    }
+
+    @Test func kindleConvertOnImportHonorsOverride() {
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .kindleConvertOnImport)
+        #expect(flags.isEnabled(.kindleConvertOnImport) == true)
+    }
+
     @Test func searchIndexingVerboseLogsDefaultOffInProd() {
         let flags = FeatureFlags(environment: .prod)
         #expect(flags.isEnabled(.searchIndexingVerboseLogs) == false)
@@ -141,13 +154,14 @@ struct FeatureFlagsTests {
     // MARK: - Flag Enum
 
     @Test func flagKeysAreExhaustive() {
-        #expect(FeatureFlagKey.allCases.count == 6)
+        #expect(FeatureFlagKey.allCases.count == 7)
         #expect(FeatureFlagKey.allCases.contains(.aiAssistant))
         #expect(FeatureFlagKey.allCases.contains(.sync))
         #expect(FeatureFlagKey.allCases.contains(.searchIndexingVerboseLogs))
         #expect(FeatureFlagKey.allCases.contains(.bilingualReading))
         #expect(FeatureFlagKey.allCases.contains(.epubContinuousScroll))
         #expect(FeatureFlagKey.allCases.contains(.readiumEPUBEngine))
+        #expect(FeatureFlagKey.allCases.contains(.kindleConvertOnImport))
     }
 
     // MARK: - Feature #42: readiumEPUBEngine

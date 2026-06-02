@@ -37,6 +37,13 @@ enum FeatureFlagKey: String, Sendable, CaseIterable {
     /// persisted override OFF reverts to `EPUBWebViewBridge` (the dual-write to
     /// the legacy `Locator` keeps positions safe when toggling back).
     case readiumEPUBEngine
+    /// Feature #42 Phase 2: convert Kindle files (AZW3/MOBI/KF8/PRC) to EPUB at
+    /// import time so they render via the (now-default) Readium EPUB engine
+    /// instead of the Foliate spike. **Default OFF** — the capability ships dark;
+    /// the flip is a separate human-gated decision after WI-5 device
+    /// verification. OFF → AZW3 imports native + renders via Foliate (today's
+    /// behavior). Not persisted yet (no user-facing toggle until the flip).
+    case kindleConvertOnImport
 }
 
 /// Runtime feature flags with environment-based defaults, override support,
@@ -239,6 +246,11 @@ nonisolated final class FeatureFlags: Sendable {
             // sign-off given 2026-06-01. Users can revert to the legacy
             // `EPUBWebViewBridge` via the persisted override (see the enum doc).
             return true
+        case .kindleConvertOnImport:
+            // Feature #42 Phase 2: ships dark (default OFF in every environment).
+            // Flag-ON convert-on-import is enabled progressively after WI-5
+            // device verification + a human-gated flip.
+            return false
         }
     }
 }

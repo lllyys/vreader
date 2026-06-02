@@ -77,6 +77,31 @@ struct MobiEPUBConverterTests {
         #expect(String(decoding: bytes[30..<(30 + nameLen)], as: UTF8.self) == "mimetype")
     }
 
+    // MARK: WI-4a — self-describing EPUB round-trips through EPUBMetadataExtractor
+
+    @Test("packaged EPUB is self-describing — title + author recover via EPUBMetadataExtractor")
+    func selfDescribingMetadataRecovers() async throws {
+        let parts = [
+            part(.markup, 0, "html", "<html><body><p>hi</p></body></html>"),
+            part(.resource, 0, "jpg", "pretend-jpeg"),
+        ]
+        let files = try MobiEPUBAssembler.assemble(parts: parts, title: "My Title", author: "Jane Doe")
+        let epub = try MobiEPUBConverter.package(files: files)
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wi4a-\(UUID().uuidString).epub")
+        try epub.write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let meta = try await EPUBMetadataExtractor().extractMetadata(from: tmp)
+        #expect(meta.title == "My Title")
+        #expect(meta.author == "Jane Doe")
+    }
+
+    @Test("converter version is a positive constant")
+    func converterVersion() {
+        #expect(MobiEPUBConverter.version >= 1)
+    }
+
     private func le16(_ b: [UInt8], _ o: Int) -> UInt16 {
         UInt16(b[o]) | (UInt16(b[o + 1]) << 8)
     }
@@ -90,7 +115,7 @@ struct MobiEPUBConverterTests {
           .enabled(if: MobiDocumentTests.realAzw3Path != nil))
     func realAzw3ConvertsToEPUB() throws {
         let path = try #require(MobiDocumentTests.realAzw3Path)
-        let epub = try MobiEPUBConverter.convert(mobiPath: path, title: "Converted")
+        let epub = try MobiEPUBConverter.convert(mobiPath: path)
 
         let names = try ZIPWriter.listEntryNames(in: epub)
         #expect(names.first == "mimetype")

@@ -49,7 +49,7 @@ enum MobiEPUBAssembler {
     /// - Throws: `MobiEPUBError.noMarkup` if there are no markup parts — an
     ///   empty spine + empty TOC `<ol>` is invalid EPUB3, so reject rather than
     ///   emit a malformed package (Codex Gate-4).
-    static func assemble(parts: [MobiPart], title: String) throws -> [EPUBFile] {
+    static func assemble(parts: [MobiPart], title: String, author: String? = nil) throws -> [EPUBFile] {
         let markup = parts.filter { $0.section == .markup }
         let flow = parts.filter { $0.section == .flow }
         let resources = parts.filter { $0.section == .resource }
@@ -77,18 +77,26 @@ enum MobiEPUBAssembler {
             manifest.append(ManifestEntry(id: id, href: href, mediaType: mediaType(forExtension: ext)))
             files.append(EPUBFile(path: "OEBPS/\(href)", data: part.data, isStored: false))
         }
+        // The cover is the FIRST image resource (deterministic — libmobi builds
+        // resources by sequential record walk and we preserve that order). It
+        // gets EPUB3 `properties="cover-image"` + an EPUB2 `<meta name="cover">`.
+        var coverID: String? = nil
         for (i, part) in resources.enumerated() {
             let ext = part.fileExtension.isEmpty ? "bin" : part.fileExtension
             let id = "res\(pad(i))"
             let href = "resources/res\(pad(i)).\(ext)"
-            manifest.append(ManifestEntry(id: id, href: href, mediaType: mediaType(forExtension: ext)))
+            let isCover = coverID == nil && Self.imageExtensions.contains(ext.lowercased())
+            if isCover { coverID = id }
+            manifest.append(ManifestEntry(id: id, href: href,
+                                          mediaType: mediaType(forExtension: ext),
+                                          properties: isCover ? "cover-image" : nil))
             files.append(EPUBFile(path: "OEBPS/\(href)", data: part.data, isStored: false))
         }
 
         // 2. Generated documents.
         let navEntry = ManifestEntry(id: "nav", href: "nav.xhtml",
                                      mediaType: "application/xhtml+xml", properties: "nav")
-        let opf = contentOPF(identifier: identifier, title: title,
+        let opf = contentOPF(identifier: identifier, title: title, author: author, coverID: coverID,
                              manifest: manifest + [navEntry], spineIDs: spineIDs)
         let nav = navDocument(title: title, markupHrefs: markup.indices.map { "text/part\(pad($0)).xhtml" })
 
@@ -114,20 +122,26 @@ enum MobiEPUBAssembler {
     </container>
     """
 
-    private static func contentOPF(identifier: String, title: String,
+    /// Image extensions eligible to be the cover resource.
+    private static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "bmp", "svg"]
+
+    private static func contentOPF(identifier: String, title: String, author: String?, coverID: String?,
                                    manifest: [ManifestEntry], spineIDs: [String]) -> String {
         let items = manifest.map { entry -> String in
             let props = entry.properties.map { " properties=\"\($0)\"" } ?? ""
             return "    <item id=\"\(entry.id)\" href=\"\(entry.href)\" media-type=\"\(entry.mediaType)\"\(props)/>"
         }.joined(separator: "\n")
         let itemrefs = spineIDs.map { "    <itemref idref=\"\($0)\"/>" }.joined(separator: "\n")
+        // dc:creator (author) + the EPUB2 cover pointer, only when present.
+        let creatorLine = author.map { "\n    <dc:creator>\(xmlEscape($0))</dc:creator>" } ?? ""
+        let coverMetaLine = coverID.map { "\n    <meta name=\"cover\" content=\"\($0)\"/>" } ?? ""
         return """
         <?xml version="1.0" encoding="utf-8"?>
         <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
           <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
             <dc:identifier id="bookid">\(xmlEscape(identifier))</dc:identifier>
-            <dc:title>\(xmlEscape(title))</dc:title>
-            <dc:language>und</dc:language>
+            <dc:title>\(xmlEscape(title))</dc:title>\(creatorLine)
+            <dc:language>und</dc:language>\(coverMetaLine)
           </metadata>
           <manifest>
         \(items)

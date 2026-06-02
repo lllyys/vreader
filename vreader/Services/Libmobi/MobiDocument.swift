@@ -43,6 +43,24 @@ enum MobiDecodeError: Error, Equatable {
     case corrupt(String)     // malformed part chain (cycle, or size>0 w/ null data)
 }
 
+/// The Kindle book's own embedded display metadata (Feature #42 P2-WI-4a). All
+/// fields are deterministic functions of the source file (read via libmobi's
+/// `mobi_meta_get_*`), so embedding them in the converted EPUB keeps the EPUB
+/// byte-deterministic (the converter is title-neutral w.r.t. callers).
+struct MobiMetadata: Equatable, Sendable {
+    let title: String?
+    let author: String?
+}
+
+/// A fully-decoded Kindle book: its reconstructed parts plus its own embedded
+/// metadata. The converter embeds the metadata into the EPUB so the result is
+/// self-describing (round-3 audit: restore must recover title/author/cover from
+/// the blob itself).
+struct MobiBook: Sendable {
+    let parts: [MobiPart]
+    let metadata: MobiMetadata
+}
+
 extension Libmobi {
 
     /// Defensive ceiling on the number of parts in a single section. A real
@@ -61,6 +79,14 @@ extension Libmobi {
     ///   chain. A DRM-encrypted book typically loads but fails at
     ///   `mobi_parse_rawml` with a libmobi error code → `.parseFailed`.
     static func decodeParts(atPath path: String) throws -> [MobiPart] {
+        try decodeBook(atPath: path).parts
+    }
+
+    /// Load + fully reconstruct the Kindle file at `path`, returning its parts
+    /// AND its embedded display metadata (title / author). The metadata is read
+    /// from the loaded `MOBIData` (`mobi_meta_get_*`) before rawml parsing.
+    /// Same C-interop / freeing / off-main contract as `decodeParts`.
+    static func decodeBook(atPath path: String) throws -> MobiBook {
         guard let m = mobi_init() else { throw MobiDecodeError.initFailed }
         defer { mobi_free(m) }
 
@@ -68,6 +94,12 @@ extension Libmobi {
         guard loadRet == MOBI_SUCCESS else {
             throw MobiDecodeError.loadFailed(Int32(loadRet.rawValue))
         }
+
+        // Metadata from the source file's own headers — deterministic.
+        let metadata = MobiMetadata(
+            title: copyMetaString(mobi_meta_get_title(m)),
+            author: copyMetaString(mobi_meta_get_author(m))
+        )
 
         guard let rawml = mobi_init_rawml(m) else { throw MobiDecodeError.initFailed }
         defer { mobi_free_rawml(rawml) }
@@ -85,7 +117,17 @@ extension Libmobi {
         guard parts.contains(where: { $0.section == .markup }) else {
             throw MobiDecodeError.noMarkup
         }
-        return parts
+        return MobiBook(parts: parts, metadata: metadata)
+    }
+
+    /// Copy a libmobi-allocated metadata C string into a Swift `String` and free
+    /// it (libmobi's `mobi_meta_get_*` return malloc'd strings the caller owns).
+    /// Returns nil for a null pointer or an empty string.
+    private static func copyMetaString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
+        guard let ptr else { return nil }
+        defer { free(ptr) }
+        let s = String(cString: ptr)
+        return s.isEmpty ? nil : s
     }
 
     /// Walk a libmobi part linked list, copying each node's bytes into a value.
