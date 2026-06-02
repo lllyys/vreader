@@ -129,15 +129,29 @@ extension AISettingsViewModel {
     /// `AIService.resolveProvider` does (OpenAICompatibleProvider /
     /// AnthropicProvider). Uses the VM's injected `urlSession`
     /// (production `.shared`; tests inject a stubbed session via init).
-    func testConnection(profile: ProviderProfile) async -> Result<Void, Error> {
+    /// Feature #80: `apiKeyOverride` lets the editor sheet test a TYPED,
+    /// not-yet-saved key (add-mode "Test before Save") — when non-nil/non-empty
+    /// it is used directly; otherwise the existing keychain read applies (so
+    /// edit-mode with a saved key is unchanged). The override is used only to
+    /// build the transient provider; it is never persisted (only Save writes the
+    /// keychain).
+    func testConnection(
+        profile: ProviderProfile,
+        apiKeyOverride: String? = nil
+    ) async -> Result<Void, Error> {
         let apiKey: String
-        do {
-            guard let key = try keychainService.readAPIKey(forProfile: profile.id), !key.isEmpty else {
-                return .failure(AIError.apiKeyMissing)
+        if let override = apiKeyOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            apiKey = override
+        } else {
+            do {
+                guard let key = try keychainService.readAPIKey(forProfile: profile.id), !key.isEmpty else {
+                    return .failure(AIError.apiKeyMissing)
+                }
+                apiKey = key
+            } catch {
+                return .failure(error)
             }
-            apiKey = key
-        } catch {
-            return .failure(error)
         }
 
         let provider: any AIProvider

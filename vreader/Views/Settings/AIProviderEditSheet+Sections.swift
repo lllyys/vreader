@@ -42,6 +42,7 @@ extension AIProviderEditSheet {
                 ) {
                     model = newKind.defaultModel
                 }
+                resetTestResult()  // Feature #80: kind changed → stale test invalid.
             }
         }
     }
@@ -98,6 +99,7 @@ extension AIProviderEditSheet {
                         baseURLError = AISettingsViewModel.validateBaseURL(
                             AIProviderEditSheet.effectiveBaseURLText(
                                 isAddMode: isAddMode, typed: baseURLText, kind: kind))
+                        resetTestResult()  // Feature #80
                     }
             }
             if let error = baseURLError {
@@ -121,6 +123,7 @@ extension AIProviderEditSheet {
                     .multilineTextAlignment(.trailing)
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("editProviderModel")
+                    .onChange(of: model) { _, _ in resetTestResult() }  // Feature #80
             }
         } header: {
             Text("Endpoint")
@@ -151,6 +154,7 @@ extension AIProviderEditSheet {
                 step: 256
             )
             .accessibilityIdentifier("editProviderMaxTokens")
+            .onChange(of: maxTokens) { _, _ in resetTestResult() }  // Feature #80
         }
     }
 
@@ -164,6 +168,7 @@ extension AIProviderEditSheet {
                     .textContentType(.password)
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("editProviderAPIKey")
+                    .onChange(of: apiKey) { _, _ in resetTestResult() }  // Feature #80
                 if isAPIKeySaved {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
@@ -193,7 +198,9 @@ extension AIProviderEditSheet {
                     }
                 }
             } else {
-                Text("The key is stored only after the profile is saved. Enter the key above, then tap Save at the top of this sheet.")
+                // Feature #80: the key can be TESTED before Save now, so the
+                // note points at the Connection section instead of "save first".
+                Text("Saved to the keychain when you tap Save — but you can test it below first.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("editProviderSaveKeyNote")
@@ -206,37 +213,36 @@ extension AIProviderEditSheet {
     @ViewBuilder
     var testConnectionSection: some View {
         Section("Connection") {
-            // Bug #184: in add-mode the Test Connection button was always
-            // disabled because the keychain account is keyed by profileID,
-            // and in add-mode that key is only written by addProfile on
-            // top-level Save (audit round-1 finding [1]). Hide the button
-            // in add-mode and promote the explanation from caption2/tertiary
-            // to footnote/secondary so it reads as the next instruction.
-            if existing != nil {
-                Button {
-                    Task { await runTest() }
-                } label: {
-                    HStack {
-                        if testInFlight {
-                            ProgressView().padding(.trailing, 8)
-                        }
-                        Text("Test Connection")
+            // Feature #80: Test Connection is available in BOTH modes, gated on
+            // input completeness (`hasTestableKey` = a typed key OR a saved key),
+            // running against the live form + the typed in-memory key — no
+            // Save-and-reopen round-trip. (Was edit-mode + `isAPIKeySaved` only.)
+            Button {
+                Task { await runTest() }
+            } label: {
+                HStack {
+                    if testInFlight {
+                        ProgressView().padding(.trailing, 8)
                     }
+                    Text("Test Connection")
                 }
-                .disabled(testInFlight || !isAPIKeySaved)
-                .accessibilityIdentifier("editProviderTestConnection")
+            }
+            .disabled(testInFlight || !hasTestableKey)
+            .accessibilityIdentifier("editProviderTestConnection")
 
-                if let result = testResultText {
-                    Text(result)
-                        .font(.caption)
-                        .foregroundStyle(result.hasPrefix("Connected") ? .green : .red)
-                        .accessibilityIdentifier("editProviderTestResult")
-                }
-            } else {
-                Text("Save the profile first, then return here to test the connection.")
+            if !hasTestableKey {
+                // No key yet → the button is disabled; tell the user what unlocks it.
+                Text("Enter an API key above to test — no need to save first.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("editProviderTestConnectionNote")
+            }
+
+            if let result = testResultText {
+                Text(result)
+                    .font(.caption)
+                    .foregroundStyle(result.hasPrefix("Connected") ? .green : .red)
+                    .accessibilityIdentifier("editProviderTestResult")
             }
         }
     }

@@ -414,6 +414,60 @@ struct AISettingsViewModelEditorTests {
                     "testConnection must use the passed-in (live form) baseURL, not the stored profile's. Got \(req.url?.absoluteString ?? "nil")")
         }
 
+        @Test @MainActor func usesApiKeyOverride_notKeychain() async throws {
+            // Feature #80: the editor passes the TYPED in-memory key so an unsaved
+            // (or different) key can be tested without a Save round-trip. The
+            // override must win over the keychain.
+            let session = makeStubSession()
+            EditorStubURLProtocol.reset()
+            EditorStubURLProtocol.requestHandler = { request in
+                let resp = HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"])!
+                return (resp, Data(#"{"choices":[{"message":{"content":"ok"}}]}"#.utf8))
+            }
+            defer { EditorStubURLProtocol.reset() }
+
+            let (flags, consent, keychain, store, _) = makeIsolatedDeps(urlSession: session)
+            let vm = await makeVM(flags: flags, consent: consent, keychain: keychain, store: store, urlSession: session)
+
+            // Keychain holds one key…
+            let p = makeProfile(kind: .openAICompatible)
+            await vm.addProfile(p, apiKey: "sk-saved-keychain")
+
+            // …but the test passes a DIFFERENT typed override.
+            _ = await vm.testConnection(profile: p, apiKeyOverride: "sk-typed-override")
+
+            let req = try #require(EditorStubURLProtocol.capturedRequests.last)
+            #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer sk-typed-override",
+                    "testConnection must use apiKeyOverride (typed in-memory), not the keychain key")
+        }
+
+        @Test @MainActor func nilOverride_fallsBackToKeychain() async throws {
+            // Edit-mode no-regression: a nil override → the keychain key is used.
+            let session = makeStubSession()
+            EditorStubURLProtocol.reset()
+            EditorStubURLProtocol.requestHandler = { request in
+                let resp = HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"])!
+                return (resp, Data(#"{"choices":[{"message":{"content":"ok"}}]}"#.utf8))
+            }
+            defer { EditorStubURLProtocol.reset() }
+
+            let (flags, consent, keychain, store, _) = makeIsolatedDeps(urlSession: session)
+            let vm = await makeVM(flags: flags, consent: consent, keychain: keychain, store: store, urlSession: session)
+
+            let p = makeProfile(kind: .openAICompatible)
+            await vm.addProfile(p, apiKey: "sk-saved-keychain")
+
+            _ = await vm.testConnection(profile: p, apiKeyOverride: nil)
+
+            let req = try #require(EditorStubURLProtocol.capturedRequests.last)
+            #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer sk-saved-keychain",
+                    "nil override must fall back to the keychain key (edit-mode path unchanged)")
+        }
+
         @Test @MainActor func serverError_returnsFailure() async {
             let session = makeStubSession()
             EditorStubURLProtocol.reset()
@@ -676,5 +730,25 @@ struct AISettingsViewModelEditorTests {
         // Gate-2 round-2 Medium: edit-mode shows NO default hint.
         #expect(AIProviderEditSheet.placeholderBaseURL(isAddMode: false, kind: kind) == "")
         #expect(AIProviderEditSheet.placeholderModel(isAddMode: false, kind: kind) == "")
+    }
+
+    // MARK: - Feature #80: Test-before-save gating
+
+    @Test @MainActor func hasTestableKey_typedKeyOrSaved() {
+        // A typed key (add-mode) OR a saved key (edit-mode) enables Test.
+        #expect(AIProviderEditSheet.hasTestableKey(typedKey: "sk-typed", isSaved: false))
+        #expect(AIProviderEditSheet.hasTestableKey(typedKey: "", isSaved: true))
+        #expect(AIProviderEditSheet.hasTestableKey(typedKey: "sk-typed", isSaved: true))
+        // No key at all → no test; whitespace-only typed key counts as no key.
+        #expect(!AIProviderEditSheet.hasTestableKey(typedKey: "", isSaved: false))
+        #expect(!AIProviderEditSheet.hasTestableKey(typedKey: "   ", isSaved: false))
+    }
+
+    @Test @MainActor func shouldApplyTestResult_onlyWhenGenerationUnchanged() {
+        // Gate-4 High: an in-flight test whose form changed mid-request (the
+        // generation was bumped by resetTestResult) must NOT repaint its stale
+        // result over the new form state.
+        #expect(AIProviderEditSheet.shouldApplyTestResult(runGeneration: 3, currentGeneration: 3))
+        #expect(!AIProviderEditSheet.shouldApplyTestResult(runGeneration: 3, currentGeneration: 4))
     }
 }

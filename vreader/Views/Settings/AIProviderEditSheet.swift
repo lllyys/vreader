@@ -23,9 +23,13 @@
 //   validation. The model field can be empty — the provider will return
 //   an error from the API and surface it via Test Connection.
 // - Test Connection uses live form state, not the stored profile
-//   (round-1 audit fix [1]). In add-mode it's still gated on a saved
-//   keychain entry, which only exists after top-level Save (because
-//   addProfile persists key + profile atomically).
+//   (round-1 audit fix [1]). Feature #80: it is available in BOTH modes,
+//   gated on `hasTestableKey` (a typed in-memory key OR a saved key) — the
+//   typed key wins over the keychain (empty/nil falls back), so an unsaved
+//   add-mode key can be tested without a Save-and-reopen round-trip. A
+//   `testGeneration` guard drops an in-flight result whose form state
+//   changed mid-request; `resetTestResult()` clears stale results on every
+//   request-shaping input + on save/delete-key.
 // - Add-mode "Save Key" is disabled to prevent keychain orphans on
 //   Cancel (round-1 audit fix [4]). The atomic addProfile path is the
 //   only key-write path in add-mode.
@@ -79,6 +83,11 @@ struct AIProviderEditSheet: View {
     @State var baseURLError: String?
     @State var testResultText: String?
     @State var testInFlight: Bool = false
+    /// Feature #80 (Gate-4 High): monotonic run id. `runTest()` captures it; any
+    /// `resetTestResult()` (every request-shaping input change + save/delete-key)
+    /// bumps it, so an IN-FLIGHT test whose form state changed mid-request does
+    /// NOT repaint the stale result over the new state when it completes.
+    @State var testGeneration: Int = 0
 
     // Round-2 audit fix: the previous design tracked `userEditedBaseURL`
     // / `userEditedModel` via field .onChange handlers + a transient
@@ -138,6 +147,16 @@ struct AIProviderEditSheet: View {
     /// Feature #79 placeholder / effective-value behavior. Internal so the
     /// `+Sections` extension (separate file) can read it.
     var isAddMode: Bool { existing == nil }
+
+    /// Feature #80: whether Test Connection can run — a key is typed in-memory
+    /// (add-mode or a live edit) OR a key is already saved (edit-mode). Drives
+    /// the Test button's enabled state + the "enter a key" hint in both modes.
+    /// Pure static (testable without the view); whitespace-only typed key counts
+    /// as no key.
+    static func hasTestableKey(typedKey: String, isSaved: Bool) -> Bool {
+        !typedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaved
+    }
+    var hasTestableKey: Bool { Self.hasTestableKey(typedKey: apiKey, isSaved: isAPIKeySaved) }
 
     // MARK: - Feature #79: effective values + placeholders (add-mode-only)
 
@@ -272,6 +291,20 @@ struct AIProviderEditSheet: View {
         }
     }
 
+    /// Feature #80: a stored test result describes the LAST tested form state, so
+    /// any change that alters what the next test would do must clear it (back to
+    /// idle) — otherwise a stale "Connected" lingers over edited inputs.
+    func resetTestResult() {
+        testResultText = nil
+        testGeneration &+= 1  // invalidate any in-flight test run (Gate-4 High)
+    }
+
+    /// Whether a just-finished test run's result should be applied: only if its
+    /// captured generation still matches (the form didn't change mid-request).
+    static func shouldApplyTestResult(runGeneration: Int, currentGeneration: Int) -> Bool {
+        runGeneration == currentGeneration
+    }
+
     func saveKey() async {
         await viewModel.saveAPIKey(apiKey, forID: profileID)
         if viewModel.editorError == nil {
@@ -279,6 +312,8 @@ struct AIProviderEditSheet: View {
             // Clear the in-memory text since we don't display the saved
             // key back; the green checkmark is the only indicator.
             apiKey = ""
+            // Feature #80: saved-key presence changed → invalidate any prior test.
+            resetTestResult()
         }
     }
 
@@ -287,12 +322,17 @@ struct AIProviderEditSheet: View {
         if viewModel.editorError == nil {
             isAPIKeySaved = false
             apiKey = ""
+            resetTestResult()  // Feature #80: saved-key removed → stale result invalid.
         }
     }
 
     func runTest() async {
         testInFlight = true
         defer { testInFlight = false }
+        // Feature #80 (Gate-4 High): stamp this run; if the form changes
+        // mid-request (any reset bumps the generation), drop the stale result.
+        testGeneration &+= 1
+        let runGeneration = testGeneration
 
         // Audit round-1 finding [1]: build a candidate ProviderProfile
         // from the sheet's current form state so unsaved edits are
@@ -315,7 +355,15 @@ struct AIProviderEditSheet: View {
             maxTokens: maxTokens
         )
 
-        let result = await viewModel.testConnection(profile: candidate)
+        // Feature #80: pass the TYPED in-memory key so an unsaved (add-mode) key
+        // is tested without a Save-and-reopen round-trip. Empty → nil → the VM
+        // falls back to the keychain (edit-mode saved-key path, unchanged).
+        let typedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = await viewModel.testConnection(
+            profile: candidate, apiKeyOverride: typedKey.isEmpty ? nil : typedKey)
+        // Gate-4 High: the form may have changed while the request was in flight;
+        // only apply this result if its run is still current.
+        guard Self.shouldApplyTestResult(runGeneration: runGeneration, currentGeneration: testGeneration) else { return }
         switch result {
         case .success:
             testResultText = "Connected — the provider responded successfully."
