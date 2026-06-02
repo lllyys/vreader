@@ -90,6 +90,13 @@ struct ReaderContainerView: View {
     /// in one update drops the panel). Set on ready, consumed in `onDismiss`.
     @State var pendingOpenAIPanelAfterReadiness = false
     @State var aiInitialTab: AIReaderTab = .summarize
+    /// Feature #78 (Ask-AI on selection): the selected text awaiting seed into
+    /// the AI Chat input. When AI is configured it's seeded immediately; when
+    /// unconfigured it's parked here so it SURVIVES the readiness handoff and is
+    /// drained when the AI panel actually opens. Cleared on a non-handoff
+    /// readiness dismissal (abandoned) so a stale selection can't leak into a
+    /// later AI open.
+    @State var pendingAskAIText: String?
     #if DEBUG
     /// Bug #256 — the AI sheet's active detent, bound to its
     /// `presentationDetents(_:selection:)`. DEBUG-only: only the DebugBridge
@@ -373,6 +380,13 @@ struct ReaderContainerView: View {
             if pendingOpenAIPanelAfterReadiness {
                 pendingOpenAIPanelAfterReadiness = false
                 showAIPanel = true
+            } else {
+                // Feature #78: readiness ABANDONED (dismissed without becoming
+                // ready). Drop any parked Ask-AI seed + restore the default tab
+                // so a stale selection / `.chat` target can't leak into a later
+                // manual AI open.
+                pendingAskAIText = nil
+                aiInitialTab = .summarize
             }
         }) {
             ReaderAIReadinessSheet(
@@ -405,6 +419,19 @@ struct ReaderContainerView: View {
             aiInitialTab = .translate // bug #95
             showAIPanel = true
         }
+        // Feature #78: "Ask AI" / "Read" on a selection. Extracted to a
+        // ViewModifier so the body stays under SwiftUI's type-inference budget
+        // (mirrors `ReaderOpenAITranslateObserver`). The Ask-AI seed flows
+        // through `pendingAskAIText` + the `onChange(of: showAIPanel)` drain
+        // (which fetches the chat VM AFTER ensureAIReady), so no stale-VM capture.
+        .modifier(ReaderAskAIReadObserver(
+            isAIAvailable: resolvedAICoordinator.isAIAvailable,
+            setPendingAskAIText: { pendingAskAIText = $0 },
+            setInitialTab: { aiInitialTab = $0 },
+            setShowAIPanel: { showAIPanel = $0 },
+            setShowAIReadiness: { showAIReadiness = $0 },
+            speakSelection: { ttsService.startSpeaking(text: $0, fromOffset: 0) }
+        ))
         .sheet(isPresented: $showDictionary) {
             DictionarySheet(word: dictionaryWord)
         }
@@ -423,7 +450,18 @@ struct ReaderContainerView: View {
         ))
         // AI setup + text loading deferred until AI/TTS is invoked (bug #64)
         .onChange(of: showAIPanel) { _, isShowing in
-            if isShowing { ensureAIReady() }
+            if isShowing {
+                ensureAIReady()
+                // Feature #78: drain a parked Ask-AI seed now that the panel is
+                // opening and `ensureAIReady()` has created the chat VM (fetched
+                // AFTER ensureAIReady — avoids the cold-first-tap nil-VM drop).
+                // Unifies the seed path for both the AI-available open and the
+                // post-readiness handoff open.
+                if let text = pendingAskAIText {
+                    pendingAskAIText = nil
+                    resolvedAICoordinator.chatViewModel?.seedInput(text)
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerBilingualDidChange)) { notification in
             // Feature #56 WI-10: mirror the per-format host's
@@ -1154,6 +1192,45 @@ private struct ReaderOpenAITranslateObserver: ViewModifier {
             setInitialTab(.translate)
             setShowAIPanel(true)
         }
+    }
+}
+
+/// Feature #78: dedicated `ViewModifier` for the selection-popover "Ask AI"
+/// (`.readerAskAIRequested`) and "Read" (`.readerReadAloudRequested`) actions.
+/// Factored out of `ReaderContainerView.body` so the body stays under SwiftUI's
+/// type-inference budget. Ask-AI parks the selected text + targets the Chat tab,
+/// then opens the panel (AI available) or routes to readiness (Feature #82 — the
+/// seed survives the handoff; the host's `onChange(of: showAIPanel)` drain seeds
+/// the chat AFTER `ensureAIReady`, so the chat VM is never captured stale).
+/// "Read" speaks the selection via TTS (preempts the book session, no resume).
+private struct ReaderAskAIReadObserver: ViewModifier {
+    let isAIAvailable: Bool
+    let setPendingAskAIText: (String?) -> Void
+    let setInitialTab: (AIReaderTab) -> Void
+    let setShowAIPanel: (Bool) -> Void
+    let setShowAIReadiness: (Bool) -> Void
+    let speakSelection: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .readerAskAIRequested)) { notification in
+                guard let info = notification.object as? TextSelectionInfo else { return }
+                let text = info.selectedText
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                setPendingAskAIText(text)
+                setInitialTab(.chat)
+                if isAIAvailable {
+                    setShowAIPanel(true)
+                } else {
+                    setShowAIReadiness(true)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .readerReadAloudRequested)) { notification in
+                guard let info = notification.object as? TextSelectionInfo else { return }
+                let text = info.selectedText
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                speakSelection(text)
+            }
     }
 }
 

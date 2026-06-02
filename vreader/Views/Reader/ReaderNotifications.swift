@@ -49,6 +49,16 @@ extension Notification.Name {
     /// Posted by text view bridges when the user selects "Translate" from the edit menu.
     /// The notification's `object` is a `TextSelectionInfo` with selected text and range.
     static let readerTranslateRequested = Notification.Name("vreader.readerTranslateRequested")
+    /// Feature #78: posted by `SelectionPopoverActionRouter` when the user taps
+    /// "Ask AI" on a selection. `object` is the `TextSelectionInfo`; `userInfo`
+    /// may carry `"selectionRequestToken"`. The reader host opens the AI panel's
+    /// Chat tab seeded with the selected text (seed survives the unconfigured
+    /// readiness handoff).
+    static let readerAskAIRequested = Notification.Name("vreader.readerAskAIRequested")
+    /// Feature #78: posted by `SelectionPopoverActionRouter` when the user taps
+    /// "Read" on a selection. `object` is the `TextSelectionInfo`. The TTS host
+    /// reads the selection aloud (preempts any active book-reading session).
+    static let readerReadAloudRequested = Notification.Name("vreader.readerReadAloudRequested")
     /// Posted by HighlightListViewModel when a highlight is deleted from the annotations panel.
     /// The notification's `object` is the highlight UUID string. (bug #78)
     /// Reader containers observe this to remove the visual highlight immediately.

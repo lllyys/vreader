@@ -20,11 +20,11 @@
 // `object` stays a bare `TextSelectionInfo` so the existing TXT/MD
 // `ReaderNotificationModifier` consumers are unaffected.
 //
-// **Deferred actions (`.askAI`, `.read`)**: feature #60's plan ships
-// the View + router + WI-7c wiring sequentially. `.askAI` and
-// `.read` have no production consumer yet. The router returns
-// `.deferredNotYetWired` rather than silently no-opping, so test
-// runs and future audits can prove a regression would surface.
+// **`.askAI` / `.read` (Feature #78)**: now WIRED — the router dispatches
+// `.readerAskAIRequested` / `.readerReadAloudRequested` (was
+// `.deferredNotYetWired`). These tests assert the dispatch + posted
+// notification. `Result.deferredNotYetWired` remains the generic fallback
+// shape for any future unwired action.
 
 import Testing
 import Foundation
@@ -73,22 +73,37 @@ struct SelectionPopoverActionRouterTests {
         #expect(result == .dispatched(.readerAnnotationRequested))
     }
 
-    @Test("Result.deferredNotYetWired carries the unwired action")
-    func deferredReturnsAction() {
+    @Test("Feature #78: .askAI dispatches .readerAskAIRequested (was deferred)")
+    func askAIDispatchesNotification() {
         let center = makeIsolatedCenter()
-        let askResult = SelectionPopoverActionRouter.route(
-            action: .askAI,
-            payload: makePayload(),
-            notificationCenter: center
-        )
-        #expect(askResult == .deferredNotYetWired(.askAI))
+        nonisolated(unsafe) var posted: Notification?
+        let token = center.addObserver(forName: .readerAskAIRequested, object: nil, queue: nil) {
+            posted = $0
+        }
+        defer { center.removeObserver(token) }
 
-        let readResult = SelectionPopoverActionRouter.route(
-            action: .read,
-            payload: makePayload(),
-            notificationCenter: center
-        )
-        #expect(readResult == .deferredNotYetWired(.read))
+        let result = SelectionPopoverActionRouter.route(
+            action: .askAI, payload: makePayload(), notificationCenter: center)
+
+        #expect(result == .dispatched(.readerAskAIRequested))
+        #expect(posted != nil, "askAI must post .readerAskAIRequested")
+        #expect((posted?.object as? TextSelectionInfo) != nil, "object is the selection")
+    }
+
+    @Test("Feature #78: .read dispatches .readerReadAloudRequested (was deferred)")
+    func readDispatchesNotification() {
+        let center = makeIsolatedCenter()
+        nonisolated(unsafe) var posted: Notification?
+        let token = center.addObserver(forName: .readerReadAloudRequested, object: nil, queue: nil) {
+            posted = $0
+        }
+        defer { center.removeObserver(token) }
+
+        let result = SelectionPopoverActionRouter.route(
+            action: .read, payload: makePayload(), notificationCenter: center)
+
+        #expect(result == .dispatched(.readerReadAloudRequested))
+        #expect(posted != nil, "read must post .readerReadAloudRequested")
     }
 
     // MARK: - Highlight color routing

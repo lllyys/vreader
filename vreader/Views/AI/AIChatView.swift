@@ -69,6 +69,40 @@ struct AIChatView: View {
                 .accessibilityIdentifier("chatKeyboardDoneButton")
             }
         }
+        // Feature #78: consume a pending Ask-AI seed BOTH on initial mount (the
+        // seed is set before this view exists, and the Chat tab is only selected
+        // on the panel's onAppear) AND on later changes — an .onChange-only
+        // consumer would miss the first seed and open Chat with an empty input.
+        .onAppear { applySeedIfPossible() }
+        .task(id: viewModel.seededInput) { applySeedIfPossible() }
+    }
+
+    /// Feature #78: the pure decision for consuming a pending Ask-AI seed —
+    /// extracted so it's testable without rendering the view (Gate-4 Medium).
+    /// `.apply` when there's a seed and the input is empty; `.dropAndClear` when
+    /// a seed arrives over an active draft (never clobber the draft); `.none`
+    /// when there's nothing pending. Both non-`.none` cases clear the VM seed so
+    /// a pending seed can't linger and inject after the user clears the draft.
+    enum SeedDecision: Equatable { case apply(String); case dropAndClear; case none }
+
+    static func seedDecision(seededInput: String?, currentInput: String) -> SeedDecision {
+        guard let seed = seededInput else { return .none }
+        return currentInput.isEmpty ? .apply(seed) : .dropAndClear
+    }
+
+    /// One-shot consumption of `viewModel.seededInput` (applies the pure
+    /// `seedDecision` to the view's `@State`).
+    private func applySeedIfPossible() {
+        switch Self.seedDecision(seededInput: viewModel.seededInput, currentInput: inputText) {
+        case .apply(let seed):
+            inputText = seed
+            isInputFocused = true
+            viewModel.clearSeed()
+        case .dropAndClear:
+            viewModel.clearSeed()
+        case .none:
+            break
+        }
     }
 
     // MARK: - Message List

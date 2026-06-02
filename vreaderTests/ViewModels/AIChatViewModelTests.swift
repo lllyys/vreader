@@ -333,6 +333,59 @@ struct AIChatViewModelTests {
         #expect(vm.messages[1].content == "这是AI的回复 🎉")
     }
 
+    // MARK: - Feature #78: Ask-AI seed
+
+    @Test @MainActor func seedInput_setsSeededInput_andDoesNotAutoSend() async {
+        let (vm, _) = makeSUT()
+        vm.seedInput("What does this passage mean?")
+        #expect(vm.seededInput == "What does this passage mean?")
+        // Seeding pre-fills the INPUT only — it must NOT post a message.
+        #expect(vm.messages.isEmpty)
+    }
+
+    @Test @MainActor func seedInput_ignoresEmptyAndWhitespace() {
+        let (vm, _) = makeSUT()
+        vm.seedInput("")
+        #expect(vm.seededInput == nil)
+        vm.seedInput("   \n\t ")
+        #expect(vm.seededInput == nil)
+    }
+
+    @Test @MainActor func clearSeed_dropsPendingSeed() {
+        let (vm, _) = makeSUT()
+        vm.seedInput("hello")
+        #expect(vm.seededInput == "hello")
+        vm.clearSeed()
+        #expect(vm.seededInput == nil)
+    }
+
+    @Test @MainActor func seedInput_preservesCJKAndPunctuation() {
+        let (vm, _) = makeSUT()
+        vm.seedInput("解释这段话 “……” 🌍")
+        #expect(vm.seededInput == "解释这段话 “……” 🌍")
+    }
+
+    // Feature #78 Gate-4 Medium: pin AIChatView's seed-consumption decision
+    // (the view/host-seam logic the plan called out — applies on empty input,
+    // drops over an active draft, no-op when nothing pending).
+    @Test func seedDecision_appliesWhenInputEmpty() {
+        #expect(AIChatView.seedDecision(seededInput: "ask this", currentInput: "")
+                == .apply("ask this"))
+    }
+
+    @Test func seedDecision_dropsWhenDraftPresent() {
+        // A seed arriving over an active draft must NOT clobber it — drop + clear.
+        #expect(AIChatView.seedDecision(seededInput: "ask this", currentInput: "my draft")
+                == .dropAndClear)
+    }
+
+    @Test func seedDecision_noneWhenNoSeed() {
+        #expect(AIChatView.seedDecision(seededInput: nil, currentInput: "")
+                == AIChatView.SeedDecision.none)
+        #expect(AIChatView.seedDecision(seededInput: nil, currentInput: "draft")
+                == AIChatView.SeedDecision.none)
+    }
+
     // MARK: - Feature Disabled
 
     @Test @MainActor func featureDisabledShowsError() async {

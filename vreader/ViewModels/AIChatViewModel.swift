@@ -32,6 +32,27 @@ final class AIChatViewModel {
     /// Error message from the last failed request, nil if no error.
     var errorMessage: String?
 
+    /// Feature #78 (Ask-AI on selection): a one-shot pre-fill for the chat
+    /// INPUT field. When a user taps "Ask AI" on a text selection, the reader
+    /// host seeds this with the selected text; `AIChatView` consumes it into its
+    /// input (NOT auto-sent — the user edits/frames the question), then clears
+    /// it. Nil when there is nothing pending. Set only via `seedInput(_:)`.
+    private(set) var seededInput: String?
+
+    /// Seeds the chat input with `text` (one-shot; consumed + cleared by the
+    /// view). Whitespace-only / empty text is ignored (no seed).
+    func seedInput(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        seededInput = text
+    }
+
+    /// Clears any pending seed without applying it (the view calls this once it
+    /// has decided whether to consume the seed — see `AIChatView`).
+    func clearSeed() {
+        seededInput = nil
+    }
+
     // MARK: - Configuration
 
     /// Book fingerprint for book-context mode. Nil = general chat.

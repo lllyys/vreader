@@ -18,14 +18,12 @@
 // injectable `NotificationCenter` so tests can use an isolated
 // instance.
 //
-// **Deferred actions (`.askAI`, `.read`)**: no production
-// notification surface exists for these yet — the WI-3 enum was
-// shipped ahead of consumers per the design's "Ask AI" /
-// "Read aloud" requirements (Feature #60 acceptance criterion (d)).
-// Rather than silently no-op, the router returns
-// `.deferredNotYetWired(action)` so a regression-finding audit can
-// distinguish "router skipped on purpose" from "router dropped a
-// notification".
+// **`.askAI` / `.read` (Feature #78)**: now WIRED. `.askAI` posts
+// `.readerAskAIRequested` (reader host → AI panel Chat tab, seeded with the
+// selection); `.read` posts `.readerReadAloudRequested` (TTS host → speak the
+// selection). Both return `.dispatched(...)` so the dismiss policy closes the
+// popover like every other dispatched action. The `Result.deferredNotYetWired`
+// case is retained as the honest fallback shape for any future unwired action.
 //
 // @coordinates-with: SelectionPopoverAction.swift,
 //   SelectionPopoverActionRow.swift, SelectionPopoverView.swift,
@@ -45,9 +43,10 @@ enum SelectionPopoverActionRouter {
         /// expected pipeline.
         case dispatched(Notification.Name)
 
-        /// Action has no production consumer in this feature
-        /// iteration yet. Carries the action for forward-trace
-        /// when WI-7c+ wires `.askAI` / `.read` to their pipelines.
+        /// Generic fallback for any future action that has no production
+        /// consumer yet — carries the action for forward-trace. (As of
+        /// Feature #78 every current case is wired, so `route` does not return
+        /// this; it's retained as the honest shape for a newly-added action.)
         case deferredNotYetWired(SelectionPopoverAction)
     }
 
@@ -102,13 +101,27 @@ enum SelectionPopoverActionRouter {
                 userInfo: makeUserInfo(token: payload.requestToken, color: nil)
             )
             return .dispatched(.readerTranslateRequested)
-        case .askAI, .read:
-            // Deferred — no consumer exists in this iteration. The
-            // SelectionPopoverActionRow contract (WI-7a) surfaces
-            // these slots; the production wire-up to AI sheet
-            // (`.askAI`) and TTS-from-selection (`.read`) lands in
-            // a later WI of feature #60.
-            return .deferredNotYetWired(action)
+        case .askAI:
+            // Feature #78: open the AI panel's Chat tab seeded with the
+            // selection. The reader host observes this, seeds the chat input
+            // (not auto-sent), and routes an unconfigured tap to the readiness
+            // sheet (seed preserved across the handoff).
+            notificationCenter.post(
+                name: .readerAskAIRequested,
+                object: selection,
+                userInfo: makeUserInfo(token: payload.requestToken, color: nil)
+            )
+            return .dispatched(.readerAskAIRequested)
+        case .read:
+            // Feature #78: read the selection aloud via TTS
+            // (`TTSService.startSpeaking(text:fromOffset:)` — preempts any
+            // active book-reading session, no resume, per the existing contract).
+            notificationCenter.post(
+                name: .readerReadAloudRequested,
+                object: selection,
+                userInfo: makeUserInfo(token: payload.requestToken, color: nil)
+            )
+            return .dispatched(.readerReadAloudRequested)
         }
     }
 

@@ -280,27 +280,28 @@ struct SelectionPopoverDismissPolicyTests {
         ) == nil)
     }
 
-    @Test(".deferredNotYetWired(.askAI) keeps the sheet open (no production pipeline yet)")
-    func deferredAskAIKeepsOpen() {
+    @Test("Feature #78: .dispatched(.readerAskAIRequested) dismisses the sheet")
+    func dispatchedAskAIDismisses() {
         let payload = makePayload()
+        // Feature #78 wired .askAI → .dispatched, so per the "any dispatch
+        // dismisses" policy the popover now closes when the user taps Ask AI
+        // (the AI panel takes over). Previously it was .deferredNotYetWired
+        // and kept the sheet open.
         let next = SelectionPopoverDismissPolicy.nextPending(
-            after: .deferredNotYetWired(.askAI),
+            after: .dispatched(.readerAskAIRequested),
             currentPayload: payload
         )
-        // Auto-dismiss on a deferred action would silently swallow
-        // the tap. The contract pins: keep the sheet open until the
-        // pipeline lands (router result flips to `.dispatched`).
-        #expect(next == payload)
+        #expect(next == nil)
     }
 
-    @Test(".deferredNotYetWired(.read) keeps the sheet open")
-    func deferredReadKeepsOpen() {
+    @Test("Feature #78: .dispatched(.readerReadAloudRequested) dismisses the sheet")
+    func dispatchedReadDismisses() {
         let payload = makePayload()
         let next = SelectionPopoverDismissPolicy.nextPending(
-            after: .deferredNotYetWired(.read),
+            after: .dispatched(.readerReadAloudRequested),
             currentPayload: payload
         )
-        #expect(next == payload)
+        #expect(next == nil)
     }
 }
 #endif
