@@ -93,7 +93,10 @@ struct AIChatView: View {
                                 .controlSize(.small)
                             Text("Thinking\u{2026}")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                // Bug #310 (Codex Gate-4 Low): same cream-sheet
+                                // dark-mode trap as the empty state — route the
+                                // loading caption through the designed sub token.
+                                .foregroundStyle(Color(Self.secondaryContentColor(for: theme)))
                             Spacer()
                         }
                         .padding(.horizontal)
@@ -144,17 +147,17 @@ struct AIChatView: View {
 
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(.system(size: 40))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color(Self.secondaryContentColor(for: theme)))
                 .accessibilityHidden(true)
 
             if viewModel.bookFingerprint != nil {
                 Text("Ask questions about this book")
                     .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color(Self.secondaryContentColor(for: theme)))
             } else {
                 Text("Start a conversation")
                     .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color(Self.secondaryContentColor(for: theme)))
             }
         }
         .frame(maxWidth: .infinity)
@@ -203,18 +206,38 @@ struct AIChatView: View {
         Color(theme.ruleColor).frame(height: 0.5)
 
         HStack(spacing: 8) {
-            TextField(inputPlaceholder, text: $inputText, axis: .vertical)
-                .lineLimit(1...5)
-                .font(.system(size: 14))
-                .foregroundStyle(Color(theme.inkColor))
-                .textFieldStyle(.plain)
-                .focused($isInputFocused)
-                .onSubmit {
-                    sendCurrentMessage()
+            ZStack(alignment: .topLeading) {
+                // Bug #310: themed placeholder. SwiftUI ignores `.foregroundStyle`
+                // on a `TextField`'s own placeholder (it stays the system
+                // appearance-aware colour — ~1.07:1, near-invisible over the cream
+                // sheet in Dark Mode), so overlay a `Text` in the designed `sub`
+                // token. Identical font + the shared padding below keep it aligned
+                // with the entered text.
+                if inputText.isEmpty {
+                    Text(inputPlaceholder)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(Self.secondaryContentColor(for: theme)))
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                .padding(.leading, 14)
-                .padding(.vertical, 6)
-                .accessibilityIdentifier("chatInputField")
+                TextField("", text: $inputText, axis: .vertical)
+                    .lineLimit(1...5)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color(theme.inkColor))
+                    .textFieldStyle(.plain)
+                    .focused($isInputFocused)
+                    .onSubmit {
+                        sendCurrentMessage()
+                    }
+                    .accessibilityIdentifier("chatInputField")
+                    // Bug #310 (Codex Gate-4 Medium): the empty prompt `""`
+                    // would leave VoiceOver an unlabeled field (the overlay
+                    // placeholder is accessibilityHidden), so carry the label
+                    // explicitly.
+                    .accessibilityLabel(inputPlaceholder)
+            }
+            .padding(.leading, 14)
+            .padding(.vertical, 6)
 
             Button {
                 sendCurrentMessage()
@@ -257,6 +280,17 @@ struct AIChatView: View {
     private var canSend: Bool {
         !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !viewModel.isLoading
+    }
+
+    /// Bug #310: the empty-state (icon + headline) and the input placeholder
+    /// must read the designed cream-aware `sub` token — NOT the system
+    /// appearance-aware `.secondary`, which resolves to ~1.07:1 (near-white)
+    /// over the cream AI sheet (`#fcf8f0`) in Dark Mode. Same restore-to-
+    /// designed-token fix as the sibling `AIReaderPanelHeader` subtitle
+    /// (#285 / #297 / #300 class). `static` so a contrast test can pin it
+    /// without rendering the view.
+    static func secondaryContentColor(for theme: ReaderThemeV2) -> UIColor {
+        theme.subColor
     }
 
     /// The pill's neutral wash — design `ChatView` input container.
