@@ -480,6 +480,7 @@
 		50526F6EDA9CF826BAB1552B /* ReadiumDecorationTapEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F5FC69D853F6222ADED7DB9 /* ReadiumDecorationTapEventTests.swift */; };
 		505E3728FE1C69A31079DA9B /* ReaderBottomOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF9547D23D813327B536EAD5 /* ReaderBottomOverlayTests.swift */; };
 		50837395A5CDCDFC14CF2B64 /* PDFPasswordPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 425829C48779CD64EB0C5A05 /* PDFPasswordPromptView.swift */; };
+		5088375DABF1823ED1BA0CC8 /* FoliateVerticalContainerLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8EE09BCDCB14CCFAA6A943D /* FoliateVerticalContainerLayoutTests.swift */; };
 		50CB24522FC7CCD97EE58224 /* ReaderBottomChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = C76B2024F008B3A41C030585 /* ReaderBottomChrome.swift */; };
 		50D3F5B291DB7188E2BB0442 /* BackupBookProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFABA0F5E3E749CC8108947C /* BackupBookProjectionTests.swift */; };
 		51099F95B7DD54CD3D90C23B /* LazyDownloadFinalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E2A8F2AD957F6A16BC7C4F /* LazyDownloadFinalizer.swift */; };
@@ -2849,6 +2850,7 @@
 		E84B53D4E30D6614436E4C68 /* SearchResultsGroupedList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultsGroupedList.swift; sourceTree = "<group>"; };
 		E861A379A620B769CEA36300 /* AIChatViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatViewModelTests.swift; sourceTree = "<group>"; };
 		E8CFB25779576176F1D678C7 /* PDFBilingualPanelState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFBilingualPanelState.swift; sourceTree = "<group>"; };
+		E8EE09BCDCB14CCFAA6A943D /* FoliateVerticalContainerLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateVerticalContainerLayoutTests.swift; sourceTree = "<group>"; };
 		E94F1579C79832BB2EEDEB05 /* TXTChapterIndexStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterIndexStoreTests.swift; sourceTree = "<group>"; };
 		E97DAB513E717D83CD9ED3F7 /* TTSProviderProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSProviderProtocol.swift; sourceTree = "<group>"; };
 		E998CB9F64AEAFC0D2A42C46 /* SettingsRowPalette+SwiftUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsRowPalette+SwiftUI.swift"; sourceTree = "<group>"; };
@@ -5401,6 +5403,7 @@
 				C91F653CA8E9B107CA2CA4CA /* FoliateTOCConverterTests.swift */,
 				0C511C16F7FA93E91D703EE7 /* FoliateTTSAdapterTests.swift */,
 				432F646AE5FB7BFD06470EB5 /* FoliateURLSchemeHandlerTests.swift */,
+				E8EE09BCDCB14CCFAA6A943D /* FoliateVerticalContainerLayoutTests.swift */,
 			);
 			path = Foliate;
 			sourceTree = "<group>";
@@ -5900,6 +5903,7 @@
 				1558B65D447DCD7705FE074C /* FoliateTTSAdapterTests.swift in Sources */,
 				8AD533CDAFAC138CA7E20D75 /* FoliateTapToleranceBundleTests.swift in Sources */,
 				DCE7A66917407F83D657A63B /* FoliateURLSchemeHandlerTests.swift in Sources */,
+				5088375DABF1823ED1BA0CC8 /* FoliateVerticalContainerLayoutTests.swift in Sources */,
 				6E94155F0ECDFD59EAAAD010 /* FoliateViewCoordinatorTests.swift in Sources */,
 				D2A9D9BF75759BDA0213247F /* FontSizeCalibrationMeasurementTests.swift in Sources */,
 				F5C06CBFBB03CA953526172B /* FontSizeCalibrationTests.swift in Sources */,

@@ -4792,6 +4792,7 @@ ${doc.querySelector("parsererror").innerText}`);
           switch (name) {
             case "flow":
               this.render();
+              if (this.scrolled && this.#view) this.#applyScrolledContainerAxis();
               if (this.#windowedScroll && this.scrolled && this.#view) this.#ensureWindow();
               break;
             case "gap":
@@ -4967,6 +4968,29 @@ ${doc.querySelector("parsererror").innerText}`);
         // the horizontal-tb model when no view is mounted.
         get #activeScrollModel() {
           return this.#view?.scrollModel ?? scrollModelFor("horizontal-tb");
+        }
+        // Feature #76 WI-2: lay out scrolled-mode sections along the ACTIVE SCROLL
+        // AXIS, so the windowed surface (WI-3) accumulates in the right direction.
+        // Horizontal-writing (vertical scroll, axis='vertical') keeps the default
+        // BLOCK stacking — no inline style is set, so the #73 path is byte-identical.
+        // Vertical-writing (horizontal scroll, axis='horizontal') stacks sections in
+        // a flex row so they accumulate along the horizontal axis; vertical-rl
+        // (directionSign < 0, later content extends leftward) uses `row-reverse`.
+        // Idempotent + reversible (a re-display with a different writing-mode resets
+        // the inline style), and called from #display BEFORE the windowing gate so it
+        // applies even while #ensureWindow still returns early for vertical (WI-3
+        // removes that gate).
+        #applyScrolledContainerAxis() {
+          const m3 = this.#activeScrollModel;
+          if (m3.axis === "horizontal") {
+            this.#container.style.display = "flex";
+            this.#container.style.flexDirection = "row";
+            this.#container.style.direction = m3.directionSign < 0 ? "rtl" : "ltr";
+          } else {
+            this.#container.style.removeProperty("display");
+            this.#container.style.removeProperty("flex-direction");
+            this.#container.style.removeProperty("direction");
+          }
         }
         // Logical (non-negative, reading-order) scroll offset of the container along
         // the active axis. For vertical-rl, WebKit's `scrollLeft` is negative toward
@@ -5404,6 +5428,7 @@ ${doc.querySelector("parsererror").innerText}`);
           }
           await this.scrollToAnchor((typeof anchor === "function" ? anchor(this.#view.document) : anchor) ?? 0, select);
           if (hasFocus) this.focusView();
+          if (this.scrolled) this.#applyScrolledContainerAxis();
           if (this.scrolled && this.#windowedScroll) this.#ensureWindow();
         }
         #canGoToIndex(index) {

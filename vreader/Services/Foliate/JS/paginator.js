@@ -698,6 +698,12 @@ export class Paginator extends HTMLElement {
         switch (name) {
             case 'flow':
                 this.render()
+                // Feature #76 WI-2 (Gate-4 Medium): a paged→scrolled flow switch
+                // re-renders but the initial #display's container-axis pass may
+                // have run while still paginated — re-orient the container BEFORE
+                // (re)building the window, so a vertical book entering scrolled
+                // mode doesn't stay block-stacked until the next navigation.
+                if (this.scrolled && this.#view) this.#applyScrolledContainerAxis()
                 // Feature #73 WI-3: the initial #display may have run while flow
                 // was still paginated (so its #ensureWindow was gated out). When
                 // flow becomes 'scrolled', (re)build the windowed neighbour set.
@@ -930,6 +936,38 @@ export class Paginator extends HTMLElement {
     // the horizontal-tb model when no view is mounted.
     get #activeScrollModel() {
         return this.#view?.scrollModel ?? scrollModelFor('horizontal-tb')
+    }
+    // Feature #76 WI-2: lay out scrolled-mode sections along the ACTIVE SCROLL
+    // AXIS, so the windowed surface (WI-3) accumulates in the right direction.
+    // Horizontal-writing (vertical scroll, axis='vertical') keeps the default
+    // BLOCK stacking — no inline style is set, so the #73 path is byte-identical.
+    // Vertical-writing (horizontal scroll, axis='horizontal') stacks sections in
+    // a flex row so they accumulate along the horizontal axis; vertical-rl
+    // (directionSign < 0, later content extends leftward) uses `row-reverse`.
+    // Idempotent + reversible (a re-display with a different writing-mode resets
+    // the inline style), and called from #display BEFORE the windowing gate so it
+    // applies even while #ensureWindow still returns early for vertical (WI-3
+    // removes that gate).
+    #applyScrolledContainerAxis() {
+        const m = this.#activeScrollModel
+        if (m.axis === 'horizontal') {
+            this.#container.style.display = 'flex'
+            this.#container.style.flexDirection = 'row'
+            // Gate-4 High: the host forces `dir=rtl` for EVERY vertical book
+            // (`:1146`, incl. vertical-lr), and `direction` inherits into the
+            // shadow tree — so a `row-reverse` here would DOUBLE-reverse
+            // vertical-rl and vertical-lr would still mismatch. Instead set the
+            // container's logical direction EXPLICITLY from the scroll model and
+            // keep a plain `row`: vertical-rl (directionSign < 0) → `rtl` (later
+            // sections extend leftward, scroll origin on the right, matching
+            // WebKit's negative scrollLeft that `#axisScrollOffset` un-signs);
+            // vertical-lr → `ltr`.
+            this.#container.style.direction = m.directionSign < 0 ? 'rtl' : 'ltr'
+        } else {
+            this.#container.style.removeProperty('display')
+            this.#container.style.removeProperty('flex-direction')
+            this.#container.style.removeProperty('direction')
+        }
     }
     // Logical (non-negative, reading-order) scroll offset of the container along
     // the active axis. For vertical-rl, WebKit's `scrollLeft` is negative toward
@@ -1444,6 +1482,11 @@ export class Paginator extends HTMLElement {
         await this.scrollToAnchor((typeof anchor === 'function'
             ? anchor(this.#view.document) : anchor) ?? 0, select)
         if (hasFocus) this.focusView()
+        // Feature #76 WI-2: orient the scrolled container along the active scroll
+        // axis BEFORE the windowing math — runs for vertical-writing even though
+        // #ensureWindow still gates it out (WI-3). Horizontal-writing is a no-op
+        // (block stacking, byte-identical to #73).
+        if (this.scrolled) this.#applyScrolledContainerAxis()
         // Feature #73 WI-2: after the anchor section renders, mount the
         // neighbour window so the scrolled surface spans multiple sections.
         // Gated on #windowedScroll (OFF by default → paged + non-windowed
