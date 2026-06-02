@@ -104,6 +104,7 @@
 		0F2C1D4B2C4B0377F4946E12 /* BilingualCSSInjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FF4B27402111C6B812D565E /* BilingualCSSInjectionTests.swift */; };
 		0F753635DD7185A076DE4196 /* SchemaV5.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71A6667FB5A4B6534854FD37 /* SchemaV5.swift */; };
 		0FC8E41F85E5BF4E60834E77 /* DebugReaderProbeAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4184F6CBC1069C92654BCB19 /* DebugReaderProbeAdapterTests.swift */; };
+		100386D17F552B073DDBD696 /* BilingualAIReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68FE9266FB938B801CBD71C9 /* BilingualAIReadinessTests.swift */; };
 		10835FE4B33B176F7668ADF7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1F9542255A6791C9BCB034DB /* Assets.xcassets */; };
 		10D0E47D5358AADBB9223B9D /* legado_source_with_unknown_fields.json in Resources */ = {isa = PBXBuildFile; fileRef = 6B4F95A22D8731A420F20CB2 /* legado_source_with_unknown_fields.json */; };
 		10D1F8C33C1540CD242F3900 /* TXTTextViewBridgeEditMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A6970A21B903B77B011DE8 /* TXTTextViewBridgeEditMenuTests.swift */; };
@@ -1156,6 +1157,7 @@
 		C66E6BCF1D3CE1583DFACE2C /* ReadiumBilingualChapterTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44E6A86E85D800B3FE81A5DD /* ReadiumBilingualChapterTracker.swift */; };
 		C6823452CD15B52E8C40A4AC /* VerificationDebugBridgeHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B9ADB001D66D4A6EC07C9A /* VerificationDebugBridgeHelper.swift */; };
 		C68AC74F688C3FE8CD3546F0 /* SyncTestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06EFFD5584526A6602FEE2E1 /* SyncTestHelpers.swift */; };
+		C6B8E8D2BCF336DDFBF24E36 /* BilingualAIReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 816EBC35111B21F7E6B75746 /* BilingualAIReadiness.swift */; };
 		C6D9CCA699EBFFBE7A5479F1 /* LibraryTestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B26374749D7626349FB9E0 /* LibraryTestHelpers.swift */; };
 		C700F76144EB680AF90FE37C /* BilingualPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1987220FE3E8931D9F8185F2 /* BilingualPill.swift */; };
 		C72258E7A1E6477E89E27D6E /* ImportError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 982822FD76DDFB1EEE150FF0 /* ImportError.swift */; };
@@ -2107,6 +2109,7 @@
 		686E0EE508E85349AED791BE /* TokenSpan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenSpan.swift; sourceTree = "<group>"; };
 		68A7FC6A70A060CD5E43602E /* ReadingProgressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingProgressBar.swift; sourceTree = "<group>"; };
 		68BB90FF5CA185660AAE66BD /* MDReaderViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDReaderViewModel.swift; sourceTree = "<group>"; };
+		68FE9266FB938B801CBD71C9 /* BilingualAIReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualAIReadinessTests.swift; sourceTree = "<group>"; };
 		6914428EA8FF673A76DDFF66 /* ReadiumEPUBHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBHost.swift; sourceTree = "<group>"; };
 		695A8EDF52A1BFDDB7BC5A10 /* TXTBridgeSharedBilingualTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTBridgeSharedBilingualTests.swift; sourceTree = "<group>"; };
 		6974F61108CB28EFA08F1D68 /* SettingsRowPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRowPalette.swift; sourceTree = "<group>"; };
@@ -2228,6 +2231,7 @@
 		80ED96E0CBD0FFF1335B41D0 /* LibraryViewModelImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModelImportTests.swift; sourceTree = "<group>"; };
 		815A2F870C4D8EC102254ACC /* PersistenceActor+Bookmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+Bookmarks.swift"; sourceTree = "<group>"; };
 		81680767353B999AFCC3A8DE /* write.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = write.h; sourceTree = "<group>"; };
+		816EBC35111B21F7E6B75746 /* BilingualAIReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualAIReadiness.swift; sourceTree = "<group>"; };
 		8180BC93B7839BF9878114F1 /* ReadingDashboardViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingDashboardViewModelTests.swift; sourceTree = "<group>"; };
 		81816D53162945723E79FB9B /* SyncOutboundQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncOutboundQueue.swift; sourceTree = "<group>"; };
 		8188B21271D103070EE8CDE6 /* SyncConflictResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncConflictResolver.swift; sourceTree = "<group>"; };
@@ -4988,6 +4992,7 @@
 				EFB9DBE73613A6499D43B18C /* AIServiceTests.swift */,
 				1836AA0E3E80CADFB1B46834 /* AnthropicProviderStreamingTests.swift */,
 				E5892DBA34520F6BB7B8E5A3 /* AnthropicProviderTests.swift */,
+				68FE9266FB938B801CBD71C9 /* BilingualAIReadinessTests.swift */,
 				DD7224616391A07142BD1979 /* BookTranslationCoordinatorTests.swift */,
 				EF42781312FD73B373FB2BB5 /* BookTranslationProgressTests.swift */,
 				32BC7A4A1B047A76FD209AB3 /* ChapterBoundsTests.swift */,
@@ -5283,6 +5288,7 @@
 				46C22F30DF9F05C20CF8DDBC /* AITypes.swift */,
 				B8C6D6A8EC00DFFAC294DD87 /* AnthropicProvider.swift */,
 				C682F2AF644C10CEC95208AE /* AnthropicProvider+Streaming.swift */,
+				816EBC35111B21F7E6B75746 /* BilingualAIReadiness.swift */,
 				0C3959530D53C3CE271377F5 /* BookTranslationCoordinator.swift */,
 				CC65B4AF0602473F3F11C161 /* BookTranslationProgress.swift */,
 				A890F7C98CE159058714EE4D /* ChapterBounds.swift */,
@@ -5705,6 +5711,7 @@
 				9BF4E606FB4C251BD4492FA9 /* BackupReadingHistoryTests.swift in Sources */,
 				A43AD2AF5B19CF05B849BE2E /* BackupViewModelSelectiveRestoreTests.swift in Sources */,
 				90D2C41C30E622E119877967 /* BackupViewModelTests.swift in Sources */,
+				100386D17F552B073DDBD696 /* BilingualAIReadinessTests.swift in Sources */,
 				964CEC849A9E722447081EF4 /* BilingualAttributedStringComposerTests.swift in Sources */,
 				0F2C1D4B2C4B0377F4946E12 /* BilingualCSSInjectionTests.swift in Sources */,
 				8F6ADD143DF892DFAAED7C80 /* BilingualDisplayPipelineTests.swift in Sources */,
@@ -6328,6 +6335,7 @@
 				B9BF611D570F7F9681FBEE6E /* BackupSectionDTOs.swift in Sources */,
 				20271E1F835A62799E28F741 /* BackupViewModel.swift in Sources */,
 				986EFB28F7203E56F853A0FD /* BasePageNavigator.swift in Sources */,
+				C6B8E8D2BCF336DDFBF24E36 /* BilingualAIReadiness.swift in Sources */,
 				C1F29CC2BCCD3BA426DEB952 /* BilingualAttributedStringComposer.swift in Sources */,
 				04059C90590FC9DE007E150D /* BilingualDisplayPipeline.swift in Sources */,
 				430AF3E819AA5E3B26746B00 /* BilingualDisplaySegmentMap.swift in Sources */,
@@ -7153,7 +7161,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 795;
+				CURRENT_PROJECT_VERSION = 796;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7161,7 +7169,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.42.32;
+				MARKETING_VERSION = 3.42.33;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
@@ -7307,7 +7315,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 795;
+				CURRENT_PROJECT_VERSION = 796;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7315,7 +7323,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.42.32;
+				MARKETING_VERSION = 3.42.33;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
