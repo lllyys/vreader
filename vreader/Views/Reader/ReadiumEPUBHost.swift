@@ -49,6 +49,11 @@ struct ReadiumEPUBHost: View {
     /// WI-10b: shared TTS service (from `ReaderContainerView`), observed by
     /// `+TTSFollow` to auto-advance the navigator. Optional → existing call sites compat.
     var ttsService: TTSService?
+    /// Bug #299: the dispatcher's shared chrome-visibility (same source of truth
+    /// as the top chrome) — gates the bottom chrome (scrubber + toolbar) this
+    /// host mounts in its own `bottomOverlay`. Default `true` keeps existing test
+    /// call sites compiling; the live dispatcher always passes its `isChromeVisible`.
+    var isChromeVisible: Bool = true
 
     /// Not `private` — the `+Body` extension's `coreBody`/`openHostTask` read &
     /// write it (a `private` @State is file-scoped, invisible to an extension in
@@ -135,6 +140,16 @@ struct ReadiumEPUBHost: View {
     @State var ttsFollowMapper: ReadiumTTSFollowMapper?
     @State var lastFollowedTTSTarget: ReadiumTTSFollowMapper.Target?
 
+    // MARK: - Bug #299: bottom-chrome state
+
+    /// Whole-book reading progress (0…1) for the scrubber thumb, updated from
+    /// each Readium `locationDidChange` (`+BottomChrome`).
+    @State var readingProgress: Double = 0
+    /// Bottom-chrome leading label — chapter title / percentage.
+    @State var chromeLeadingLabel: String = ""
+    /// Bottom-chrome trailing label — section position.
+    @State var chromeTrailingLabel: String = ""
+
     var body: some View {
         // WI-7: compose the decorative background BEHIND the navigator, mirroring
         // the legacy `ReaderContainerView` (`ZStack { if useCustomBackground {
@@ -142,7 +157,20 @@ struct ReadiumEPUBHost: View {
         // navigator renders clear-bodied over this layer. The compositing
         // wrapper + reload observers live in `ReadiumEPUBHost+Background` for the
         // 300-line budget; bilingual body modifiers live in `bilingualSurfaces`.
-        backgroundComposited(bilingualSurfaces(coreBody))
+        //
+        // Bug #299: overlay the shared bottom chrome (scrubber + Contents / Notes
+        // / Display / AI toolbar) on top, gated on the dispatcher's chrome
+        // visibility — restoring parity with every other reader host.
+        ZStack {
+            backgroundComposited(bilingualSurfaces(coreBody))
+            if isChromeVisible {
+                VStack(spacing: 0) {
+                    Spacer()
+                    bottomChromeOverlay
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
     }
 }
 

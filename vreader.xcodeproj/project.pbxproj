@@ -23,6 +23,7 @@
 		01D3CF4E918BA0ADAA9394A8 /* FoliateTOCNavWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D25C147D85CED89E0862EE /* FoliateTOCNavWiringTests.swift */; };
 		01F374A01862EABBFB60CD7F /* TXTTextViewBridgeSafeAreaInsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF97E254D3F3DCCDAEF6185 /* TXTTextViewBridgeSafeAreaInsetTests.swift */; };
 		01FEDA4DD8F5A3BFA56F275D /* DocumentFingerprintValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4B4E4FB28FD82376AE20A4F /* DocumentFingerprintValidationTests.swift */; };
+		020F29712F38DB3630EBACDD /* ReadiumBottomChromeSeekTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E832BE02889C93E96998938 /* ReadiumBottomChromeSeekTests.swift */; };
 		0246F6958C782714D1E5FAB4 /* ReplacementTransformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8045B5C97D76DA514B27B577 /* ReplacementTransformTests.swift */; };
 		0258514C78DE454EDE81F87C /* NotesDeleteConfirm.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9DE056A8CDF8A9AB97C000 /* NotesDeleteConfirm.swift */; };
 		025BD086B35FC1C9C1892F21 /* EPUBChapterBodyRewriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4613C1666E0FA587EAA979C0 /* EPUBChapterBodyRewriterTests.swift */; };
@@ -1382,6 +1383,7 @@
 		F10FCB9E3EC6862A640BD406 /* VReaderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 605C9BAEA41B7C63D7E343B1 /* VReaderApp.swift */; };
 		F14370F35DEFDB725452B5CA /* SearchWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C47B0077BE4937C424FFBD9 /* SearchWiringTests.swift */; };
 		F14A4E744781186C72D46349 /* CustomCoverStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5CB381B25E50D44505CAAB3 /* CustomCoverStore.swift */; };
+		F18A46C6062D915B86052E08 /* ReadiumEPUBHost+BottomChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903AC337CD91275FE06EDE15 /* ReadiumEPUBHost+BottomChrome.swift */; };
 		F1F063D59EA5927565EA07A9 /* encryption.c in Sources */ = {isa = PBXBuildFile; fileRef = 70147197363D24AF5E1FF6DB /* encryption.c */; settings = {COMPILER_FLAGS = "-w"; }; };
 		F227494184D4B41D6E183C4C /* DurableTombstoneStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4EDBC478C22E7EB6BCE618 /* DurableTombstoneStoreTests.swift */; };
 		F27AD3A7527418A2667BE8B1 /* ChangeTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E8D5CB4F3E93E8A15D3EDEA /* ChangeTokenStore.swift */; };
@@ -2312,6 +2314,7 @@
 		8F2CBC94D52B152BEE89C629 /* ReaderTranslateBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTranslateBanner.swift; sourceTree = "<group>"; };
 		8F5657735EB002031AE15176 /* EPUBBilingualOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBBilingualOrchestrator.swift; sourceTree = "<group>"; };
 		8FA15EA6877E3CA9421E1B59 /* EPUBProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBProgressTests.swift; sourceTree = "<group>"; };
+		903AC337CD91275FE06EDE15 /* ReadiumEPUBHost+BottomChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReadiumEPUBHost+BottomChrome.swift"; sourceTree = "<group>"; };
 		903D9FCA142155D5B65A5C18 /* Feature40TTSSentenceHighlightVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feature40TTSSentenceHighlightVerificationTests.swift; sourceTree = "<group>"; };
 		904A30F4AD7E5862C2D3C955 /* EPUBBilingualJS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBBilingualJS.swift; sourceTree = "<group>"; };
 		907D934613DDAEA1F3055F82 /* EPUBReaderContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderContainerView.swift; sourceTree = "<group>"; };
@@ -2402,6 +2405,7 @@
 		9DBD86DDBB52369C831FF078 /* ReadingStatsAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStatsAggregator.swift; sourceTree = "<group>"; };
 		9E09E65978F174E10780F7D3 /* LibraryContinueCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryContinueCard.swift; sourceTree = "<group>"; };
 		9E4A364E7AFF2DD96244D639 /* WebDAVServerProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVServerProfile.swift; sourceTree = "<group>"; };
+		9E832BE02889C93E96998938 /* ReadiumBottomChromeSeekTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumBottomChromeSeekTests.swift; sourceTree = "<group>"; };
 		9E9734639739473622AE22A1 /* HighlightHitToleranceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightHitToleranceTests.swift; sourceTree = "<group>"; };
 		9EC7240FBC11713CD18A4812 /* AIEditorContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIEditorContextTests.swift; sourceTree = "<group>"; };
 		9F2D542588B3156C4A282264 /* WI11TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WI11TestHelpers.swift; sourceTree = "<group>"; };
@@ -3567,6 +3571,7 @@
 				AE98B137F042D616716D4C72 /* ReaderTapZoneRouterTests.swift */,
 				44CDE923DD9CB934E3E42969 /* ReaderTOCTXTAlignmentTests.swift */,
 				63E4737FA3A880C3CC2BA07D /* ReadingProgressBarTests.swift */,
+				9E832BE02889C93E96998938 /* ReadiumBottomChromeSeekTests.swift */,
 				0690CFD7EBDB5EFF481F2202 /* ReadiumEPUBHostTests.swift */,
 				03321A13C86F9E69BE338864 /* ReadiumNavCommanderTests.swift */,
 				CD909811249AF108809A8E38 /* ReadiumSelectionTokenCacheTests.swift */,
@@ -4195,6 +4200,7 @@
 				2E7D9B366FE8503B0E79530E /* ReadiumEPUBHost+Bilingual.swift */,
 				2B29ECB0699594B79632E3EE /* ReadiumEPUBHost+BilingualDriver.swift */,
 				5A746E0EDC5F1208A0774008 /* ReadiumEPUBHost+Body.swift */,
+				903AC337CD91275FE06EDE15 /* ReadiumEPUBHost+BottomChrome.swift */,
 				820C166494A63E2245B18252 /* ReadiumEPUBHost+Highlights.swift */,
 				63ADF5E2B0D325F0B4F552D2 /* ReadiumEPUBHost+Navigation.swift */,
 				57171272166BB46F00A14A91 /* ReadiumEPUBHost+TTSFollow.swift */,
@@ -6062,6 +6068,7 @@
 				207EEC2695C81527F2258358 /* ReadiumBilingualChapterTrackerTests.swift in Sources */,
 				BA6B419E180F3EC54680DDCE /* ReadiumBilingualCommanderTests.swift in Sources */,
 				0B2C125F4B243C2D1D0874B0 /* ReadiumBilingualEvalAdapterTests.swift in Sources */,
+				020F29712F38DB3630EBACDD /* ReadiumBottomChromeSeekTests.swift in Sources */,
 				1B2EF4DD9E11CE736EDCAC1E /* ReadiumDebugProbeTests.swift in Sources */,
 				6B8ED541073183163907D347 /* ReadiumDecorationHighlightAdapterTests.swift in Sources */,
 				3C894F8ED6493D1DF6DB58D6 /* ReadiumEPUBHostTests.swift in Sources */,
@@ -6748,6 +6755,7 @@
 				BCDABEB4FF345F85FD44A294 /* ReadiumEPUBHost+Bilingual.swift in Sources */,
 				3BAE0F10DF996E3F0E5E1FE5 /* ReadiumEPUBHost+BilingualDriver.swift in Sources */,
 				F56CAC78114E34FA6CA59A53 /* ReadiumEPUBHost+Body.swift in Sources */,
+				F18A46C6062D915B86052E08 /* ReadiumEPUBHost+BottomChrome.swift in Sources */,
 				0AEFE05A668B529B34DC0133 /* ReadiumEPUBHost+Highlights.swift in Sources */,
 				3EAB442DE25D46C0F1E8AB32 /* ReadiumEPUBHost+Navigation.swift in Sources */,
 				A87B42C58CE5E5DBE06D4FB9 /* ReadiumEPUBHost+TTSFollow.swift in Sources */,

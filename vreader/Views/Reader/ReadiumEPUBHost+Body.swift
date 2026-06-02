@@ -99,6 +99,9 @@ extension ReadiumEPUBHost {
                 // (href change + enabled → enumerate; intra-chapter deduped). HIGH-2:
                 // a persisted-on book enumerates on its FIRST locator.
                 handleBilingualLocationChange(locator)
+                // Bug #299: update the bottom-chrome scrubber + labels off the
+                // same relocate.
+                updateBottomChrome(from: locator)
             },
             // WI-8 (new-highlight): cache the finalized selection + surface the
             // designed color-picker popover (handler in `+Highlights`).
