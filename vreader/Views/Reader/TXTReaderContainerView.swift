@@ -448,6 +448,9 @@ struct TXTReaderContainerView: View {
                         guard let chapters = viewModel.chapterIndex?.chapters,
                               viewModel.currentChapterIdx < chapters.count else { return }
                         let chapter = chapters[viewModel.currentChapterIdx]
+                        // Bug #312: a scrubber seek pins its landing line to the
+                        // top edge, like a TOC/chapter jump — not the search headroom.
+                        uiState.scrollSnapToTop = true
                         uiState.scrollToOffset = Self.chapterScrubberGlobalOffset(
                             seekValue: seekValue, chapter: chapter
                         )
@@ -461,6 +464,9 @@ struct TXTReaderContainerView: View {
                     theme: settingsStore?.theme ?? .paper,
                     progress: $chapterScrollFraction,
                     onSeek: { seekValue in
+                        // Bug #312: a scrubber seek pins its landing line to the
+                        // top edge, like a TOC/chapter jump — not the search headroom.
+                        uiState.scrollSnapToTop = true
                         // If TOC entries exist, seek within current chapter
                         if tocChapterProgress != nil {
                             let chapterLen = tocChapterLength
@@ -840,6 +846,7 @@ struct TXTReaderContainerView: View {
                 config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
                 restoreOffset: bilingualRestore,
                 scrollToOffset: bilingualScroll,
+                snapToTop: uiState.scrollSnapToTop,
                 highlightRange: bilingualTemp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 highlightNonce: uiState.highlightNonce,
@@ -938,6 +945,7 @@ struct TXTReaderContainerView: View {
                 config: settingsStore?.txtViewConfig ?? TXTViewConfig(),
                 restoreOffset: bilingualRestore,
                 scrollToOffset: bilingualScroll,
+                snapToTop: uiState.scrollSnapToTop,
                 highlightRange: bilingualTemp,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 highlightNonce: uiState.highlightNonce,
@@ -997,6 +1005,7 @@ struct TXTReaderContainerView: View {
                 delegate: viewModel,
                 chunkStartOffsets: offsets,
                 scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
+                scrollSnapToTop: uiState.scrollSnapToTop,
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 highlightNonce: uiState.highlightNonce,
@@ -1044,6 +1053,7 @@ struct TXTReaderContainerView: View {
                 delegate: viewModel,
                 chunkStartOffsets: offsets,
                 scrollToOffset: uiState.scrollToOffset ?? scrollToOffset,
+                scrollSnapToTop: uiState.scrollSnapToTop,
                 highlightRange: uiState.highlightRange,
                 highlightIsTemporary: uiState.highlightIsTemporary,
                 highlightNonce: uiState.highlightNonce,

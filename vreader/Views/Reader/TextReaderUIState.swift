@@ -27,6 +27,10 @@ final class TextReaderUIState: ReaderNotificationHandlerStateProtocol {
 
     /// Navigation target from search results. Updated via notification.
     var scrollToOffset: Int?
+    /// Bug #312: true when the pending `scrollToOffset` is a TOC / chapter /
+    /// bookmark jump that should pin its destination to the top edge (vs. a
+    /// search hit, which keeps the headroom that shows the match in context).
+    var scrollSnapToTop: Bool = false
     /// Match highlight range for search navigation.
     var highlightRange: NSRange?
     /// Whether the current highlight is temporary (search nav) or persistent (user-created).

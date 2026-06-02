@@ -40,6 +40,11 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
     /// Dynamic navigation target (document-global UTF-16 offset). Set by container
     /// view when navigating from annotation panel, search results, etc. (bug #52)
     var scrollToOffset: Int?
+    /// Bug #312: when true, the `scrollToOffset` jump pins the destination
+    /// character to the TOP edge (TOC / chapter / bookmark) via the target
+    /// glyph's rect, instead of the linear intra-chunk fraction tuned for
+    /// search/restore.
+    var scrollSnapToTop: Bool = false
 
     /// Highlight range (document-global UTF-16) for visual feedback. (bug #53)
     var highlightRange: NSRange?
@@ -318,10 +323,17 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         }
 
         // Dynamic navigation from annotation panel, search, etc. (bug #52)
+        // Bug #312 (Codex Gate-4 MED): a snap-mode change re-arms the jump even to
+        // the SAME offset (search headroom ⇄ TOC top-pin), so the new positioning
+        // applies instead of being deduped away.
         if let offset = scrollToOffset,
-           offset != context.coordinator.lastScrollToOffset {
+           offset != context.coordinator.lastScrollToOffset
+            || scrollSnapToTop != context.coordinator.lastSnapToTop {
             context.coordinator.lastScrollToOffset = offset
-            context.coordinator.scrollToGlobalOffset(offset, in: tableView)
+            context.coordinator.lastSnapToTop = scrollSnapToTop
+            // Bug #312: a TOC / chapter / bookmark jump pins the destination
+            // glyph to the top; a search hit keeps the linear intra-chunk fraction.
+            context.coordinator.scrollToGlobalOffset(offset, in: tableView, snapToTop: scrollSnapToTop)
         }
 
         // Sync persisted highlights via layout manager on visible cells (bug #55, bug #47 v12)
@@ -424,6 +436,10 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
         /// Tracks last processed scrollToOffset to avoid redundant scrolls (bug #52).
         var lastScrollToOffset: Int?
+        /// Bug #312 (Codex Gate-4 MED): the snap mode of the last honored jump,
+        /// part of the dedupe key so a search→TOC (or TOC→search) jump to the
+        /// SAME offset still re-scrolls into the new positioning.
+        var lastSnapToTop = false
 
         /// Tracks last processed highlightRange to avoid redundant applications (bug #53).
         var lastHighlightRange: NSRange?
@@ -522,10 +538,16 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
 
         /// Restores scroll to a chunk index with optional intra-chunk fraction (0-1),
         /// retrying if the table view has no valid frame.
+        ///
+        /// Bug #312: when `snapLocalOffset` is set (a TOC / chapter / bookmark
+        /// jump), the intra-chunk adjustment uses the TARGET glyph's rect to pin
+        /// that character to the top edge instead of the linear `intraFraction`
+        /// (which lands mid-chunk because 16KB chunks aren't chapter-aligned).
         func attemptChunkRestore(
             in tableView: UITableView,
             toChunkIndex index: Int,
-            intraFraction: CGFloat? = nil
+            intraFraction: CGFloat? = nil,
+            snapLocalOffset: Int? = nil
         ) {
             guard index >= 0, index < chunks.count else {
                 restoreRetryCount = 0
@@ -549,7 +571,10 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
                 restoreRetryCount += 1
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak tableView] in
                     guard let self, let tableView else { return }
-                    self.attemptChunkRestore(in: tableView, toChunkIndex: index, intraFraction: intraFraction)
+                    self.attemptChunkRestore(
+                        in: tableView, toChunkIndex: index,
+                        intraFraction: intraFraction, snapLocalOffset: snapLocalOffset
+                    )
                 }
                 return
             }
@@ -560,8 +585,32 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
                 animated: false
             )
 
-            // Adjust for intra-chunk position
-            if let fraction = intraFraction, fraction > 0 {
+            // Adjust for intra-chunk position.
+            if let snapLocalOffset {
+                // Bug #312: pin the target glyph to the top edge. scrollToRow(.top)
+                // put the chunk top at the visible top; adding the glyph's y within
+                // the cell pushes the content up so the destination line is at the
+                // top. `scrollToRow(animated:false)` updates contentOffset
+                // synchronously but does NOT dequeue/lay out the cell in the same
+                // turn, so force a layout pass before querying the cell — otherwise
+                // `cellForRow` is nil and the jump lands at the (arbitrary,
+                // non-chapter-aligned) chunk top. Falls back to the chunk top only
+                // if the cell still can't be resolved.
+                tableView.layoutIfNeeded()
+                // The text width is the cell width minus the textView's left+right
+                // `textContainerInset` (16 + 16). Compute the glyph y in a
+                // STANDALONE layout at that width — NOT off the live cell's
+                // layoutManager, whose textContainer width may not have propagated
+                // yet (width ≈ 0 → one char per line → a huge y that overscrolls
+                // to the chunk end).
+                let textWidth = tableView.bounds.width - 32
+                let attr = attributedString(forChunk: index)
+                if let glyphTopY = Self.glyphTopY(
+                    forChunk: attr, localOffset: snapLocalOffset, textWidth: textWidth
+                ) {
+                    tableView.contentOffset.y += glyphTopY
+                }
+            } else if let fraction = intraFraction, fraction > 0 {
                 let cellRect = tableView.rectForRow(at: IndexPath(row: index, section: 0))
                 if cellRect.height > 0 {
                     tableView.contentOffset.y += cellRect.height * fraction
@@ -577,6 +626,38 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 self?.isRestoringPosition = false
             }
+        }
+
+        /// Bug #312: the y-offset of the glyph at chunk-local UTF-16 `localOffset`
+        /// within a text column of `textWidth` — used to pin a TOC / chapter jump's
+        /// destination character to the top edge. Computed in a STANDALONE
+        /// `NSLayoutManager` at the cell's known text width (NOT off the live cell,
+        /// whose `textContainer` width may be unset right after `layoutIfNeeded`,
+        /// which would stack one char per line and overscroll to the chunk end).
+        /// The cell's textView has `lineFragmentPadding = 0` and `textContainerInset`
+        /// top 0, so the standalone layout (padding 0, no top inset) matches it.
+        /// Returns nil when the chunk is empty or the width is non-positive. The
+        /// local offset is valid in the rendered attr string under the same
+        /// 1:1-BMP-UTF16 invariant the chunked bridge relies on.
+        static func glyphTopY(
+            forChunk attr: NSAttributedString, localOffset: Int, textWidth: CGFloat
+        ) -> CGFloat? {
+            guard attr.length > 0, textWidth > 0 else { return nil }
+            let storage = NSTextStorage(attributedString: attr)
+            let layoutManager = NSLayoutManager()
+            let container = NSTextContainer(
+                size: CGSize(width: textWidth, height: .greatestFiniteMagnitude)
+            )
+            container.lineFragmentPadding = 0
+            layoutManager.addTextContainer(container)
+            storage.addLayoutManager(layoutManager)
+            let clamped = min(max(localOffset, 0), attr.length - 1)
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: NSRange(location: clamped, length: 1),
+                actualCharacterRange: nil
+            )
+            layoutManager.ensureLayout(for: container)
+            return layoutManager.boundingRect(forGlyphRange: glyphRange, in: container).minY
         }
 
         /// Bug #27: reveal the table after a restore lands (it was hidden in

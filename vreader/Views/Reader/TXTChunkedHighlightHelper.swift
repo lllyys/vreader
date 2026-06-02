@@ -13,7 +13,7 @@ extension TXTChunkedReaderBridge.Coordinator {
 
     /// Scrolls the table view to the chunk containing the given document-global
     /// UTF-16 offset, with intra-chunk positioning.
-    func scrollToGlobalOffset(_ globalOffset: Int, in tableView: UITableView) {
+    func scrollToGlobalOffset(_ globalOffset: Int, in tableView: UITableView, snapToTop: Bool = false) {
         // Bug #27 (audit): if the table was hidden for restore (alpha 0) and the
         // metadata is empty/mismatched, reveal before the early return so the
         // reader isn't left blank for the full 1.2s safety timeout. Idempotent +
@@ -26,17 +26,27 @@ extension TXTChunkedReaderBridge.Coordinator {
             forGlobalOffset: globalOffset, chunkStartOffsets: chunkStartOffsets
         ), chunkIndex < chunks.count else { revealContent(tableView); return }
 
-        // Compute intra-chunk fraction for sub-cell positioning
         let chunkStart = chunkStartOffsets[chunkIndex]
-        let nextStart = chunkIndex + 1 < chunkStartOffsets.count
-            ? chunkStartOffsets[chunkIndex + 1]
-            : chunkStart + chunks[chunkIndex].utf16.count
-        let chunkLen = nextStart - chunkStart
-        let fraction: CGFloat = chunkLen > 0
-            ? CGFloat(globalOffset - chunkStart) / CGFloat(chunkLen)
-            : 0
 
-        attemptChunkRestore(in: tableView, toChunkIndex: chunkIndex, intraFraction: fraction)
+        if snapToTop {
+            // Bug #312: TOC / chapter / bookmark jump — pin the destination
+            // character to the top edge via its glyph rect (the linear fraction
+            // below lands mid-chunk because 16KB chunks aren't chapter-aligned).
+            attemptChunkRestore(
+                in: tableView, toChunkIndex: chunkIndex,
+                snapLocalOffset: max(0, globalOffset - chunkStart)
+            )
+        } else {
+            // Search/restore: linear intra-chunk fraction for sub-cell positioning.
+            let nextStart = chunkIndex + 1 < chunkStartOffsets.count
+                ? chunkStartOffsets[chunkIndex + 1]
+                : chunkStart + chunks[chunkIndex].utf16.count
+            let chunkLen = nextStart - chunkStart
+            let fraction: CGFloat = chunkLen > 0
+                ? CGFloat(globalOffset - chunkStart) / CGFloat(chunkLen)
+                : 0
+            attemptChunkRestore(in: tableView, toChunkIndex: chunkIndex, intraFraction: fraction)
+        }
 
         // Bug #288: broadcast the TARGET offset as the reading position
         // immediately + deterministically. The reader's `currentLocator` (and

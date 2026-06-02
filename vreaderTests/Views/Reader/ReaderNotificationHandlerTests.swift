@@ -60,6 +60,7 @@ private enum HandlerTestError: Error { case persistence }
 @MainActor
 private final class TestHandlerState: ReaderNotificationHandlerStateProtocol {
     var scrollToOffset: Int?
+    var scrollSnapToTop: Bool = false
     var highlightRange: NSRange?
     var highlightIsTemporary: Bool = true
     var highlightNonce: Int = 0
@@ -142,6 +143,49 @@ struct ReaderNotificationHandlerTests {
         #expect(state.highlightIsTemporary == true)
         #expect(state.highlightRange == NSRange(location: 500, length: 10))
         #expect(navigatedOffset == 500)
+    }
+
+    // MARK: - Snap-to-top intent (Bug #312)
+
+    /// A TOC / chapter / bookmark jump carries only a point offset (no match
+    /// range) → snap-to-top so the destination pins to the top edge.
+    @Test @MainActor func handleNavigateToLocator_pointOffset_setsSnapToTop() {
+        let state = TestHandlerState()
+        let deps = makeDeps()
+
+        let locator = makeLocator(charOffsetUTF16: 500)
+        ReaderNotificationHandlers.handleNavigateToLocator(locator: locator, state: state, deps: deps)
+
+        #expect(state.highlightRange == nil)
+        #expect(state.scrollSnapToTop == true)
+    }
+
+    /// A search hit carries a char range (the match) → keep the headroom that
+    /// shows it in context, so snap-to-top stays false.
+    @Test @MainActor func handleNavigateToLocator_searchRange_doesNotSnapToTop() {
+        let state = TestHandlerState()
+        let deps = makeDeps()
+
+        let locator = makeLocator(charRangeStartUTF16: 500, charRangeEndUTF16: 510)
+        ReaderNotificationHandlers.handleNavigateToLocator(locator: locator, state: state, deps: deps)
+
+        #expect(state.highlightRange == NSRange(location: 500, length: 10))
+        #expect(state.scrollSnapToTop == false)
+    }
+
+    /// A subsequent point-jump after a search hit clears the snap-to-top back to
+    /// the search behavior on the next search, and vice-versa (no stale intent).
+    @Test @MainActor func handleNavigateToLocator_snapToTop_tracksLatestNav() {
+        let state = TestHandlerState()
+        let deps = makeDeps()
+
+        ReaderNotificationHandlers.handleNavigateToLocator(
+            locator: makeLocator(charOffsetUTF16: 100), state: state, deps: deps)
+        #expect(state.scrollSnapToTop == true)
+
+        ReaderNotificationHandlers.handleNavigateToLocator(
+            locator: makeLocator(charRangeStartUTF16: 200, charRangeEndUTF16: 220), state: state, deps: deps)
+        #expect(state.scrollSnapToTop == false)
     }
 
     @Test @MainActor func handleNavigateToLocatorFallsBackToCharRangeStart() {

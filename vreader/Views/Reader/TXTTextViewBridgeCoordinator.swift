@@ -50,6 +50,10 @@ extension TXTTextViewBridge {
         private static let maxRestoreRetries = 5
         var suppressScrollCallbacks = false
         var lastScrollToTarget: Int?
+        /// Bug #312 (Codex Gate-4 MED): the snap mode of the last honored jump.
+        /// A change in snap mode to the SAME offset must still re-scroll (search
+        /// headroom → TOC top-pin, or vice-versa), so it's part of the dedupe key.
+        var lastSnapToTop = false
 
         /// Feature #56 WI-12b: source↔display offset map for the
         /// bridge. Used by selection-action notifications
@@ -174,13 +178,13 @@ extension TXTTextViewBridge {
         /// edge case (very long wrapped paragraphs, post-clamp visual drift), the
         /// system's "ensure visible" pass guarantees the highlight is in the viewport
         /// before the 3 s auto-clear timer fires.
-        func scrollToMatchedOffset(in textView: UITextView, charOffset: Int, highlightRange: NSRange? = nil) {
+        func scrollToMatchedOffset(in textView: UITextView, charOffset: Int, highlightRange: NSRange? = nil, snapToTop: Bool = false) {
             guard textView.bounds.width > 0 else {
                 guard restoreRetryCount < Self.maxRestoreRetries else { return }
                 restoreRetryCount += 1
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak textView] in
                     guard let self, let textView else { return }
-                    self.scrollToMatchedOffset(in: textView, charOffset: charOffset, highlightRange: highlightRange)
+                    self.scrollToMatchedOffset(in: textView, charOffset: charOffset, highlightRange: highlightRange, snapToTop: snapToTop)
                 }
                 return
             }
@@ -192,10 +196,14 @@ extension TXTTextViewBridge {
                 layoutManager: textView.layoutManager,
                 textContainer: textView.textContainer
             )
+            // Bug #312: a TOC / chapter / bookmark jump pins the destination to
+            // the TOP edge (headroom 0); a search hit keeps the 0.25 headroom so
+            // the match shows in context.
             let scrollY = TXTOffsetMapper.scrollOffsetForVisibleMatch(
                 lineY: lineY,
                 viewportHeight: textView.bounds.height,
-                topInset: textView.textContainerInset.top
+                topInset: textView.textContainerInset.top,
+                headroomFraction: snapToTop ? 0 : 0.25
             )
             textView.setContentOffset(CGPoint(x: 0, y: scrollY), animated: false)
 

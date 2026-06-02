@@ -22,6 +22,13 @@ protocol ReaderNotificationHandlerStateProtocol: AnyObject {
     var scrollToOffset: Int? { get set }
     var highlightRange: NSRange? { get set }
     var highlightIsTemporary: Bool { get set }
+    /// Bug #312: true when the pending `scrollToOffset` is a TOC / chapter /
+    /// bookmark jump (a point offset with no match range) that should pin its
+    /// destination to the TOP edge, vs. a search hit (a char range) that keeps
+    /// the ~0.25 viewport headroom showing context. Set by
+    /// `handleNavigateToLocator`; read by the TXT bridges when consuming
+    /// `scrollToOffset`.
+    var scrollSnapToTop: Bool { get set }
     /// Monotonic counter bumped on every `.readerNavigateToLocator` event.
     /// Bug #154 / GH #443: a search-tap to an already-current target re-sets
     /// `scrollToOffset` / `highlightRange` to values they already hold — an
@@ -125,6 +132,12 @@ enum ReaderNotificationHandlers {
         } else {
             state.highlightRange = nil
         }
+        // Bug #312: a search hit carries a char RANGE (highlight the match → keep
+        // the search headroom that shows it in context); a TOC / chapter /
+        // bookmark jump carries only a point offset (no range) → snap the
+        // destination to the top edge so the chapter title pins to the top
+        // instead of landing ~¼ down.
+        state.scrollSnapToTop = (state.highlightRange == nil)
         state.highlightNonce &+= 1
         deps.onNavigate(offset)
     }

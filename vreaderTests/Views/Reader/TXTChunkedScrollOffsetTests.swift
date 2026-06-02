@@ -6,10 +6,53 @@
 
 import Testing
 import CoreGraphics
+import UIKit
 @testable import vreader
 
 @Suite("TXTChunkedScrollOffset")
 struct TXTChunkedScrollOffsetTests {
+
+    // MARK: - Bug #312: glyphTopY computes a real-width layout, not per-char stacking
+
+    /// The snap-to-top glyph y MUST be computed at the real text-column width, not
+    /// the degenerate ~0 width that stacks one char per line and overscrolls a TOC
+    /// jump to the end of the chunk (the overshoot that landed chapter 8 on chapter
+    /// 12 during device verification). At a real width a deep offset is a handful of
+    /// rows down; at a 1-char-wide column it is ~N rows down — the assertion is that
+    /// the real-width result is dramatically smaller.
+    @MainActor @Test func glyphTopY_realWidth_doesNotStackPerLine() {
+        let attr = NSAttributedString(
+            string: String(repeating: "字", count: 200),
+            attributes: [.font: UIFont.systemFont(ofSize: 18)]
+        )
+        let wide = TXTChunkedReaderBridge.Coordinator.glyphTopY(
+            forChunk: attr, localOffset: 120, textWidth: 320)!
+        let degenerate = TXTChunkedReaderBridge.Coordinator.glyphTopY(
+            forChunk: attr, localOffset: 120, textWidth: 18)! // ~1 CJK glyph per line
+        #expect(wide >= 0)
+        #expect(wide < degenerate / 4)
+    }
+
+    /// The first character of the chunk sits at the top (y == 0), so a chapter whose
+    /// title begins the chunk pins exactly to the top edge.
+    @MainActor @Test func glyphTopY_firstChar_isAtTop() {
+        let attr = NSAttributedString(
+            string: "第八章　八楼的高手\n正文……",
+            attributes: [.font: UIFont.systemFont(ofSize: 18)]
+        )
+        let y = TXTChunkedReaderBridge.Coordinator.glyphTopY(
+            forChunk: attr, localOffset: 0, textWidth: 320)!
+        #expect(y == 0)
+    }
+
+    /// Guards: empty string and non-positive width return nil (caller leaves the
+    /// chunk top aligned rather than crashing or misplacing).
+    @MainActor @Test func glyphTopY_emptyOrZeroWidth_returnsNil() {
+        let empty = NSAttributedString(string: "")
+        #expect(TXTChunkedReaderBridge.Coordinator.glyphTopY(forChunk: empty, localOffset: 0, textWidth: 320) == nil)
+        let attr = NSAttributedString(string: "abc", attributes: [.font: UIFont.systemFont(ofSize: 18)])
+        #expect(TXTChunkedReaderBridge.Coordinator.glyphTopY(forChunk: attr, localOffset: 0, textWidth: 0) == nil)
+    }
 
     // MARK: - Bug #289: inset is included in the measured visible top
 

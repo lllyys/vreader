@@ -30,6 +30,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
     /// Programmatic scroll target (e.g., from search result navigation).
     /// When this changes in updateUIView, the bridge scrolls to the offset.
     var scrollToOffset: Int?
+    /// Bug #312: when true, the `scrollToOffset` jump pins to the TOP edge (TOC /
+    /// chapter / bookmark) instead of applying the search-match headroom.
+    var snapToTop: Bool = false
     /// Temporary highlight range for search result visualization (bug #43).
     /// Applied as a yellow background attribute on the text storage.
     var highlightRange: NSRange?
@@ -296,10 +299,15 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // saved-position restore path, which is purposely top-edge.
         // Reset dedupe on text/attr identity change only; config-only changes (font/theme)
         // must not re-arm scroll — that would jump the user back to a stale search target.
+        // Bug #312 (Codex Gate-4 MED): a snap-mode change re-arms the scroll even
+        // when the target offset is unchanged (search headroom ⇄ TOC top-pin to
+        // the same offset), so the new positioning actually applies.
+        let snapModeChanged = snapToTop != context.coordinator.lastSnapToTop
         if Self.shouldScroll(to: scrollToOffset, lastTarget: context.coordinator.lastScrollToTarget,
-                             sourceChanged: textChanged || attrChanged),
+                             sourceChanged: textChanged || attrChanged || snapModeChanged),
            let target = scrollToOffset {
             context.coordinator.lastScrollToTarget = target
+            context.coordinator.lastSnapToTop = snapToTop
             let textLength = (textView.text as NSString?)?.length ?? 0
             if textLength > 0 {
                 let rangeEnd = min(textLength, target + 4096)
@@ -308,7 +316,8 @@ struct TXTTextViewBridge: UIViewRepresentable {
             context.coordinator.scrollToMatchedOffset(
                 in: textView,
                 charOffset: target,
-                highlightRange: highlightRange
+                highlightRange: highlightRange,
+                snapToTop: snapToTop
             )
         }
 
