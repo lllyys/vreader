@@ -105,35 +105,49 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         }
         let providerProfileID = activeProfile.id
 
-        // Resolve the config by ID for the profile we just snapshotted.
-        // `AIService.resolveProviderConfig(profileID:modelOverride:)`
-        // is the by-named-id seam (originally added for the
-        // re-translate picker), so passing the active profile's id
-        // through it gives us a deterministic config-snapshot tied
-        // to the same id we cache under.
-        let config: ResolvedAIProviderConfig
-        do {
-            config = try await aiService.resolveProviderConfig(
-                profileID: providerProfileID, modelOverride: nil)
-        } catch {
-            // `apiKeyMissing` etc. surface as `.providerFailed` from
-            // the bilingual VM's perspective — a transient failure
-            // the VM treats as "retry later", not as the offline
-            // silent-source-fallback (that's `URLError.notConnected`
-            // territory, handled below by the service).
-            Self.log.error("prefetch resolveProviderConfig failed: \(String(describing: error), privacy: .private)")
-            throw ChapterTranslationError.providerFailed("provider config unavailable")
-        }
-
-        // Source text for the unit. A missing unit throws
-        // `ChapterTextProviderError.unknownUnit` — the VM swallows
-        // it as a transient failure.
+        // Source text for the unit (needed for the cache count check + the
+        // translate). A missing unit throws `ChapterTextProviderError.unknownUnit`
+        // — the VM swallows it as a transient failure. Fetched BEFORE the provider
+        // gate so the cache check below can run without a config.
         let sourceText: String
         do {
             sourceText = try await textProvider.sourceText(for: unit)
         } catch {
             Self.log.error("prefetch sourceText failed for unit \(String(describing: unit), privacy: .public): \(String(describing: error), privacy: .private)")
             throw ChapterTranslationError.providerFailed("chapter text unavailable")
+        }
+
+        // Bug #306: consult the disk cache BEFORE the provider gate. An
+        // already-translated chapter must render even when AI is later disabled /
+        // unconfigured / key-less — previously `resolveProviderConfig` threw first
+        // and the cache (inside `translate`) was never reached. Needs no config —
+        // only the lookupKey (profile id + target + unit) the snapshot gives us.
+        if let cached = await translationService.cachedTranslation(
+            bookFingerprintKey: bookFingerprintKey,
+            unit: unit,
+            sourceText: sourceText,
+            targetLanguage: targetLanguage,
+            providerProfileID: providerProfileID,
+            granularity: effectiveGranularity
+        ) {
+            Self.log.debug("prefetch cache HIT (pre-gate) for unit \(String(describing: unit), privacy: .public)")
+            return cached.segments
+        }
+
+        // Cache miss → resolve the config by ID for the profile we just
+        // snapshotted. `AIService.resolveProviderConfig(profileID:modelOverride:)`
+        // is the by-named-id seam, so passing the active profile's id gives a
+        // deterministic config-snapshot tied to the same id we cache under.
+        let config: ResolvedAIProviderConfig
+        do {
+            config = try await aiService.resolveProviderConfig(
+                profileID: providerProfileID, modelOverride: nil)
+        } catch {
+            // `apiKeyMissing` etc. surface as `.providerFailed` from the
+            // bilingual VM's perspective — a transient failure the VM treats as
+            // "retry later", not the offline silent-source-fallback.
+            Self.log.error("prefetch resolveProviderConfig failed: \(String(describing: error), privacy: .private)")
+            throw ChapterTranslationError.providerFailed("provider config unavailable")
         }
 
         do {

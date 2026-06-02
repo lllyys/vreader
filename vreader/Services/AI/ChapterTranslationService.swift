@@ -95,6 +95,36 @@ actor ChapterTranslationService {
         self.maxCharsPerChunk = maxCharsPerChunk
     }
 
+    /// Bug #306: a CACHE-ONLY lookup that needs NO provider config. Returns the
+    /// cached translation when a fresh (count-matching) row exists, else nil.
+    /// Lets the prefetcher serve an already-translated chapter BEFORE the
+    /// provider gate (`resolveProviderConfig`), so a cached chapter still renders
+    /// when AI is later disabled / unconfigured / key-less — previously the gate
+    /// threw first and the disk cache (inside `translate`) was never reached.
+    func cachedTranslation(
+        bookFingerprintKey: String,
+        unit: TranslationUnitID,
+        sourceText: String,
+        targetLanguage: String,
+        providerProfileID: UUID,
+        granularity: TranslationGranularity = .paragraph
+    ) async -> ChapterTranslationResult? {
+        let lookupKey = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: bookFingerprintKey,
+            unitStorageKey: unit.storageKey,
+            targetLanguage: targetLanguage,
+            providerProfileID: providerProfileID,
+            promptVersion: promptVersion)
+        let segments: [String]
+        switch granularity {
+        case .paragraph: segments = ChapterSegmenter.paragraphs(in: sourceText)
+        case .sentence:  segments = ChapterSegmenter.sentences(in: sourceText)
+        }
+        guard let cached = await store.translation(forKey: lookupKey),
+              cached.sourceParagraphCount == segments.count else { return nil }
+        return ChapterTranslationResult(segments: cached.translatedSegments, fromCache: true)
+    }
+
     /// Translates `unit`'s source text into `targetLanguage`. Serves from the
     /// disk cache on a hit; on a miss segments → chunks → requests → decodes →
     /// caches. Throws `ChapterTranslationError` on a provider failure or
