@@ -97,6 +97,12 @@ struct ReaderContainerView: View {
     /// readiness dismissal (abandoned) so a stale selection can't leak into a
     /// later AI open.
     @State var pendingAskAIText: String?
+    /// Bug #314: the text-selection awaiting the Translate tab. Set by the
+    /// `.readerTranslateRequested` consumer; applied (or cleared) on the AI
+    /// panel open in `onChange(of: showAIPanel)` so a COLD open never inherits a
+    /// stale `hasExplicitSelection` from a prior selection-translate (the
+    /// translation VM is reused across opens). nil on every non-selection open.
+    @State var pendingTranslateSelection: String?
     #if DEBUG
     /// Bug #256 — the AI sheet's active detent, bound to its
     /// `presentationDetents(_:selection:)`. DEBUG-only: only the DebugBridge
@@ -413,9 +419,10 @@ struct ReaderContainerView: View {
             // defense-in-depth layer at the sheet-presentation seam.
             guard resolvedAICoordinator.isAIAvailable else { return }
             ensureAIReady()
-            if let transVM = resolvedAICoordinator.translationViewModel {
-                transVM.originalText = info.selectedText
-            }
+            // Bug #314: park the selection; `onChange(of: showAIPanel)` applies it
+            // to the translation VM (trim-guarded) and clears the flag on cold
+            // opens — so a later cold open can't inherit this stale selection.
+            pendingTranslateSelection = info.selectedText
             aiInitialTab = .translate // bug #95
             showAIPanel = true
         }
@@ -461,6 +468,22 @@ struct ReaderContainerView: View {
                     pendingAskAIText = nil
                     resolvedAICoordinator.chatViewModel?.seedInput(text)
                 }
+                // Bug #314: apply (or clear) the explicit translate-selection on
+                // EVERY open — a cold open (toolbar / readiness / Ask-AI) parks no
+                // selection, so `hasExplicitSelection` is cleared and the Translate
+                // tab falls back to the context window; a selection-translate parked
+                // one, so it's translated verbatim. Whitespace-only → cleared.
+                if let trans = resolvedAICoordinator.translationViewModel {
+                    let parked = pendingTranslateSelection
+                    if let parked,
+                       !parked.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        trans.originalText = parked
+                        trans.hasExplicitSelection = true
+                    } else {
+                        trans.hasExplicitSelection = false
+                    }
+                }
+                pendingTranslateSelection = nil
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerBilingualDidChange)) { notification in

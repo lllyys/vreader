@@ -35,6 +35,15 @@ final class AITranslationViewModel {
     /// The original text that was sent for translation.
     var originalText: String = ""
 
+    /// Bug #314: true when the Translate tab was opened from a text SELECTION
+    /// (the selection-popover path sets `originalText` to the selection + this
+    /// flag). When set, a language-pill tap translates the selection VERBATIM
+    /// (no `.section` context-window re-extraction). Cleared by `reset()` — the
+    /// cold "Open AI Translate" path — so a no-selection open falls back to the
+    /// current reading context. Owned by the consumer (`ReaderContainerView`),
+    /// read by `TranslationPanel.requestTranslation`.
+    var hasExplicitSelection: Bool = false
+
     /// The translated text result (nil before first translation).
     var translatedText: String?
 
@@ -100,7 +109,11 @@ final class AITranslationViewModel {
         originalText: String,
         locator: Locator,
         format: BookFormat,
-        targetLanguage: String
+        targetLanguage: String,
+        // Bug #314: translate `originalText` VERBATIM (the user's selection),
+        // skipping the `.section` context-window re-extraction. Default false
+        // preserves the cold context-translate path.
+        isExplicitSelection: Bool = false
     ) async {
         // Supersede any in-flight predecessor — its result will be
         // discarded once it observes cancellation.
@@ -118,7 +131,8 @@ final class AITranslationViewModel {
                 originalText: originalText,
                 locator: locator,
                 format: format,
-                targetLanguage: targetLanguage
+                targetLanguage: targetLanguage,
+                isExplicitSelection: isExplicitSelection
             )
         }
         translateTask = task
@@ -133,13 +147,18 @@ final class AITranslationViewModel {
         originalText: String,
         locator: Locator,
         format: BookFormat,
-        targetLanguage: String
+        targetLanguage: String,
+        isExplicitSelection: Bool = false
     ) async {
-        let context = contextExtractor.extractContext(
-            locator: locator,
-            textContent: originalText,
-            format: format
-        )
+        // Bug #314: an explicit selection is translated verbatim; only the cold
+        // context-translate re-extracts the `.section` window around the locator.
+        let context = isExplicitSelection
+            ? originalText
+            : contextExtractor.extractContext(
+                locator: locator,
+                textContent: originalText,
+                format: format
+            )
 
         guard !context.isEmpty else {
             applyFailure(AIError.contextExtractionFailed.localizedDescription)
@@ -181,6 +200,7 @@ final class AITranslationViewModel {
         translateTask?.cancel()
         translateTask = nil
         originalText = ""
+        hasExplicitSelection = false  // Bug #314: cold reset → context-translate
         translatedText = nil
         errorMessage = nil
         isLoading = false

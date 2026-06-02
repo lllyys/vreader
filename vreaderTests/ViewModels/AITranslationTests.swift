@@ -167,6 +167,57 @@ struct AITranslationViewModelTests {
         #expect(stub.lastRequest?.targetLanguage == "Chinese")
     }
 
+    // MARK: - Bug #314: explicit selection translated verbatim
+
+    @Test @MainActor func translate_explicitSelection_translatesVerbatim_noWindowExtraction() async {
+        // Bug #314: with an explicit selection, the request's contextText must be
+        // the SELECTION verbatim — NOT a re-extracted `.section` context window.
+        let stub = StubAIProvider()
+        stub.stubbedResponse = AIResponse(
+            content: "译文", actionType: .translate, promptVersion: "v1", createdAt: Date())
+        let (vm, _) = makeViewModel(provider: stub)
+
+        let selection = "The sentinel word here is alpha-1."
+        await vm.translate(
+            originalText: selection,
+            locator: WI11TestHelpers.makeLocator(),
+            format: .epub,
+            targetLanguage: "Chinese",
+            isExplicitSelection: true
+        )
+
+        #expect(stub.lastRequest?.contextText == selection,
+                "explicit selection must be sent verbatim, not a re-extracted window")
+    }
+
+    @Test @MainActor func translate_coldContext_defaultsToExtractionPath() async {
+        // Default (isExplicitSelection == false) → the cold context-translate
+        // path: contextText comes from the extractor (path preserved, not the
+        // verbatim-selection shortcut).
+        let stub = StubAIProvider()
+        stub.stubbedResponse = AIResponse(
+            content: "译文", actionType: .translate, promptVersion: "v1", createdAt: Date())
+        let (vm, _) = makeViewModel(provider: stub)
+
+        await vm.translate(
+            originalText: "Section context text.",
+            locator: WI11TestHelpers.makeLocator(),
+            format: .txt,
+            targetLanguage: "Chinese"
+        )
+        #expect(stub.sendRequestCallCount == 1)
+        #expect(stub.lastRequest?.contextText != nil)  // went through the extractor path
+    }
+
+    @Test @MainActor func reset_clearsHasExplicitSelection() {
+        let (vm, _) = makeViewModel()
+        vm.hasExplicitSelection = true
+        vm.originalText = "sel"
+        vm.reset()
+        #expect(vm.hasExplicitSelection == false)
+        #expect(vm.originalText.isEmpty)
+    }
+
     // MARK: - Translate uses the passed language, not the property
 
     @Test @MainActor func translateUsesThePassedLanguageNotTheStaleProperty() async {

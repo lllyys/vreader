@@ -99,12 +99,19 @@ struct TranslationPanel: View {
     /// rapid follow-up tap cannot retarget an already-spawned request
     /// (Gate-4 finding #1).
     private func requestTranslation(_ language: String) {
+        // Bug #314: when the Translate tab was opened from a text SELECTION,
+        // translate that selection (`viewModel.originalText`) verbatim — NOT the
+        // auto-extracted book-context `textContent`. A cold open (no selection)
+        // falls back to `textContent` + the `.section` context window.
+        let isSelection = viewModel.hasExplicitSelection
+        let text = isSelection ? viewModel.originalText : textContent
         Task {
             await viewModel.translate(
-                originalText: textContent,
+                originalText: text,
                 locator: locator,
                 format: format,
-                targetLanguage: language
+                targetLanguage: language,
+                isExplicitSelection: isSelection
             )
         }
     }
