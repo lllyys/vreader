@@ -1441,6 +1441,7 @@
 		FB0A5F6990BB44BA58C1F366 /* PersistenceActor+Backup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2832B213595B426B8FFC8B6B /* PersistenceActor+Backup.swift */; };
 		FB0BC111F33D81D4E93A031F /* HighlightListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275DFDD33FCF69E75F251F27 /* HighlightListViewModelTests.swift */; };
 		FB165F7EA6481A67F3435EDD /* OPDSCatalogListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326632F80DB744679F67D712 /* OPDSCatalogListTests.swift */; };
+		FB1821C008D68AD3D3A3502A /* FoliateVerticalWindowBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41605378442282DEAB0DBFCA /* FoliateVerticalWindowBundleTests.swift */; };
 		FB379B5459AC6B9D5975E3D2 /* BookFileState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2838729583E68E78C072AD56 /* BookFileState.swift */; };
 		FB4B2B41D865A14865DF4DE1 /* HTTPTTSProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CDE700F3AC42B0D8AD377E1 /* HTTPTTSProviderTests.swift */; };
 		FB59D6FDE7A4F0E7F44C78DA /* DebugAIActionEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 291B9DC0FD8C89549850D5A6 /* DebugAIActionEffect.swift */; };
@@ -1830,6 +1831,7 @@
 		40E27899DB05507AB2F13CDE /* NotesRowStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesRowStateTests.swift; sourceTree = "<group>"; };
 		410014C25D3480276D1E5F00 /* WebDAVProfileMigratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProfileMigratorTests.swift; sourceTree = "<group>"; };
 		410BA6F21267316487DF58FC /* PersistenceBookmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceBookmarkTests.swift; sourceTree = "<group>"; };
+		41605378442282DEAB0DBFCA /* FoliateVerticalWindowBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateVerticalWindowBundleTests.swift; sourceTree = "<group>"; };
 		4184F6CBC1069C92654BCB19 /* DebugReaderProbeAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugReaderProbeAdapterTests.swift; sourceTree = "<group>"; };
 		41C3ECA5E8F6419DB347F2E4 /* BookFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFormat.swift; sourceTree = "<group>"; };
 		41D94EE13466B0286DEA2EA7 /* ReadingSessionTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionTracker.swift; sourceTree = "<group>"; };
@@ -5404,6 +5406,7 @@
 				0C511C16F7FA93E91D703EE7 /* FoliateTTSAdapterTests.swift */,
 				432F646AE5FB7BFD06470EB5 /* FoliateURLSchemeHandlerTests.swift */,
 				E8EE09BCDCB14CCFAA6A943D /* FoliateVerticalContainerLayoutTests.swift */,
+				41605378442282DEAB0DBFCA /* FoliateVerticalWindowBundleTests.swift */,
 			);
 			path = Foliate;
 			sourceTree = "<group>";
@@ -5904,6 +5907,7 @@
 				8AD533CDAFAC138CA7E20D75 /* FoliateTapToleranceBundleTests.swift in Sources */,
 				DCE7A66917407F83D657A63B /* FoliateURLSchemeHandlerTests.swift in Sources */,
 				5088375DABF1823ED1BA0CC8 /* FoliateVerticalContainerLayoutTests.swift in Sources */,
+				FB1821C008D68AD3D3A3502A /* FoliateVerticalWindowBundleTests.swift in Sources */,
 				6E94155F0ECDFD59EAAAD010 /* FoliateViewCoordinatorTests.swift in Sources */,
 				D2A9D9BF75759BDA0213247F /* FontSizeCalibrationMeasurementTests.swift in Sources */,
 				F5C06CBFBB03CA953526172B /* FontSizeCalibrationTests.swift in Sources */,

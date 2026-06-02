@@ -52,9 +52,13 @@ struct FoliateScrollModel: Equatable {
     static func scrolled(writingMode: String) -> FoliateScrollModel {
         switch writingMode {
         case "vertical-rl":
+            // Feature #76 WI-3 (Gate-4 High): the logical reading-order start of a
+            // vertical-rl section is its RIGHT edge (WebKit scrollLeft is 0 at the
+            // right, negative leftward), so the windowed `#elementAxisStart`
+            // measures `el.right - container.right`. Mirrors the JS `scrollModelFor`.
             return FoliateScrollModel(
                 axis: .horizontal, scrollProp: "scrollLeft", sizeProp: "width",
-                rectStartProp: "left", directionSign: -1)
+                rectStartProp: "right", directionSign: -1)
         case "vertical-lr":
             return FoliateScrollModel(
                 axis: .horizontal, scrollProp: "scrollLeft", sizeProp: "width",

@@ -21,13 +21,15 @@ struct FoliateScrollModelTests {
         #expect(m.directionSign == 1)
     }
 
-    @Test("vertical-rl: scrolls horizontally (scrollLeft/width/left), sign −1 (WebKit negative scrollLeft)")
+    @Test("vertical-rl: scrolls horizontally (scrollLeft/width/RIGHT), sign −1 (WebKit negative scrollLeft)")
     func verticalRL() {
         let m = FoliateScrollModel.scrolled(writingMode: "vertical-rl")
         #expect(m.axis == .horizontal)
         #expect(m.scrollProp == "scrollLeft")
         #expect(m.sizeProp == "width")
-        #expect(m.rectStartProp == "left")
+        // Feature #76 WI-3: the logical reading-order start is the section's RIGHT
+        // edge (reading starts at the right; scrollLeft 0 there, negative leftward).
+        #expect(m.rectStartProp == "right")
         #expect(m.directionSign == -1)
     }
 

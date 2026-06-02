@@ -4314,7 +4314,7 @@ ${doc.querySelector("parsererror").innerText}`);
               axis: "horizontal",
               scrollProp: "scrollLeft",
               sizeProp: "width",
-              rectStartProp: "left",
+              rectStartProp: "right",
               directionSign: -1
             };
           case "vertical-lr":
@@ -5008,6 +5008,16 @@ ${doc.querySelector("parsererror").innerText}`);
         #elementAxisSize(el) {
           return Math.max(0, el.getBoundingClientRect()[this.#activeScrollModel.sizeProp]);
         }
+        // Feature #76 WI-3: the container's total scroll extent + viewport size along
+        // the active axis (horizontal-tb: scrollHeight / clientHeight; vertical-
+        // writing: scrollWidth / clientWidth). Used by the windowed `#scrollNext`
+        // remaining-room check so it works on the horizontal scroll axis too.
+        #axisScrollSize() {
+          return this.#container[this.#activeScrollModel.sizeProp === "width" ? "scrollWidth" : "scrollHeight"];
+        }
+        #axisClientSize() {
+          return this.#container[this.#activeScrollModel.sizeProp === "width" ? "clientWidth" : "clientHeight"];
+        }
         // Element's logical start offset within the container's scroll content along
         // the active axis (axis-aware generalization of the old #elementScrollTop).
         // horizontal-tb: rect.top - container.top + scrollTop — byte-identical.
@@ -5032,7 +5042,7 @@ ${doc.querySelector("parsererror").innerText}`);
           }
         }
         async #ensureWindow() {
-          if (!this.#windowedScroll || !this.scrolled || this.#vertical) return;
+          if (!this.#windowedScroll || !this.scrolled) return;
           const range = this.#windowRange(this.#index, this.sections.length, this.#K);
           if (!range) return;
           const [lo, hi] = range;
@@ -5127,8 +5137,8 @@ ${doc.querySelector("parsererror").innerText}`);
         // offset RELATIVE to the current view's position in the container. Flag OFF
         // (or no neighbours) → one view at offset 0 → relative == absolute.
         #viewRelativeStart() {
-          if (!this.#windowedScroll || !this.#view || this.#vertical) return this.start;
-          return Math.max(0, this.#container.scrollTop - this.#elementScrollTop(this.#view.element));
+          if (!this.#windowedScroll || !this.#view) return this.start;
+          return Math.max(0, this.#axisScrollOffset() - this.#elementScrollTop(this.#view.element));
         }
         #beforeRender({ vertical, rtl, background }) {
           this.#vertical = vertical;
@@ -5289,7 +5299,11 @@ ${doc.querySelector("parsererror").innerText}`);
           if (this.scrolled) {
             const size = this.viewSize;
             const margin = this.#margin;
-            return this.#vertical ? ({ left, right }) => ({ left: size - right - margin, right: size - left - margin }) : ({ top, bottom }) => ({ left: top + margin, right: bottom + margin });
+            const m3 = this.#activeScrollModel;
+            if (m3.axis === "horizontal") {
+              return m3.directionSign < 0 ? ({ left, right }) => ({ left: size - right - margin, right: size - left - margin }) : ({ left, right }) => ({ left: left + margin, right: right + margin });
+            }
+            return ({ top, bottom }) => ({ left: top + margin, right: bottom + margin });
           }
           const pxSize = this.pages * this.size;
           return this.#rtl ? ({ left, right }) => ({ left: pxSize - right, right: pxSize - left }) : this.#vertical ? ({ top, bottom }) => ({ left: top, right: bottom }) : (f3) => f3;
@@ -5297,7 +5311,7 @@ ${doc.querySelector("parsererror").innerText}`);
         async #scrollToRect(rect, reason) {
           if (this.scrolled) {
             let offset2 = this.#getRectMapper()(rect).left - this.#margin;
-            if (this.#windowedScroll && this.#view && !this.#vertical) offset2 += this.#elementScrollTop(this.#view.element);
+            if (this.#windowedScroll && this.#view) offset2 += this.#elementScrollTop(this.#view.element);
             return this.#scrollTo(offset2, reason);
           }
           const offset = this.#getRectMapper()(rect).left;
@@ -5306,12 +5320,12 @@ ${doc.querySelector("parsererror").innerText}`);
         async #scrollTo(offset, reason, smooth) {
           const element = this.#container;
           const { scrollProp, size } = this;
+          if (this.scrolled && this.#activeScrollModel.directionSign < 0) offset = -offset;
           if (element[scrollProp] === offset) {
             this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size];
             this.#afterScroll(reason);
             return;
           }
-          if (this.scrolled && this.#vertical) offset = -offset;
           if ((reason === "snap" || smooth) && this.hasAttribute("animated")) return animate(
             element[scrollProp],
             offset,
@@ -5346,7 +5360,7 @@ ${doc.querySelector("parsererror").innerText}`);
           }
           if (this.scrolled) {
             let offset = anchor * this.viewSize;
-            if (this.#windowedScroll && this.#view && !this.#vertical) offset += this.#elementScrollTop(this.#view.element);
+            if (this.#windowedScroll && this.#view) offset += this.#elementScrollTop(this.#view.element);
             await this.#scrollTo(offset, reason);
             return;
           }
@@ -5377,7 +5391,7 @@ ${doc.querySelector("parsererror").innerText}`);
         }
         #afterScroll(reason) {
           let scrolledFraction = null;
-          if (this.scrolled && this.#windowedScroll && !this.#vertical) {
+          if (this.scrolled && this.#windowedScroll) {
             const r3 = this.#windowedResolve();
             this.#promoteCurrentView(r3);
             scrolledFraction = r3.intra;
@@ -5458,9 +5472,9 @@ ${doc.querySelector("parsererror").innerText}`);
         #scrollPrev(distance) {
           if (!this.#view) return true;
           if (this.scrolled) {
-            if (this.#windowedScroll && !this.#vertical) {
-              const top = this.#container.scrollTop;
-              if (top > 0) return this.#scrollTo(Math.max(0, top - (distance ?? this.size)), null, true);
+            if (this.#windowedScroll) {
+              const offset = this.#axisScrollOffset();
+              if (offset > 0) return this.#scrollTo(Math.max(0, offset - (distance ?? this.size)), null, true);
               return this.#adjacentIndex(-1) != null;
             }
             if (this.start > 0) return this.#scrollTo(
@@ -5477,10 +5491,10 @@ ${doc.querySelector("parsererror").innerText}`);
         #scrollNext(distance) {
           if (!this.#view) return true;
           if (this.scrolled) {
-            if (this.#windowedScroll && !this.#vertical) {
-              const c2 = this.#container;
-              const remaining = c2.scrollHeight - (c2.scrollTop + c2.clientHeight);
-              if (remaining > 2) return this.#scrollTo(c2.scrollTop + (distance ?? this.size), null, true);
+            if (this.#windowedScroll) {
+              const offset = this.#axisScrollOffset();
+              const remaining = this.#axisScrollSize() - (offset + this.#axisClientSize());
+              if (remaining > 2) return this.#scrollTo(offset + (distance ?? this.size), null, true);
               return this.#adjacentIndex(1) != null;
             }
             if (this.viewSize - this.end > 2) return this.#scrollTo(
@@ -5560,7 +5574,7 @@ ${doc.querySelector("parsererror").innerText}`);
           if (!this.scrolled) return;
           if (this.#locked) return;
           if (!this.#view) return;
-          if (this.#windowedScroll && !this.#vertical) {
+          if (this.#windowedScroll) {
             const r3 = this.#windowedResolve();
             this.#promoteCurrentView(r3);
             this.#ensureWindow();

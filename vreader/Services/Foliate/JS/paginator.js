@@ -199,8 +199,12 @@ const getDirection = doc => {
 const scrollModelFor = writingMode => {
     switch (writingMode) {
         case 'vertical-rl':
+            // Gate-4 WI-3 High: the logical reading-order start of a vertical-rl
+            // section is its RIGHT edge (WebKit scrollLeft is 0 at the right and
+            // goes negative leftward), so `#elementAxisStart` must measure
+            // `el.right - container.right` (then directionSign<0 maps it positive).
             return { axis: 'horizontal', scrollProp: 'scrollLeft', sizeProp: 'width',
-                rectStartProp: 'left', directionSign: -1 }
+                rectStartProp: 'right', directionSign: -1 }
         case 'vertical-lr':
             return { axis: 'horizontal', scrollProp: 'scrollLeft', sizeProp: 'width',
                 rectStartProp: 'left', directionSign: 1 }
@@ -985,6 +989,16 @@ export class Paginator extends HTMLElement {
     #elementAxisSize(el) {
         return Math.max(0, el.getBoundingClientRect()[this.#activeScrollModel.sizeProp])
     }
+    // Feature #76 WI-3: the container's total scroll extent + viewport size along
+    // the active axis (horizontal-tb: scrollHeight / clientHeight; vertical-
+    // writing: scrollWidth / clientWidth). Used by the windowed `#scrollNext`
+    // remaining-room check so it works on the horizontal scroll axis too.
+    #axisScrollSize() {
+        return this.#container[this.#activeScrollModel.sizeProp === 'width' ? 'scrollWidth' : 'scrollHeight']
+    }
+    #axisClientSize() {
+        return this.#container[this.#activeScrollModel.sizeProp === 'width' ? 'clientWidth' : 'clientHeight']
+    }
     // Element's logical start offset within the container's scroll content along
     // the active axis (axis-aware generalization of the old #elementScrollTop).
     // horizontal-tb: rect.top - container.top + scrollTop — byte-identical.
@@ -1012,13 +1026,12 @@ export class Paginator extends HTMLElement {
         }
     }
     async #ensureWindow() {
-        // Gate-4 H (audit): the windowed coordinate math (#elementScrollTop /
-        // #windowedResolve / eviction + expand compensation) is vertical-scroll
-        // (top/height/scrollTop) only. Vertical-WRITING scrolled mode scrolls on
-        // the horizontal axis, so scope windowing to horizontal writing for now —
-        // vertical writing falls back to the proven per-section swap (window stays
-        // empty → all resolvers return the single `#view`).
-        if (!this.#windowedScroll || !this.scrolled || this.#vertical) return
+        // Feature #76 WI-3: the windowed coordinate math (#elementAxisStart /
+        // #windowedResolve / eviction + expand compensation) is now AXIS-AWARE via
+        // the ScrollModel, so windowing runs for vertical-writing too (it scrolls
+        // the horizontal axis). The `this.#vertical` gate is gone — horizontal-tb
+        // resolves to the identical scrollTop/height expressions (directionSign +1).
+        if (!this.#windowedScroll || !this.scrolled) return
         const range = this.#windowRange(this.#index, this.sections.length, this.#K)
         if (!range) return
         const [lo, hi] = range
@@ -1113,11 +1126,11 @@ export class Paginator extends HTMLElement {
     // offset RELATIVE to the current view's position in the container. Flag OFF
     // (or no neighbours) → one view at offset 0 → relative == absolute.
     #viewRelativeStart() {
-        // Gate-4 H: vertical-writing scroll is horizontal-axis; the windowed
-        // helpers are vertical-only, so vertical writing keeps the container-
-        // absolute `start` (windowing is disabled for it in #ensureWindow).
-        if (!this.#windowedScroll || !this.#view || this.#vertical) return this.start
-        return Math.max(0, this.#container.scrollTop - this.#elementScrollTop(this.#view.element))
+        // Feature #76 WI-3: axis-aware. The container-absolute logical offset minus
+        // the current view's logical start in the container = the intra-view offset.
+        // horizontal-tb resolves to `scrollTop - elementTop` (byte-identical).
+        if (!this.#windowedScroll || !this.#view) return this.start
+        return Math.max(0, this.#axisScrollOffset() - this.#elementScrollTop(this.#view.element))
     }
     #beforeRender({ vertical, rtl, background }) {
         this.#vertical = vertical
@@ -1317,10 +1330,21 @@ export class Paginator extends HTMLElement {
         if (this.scrolled) {
             const size = this.viewSize
             const margin = this.#margin
-            return this.#vertical
-                ? ({ left, right }) =>
-                    ({ left: size - right - margin, right: size - left - margin })
-                : ({ top, bottom }) => ({ left: top + margin, right: bottom + margin })
+            const m = this.#activeScrollModel
+            if (m.axis === 'horizontal') {
+                // Feature #76 WI-3: vertical writing scrolls the horizontal axis.
+                // vertical-rl (directionSign < 0) reads right→left, so MIRROR the
+                // rect's horizontal extent into the logical offset (`size - right`).
+                // vertical-lr (directionSign +1) reads left→right — map the left
+                // edge directly (the horizontal-axis analogue of horizontal-tb's
+                // `top + margin`), NOT mirrored (the Gate-4 Medium: the old blanket
+                // `this.#vertical` wrongly mirrored vertical-lr too).
+                return m.directionSign < 0
+                    ? ({ left, right }) =>
+                        ({ left: size - right - margin, right: size - left - margin })
+                    : ({ left, right }) => ({ left: left + margin, right: right + margin })
+            }
+            return ({ top, bottom }) => ({ left: top + margin, right: bottom + margin })
         }
         const pxSize = this.pages * this.size
         return this.#rtl
@@ -1337,7 +1361,7 @@ export class Paginator extends HTMLElement {
             // coordinates; in windowed mode `#view` may sit at a nonzero
             // container offset, so add its position to land at the right
             // container scroll. Flag OFF → offset 0 → unchanged.
-            if (this.#windowedScroll && this.#view && !this.#vertical) offset += this.#elementScrollTop(this.#view.element)
+            if (this.#windowedScroll && this.#view) offset += this.#elementScrollTop(this.#view.element)
             return this.#scrollTo(offset, reason)
         }
         const offset = this.#getRectMapper()(rect).left
@@ -1346,13 +1370,19 @@ export class Paginator extends HTMLElement {
     async #scrollTo(offset, reason, smooth) {
         const element = this.#container
         const { scrollProp, size } = this
+        // Feature #76 WI-3: sign the logical offset for the actual scroll direction
+        // FIRST — vertical-rl (directionSign < 0) writes a NEGATIVE scrollLeft
+        // (WebKit RTL); vertical-lr and horizontal-tb (directionSign +1) stay
+        // positive. Done before the early-return compare so a vertical-rl no-op
+        // seek (raw scrollLeft === signed offset) short-circuits correctly (Gate-4
+        // Low), and fixes the old `this.#vertical` check that wrongly negated
+        // vertical-lr too (the live FIXME).
+        if (this.scrolled && this.#activeScrollModel.directionSign < 0) offset = -offset
         if (element[scrollProp] === offset) {
             this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size]
             this.#afterScroll(reason)
             return
         }
-        // FIXME: vertical-rl only, not -lr
-        if (this.scrolled && this.#vertical) offset = -offset
         if ((reason === 'snap' || smooth) && this.hasAttribute('animated')) return animate(
             element[scrollProp], offset, 300, easeOutQuad,
             x => element[scrollProp] = x,
@@ -1395,7 +1425,7 @@ export class Paginator extends HTMLElement {
             // re-assert window) lands too high by the above-sections' height.
             // Same offset gap WI-6c fixed for `#scrollToRect`. Flag OFF → 0.
             let offset = anchor * this.viewSize
-            if (this.#windowedScroll && this.#view && !this.#vertical) offset += this.#elementScrollTop(this.#view.element)
+            if (this.#windowedScroll && this.#view) offset += this.#elementScrollTop(this.#view.element)
             await this.#scrollTo(offset, reason)
             return
         }
@@ -1429,7 +1459,7 @@ export class Paginator extends HTMLElement {
         // still owns whole-book conversion + Bug #265 restore). Non-windowed path
         // unchanged.
         let scrolledFraction = null
-        if (this.scrolled && this.#windowedScroll && !this.#vertical) {
+        if (this.scrolled && this.#windowedScroll) {
             const r = this.#windowedResolve()
             this.#promoteCurrentView(r)
             scrolledFraction = r.intra
@@ -1526,9 +1556,10 @@ export class Paginator extends HTMLElement {
             // container (all mounted sections), not just `#view`. Scroll within it
             // and let the scroll-driven promote/#ensureWindow slide the window; only
             // fall through to #goTo at the true top of the book.
-            if (this.#windowedScroll && !this.#vertical) {
-                const top = this.#container.scrollTop
-                if (top > 0) return this.#scrollTo(Math.max(0, top - (distance ?? this.size)), null, true)
+            if (this.#windowedScroll) {
+                // Feature #76 WI-3: axis-aware logical offset (horizontal-tb == scrollTop).
+                const offset = this.#axisScrollOffset()
+                if (offset > 0) return this.#scrollTo(Math.max(0, offset - (distance ?? this.size)), null, true)
                 return this.#adjacentIndex(-1) != null
             }
             if (this.start > 0) return this.#scrollTo(
@@ -1542,10 +1573,14 @@ export class Paginator extends HTMLElement {
     #scrollNext(distance) {
         if (!this.#view) return true
         if (this.scrolled) {
-            if (this.#windowedScroll && !this.#vertical) {
-                const c = this.#container
-                const remaining = c.scrollHeight - (c.scrollTop + c.clientHeight)
-                if (remaining > 2) return this.#scrollTo(c.scrollTop + (distance ?? this.size), null, true)
+            if (this.#windowedScroll) {
+                // Feature #76 WI-3: axis-aware remaining-room (horizontal-tb ==
+                // scrollHeight - (scrollTop + clientHeight)). `#axisScrollOffset`
+                // is the logical (positive) offset; `#axisScrollSize`/`#axisClientSize`
+                // pick scrollWidth/clientWidth for the vertical-writing horizontal axis.
+                const offset = this.#axisScrollOffset()
+                const remaining = this.#axisScrollSize() - (offset + this.#axisClientSize())
+                if (remaining > 2) return this.#scrollTo(offset + (distance ?? this.size), null, true)
                 return this.#adjacentIndex(1) != null
             }
             if (this.viewSize - this.end > 2) return this.#scrollTo(
@@ -1627,7 +1662,7 @@ export class Paginator extends HTMLElement {
         // do NOT swap. Track the current section live from the scroll position
         // and keep the K-window mounted ahead/behind. (D1 offset-reset gone:
         // there is no scrollToAnchor(0) reset, the scroll simply continues.)
-        if (this.#windowedScroll && !this.#vertical) {
+        if (this.#windowedScroll) {
             const r = this.#windowedResolve()
             this.#promoteCurrentView(r) // WI-6a: track `#view` to the viewport's section
             this.#ensureWindow()
