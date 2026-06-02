@@ -94,9 +94,16 @@ struct LibraryViewSheets: ViewModifier {
 
     private var aiChatSheet: some View {
         NavigationStack {
-            AIChatView(viewModel: resolvedGeneralChatVM)
+            AIChatView(viewModel: resolvedGeneralChatVM, theme: Self.generalChatTheme)
                 .navigationTitle("AI Chat")
                 .navigationBarTitleDisplayMode(.inline)
+                // Bug #310: pin the cream Paper sheet (the design's `ChatView`
+                // surface) so the Paper-derived ink/sub tokens read. Without
+                // this the general chat fell to the SYSTEM sheet, which is dark
+                // in Dark Mode — making the (now theme-tokened) empty-state /
+                // placeholder dark-on-dark. The reader AI panel already pins its
+                // theme surface; this brings the Library general chat in line.
+                .background(Color(Self.generalChatTheme.sheetSurfaceColor).ignoresSafeArea())
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Done") {
@@ -106,7 +113,16 @@ struct LibraryViewSheets: ViewModifier {
                     }
                 }
         }
+        .preferredColorScheme(Self.generalChatTheme.isDark ? .dark : .light)
     }
+
+    /// Bug #310: the general (no-book) AI chat has no reader theme to inherit,
+    /// so it pins the default Paper identity — matching the design's cream
+    /// `ChatView` surface and the per-book reader AI panel. `static` (not
+    /// `private`) so a presenter-level regression test can pin the choice: a
+    /// host that lets this fall to a dark-family surface would re-hide the
+    /// dark-`sub` empty-state in Dark Mode (Codex Gate-4 Low).
+    static var generalChatTheme: ReaderThemeV2 { .paper }
 
     private var opdsCatalogsSheet: some View {
         NavigationStack {

@@ -74,5 +74,23 @@ struct AIChatViewContrastTests {
                     "\(theme) AI-chat secondary \(ratio) must clear AA over the cream sheet")
         }
     }
+
+    /// Bug #310 follow-up (Codex Gate-4 Low): the general (no-book) Library chat
+    /// host must pin a LIGHT-family theme so its sheet renders cream — else the
+    /// dark `sub`-token empty-state falls onto a system-dark sheet in Dark Mode
+    /// (dark-on-dark, invisible — the device-caught regression). Pin the
+    /// presenter's theme choice so a host that lets it drift to a dark family
+    /// fails here, not silently in Dark Mode.
+    @Test func libraryGeneralChat_pinsLightFamilyCreamSurface() {
+        let theme = LibraryViewSheets.generalChatTheme
+        #expect(theme == .paper, "general chat must pin the Paper identity")
+        #expect(theme.isDark == false, "general chat surface must be light-family (cream), not system-dark")
+        // and the empty-state/placeholder secondary content clears AA on it
+        let surface = theme.sheetSurfaceColor
+        let ratio = contrastRatio(
+            composite(AIChatView.secondaryContentColor(for: theme), over: surface), surface)
+        #expect(ratio >= 4.5,
+                "general-chat secondary \(ratio) must clear AA over the pinned cream sheet")
+    }
 }
 #endif
