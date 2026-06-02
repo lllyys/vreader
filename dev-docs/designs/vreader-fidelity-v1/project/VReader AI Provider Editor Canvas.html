@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VReader — #1363 AI provider editor field pre-fill (canvas)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: #f0eee9;
+    font-family: -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .hide-scroll::-webkit-scrollbar { display: none; }
+  .hide-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+</style>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" fill="#1a1815"/>
+    <rect x="34" y="58" width="132" height="32" rx="9" fill="#fcf8f0"/>
+    <text x="44" y="79" font-family="Inter, system-ui" font-size="13" fill="rgba(29,26,20,0.34)">api.openai.com/v1</text>
+    <rect x="34" y="100" width="132" height="32" rx="9" fill="#fcf8f0"/>
+    <text x="44" y="121" font-family="Inter, system-ui" font-size="13" fill="rgba(29,26,20,0.34)">gpt-4o-mini</text>
+    <rect x="150" y="66" width="30" height="15" rx="5" fill="#8c2f2f" opacity="0.85"/>
+    <text x="100" y="166" font-family="Inter, system-ui" font-size="12" font-weight="600" fill="#d8d2c5" text-anchor="middle" letter-spacing="2">#1363</text>
+  </svg>
+</template>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Canvas + reader theme tokens -->
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="vreader-themes.jsx"></script>
+
+<!-- This issue's design -->
+<script type="text/babel" src="vreader-ai-provider-fields.jsx"></script>
+<script type="text/babel" src="ai-provider-editor-artboards.jsx"></script>
+
+<script type="text/babel">
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<CanvasRoot/>);
+</script>
+</body>
+</html>
