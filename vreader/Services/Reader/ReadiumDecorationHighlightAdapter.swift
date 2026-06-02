@@ -89,7 +89,7 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
         // `unifiedHighlightPopoverPresenter` observes to open the edit popover.
         navigator.observeDecorationInteractions(inGroup: Self.group) { event in
             guard let tapEvent = Self.tapEvent(
-                forDecorationId: event.decoration.id, rect: event.rect
+                forDecorationId: event.decoration.id, rect: event.rect, point: event.point
             ) else { return }
             NotificationCenter.default.post(
                 name: .readerHighlightTapped, object: tapEvent
@@ -98,17 +98,28 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
     }
 
     /// Pure mapping (unit-testable without a navigator): a decoration-activation
-    /// id + optional rect → the cross-format `ReaderHighlightTapEvent`. Returns
-    /// `nil` when the id is not a valid `HighlightRecord` UUID (a foreign
+    /// id + optional rect / tap point → the cross-format `ReaderHighlightTapEvent`.
+    /// Returns `nil` when the id is not a valid `HighlightRecord` UUID (a foreign
     /// decoration / malformed id), so a stray activation is ignored rather than
-    /// posting a bogus tap. A missing rect degrades to `.zero` (the popover
-    /// anchors at a default, matching the Foliate tap path).
+    /// posting a bogus tap.
+    ///
+    /// Bug #316: Readium's `OnDecorationActivatedEvent.rect` is nil for these
+    /// decorations, so the popover degraded to the barren full-width bottom sheet
+    /// (`sourceRect == .zero` → `.sheet`). When `rect` is absent, fall back to the
+    /// event's tap `point` as a 1×1 anchor so the popover opens as the designed
+    /// anchored CARD near the tapped word. Only a genuinely point-less activation
+    /// (neither rect nor point — e.g. the format-agnostic Edit-handoff path) still
+    /// degrades to `.zero`/sheet.
     nonisolated static func tapEvent(
         forDecorationId id: Decoration.Id,
-        rect: CGRect?
+        rect: CGRect?,
+        point: CGPoint? = nil
     ) -> ReaderHighlightTapEvent? {
         guard let highlightID = UUID(uuidString: id) else { return nil }
-        return ReaderHighlightTapEvent(highlightID: highlightID, sourceRect: rect ?? .zero)
+        let anchor = rect
+            ?? point.map { CGRect(origin: $0, size: CGSize(width: 1, height: 1)) }
+            ?? .zero
+        return ReaderHighlightTapEvent(highlightID: highlightID, sourceRect: anchor)
     }
 
     /// Drops the navigator reference on host teardown so no stale apply fires
@@ -116,6 +127,15 @@ final class ReadiumDecorationHighlightAdapter: HighlightRenderer {
     func detach() {
         navigator = nil
     }
+
+    /// Bug #316: the navigator's `UIView` — the host view a tapped highlight's
+    /// popover anchors in. The concrete navigator is an
+    /// `EPUBNavigatorViewController` (a `UIViewController`); Readium's
+    /// `OnDecorationActivatedEvent.rect`/`point` are in THIS view's coordinate
+    /// space, so anchoring the card here (rather than supplying no host → the
+    /// `resolvedForm` sheet fallback) places it over the tapped word with no
+    /// coordinate conversion. `nil` before `attach` / after `detach`.
+    var hostView: UIView? { (navigator as? UIViewController)?.view }
 
     // MARK: - HighlightRenderer
 

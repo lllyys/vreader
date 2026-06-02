@@ -65,7 +65,14 @@ extension ReadiumEPUBHost {
             modelContainer: modelContainer,
             bookFingerprintKey: fingerprint.canonicalKey,
             mutating: highlightCoordinator,
-            theme: settingsStore.theme
+            theme: settingsStore.theme,
+            // Bug #316: supply the navigator's view as the popover host so a
+            // tapped highlight (now carrying a non-zero point-derived anchor —
+            // see `ReadiumDecorationHighlightAdapter.tapEvent`) opens as the
+            // designed anchored CARD. Without a host view, `resolvedForm`
+            // degrades even a non-zero rect back to the bottom sheet. The
+            // decoration's `point`/`rect` are already in this view's space.
+            hostViewProvider: { [weak highlightAdapter] in highlightAdapter?.hostView }
         )
         .onDisappear { onHostDisappear() }
     }
