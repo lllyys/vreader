@@ -59,12 +59,15 @@ struct SettingsSectionHeaderTests {
         #expect(color != UIColor.secondaryLabel)
     }
 
-    @Test("header clears the secondary-text bar (>=3.0) over the cream sheet surface")
+    @Test("header clears WCAG AA (>=4.5) over the cream sheet surface")
     func clearsSecondaryBarOverSheet() {
+        // Feature #84 bumped the light-family `sub` token to ink@68%, so the
+        // header (which reads `paper.subColor`) now clears full AA, not just
+        // the project's 3.0 secondary self-bar.
         let surface = ReaderThemeV2.paper.sheetSurfaceColor
         let composited = composite(SettingsSectionHeader.color(for: .paper), over: surface)
         let ratio = contrastRatio(composited, surface)
-        #expect(ratio >= 3.0, "Settings header sub token \(ratio) must be >= 3.0 over the sheet")
+        #expect(ratio >= 4.5, "Settings header sub token \(ratio) must clear WCAG AA 4.5 over the sheet")
     }
 
     @Test("the faint system secondaryLabel the bug used would NOT have cleared the bar")

@@ -51,9 +51,9 @@ struct ReaderSettingsPanelContrastTests {
     }
 
     /// Composites a possibly-translucent foreground colour over an opaque
-    /// background, so an alpha-blended token (the `sub` ink@0.55) is
-    /// scored as it actually renders on the cream panel — not as if it
-    /// were opaque.
+    /// background, so an alpha-blended token (the `sub` ink@68% in the light
+    /// family) is scored as it actually renders on the cream panel — not as if
+    /// it were opaque.
     private func composite(_ fg: UIColor, over bg: UIColor) -> UIColor {
         var fr: CGFloat = 0, fg2: CGFloat = 0, fb: CGFloat = 0, fa: CGFloat = 0
         var br: CGFloat = 0, bg2: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
@@ -89,15 +89,18 @@ struct ReaderSettingsPanelContrastTests {
 
     // MARK: - Secondary chrome (section headers + footers) clear 3.0:1
 
-    /// Section headers and footer captions resolve to the theme `sub`
-    /// token (matching the design's `SectionLabel` = `t.sub`). Per the
-    /// project's two-bar convention secondary text needs >= 3.0:1.
-    @Test func secondaryChromeLabelClearsSecondaryBar() {
+    /// Feature #84 (landed design `secondary-text-sub-token.md`, resolving the
+    /// closed needs-design #1292): the light-family `sub` token was bumped from
+    /// ink@55% to ink@68% so the Display-panel secondary chrome (section
+    /// headers / footers / value captions) clears full **WCAG AA 4.5:1** over
+    /// the cream sheet — not just the project's 3.0 self-bar. Design ratios:
+    /// Paper 5.81:1, Sepia 4.88:1 (Sepia is the binding case).
+    @Test func secondaryChromeLabelClearsAA() {
         for theme in Self.lightThemes {
             let palette = ReaderSettingsPanel.ChromeLabelPalette(theme: theme)
             let surface = theme.sheetSurfaceColor
             let ratio = contrastRatio(composite(palette.secondary, over: surface), surface)
-            #expect(ratio >= 3.0, "\(theme) secondary chrome label \(ratio) must be >= 3.0")
+            #expect(ratio >= 4.5, "\(theme) secondary chrome label \(ratio) must clear WCAG AA 4.5")
         }
     }
 

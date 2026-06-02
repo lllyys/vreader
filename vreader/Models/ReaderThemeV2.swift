@@ -7,7 +7,11 @@
 // `MDReaderContainerView`) and the WI-6+ chrome re-skin.
 //
 // Token values are pinned to the committed design bundle at
-// `dev-docs/designs/vreader-fidelity-v1/project/vreader-themes.jsx`.
+// `dev-docs/designs/vreader-fidelity-v1/project/vreader-themes.jsx`, EXCEPT
+// the light-family `sub` token (Paper/Sepia), whose WCAG-AA value ink@68% is
+// governed by the later design note
+// `dev-docs/designs/vreader-fidelity-v1/project/design-notes/secondary-text-sub-token.md`
+// (Feature #84 / #1292) — it supersedes the older bundle's ink@55% for `sub`.
 //
 // Key decisions:
 // - **Strictly additive over `ReaderTheme`.** The existing 3-token
@@ -87,10 +91,18 @@ enum ReaderThemeV2: String, CaseIterable, Sendable {
     /// Secondary text (timestamps, captions, page indicators). Per design
     /// this is `ink` with a per-theme alpha — kept as alpha rather than
     /// pre-blended so it renders correctly over varying paper tints.
+    ///
+    /// Feature #84 (landed design `secondary-text-sub-token.md`, resolving the
+    /// closed needs-design #1292 — the secondary-text facet of Bug #285):
+    /// the light family (Paper/Sepia) bumped from ink@55% → **ink@68%** so the
+    /// Display-panel secondary chrome (section headers / footers / value
+    /// captions) clears WCAG AA 4.5:1 over the cream sheet `#fcf8f0` — Paper
+    /// 5.81:1, Sepia 4.88:1 (Sepia is the binding case; 0.68 is the smallest
+    /// unified alpha clearing both). Dark/OLED unchanged (light-family only).
     var subColor: UIColor {
         switch self {
-        case .paper: return Self.hex(0x1d, 0x1a, 0x14, alpha: 0.55)
-        case .sepia: return Self.hex(0x3a, 0x29, 0x13, alpha: 0.55)
+        case .paper: return Self.hex(0x1d, 0x1a, 0x14, alpha: 0.68)
+        case .sepia: return Self.hex(0x3a, 0x29, 0x13, alpha: 0.68)
         case .dark:  return Self.hex(0xd8, 0xd2, 0xc5, alpha: 0.5)
         case .oled:  return Self.hex(0xb9, 0xb6, 0xb0, alpha: 0.5)
         case .photo: return Self.hex(0xe8, 0xe0, 0xd0, alpha: 0.55)

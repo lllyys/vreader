@@ -114,11 +114,11 @@ struct TXTViewConfigThemeTests {
     @Test @MainActor func uiSecondaryTextColor_lightTheme_usesV2SubRGBA() {
         var s = makeStore(); s.theme = .paper
         let c = rgba(s.uiSecondaryTextColor)
-        // Paper sub: ink-RGB (29,26,20) + alpha 0.55
+        // Paper sub: ink-RGB (29,26,20) + alpha 0.68 (Feature #84 AA bump)
         #expect(c.r == 29 && c.g == 26 && c.b == 20,
                 "Paper sub RGB must equal paper ink RGB, got (\(c.r),\(c.g),\(c.b))")
-        #expect(abs(c.a - 0.55) < 0.01,
-                "Paper sub alpha must be 0.55 (got \(c.a))")
+        #expect(abs(c.a - 0.68) < 0.01,
+                "Paper sub alpha must be 0.68 (got \(c.a))")
     }
 
     @Test @MainActor func uiSecondaryTextColor_darkTheme_usesV2SubRGBA() {
@@ -136,11 +136,11 @@ struct TXTViewConfigThemeTests {
     @Test @MainActor func mdRenderConfig_lightTheme_secondaryAndCodeBg() {
         var s = makeStore(); s.theme = .paper
         let cfg = s.mdRenderConfig
-        // secondaryColor → V2 subColor (paper ink + alpha 0.55)
+        // secondaryColor → V2 subColor (paper ink + alpha 0.68, Feature #84)
         let sec = rgba(cfg.secondaryColor)
         #expect(sec.r == 29 && sec.g == 26 && sec.b == 20,
                 "Light MDRenderConfig.secondaryColor RGB must equal V2 paper subColor RGB")
-        #expect(abs(sec.a - 0.55) < 0.01,
+        #expect(abs(sec.a - 0.68) < 0.01,
                 "Light MDRenderConfig.secondaryColor alpha must equal V2 paper subColor alpha")
         // codeBackgroundColor → V2 paperColor (250,246,234)
         let codeBg = rgba(cfg.codeBackgroundColor)

@@ -43,8 +43,9 @@ struct EPUBThemeOverrideCSSV2Tests {
         // accent on a:link
         #expect(css.contains("a:link { color: rgb(140,47,47)"),
                 "Paper accent pinned to a:link")
-        // sub on a:visited
-        #expect(css.contains("a:visited { color: rgba(29,26,20,0.55)"),
+        // sub on a:visited — Feature #84: light-family sub bumped ink@0.55 →
+        // ink@0.68 (WCAG AA); `sub` is global so the a:visited colour darkens too.
+        #expect(css.contains("a:visited { color: rgba(29,26,20,0.68)"),
                 "Paper sub pinned to a:visited (alpha-blended over ink)")
         // rule on td/th + hr borders
         #expect(css.contains("border: 1px solid rgba(29,26,20,0.12)"),
@@ -65,8 +66,8 @@ struct EPUBThemeOverrideCSSV2Tests {
         #expect(css.contains("color: rgb(58,41,19)"), "Sepia ink")
         #expect(css.contains("a:link { color: rgb(122,58,31)"),
                 "Sepia accent on a:link")
-        #expect(css.contains("a:visited { color: rgba(58,41,19,0.55)"),
-                "Sepia sub on a:visited")
+        #expect(css.contains("a:visited { color: rgba(58,41,19,0.68)"),
+                "Sepia sub on a:visited (Feature #84: ink@0.68)")
         #expect(css.contains("border: 1px solid rgba(58,41,19,0.15)"),
                 "Sepia rule on td/th border")
     }

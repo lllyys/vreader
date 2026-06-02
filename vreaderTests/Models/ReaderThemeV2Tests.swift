@@ -129,7 +129,9 @@ struct ReaderThemeV2Tests {
         #expect(approxEqual(r, 29.0 / 255.0))
         #expect(approxEqual(g, 26.0 / 255.0))
         #expect(approxEqual(b, 20.0 / 255.0))
-        #expect(approxEqual(a, 0.55))
+        // Feature #84: light-family sub bumped ink@0.55 → ink@0.68 for WCAG AA
+        // (landed design secondary-text-sub-token.md).
+        #expect(approxEqual(a, 0.68))
     }
 
     @Test
@@ -201,7 +203,10 @@ struct ReaderThemeV2Tests {
     /// `chromeColor` or OLED's `paperColor` — would ship unnoticed.
     /// This matrix walks every theme × every color token and pins each
     /// to the committed design bundle values from
-    /// `dev-docs/designs/vreader-fidelity-v1/project/vreader-themes.jsx`.
+    /// `dev-docs/designs/vreader-fidelity-v1/project/vreader-themes.jsx` —
+    /// EXCEPT the light-family `sub` alpha (Paper/Sepia ink@0.68), governed by
+    /// the later `design-notes/secondary-text-sub-token.md` (Feature #84 / #1292,
+    /// WCAG-AA bump from the bundle's 0.55).
     /// Each row's (r, g, b, a) is byte-exact except where the design
     /// specifies alpha (sub / rule / photo paper+chrome).
     @Test
@@ -212,7 +217,7 @@ struct ReaderThemeV2Tests {
             Row(theme: .paper, token: .bg,     r: 0xf4, g: 0xee, b: 0xe0, alpha: 1.00),
             Row(theme: .paper, token: .paper,  r: 0xfa, g: 0xf6, b: 0xea, alpha: 1.00),
             Row(theme: .paper, token: .ink,    r: 0x1d, g: 0x1a, b: 0x14, alpha: 1.00),
-            Row(theme: .paper, token: .sub,    r: 0x1d, g: 0x1a, b: 0x14, alpha: 0.55),
+            Row(theme: .paper, token: .sub,    r: 0x1d, g: 0x1a, b: 0x14, alpha: 0.68),
             Row(theme: .paper, token: .rule,   r: 0x1d, g: 0x1a, b: 0x14, alpha: 0.12),
             Row(theme: .paper, token: .accent, r: 0x8c, g: 0x2f, b: 0x2f, alpha: 1.00),
             Row(theme: .paper, token: .chrome, r: 0xf7, g: 0xf1, b: 0xe3, alpha: 1.00),
@@ -220,7 +225,7 @@ struct ReaderThemeV2Tests {
             Row(theme: .sepia, token: .bg,     r: 0xe6, g: 0xd6, b: 0xb6, alpha: 1.00),
             Row(theme: .sepia, token: .paper,  r: 0xed, g: 0xdf, b: 0xc2, alpha: 1.00),
             Row(theme: .sepia, token: .ink,    r: 0x3a, g: 0x29, b: 0x13, alpha: 1.00),
-            Row(theme: .sepia, token: .sub,    r: 0x3a, g: 0x29, b: 0x13, alpha: 0.55),
+            Row(theme: .sepia, token: .sub,    r: 0x3a, g: 0x29, b: 0x13, alpha: 0.68),
             Row(theme: .sepia, token: .rule,   r: 0x3a, g: 0x29, b: 0x13, alpha: 0.15),
             Row(theme: .sepia, token: .accent, r: 0x7a, g: 0x3a, b: 0x1f, alpha: 1.00),
             Row(theme: .sepia, token: .chrome, r: 0xe8, g: 0xd9, b: 0xbd, alpha: 1.00),
