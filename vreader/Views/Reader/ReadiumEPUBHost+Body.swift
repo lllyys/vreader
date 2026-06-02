@@ -119,6 +119,19 @@ extension ReadiumEPUBHost {
                 // Bug #299: update the bottom-chrome scrubber + labels off the
                 // same relocate.
                 updateBottomChrome(from: locator)
+                // Bug #313: the Readium host was the only format host that never
+                // posted `.readerPositionDidChange`, so `currentLocator` stayed
+                // nil → the TOC couldn't focus the current chapter. Post the
+                // relocate's vreader locator — but only when its href resolves to
+                // a known spine href (Codex Gate-4 MED), so an unresolved href
+                // never overwrites a good `currentLocator` with a non-TOC-matchable
+                // position.
+                ReadiumPositionBroadcast.post(
+                    ReadiumPositionBroadcast.spineResolved(
+                        currentVReaderLocator(from: locator),
+                        spineHrefs: bilingualSpineHrefs
+                    )
+                )
             },
             // WI-8 (new-highlight): cache the finalized selection + surface the
             // designed color-picker popover (handler in `+Highlights`).

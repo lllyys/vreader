@@ -234,3 +234,107 @@ struct ReadiumEPUBHostTests {
     }
     #endif
 }
+
+/// Bug #313: the Readium host is the only format host that never posted
+/// `.readerPositionDidChange`, so `ReaderContainerView.currentLocator` stayed
+/// nil for Readium EPUBs → the TOC sheet couldn't highlight/scroll to the
+/// current chapter (and the AI-panel locator was stale). `ReadiumPositionBroadcast`
+/// is the testable seam the host's `onLocationChange` now delegates to — it
+/// posts the spine-href-carrying vreader `Locator`, and is a no-op when the
+/// relocate can't be resolved to a locator (so nothing clobbers a good
+/// `currentLocator` with garbage).
+@Suite("ReadiumPositionBroadcast (Bug #313)")
+@MainActor
+struct ReadiumPositionBroadcastTests {
+
+    private func sampleLocator(href: String = "OEBPS/ch3.xhtml") -> Locator {
+        Locator.validated(
+            bookFingerprint: DocumentFingerprint(
+                contentSHA256: String(repeating: "a", count: 64),
+                fileByteCount: 10,
+                format: .epub
+            ),
+            href: href,
+            progression: 0.25
+        )!
+    }
+
+    @Test func post_withLocator_postsReaderPositionDidChange() {
+        let center = NotificationCenter()
+        let locator = sampleLocator()
+        nonisolated(unsafe) var received: Locator?
+        let token = center.addObserver(
+            forName: .readerPositionDidChange, object: nil, queue: nil
+        ) { note in received = note.object as? Locator }
+        defer { center.removeObserver(token) }
+
+        ReadiumPositionBroadcast.post(locator, on: center)
+
+        #expect(received == locator)
+    }
+
+    @Test func post_withNil_doesNotPost() {
+        let center = NotificationCenter()
+        nonisolated(unsafe) var fired = false
+        let token = center.addObserver(
+            forName: .readerPositionDidChange, object: nil, queue: nil
+        ) { _ in fired = true }
+        defer { center.removeObserver(token) }
+
+        ReadiumPositionBroadcast.post(nil, on: center)
+
+        #expect(fired == false)
+    }
+
+    // MARK: - spineResolved gate (Codex Gate-4 MED)
+
+    @Test func spineResolved_hrefInSpine_returnsLocator() {
+        let locator = sampleLocator(href: "OEBPS/ch3.xhtml")
+        let resolved = ReadiumPositionBroadcast.spineResolved(
+            locator, spineHrefs: ["OEBPS/ch1.xhtml", "OEBPS/ch3.xhtml"]
+        )
+        #expect(resolved == locator)
+    }
+
+    @Test func spineResolved_hrefNotInSpine_returnsNil() {
+        // An unresolved Readium container-relative href that matches no spine
+        // entry must NOT be posted (else it clobbers a good currentLocator).
+        let locator = sampleLocator(href: "container/raw-unresolved.xhtml")
+        let resolved = ReadiumPositionBroadcast.spineResolved(
+            locator, spineHrefs: ["OEBPS/ch1.xhtml", "OEBPS/ch3.xhtml"]
+        )
+        #expect(resolved == nil)
+    }
+
+    @Test func spineResolved_nilLocator_returnsNil() {
+        #expect(ReadiumPositionBroadcast.spineResolved(nil, spineHrefs: ["OEBPS/ch1.xhtml"]) == nil)
+    }
+
+    @Test func spineResolved_emptySpine_returnsNil() {
+        let locator = sampleLocator()
+        #expect(ReadiumPositionBroadcast.spineResolved(locator, spineHrefs: []) == nil)
+    }
+
+    /// End-to-end through the gate: a resolved relocate reaches the bus; an
+    /// unresolved one does not (so `currentLocator` is preserved).
+    @Test func post_spineResolved_onlyPostsResolvableHref() {
+        let center = NotificationCenter()
+        let spine = ["OEBPS/ch3.xhtml"]
+        nonisolated(unsafe) var postCount = 0
+        let token = center.addObserver(
+            forName: .readerPositionDidChange, object: nil, queue: nil
+        ) { _ in postCount += 1 }
+        defer { center.removeObserver(token) }
+
+        ReadiumPositionBroadcast.post(
+            ReadiumPositionBroadcast.spineResolved(sampleLocator(href: "OEBPS/ch3.xhtml"), spineHrefs: spine),
+            on: center
+        )
+        ReadiumPositionBroadcast.post(
+            ReadiumPositionBroadcast.spineResolved(sampleLocator(href: "raw/unresolved.xhtml"), spineHrefs: spine),
+            on: center
+        )
+
+        #expect(postCount == 1)
+    }
+}

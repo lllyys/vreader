@@ -425,6 +425,7 @@
 		4597AB9A7B4EC164B6F67B67 /* AIReaderPanelDebugBridgeAIActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9BC24746B5DCBD0CF71B5EF /* AIReaderPanelDebugBridgeAIActionTests.swift */; };
 		459E1CD6D110B55F7851332B /* WebDAVProfileListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C31B8CDD80C204C332BFF2B /* WebDAVProfileListViewModel.swift */; };
 		45BA9B6254EEC5FE0FE892A2 /* NotesRowState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F472E419C207DEF572E322B /* NotesRowState.swift */; };
+		45DBBD9CCF04F7A8E16DA8E5 /* ReadiumPositionBroadcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96CB493E59DE1E803CBD3BE3 /* ReadiumPositionBroadcast.swift */; };
 		45DCD999000BA3BB43002662 /* ReaderSettingsPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523E78C49AD7945AB16A9602 /* ReaderSettingsPanelTests.swift */; };
 		45EA62BA74F57E9AC57B1BA4 /* HighlightedSnippetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631D0375777D50E5B1EDF31C /* HighlightedSnippetTests.swift */; };
 		4634CB9EF3A5D1AB09973BB2 /* AIServiceProfileDispatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28A6E86CE6A4730CD6F7D674 /* AIServiceProfileDispatchTests.swift */; };
@@ -2397,6 +2398,7 @@
 		96A2FE9743AF484093A21969 /* TTSServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSServiceTests.swift; sourceTree = "<group>"; };
 		96BE19585BF1F4C8174F7219 /* HighlightRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightRecord.swift; sourceTree = "<group>"; };
 		96C994418AB3E9CCF1914CA9 /* SettingsIconRowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsIconRowTests.swift; sourceTree = "<group>"; };
+		96CB493E59DE1E803CBD3BE3 /* ReadiumPositionBroadcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumPositionBroadcast.swift; sourceTree = "<group>"; };
 		96E10DBA312E3C1934B36E63 /* MockAnnotationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAnnotationStore.swift; sourceTree = "<group>"; };
 		96E63B3DC1B23F9594470E3B /* ContinueReadingRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinueReadingRail.swift; sourceTree = "<group>"; };
 		96E6FA59B833AC785C70A7A8 /* LibraryTouchTargetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTouchTargetTests.swift; sourceTree = "<group>"; };
@@ -4280,6 +4282,7 @@
 				63ADF5E2B0D325F0B4F552D2 /* ReadiumEPUBHost+Navigation.swift */,
 				57171272166BB46F00A14A91 /* ReadiumEPUBHost+TTSFollow.swift */,
 				495092976A763ACB8B0DF741 /* ReadiumNavigatorRepresentable.swift */,
+				96CB493E59DE1E803CBD3BE3 /* ReadiumPositionBroadcast.swift */,
 				EC85DD3A8FBE53E3D436502E /* ReadiumReaderCoordinator.swift */,
 				AC968C1CC671160D930BF4F9 /* ReadiumReaderCoordinator+Transparency.swift */,
 				566173BF61B58B66B8225A79 /* ReadiumSelectionTokenCache.swift */,
@@ -6875,6 +6878,7 @@
 				A4B263A7DDAB48522AB48E0D /* ReadiumEPUBReaderViewModel+Navigation.swift in Sources */,
 				5BB27DAA4914CE57DD0049C2 /* ReadiumEPUBReaderViewModel.swift in Sources */,
 				A15B32F95E166CD50E5CE578 /* ReadiumNavigatorRepresentable.swift in Sources */,
+				45DBBD9CCF04F7A8E16DA8E5 /* ReadiumPositionBroadcast.swift in Sources */,
 				5E8149FD3C92FE1BC4933885 /* ReadiumReaderCoordinator+Transparency.swift in Sources */,
 				931DA2D4DCE442A9BE78F2EF /* ReadiumReaderCoordinator.swift in Sources */,
 				F3D61B52408E7E4CF29C7C3F /* ReadiumSelectionHighlightBuilder.swift in Sources */,
