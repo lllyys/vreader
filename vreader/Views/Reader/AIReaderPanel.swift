@@ -117,15 +117,21 @@ struct AIReaderPanel: View {
                     onDismiss: onDismiss
                 )
 
-                Picker("Mode", selection: $selectedTab) {
-                    ForEach(AIReaderTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
+                // Bug #315: the system `.segmented` Picker washed out on the
+                // cream sheet (same class as #298). Reuse the landed
+                // `ThemedSegmentedPicker` (controlTrack trough + legible elevated
+                // pill, per-theme) so active/inactive tabs read on
+                // Paper/Sepia/Dark/OLED. Rule-51-exempt (reuses the #298/#1329
+                // token + component).
+                ThemedSegmentedPicker(
+                    options: AIReaderTab.allCases.map { (title: $0.rawValue, value: $0) },
+                    selection: $selectedTab,
+                    theme: theme,
+                    accessibilityLabel: "Mode",
+                    accessibilityIdentifier: "aiReaderTabPicker"
+                )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .accessibilityIdentifier("aiReaderTabPicker")
 
                 Color(theme.ruleColor).frame(height: 0.5)
 
