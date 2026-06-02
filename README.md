@@ -65,7 +65,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 
 - **Summarization** — scoped summaries (Section / Chapter / Book-so-far) via OpenAI-compatible API
 - **Chat** — Multi-turn conversation with book context
-- **Translation** — Bilingual interlinear (9 languages) with persistent disk cache, "Translate entire book" background job, and per-chapter re-translation with provider/style override
+- **Translation** — Bilingual interlinear (9 languages) with persistent disk cache, "Translate entire book" background job, and per-chapter re-translation with provider/style override. Set up the translation provider inline from the bilingual sheet's "Set up" / "Change…" button — a scoped in-reader AI Providers list, no trip to Settings
 - **General chat** — AI chat without book context
 
 ### Library

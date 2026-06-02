@@ -65,16 +65,61 @@ struct AIEditorContext: Identifiable, Equatable, Sendable {
 struct AIProviderListView: View {
     @Bindable var viewModel: AISettingsViewModel
 
+    /// Feature #81 reader seam: when supplied, replaces the built-in globe
+    /// empty state. The builder RECEIVES this view's internal add action so
+    /// its CTA still drives the canonical editor (`editorContext = .add()`).
+    /// Default nil → the Library globe empty state (byte-identical).
+    let emptyState: ((@escaping () -> Void) -> AnyView)?
+
+    /// Feature #81 reader seam: fired AFTER the editor sheet fully dismisses
+    /// following a successful add/edit, carrying the saved profile id +
+    /// `wasAdd`. The reader flow activates the saved provider + pops. Default
+    /// nil → Library path unchanged. (Re-emitted from `.sheet(onDismiss:)`,
+    /// NOT directly from the editor, so the reader nav stack never pops
+    /// underneath a still-present editor.)
+    let onEditorSaveSuccess: ((UUID, _ wasAdd: Bool) -> Void)?
+
+    /// Feature #81 reader seam: fired after a row tap's `setActive`
+    /// completes. The reader flow pops back to the bilingual sheet. Default
+    /// nil → Library path unchanged.
+    let onRowActivated: ((UUID) -> Void)?
+
+    init(
+        viewModel: AISettingsViewModel,
+        emptyState: ((@escaping () -> Void) -> AnyView)? = nil,
+        onEditorSaveSuccess: ((UUID, _ wasAdd: Bool) -> Void)? = nil,
+        onRowActivated: ((UUID) -> Void)? = nil
+    ) {
+        self.viewModel = viewModel
+        self.emptyState = emptyState
+        self.onEditorSaveSuccess = onEditorSaveSuccess
+        self.onRowActivated = onRowActivated
+    }
+
     /// Single Identifiable state field that drives the editor sheet
     /// (`.sheet(item:)`). Nil = no sheet; non-nil = present sheet for
     /// the wrapped target. See `AIEditorContext` for the race-fix
-    /// rationale.
-    @State private var editorContext: AIEditorContext? = nil
+    /// rationale. Internal (not `private`) so the row rendering in
+    /// `AIProviderListView+Rows.swift` can drive `.edit(profile)`.
+    @State var editorContext: AIEditorContext? = nil
+
+    /// Feature #81: buffers the editor's reported save id until the editor
+    /// sheet's `onDismiss` re-emits it to `onEditorSaveSuccess`. nil = no
+    /// pending save.
+    @State private var pendingSavedID: UUID? = nil
+    @State private var pendingSavedWasAdd: Bool = false
 
     var body: some View {
         Group {
             if viewModel.profiles.isEmpty {
-                emptyState
+                if let emptyState {
+                    // Feature #81: reader-supplied empty state. Its CTA drives
+                    // THIS view's internal add presentation so the canonical
+                    // editor is reused.
+                    emptyState({ editorContext = .add() })
+                } else {
+                    defaultEmptyState
+                }
             } else {
                 profileList
             }
@@ -94,8 +139,26 @@ struct AIProviderListView: View {
         .task {
             await viewModel.loadProfiles()
         }
-        .sheet(item: $editorContext) { context in
-            AIProviderEditSheet(viewModel: viewModel, existing: context.profile)
+        .sheet(item: $editorContext, onDismiss: {
+            // Feature #81: re-emit the editor's reported save id to the
+            // reader flow AFTER the editor sheet has fully dismissed — so
+            // the reader nav stack pops without racing the editor's own
+            // dismissal. No-op for the Library path (callback nil / no
+            // pending save).
+            if let id = pendingSavedID {
+                pendingSavedID = nil
+                onEditorSaveSuccess?(id, pendingSavedWasAdd)
+            }
+        }) { context in
+            AIProviderEditSheet(
+                viewModel: viewModel,
+                existing: context.profile,
+                onSaveSuccess: { id, wasAdd in
+                    // Buffer only — the re-emit happens in onDismiss above.
+                    pendingSavedID = id
+                    pendingSavedWasAdd = wasAdd
+                }
+            )
         }
         .alert(
             "Profile Error",
@@ -112,7 +175,10 @@ struct AIProviderListView: View {
 
     // MARK: - Empty State
 
-    private var emptyState: some View {
+    /// The Library default empty state (globe icon + generic copy). The
+    /// feature-#81 reader flow overrides this via the `emptyState` builder
+    /// param. Renamed from `emptyState` to free that name for the param.
+    private var defaultEmptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "globe")
                 .font(.system(size: 48))
@@ -138,100 +204,7 @@ struct AIProviderListView: View {
         .accessibilityIdentifier("aiProvidersEmptyState")
     }
 
-    // MARK: - Profile List
-
-    private var profileList: some View {
-        List {
-            ForEach(viewModel.profiles) { profile in
-                profileRow(profile)
-            }
-        }
-        .listStyle(.insetGrouped)
-        .accessibilityIdentifier("aiProvidersList")
-    }
-
-    @ViewBuilder
-    private func profileRow(_ profile: ProviderProfile) -> some View {
-        // Two-button row: the wide leading half (radio + text) activates
-        // the profile; a trailing pencil button opens the editor.
-        // `.buttonStyle(.borderless)` on each button is required so
-        // SwiftUI doesn't merge them into one row-wide hit area — that
-        // would re-introduce the "tap does only setActive" bug for
-        // anyone trying to land on the pencil.
-        HStack(spacing: 12) {
-            Button {
-                Task { await viewModel.setActive(profile.id) }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: viewModel.activeID == profile.id
-                          ? "largecircle.fill.circle"
-                          : "circle")
-                        .foregroundStyle(viewModel.activeID == profile.id ? .blue : .secondary)
-                        .accessibilityHidden(true)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(profile.name)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                        Text(profile.kind.displayName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(profile.baseURL.absoluteString)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("providerProfileRow_\(profile.id.uuidString)")
-            .accessibilityLabel(profile.name)
-            .accessibilityValue(viewModel.activeID == profile.id ? "Active" : "Not active")
-            // Round-1 audit finding [4]: surface the radio-style selection
-            // semantically. Without `.isSelected`, VoiceOver reports the row
-            // as a regular button and the active state is only carried in the
-            // accessibilityValue string, which is weaker than the visual UI
-            // suggests.
-            .accessibilityAddTraits(viewModel.activeID == profile.id ? [.isSelected, .isButton] : .isButton)
-            .accessibilityHint(viewModel.activeID == profile.id ? "" : "Double-tap to make active.")
-
-            // Bug #174 fix: discoverable Edit affordance. The leading-edge
-            // swipe (kept below) was the only edit entry pre-fix.
-            Button {
-                editorContext = .edit(profile)
-            } label: {
-                Image(systemName: "pencil")
-                    .font(.body)
-                    .foregroundStyle(.blue)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("editProviderProfileButton_\(profile.id.uuidString)")
-            .accessibilityLabel("Edit \(profile.name)")
-            .accessibilityHint("Opens the editor for this provider.")
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                Task { await viewModel.deleteProfile(profile.id) }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .accessibilityIdentifier("deleteProviderProfile_\(profile.id.uuidString)")
-        }
-        // Leading-edge swipe remains as a power-user shortcut. Mirrors
-        // Mail.app's common Edit + Delete row gesture pair.
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            Button {
-                editorContext = .edit(profile)
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            .tint(.blue)
-            .accessibilityIdentifier("editProviderProfile_\(profile.id.uuidString)")
-        }
-    }
+    // Row activation + the profile list/row rendering live in
+    // `AIProviderListView+Rows.swift` to keep this file under the ~300-line
+    // guideline (rule 50 §9).
 }

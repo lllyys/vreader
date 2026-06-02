@@ -48,6 +48,15 @@ struct AIProviderEditSheet: View {
     /// Non-nil = edit-mode, pre-fill from this profile. Nil = add-mode.
     let existing: ProviderProfile?
 
+    /// Feature #81: reader-flow hook fired AFTER a successful add/update,
+    /// just before `dismiss()`. `wasAdd` is true for add-mode. Default nil
+    /// → the Library presentation path is unchanged. `AIProviderListView`
+    /// (not the reader) supplies this to buffer the saved id and re-emit it
+    /// from its own `.sheet(onDismiss:)` once the editor fully dismisses
+    /// (avoids popping the reader nav stack underneath a still-present
+    /// editor sheet).
+    let onSaveSuccess: ((UUID, _ wasAdd: Bool) -> Void)?
+
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - Form State
@@ -85,9 +94,14 @@ struct AIProviderEditSheet: View {
     // kind's default. If it doesn't match, the user typed something
     // custom and we leave it alone. No timing assumptions, no flags.
 
-    init(viewModel: AISettingsViewModel, existing: ProviderProfile?) {
+    init(
+        viewModel: AISettingsViewModel,
+        existing: ProviderProfile?,
+        onSaveSuccess: ((UUID, _ wasAdd: Bool) -> Void)? = nil
+    ) {
         self.viewModel = viewModel
         self.existing = existing
+        self.onSaveSuccess = onSaveSuccess
 
         if let existing {
             _profileID = State(initialValue: existing.id)
@@ -196,6 +210,11 @@ struct AIProviderEditSheet: View {
         }
 
         if viewModel.editorError == nil {
+            // Feature #81: report the saved id BEFORE dismissing so the
+            // reader flow (via AIProviderListView's onDismiss re-emission)
+            // can activate it as the bilingual engine + pop. `existing ==
+            // nil` distinguishes add from edit. Library path: nil → no-op.
+            onSaveSuccess?(profileID, existing == nil)
             dismiss()
         }
     }

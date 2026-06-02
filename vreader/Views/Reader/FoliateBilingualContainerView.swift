@@ -304,7 +304,7 @@ struct FoliateBilingualContainerView: View {
         // Observers live on the coordinator — no extra wiring is needed
         // here in the container.
         .sheet(isPresented: $showBilingualSetupSheet) {
-            BilingualSetupSheet(
+            BilingualSetupSheetContainer(
                 theme: settingsStore?.theme ?? .paper,
                 state: $bilingualSetupState,
                 engineDescriptor: BilingualEngineDescriptor(
@@ -314,7 +314,10 @@ struct FoliateBilingualContainerView: View {
                 ),
                 onConfirm: { confirmBilingualSetup() },
                 onCancel: { cancelBilingualSetup() },
-                onOpenSettings: { cancelBilingualSetup() }
+                // Feature #81: "Set up" / "Change…" pushes the scoped AI
+                // Providers list (handled inside the container); on configure
+                // it refreshes this strip + pops back.
+                onConfigured: { await bilingualViewModel?.refreshAIConfigured() }
             )
             // Bug #301: re-resolve live AI readiness each time the sheet
             // appears, so the engine strip is truthful even if AI settings
