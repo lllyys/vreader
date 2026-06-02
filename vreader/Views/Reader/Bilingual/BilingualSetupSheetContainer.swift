@@ -1,14 +1,14 @@
 // Purpose: Feature #81 — the shared wrapper that all 6 bilingual hosts present
 // instead of a bare `BilingualSetupSheet`. Wraps the setup sheet in a
 // `NavigationStack` so the engine strip's "Set up" / "Change…" button pushes
-// the scoped `ReaderAIProvidersView` (slide-left, `‹ Bilingual` back) instead
+// the scoped `ReaderAIReadinessView` (slide-left, `‹ Bilingual` back) instead
 // of dismissing. On a provider becoming the active engine it refreshes the
 // strip and pops back to the bilingual root.
 //
 // Key decisions:
 // - **Root keeps its own `ReaderSheetChrome`.** The system nav bar is hidden on
 //   the root (`.toolbar(.hidden, for: .navigationBar)`) so there's no double
-//   chrome; only the pushed `ReaderAIProvidersView` shows the system nav bar.
+//   chrome; only the pushed `ReaderAIReadinessView` shows the system nav bar.
 // - **Navigation + activation live in `ReaderAIProvidersFlow`** (a `@State`
 //   model) so the logic is unit-tested without a render path. The container is
 //   thin wiring: present root → push on `onOpenSettings` → the flow handles
@@ -18,7 +18,7 @@
 //   `engineDescriptor` / `onConfirm` / `onCancel` bindings as before, plus an
 //   `onConfigured` that refreshes the host's `bilingualViewModel`.
 //
-// @coordinates-with: BilingualSetupSheet.swift, ReaderAIProvidersView.swift,
+// @coordinates-with: BilingualSetupSheet.swift, ReaderAIReadinessView.swift,
 //   ReaderAIProvidersFlow.swift, ReaderSheetChrome.swift,
 //   `dev-docs/designs/vreader-fidelity-v1/project/design-notes/reader-ai-provider-entry.md`
 
@@ -70,7 +70,7 @@ struct BilingualSetupSheetContainer: View {
             )
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $flow.showingProviders) {
-                ReaderAIProvidersView(theme: theme, flow: flow)
+                ReaderAIReadinessView(theme: theme, flow: flow)
             }
         }
     }
