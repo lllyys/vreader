@@ -78,11 +78,14 @@ struct BookImporterTests {
 
     // MARK: - Feature #42 Phase 2 WI-4b: Kindle convert-on-import (gated)
 
-    @Test("flag OFF + AZW3 → imported as native .azw3 (today's behavior)")
+    @Test("flag OFF (explicit override) + AZW3 → imported as native .azw3")
     func convertOnImportFlagOffKeepsAzw3() async throws {
         guard let azw3 = try copyRealAzw3ToTemp() else { return }  // CI / no fixture
         defer { try? FileManager.default.removeItem(at: azw3) }
-        let flags = FeatureFlags(environment: .prod)  // kindleConvertOnImport default OFF
+        let flags = FeatureFlags(environment: .prod)
+        // Convert-on-import is now default ON (Phase-2 G2 flip) — set the override
+        // OFF explicitly to exercise the native (revert) path.
+        flags.setOverride(false, for: .kindleConvertOnImport)
         let (importer, _, sandbox) = try await makeImporter(featureFlags: flags)
         defer { try? FileManager.default.removeItem(at: sandbox) }
 

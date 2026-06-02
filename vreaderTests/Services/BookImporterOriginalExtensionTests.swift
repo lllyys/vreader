@@ -33,8 +33,13 @@ struct BookImporterOriginalExtensionTests {
     private func makeImporter() async throws -> (BookImporter, MockPersistenceActor, URL) {
         let mock = MockPersistenceActor()
         let sandbox = try makeSandboxDir()
+        // Native Kindle extension-preservation tests: convert-on-import is now
+        // default ON (Phase-2 G2), so pin the override OFF to test the native
+        // .azw3 path deterministically (not via the synthetic-fixture fallback).
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(false, for: .kindleConvertOnImport)
         return (
-            BookImporter(persistence: mock, sandboxBooksDirectory: sandbox),
+            BookImporter(persistence: mock, sandboxBooksDirectory: sandbox, featureFlags: flags),
             mock,
             sandbox
         )

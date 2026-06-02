@@ -28,9 +28,16 @@ struct BookImporterAZW3Tests {
     private func makeImporter() async throws -> (BookImporter, MockPersistenceActor, URL) {
         let mock = MockPersistenceActor()
         let sandbox = try makeSandboxDir()
+        // These tests exercise native Kindle format-normalization (.mobi/.azw/.prc →
+        // canonical .azw3), independent of convert-on-import (now default ON, Phase-2
+        // G2). Pin the override OFF so they test the native path deterministically,
+        // not via the unconvertible-synthetic-fixture conversion fallback.
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(false, for: .kindleConvertOnImport)
         let importer = BookImporter(
             persistence: mock,
-            sandboxBooksDirectory: sandbox
+            sandboxBooksDirectory: sandbox,
+            featureFlags: flags
         )
         return (importer, mock, sandbox)
     }

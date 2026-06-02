@@ -20,15 +20,20 @@ struct FeatureFlagsTests {
         #expect(flags.isEnabled(.sync) == false)
     }
 
-    // Feature #42 Phase 2 WI-4a: convert-on-import ships dark (default OFF).
-    @Test func kindleConvertOnImportDefaultOff() {
+    // Feature #42 Phase 2 (human-gated G2 flip 2026-06-02): convert-on-import is
+    // now default ON in every environment.
+    @Test func kindleConvertOnImportDefaultOn() {
         for env in [AppEnvironment.prod, .staging, .dev] {
-            #expect(FeatureFlags(environment: env).isEnabled(.kindleConvertOnImport) == false)
+            #expect(FeatureFlags(environment: env).isEnabled(.kindleConvertOnImport) == true)
         }
     }
 
     @Test func kindleConvertOnImportHonorsOverride() {
         let flags = FeatureFlags(environment: .prod)
+        // Persisted-revertable (symmetric with readiumEPUBEngine): a user can turn
+        // convert-on-import OFF to keep native Foliate-rendered Kindle.
+        flags.setOverride(false, for: .kindleConvertOnImport)
+        #expect(flags.isEnabled(.kindleConvertOnImport) == false)
         flags.setOverride(true, for: .kindleConvertOnImport)
         #expect(flags.isEnabled(.kindleConvertOnImport) == true)
     }
@@ -210,6 +215,26 @@ struct FeatureFlagsTests {
         // Removing the persisted override restores the new ON default.
         reloaded.removeOverride(for: .readiumEPUBEngine)
         #expect(reloaded.readiumEPUBEngine == true)
+    }
+
+    @Test func kindleConvertOnImportOverridePersists() {
+        // Feature #42 Phase 2 G2 flip: the persisted OFF override must survive a
+        // reload, beating the new ON default — the path a user who keeps native
+        // Foliate-rendered Kindle relies on. Discriminating (persist `false`): a
+        // regression dropping `.kindleConvertOnImport` from `persistedFlags` would
+        // make the reload read the ON default and fail.
+        let suiteName = "test.kindleConvertOnImport.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let flags = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        flags.setOverride(false, for: .kindleConvertOnImport)
+        #expect(defaults.bool(forKey: "com.vreader.featureFlags.kindleConvertOnImport") == false)
+
+        let reloaded = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        #expect(reloaded.isEnabled(.kindleConvertOnImport) == false)
+        reloaded.removeOverride(for: .kindleConvertOnImport)
+        #expect(reloaded.isEnabled(.kindleConvertOnImport) == true)
     }
 
     // MARK: - Feature #71: epubContinuousScroll

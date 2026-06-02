@@ -2,7 +2,7 @@
 
 ## Overview
 
-VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT, EPUB, AZW3/MOBI, PDF, and Markdown formats, each rendered by a format-specific native host (UIKit/WebView bridges) selected internally by `ReaderEngine` (feature #54). AZW3/MOBI is rendered via Foliate-js inside a WKWebView. The `UnifiedTextRenderer` (TextKit 2 reflow) stack is retained in the codebase but no longer wired into the reader dispatch.
+VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT, EPUB, AZW3/MOBI, PDF, and Markdown formats, each rendered by a format-specific native host (UIKit/WebView bridges) selected internally by `ReaderEngine` (feature #54). AZW3/MOBI is rendered via Foliate-js inside a WKWebView. **Feature #42 Phase 2 (`kindleConvertOnImport`, default ON since the G2 flip 2026-06-02):** NEW AZW3/MOBI/KF8/PRC imports are converted to a first-class EPUB at import time (via the vendored libmobi MOBI→EPUB converter) and render via the default Readium EPUB engine; already-imported native `.azw3` books are unchanged and keep rendering via Foliate, and a user can revert via the persisted `kindleConvertOnImport` override OFF. The `UnifiedTextRenderer` (TextKit 2 reflow) stack is retained in the codebase but no longer wired into the reader dispatch.
 
 ## System Diagram
 

@@ -192,9 +192,10 @@ struct VReaderApp: App {
                 consentManager: AIConsentManager()
             )
 
-            // Feature #42 Phase 2 WI-5 (DEBUG): force convert-on-import ON for
-            // device verification. The flag is default-OFF (ships dark) until
-            // the human-gated flip; this override only applies to a launch that
+            // Feature #42 Phase 2 (DEBUG): force convert-on-import ON for a
+            // verification run regardless of any persisted override. Since the G2
+            // flip (2026-06-02) the flag is default-ON, so this is now mainly a
+            // way to override a persisted OFF; it only applies to a launch that
             // explicitly passes --enable-kindle-convert.
             if config.enableKindleConvert {
                 FeatureFlags.shared.setOverride(true, for: .kindleConvertOnImport)

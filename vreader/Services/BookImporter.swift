@@ -144,8 +144,9 @@ final class BookImporter: BookImporting, Sendable {
             throw ImportError.fileNotReadable("File does not exist or is not readable")
         }
 
-        // Step 3.5 (Feature #42 Phase 2 WI-4b): Kindle convert-on-import (gated,
-        // default OFF). When ON and the file is a Kindle format, convert it to a
+        // Step 3.5 (Feature #42 Phase 2 WI-4b): Kindle convert-on-import (default
+        // ON since the G2 flip 2026-06-02; a user can override OFF for native
+        // Foliate Kindle). When ON and the file is a Kindle format, convert it to a
         // self-describing EPUB and run the ENTIRE rest of the pipeline over the
         // converted file — so identity/fingerprint/blob/metadata are all the
         // EPUB's (a first-class EPUB; design decisions #1/#2). The source's own

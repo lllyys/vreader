@@ -6,8 +6,9 @@
 // - Reference type (class) so AIService/SyncService see live changes via .shared.
 // - Thread-safe via OSAllocatedUnfairLock (iOS 16+, os framework).
 // - `static let shared` singleton configured once at startup via configure(environment:).
-// - Persisted flags (`aiAssistant`, `epubContinuousScroll`, `readiumEPUBEngine`) write their overrides
-//   to UserDefaults for cross-launch stickiness; see `persistedFlags`.
+// - Persisted flags (`aiAssistant`, `epubContinuousScroll`, `readiumEPUBEngine`,
+//   `kindleConvertOnImport`) write their overrides to UserDefaults for cross-launch
+//   stickiness; see `persistedFlags`.
 // - Non-persisted overrides remain session-scoped.
 // - Convenience init(environment:) creates standalone instances for testing.
 //
@@ -38,11 +39,11 @@ enum FeatureFlagKey: String, Sendable, CaseIterable {
     /// the legacy `Locator` keeps positions safe when toggling back).
     case readiumEPUBEngine
     /// Feature #42 Phase 2: convert Kindle files (AZW3/MOBI/KF8/PRC) to EPUB at
-    /// import time so they render via the (now-default) Readium EPUB engine
-    /// instead of the Foliate spike. **Default OFF** — the capability ships dark;
-    /// the flip is a separate human-gated decision after WI-5 device
-    /// verification. OFF → AZW3 imports native + renders via Foliate (today's
-    /// behavior). Not persisted yet (no user-facing toggle until the flip).
+    /// import time so they render via the (default) Readium EPUB engine instead of
+    /// the Foliate spike. **Default ON** since the human-gated G2 flip (2026-06-02,
+    /// after WI-5 device verification). Persisted (in `persistedFlags`): a user can
+    /// override OFF to keep native AZW3 import + Foliate rendering. Affects only NEW
+    /// imports — already-imported native `.azw3` books are unchanged.
     case kindleConvertOnImport
 }
 
@@ -69,7 +70,7 @@ nonisolated final class FeatureFlags: Sendable {
     private static let persistenceKeyPrefix = "com.vreader.featureFlags."
 
     /// Flags that are persisted to UserDefaults when overridden.
-    private static let persistedFlags: Set<FeatureFlagKey> = [.aiAssistant, .epubContinuousScroll, .readiumEPUBEngine]
+    private static let persistedFlags: Set<FeatureFlagKey> = [.aiAssistant, .epubContinuousScroll, .readiumEPUBEngine, .kindleConvertOnImport]
 
     // MARK: - Shared Singleton
 
@@ -247,10 +248,16 @@ nonisolated final class FeatureFlags: Sendable {
             // `EPUBWebViewBridge` via the persisted override (see the enum doc).
             return true
         case .kindleConvertOnImport:
-            // Feature #42 Phase 2: ships dark (default OFF in every environment).
-            // Flag-ON convert-on-import is enabled progressively after WI-5
-            // device verification + a human-gated flip.
-            return false
+            // Feature #42 Phase 2 (human-gated G2 flip, 2026-06-02): default ON.
+            // AZW3/MOBI/PRC now convert to first-class EPUB on import (rendered via
+            // the default Readium engine) instead of importing native-to-Foliate.
+            // The MOBI→EPUB converter + the gated `BookImporter` wiring were
+            // device-verified at WI-5 (`dev-docs/verification/feature-42-p2-wi5-20260602.md`,
+            // result=pass), and #307 preserves the Kindle-convert origin across a
+            // dedupe re-import. Symmetric with the Phase-1 `readiumEPUBEngine` flip.
+            // Users can revert to native Foliate-rendered Kindle via the persisted
+            // override OFF (see `persistedFlags`).
+            return true
         }
     }
 }
