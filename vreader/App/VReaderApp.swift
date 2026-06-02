@@ -192,6 +192,14 @@ struct VReaderApp: App {
                 consentManager: AIConsentManager()
             )
 
+            // Feature #42 Phase 2 WI-5 (DEBUG): force convert-on-import ON for
+            // device verification. The flag is default-OFF (ships dark) until
+            // the human-gated flip; this override only applies to a launch that
+            // explicitly passes --enable-kindle-convert.
+            if config.enableKindleConvert {
+                FeatureFlags.shared.setOverride(true, for: .kindleConvertOnImport)
+            }
+
             // Seed test data before creating the ViewModel to avoid race with LibraryView.loadBooks().
             // Uses Task.detached + semaphore to block init until seeding completes.
             // Bounded timeout prevents indefinite hang if seeding fails.
@@ -538,6 +546,11 @@ struct TestLaunchConfig: Sendable {
     /// without a real audio session (which fails to activate under
     /// XCUITest headless mode on iPhone 17 Pro Simulator).
     let ttsTestMode: Bool
+    /// `--enable-kindle-convert` (feature #42 Phase 2 WI-5, DEBUG): force
+    /// `FeatureFlags.kindleConvertOnImport` ON so a verification run can import a
+    /// Kindle file and confirm it converts to a first-class EPUB. The flag is
+    /// otherwise default-OFF (ships dark until the human-gated flip).
+    let enableKindleConvert: Bool
 
     /// Parses launch arguments into a typed config.
     /// Unknown flags are silently ignored.
@@ -596,7 +609,8 @@ struct TestLaunchConfig: Sendable {
             enableAI: args.contains("--enable-ai"),
             enableSync: args.contains("--enable-sync"),
             reduceMotion: args.contains("--reduce-motion"),
-            ttsTestMode: args.contains("--tts-test-mode")
+            ttsTestMode: args.contains("--tts-test-mode"),
+            enableKindleConvert: args.contains("--enable-kindle-convert")
         )
     }
 
@@ -621,7 +635,8 @@ struct TestLaunchConfig: Sendable {
         enableAI: false,
         enableSync: false,
         reduceMotion: false,
-        ttsTestMode: false
+        ttsTestMode: false,
+        enableKindleConvert: false
     )
 }
 
