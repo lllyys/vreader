@@ -61,6 +61,19 @@ final class BilingualReadingViewModel {
     /// `true` when the first-enable setup sheet should be presented.
     private(set) var needsSetupSheet: Bool = false
 
+    /// Bug #301: the LIVE "is the AI provider ready for bilingual" state — the
+    /// SAME gate `AIService` enforces (aiAssistant + consent + active profile +
+    /// per-profile key), resolved async via `BilingualAIReadiness`. Read by the
+    /// setup-sheet `engineDescriptor` so it truthfully shows whether bilingual
+    /// will translate (it previously hardcoded `configured: true`). Refreshed by
+    /// the host when the VM is built / the setup sheet is about to show.
+    private(set) var aiConfigured: Bool = false
+
+    /// Re-resolve `aiConfigured` against the live provider/flag/consent state.
+    func refreshAIConfigured() async {
+        aiConfigured = await BilingualAIReadiness.resolve()
+    }
+
     /// `true` while at least one prefetch `Task` is in flight.
     var isFetching: Bool = false
 

@@ -112,6 +112,9 @@ extension PDFReaderContainerView {
             )
         )
         bilingualViewModel = vm
+        // Bug #301: resolve the LIVE AI-readiness so the setup-sheet
+        // engineDescriptor (`configured`) is truthful, not hardcoded.
+        Task { await vm.refreshAIConfigured() }
         if vm.needsSetupSheet {
             showBilingualSetupSheet = true
             bilingualSetupState = BilingualSetupSheetState(
@@ -282,7 +285,7 @@ extension PDFReaderContainerView {
             theme: settingsStore?.theme ?? .paper,
             state: $bilingualSetupState,
             engineDescriptor: BilingualEngineDescriptor(
-                configured: true,
+                configured: bilingualViewModel?.aiConfigured ?? false,
                 providerName: nil,
                 subtitle: nil
             ),
@@ -294,6 +297,10 @@ extension PDFReaderContainerView {
                 cancelBilingualSetup()
             }
         )
+        // Bug #301: re-resolve live AI readiness each time the sheet
+        // appears, so the engine strip is truthful even if AI settings
+        // changed after the reader VM was first built (audit-Medium).
+        .task { await bilingualViewModel?.refreshAIConfigured() }
     }
 }
 
