@@ -137,7 +137,13 @@ actor ChapterTranslationService {
         providerProfileID: UUID,
         config: ResolvedAIProviderConfig,
         style: TranslationStyle,
-        granularity: TranslationGranularity = .paragraph
+        granularity: TranslationGranularity = .paragraph,
+        // Bug #311: optional real progress source. Fired after each chunk
+        // completes with `(completedChunks, totalChunks)` so a caller (the
+        // re-translate VM) can drive an honest N-of-M progress bar instead of
+        // a faked 0.5 pin during the opaque per-chunk network phase. nil by
+        // default — the whole-book coordinator + bilingual paths don't use it.
+        onChunkProgress: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> ChapterTranslationResult {
         let lookupKey = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: bookFingerprintKey,
@@ -185,6 +191,7 @@ actor ChapterTranslationService {
         var translated = [String](repeating: "", count: segments.count)
 
         do {
+            var completedChunks = 0
             for chunk in chunks {
                 try Task.checkCancellation()
                 let chunkSegments = chunk.map { segments[$0] }
@@ -193,6 +200,10 @@ actor ChapterTranslationService {
                 for (offset, segmentIndex) in chunk.enumerated() {
                     translated[segmentIndex] = chunkResult[offset]
                 }
+                // Bug #311: real N-of-M progress — fire AFTER the chunk's
+                // segments land so the count reflects committed work.
+                completedChunks += 1
+                onChunkProgress?(completedChunks, chunks.count)
             }
         } catch is CancellationError {
             // The between-chunk Task.checkCancellation() throws a raw

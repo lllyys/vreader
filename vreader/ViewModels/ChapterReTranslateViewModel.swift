@@ -20,10 +20,12 @@
 // - **Source text comes through a closure** (`sourceTextProvider`) so a test
 //   can supply a deterministic string without standing up a real
 //   `ChapterTextProviding` actor. The host wires it to the live provider.
-// - **Two-step progress is faked** (0% on submit, 50% on resolve, 100% on
-//   complete). The translation service is opaque — we cannot stream per-chunk
-//   progress, so a coarse tick keeps the progress bar honest (it animates,
-//   but never lies about a chunk it hasn't started).
+// - **Progress is real N-of-M** (Bug #311). Setup ticks 0% → 0.25 (cache
+//   delete) → 0.5 (provider resolved); the translate phase then advances 0.5 →
+//   0.95 driven by `ChapterTranslationService`'s per-chunk `onChunkProgress`
+//   callback (committed-chunk count), and 1.0 is set when the flow finishes
+//   (cache-write + host apply). Previously the translate phase was a faked 0.5
+//   pin for the whole opaque request, which read as "stuck" on slow chapters.
 // - **Empty source text completes immediately** — the runner is skipped, the
 //   host callback is called with `[]`, the sheet moves to `.complete`. Mirrors
 //   the service's own empty-segments contract (`translate(...)` returns
@@ -107,9 +109,9 @@ final class ChapterReTranslateViewModel {
     /// translation uses it.
     private(set) var targetLanguage: String = "Chinese"
 
-    /// Two-step coarse progress (0.0 / 0.5 / 1.0). The translation service is
-    /// opaque so per-chunk progress isn't available; this keeps the bar
-    /// animated without lying about chunks.
+    /// Progress for the in-flight re-translate (Bug #311): 0 → 0.25 (cache
+    /// delete) → 0.5 (provider resolved) → 0.5…0.95 (real per-chunk N-of-M from
+    /// the service's `onChunkProgress`) → 1.0 (applied). Monotonic.
     private(set) var progress: Double = 0.0
 
     /// The most recent error message, displayed inline at the top of the
@@ -154,6 +156,16 @@ final class ChapterReTranslateViewModel {
 
     /// In-flight translation task — cancelled by `cancel()`.
     private var inFlightTask: Task<Void, Never>?
+
+    /// Bug #311 (Codex Gate-4 Medium): monotonically-increasing run id. Each
+    /// `submit()` captures the current value into its per-chunk progress
+    /// callback; `applyChunkProgress` applies a tick ONLY if its captured
+    /// generation still matches AND the sheet is still `.running`. Bumped on
+    /// `submit()` (new run), `cancel()`, and `dismiss()` so a queued tick from a
+    /// cancelled / superseded / finished run can never move a new or idle bar
+    /// (the `max()` guard alone only protects the terminal 1.0, not the reset-to-
+    /// 0.0 cancel / retry paths).
+    private var runGeneration = 0
 
     init(
         bookFingerprintKey: String,
@@ -204,6 +216,7 @@ final class ChapterReTranslateViewModel {
     func dismiss() {
         inFlightTask?.cancel()
         inFlightTask = nil
+        runGeneration &+= 1  // invalidate any queued progress ticks
         sheetState = .dismissed
         progress = 0.0
     }
@@ -213,6 +226,7 @@ final class ChapterReTranslateViewModel {
     func cancel() {
         inFlightTask?.cancel()
         inFlightTask = nil
+        runGeneration &+= 1  // invalidate any queued progress ticks from this run
         progress = 0.0
         // A cancel from .running returns to .picker so the user can decide
         // whether to retry or change selection.
@@ -241,6 +255,8 @@ final class ChapterReTranslateViewModel {
             return
         }
 
+        runGeneration &+= 1
+        let generation = runGeneration
         sheetState = .running
         progress = 0.0
         lastError = nil
@@ -251,7 +267,7 @@ final class ChapterReTranslateViewModel {
         // `inFlightTask` field.
         let task: Task<Void, Never> = Task { [weak self] in
             guard let self else { return }
-            await self.runSubmit(unit: unit)
+            await self.runSubmit(unit: unit, generation: generation)
         }
         inFlightTask = task
         await task.value
@@ -260,7 +276,7 @@ final class ChapterReTranslateViewModel {
 
     /// The inner submit pipeline. Split out so the Task body is small and the
     /// guard / progression is obvious.
-    private func runSubmit(unit: TranslationUnitID) async {
+    private func runSubmit(unit: TranslationUnitID, generation: Int) async {
         // 1. Delete the cache row for the ORIGINAL profile so a subsequent
         //    cache lookup on the original key returns nil. The new translation
         //    lands under the (potentially overridden) picker key; the original
@@ -338,7 +354,14 @@ final class ChapterReTranslateViewModel {
                 providerProfileID: selection.providerProfileID,
                 config: config,
                 style: selection.style,
-                granularity: .paragraph)
+                granularity: .paragraph,
+                // Bug #311: real N-of-M progress. The service fires this from
+                // its actor as each chunk lands; hop to the main actor to update
+                // the @Observable bar. `applyChunkProgress` is monotonic-guarded
+                // so a late callback can never undo the terminal 1.0 below.
+                onChunkProgress: { [weak self] done, total in
+                    Task { @MainActor in self?.applyChunkProgress(done, total, generation: generation) }
+                })
         } catch is CancellationError {
             // Cancellation: cancel() already restored state. Bail.
             return
@@ -353,6 +376,35 @@ final class ChapterReTranslateViewModel {
         // 5. Apply translations to the bilingual VM (via host callback).
         onTranslationApplied?(unit, result.segments)
         sheetState = .complete
+    }
+
+    // MARK: - Progress mapping (Bug #311)
+
+    /// Maps real chunk completion into the translate phase's slice of the bar.
+    /// The flow is 0.25 (cache delete) → 0.5 (provider resolved) → [translate]
+    /// → 1.0 (applied); this owns the [translate] slice: a 0.5 baseline at zero
+    /// chunks rising toward — but never reaching — 1.0, because the terminal 1.0
+    /// is set only when the whole flow finishes (cache-write + host apply), so
+    /// the bar never claims 100% mid-flight. `totalChunks <= 0` (defensive, e.g.
+    /// an empty chunking) returns the 0.5 baseline.
+    static func translateProgress(chunksDone: Int, totalChunks: Int) -> Double {
+        guard totalChunks > 0 else { return 0.5 }
+        let clamped = min(max(chunksDone, 0), totalChunks)
+        let fraction = Double(clamped) / Double(totalChunks)
+        // Translate phase occupies 0.5 → 0.95; the 0.95…1.0 head is reserved
+        // for the post-translate cache-write + apply.
+        return 0.5 + 0.45 * fraction
+    }
+
+    /// Applies a per-chunk progress tick to `progress`. Guards (Codex Gate-4
+    /// Medium): the tick is dropped unless its captured `generation` still
+    /// matches the current run AND the sheet is still `.running` — so a tick
+    /// queued (via the actor→main hop) by a cancelled / superseded / finished
+    /// run can't move a new or idle bar. Within a live run it is MONOTONIC: the
+    /// mapped value is always < 1.0, so a late tick can't undo the terminal 1.0.
+    private func applyChunkProgress(_ chunksDone: Int, _ totalChunks: Int, generation: Int) {
+        guard generation == runGeneration, sheetState == .running else { return }
+        progress = max(progress, Self.translateProgress(chunksDone: chunksDone, totalChunks: totalChunks))
     }
 
     // MARK: - Error formatting

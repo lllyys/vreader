@@ -82,8 +82,26 @@ struct ChapterReTranslateViewModelTests {
     actor MockTranslationRunner: ChapterReTranslating {
         private(set) var calls: [(unit: TranslationUnitID, style: TranslationStyle, providerProfileID: UUID, model: String)] = []
         private let result: Result<ChapterTranslationResult, Error>
+        /// Bug #311: when > 0, fire `onChunkProgress(i, n)` for i in 1...n to
+        /// simulate the real per-chunk ticks the service emits.
+        private let simulateChunks: Int
+        /// Bug #311: records whether the VM passed a non-nil progress callback.
+        private(set) var receivedProgressCallback = false
+        /// Bug #311 (Codex Gate-4 Low): when true, stash the callback instead of
+        /// firing it, so a test can fire a STALE tick after cancel()/dismiss()/a
+        /// second submit() and assert the run-generation guard ignores it.
+        private let captureCallback: Bool
+        private var capturedCallback: (@Sendable (Int, Int) -> Void)?
 
-        init(result: Result<ChapterTranslationResult, Error>) { self.result = result }
+        init(
+            result: Result<ChapterTranslationResult, Error>,
+            simulateChunks: Int = 0,
+            captureProgressCallback: Bool = false
+        ) {
+            self.result = result
+            self.simulateChunks = simulateChunks
+            self.captureCallback = captureProgressCallback
+        }
 
         func translateForRetranslate(
             bookFingerprintKey: String,
@@ -93,10 +111,22 @@ struct ChapterReTranslateViewModelTests {
             providerProfileID: UUID,
             config: ResolvedAIProviderConfig,
             style: TranslationStyle,
-            granularity: TranslationGranularity
+            granularity: TranslationGranularity,
+            onChunkProgress: (@Sendable (Int, Int) -> Void)?
         ) async throws -> ChapterTranslationResult {
             calls.append((unit, style, providerProfileID, config.model))
+            receivedProgressCallback = (onChunkProgress != nil)
+            if captureCallback { capturedCallback = onChunkProgress }
+            if simulateChunks > 0, let cb = onChunkProgress {
+                for i in 1...simulateChunks { cb(i, simulateChunks) }
+            }
             return try result.get()
+        }
+
+        /// Fires the callback captured during the most recent translate, as if a
+        /// late chunk from that (now-finished/superseded) run just landed.
+        func fireCapturedProgress(_ done: Int, _ total: Int) {
+            capturedCallback?(done, total)
         }
     }
 
@@ -157,6 +187,77 @@ struct ChapterReTranslateViewModelTests {
 
         vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
         vm.dismiss()
+        #expect(vm.sheetState == .dismissed)
+    }
+
+    // MARK: - Bug #311: real per-chunk progress (not pinned at 0.5)
+
+    /// The translate-phase mapping starts at the 0.5 post-resolve baseline, is
+    /// strictly monotonic in completed chunks, and stays below 1.0 even at full
+    /// completion (the terminal 1.0 is reserved for the whole flow finishing) —
+    /// so the bar advances honestly during a slow chapter instead of pinning.
+    @Test func translateProgressMapping_isMonotonic_andBoundedBelowComplete() {
+        let total = 4
+        let p0 = ChapterReTranslateViewModel.translateProgress(chunksDone: 0, totalChunks: total)
+        let p1 = ChapterReTranslateViewModel.translateProgress(chunksDone: 1, totalChunks: total)
+        let p2 = ChapterReTranslateViewModel.translateProgress(chunksDone: 2, totalChunks: total)
+        let p4 = ChapterReTranslateViewModel.translateProgress(chunksDone: 4, totalChunks: total)
+        #expect(p0 == 0.5)                        // baseline == post-resolve
+        #expect(p1 > p0 && p2 > p1 && p4 > p2)    // strictly monotonic
+        #expect(p4 < 1.0 && p4 <= 0.95)           // full chunks < 100% (flow not done)
+        // defensive: empty chunking returns the baseline, never NaN/∞
+        #expect(ChapterReTranslateViewModel.translateProgress(chunksDone: 0, totalChunks: 0) == 0.5)
+        // clamps an over-count rather than exceeding the band
+        #expect(ChapterReTranslateViewModel.translateProgress(chunksDone: 9, totalChunks: total) <= 0.95)
+    }
+
+    /// Bug #311: the VM must pass a real per-chunk progress callback into the
+    /// runner (pre-fix it passed none, so the bar pinned at 0.5 for the entire
+    /// opaque translate and read as "stuck"). The mock fires 3 chunk ticks; we
+    /// assert the runner RECEIVED a non-nil callback and the flow still
+    /// completes at 1.0.
+    @Test func submit_passesPerChunkProgressCallback_toRunner() async throws {
+        let store = try Self.makeStore()
+        let unit = Self.unit("ch6")
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(
+            result: .success(ChapterTranslationResult(segments: ["新一", "新二"], fromCache: false)),
+            simulateChunks: 3)
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+        vm.presentPicker(unit: unit, unitTitle: "ch6", targetLanguage: "Chinese")
+
+        await vm.submit()
+
+        #expect(await runner.receivedProgressCallback,
+                "VM must pass a per-chunk progress callback so the bar isn't pinned at 0.5")
+        #expect(vm.sheetState == .complete)
+        #expect(vm.progress == 1.0)
+    }
+
+    /// Bug #311 (Codex Gate-4 Medium): a per-chunk tick that is delivered (via
+    /// the actor→main hop) AFTER the run finished and the sheet was dismissed
+    /// must NOT push the now-idle bar back into the 0.5–0.95 translate band. The
+    /// run-generation + `.running` guard drops it. (The `max()` guard alone
+    /// would not — it only protects the terminal 1.0, not the reset-to-0.0.)
+    @Test func staleChunkTick_afterDismiss_doesNotMoveIdleBar() async throws {
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(
+            result: .success(ChapterTranslationResult(segments: ["新一"], fromCache: false)),
+            captureProgressCallback: true)
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+        vm.presentPicker(unit: Self.unit("ch6"), unitTitle: "ch6", targetLanguage: "Chinese")
+        await vm.submit()                 // run completes; runner captured the callback
+        vm.dismiss()                      // idle: progress 0.0, generation invalidated
+        #expect(vm.progress == 0.0)
+
+        // A late chunk tick from the finished + dismissed run arrives:
+        await runner.fireCapturedProgress(2, 4)
+        // Drain the @MainActor hop the VM's callback enqueues.
+        await Task.yield(); await Task.yield(); await Task.yield()
+
+        #expect(vm.progress == 0.0,
+                "a stale per-chunk tick after dismiss must not push the idle bar into the translate band")
         #expect(vm.sheetState == .dismissed)
     }
 

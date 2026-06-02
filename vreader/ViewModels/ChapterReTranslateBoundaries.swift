@@ -44,6 +44,10 @@ extension AIService: RetranslateProviderResolving {}
 /// the extension below. Tests inject a deterministic runner that records the
 /// resolved config + style without calling any AI provider.
 protocol ChapterReTranslating: Sendable {
+    /// `onChunkProgress` (Bug #311): fired with `(completedChunks, totalChunks)`
+    /// after each chunk lands, so the VM can drive an honest N-of-M progress bar
+    /// rather than a faked 0.5 pin during the opaque translate. `@Sendable` —
+    /// it crosses from the service actor back to the `@MainActor` VM.
     func translateForRetranslate(
         bookFingerprintKey: String,
         unit: TranslationUnitID,
@@ -52,7 +56,8 @@ protocol ChapterReTranslating: Sendable {
         providerProfileID: UUID,
         config: ResolvedAIProviderConfig,
         style: TranslationStyle,
-        granularity: TranslationGranularity
+        granularity: TranslationGranularity,
+        onChunkProgress: (@Sendable (Int, Int) -> Void)?
     ) async throws -> ChapterTranslationResult
 }
 
@@ -65,7 +70,8 @@ extension ChapterTranslationService: ChapterReTranslating {
         providerProfileID: UUID,
         config: ResolvedAIProviderConfig,
         style: TranslationStyle,
-        granularity: TranslationGranularity
+        granularity: TranslationGranularity,
+        onChunkProgress: (@Sendable (Int, Int) -> Void)?
     ) async throws -> ChapterTranslationResult {
         try await translate(
             bookFingerprintKey: bookFingerprintKey,
@@ -75,6 +81,7 @@ extension ChapterTranslationService: ChapterReTranslating {
             providerProfileID: providerProfileID,
             config: config,
             style: style,
-            granularity: granularity)
+            granularity: granularity,
+            onChunkProgress: onChunkProgress)
     }
 }
