@@ -85,6 +85,24 @@ struct ReadiumEPUBHost: View {
     /// legacy `EPUBSelectionTokenCache`; wiring in `ReadiumEPUBHost+Highlights`.
     @State var readiumSelectionTokenCache = ReadiumSelectionTokenCache<Selection>()
 
+    // MARK: - Bug #303: select → Note (annotation) parity
+
+    // The Readium host had no `.readerAnnotationRequested` observer + no note
+    // sheet, so a selection's "Note" action was a no-op (legacy EPUB + TXT/MD
+    // mount it; Readium omitted it). Mirrors the legacy `pendingSelectionEvent`
+    // round-trip; wiring lives in `ReadiumEPUBHost+Annotations`. Not `private`
+    // so that extension can read/write them (`@State` can't live in an extension).
+
+    /// Whether the first-class `AddNoteSheet` (designed surface — rule 51 reuse)
+    /// is presented for an in-flight selection→Note request.
+    @State var showReadiumNoteSheet = false
+    /// The note text bound into `AddNoteSheet`; reset on each present.
+    @State var readiumNoteText = ""
+    /// The Readium `Selection` resolved from the annotation request token, held
+    /// across the sheet's lifetime (the token is consumed on resolve, so the
+    /// selection is stashed here — the same shape as legacy `pendingSelectionEvent`).
+    @State var pendingReadiumNoteSelection: Selection?
+
     // MARK: - WI-11b/WI-12 bilingual (per-spine interlinear via the eval channel)
 
     // All non-`private` so the `ReadiumEPUBHost+Bilingual` / `+BilingualDriver`

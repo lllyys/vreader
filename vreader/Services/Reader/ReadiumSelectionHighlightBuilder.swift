@@ -37,6 +37,16 @@ enum ReadiumSelectionHighlightBuilder {
         let locator: Locator
     }
 
+    /// Bug #303: normalize a raw `AddNoteSheet` string into the `note:` argument
+    /// for `HighlightCoordinator.create`. A blank / whitespace-only note degrades
+    /// to `nil` (a plain highlight, no note) — mirroring the legacy EPUB note path
+    /// (`noteText.isEmpty ? nil : noteText`, but whitespace-trimmed) — otherwise
+    /// the trimmed text is stored.
+    nonisolated static func normalizeNote(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// Build the create inputs from a Readium selection's decomposed fields, or
     /// `nil` when the selection is unrenderable (empty/whitespace quote, or empty/
     /// nil href). The caller (the Readium host's selection handler) passes the

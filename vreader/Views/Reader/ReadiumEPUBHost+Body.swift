@@ -50,6 +50,10 @@ extension ReadiumEPUBHost {
         // decoration clear, import re-restore) live in the `+Highlights`
         // extension's `highlightObservers` modifier (300-line budget).
         .modifier(highlightObservers)
+        // Bug #303: select → Note parity — observe `.readerAnnotationRequested`
+        // and present the designed `AddNoteSheet` (rule 51 reuse). Lives in the
+        // `+Annotations` extension's `annotationObservers` modifier.
+        .modifier(annotationObservers)
         .onDisappear { onHostDisappear() }
     }
 
