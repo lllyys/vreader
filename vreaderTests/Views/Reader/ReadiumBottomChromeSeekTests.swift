@@ -52,4 +52,27 @@ struct ReadiumBottomChromeSeekTests {
         #expect(t.index == 0)
         #expect(t.intra == 0)
     }
+
+    // M1: display `progress` is the inverse of seek `target` — they agree, so a
+    // dragged fraction and the relocate that follows don't snap.
+    @Test("display progress is the inverse of seek target (no snap)")
+    func displaySeekRoundTrip() {
+        for spineCount in [1, 2, 5, 13] {
+            for f in stride(from: 0.0, through: 1.0, by: 0.1) {
+                let t = ReadiumBottomChromeSeek.target(fraction: f, spineCount: spineCount)
+                let back = ReadiumBottomChromeSeek.progress(
+                    index: t.index, intra: t.intra, spineCount: spineCount)
+                #expect(abs(back - max(0, min(1, f))) < 1e-9)
+            }
+        }
+    }
+
+    // M2: the visibility gate matches the other hosts (ready + visible + TTS idle).
+    @Test("visibility gate requires ready + chrome-visible + TTS idle")
+    func visibilityGate() {
+        #expect(ReadiumBottomChromeSeek.shouldShow(isChromeVisible: true, isReady: true, ttsIsIdle: true))
+        #expect(!ReadiumBottomChromeSeek.shouldShow(isChromeVisible: false, isReady: true, ttsIsIdle: true))
+        #expect(!ReadiumBottomChromeSeek.shouldShow(isChromeVisible: true, isReady: false, ttsIsIdle: true))
+        #expect(!ReadiumBottomChromeSeek.shouldShow(isChromeVisible: true, isReady: true, ttsIsIdle: false))
+    }
 }

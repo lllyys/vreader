@@ -163,7 +163,9 @@ struct ReadiumEPUBHost: View {
         // visibility — restoring parity with every other reader host.
         ZStack {
             backgroundComposited(bilingualSurfaces(coreBody))
-            if isChromeVisible {
+            // Gated on ready + chrome-visible + TTS-idle (parity with the other
+            // hosts' bottomOverlay — Codex Gate-4 M2).
+            if isBottomChromeVisible {
                 VStack(spacing: 0) {
                     Spacer()
                     bottomChromeOverlay
