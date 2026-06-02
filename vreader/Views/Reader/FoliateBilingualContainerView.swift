@@ -230,6 +230,14 @@ struct FoliateBilingualContainerView: View {
             // only after the user toggles bilingual mode). Codex Gate-4
             // round-2 H2 fix. Idempotent — host caches by fingerprintKey.
             publishTranslateBookTextProviderIfReady()
+            // Bug #305 / GH #1360: build the bilingual VM on OPEN (not only
+            // on the first toggle) so a book whose persisted state is
+            // `isEnabled == true` posts `.readerBilingualDidChange` to the
+            // parent — otherwise the More menu shows Bilingual OFF + hides
+            // "Re-translate chapter" on reopen. Safe on open: a persistence-
+            // loaded VM has `needsSetupSheet == false`, so no setup sheet is
+            // raised. Foliate analogue of the TXT-only Bug #245 fix.
+            ensureBilingualViewModel()
             handleSectionLoaded(notification.userInfo)
         }
         .onReceive(
@@ -366,6 +374,13 @@ struct FoliateBilingualContainerView: View {
                 granularity: vm.granularity
             )
         }
+        // Bug #305 / GH #1360: mirror the loaded-from-persistence bilingual
+        // state to the parent `ReaderContainerView` — `.readerBilingualDidChange`
+        // is what the parent observes to repaint the chrome pill + the More-menu
+        // "Bilingual" / "Re-translate chapter" rows. Without this the parent
+        // stays at the default `bilingualActive = false` on reopen even when the
+        // book was previously bilingual. Mirrors the TXT #245 fix.
+        vm.postDidChange()
     }
 
     /// Feature #56 WI-14: publishes the Foliate chapter-text provider
