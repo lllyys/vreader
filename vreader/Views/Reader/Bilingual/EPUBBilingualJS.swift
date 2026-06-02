@@ -349,6 +349,31 @@ enum EPUBBilingualJS {
         return makeInjectJS(translationsByBid: translationsByBid)
     }
 
+    /// Bug #304: idempotent JS that ensures a `<style id="vreader-bilingual-style">`
+    /// carrying the interlinear `.vreader-bilingual` rule is present in the
+    /// document `<head>`. The modern engines (Readium spine) don't thread
+    /// `epubOverrideCSS`, so the injected bilingual blocks otherwise render as
+    /// plain body text. Re-runnable — updates the existing element's text on a
+    /// theme change. The CSS is escaped via `FoliateJSEscaper.escapeForJSString`.
+    static func bilingualStyleJS(css: String) -> String {
+        let escaped = FoliateJSEscaper.escapeForJSString(css)
+        return """
+        (function() {
+            try {
+                var id = 'vreader-bilingual-style';
+                var css = '\(escaped)';
+                var el = document.getElementById(id);
+                if (!el) {
+                    el = document.createElement('style');
+                    el.id = id;
+                    (document.head || document.documentElement).appendChild(el);
+                }
+                if (el.textContent !== css) { el.textContent = css; }
+            } catch (e) {}
+        })();
+        """
+    }
+
     private static func makeInjectJS(translationsByBid: [String: String]) -> String {
         var entries: [String] = []
         // Stable order: sort keys so the emitted JS is deterministic

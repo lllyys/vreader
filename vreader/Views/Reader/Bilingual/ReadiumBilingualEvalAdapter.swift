@@ -156,6 +156,13 @@ enum ReadiumBilingualEvalAdapter {
         EPUBBilingualJS.bilingualInjectJS(translationsByBid: pairs)
     }
 
+    /// Bug #304: JS that ensures the interlinear `.vreader-bilingual` `<style>`
+    /// is present on the Readium spine (the Readium engine doesn't thread
+    /// `epubOverrideCSS`, so the injected blocks otherwise render as plain text).
+    static func styleJS(css: String) -> String {
+        EPUBBilingualJS.bilingualStyleJS(css: css)
+    }
+
     // MARK: - clear (engine-agnostic body, re-exported)
 
     /// JS that removes every `vreader-bilingual` decoration node from the

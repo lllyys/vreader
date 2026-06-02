@@ -63,13 +63,19 @@ struct FoliateSpikeView: View {
         let unified = store?.typography.fontSize ?? defaultUnifiedFontSize
         let lineHeight = Double(store?.typography.lineSpacing ?? 1.4)
         let calibrator = store?.calibrator ?? FontSizeCalibrator()
-        return FoliateStyleMapper.themeCSS(
+        let base = FoliateStyleMapper.themeCSS(
             fontSize: calibrator.calibratedFoliateSize(forUnified: unified),
             lineHeight: lineHeight,
             fontFamily: nil,
             textColor: nil,
             backgroundColor: nil
         )
+        // Bug #304: append the `.vreader-bilingual` interlinear rule so the
+        // bilingual blocks the Foliate bilingual JS injects get the designed
+        // style (AZW3/MOBI render via Foliate `setStyles`, which never threaded
+        // `epubOverrideCSS`). Harmless when no bilingual content exists.
+        let parts = [base, store?.theme.bilingualBlockCSSRule()].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
     var body: some View {

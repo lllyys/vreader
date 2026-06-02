@@ -187,6 +187,19 @@ extension ReaderThemeV2 {
     /// `55` (≈ 33% in hex) when the accent is in hex. Since our cssColor
     /// helper emits hex tokens, the concatenation is safe; non-hex
     /// fallbacks degrade to the solid accent (still readable).
+    /// Bug #304: the `.vreader-bilingual` interlinear rule for THIS theme, for
+    /// injection into the modern engines that don't thread `epubOverrideCSS` —
+    /// the Readium spine (via `bilingualInjectJS`'s `<style>`) and the Foliate
+    /// `setStyles` pipeline. Harmless when no bilingual content exists (the
+    /// selector matches nothing). Uses the same accent/sub tokens as
+    /// `epubOverrideCSS`, so all three engines render the interlinear block
+    /// identically.
+    func bilingualBlockCSSRule() -> String {
+        Self.bilingualCSSRule(
+            accent: Self.cssColor(self.accentColor),
+            sub: Self.cssColor(self.subColor))
+    }
+
     private static func bilingualCSSRule(accent: String, sub: String) -> String {
         // Use a solid 2px border in the accent token; a translucent
         // overlay would require parsing rgb()/hex which is outside

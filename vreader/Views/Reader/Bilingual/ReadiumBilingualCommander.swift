@@ -135,6 +135,15 @@ final class ReadiumBilingualCommander {
         _ = await evaluator(ReadiumBilingualEvalAdapter.injectJS(pairs: pairs))
     }
 
+    /// Bug #304: ensure the interlinear `.vreader-bilingual` `<style>` is present
+    /// on the live spine so the injected blocks get the designed style. No-op
+    /// when unbound or the CSS is empty. Idempotent (updates the existing
+    /// `<style>` on a theme change).
+    func setStyle(_ css: String) async {
+        guard let evaluator, !css.isEmpty else { return }
+        _ = await evaluator(ReadiumBilingualEvalAdapter.styleJS(css: css))
+    }
+
     /// Removes every bilingual decoration node from the live spine. No-op when
     /// unbound. Idempotent (safe on a spine without decorations).
     func clear() async {

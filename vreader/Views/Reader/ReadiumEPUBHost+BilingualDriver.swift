@@ -221,6 +221,11 @@ extension ReadiumEPUBHost {
             blocks: blocks, translatedSegments: segments
         )
         guard !pairs.isEmpty else { return }
+        // Bug #304: ensure the interlinear `.vreader-bilingual` `<style>` is on
+        // the spine BEFORE injecting the blocks, so they render with the designed
+        // style (the Readium engine never threaded `epubOverrideCSS`). Idempotent;
+        // uses the live theme so a theme switch updates the rule.
+        await bilingualCommander.setStyle(settingsStore.theme.bilingualBlockCSSRule())
         // The pipeline build above is synchronous, so the unit re-check is the
         // inject-path's final generation gate (no await intervenes before here).
         await bilingualCommander.inject(pairs)
