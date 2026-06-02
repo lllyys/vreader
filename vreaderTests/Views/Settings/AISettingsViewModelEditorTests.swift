@@ -628,4 +628,53 @@ struct AISettingsViewModelEditorTests {
         #expect(KindResetPolicy.shouldReplaceBaseURL(current: url, oldKind: fromKind))
         #expect(KindResetPolicy.shouldReplaceModel(current: model, oldKind: fromKind))
     }
+
+    // MARK: - Feature #79: add-mode placeholder / effective-value helpers
+
+    @Test @MainActor func effectiveBaseURL_addModeBlank_usesKindDefault() {
+        let kind = ProviderKind.openAICompatible
+        #expect(AIProviderEditSheet.effectiveBaseURLText(isAddMode: true, typed: "", kind: kind)
+                == kind.defaultBaseURL.absoluteString)
+        #expect(AIProviderEditSheet.effectiveBaseURLText(isAddMode: true, typed: "   ", kind: kind)
+                == kind.defaultBaseURL.absoluteString)  // whitespace == blank
+    }
+
+    @Test @MainActor func effectiveBaseURL_addModeTyped_usesTypedVerbatim() {
+        #expect(AIProviderEditSheet.effectiveBaseURLText(
+            isAddMode: true, typed: "https://x.example/v1", kind: .openAICompatible) == "https://x.example/v1")
+    }
+
+    @Test @MainActor func effectiveBaseURL_editModeBlank_staysRaw_notDefaulted() {
+        // Gate-2 round-1 High: edit-mode clearing must NOT silently default.
+        #expect(AIProviderEditSheet.effectiveBaseURLText(
+            isAddMode: false, typed: "", kind: .openAICompatible) == "")
+        #expect(AIProviderEditSheet.effectiveBaseURLText(
+            isAddMode: false, typed: "https://kept.example", kind: .openAICompatible) == "https://kept.example")
+    }
+
+    @Test @MainActor func effectiveModel_addModeBlankDefaults_editModeRaw() {
+        let kind = ProviderKind.openAICompatible
+        // Gate-2 round-1 Medium: blank model is NOT provider-tolerated, so add-mode
+        // blank must resolve to the kind default (never "").
+        #expect(AIProviderEditSheet.effectiveModel(isAddMode: true, typed: "", kind: kind) == kind.defaultModel)
+        #expect(AIProviderEditSheet.effectiveModel(isAddMode: true, typed: "gpt-x", kind: kind) == "gpt-x")
+        #expect(AIProviderEditSheet.effectiveModel(isAddMode: false, typed: "", kind: kind) == "")  // edit raw
+    }
+
+    @Test @MainActor func effectiveModel_editMode_preservesRawWhitespace_noNormalization() {
+        // Gate-4 Medium: edit-mode save persisted the RAW (untrimmed) model
+        // pre-#79; the effective helper must NOT silently normalize it.
+        let kind = ProviderKind.openAICompatible
+        #expect(AIProviderEditSheet.effectiveModel(isAddMode: false, typed: "  gpt-x  ", kind: kind) == "  gpt-x  ")
+        #expect(AIProviderEditSheet.effectiveModel(isAddMode: false, typed: "   ", kind: kind) == "   ")
+    }
+
+    @Test @MainActor func placeholder_addModeKindDefault_editModeEmpty() {
+        let kind = ProviderKind.openAICompatible
+        #expect(AIProviderEditSheet.placeholderBaseURL(isAddMode: true, kind: kind) == kind.defaultBaseURL.absoluteString)
+        #expect(AIProviderEditSheet.placeholderModel(isAddMode: true, kind: kind) == kind.defaultModel)
+        // Gate-2 round-2 Medium: edit-mode shows NO default hint.
+        #expect(AIProviderEditSheet.placeholderBaseURL(isAddMode: false, kind: kind) == "")
+        #expect(AIProviderEditSheet.placeholderModel(isAddMode: false, kind: kind) == "")
+    }
 }

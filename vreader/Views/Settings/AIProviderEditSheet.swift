@@ -122,12 +122,64 @@ struct AIProviderEditSheet: View {
             _profileID = State(initialValue: newID)
             _name = State(initialValue: "")
             _kind = State(initialValue: defaultKind)
-            _baseURLText = State(initialValue: defaultKind.defaultBaseURL.absoluteString)
-            _model = State(initialValue: defaultKind.defaultModel)
+            // Feature #79 (Variant A): bind Base URL + Model EMPTY in add-mode.
+            // The kind default is shown as a muted placeholder + "Default" tag;
+            // a blank field resolves to the kind default at Save (the `effective`
+            // helpers). Nothing to backspace.
+            _baseURLText = State(initialValue: "")
+            _model = State(initialValue: "")
             _temperature = State(initialValue: 0.7)
             _maxTokens = State(initialValue: 2048)
             _isAPIKeySaved = State(initialValue: false)
         }
+    }
+
+    /// Add-mode (vs edit an existing profile) — the discriminator for all the
+    /// Feature #79 placeholder / effective-value behavior. Internal so the
+    /// `+Sections` extension (separate file) can read it.
+    var isAddMode: Bool { existing == nil }
+
+    // MARK: - Feature #79: effective values + placeholders (add-mode-only)
+
+    /// The Base URL to validate / persist / test. In ADD-MODE a blank (or
+    /// whitespace-only) field resolves to the kind default; otherwise the typed
+    /// value. In EDIT-MODE it is always the raw typed value (so clearing a field
+    /// still fails validation, never silently defaults — Gate-2 round-1 High).
+    static func effectiveBaseURLText(isAddMode: Bool, typed: String, kind: ProviderKind) -> String {
+        let t = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (isAddMode && t.isEmpty) ? kind.defaultBaseURL.absoluteString : t
+    }
+
+    /// The Model to persist / test, same add-mode-only fallback. Blank model is
+    /// NOT provider-tolerated (serialized verbatim), so add-mode blank →
+    /// kind.defaultModel is a required local fix (Gate-2 round-1 Medium).
+    static func effectiveModel(isAddMode: Bool, typed: String, kind: ProviderKind) -> String {
+        // Edit-mode: return the RAW typed value — pre-#79 `save()` persisted
+        // `model` untrimmed, so trimming here would silently normalize an
+        // existing whitespace-padded model on an unrelated save (Gate-4 Medium).
+        guard isAddMode else { return typed }
+        // Add-mode: blank (incl. whitespace-only) → kind default; else verbatim.
+        return typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? kind.defaultModel : typed
+    }
+
+    /// The Base URL placeholder text: the kind default in ADD-MODE, empty in
+    /// EDIT-MODE (an existing profile with `model==""` must NOT show a misleading
+    /// default hint — Gate-2 round-2 Medium).
+    static func placeholderBaseURL(isAddMode: Bool, kind: ProviderKind) -> String {
+        isAddMode ? kind.defaultBaseURL.absoluteString : ""
+    }
+
+    static func placeholderModel(isAddMode: Bool, kind: ProviderKind) -> String {
+        isAddMode ? kind.defaultModel : ""
+    }
+
+    /// Instance conveniences over the pure statics with the current form state.
+    var effectiveBaseURLText: String {
+        Self.effectiveBaseURLText(isAddMode: isAddMode, typed: baseURLText, kind: kind)
+    }
+    var effectiveModel: String {
+        Self.effectiveModel(isAddMode: isAddMode, typed: model, kind: kind)
     }
 
     // MARK: - Body
@@ -180,22 +232,23 @@ struct AIProviderEditSheet: View {
 
     var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && AISettingsViewModel.validateBaseURL(baseURLText) == nil
+            // Feature #79: validate the EFFECTIVE URL (add-mode blank → kind
+            // default, valid; edit-mode raw, so clearing still fails).
+            && AISettingsViewModel.validateBaseURL(effectiveBaseURLText) == nil
     }
 
     func save() async {
-        // Re-validate base URL one last time. The picker drag could
-        // also have left a stale error visible.
-        baseURLError = AISettingsViewModel.validateBaseURL(baseURLText)
+        // Feature #79: validate + persist the EFFECTIVE Base URL / Model.
+        baseURLError = AISettingsViewModel.validateBaseURL(effectiveBaseURLText)
         guard baseURLError == nil else { return }
-        guard let url = URL(string: baseURLText.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
+        guard let url = URL(string: effectiveBaseURLText) else { return }
 
         let profile = ProviderProfile(
             id: profileID,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             kind: kind,
             baseURL: url,
-            model: model,
+            model: effectiveModel,
             temperature: temperature,
             maxTokens: maxTokens
         )
@@ -246,7 +299,9 @@ struct AIProviderEditSheet: View {
         // exercised. The id is still profileID — that's the keychain
         // account key. The provider config (baseURL, model, kind,
         // maxTokens) is whatever the user has on screen right now.
-        guard let url = URL(string: baseURLText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        // Feature #79: test the EFFECTIVE URL/model (add-mode blank → kind
+        // default; edit-mode raw — unchanged).
+        guard let url = URL(string: effectiveBaseURLText) else {
             testResultText = "Failed: invalid base URL."
             return
         }
@@ -255,7 +310,7 @@ struct AIProviderEditSheet: View {
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             kind: kind,
             baseURL: url,
-            model: model.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: effectiveModel,
             temperature: temperature,
             maxTokens: maxTokens
         )

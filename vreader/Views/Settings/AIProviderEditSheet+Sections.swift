@@ -58,6 +58,18 @@ extension AIProviderEditSheet {
 
     // MARK: - Endpoint + Sampling
 
+    /// Feature #79: the muted "Default" chip shown beside an empty add-mode
+    /// field (committed design `vreader-ai-provider-fields.jsx`). Signals the
+    /// kind default will be used if left blank — no text to delete.
+    var defaultTag: some View {
+        Text("Default")
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.secondary.opacity(0.15)))
+    }
+
     @ViewBuilder
     var providerSection: some View {
         Section {
@@ -65,14 +77,27 @@ extension AIProviderEditSheet {
                 Text("Base URL")
                     .foregroundStyle(.secondary)
                 Spacer()
-                TextField("https://api.example.com/v1", text: $baseURLText)
+                // Feature #79: "Default" tag shown only in add-mode while the
+                // field is empty (the kind default applies at Save).
+                if isAddMode && baseURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    defaultTag.accessibilityIdentifier("editProviderBaseURLDefaultTag")
+                }
+                // Add-mode → kind default as the placeholder; edit-mode → none.
+                TextField(
+                    AIProviderEditSheet.placeholderBaseURL(isAddMode: isAddMode, kind: kind),
+                    text: $baseURLText
+                )
                     .multilineTextAlignment(.trailing)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
                     .accessibilityIdentifier("editProviderBaseURL")
                     .onChange(of: baseURLText) { _, _ in
-                        baseURLError = AISettingsViewModel.validateBaseURL(baseURLText)
+                        // Validate the EFFECTIVE URL (add-mode blank → kind
+                        // default → no spurious "empty" error; edit-mode raw).
+                        baseURLError = AISettingsViewModel.validateBaseURL(
+                            AIProviderEditSheet.effectiveBaseURLText(
+                                isAddMode: isAddMode, typed: baseURLText, kind: kind))
                     }
             }
             if let error = baseURLError {
@@ -86,7 +111,13 @@ extension AIProviderEditSheet {
                 Text("Model")
                     .foregroundStyle(.secondary)
                 Spacer()
-                TextField("e.g. gpt-4o-mini", text: $model)
+                if isAddMode && model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    defaultTag.accessibilityIdentifier("editProviderModelDefaultTag")
+                }
+                TextField(
+                    AIProviderEditSheet.placeholderModel(isAddMode: isAddMode, kind: kind),
+                    text: $model
+                )
                     .multilineTextAlignment(.trailing)
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("editProviderModel")
