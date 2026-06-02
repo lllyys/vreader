@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VReader — Issue #1394 · In-reader AI-enable + consent affordance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&family=Inter:wght@300;400;500;600;700;800&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: #f0eee9;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .hide-scroll::-webkit-scrollbar { display: none; }
+  .hide-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+  button { font-family: inherit; }
+  button:focus { outline: none; }
+</style>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" fill="#1a1815"/>
+    <!-- 3-step tracker -->
+    <circle cx="58" cy="58" r="11" fill="#3a6a5a"/>
+    <path d="M53.5 58.2l3 3 6-6.5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="69" y="56.5" width="24" height="3" fill="#3a6a5a"/>
+    <circle cx="100" cy="58" r="11" fill="#3a6a5a"/>
+    <path d="M95.5 58.2l3 3 6-6.5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="111" y="56.5" width="24" height="3" fill="#8c2f2f"/>
+    <circle cx="142" cy="58" r="11" fill="#8c2f2f"/>
+    <text x="142" y="62.5" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">3</text>
+    <!-- enable row -->
+    <rect x="36" y="92" width="128" height="30" rx="8" fill="#222020" stroke="#3a3530" stroke-width="1"/>
+    <rect x="46" y="100" width="14" height="14" rx="4" fill="#8c2f2f"/>
+    <rect x="138" y="101" width="20" height="12" rx="6" fill="#3a6a5a"/>
+    <!-- consent card -->
+    <rect x="36" y="130" width="128" height="34" rx="8" fill="#222020" stroke="#4a6a8a" stroke-width="1"/>
+    <rect x="46" y="138" width="14" height="14" rx="4" fill="#4a6a8a"/>
+    <rect x="138" y="139" width="20" height="12" rx="6" fill="#3a6a5a"/>
+    <text x="100" y="184" font-family="Inter, sans-serif" font-size="11" font-weight="600" fill="#d8d2c5" text-anchor="middle" letter-spacing="1.5">#1394 READY</text>
+  </svg>
+</template>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Canvas + base tokens + shared primitives -->
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="vreader-themes.jsx"></script>
+<script type="text/babel" src="vreader-icons.jsx"></script>
+<script type="text/babel" src="vreader-panels.jsx"></script>
+<!-- PillSwitch lives in vreader-retranslate.jsx -->
+<script type="text/babel" src="vreader-retranslate.jsx"></script>
+<script type="text/babel" src="vreader-bilingual.jsx"></script>
+<script type="text/babel" src="vreader-ai-provider-fields.jsx"></script>
+<script type="text/babel" src="vreader-ai-toggles.jsx"></script>
+<script type="text/babel" src="vreader-ai-provider-entry.jsx"></script>
+
+<!-- New: the in-reader AI-enable + consent affordance + this canvas's artboards -->
+<script type="text/babel" src="vreader-ai-readiness.jsx"></script>
+<script type="text/babel" src="ai-readiness-artboards.jsx"></script>
+
+<script type="text/babel">
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<CanvasRoot1394/>);
+</script>
+</body>
+</html>
