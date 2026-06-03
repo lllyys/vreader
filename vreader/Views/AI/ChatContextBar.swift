@@ -16,7 +16,8 @@
 #if canImport(UIKit)
 import SwiftUI
 
-/// The Chat context bar (WI-3: scope chip only).
+/// The Chat context bar: a left scope chip + a right sources chip (Feature #86
+/// WI-3 + WI-4).
 struct ChatContextBar: View {
     let scope: ChatContextScope
     let theme: ReaderThemeV2
@@ -24,14 +25,24 @@ struct ChatContextBar: View {
     let isScopeMenuOpen: Bool
     /// Tapped the scope chip.
     let onScopeTap: () -> Void
+    /// Number of toggled-on source kinds (the green badge; 0 ⇒ "Off").
+    let sourcesCount: Int
+    /// Whether the sources menu is currently open.
+    let isSourcesMenuOpen: Bool
+    /// Tapped the sources chip.
+    let onSourcesTap: () -> Void
 
     static let scopeChipIdentifier = "chatContextScopeChip"
+    static let sourcesChipIdentifier = "chatContextSourcesChip"
+
+    /// The "on" green — matches `PillSwitch` ON across the app (design `#3a6a5a`).
+    static let accentGreen = UIColor(red: 0x3a / 255, green: 0x6a / 255, blue: 0x5a / 255, alpha: 1)
 
     var body: some View {
         HStack(spacing: 0) {
             scopeChip
-            Spacer(minLength: 0)
-            // WI-4: sources chip docks here.
+            Spacer(minLength: 8)
+            sourcesChip
         }
         .padding(.horizontal, 14)
         .padding(.top, 9)
@@ -42,6 +53,56 @@ struct ChatContextBar: View {
                 .frame(height: 0.5)
         }
         .accessibilityIdentifier("chatContextBar")
+    }
+
+    @ViewBuilder
+    private var sourcesChip: some View {
+        let on = sourcesCount > 0
+        Button(action: onSourcesTap) {
+            HStack(spacing: 6) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(Color(on ? Self.accentGreen : theme.subColor))
+                Text("Sources")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Color(on ? theme.inkColor : theme.subColor))
+                if on {
+                    Text("\(sourcesCount)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16)
+                        .padding(.horizontal, 3)
+                        .frame(height: 16)
+                        .background(Capsule().fill(Color(Self.accentGreen)))
+                } else {
+                    Text("Off")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(theme.subColor))
+                }
+            }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color(sourcesChipFill(on: on))))
+            .overlay(
+                Capsule().stroke(
+                    Color(isSourcesMenuOpen ? theme.accentColor : (on ? .clear : theme.ruleColor)),
+                    lineWidth: 0.5
+                )
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(Self.sourcesChipIdentifier)
+        .accessibilityLabel(on ? "Chat sources: \(sourcesCount) on" : "Chat sources: off")
+    }
+
+    /// Soft green wash when any source is on; transparent when all off.
+    private func sourcesChipFill(on: Bool) -> UIColor {
+        guard on else { return .clear }
+        return theme.isDark
+            ? Self.accentGreen.withAlphaComponent(0.22)
+            : Self.accentGreen.withAlphaComponent(0.12)
     }
 
     @ViewBuilder

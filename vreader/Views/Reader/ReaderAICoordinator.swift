@@ -110,8 +110,28 @@ final class ReaderAICoordinator {
     /// and the chat VM calls it on a scope change, so a late TOC upgrades the
     /// context and a scroll never reverts it.
     func refreshChatContext() {
-        let scope = chatViewModel?.scope ?? .chapter
-        chatViewModel?.bookContext = scopedChatContext(scope)
+        guard let chatVM = chatViewModel else { return }
+        let scopeText = scopedChatContext(chatVM.scope)
+        // Feature #86 WI-4: fold in the reader's selected annotation kinds, read
+        // from the in-memory cache (NO SwiftData fetch on relocate). When no cache
+        // exists (AI without persistence), the block is empty → WI-1/3 behavior.
+        let block = chatAnnotationCache?.annotationBlock(
+            for: chatVM.sources, maxUTF16: AIContextBudget.defaultMaxUTF16
+        ) ?? ""
+        let assembly = ChatContextAssembler.assemble(
+            scopeText: scopeText, annotationBlock: block, citations: [],
+            maxUTF16: AIContextBudget.defaultMaxUTF16
+        )
+        chatVM.bookContext = assembly.bookContext
+    }
+
+    /// Feature #86 WI-4: the per-book annotation cache backing the sources chip.
+    /// Created in `setupIfNeeded` when persistence is available.
+    private(set) var chatAnnotationCache: ChatAnnotationCache?
+
+    /// Pushes the cache's current per-kind counts to the chat VM's sources chip.
+    private func syncSourceCounts() {
+        chatViewModel?.sourceCounts = chatAnnotationCache?.counts ?? (0, 0, 0)
     }
 
     /// Book title used as fallback when no text content is available.
@@ -120,11 +140,20 @@ final class ReaderAICoordinator {
     private let bookFormat: BookFormat
     /// Fingerprint key for creating chat VM.
     private let fingerprintKey: String
+    /// Annotation stores for the sources cache (the `PersistenceActor`, which
+    /// conforms to all three). Nil when persistence isn't injected.
+    private let annotationStores: (any AnnotationPersisting & HighlightPersisting & BookmarkPersisting)?
 
-    init(fallbackTitle: String, bookFormat: BookFormat, fingerprintKey: String) {
+    init(
+        fallbackTitle: String,
+        bookFormat: BookFormat,
+        fingerprintKey: String,
+        annotationStores: (any AnnotationPersisting & HighlightPersisting & BookmarkPersisting)? = nil
+    ) {
         self.fallbackTitle = fallbackTitle
         self.bookFormat = bookFormat
         self.fingerprintKey = fingerprintKey
+        self.annotationStores = annotationStores
     }
 
     /// Creates the AI ViewModels if AI features are available.
@@ -147,9 +176,26 @@ final class ReaderAICoordinator {
         let fingerprint = DocumentFingerprint(canonicalKey: fingerprintKey)
         let chatVM = AIChatViewModel(aiService: service, bookFingerprint: fingerprint)
         chatViewModel = chatVM
-        // Feature #86 WI-3: re-assemble the context when the user changes scope,
-        // through the same single funnel.
+        // Feature #86 WI-3/4: re-assemble the context when the user changes scope
+        // OR toggles sources, through the same single funnel.
         chatVM.onScopeChanged = { [weak self] in self?.refreshChatContext() }
+
+        // Feature #86 WI-4: the sources cache. Loads once now and refreshes on
+        // `.readerAnnotationsDidChange`; each (re)load re-assembles the context +
+        // updates the chip counts.
+        if let stores = annotationStores {
+            let cache = ChatAnnotationCache(
+                fingerprintKey: fingerprintKey,
+                annotationStore: stores, highlightStore: stores, bookmarkStore: stores
+            )
+            cache.onChange = { [weak self] in
+                self?.syncSourceCounts()
+                self?.refreshChatContext()
+            }
+            chatAnnotationCache = cache
+            Task { await cache.load() }   // populates, then fires onChange
+        }
+
         // Feature #86 WI-1: assign chatViewModel FIRST, then refresh — else the
         // refresh no-ops against a nil VM (Gate-2 round-2 note).
         refreshChatContext()

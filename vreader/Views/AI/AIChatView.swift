@@ -37,11 +37,12 @@ struct AIChatView: View {
     /// `.paper` so existing callers / previews that omit it keep working.
     var theme: ReaderThemeV2 = .paper
 
-    /// Feature #86 WI-3: whether the scope menu is presented above the bar.
-    @State private var isScopeMenuOpen = false
+    /// Feature #86 WI-3/4: which context-bar menu is presented (or none).
+    @State private var openMenu: ContextMenuKind?
+    private enum ContextMenuKind { case scope, sources }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
+        ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 messageList
 
@@ -49,38 +50,57 @@ struct AIChatView: View {
                     errorBanner(message: error)
                 }
 
-                // Feature #86 WI-3: the docked context bar, above the composer.
+                // Feature #86 WI-3/4: the docked context bar, above the composer.
                 ChatContextBar(
                     scope: viewModel.scope,
                     theme: theme,
-                    isScopeMenuOpen: isScopeMenuOpen,
-                    onScopeTap: { isScopeMenuOpen.toggle() }
+                    isScopeMenuOpen: openMenu == .scope,
+                    onScopeTap: { toggleMenu(.scope) },
+                    sourcesCount: viewModel.sources.activeCount,
+                    isSourcesMenuOpen: openMenu == .sources,
+                    onSourcesTap: { toggleMenu(.sources) }
                 )
 
                 inputBar
             }
 
-            // Feature #86 WI-3: the scope menu floats above the composer with a
-            // tap-scrim that dismisses it.
-            if isScopeMenuOpen {
+            // Feature #86 WI-3/4: the scope / sources menus float above the
+            // composer (scope at leading, sources at trailing) with a shared
+            // tap-scrim that dismisses whichever is open.
+            if openMenu != nil {
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
-                    .onTapGesture { isScopeMenuOpen = false }
+                    .onTapGesture { openMenu = nil }
+            }
+            if openMenu == .scope {
                 ChatScopeMenu(
                     selected: viewModel.scope,
                     theme: theme,
                     onSelect: { scope in
                         viewModel.setScope(scope)
-                        isScopeMenuOpen = false
+                        openMenu = nil
                     }
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 14)
                 .padding(.bottom, 80)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+            if openMenu == .sources {
+                ChatSourcesMenu(
+                    selection: viewModel.sources,
+                    counts: viewModel.sourceCounts,
+                    theme: theme,
+                    onToggle: { viewModel.setSources($0) }   // stays open for multi-toggle
+                )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 14)
+                .padding(.bottom, 80)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
-        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isScopeMenuOpen)
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: openMenu)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -122,6 +142,12 @@ struct AIChatView: View {
     static func seedDecision(seededInput: String?, currentInput: String) -> SeedDecision {
         guard let seed = seededInput else { return .none }
         return currentInput.isEmpty ? .apply(seed) : .dropAndClear
+    }
+
+    /// Feature #86 WI-3/4: toggle a context-bar menu (tapping the open one closes it,
+    /// tapping the other switches to it).
+    private func toggleMenu(_ kind: ContextMenuKind) {
+        openMenu = (openMenu == kind) ? nil : kind
     }
 
     /// One-shot consumption of `viewModel.seededInput` (applies the pure

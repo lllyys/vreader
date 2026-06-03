@@ -43,6 +43,10 @@ struct ReaderContainerView: View {
 
     @Environment(\.dismiss) var dismiss
     @Environment(\.modelContext) var modelContext
+    /// Feature #86 WI-4: persistence for the AI Chat sources cache (the
+    /// `PersistenceActor`, which conforms to the three annotation-persisting
+    /// protocols). Nil in previews / no-store contexts → sources simply stay empty.
+    @Environment(\.persistenceActor) private var persistenceActor
     @State var settingsStore = ReaderSettingsStore()
     @State var showSettings = false
     /// Feature #61 WI-3: whether the reader Book Details sheet is
@@ -981,13 +985,21 @@ struct ReaderContainerView: View {
         DocumentFingerprint(canonicalKey: book.fingerprintKey)?.format ?? resolvedBookFormat
     }
 
+    /// Feature #86 WI-4: the annotation stores for the AI sources cache — the
+    /// `PersistenceActor` (which conforms to all three persisting protocols), or
+    /// nil when no store is injected.
+    private var aiAnnotationStores: (any AnnotationPersisting & HighlightPersisting & BookmarkPersisting)? {
+        persistenceActor
+    }
+
     /// Lazily creates the AI coordinator on first access.
     var resolvedAICoordinator: ReaderAICoordinator {
         if let existing = aiCoordinator { return existing }
         let coordinator = ReaderAICoordinator(
             fallbackTitle: book.title,
             bookFormat: resolvedBookFormat,
-            fingerprintKey: book.fingerprintKey
+            fingerprintKey: book.fingerprintKey,
+            annotationStores: aiAnnotationStores   // Feature #86 WI-4 (nil when no persistence)
         )
         // SwiftUI will apply the mutation at the end of the render pass
         DispatchQueue.main.async {

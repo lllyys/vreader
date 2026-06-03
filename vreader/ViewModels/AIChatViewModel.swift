@@ -84,6 +84,23 @@ final class AIChatViewModel {
         onScopeChanged?()
     }
 
+    /// Feature #86 WI-4: which of the reader's own annotation kinds (Notes /
+    /// Highlights / Bookmarks) are folded into the AI context. Drives the
+    /// context-bar sources chip. Changing it re-assembles `bookContext` via the
+    /// same coordinator funnel as scope.
+    private(set) var sources: ChatSourceSelection = .default
+
+    /// Per-book annotation counts for the sources popover (notes / highlights /
+    /// bookmarks). Set by the coordinator from the `ChatAnnotationCache`.
+    var sourceCounts: (notes: Int, highlights: Int, bookmarks: Int) = (0, 0, 0)
+
+    /// Toggles a single source kind and re-assembles the book context.
+    func setSources(_ newSources: ChatSourceSelection) {
+        guard newSources != sources else { return }
+        sources = newSources
+        onScopeChanged?()   // same single re-assembly funnel as scope
+    }
+
     // MARK: - Dependencies
 
     private let aiService: AIService
