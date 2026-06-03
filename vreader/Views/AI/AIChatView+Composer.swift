@@ -44,6 +44,12 @@ extension AIChatView {
                     .textFieldStyle(.plain)
                     .focused($isInputFocused)
                     .onSubmit { sendCurrentMessage() }
+                    // Feature #86 WI-5b (Gate-4): the field itself is non-editable
+                    // while the whole book is being read — not just the send button.
+                    .disabled(viewModel.isComposerDisabled)
+                    .onChange(of: viewModel.isComposerDisabled) { _, disabled in
+                        if disabled { isInputFocused = false }
+                    }
                     .accessibilityIdentifier("chatInputField")
                     // Bug #310: the empty prompt `""` would leave VoiceOver an
                     // unlabeled field (the overlay placeholder is hidden), so

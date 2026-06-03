@@ -142,17 +142,26 @@ final class ReaderAICoordinator {
     /// The pinned AI service for whole-book retrieval (WI-5b). Set in setupIfNeeded.
     private var pinnedAIService: AIService?
 
-    /// Feature #86 WI-5b: a scope/sources change. Arms whole-book retrieval when
-    /// `.wholeBook` is selected (disarms otherwise), then re-assembles via the
-    /// single funnel.
+    /// The chat scope last seen by the funnel — so a whole-book read is armed only
+    /// on the TRANSITION into `.wholeBook`, not on every sources toggle (Gate-4
+    /// High: a sources change must NOT downgrade a `.ready` digest back to armed).
+    private var lastChatScope: ChatContextScope = .chapter
+
+    /// Feature #86 WI-5b: a scope/sources change. Arms whole-book retrieval ONLY
+    /// when the scope transitions into `.wholeBook` (disarms when it leaves); a
+    /// source-only toggle preserves `.ready`/`.partial`. Always re-assembles via
+    /// the single funnel.
     private func handleChatContextChanged() {
+        let scope = chatViewModel?.scope ?? .chapter
         if let retrieval = chatViewModel?.wholeBookRetrieval {
-            if chatViewModel?.scope == .wholeBook {
-                retrieval.arm()
-            } else if retrieval.phase != .idle {
-                retrieval.disarm()
+            if scope == .wholeBook, lastChatScope != .wholeBook {
+                retrieval.arm()                       // transition INTO whole-book
+            } else if scope != .wholeBook, retrieval.phase != .idle {
+                retrieval.disarm()                    // left whole-book
             }
+            // scope unchanged (e.g. a sources toggle) → preserve the read state.
         }
+        lastChatScope = scope
         refreshChatContext()
     }
 

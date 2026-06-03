@@ -57,7 +57,7 @@ struct WholeBookRetrievalViewModelTests {
 
     @Test func cancel_midRead_movesToPartial() async {
         let reducer = WholeBookReducer()
-        let vm = WholeBookRetrievalViewModel(reducer: reducer)
+        let vm = WholeBookRetrievalViewModel(reducerFactory: { reducer })
         nonisolated(unsafe) var calls = 0
         vm.read(
             fullText: String(repeating: "w", count: 1000), chunkBudgetUTF16: 100,
@@ -73,6 +73,25 @@ struct WholeBookRetrievalViewModelTests {
         }
         #expect(!coverage.isComplete)
         #expect(coverage.coveredSpans.count <= 3)
+    }
+
+    /// Gate-4: disarm during an in-flight read bumps the epoch + cancels the
+    /// reducer, so the stale read's terminal write is discarded — the phase stays
+    /// `.idle`, never resurrecting `.ready`/`.partial` after the user left whole-book.
+    @Test func disarm_duringRead_staysIdle_noStaleWrite() async {
+        let reducer = WholeBookReducer()
+        let vm = WholeBookRetrievalViewModel(reducerFactory: { reducer })
+        nonisolated(unsafe) var calls = 0
+        vm.read(
+            fullText: String(repeating: "y", count: 1000), chunkBudgetUTF16: 100,
+            digestBudgetUTF16: 10_000, maxChunks: 50
+        ) { _ in
+            calls += 1
+            if calls == 1 { await MainActor.run { vm.disarm() } }   // leave whole-book mid-read
+            return "s"
+        }
+        await vm.readTask?.value
+        #expect(vm.phase == .idle)   // the late read never wrote ready/partial
     }
 
     @Test func arm_fromPartial_reArms() async {

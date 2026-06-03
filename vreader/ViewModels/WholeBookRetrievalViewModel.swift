@@ -31,10 +31,19 @@ final class WholeBookRetrievalViewModel {
     /// The consuming read task (exposed for tests to await; NOT the cancel lever).
     private(set) var readTask: Task<Void, Never>?
 
-    private let reducer: WholeBookReducer
+    /// A FRESH reducer per read (Gate-4 r3): the reducer's `isCancelled` flag is
+    /// per-read state, so sharing one reducer across reads let a `disarm()` cancel
+    /// race a re-enter's reset and poison the new read. Each read owns its reducer;
+    /// `cancel()`/`disarm()` target the current one; an old read's cancel can never
+    /// touch a new read's (different instance). Injectable for tests.
+    private let reducerFactory: () -> WholeBookReducer
+    private var reducer: WholeBookReducer?
+    /// Monotonic read epoch — a `disarm()` (or a new `read()`) bumps it so a stale
+    /// in-flight read can never write its terminal phase back over the new state.
+    private var generation = 0
 
-    init(reducer: WholeBookReducer = WholeBookReducer()) {
-        self.reducer = reducer
+    init(reducerFactory: @escaping () -> WholeBookReducer = { WholeBookReducer() }) {
+        self.reducerFactory = reducerFactory
     }
 
     /// Arms whole-book retrieval — the next question triggers the read.
@@ -46,17 +55,21 @@ final class WholeBookRetrievalViewModel {
     }
 
     /// Resets to idle (e.g. when the user switches away from whole-book scope).
+    /// Bumps the epoch (so any in-flight read's terminal write is discarded), stops
+    /// the reducer work, and cancels the consuming task.
     func disarm() {
+        generation += 1
+        if let reducer { Task { await reducer.cancel() } }   // stop the off-actor work
         readTask?.cancel()
         phase = .idle
     }
 
-    /// Requests cancellation of an in-flight read. Cancels the REDUCER (not the
-    /// consuming task), so the read finishes with the partial digest and lands in
-    /// `.partial`. Keeps everything already indexed.
+    /// Requests cancellation of an in-flight read by the USER (the Cancel ×).
+    /// Cancels the REDUCER (not the consuming task) and does NOT bump the epoch, so
+    /// the read finishes with the partial digest and lands in `.partial` — keeping
+    /// everything already indexed.
     func cancel() {
-        let reducer = self.reducer
-        Task { await reducer.cancel() }
+        if let reducer { Task { await reducer.cancel() } }
     }
 
     /// Starts a whole-book read. `condense` is the injected per-chunk AI call (the
@@ -70,11 +83,13 @@ final class WholeBookRetrievalViewModel {
         condense: @escaping @Sendable (String) async throws -> String
     ) {
         readTask?.cancel()
+        generation += 1
+        let generation = self.generation
         phase = .reading(done: 0, total: 0)
-        let reducer = self.reducer
+        let reducer = reducerFactory()   // fresh, un-cancelled — no shared-flag poisoning
+        self.reducer = reducer
         readTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await reducer.reset()
             do {
                 let digest = try await reducer.reduce(
                     fullText: fullText,
@@ -84,15 +99,18 @@ final class WholeBookRetrievalViewModel {
                     condense: condense,
                     onProgress: { done, total in
                         await MainActor.run { [weak self] in
-                            self?.phase = .reading(done: done, total: total)
+                            guard let self, generation == self.generation else { return }
+                            self.phase = .reading(done: done, total: total)
                         }
                     }
                 )
+                guard generation == self.generation else { return }   // superseded by disarm / a new read
                 self.digest = digest
                 self.phase = digest.coverage.isComplete
                     ? .ready(digest.coverage)
                     : .partial(digest.coverage)
             } catch {
+                guard generation == self.generation else { return }
                 // A read failure → partial with whatever coverage the reducer last
                 // reported (or empty), so the UI never claims a phantom "ready".
                 let coverage = self.digest?.coverage
