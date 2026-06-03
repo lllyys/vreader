@@ -315,6 +315,56 @@ struct ReadiumPositionBroadcastTests {
         #expect(ReadiumPositionBroadcast.spineResolved(locator, spineHrefs: []) == nil)
     }
 
+    // MARK: - Bug #318: verified-parallel duplicate-basename index fallback
+
+    /// A raw href that matches no spine entry but IS in the reading-order maps,
+    /// by index, to the OPF spine href at that position — when the two lists are
+    /// equal-count (provably parallel).
+    @Test func spineResolved_rawHrefViaParallelIndex_adoptsSpineHref() {
+        let locator = sampleLocator(href: "OEBPS/a/ch.xhtml")  // raw, duplicate basename
+        let spine = ["OPF/ch1.xhtml", "OPF/ch2.xhtml", "OPF/ch3.xhtml"]
+        let readingOrder = ["OEBPS/x/ch.xhtml", "OEBPS/a/ch.xhtml", "OEBPS/b/ch.xhtml"]
+        let resolved = ReadiumPositionBroadcast.spineResolved(
+            locator, spineHrefs: spine, readingOrderHrefs: readingOrder
+        )
+        // index 1 of reading-order → spine[1].
+        #expect(resolved?.href == "OPF/ch2.xhtml")
+    }
+
+    /// Non-parallel lists (different counts) → conservative skip (no wrong-chapter
+    /// risk), even though the raw href is present in the reading order.
+    @Test func spineResolved_nonParallelLists_returnsNil() {
+        let locator = sampleLocator(href: "OEBPS/a/ch.xhtml")
+        let resolved = ReadiumPositionBroadcast.spineResolved(
+            locator,
+            spineHrefs: ["OPF/ch1.xhtml", "OPF/ch2.xhtml"],          // 2
+            readingOrderHrefs: ["OEBPS/a/ch.xhtml", "x", "y"]        // 3 — diverged
+        )
+        #expect(resolved == nil)
+    }
+
+    /// A spine-matching href ignores the reading-order fallback (primary wins).
+    @Test func spineResolved_spineMatch_ignoresReadingOrder() {
+        let locator = sampleLocator(href: "OPF/ch2.xhtml")
+        let resolved = ReadiumPositionBroadcast.spineResolved(
+            locator,
+            spineHrefs: ["OPF/ch1.xhtml", "OPF/ch2.xhtml"],
+            readingOrderHrefs: ["z", "z"]
+        )
+        #expect(resolved?.href == "OPF/ch2.xhtml")
+    }
+
+    /// A raw href absent from BOTH spine and reading order → skip.
+    @Test func spineResolved_rawHrefNotInReadingOrder_returnsNil() {
+        let locator = sampleLocator(href: "OEBPS/missing.xhtml")
+        let resolved = ReadiumPositionBroadcast.spineResolved(
+            locator,
+            spineHrefs: ["OPF/ch1.xhtml"],
+            readingOrderHrefs: ["OEBPS/other.xhtml"]
+        )
+        #expect(resolved == nil)
+    }
+
     /// End-to-end through the gate: a resolved relocate reaches the bus; an
     /// unresolved one does not (so `currentLocator` is preserved).
     @Test func post_spineResolved_onlyPostsResolvableHref() {

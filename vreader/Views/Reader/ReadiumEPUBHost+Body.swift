@@ -136,7 +136,12 @@ extension ReadiumEPUBHost {
                 ReadiumPositionBroadcast.post(
                     ReadiumPositionBroadcast.spineResolved(
                         currentVReaderLocator(from: locator),
-                        spineHrefs: bilingualSpineHrefs
+                        spineHrefs: bilingualSpineHrefs,
+                        // Bug #318: the Readium reading-order hrefs, parallel to the
+                        // parser's `bilingualSpineHrefs`, let a duplicate-basename
+                        // relocate (whose href the normalizer left raw) map by index
+                        // to its OPF spine href instead of being skipped.
+                        readingOrderHrefs: publication.readingOrder.map(\.href)
                     )
                 )
             },
