@@ -257,6 +257,9 @@ struct EPUBBilingualSurfacesModifier: ViewModifier {
     let ensureViewModel: () -> Void
     let onMoreBilingualToggle: () -> Void
     let onBilingualDidChange: () -> Void
+    /// Feature #77 WI-4: the prefetch-state bus — drives the inline loading
+    /// shimmer as the in-flight unit set changes (the FULL set is carried).
+    let onPrefetchDidChange: (Set<TranslationUnitID>) -> Void
     /// Feature #56 WI-15: routes a re-translate result to the format's
     /// bilingual VM so the open chapter re-renders without waiting for the
     /// next prefetch trigger.
@@ -302,6 +305,17 @@ struct EPUBBilingualSurfacesModifier: ViewModifier {
                 let key = notification.userInfo?["fingerprintKey"] as? String
                 guard key == bookFingerprintKey else { return }
                 onBilingualDidChange()
+            }
+            // Feature #77 WI-4: the prefetch-state bus drives the inline loading
+            // shimmer for the legacy EPUB engine (override-off path).
+            .onReceive(
+                NotificationCenter.default.publisher(for: .readerBilingualPrefetchDidChange)
+            ) { notification in
+                let key = notification.userInfo?["fingerprintKey"] as? String
+                guard key == bookFingerprintKey else { return }
+                let inFlight = notification.userInfo?["inFlightUnits"]
+                    as? Set<TranslationUnitID> ?? []
+                onPrefetchDidChange(inFlight)
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .readerBilingualReTranslateApplied)

@@ -209,6 +209,14 @@ final class EPUBBilingualOrchestrator {
         )
     }
 
+    /// Feature #77: JS that removes ONLY the loading-shimmer decoration nodes (a
+    /// failed / cancelled prefetch), leaving landed translations intact. The
+    /// translation-landed path replaces a shimmer in place, so the shimmer must
+    /// NOT be removed there — only here, for the no-translation outcome.
+    func clearLoadingJS() -> String {
+        EPUBBilingualJS.bilingualClearLoadingJS()
+    }
+
     /// Feature #71 WI-7 (Gate-4 round-2 HIGH 2): build ONE inject JS payload
     /// covering MULTIPLE stitched sections at once, pairing each section's
     /// ordered segments against ONLY that section's bids.

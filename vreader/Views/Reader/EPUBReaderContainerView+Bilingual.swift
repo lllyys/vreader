@@ -252,6 +252,29 @@ extension EPUBReaderContainerView {
         }
     }
 
+    /// Feature #77 WI-4: `.readerBilingualPrefetchDidChange` handler for the
+    /// legacy EPUB engine (override-off PAGED path). Shows the inline loading
+    /// shimmer while the current chapter's unit is fetching, and removes a
+    /// leftover shimmer on a failed / cancelled prefetch (a landed translation is
+    /// replaced in place by the inject path, so it is NOT cleared here). Pushes
+    /// through the same `pendingHighlightJS` seam the paged inject uses.
+    /// Continuous-scroll mode is handled separately (WI-5).
+    func handleBilingualPrefetchChange(inFlightUnits: Set<TranslationUnitID>) {
+        guard let vm = bilingualViewModel, vm.isEnabled else { return }
+        guard !isBilingualContinuousMode else { return }   // WI-5 owns continuous
+        Task {
+            guard let locator = viewModel.makeCurrentLocator(),
+                  let unit = await vm.textProvider?.unit(containing: locator) else { return }
+            if inFlightUnits.contains(unit) {
+                if let js = bilingualOrchestrator.buildLoadingJS() {
+                    pendingHighlightJS = js
+                }
+            } else if vm.translations(for: unit) == nil {
+                pendingHighlightJS = bilingualOrchestrator.clearLoadingJS()
+            }
+        }
+    }
+
     /// Handle a `.readerMoreBilingual` notification — toggle the
     /// bilingual VM's `isEnabled` state. Construct the VM lazily if
     /// the More menu fired before metadata loaded (a rare edge — the
@@ -383,6 +406,7 @@ extension EPUBReaderContainerView {
             ensureViewModel: { ensureBilingualViewModel() },
             onMoreBilingualToggle: { handleMoreBilingualToggle() },
             onBilingualDidChange: { handleBilingualDidChange() },
+            onPrefetchDidChange: { handleBilingualPrefetchChange(inFlightUnits: $0) },
             onReTranslateApplied: { unit, segments in
                 bilingualViewModel?.applyReTranslateResult(segments, for: unit)
             },

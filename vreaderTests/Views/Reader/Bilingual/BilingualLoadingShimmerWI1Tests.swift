@@ -218,6 +218,17 @@ struct EPUBBilingualOrchestratorLoadingTests {
         #expect(js.contains("'s0a'"))
         #expect(!js.contains("'s1a'"))   // section 1's bid must NOT leak in
     }
+
+    // Feature #77 WI-4: the legacy EPUB paged loading-clear delegates to the
+    // shared loading-only clear JS.
+    @Test("clearLoadingJS emits the loading-only clear payload")
+    func orchestratorClearLoadingJS() {
+        let orchestrator = EPUBBilingualOrchestrator()
+        let js = orchestrator.clearLoadingJS()
+        #expect(js == EPUBBilingualJS.bilingualClearLoadingJS())
+        #expect(js.contains("vreader-bilingual-loading"))
+        #expect(js.contains("removeChild"))
+    }
 }
 
 // MARK: - 5. setInFlight funnel + notification
