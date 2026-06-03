@@ -81,9 +81,22 @@ enum HighlightPaintColor {
     /// (legacy hex, empty string, a future custom color) falls back to
     /// yellow — mirroring `FoliateHighlightRenderer.foliateColor(from:)`.
     static func fill(for storedColorName: String) -> UIColor {
+        solidSwatch(for: storedColorName).withAlphaComponent(fillAlpha)
+    }
+
+    /// Feature #74: the OPAQUE design swatch for a stored color name — the hue the
+    /// locate-bloom focus ring strokes and the glow tints. Same resolution +
+    /// yellow fallback as `fill(for:)`, but without the wash alpha applied.
+    static func solidSwatch(for storedColorName: String) -> UIColor {
         let named = NamedHighlightColor.from(storageString: storedColorName) ?? .yellow
-        let base = uiColor(fromHex: named.hex) ?? UIColor.systemYellow
-        return base.withAlphaComponent(fillAlpha)
+        return uiColor(fromHex: named.hex) ?? UIColor.systemYellow
+    }
+
+    /// Feature #74: the swatch fill at an explicit `alpha` — the variable-alpha
+    /// wash the locate bloom value-lifts (0.4 resting → 0.86 peak). The fixed
+    /// `fill(for:)` (resting `fillAlpha`) is unchanged.
+    static func fill(for storedColorName: String, alpha: CGFloat) -> UIColor {
+        solidSwatch(for: storedColorName).withAlphaComponent(alpha)
     }
 
     /// Parses a `#RRGGBB` hex string into an opaque `UIColor`. Returns nil

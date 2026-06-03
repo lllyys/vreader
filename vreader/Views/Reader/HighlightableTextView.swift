@@ -32,9 +32,17 @@ final class HighlightingLayoutManager: NSLayoutManager {
     /// from a persisted highlight, which carries a user-chosen color.
     var searchHighlightRange: NSRange?
 
+    /// Feature #74: the transient locate-bloom layer — a highlight range, its
+    /// color, the bloom `intensity` (0 = rest, 1 = peak), and the theme family.
+    /// Painted SEPARATELY (so it renders even when its range equals a persisted
+    /// range — defeats the dedup no-op), and it REPLACES the persisted fill for
+    /// an equal range (the design's single wash value-lift, never a stacked
+    /// translucent fill). `nil` when no bloom is active. WI-2 drives `intensity`.
+    var landingHighlight: (range: NSRange, colorName: String, intensity: CGFloat, family: LandingBloomThemeFamily)?
+
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
-        guard !persistedHighlights.isEmpty || searchHighlightRange != nil,
+        guard !persistedHighlights.isEmpty || searchHighlightRange != nil || landingHighlight != nil,
               let ctx = UIGraphicsGetCurrentContext(),
               let tc = textContainers.first,
               let ts = textStorage else { return }
@@ -48,6 +56,14 @@ final class HighlightingLayoutManager: NSLayoutManager {
         )
 
         for highlight in persistedHighlights {
+            // Feature #74: skip the persisted wash the landing layer replaces for
+            // an equal range — the landing wash is painted instead (single
+            // value-lifting wash, never two stacked translucent fills).
+            if let landing = landingHighlight,
+               LandingBloomPaint.suppressesPersisted(
+                   persistedRange: highlight.range, landingRange: landing.range) {
+                continue
+            }
             paint(
                 charRange: highlight.range,
                 color: HighlightPaintColor.fill(for: highlight.colorName).cgColor,
@@ -65,6 +81,61 @@ final class HighlightingLayoutManager: NSLayoutManager {
                 glyphsToShow: glyphsToShow, origin: origin
             )
         }
+        if let landing = landingHighlight {
+            paintLandingBloom(
+                landing, ctx: ctx, container: tc, validBounds: validBounds,
+                visibleCharRange: visibleCharRange,
+                glyphsToShow: glyphsToShow, origin: origin
+            )
+        }
+    }
+
+    /// Feature #74: paint the locate-bloom layer — the value-lifted wash (which
+    /// replaces the suppressed equal-range persisted fill), then the solid-swatch
+    /// focus ring with its outer glow. Ring + glow are wrapped in
+    /// `saveGState`/`restoreGState` so the shadow/stroke state never leaks into
+    /// the persisted/search fills painted above.
+    private func paintLandingBloom(
+        _ landing: (range: NSRange, colorName: String, intensity: CGFloat, family: LandingBloomThemeFamily),
+        ctx: CGContext, container: NSTextContainer, validBounds: NSRange,
+        visibleCharRange: NSRange, glyphsToShow: NSRange, origin: CGPoint
+    ) {
+        let p = LandingBloomPaint(intensity: landing.intensity, family: landing.family)
+        let swatch = HighlightPaintColor.solidSwatch(for: landing.colorName)
+        // 1. Wash (value-lifted alpha).
+        paint(
+            charRange: landing.range,
+            color: swatch.withAlphaComponent(p.washAlpha).cgColor,
+            ctx: ctx, container: container, validBounds: validBounds,
+            visibleCharRange: visibleCharRange,
+            glyphsToShow: glyphsToShow, origin: origin
+        )
+        // 2. Ring + glow — nothing to stroke at rest (ringWidth 0).
+        guard p.ringWidth > 0 else { return }
+        let clamped = NSIntersectionRange(landing.range, validBounds)
+        guard clamped.length > 0,
+              NSIntersectionRange(clamped, visibleCharRange).length > 0 else { return }
+        let glyphRange = self.glyphRange(forCharacterRange: clamped, actualCharacterRange: nil)
+        let visible = NSIntersectionRange(glyphRange, glyphsToShow)
+        guard visible.length > 0 else { return }
+
+        ctx.saveGState()
+        if p.glowRadius > 0 {
+            ctx.setShadow(
+                offset: .zero, blur: p.glowRadius,
+                color: swatch.withAlphaComponent(p.glowAlpha).cgColor
+            )
+        }
+        ctx.setStrokeColor(swatch.cgColor)
+        ctx.setLineWidth(p.ringWidth)
+        enumerateEnclosingRects(
+            forGlyphRange: visible,
+            withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+            in: container
+        ) { rect, _ in
+            ctx.stroke(rect.offsetBy(dx: origin.x, dy: origin.y))
+        }
+        ctx.restoreGState()
     }
 
     /// Fills the visible portion of one highlight range with `color`.
@@ -159,6 +230,31 @@ final class HighlightableTextView: UITextView {
         } else {
             lm.searchHighlightRange = nil
         }
+        invalidateHighlightDisplay(lm)
+    }
+
+    /// Feature #74 WI-1: set the locate-bloom layer + invalidate. WI-2's
+    /// animation driver calls this per frame with a rising/falling `intensity`;
+    /// a single call paints one static frame. Painted separately from
+    /// persisted/search (so an equal range still renders — defeats the dedup),
+    /// and it replaces the equal-range persisted wash (no stacking).
+    func setLandingHighlight(
+        range: NSRange, colorName: String, intensity: CGFloat, family: LandingBloomThemeFamily
+    ) {
+        guard let lm = layoutManager as? HighlightingLayoutManager else { return }
+        lm.landingHighlight = (range: range, colorName: colorName, intensity: intensity, family: family)
+        invalidateHighlightDisplay(lm)
+    }
+
+    /// Feature #74 WI-1: tear down the locate-bloom layer + invalidate.
+    func clearLandingHighlight() {
+        guard let lm = layoutManager as? HighlightingLayoutManager,
+              lm.landingHighlight != nil else { return }
+        lm.landingHighlight = nil
+        invalidateHighlightDisplay(lm)
+    }
+
+    private func invalidateHighlightDisplay(_ lm: HighlightingLayoutManager) {
         let glyphCount = lm.numberOfGlyphs
         if glyphCount > 0 {
             lm.invalidateDisplay(forGlyphRange: NSRange(location: 0, length: glyphCount))
