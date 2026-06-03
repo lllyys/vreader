@@ -22,9 +22,10 @@ struct ChatScopeMenu: View {
         "chatScopeRow.\(scope.rawValue)"
     }
 
-    /// The scopes the WI-3 menu offers: the synchronous (non-on-demand) ones.
-    /// WI-5 adds the on-demand Whole-book row alongside its retrieval states.
-    static let menuScopes: [ChatContextScope] = ChatContextScope.allCases.filter { !$0.isOnDemand }
+    /// All four scopes. WI-5 added the on-demand Whole-book row now that its
+    /// retrieval + armed/reading/ready states exist (it was filtered out in WI-3
+    /// to avoid offering whole-book before retrieval was built).
+    static let menuScopes: [ChatContextScope] = ChatContextScope.allCases
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

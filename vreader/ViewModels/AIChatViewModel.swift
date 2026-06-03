@@ -101,6 +101,21 @@ final class AIChatViewModel {
         onScopeChanged?()   // same single re-assembly funnel as scope
     }
 
+    /// Feature #86 WI-5b: the whole-book retrieval state machine (set by the
+    /// coordinator). Drives the context bar's Armed/Reading/Ready cluster when the
+    /// scope is `.wholeBook`.
+    var wholeBookRetrieval: WholeBookRetrievalViewModel?
+
+    /// Set by the coordinator: triggers the on-demand whole-book read and awaits
+    /// it (so the digest is in `bookContext` before the question is answered).
+    var onWholeBookReadRequested: (() async -> Void)?
+
+    /// The composer is disabled while the whole book is being read.
+    var isComposerDisabled: Bool {
+        if case .reading = wholeBookRetrieval?.phase { return true }
+        return false
+    }
+
     // MARK: - Dependencies
 
     private let aiService: AIService
@@ -140,6 +155,13 @@ final class AIChatViewModel {
 
         isLoading = true
         defer { isLoading = false }
+
+        // Feature #86 WI-5b: the Whole-book scope reads on the FIRST question
+        // ("reads on your next question"). Trigger the on-demand read and await it
+        // so the digest is folded into `bookContext` before the answer is built.
+        if scope == .wholeBook, let retrieval = wholeBookRetrieval, !retrieval.isReady {
+            await onWholeBookReadRequested?()
+        }
 
         // Build context from conversation history (sliding window)
         let contextText = buildContextText()

@@ -80,7 +80,12 @@ final class ReaderAICoordinator {
     func scopedChatContext(_ scope: ChatContextScope) -> String {
         let section = currentTextContent
         guard let summaryScope = scope.summaryScope else {
-            return scopedChatContext(.bookSoFar)   // .wholeBook → best synchronous scope (WI-5 replaces)
+            // .wholeBook (WI-5b): use the retrieved digest once available; until the
+            // read completes, fall back to the broadest synchronous scope.
+            if let digest = chatViewModel?.wholeBookRetrieval?.availableContext, !digest.isEmpty {
+                return digest
+            }
+            return scopedChatContext(.bookSoFar)
         }
         if summaryScope == .section { return section }
         guard let loaded = loadedTextContent, !loaded.isEmpty,
@@ -134,6 +139,60 @@ final class ReaderAICoordinator {
         chatViewModel?.sourceCounts = chatAnnotationCache?.counts ?? (0, 0, 0)
     }
 
+    /// The pinned AI service for whole-book retrieval (WI-5b). Set in setupIfNeeded.
+    private var pinnedAIService: AIService?
+
+    /// Feature #86 WI-5b: a scope/sources change. Arms whole-book retrieval when
+    /// `.wholeBook` is selected (disarms otherwise), then re-assembles via the
+    /// single funnel.
+    private func handleChatContextChanged() {
+        if let retrieval = chatViewModel?.wholeBookRetrieval {
+            if chatViewModel?.scope == .wholeBook {
+                retrieval.arm()
+            } else if retrieval.phase != .idle {
+                retrieval.disarm()
+            }
+        }
+        refreshChatContext()
+    }
+
+    /// Feature #86 WI-5b: the on-demand whole-book read. Resolves ONE provider
+    /// config (pinned for the whole job), drives `WholeBookRetrievalViewModel.read`
+    /// with a `condense` closure that summarizes each chunk, awaits completion, and
+    /// re-assembles the context so the digest becomes the scope text.
+    func runWholeBookRead() async {
+        guard let retrieval = chatViewModel?.wholeBookRetrieval,
+              let service = pinnedAIService,
+              let text = loadedTextContent, !text.isEmpty
+        else { return }
+        if retrieval.isReady { return }
+        if case .reading = retrieval.phase { await retrieval.readTask?.value; return }
+
+        do {
+            let config = try await service.resolveActiveProviderConfig()
+            retrieval.read(
+                fullText: text,
+                chunkBudgetUTF16: AIContextBudget.defaultMaxUTF16,
+                digestBudgetUTF16: AIContextBudget.defaultMaxUTF16,
+                maxChunks: 30,   // overflow bound on provider calls — large books read a bounded digest
+                condense: { chunk in
+                    let request = AIRequest(
+                        actionType: .summarize, bookFingerprint: nil, locator: nil,
+                        contextText: chunk,
+                        userPrompt: "Summarize the key events, characters, and ideas in this passage concisely.",
+                        targetLanguage: nil, promptVersion: "v1"
+                    )
+                    return try await service.sendRequest(request, using: config).content
+                }
+            )
+            await retrieval.readTask?.value
+        } catch {
+            // Provider/config failure → the VM lands in .partial; the scope text
+            // falls back to book-so-far. Never blocks the send.
+        }
+        refreshChatContext()
+    }
+
     /// Book title used as fallback when no text content is available.
     private let fallbackTitle: String
     /// Resolved book format for context extraction.
@@ -176,9 +235,13 @@ final class ReaderAICoordinator {
         let fingerprint = DocumentFingerprint(canonicalKey: fingerprintKey)
         let chatVM = AIChatViewModel(aiService: service, bookFingerprint: fingerprint)
         chatViewModel = chatVM
-        // Feature #86 WI-3/4: re-assemble the context when the user changes scope
-        // OR toggles sources, through the same single funnel.
-        chatVM.onScopeChanged = { [weak self] in self?.refreshChatContext() }
+        pinnedAIService = service
+        // Feature #86 WI-5b: the whole-book retrieval state machine.
+        chatVM.wholeBookRetrieval = WholeBookRetrievalViewModel()
+        chatVM.onWholeBookReadRequested = { [weak self] in await self?.runWholeBookRead() }
+        // Feature #86 WI-3/4/5b: re-assemble the context when the user changes scope
+        // OR toggles sources, through the same single funnel; whole-book select arms.
+        chatVM.onScopeChanged = { [weak self] in self?.handleChatContextChanged() }
 
         // Feature #86 WI-4: the sources cache. Loads once now and refreshes on
         // `.readerAnnotationsDidChange`; each (re)load re-assembles the context +

@@ -52,16 +52,30 @@ struct AIChatView: View {
                     errorBanner(message: error)
                 }
 
-                // Feature #86 WI-3/4: the docked context bar, above the composer.
-                ChatContextBar(
-                    scope: viewModel.scope,
-                    theme: theme,
-                    isScopeMenuOpen: openMenu == .scope,
-                    onScopeTap: { toggleMenu(.scope) },
-                    sourcesCount: viewModel.sources.activeCount,
-                    isSourcesMenuOpen: openMenu == .sources,
-                    onSourcesTap: { toggleMenu(.sources) }
-                )
+                // Feature #86 WI-3/4/5b: the docked context bar above the composer.
+                // For the on-demand Whole-book scope, the bar morphs into the
+                // retrieval cluster (Armed/Reading/Ready); otherwise the normal
+                // scope + sources chips.
+                if viewModel.scope == .wholeBook, let retrieval = viewModel.wholeBookRetrieval {
+                    ChatRetrievalCluster(
+                        phase: retrieval.phase,
+                        theme: theme,
+                        progressFraction: retrieval.progressFraction,
+                        unitProgressLabel: retrieval.unitProgressLabel,
+                        onScopeTap: { toggleMenu(.scope) },
+                        onCancel: { retrieval.cancel() }
+                    )
+                } else {
+                    ChatContextBar(
+                        scope: viewModel.scope,
+                        theme: theme,
+                        isScopeMenuOpen: openMenu == .scope,
+                        onScopeTap: { toggleMenu(.scope) },
+                        sourcesCount: viewModel.sources.activeCount,
+                        isSourcesMenuOpen: openMenu == .sources,
+                        onSourcesTap: { toggleMenu(.sources) }
+                    )
+                }
 
                 inputBar
             }
