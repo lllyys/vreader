@@ -34,6 +34,7 @@ extension PersistenceActor: BookmarkPersisting {
         book.bookmarks.append(bookmark)
         context.insert(bookmark)
         try context.save()
+        postAnnotationsDidChange()
 
         return bookmarkToRecord(bookmark)
     }
@@ -51,6 +52,7 @@ extension PersistenceActor: BookmarkPersisting {
 
         context.delete(bookmark)
         try context.save()
+        postAnnotationsDidChange()
     }
 
     func fetchBookmarks(forBookWithKey key: String) async throws -> [BookmarkRecord] {
@@ -96,6 +98,7 @@ extension PersistenceActor: BookmarkPersisting {
         bookmark.title = title
         bookmark.updatedAt = Date()
         try context.save()
+        postAnnotationsDidChange()
     }
 
     // MARK: - Private

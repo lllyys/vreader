@@ -83,6 +83,15 @@ extension Notification.Name {
     /// Posted after annotation import completes (bug #88).
     /// Reader containers observe this to re-render persisted highlights.
     static let readerHighlightsDidImport = Notification.Name("vreader.readerHighlightsDidImport")
+    /// Feature #86 WI-2: the single **mutation-complete** bus for the reader's own
+    /// annotations. Posted by `PersistenceActor` AFTER a successful save at every
+    /// highlight / bookmark / standalone-annotation mutation chokepoint
+    /// (add·remove·update) — so it fires once persistence has actually landed,
+    /// unlike the request-time `.reader*Requested` notifications which fire before
+    /// the async persistence runs. The AI Chat `ChatAnnotationCache` observes this
+    /// (on `.main`) to refresh its cached annotation records/counts WITHOUT hitting
+    /// SwiftData on every relocate. No payload — observers refetch by book key.
+    static let readerAnnotationsDidChange = Notification.Name("vreader.readerAnnotationsDidChange")
     /// Feature #60 WI-6b: posted by the shared `ReaderBottomChrome`
     /// toolbar when the user taps one of its four buttons.
     /// `ReaderContainerView` observes these and presents the matching

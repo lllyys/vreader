@@ -37,6 +37,7 @@ extension PersistenceActor: AnnotationPersisting {
         book.annotations.append(annotation)
         context.insert(annotation)
         try context.save()
+        postAnnotationsDidChange()
 
         return annotationToRecord(annotation)
     }
@@ -54,6 +55,7 @@ extension PersistenceActor: AnnotationPersisting {
 
         context.delete(annotation)
         try context.save()
+        postAnnotationsDidChange()
     }
 
     func updateAnnotation(annotationId: UUID, content: String) async throws {
@@ -75,6 +77,7 @@ extension PersistenceActor: AnnotationPersisting {
         annotation.content = trimmedContent
         annotation.updatedAt = Date()
         try context.save()
+        postAnnotationsDidChange()
     }
 
     func fetchAnnotations(forBookWithKey key: String) async throws -> [AnnotationRecord] {

@@ -258,6 +258,7 @@ All cross-component communication uses NotificationCenter:
 | `.readerSelectionPopoverRequested` | `TextSelectionInfo` (object) | Bridge → `SelectionPopoverPresenterModifier` (Feature #60 WI-7c1). Bridges that have swapped to the popover suppress their legacy `UIMenu` and post this instead; the presenter mounts `SelectionPopoverView` (WI-7a) as a sheet and routes taps through `SelectionPopoverActionRouter` (WI-7b). |
 | `.readerHighlightRemoved`      | UUID string          | HighlightListVM → Container                             |
 | `.readerHighlightsDidImport`   | fingerprintKey       | Importer → format containers (refresh persisted highlights) |
+| `.readerAnnotationsDidChange`  | nil                  | `PersistenceActor` (after a successful highlight/bookmark/annotation add·remove·update save) → AI Chat `ChatAnnotationCache` (Feature #86 WI-2). The single **mutation-complete** bus — posted from the actor chokepoints so it covers every caller (rule 50), unlike the request-time `.reader*Requested` notifications which fire before persistence lands. Observers register on `.main` and refetch by book key. |
 | `.readerDidClose`              | fingerprintKey       | ViewModel → LibraryView                                 |
 | `.readerAnnotationRequested`   | `TextSelectionInfo`  | Bridge → Container                                      |
 | `.readerDefineRequested`       | `TextSelectionInfo`  | Bridge → Container (dictionary)                         |

@@ -77,6 +77,7 @@ extension PersistenceActor: HighlightPersisting {
         book.highlights.append(highlight)
         context.insert(highlight)
         try context.save()
+        postAnnotationsDidChange()
 
         return highlightToRecord(highlight)
     }
@@ -94,6 +95,7 @@ extension PersistenceActor: HighlightPersisting {
 
         context.delete(highlight)
         try context.save()
+        postAnnotationsDidChange()
     }
 
     func updateHighlightNote(highlightId: UUID, note: String?) async throws {
@@ -110,6 +112,7 @@ extension PersistenceActor: HighlightPersisting {
         highlight.note = note
         highlight.updatedAt = Date()
         try context.save()
+        postAnnotationsDidChange()
     }
 
     func updateHighlightColor(highlightId: UUID, color: String) async throws {
@@ -126,6 +129,7 @@ extension PersistenceActor: HighlightPersisting {
         highlight.color = color
         highlight.updatedAt = Date()
         try context.save()
+        postAnnotationsDidChange()
     }
 
     func fetchHighlights(forBookWithKey key: String) async throws -> [HighlightRecord] {
