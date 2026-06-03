@@ -97,13 +97,20 @@ struct AIChatMessageRow: View {
     private var assistantRow: some View {
         HStack(alignment: .top, spacing: 8) {
             sparkleAvatar
-            Text(message.content)
-                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 14.5)))
-                .lineSpacing(4)
-                .foregroundStyle(Color(theme.inkColor))
-                .textSelection(.enabled)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(message.content)
+                    .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 14.5)))
+                    .lineSpacing(4)
+                    .foregroundStyle(Color(theme.inkColor))
+                    .textSelection(.enabled)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Feature #86 WI-6: the "Drew on" provenance row under the reply.
+                if !message.citations.isEmpty {
+                    ChatCitationRow(citations: message.citations, theme: theme)
+                        .padding(.bottom, 4)
+                }
+            }
             Spacer(minLength: 32)
         }
         .padding(.horizontal, 18)

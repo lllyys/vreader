@@ -123,11 +123,21 @@ final class ReaderAICoordinator {
         let block = chatAnnotationCache?.annotationBlock(
             for: chatVM.sources, maxUTF16: AIContextBudget.defaultMaxUTF16
         ) ?? ""
+        // Feature #86 WI-6: compute the provenance citations the context drew on;
+        // the assembler retains only those that survive the budget clamp.
+        let counts = chatAnnotationCache?.counts ?? (0, 0, 0)
+        let wholeBookCoverage = chatVM.scope == .wholeBook
+            ? chatVM.wholeBookRetrieval?.digest?.coverage : nil
+        let citations = ChatCitationFactory.citations(
+            scope: chatVM.scope, sources: chatVM.sources, counts: counts,
+            wholeBookCoverage: wholeBookCoverage
+        )
         let assembly = ChatContextAssembler.assemble(
-            scopeText: scopeText, annotationBlock: block, citations: [],
+            scopeText: scopeText, annotationBlock: block, citations: citations,
             maxUTF16: AIContextBudget.defaultMaxUTF16
         )
         chatVM.bookContext = assembly.bookContext
+        chatVM.pendingCitations = assembly.citations
     }
 
     /// Feature #86 WI-4: the per-book annotation cache backing the sources chip.

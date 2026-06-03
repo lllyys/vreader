@@ -94,6 +94,11 @@ final class AIChatViewModel {
     /// bookmarks). Set by the coordinator from the `ChatAnnotationCache`.
     var sourceCounts: (notes: Int, highlights: Int, bookmarks: Int) = (0, 0, 0)
 
+    /// Feature #86 WI-6: the citations the CURRENT assembled context drew on (set
+    /// by the coordinator's funnel). `sendMessage` snapshots these at send time and
+    /// stamps the assistant reply's "Drew on" row from the snapshot.
+    var pendingCitations: [ChatCitation] = []
+
     /// Toggles a single source kind and re-assembles the book context.
     func setSources(_ newSources: ChatSourceSelection) {
         guard newSources != sources else { return }
@@ -163,6 +168,11 @@ final class AIChatViewModel {
             await onWholeBookReadRequested?()
         }
 
+        // Feature #86 WI-6: SNAPSHOT the citations the context drew on, AFTER any
+        // whole-book read (so the snapshot reflects the digest) but BEFORE the
+        // async stream — so a scope/source change mid-send can't mis-stamp the reply.
+        let citationSnapshot = pendingCitations
+
         // Build context from conversation history (sliding window)
         let contextText = buildContextText()
 
@@ -177,8 +187,9 @@ final class AIChatViewModel {
         )
 
         do {
-            // Create an empty assistant message for incremental streaming
-            let assistantMessage = ChatMessage(role: .assistant, content: "")
+            // Create an empty assistant message (stamped with the citation snapshot)
+            // for incremental streaming.
+            let assistantMessage = ChatMessage(role: .assistant, content: "", citations: citationSnapshot)
             messages.append(assistantMessage)
             let assistantIndex = messages.count - 1
 
