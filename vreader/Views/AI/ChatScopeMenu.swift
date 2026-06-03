@@ -22,12 +22,21 @@ struct ChatScopeMenu: View {
         "chatScopeRow.\(scope.rawValue)"
     }
 
+    /// The scopes the WI-3 menu offers: the synchronous (non-on-demand) ones.
+    /// WI-5 adds the on-demand Whole-book row alongside its retrieval states.
+    static let menuScopes: [ChatContextScope] = ChatContextScope.allCases.filter { !$0.isOnDemand }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider().overlay(Color(theme.ruleColor))
             VStack(spacing: 0) {
-                ForEach(ChatContextScope.allCases, id: \.self) { scope in
+                // WI-3 ships the three synchronous scopes only. The on-demand
+                // Whole-book row lands in WI-5 together with its retrieval +
+                // armed/reading/ready states — so the menu never offers whole-book
+                // (with its spoiler-aware copy) while requests would silently use a
+                // narrower slice (Gate-4 High).
+                ForEach(Self.menuScopes, id: \.self) { scope in
                     row(scope)
                 }
             }

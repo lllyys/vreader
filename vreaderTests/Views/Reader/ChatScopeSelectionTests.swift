@@ -23,7 +23,7 @@ struct ChatContextScopeMenuTests {
         #expect(ChatContextScope.section.tokenEstimate == "~600 tokens")
         #expect(ChatContextScope.chapter.tokenEstimate == "~4.2k tokens")
         #expect(ChatContextScope.bookSoFar.tokenEstimate == "~58k tokens")
-        #expect(ChatContextScope.wholeBook.tokenEstimate == "On-demand")
+        #expect(ChatContextScope.wholeBook.tokenEstimate == "on-demand")
     }
 
     @Test func menuFooter_isSpoilerAwareOnlyForWholeBook() {

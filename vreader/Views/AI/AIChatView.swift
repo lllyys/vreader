@@ -271,8 +271,9 @@ struct AIChatView: View {
     /// behaviour and the bug-#94 focus / submit wiring are preserved.
     @ViewBuilder
     private var inputBar: some View {
-        Color(theme.ruleColor).frame(height: 0.5)
-
+        // Feature #86 WI-3: the cluster's single top rule now lives on the docked
+        // ChatContextBar above this composer (design #1455 — one shared rule around
+        // bar + composer), so the composer no longer draws its own.
         HStack(spacing: 8) {
             ZStack(alignment: .topLeading) {
                 // Bug #310: themed placeholder. SwiftUI ignores `.foregroundStyle`

@@ -27,7 +27,7 @@ extension ChatContextScope {
         case .section:   return "~600 tokens"
         case .chapter:   return "~4.2k tokens"
         case .bookSoFar: return "~58k tokens"
-        case .wholeBook: return "On-demand"
+        case .wholeBook: return "on-demand"   // matches the #1455 source string verbatim
         }
     }
 
