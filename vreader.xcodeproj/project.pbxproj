@@ -885,6 +885,7 @@
 		8F49E620D597517097E96AE7 /* PersistenceActor+HighlightLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88D54435E0293B133D7C4ECE /* PersistenceActor+HighlightLookupTests.swift */; };
 		8F6ADD143DF892DFAAED7C80 /* BilingualDisplayPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18967D09A42C1FAF3DD22C48 /* BilingualDisplayPipelineTests.swift */; };
 		8FD1FAC0AE8611D29DEDC87D /* ChatScopeMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4007FACF71264B6118B3F5FA /* ChatScopeMenu.swift */; };
+		8FEAAB7DF40F77A4C62A971A /* BilingualLoadingShimmerWI1Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20C6CA30A3C2A4D93818C56 /* BilingualLoadingShimmerWI1Tests.swift */; };
 		8FFE1DA9C8F17FC318BE81BD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138AEC5BBAD52B075096E5C8 /* SettingsView.swift */; };
 		9008E6E28C2B6F8202E2183A /* TXTChapterIndexBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEAA04C3430C5B247FB86585 /* TXTChapterIndexBuilderTests.swift */; };
 		9046B57894C5D46BDFBA4B49 /* PersistenceActorAnnotationBusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF24473B2CF440F36180E227 /* PersistenceActorAnnotationBusTests.swift */; };
@@ -2604,6 +2605,7 @@
 		B13E51BF43992E1B2786A8FD /* ChapterTranslationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterTranslationServiceTests.swift; sourceTree = "<group>"; };
 		B16D420A03BD524C247A78FB /* TXTReflowableTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTReflowableTextSource.swift; sourceTree = "<group>"; };
 		B1DBBFF061B96088FFE84194 /* TXTService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTService.swift; sourceTree = "<group>"; };
+		B20C6CA30A3C2A4D93818C56 /* BilingualLoadingShimmerWI1Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualLoadingShimmerWI1Tests.swift; sourceTree = "<group>"; };
 		B21BF3A477B679DC3646FE38 /* ChapterTranslationCacheLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterTranslationCacheLookupTests.swift; sourceTree = "<group>"; };
 		B21FF5B2854F2C50C5A43F17 /* BookFileImportFinalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFileImportFinalizerTests.swift; sourceTree = "<group>"; };
 		B26F3EB2A31C52E81656141C /* WholeBookReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WholeBookReducerTests.swift; sourceTree = "<group>"; };
@@ -4849,6 +4851,7 @@
 				18967D09A42C1FAF3DD22C48 /* BilingualDisplayPipelineTests.swift */,
 				016383B776469400B2DAA64F /* BilingualDisplaySegmentMapTests.swift */,
 				EE4A2E56BB468589356E2DBF /* BilingualLanguageTests.swift */,
+				B20C6CA30A3C2A4D93818C56 /* BilingualLoadingShimmerWI1Tests.swift */,
 				584B96C4075536A21E49E647 /* BilingualOffsetRouterTests.swift */,
 				B8AF952035ED7A7AF46DE73A /* BilingualPillTests.swift */,
 				E49486599FAD7ED74521BC9C /* BilingualSetupSheetTests.swift */,
@@ -5884,6 +5887,7 @@
 				8F6ADD143DF892DFAAED7C80 /* BilingualDisplayPipelineTests.swift in Sources */,
 				B71D0A4E49A75B707B1F0698 /* BilingualDisplaySegmentMapTests.swift in Sources */,
 				3412EBE1BB9E4A31634D0209 /* BilingualLanguageTests.swift in Sources */,
+				8FEAAB7DF40F77A4C62A971A /* BilingualLoadingShimmerWI1Tests.swift in Sources */,
 				A3008C87C09AF4FFE433E3E4 /* BilingualOffsetRouterTests.swift in Sources */,
 				12BECC7665D79D765B478EA8 /* BilingualParagraphRangesTests.swift in Sources */,
 				633C51302507DA66A2EED1DF /* BilingualPillTests.swift in Sources */,
@@ -7377,7 +7381,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 851;
+				CURRENT_PROJECT_VERSION = 852;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7385,7 +7389,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.50.8;
+				MARKETING_VERSION = 3.50.9;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
@@ -7531,7 +7535,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 851;
+				CURRENT_PROJECT_VERSION = 852;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7539,7 +7543,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.50.8;
+				MARKETING_VERSION = 3.50.9;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
