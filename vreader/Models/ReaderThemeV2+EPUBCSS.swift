@@ -200,6 +200,37 @@ extension ReaderThemeV2 {
             sub: Self.cssColor(self.subColor))
     }
 
+    /// Feature #77: the inline bilingual LOADING shimmer rule + `@keyframes vreaderBilingualShim`.
+    /// Shared by all three bilingual engines (Readium / legacy EPUB / Foliate) so a
+    /// `.vreader-bilingual.vreader-bilingual-loading` decoration renders the design's
+    /// animated shimmer bars (`BilingualLoadingSlot`, #1024 §L) while a unit is being
+    /// fetched, distinct from the offline (dashed) state. Theme-aware gradient.
+    func bilingualLoadingCSSRule() -> String {
+        Self.bilingualLoadingCSSRule(isDark: self.isDark)
+    }
+
+    static func bilingualLoadingCSSRule(isDark: Bool) -> String {
+        // The design's theme-aware shimmer gradient (4% → 12% → 4%).
+        let gradient = isDark
+            ? "linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.12), rgba(255,255,255,0.04))"
+            : "linear-gradient(90deg, rgba(20,14,4,0.04), rgba(20,14,4,0.10), rgba(20,14,4,0.04))"
+        return """
+        @keyframes vreaderBilingualShim { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } } \
+        .vreader-bilingual.vreader-bilingual-loading[data-vreader-decoration] { \
+          border-left-color: transparent !important; \
+        } \
+        .vreader-bilingual-loading .vreader-shimmer-bar { \
+          height: 0.62em !important; \
+          margin: 0 0 5px 0 !important; \
+          border-radius: 3px !important; \
+          background: \(gradient) !important; \
+          background-size: 200% 100% !important; \
+          animation: vreaderBilingualShim 1.4s ease-in-out infinite !important; \
+        } \
+        .vreader-bilingual-loading .vreader-shimmer-bar:last-child { margin-bottom: 0 !important; }
+        """
+    }
+
     private static func bilingualCSSRule(accent: String, sub: String) -> String {
         // Use a solid 2px border in the accent token; a translucent
         // overlay would require parsing rgb()/hex which is outside

@@ -163,6 +163,13 @@ extension Notification.Name {
     /// Each format renderer (WI-10..13) observes this to re-inject / clear
     /// the interlinear translation for the affected unit.
     static let readerBilingualDidChange = Notification.Name("vreader.reader.bilingualDidChange")
+    /// Feature #77: posted by `BilingualReadingViewModel` whenever its
+    /// `inFlightUnits` set changes (prefetch start / finish / cancel / retry /
+    /// re-translate), carrying the FULL current in-flight set so a renderer can
+    /// (re)draw or clear the inline loading shimmer authoritatively — a delta
+    /// signal would leak shimmer after cancel/retry. `userInfo`:
+    /// `["fingerprintKey": String, "inFlightUnits": Set<TranslationUnitID>]`.
+    static let readerBilingualPrefetchDidChange = Notification.Name("vreader.reader.bilingualPrefetchDidChange")
     /// Feature #71 WI-7: posted when a chapter section is stitched into the
     /// EPUB continuous-scroll DOM (`sectionMaterialized` lifecycle hook).
     /// Appended/prepended sections never fire `didFinish`, so this is the

@@ -166,7 +166,7 @@ extension BilingualReadingViewModel {
             priorTask.cancel()
             cancelledPrefetchTasks.append(priorTask)
         }
-        inFlightUnits.remove(unit)
+        setInFlight(inFlightUnits.subtracting([unit]))   // Feature #77 funnel
         unavailableUnits.remove(unit)
         if lastTriggerUnit == unit { lastTriggerUnit = nil }
         epoch += 1
@@ -243,8 +243,7 @@ extension BilingualReadingViewModel {
         guard translationsByUnit[unit] == nil else { return }
         guard !inFlightUnits.contains(unit) else { return }
         guard let prefetcher else { return }
-        inFlightUnits.insert(unit)
-        isFetching = true
+        setInFlight(inFlightUnits.union([unit]))   // Feature #77 funnel (was insert + isFetching=true)
         let language = targetLanguage
         let unitGranularity = granularity
         let task = Task { [weak self] in
@@ -272,13 +271,12 @@ extension BilingualReadingViewModel {
     private func finishPrefetch(
         unit: TranslationUnitID, epoch resultEpoch: Int, outcome: PrefetchOutcome
     ) {
-        inFlightUnits.remove(unit)
+        setInFlight(inFlightUnits.subtracting([unit]))   // Feature #77 funnel (was remove + isFetching reset)
         // Only clear the task entry if it is still THIS task's — a newer
         // prefetch for the same unit (a later epoch) may have replaced it.
         if resultEpoch == epoch {
             prefetchTasks.removeValue(forKey: unit)
         }
-        if inFlightUnits.isEmpty { isFetching = false }
         // Stale-epoch guard: discard a result from a superseded epoch.
         guard resultEpoch == epoch, isEnabled else { return }
         switch outcome {
@@ -311,7 +309,6 @@ extension BilingualReadingViewModel {
             cancelledPrefetchTasks.append(task)
         }
         prefetchTasks.removeAll()
-        inFlightUnits.removeAll()
-        isFetching = false
+        setInFlight([])   // Feature #77 funnel (was removeAll + isFetching=false)
     }
 }

@@ -78,6 +78,13 @@ enum EPUBBilingualJS {
     /// Pinned by name in CSS + the clear path.
     static let blockClassName = "vreader-bilingual"
 
+    /// Feature #77: the modifier class marking a decoration node as the LOADING
+    /// shimmer (vs a landed translation). The shared `bilingualLoadingCSSRule()`
+    /// styles `.vreader-bilingual-loading .vreader-shimmer-bar`.
+    static let loadingClassName = "vreader-bilingual-loading"
+    /// Feature #77: the shimmer-bar element class inside a loading decoration.
+    static let shimmerBarClassName = "vreader-shimmer-bar"
+
     /// The WKScriptMessageHandler name the enumerate payload posts
     /// to. Wired up in `EPUBWebViewBridge.makeUIView`.
     static let enumerateMessageHandlerName = "bilingualEnumerate"
@@ -88,6 +95,21 @@ enum EPUBBilingualJS {
     /// producer's literal so a section-scoped enumerate / clear walk
     /// targets the same subtree the stitching emits.
     static let spineIndexAttribute = "data-vreader-spine-index"
+
+    /// Feature #77 (Gate-4 Medium): a JS function definition (`__vreaderBidEsc`)
+    /// that escapes a bid for the CSS **attribute-selector** context before it is
+    /// interpolated into `[data-vreader-bid="…"]`. EPUB's enumerate PRESERVES a
+    /// pre-existing `data-vreader-bid` from book HTML (`stamp()` returns the
+    /// existing attribute rather than overwriting it), so a crafted book could
+    /// carry a `"` / `]` bid that breaks or redirects the `querySelector`.
+    /// `FoliateJSEscaper.escapeForJSString` already hardens the JS-string-literal
+    /// context that carries the bid into the payload array; THIS hardens the
+    /// selector context. Mirrors `foliate-host.js`' defensive `CSS.escape` with
+    /// the identical pre-`CSS.escape` fallback. Inject it at the top of an IIFE,
+    /// then call `__vreaderBidEsc(bid)` inside the selector.
+    static let bidSelectorEscapeJS = """
+    function __vreaderBidEsc(s) { return (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, '\\\\$&'); }
+    """
 
     // MARK: - enumerate
 
@@ -393,10 +415,11 @@ enum EPUBBilingualJS {
             var translations = {
         \(table)};
 
+            \(bidSelectorEscapeJS)
             function findBlock(bid) {
                 try {
                     return document.querySelector(
-                        '[\(blockIDAttribute)="' + bid + '"]'
+                        '[\(blockIDAttribute)="' + __vreaderBidEsc(bid) + '"]'
                     );
                 } catch (e) { return null; }
             }
@@ -431,10 +454,69 @@ enum EPUBBilingualJS {
                     && existing.hasAttribute('\(decorationAttribute)')
                     && existing.classList
                     && existing.classList.contains('\(blockClassName)')) {
+                    // Feature #77: setting textContent replaces the shimmer-bar
+                    // children; also drop the loading class so the landed
+                    // translation styles as a normal interlinear row.
+                    existing.classList.remove('\(loadingClassName)');
                     existing.textContent = translations[bid];
                     continue;
                 }
                 var node = makeBlock(translations[bid]);
+                if (block.parentNode) {
+                    block.parentNode.insertBefore(node, block.nextSibling);
+                }
+            }
+        })();
+        """
+    }
+
+    // MARK: - loading (Feature #77)
+
+    /// Builds the LOADING-shimmer inject JS for `loadingBids` — a decoration node
+    /// carrying the `loading` class + shimmer bars after each source block that has
+    /// no decoration yet. A bid that already has a decoration (a landed translation,
+    /// or an existing loading node) is left untouched, so loading never downgrades a
+    /// translation. The later `bilingualInjectJS` REPLACES a loading node in place
+    /// (clearing the loading class + the shimmer children).
+    static func bilingualInjectLoadingJS(loadingBids: [String], spineIndex: Int? = nil) -> String {
+        _ = spineIndex // attribute-keyed walk; section scoping is the caller's via the bid set.
+        let bidArray = loadingBids.sorted()
+            .map { "'\(FoliateJSEscaper.escapeForJSString($0))'" }
+            .joined(separator: ", ")
+        return """
+        (function() {
+            var bids = [\(bidArray)];
+            \(bidSelectorEscapeJS)
+            function findBlock(bid) {
+                try { return document.querySelector('[\(blockIDAttribute)="' + __vreaderBidEsc(bid) + '"]'); }
+                catch (e) { return null; }
+            }
+            function makeLoading() {
+                var div = document.createElement('div');
+                div.className = '\(blockClassName) \(loadingClassName)';
+                div.setAttribute('\(decorationAttribute)', '');
+                div.style.cssText = 'user-select: none; -webkit-user-select: none;';
+                var widths = ['92%', '54%'];
+                for (var i = 0; i < widths.length; i++) {
+                    var bar = document.createElement('div');
+                    bar.className = '\(shimmerBarClassName)';
+                    bar.style.width = widths[i];
+                    div.appendChild(bar);
+                }
+                return div;
+            }
+            for (var i = 0; i < bids.length; i++) {
+                var block = findBlock(bids[i]);
+                if (!block) continue;
+                var existing = block.nextElementSibling;
+                if (existing
+                    && existing.hasAttribute
+                    && existing.hasAttribute('\(decorationAttribute)')
+                    && existing.classList
+                    && existing.classList.contains('\(blockClassName)')) {
+                    continue; // already decorated (translation or loading) — don't downgrade
+                }
+                var node = makeLoading();
                 if (block.parentNode) {
                     block.parentNode.insertBefore(node, block.nextSibling);
                 }

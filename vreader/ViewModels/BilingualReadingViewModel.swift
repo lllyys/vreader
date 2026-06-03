@@ -105,7 +105,24 @@ final class BilingualReadingViewModel {
     var lastTriggerUnit: TranslationUnitID?
 
     /// Units with a prefetch currently in flight — guards a double-fetch.
-    var inFlightUnits: Set<TranslationUnitID> = []
+    private(set) var inFlightUnits: Set<TranslationUnitID> = []
+
+    /// Feature #77: the SINGLE funnel for every `inFlightUnits` mutation. Sets the
+    /// set, keeps `isFetching` consistent, and posts `.readerBilingualPrefetchDidChange`
+    /// with the FULL current set so a renderer can authoritatively (re)draw or clear
+    /// the inline loading shimmer — a delta signal would leak shimmer after a cancel
+    /// or retry that removes a unit outside the start/finish path.
+    func setInFlight(_ newSet: Set<TranslationUnitID>) {
+        guard newSet != inFlightUnits else { return }
+        inFlightUnits = newSet
+        isFetching = !newSet.isEmpty
+        NotificationCenter.default.post(
+            name: .readerBilingualPrefetchDidChange, object: nil,
+            userInfo: [
+                "fingerprintKey": bookFingerprintKey,
+                "inFlightUnits": newSet
+            ])
+    }
 
     /// Monotonic guard; bumps on disable / book-change / unit-change. A
     /// prefetch `Task` captures the epoch at launch and discards its result
@@ -209,8 +226,12 @@ final class BilingualReadingViewModel {
     /// reopen will hit the new cache row.
     func applyReTranslateResult(_ segments: [String], for unit: TranslationUnitID) {
         translationsByUnit[unit] = segments
-        inFlightUnits.remove(unit)
+        // Feature #77 (Gate-4 Low): settle ALL of the unit's VM state BEFORE
+        // funnelling the prefetch notification, so an observer recomputing UI
+        // off `.readerBilingualPrefetchDidChange` never sees a one-turn
+        // "translated, not in flight, still unavailable" inconsistency.
         unavailableUnits.remove(unit)
+        setInFlight(inFlightUnits.subtracting([unit]))   // Feature #77 funnel
         postDidChange()
     }
 

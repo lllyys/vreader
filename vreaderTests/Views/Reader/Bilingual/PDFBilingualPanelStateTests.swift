@@ -141,8 +141,7 @@ struct PDFBilingualPanelStateTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let vm = makeEnabledVM(dir: dir)
         let unit = Self.encodedUnit(currentPage: 3, pagesPerUnit: 1, totalPages: 10)
-        vm.inFlightUnits.insert(unit)
-        vm.isFetching = true
+        vm.setInFlight([unit])   // Feature #77: inFlightUnits is private(set); funnel sets isFetching too
         let state = PDFBilingualPanelState.panelState(
             viewModel: vm, currentPage: 3, pagesPerUnit: 1, totalPages: 10)
         #expect(state == .loading)

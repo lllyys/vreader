@@ -189,6 +189,26 @@ final class EPUBBilingualOrchestrator {
         )
     }
 
+    /// Feature #77: builds the LOADING-shimmer inject JS for a section's enumerated
+    /// bids (section/unit-scoped — all the in-flight unit's bids get the shimmer
+    /// until each translation lands and replaces it in place). `sectionIndex == nil`
+    /// uses the flattened `currentBlocks` (paged path). Returns `nil` when there are
+    /// no enumerated blocks for the scope. The loading-inject JS itself skips any bid
+    /// that already has a decoration, so it never downgrades a landed translation.
+    func buildLoadingJS(forSection sectionIndex: Int? = nil) -> String? {
+        let scoped: [BilingualBlock]
+        if let sectionIndex {
+            scoped = blocksBySection[sectionIndex] ?? []
+        } else {
+            scoped = currentBlocks
+        }
+        guard !scoped.isEmpty else { return nil }
+        return EPUBBilingualJS.bilingualInjectLoadingJS(
+            loadingBids: scoped.map(\.bid),
+            spineIndex: sectionIndex
+        )
+    }
+
     /// Feature #71 WI-7 (Gate-4 round-2 HIGH 2): build ONE inject JS payload
     /// covering MULTIPLE stitched sections at once, pairing each section's
     /// ordered segments against ONLY that section's bids.
