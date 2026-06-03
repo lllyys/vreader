@@ -172,7 +172,48 @@ struct LandingBloomTriggerTests {
         #expect(p.glowRadius == 0)
         #expect(p.glowAlpha == 0)
         #expect(approxCG(p.ringWidth, 1.6))
+        #expect(p.ringAlpha == 1)
         #expect(approxCG(p.washAlpha, 0.86))
+    }
+
+    /// §5 fidelity (Gate-4 Medium): under reduce-motion the ring fades by OPACITY
+    /// (ringAlpha), NOT by shrinking — its WIDTH stays fixed at 1.6 while active,
+    /// so nothing translates/scales. Contrast: motion shrinks the ring width.
+    @Test func paint_reduceMotion_ringFadesByOpacityNotWidth() {
+        let fading = LandingBloomPaint(intensity: 0.5, family: .dark, reduceMotion: true)
+        #expect(approxCG(fading.ringWidth, 1.6))   // fixed geometry
+        #expect(approxCG(fading.ringAlpha, 0.5))   // fades by opacity
+        #expect(fading.glowRadius == 0)
+        // Motion (contrast): the ring width shrinks with intensity, alpha stays 1.
+        let motion = LandingBloomPaint(intensity: 0.5, family: .dark, reduceMotion: false)
+        #expect(approxCG(motion.ringWidth, 0.8))
+        #expect(motion.ringAlpha == 1)
+    }
+
+    /// Gate-4 round-2: the coordinator's `cancelLandingBloom` cancels BOTH the
+    /// pending (delayed work item) AND the active (layer on the text view) bloom —
+    /// the contract the interruptibility paths (user tap/scroll, superseding nav,
+    /// highlight-hit tap) rely on.
+    @Test func coordinator_cancelLandingBloom_cancelsPendingAndActive() {
+        let coord = TXTTextViewBridge.Coordinator(delegate: nil, config: TXTViewConfig())
+        let tv = HighlightableTextView()
+        coord.activeTextView = tv
+        // Active bloom: a landing layer is on the text view.
+        tv.setLandingHighlight(
+            range: NSRange(location: 0, length: 4), colorName: "yellow",
+            intensity: 0.5, family: .light
+        )
+        let lm = tv.layoutManager as? HighlightingLayoutManager
+        #expect(lm?.landingHighlight != nil)
+        // Pending bloom: a scheduled work item.
+        let work = DispatchWorkItem {}
+        coord.pendingBloom = work
+
+        coord.cancelLandingBloom()
+
+        #expect(coord.pendingBloom == nil)   // pending dropped
+        #expect(work.isCancelled)            // …and cancelled
+        #expect(lm?.landingHighlight == nil) // active torn down
     }
 
     private func approxCG(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 0.0001 }

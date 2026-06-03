@@ -43,6 +43,25 @@ extension TXTTextViewBridge {
         /// Observation token for searchHighlightClear notification.
         nonisolated(unsafe) var highlightClearObserver: NSObjectProtocol?
 
+        /// Feature #74 WI-2: the last navigate-nonce a locate bloom fired for.
+        /// The bloom is gated on the NONCE (which advances on every navigate,
+        /// incl. a re-tap on the same highlight) — NOT on scroll dedupe — so a
+        /// re-tap re-blooms (Gate-4 High). `.min` so the first nav fires.
+        var lastBloomNonce: Int = .min
+        /// Feature #74 WI-2: the cancellable scroll-settle-delayed bloom trigger,
+        /// so a superseding navigation or a user interaction cancels it before it
+        /// fires (Gate-4 High — interruptibility, design §3).
+        var pendingBloom: DispatchWorkItem?
+
+        /// Feature #74 WI-2: cancel a pending OR in-flight locate bloom — called
+        /// on a user tap / user-driven scroll (design §3: any interaction during
+        /// the bloom cancels it) and when a superseding navigation arrives.
+        func cancelLandingBloom() {
+            pendingBloom?.cancel()
+            pendingBloom = nil
+            (activeTextView as? HighlightableTextView)?.cancelLandingBloom()
+        }
+
         var hasRestoredPosition = false
         private var lastScrollCallbackTime: CFTimeInterval = 0
         private static let scrollThrottleInterval: CFTimeInterval = 0.1
@@ -124,6 +143,11 @@ extension TXTTextViewBridge {
                !scrollView.isDecelerating {
                 return
             }
+            // Feature #74 WI-2 (design §3): past the guard means a real user
+            // interaction (a tap — no scrollView — or a user-driven scroll), so
+            // cancel any pending/active locate bloom. A programmatic scroll
+            // returned above, so the scroll-to-prominent + bloom is not self-cancelled.
+            cancelLandingBloom()
             highlightClearTimer?.invalidate()
             highlightClearTimer = nil
             // Bug #154 / GH #443 (Codex audit): only notify the container —
@@ -235,6 +259,11 @@ extension TXTTextViewBridge {
                    in: tv,
                    lookup: persistedHighlightLookup
                ) {
+                // Feature #74 WI-2 (Gate-4 round-2 High): this path returns BEFORE
+                // `clearSearchHighlightIfTemporary`, so cancel the bloom here too —
+                // tapping a highlight (incl. re-tapping the just-landed one to open
+                // its popover) is a user interaction that must stop the bloom (§3).
+                cancelLandingBloom()
                 NotificationCenter.default.post(
                     name: .readerHighlightTapped,
                     object: event

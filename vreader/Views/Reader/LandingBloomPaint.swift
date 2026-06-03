@@ -26,11 +26,16 @@ struct LandingBloomPaint: Equatable {
     /// Wash fill alpha — lerps from the persisted resting fill
     /// (`HighlightPaintColor.fillAlpha`) to the bloom peak (0.86).
     let washAlpha: CGFloat
-    /// Focus-ring stroke width (pt) — 0 at rest, 1.6 at peak.
+    /// Focus-ring stroke width (pt). Motion: 0 → 1.6 with intensity. Reduce-Motion
+    /// (§5): FIXED 1.6 while active (no width animation = no movement).
     let ringWidth: CGFloat
-    /// Glow blur radius (pt) — 0 at rest, 16 at peak.
+    /// Focus-ring stroke alpha. Motion: 1 (opaque — geometry carries the motion).
+    /// Reduce-Motion: == intensity, so the ring fades by OPACITY, not by shrinking.
+    let ringAlpha: CGFloat
+    /// Glow blur radius (pt) — 0 at rest, 16 at peak. Reduce-Motion: 0 (no spread).
     let glowRadius: CGFloat
     /// Glow color alpha — 0 at rest; 0.55 (light) / 0.85 (dark) at peak.
+    /// Reduce-Motion: 0 (no glow).
     let glowAlpha: CGFloat
 
     /// Design §3 / §6. `washAlpha` lerps from `HighlightPaintColor.fillAlpha`
@@ -38,17 +43,26 @@ struct LandingBloomPaint: Equatable {
     /// highlight's source alpha) to 0.86 at peak; the ring (1.6 pt), glow radius
     /// (16 pt), and glow alpha (0.55 light / 0.85 dark) scale linearly with
     /// intensity. `intensity` is clamped to `[0, 1]`.
-    /// `reduceMotion` (design §5) suppresses the glow spread entirely (no
-    /// blur/halo) — the wash + solid ring carry the cue with zero movement. The
-    /// wash and ring still scale with intensity so the driver's opacity-style
-    /// fade works.
+    /// `reduceMotion` (design §5): zero glow, and a FIXED-width ring that fades by
+    /// opacity (`ringAlpha`) instead of shrinking — so nothing translates, scales,
+    /// or spreads (the reduce-motion contract). The wash still lerps so the
+    /// opacity-style cross-fade returns it to the resting persisted wash.
     init(intensity: CGFloat, family: LandingBloomThemeFamily, reduceMotion: Bool = false) {
         let i = min(max(intensity, 0), 1)
         let base = HighlightPaintColor.fillAlpha
         washAlpha = base + (0.86 - base) * i
-        ringWidth = 1.6 * i
-        glowRadius = reduceMotion ? 0 : 16 * i
-        glowAlpha = reduceMotion ? 0 : (family == .light ? 0.55 : 0.85) * i
+        if reduceMotion {
+            // §5: fixed-geometry ring that fades by opacity; no glow, no movement.
+            ringWidth = i > 0 ? 1.6 : 0
+            ringAlpha = i
+            glowRadius = 0
+            glowAlpha = 0
+        } else {
+            ringWidth = 1.6 * i
+            ringAlpha = 1
+            glowRadius = 16 * i
+            glowAlpha = (family == .light ? 0.55 : 0.85) * i
+        }
     }
 
     /// Whether the landing wash REPLACES the persisted fill for `persistedRange`

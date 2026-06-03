@@ -319,20 +319,32 @@ struct TXTTextViewBridge: UIViewRepresentable {
                 highlightRange: highlightRange,
                 snapToTop: snapToTop
             )
-            // Feature #74 WI-2: if this navigation landed on a SAVED highlight (a
-            // Notes/Highlights row tap — the nav range exactly matches a persisted
-            // highlight), play the locate bloom ONCE after the scroll settles. A
-            // search hit (range matches no persisted highlight) does not bloom.
+        }
+
+        // Feature #74 WI-2: bloom when a navigation lands on a SAVED highlight (a
+        // Notes/Highlights row tap — the nav range exactly matches a persisted
+        // highlight). Gated on the navigate NONCE (advances on every nav incl. a
+        // re-tap on the same highlight), NOT scroll dedupe, so a re-tap re-blooms
+        // (Gate-4 High). The trigger is a CANCELLABLE work item — a superseding
+        // nav cancels the prior pending bloom, and a user tap/scroll cancels it
+        // via `cancelLandingBloom` (design §3 interruptibility, Gate-4 High).
+        if highlightNonce != context.coordinator.lastBloomNonce {
+            context.coordinator.lastBloomNonce = highlightNonce
+            context.coordinator.cancelLandingBloom()  // supersede any prior bloom
             if let landed = Self.landingTrigger(
                 highlightRange: highlightRange, persisted: persistedHighlights) {
                 let family = Self.bloomThemeFamily(for: config.backgroundColor)
                 let reduceMotion = UIAccessibility.isReduceMotionEnabled
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak textView] in
+                let range = landed.range
+                let colorName = landed.colorName
+                let work = DispatchWorkItem { [weak textView] in
                     (textView as? HighlightableTextView)?.playLandingBloom(
-                        range: landed.range, colorName: landed.colorName,
+                        range: range, colorName: colorName,
                         family: family, reduceMotion: reduceMotion
                     )
                 }
+                context.coordinator.pendingBloom = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
             }
         }
 
@@ -344,6 +356,13 @@ struct TXTTextViewBridge: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(delegate: delegate, config: config)
+    }
+
+    static func dismantleUIView(_ uiView: UITextView, coordinator: Coordinator) {
+        // Feature #74 WI-2 (Gate-4 Medium): cancel any pending/active locate bloom
+        // (and its CADisplayLink) when the reader tears down, so nothing animates
+        // against a detached view.
+        coordinator.cancelLandingBloom()
     }
 
     // MARK: - Static seams (testable)

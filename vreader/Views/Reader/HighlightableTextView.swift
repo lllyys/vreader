@@ -129,7 +129,7 @@ final class HighlightingLayoutManager: NSLayoutManager {
                 color: swatch.withAlphaComponent(p.glowAlpha).cgColor
             )
         }
-        ctx.setStrokeColor(swatch.cgColor)
+        ctx.setStrokeColor(swatch.withAlphaComponent(p.ringAlpha).cgColor)
         ctx.setLineWidth(p.ringWidth)
         enumerateEnclosingRects(
             forGlyphRange: visible,
@@ -283,8 +283,12 @@ final class HighlightableTextView: UITextView {
         bloomFamily = family
         bloomReduceMotion = reduceMotion
         bloomStart = 0
+        // Seed the FIRST frame at the curve's t=0 value — 0 for motion (rises in),
+        // 1 for reduce-motion (jumps to peak per §5), so there is no rest-frame
+        // flash before the first display tick (Gate-4 Medium).
         setLandingHighlight(
-            range: range, colorName: colorName, intensity: 0,
+            range: range, colorName: colorName,
+            intensity: LandingBloomCurve.intensity(elapsedMs: 0, reduceMotion: reduceMotion),
             family: family, reduceMotion: reduceMotion
         )
         let link = CADisplayLink(target: self, selector: #selector(bloomTick(_:)))
@@ -313,6 +317,13 @@ final class HighlightableTextView: UITextView {
         bloomLink = nil
         clearLandingHighlight()
     }
+
+    // Feature #74 WI-2 (Gate-4 Medium): teardown is handled by
+    // `TXTTextViewBridge.dismantleUIView` → `cancelLandingBloom()`, which
+    // invalidates the link. A `deinit` cannot touch the MainActor-isolated
+    // `CADisplayLink` under Swift 6, and isn't needed: while a bloom runs the
+    // link retains `self`, so the view cannot dealloc until the link is already
+    // invalidated (on completion, cancel, or dismantle).
 
     private func invalidateHighlightDisplay(_ lm: HighlightingLayoutManager) {
         let glyphCount = lm.numberOfGlyphs
