@@ -172,5 +172,24 @@ enum ReadiumBilingualEvalAdapter {
     static func clearJS() -> String {
         EPUBBilingualJS.bilingualClearJS()
     }
+
+    // MARK: - loading shimmer (Feature #77)
+
+    /// Feature #77: JS that inserts a LOADING-shimmer decoration after each block
+    /// matching the supplied bids, skipping any block already carrying a
+    /// decoration (never downgrades a landed translation). Delegates to the
+    /// engine-agnostic `EPUBBilingualJS.bilingualInjectLoadingJS`, which routes
+    /// each bid through `FoliateJSEscaper` (JS-literal) + a defensive `CSS.escape`
+    /// (selector). Runs as-is through `navigator.evaluateJavaScript`.
+    static func loadingJS(bids: [String], spineIndex: Int? = nil) -> String {
+        EPUBBilingualJS.bilingualInjectLoadingJS(loadingBids: bids, spineIndex: spineIndex)
+    }
+
+    /// Feature #77: JS that removes ONLY the in-flight loading-shimmer decoration
+    /// nodes (a failed / cancelled prefetch), leaving landed translations intact.
+    /// Delegates to `EPUBBilingualJS.bilingualClearLoadingJS`.
+    static func clearLoadingJS() -> String {
+        EPUBBilingualJS.bilingualClearLoadingJS()
+    }
 }
 #endif

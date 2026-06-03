@@ -141,6 +141,14 @@ extension ReadiumEPUBHost {
         // was in flight. Recheck before mutating the orchestrator / prefetching —
         // the disable path's `clear()` already removed any decorations.
         guard vm.isEnabled else { return }
+        // Feature #77 WI-2 (Gate-4 Medium): the eval channel only reaches the
+        // VISIBLE spine, so a loading shimmer started on a spine the user then
+        // scrolled away from cannot be cleared from the off-current spine. Clear
+        // any STALE shimmer on THIS (newly entered / re-entered) spine before
+        // re-committing its blocks — a unit that failed off-current then gets a
+        // clean source-only (or a fresh shimmer once the prefetch re-triggers
+        // below). Loading-only clear leaves landed translations intact.
+        await bilingualCommander.clearLoading()
         bilingualOrchestrator.updateBlocks(blocks)
         // Round-4 ROOT CAUSE: record WHICH chapter these just-committed blocks belong
         // to, in the SAME normalized (OPF-relative) href space the inject locator
@@ -224,8 +232,10 @@ extension ReadiumEPUBHost {
         // Bug #304: ensure the interlinear `.vreader-bilingual` `<style>` is on
         // the spine BEFORE injecting the blocks, so they render with the designed
         // style (the Readium engine never threaded `epubOverrideCSS`). Idempotent;
-        // uses the live theme so a theme switch updates the rule.
-        await bilingualCommander.setStyle(settingsStore.theme.bilingualBlockCSSRule())
+        // uses the live theme so a theme switch updates the rule. Feature #77:
+        // the combined CSS also carries the loading-shimmer rule so an in-flight
+        // shimmer rendered just before this inject keeps its styling.
+        await bilingualCommander.setStyle(bilingualStyleCSS())
         // The pipeline build above is synchronous, so the unit re-check is the
         // inject-path's final generation gate (no await intervenes before here).
         await bilingualCommander.inject(pairs)

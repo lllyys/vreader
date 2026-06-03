@@ -163,6 +163,20 @@ struct EPUBBilingualJSLoadingTests {
         // becomes the final translation block in place (no flicker / re-insert).
         #expect(js.contains("classList.remove('\(EPUBBilingualJS.loadingClassName)')"))
     }
+
+    // Feature #77 WI-2: a loading-only clear (failed/cancelled prefetch) must
+    // remove ONLY the shimmer nodes, leaving landed translations intact.
+    @Test("bilingualClearLoadingJS removes only the loading decorations")
+    func clearLoadingTargetsOnlyLoadingNodes() {
+        let js = EPUBBilingualJS.bilingualClearLoadingJS()
+        #expect(js.contains("(function()"))
+        // Targets the loading-modifier class + decoration attribute, NOT the
+        // bare block class (which would also nuke landed translations).
+        #expect(js.contains(".\(EPUBBilingualJS.loadingClassName)[\(EPUBBilingualJS.decorationAttribute)]"))
+        #expect(js.contains("removeChild"))
+        // Must NOT select the generic block class alone (that's bilingualClearJS).
+        #expect(!js.contains(".\(EPUBBilingualJS.blockClassName)[\(EPUBBilingualJS.decorationAttribute)]"))
+    }
 }
 
 // MARK: - 4. Orchestrator buildLoadingJS

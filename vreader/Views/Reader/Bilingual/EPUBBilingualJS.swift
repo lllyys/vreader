@@ -571,6 +571,31 @@ enum EPUBBilingualJS {
         """
     }
 
+    /// Feature #77: removes ONLY the in-flight LOADING-shimmer decoration nodes
+    /// (`.vreader-bilingual-loading[data-vreader-decoration]`), leaving any LANDED
+    /// translation decorations intact. Used when a unit leaves the in-flight set
+    /// WITHOUT a translation landing (a failed / cancelled prefetch) — the
+    /// translation-landed path replaces the shimmer in place via the inject
+    /// class-clear, so it must NOT be removed there. Idempotent (safe on a spine
+    /// with no loading nodes). Mirrors `globalClearJS`' node-removal shape.
+    static func bilingualClearLoadingJS() -> String {
+        """
+        (function() {
+            try {
+                var nodes = document.querySelectorAll(
+                    '.\(loadingClassName)[\(decorationAttribute)]'
+                );
+                for (var i = 0; i < nodes.length; i++) {
+                    var n = nodes[i];
+                    if (n.parentNode) {
+                        n.parentNode.removeChild(n);
+                    }
+                }
+            } catch (e) {}
+        })();
+        """
+    }
+
     /// Feature #71 WI-7: the section-scoped clear body — removes every
     /// `vreader-bilingual` decoration node WITHIN one stitched chapter
     /// `<section data-vreader-spine-index="N">` subtree so a clear on one

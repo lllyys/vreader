@@ -151,6 +151,25 @@ final class ReadiumBilingualCommander {
         _ = await evaluator(ReadiumBilingualEvalAdapter.clearJS())
     }
 
+    /// Feature #77: inserts the in-flight LOADING shimmer after each of `bids`'
+    /// blocks (skipping already-decorated blocks, so a landed translation is never
+    /// downgraded). No-op when unbound or `bids` is empty. The combined bilingual
+    /// `<style>` (block + loading rules) must already be on the spine via
+    /// `setStyle` for the shimmer to render.
+    func injectLoading(_ bids: [String], spineIndex: Int? = nil) async {
+        guard let evaluator, !bids.isEmpty else { return }
+        _ = await evaluator(
+            ReadiumBilingualEvalAdapter.loadingJS(bids: bids, spineIndex: spineIndex))
+    }
+
+    /// Feature #77: removes ONLY the loading-shimmer decoration nodes (a failed /
+    /// cancelled prefetch), leaving landed translations intact. No-op when
+    /// unbound. Idempotent.
+    func clearLoading() async {
+        guard let evaluator else { return }
+        _ = await evaluator(ReadiumBilingualEvalAdapter.clearLoadingJS())
+    }
+
     // MARK: - Href-consistency normalization (seam #3)
 
     /// Rewrites a Readium-host-produced vreader `Locator`'s href (Readium's

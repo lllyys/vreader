@@ -140,4 +140,25 @@ struct ReadiumBilingualEvalAdapterTests {
         #expect(enumerate.contains("data-vreader-bid"))
         #expect(inject.contains("data-vreader-bid"))
     }
+
+    // MARK: - loading shimmer (Feature #77 WI-2)
+
+    @Test("loadingJS inserts a loading-shimmer decoration per bid")
+    func loadingJSShape() {
+        let js = ReadiumBilingualEvalAdapter.loadingJS(bids: ["b1", "b2"])
+        #expect(js.contains("'b1'"))
+        #expect(js.contains("'b2'"))
+        #expect(js.contains(EPUBBilingualJS.loadingClassName))
+        #expect(js.contains(EPUBBilingualJS.shimmerBarClassName))
+        // Selector hardening rides through from the shared builder.
+        #expect(js.contains("__vreaderBidEsc(bid)"))
+    }
+
+    @Test("clearLoadingJS targets only the loading decoration nodes")
+    func clearLoadingJSShape() {
+        let js = ReadiumBilingualEvalAdapter.clearLoadingJS()
+        #expect(js.contains(EPUBBilingualJS.loadingClassName))
+        #expect(js.contains("data-vreader-decoration"))
+        #expect(js.contains("removeChild"))
+    }
 }

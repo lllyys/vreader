@@ -185,6 +185,17 @@ extension ReadiumEPUBHost {
                 guard key == fingerprint.canonicalKey else { return }
                 handleBilingualDidChange()
             }
+            // Feature #77 WI-2: the prefetch-state bus drives the inline loading
+            // shimmer — show it while the current chapter's unit is fetching,
+            // remove it on a failed/cancelled prefetch (a landed one is replaced
+            // in place by the inject above).
+            .onReceive(NotificationCenter.default.publisher(for: .readerBilingualPrefetchDidChange)) { notification in
+                let key = notification.userInfo?["fingerprintKey"] as? String
+                guard key == fingerprint.canonicalKey else { return }
+                let inFlight = notification.userInfo?["inFlightUnits"]
+                    as? Set<TranslationUnitID> ?? []
+                handleBilingualPrefetchChange(inFlightUnits: inFlight)
+            }
             // WI-12: a paged↔scroll switch while bilingual is enabled re-renders the
             // spine in Readium, discarding the injected decorations + bid stamps, so
             // we re-enumerate the current spine in either direction.
@@ -198,7 +209,9 @@ extension ReadiumEPUBHost {
             .onChange(of: settingsStore.theme) { _, _ in
                 guard bilingualViewModel?.isEnabled == true else { return }
                 Task { @MainActor in
-                    await bilingualCommander.setStyle(settingsStore.theme.bilingualBlockCSSRule())
+                    // Feature #77: combined block + loading-shimmer CSS so a theme
+                    // switch refreshes BOTH the translation and shimmer styling.
+                    await bilingualCommander.setStyle(bilingualStyleCSS())
                 }
             }
             .sheet(isPresented: $showBilingualSetupSheet) { bilingualSetupSheetView }

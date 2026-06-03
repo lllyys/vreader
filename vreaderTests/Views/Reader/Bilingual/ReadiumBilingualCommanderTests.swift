@@ -194,6 +194,50 @@ struct ReadiumBilingualCommanderTests {
         #expect(seenScript?.contains("removeChild") == true)
     }
 
+    // MARK: - loading shimmer (Feature #77 WI-2)
+
+    @Test("injectLoading feeds the adapter's loading JS to the evaluator")
+    func injectLoadingFeedsLoadingJS() async {
+        let commander = ReadiumBilingualCommander()
+        nonisolated(unsafe) var seenScript: String?
+        commander.setEvaluator { script in
+            seenScript = script
+            return .success(NSNull())
+        }
+        await commander.injectLoading(["b1", "b2"])
+        #expect(seenScript?.contains(EPUBBilingualJS.loadingClassName) == true)
+        #expect(seenScript?.contains(EPUBBilingualJS.shimmerBarClassName) == true)
+        #expect(seenScript?.contains("'b1'") == true)
+    }
+
+    @Test("injectLoading no-ops (does not call evaluator) when bids is empty")
+    func injectLoadingEmptyNoops() async {
+        let commander = ReadiumBilingualCommander()
+        nonisolated(unsafe) var called = false
+        commander.setEvaluator { _ in called = true; return .success(NSNull()) }
+        await commander.injectLoading([])
+        #expect(called == false)
+    }
+
+    @Test("injectLoading no-ops when unbound (no navigator / after detach)")
+    func injectLoadingUnboundNoops() async {
+        let commander = ReadiumBilingualCommander()
+        await commander.injectLoading(["b1"])   // must not crash
+    }
+
+    @Test("clearLoading feeds the loading-only clear JS to the evaluator")
+    func clearLoadingFeedsClearLoadingJS() async {
+        let commander = ReadiumBilingualCommander()
+        nonisolated(unsafe) var seenScript: String?
+        commander.setEvaluator { script in
+            seenScript = script
+            return .success(NSNull())
+        }
+        await commander.clearLoading()
+        #expect(seenScript?.contains(EPUBBilingualJS.loadingClassName) == true)
+        #expect(seenScript?.contains("removeChild") == true)
+    }
+
     // MARK: - href-consistency normalization (seam #3)
 
     @Test("a Readium container-relative locator href resolves to the provider's OPF spine unit")
