@@ -105,8 +105,8 @@ struct WholeBookReducerTests {
     @Test func reduce_cancelMidRead_returnsPartial_doesNotThrow() async throws {
         let reducer = WholeBookReducer()
         let rec = CondenseRecorder()
-        let text = String(repeating: "w", count: 1000)   // 10 chunks
-        // The condense closure cancels the reducer after the 2nd chunk.
+        let text = String(repeating: "w", count: 1000)   // 10 chunks at budget 100
+        // The condense closure cancels the reducer on the 2nd chunk call.
         let digest = try await reducer.reduce(
             fullText: text, chunkBudgetUTF16: 100, digestBudgetUTF16: 10_000, maxChunks: 50,
             condense: { chunk in
@@ -116,11 +116,59 @@ struct WholeBookReducerTests {
             },
             onProgress: { _, _ in }
         )
-        // Cancelled after ~2 chunks → partial: not complete, some covered, rest dropped.
+        // EXACTLY 2 chunks condensed before the cancel breaks the loop (Gate-4: the
+        // re-check after onProgress prevents a 3rd call).
+        #expect(await rec.calls == 2)
+        #expect(digest.coverage.coveredSpans.count == 2)
         #expect(!digest.coverage.isComplete)
-        #expect(digest.coverage.coveredSpans.count <= 3)
-        #expect(!digest.coverage.droppedSpans.isEmpty)
-        #expect(await rec.calls < 10)                    // didn't read the whole book
+        #expect(digest.coverage.droppedSpans.count == 8)   // the 8 unread chunks
+    }
+
+    /// Gate-4 High: a cancel DURING a hierarchical reduce round discards the partial
+    /// round and keeps the last fully-completed level — never dropping covered text.
+    @Test func reduce_cancelDuringReduceRound_keepsFullMapLevel() async throws {
+        let reducer = WholeBookReducer()
+        let rec = CondenseRecorder()
+        let text = String(repeating: "y", count: 1000)   // 10 chunks
+        // 10 summaries × 50 chars = ~500 joined > 120 budget → forces a reduce round;
+        // cancel on call #11 (the first reduce-group condense).
+        let digest = try await reducer.reduce(
+            fullText: text, chunkBudgetUTF16: 100, digestBudgetUTF16: 120, maxChunks: 50,
+            condense: { input in
+                await rec.record(input)
+                if await rec.calls == 11 { await reducer.cancel() }
+                return String(repeating: "S", count: 50)
+            },
+            onProgress: { _, _ in }
+        )
+        // The MAP covered the whole book (10 chunks) before the reduce-round cancel.
+        #expect(digest.coverage.coveredSpans.count == 10)
+        #expect(digest.coverage.isComplete)               // book fully read; only the reduce was cut
+        #expect(digest.context.utf16.count <= 120)        // still clamped to the budget
+    }
+
+    /// Gate-4 High: an oversized `condense` output is re-chunked before the next
+    /// round, so NO recursive condense input ever exceeds `chunkBudgetUTF16`.
+    @Test func reduce_oversizedSummary_neverExceedsChunkBudget() async throws {
+        let reducer = WholeBookReducer()
+        let rec = CondenseRecorder()
+        let text = String(repeating: "y", count: 600)    // 6 chunks at budget 100
+        // condense returns a 250-char summary (> the 100 chunk budget) → without the
+        // normalize re-chunk, a reduce group would feed an over-budget input back in.
+        _ = try await reducer.reduce(
+            fullText: text, chunkBudgetUTF16: 100, digestBudgetUTF16: 200, maxChunks: 50,
+            condense: { input in await rec.record(input); return String(repeating: "S", count: 250) },
+            onProgress: { _, _ in }
+        )
+        let inputs = await rec.seenChunks
+        #expect(inputs.allSatisfy { $0.utf16.count <= 100 })   // every condense input within budget
+    }
+
+    @Test func reduce_invalidBudget_nonEmptyBook_reportsAllDropped() async throws {
+        let digest = try await runReduce(text: "abc", chunkBudget: 100, digestBudget: 100, maxChunks: 0) { _ in "s" }
+        #expect(digest.context.isEmpty)
+        #expect(!digest.coverage.isComplete)
+        #expect(digest.coverage.droppedSpans == [0...2])    // whole non-empty book dropped, honestly
     }
 
     @Test func reduce_emptyBook_isEmptyDigest() async throws {

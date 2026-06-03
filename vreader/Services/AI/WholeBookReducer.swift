@@ -110,8 +110,15 @@ actor WholeBookReducer {
         onProgress: @Sendable (Int, Int) async -> Void
     ) async throws -> WholeBookDigest {
         let totalUTF16 = fullText.utf16.count
-        guard totalUTF16 > 0, chunkBudgetUTF16 > 0, digestBudgetUTF16 > 0, maxChunks > 0 else {
-            return .empty(totalUTF16: totalUTF16)
+        guard totalUTF16 > 0 else { return .empty(totalUTF16: 0) }
+        // Invalid budgets on a NON-empty book → honest "all dropped" coverage,
+        // not an empty span set (Gate-4 Low).
+        guard chunkBudgetUTF16 > 0, digestBudgetUTF16 > 0, maxChunks > 0 else {
+            return WholeBookDigest(
+                context: "",
+                coverage: WholeBookCoverage(coveredSpans: [], totalUTF16: totalUTF16,
+                                            droppedSpans: [0...(totalUTF16 - 1)])
+            )
         }
 
         let allChunks = Self.chunk(fullText, budgetUTF16: chunkBudgetUTF16)
@@ -123,31 +130,44 @@ actor WholeBookReducer {
             log.info("whole-book overflow: \(droppedChunks.count) of \(allChunks.count) chunks dropped (maxChunks=\(maxChunks))")
         }
 
-        // Map: condense each kept chunk, checking cancellation between calls.
+        // Map: condense each kept chunk, checking cancellation around EVERY await
+        // (Gate-4 Medium — a cancel during `onProgress` must not start one more call).
         var condensed: [String] = []
         var coveredSpans: [ClosedRange<Int>] = []
         let total = kept.count
         for (index, chunk) in kept.enumerated() {
             if isCancelled { break }
             await onProgress(index, total)
+            if isCancelled { break }
             let result = try await condense(chunk.text)
             condensed.append(result)
             coveredSpans.append(chunk.span)
-            if isCancelled { break }
         }
-        await onProgress(condensed.count, total)
+        if !isCancelled { await onProgress(condensed.count, total) }
 
         // Reduce: hierarchically re-condense until the digest fits the budget.
+        // Commit a round's output ONLY when the round COMPLETES — a cancel
+        // mid-round discards the partial round and keeps the last full level
+        // (Gate-4 High: never drop what was already condensed).
         var digestText = condensed.joined(separator: "\n\n")
         var guardRounds = 0
         while digestText.utf16.count > digestBudgetUTF16, !isCancelled, guardRounds < 8 {
             guardRounds += 1
-            let groups = Self.group(condensed, budgetUTF16: chunkBudgetUTF16)
+            // Normalize: re-chunk any piece that grew past the chunk budget so every
+            // recursive `condense` input stays ≤ chunkBudget (Gate-4 High).
+            let normalized = condensed.flatMap { piece -> [String] in
+                piece.utf16.count <= chunkBudgetUTF16
+                    ? [piece]
+                    : Self.chunk(piece, budgetUTF16: chunkBudgetUTF16).map(\.text)
+            }
+            let groups = Self.group(normalized, budgetUTF16: chunkBudgetUTF16)
             var nextLevel: [String] = []
+            var roundCancelled = false
             for group in groups {
-                if isCancelled { break }
+                if isCancelled { roundCancelled = true; break }
                 nextLevel.append(try await condense(group))
             }
+            if roundCancelled { break }   // discard partial round; keep `digestText`
             condensed = nextLevel
             digestText = condensed.joined(separator: "\n\n")
         }
