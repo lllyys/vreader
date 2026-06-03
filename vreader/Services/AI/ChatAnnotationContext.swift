@@ -19,6 +19,13 @@ import Foundation
 
 enum ChatAnnotationContext {
 
+    /// The section header each annotation kind serializes under — the assembler
+    /// uses these to retain a kind's citation only if its section survived the
+    /// budget clamp (Feature #86 WI-6 per-section retention).
+    static let notesHeader = "Notes:"
+    static let highlightsHeader = "Highlights:"
+    static let bookmarksHeader = "Bookmarks:"
+
     /// A non-empty note: present and not whitespace-only.
     static func hasNote(_ note: String?) -> Bool {
         guard let note else { return false }
@@ -69,7 +76,7 @@ enum ChatAnnotationContext {
                 .map { line(label: locatorLabel($0.1), text: sanitize($0.2)) }
                 .filter { !$0.isEmpty }
             if !lines.isEmpty {
-                sections.append("Notes:\n" + lines.joined(separator: "\n"))
+                sections.append(notesHeader + "\n" + lines.joined(separator: "\n"))
             }
         }
 
@@ -79,7 +86,7 @@ enum ChatAnnotationContext {
                 .map { line(label: locatorLabel($0.locator), text: sanitize($0.selectedText), quote: true) }
                 .filter { !$0.isEmpty }
             if !lines.isEmpty {
-                sections.append("Highlights:\n" + lines.joined(separator: "\n"))
+                sections.append(highlightsHeader + "\n" + lines.joined(separator: "\n"))
             }
         }
 
@@ -89,7 +96,7 @@ enum ChatAnnotationContext {
                 .map { line(label: locatorLabel($0.locator), text: sanitize($0.title ?? "Bookmark")) }
                 .filter { !$0.isEmpty }
             if !lines.isEmpty {
-                sections.append("Bookmarks:\n" + lines.joined(separator: "\n"))
+                sections.append(bookmarksHeader + "\n" + lines.joined(separator: "\n"))
             }
         }
 

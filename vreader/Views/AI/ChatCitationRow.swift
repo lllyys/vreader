@@ -29,7 +29,11 @@ struct ChatCitationRow: View {
         }
         .accessibilityIdentifier(Self.identifier)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Drew on: " + citations.map(\.label).joined(separator: ", "))
+        // Gate-4 WI-6: announce the spoiler ("ahead") state to VoiceOver, not just
+        // the label — otherwise a spoiler chip sounds the same as a safe one.
+        .accessibilityLabel("Drew on: " + citations.map {
+            $0.aheadOfReader ? "\($0.label), ahead" : $0.label
+        }.joined(separator: ", "))
     }
 
     @ViewBuilder

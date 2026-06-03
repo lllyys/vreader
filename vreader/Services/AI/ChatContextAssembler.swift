@@ -27,10 +27,6 @@ struct ChatContextAssembly: Sendable, Equatable {
 
 enum ChatContextAssembler {
 
-    /// The annotation source kinds — citations the annotation block contributes.
-    /// (Scope / whole-book citations come from the scope text, not the block.)
-    private static let annotationKinds: Set<ChatCitation.SourceKind> = [.note, .highlight, .bookmark]
-
     /// Combines the scope text and the annotation block into the injected
     /// `bookContext`, clamped to `maxUTF16`, and bundles the citations — keeping
     /// only the citations whose content actually SURVIVED the clamp (Gate-4: the
@@ -66,24 +62,57 @@ enum ChatContextAssembler {
 
         let bounded = UTF16Clamp.clamp(combined, maxUTF16: max(0, maxUTF16))
 
-        // Citation retention:
-        // - bookContext empty → nothing was injected → no citations.
-        // - the annotation block didn't fully survive the clamp → drop the
-        //   annotation-derived citations (the scope citation still holds, since
-        //   the scope text is preserved first).
+        // Citation retention: keep only citations whose content actually survived
+        // the clamp — PER source SECTION (Gate-4 WI-6), not all-or-nothing, so a
+        // partial clamp that keeps Notes but drops Bookmarks under-reports neither.
         let citations = retainedCitations(
-            citations, bounded: bounded, trimmedBlock: trimmedBlock, blockStartUTF16: blockStartUTF16
+            citations, block: trimmedBlock, blockStartUTF16: blockStartUTF16, bounded: bounded
         )
         return ChatContextAssembly(bookContext: bounded, citations: citations)
     }
 
+    /// The section header each annotation-kind citation maps to.
+    private static func sectionHeader(for kind: ChatCitation.SourceKind) -> String? {
+        switch kind {
+        case .note:      return ChatAnnotationContext.notesHeader
+        case .highlight: return ChatAnnotationContext.highlightsHeader
+        case .bookmark:  return ChatAnnotationContext.bookmarksHeader
+        case .scope, .wholeBookSpan: return nil   // not annotation-block-derived
+        }
+    }
+
+    /// The UTF-16 offset (in the COMBINED string) where a section's first bullet
+    /// content begins. Searches ONLY the annotation `block` (never the scope text),
+    /// via the line-anchored marker `"\n<header>\n- "`, so scope/annotation prose
+    /// that happens to match the line shape can't false-retain a citation. Returns
+    /// nil if the section isn't in the block.
+    private static func firstBulletUTF16Offset(
+        forHeader header: String, block: String, blockStartUTF16: Int
+    ) -> Int? {
+        let marker = "\n" + header + "\n- "
+        guard let range = block.range(of: marker) else { return nil }
+        return blockStartUTF16 + block[block.startIndex..<range.upperBound].utf16.count
+    }
+
     private static func retainedCitations(
-        _ citations: [ChatCitation], bounded: String, trimmedBlock: String, blockStartUTF16: Int
+        _ citations: [ChatCitation], block: String, blockStartUTF16: Int, bounded: String
     ) -> [ChatCitation] {
-        guard !bounded.isEmpty else { return [] }
-        let blockFullySurvived = trimmedBlock.isEmpty
-            || bounded.utf16.count >= blockStartUTF16 + trimmedBlock.utf16.count
-        guard !blockFullySurvived else { return citations }
-        return citations.filter { !annotationKinds.contains($0.sourceKind) }
+        guard !bounded.isEmpty else { return [] }   // nothing injected → no provenance
+        let boundedLen = bounded.utf16.count
+        return citations.filter { citation in
+            guard let header = sectionHeader(for: citation.sourceKind) else {
+                return true   // scope / whole-book citations ride with the scope text (kept)
+            }
+            guard let firstBullet = firstBulletUTF16Offset(
+                forHeader: header, block: block, blockStartUTF16: blockStartUTF16
+            ) else {
+                return false   // the section isn't in the annotation block at all
+            }
+            // The section's first ITEM survived iff the clamp kept past its bullet
+            // marker. (A clamp that preserves only the bullet's `[label]` prefix but
+            // cuts the item text can still retain — an accepted narrow over-report
+            // in the rare >budget-clamp case; provenance is advisory.)
+            return boundedLen > firstBullet
+        }
     }
 }

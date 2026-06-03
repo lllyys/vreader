@@ -126,7 +126,13 @@ final class ReaderAICoordinator {
         // Feature #86 WI-6: compute the provenance citations the context drew on;
         // the assembler retains only those that survive the budget clamp.
         let counts = chatAnnotationCache?.counts ?? (0, 0, 0)
-        let wholeBookCoverage = chatVM.scope == .wholeBook
+        // Gate the whole-book coverage citation on the SAME condition the scope text
+        // uses (a non-empty `availableContext` — i.e. .ready/.partial), so a stale
+        // digest that survived disarm can't stamp a whole-book span on a send that
+        // actually used the book-so-far fallback (Gate-4 High).
+        let usesWholeBookDigest = chatVM.scope == .wholeBook
+            && (chatVM.wholeBookRetrieval?.availableContext?.isEmpty == false)
+        let wholeBookCoverage = usesWholeBookDigest
             ? chatVM.wholeBookRetrieval?.digest?.coverage : nil
         let citations = ChatCitationFactory.citations(
             scope: chatVM.scope, sources: chatVM.sources, counts: counts,
