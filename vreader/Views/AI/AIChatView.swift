@@ -37,16 +37,50 @@ struct AIChatView: View {
     /// `.paper` so existing callers / previews that omit it keep working.
     var theme: ReaderThemeV2 = .paper
 
-    var body: some View {
-        VStack(spacing: 0) {
-            messageList
+    /// Feature #86 WI-3: whether the scope menu is presented above the bar.
+    @State private var isScopeMenuOpen = false
 
-            if let error = viewModel.errorMessage {
-                errorBanner(message: error)
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            VStack(spacing: 0) {
+                messageList
+
+                if let error = viewModel.errorMessage {
+                    errorBanner(message: error)
+                }
+
+                // Feature #86 WI-3: the docked context bar, above the composer.
+                ChatContextBar(
+                    scope: viewModel.scope,
+                    theme: theme,
+                    isScopeMenuOpen: isScopeMenuOpen,
+                    onScopeTap: { isScopeMenuOpen.toggle() }
+                )
+
+                inputBar
             }
 
-            inputBar
+            // Feature #86 WI-3: the scope menu floats above the composer with a
+            // tap-scrim that dismisses it.
+            if isScopeMenuOpen {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { isScopeMenuOpen = false }
+                ChatScopeMenu(
+                    selected: viewModel.scope,
+                    theme: theme,
+                    onSelect: { scope in
+                        viewModel.setScope(scope)
+                        isScopeMenuOpen = false
+                    }
+                )
+                .padding(.leading, 14)
+                .padding(.bottom, 80)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isScopeMenuOpen)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {

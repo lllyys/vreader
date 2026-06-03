@@ -66,6 +66,24 @@ final class AIChatViewModel {
     /// When non-nil and non-empty, prepended as "[Book Context]" in the AI request.
     var bookContext: String?
 
+    /// Feature #86 WI-3: the breadth of book text the Chat tab reads. Drives the
+    /// context-bar scope chip. Changing it (via `setScope`) re-assembles
+    /// `bookContext` through `onScopeChanged` (the coordinator's single funnel).
+    /// Default `.chapter` matches the shipped WI-1 behavior.
+    private(set) var scope: ChatContextScope = .chapter
+
+    /// Set by the reader coordinator: invoked after a scope change so the
+    /// coordinator re-computes `bookContext` for the new scope.
+    var onScopeChanged: (() -> Void)?
+
+    /// Selects a new Chat context scope and re-assembles the book context.
+    /// A no-op when the scope is unchanged (avoids a redundant re-assembly).
+    func setScope(_ newScope: ChatContextScope) {
+        guard newScope != scope else { return }
+        scope = newScope
+        onScopeChanged?()
+    }
+
     // MARK: - Dependencies
 
     private let aiService: AIService

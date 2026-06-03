@@ -68,34 +68,50 @@ final class ReaderAICoordinator {
     /// the chapter can't be resolved — EPUB / non-char-offset TOC, no locator, or
     /// no loaded text — it **degrades to `currentTextContent` (`.section`)**, so
     /// EPUB chat and the no-context fallback are unchanged.
-    var chatContext: String {
+    var chatContext: String { scopedChatContext(.chapter) }
+
+    /// Feature #86 WI-3: the Chat tab's book context for a GIVEN scope. The three
+    /// bounded scopes map onto the #69 `AIContextExtractor` stack:
+    /// `.section` → the ~2500-char window; `.chapter` → the TOC-chapter slice;
+    /// `.bookSoFar` → the budget-capped prefix to the locator. `.wholeBook`
+    /// retrieval lands in WI-5 — until then it degrades to `.bookSoFar` (the
+    /// broadest synchronous scope). Any unresolvable case degrades to
+    /// `currentTextContent` (`.section`), so EPUB chat / no-context are unchanged.
+    func scopedChatContext(_ scope: ChatContextScope) -> String {
         let section = currentTextContent
+        guard let summaryScope = scope.summaryScope else {
+            return scopedChatContext(.bookSoFar)   // .wholeBook → best synchronous scope (WI-5 replaces)
+        }
+        if summaryScope == .section { return section }
         guard let loaded = loadedTextContent, !loaded.isEmpty,
-              let locator = currentLocator,
-              let bounds = SummaryScopeResolver.chapterBounds(
-                  for: locator,
-                  tocEntries: tocEntries,
-                  totalTextLengthUTF16: loaded.utf16.count
-              )
+              let locator = currentLocator
         else { return section }
+        let bounds = SummaryScopeResolver.chapterBounds(
+            for: locator, tocEntries: tocEntries, totalTextLengthUTF16: loaded.utf16.count
+        )
+        // Chapter needs resolved bounds; book-so-far does not.
+        if summaryScope == .chapter, bounds == nil { return section }
         let extracted = AIContextExtractor().extractContext(
             locator: locator,
             fullText: loaded,
             format: bookFormat,
-            scope: .chapter,
+            scope: summaryScope,
             chapterBounds: bounds,
             maxUTF16: AIContextBudget.defaultMaxUTF16
         )
         return extracted.isEmpty ? section : extracted
     }
 
-    /// Feature #86 WI-1: the SINGLE place the chat's `bookContext` is assigned.
-    /// Idempotent — recomputes `chatContext` from the current
-    /// `loadedTextContent` / `currentLocator` / `tocEntries`. The host calls this
-    /// on every state change (text load, locator change, TOC arrival) so a late
-    /// TOC upgrades the context and a scroll never reverts it to section.
+    /// Feature #86 WI-1/WI-3: the SINGLE place the chat's `bookContext` is
+    /// assigned. Idempotent — recomputes from the current
+    /// `loadedTextContent` / `currentLocator` / `tocEntries` for the chat's
+    /// currently-selected scope (`.chapter` until the user changes it). The host
+    /// calls this on every state change (text load, locator change, TOC arrival),
+    /// and the chat VM calls it on a scope change, so a late TOC upgrades the
+    /// context and a scroll never reverts it.
     func refreshChatContext() {
-        chatViewModel?.bookContext = chatContext
+        let scope = chatViewModel?.scope ?? .chapter
+        chatViewModel?.bookContext = scopedChatContext(scope)
     }
 
     /// Book title used as fallback when no text content is available.
@@ -131,6 +147,9 @@ final class ReaderAICoordinator {
         let fingerprint = DocumentFingerprint(canonicalKey: fingerprintKey)
         let chatVM = AIChatViewModel(aiService: service, bookFingerprint: fingerprint)
         chatViewModel = chatVM
+        // Feature #86 WI-3: re-assemble the context when the user changes scope,
+        // through the same single funnel.
+        chatVM.onScopeChanged = { [weak self] in self?.refreshChatContext() }
         // Feature #86 WI-1: assign chatViewModel FIRST, then refresh — else the
         // refresh no-ops against a nil VM (Gate-2 round-2 note).
         refreshChatContext()
