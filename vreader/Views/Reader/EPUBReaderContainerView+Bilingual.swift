@@ -261,7 +261,12 @@ extension EPUBReaderContainerView {
     /// Continuous-scroll mode is handled separately (WI-5).
     func handleBilingualPrefetchChange(inFlightUnits: Set<TranslationUnitID>) {
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
-        guard !isBilingualContinuousMode else { return }   // WI-5 owns continuous
+        if isBilingualContinuousMode {
+            // Feature #77 WI-5: the stitched continuous DOM holds MULTIPLE
+            // sections, each with its own unit — handled section-by-section.
+            handleBilingualPrefetchChangeContinuous(inFlightUnits: inFlightUnits)
+            return
+        }
         Task {
             guard let locator = viewModel.makeCurrentLocator(),
                   let unit = await vm.textProvider?.unit(containing: locator) else { return }

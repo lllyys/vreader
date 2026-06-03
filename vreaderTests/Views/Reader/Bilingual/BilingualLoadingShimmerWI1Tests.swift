@@ -177,6 +177,22 @@ struct EPUBBilingualJSLoadingTests {
         // Must NOT select the generic block class alone (that's bilingualClearJS).
         #expect(!js.contains(".\(EPUBBilingualJS.blockClassName)[\(EPUBBilingualJS.decorationAttribute)]"))
     }
+
+    // Feature #77 WI-5: section-scoped loading clear for continuous-scroll —
+    // clearing one stitched section must NOT touch other still-fetching sections.
+    @Test("bilingualClearLoadingJS(spineIndex:) scopes the clear to the section root")
+    func clearLoadingScopedToSection() {
+        let js = EPUBBilingualJS.bilingualClearLoadingJS(spineIndex: 3)
+        #expect(js.contains("[\(EPUBBilingualJS.spineIndexAttribute)=\"3\"]"))
+        #expect(js.contains(".\(EPUBBilingualJS.loadingClassName)[\(EPUBBilingualJS.decorationAttribute)]"))
+        #expect(js.contains("removeChild"))
+    }
+
+    @Test("bilingualClearLoadingJS() global (nil) is NOT section-scoped")
+    func clearLoadingGlobalNotScoped() {
+        let js = EPUBBilingualJS.bilingualClearLoadingJS()
+        #expect(!js.contains(EPUBBilingualJS.spineIndexAttribute))
+    }
 }
 
 // MARK: - 4. Orchestrator buildLoadingJS
@@ -228,6 +244,15 @@ struct EPUBBilingualOrchestratorLoadingTests {
         #expect(js == EPUBBilingualJS.bilingualClearLoadingJS())
         #expect(js.contains("vreader-bilingual-loading"))
         #expect(js.contains("removeChild"))
+    }
+
+    // Feature #77 WI-5: the continuous path clears one section's shimmer scoped.
+    @Test("clearLoadingJS(spineIndex:) forwards to the section-scoped clear")
+    func orchestratorClearLoadingScoped() {
+        let orchestrator = EPUBBilingualOrchestrator()
+        let js = orchestrator.clearLoadingJS(spineIndex: 2)
+        #expect(js == EPUBBilingualJS.bilingualClearLoadingJS(spineIndex: 2))
+        #expect(js.contains("[\(EPUBBilingualJS.spineIndexAttribute)=\"2\"]"))
     }
 }
 

@@ -101,6 +101,19 @@ extension EPUBReaderContainerView {
         guard let unit = bilingualUnit(forSection: spineIndex) else { return }
         vm.prefetchUnitIfNeeded(unit)
         injectBilingualSection(spineIndex: spineIndex, unit: unit)
+        // Feature #77 WI-5 (Gate-4 Medium): if the unit was ALREADY in flight when
+        // this section materialized, the earlier `.readerBilingualPrefetchDidChange`
+        // replay skipped it (the section wasn't materialized yet) AND
+        // `prefetchUnitIfNeeded` is a no-op for an in-flight unit (so it posts no
+        // fresh prefetch-change to trigger the reconcile). `injectBilingualSection`
+        // also no-ops without a cached translation. So a late-materializing section
+        // whose translation is still in flight would show NOTHING — paint its
+        // shimmer now. Idempotent (the loading-inject skips already-decorated
+        // blocks); a landed translation has `translations != nil` so it is skipped.
+        if vm.translations(for: unit) == nil, vm.inFlightUnits.contains(unit),
+           let js = bilingualOrchestrator.buildLoadingJS(forSection: spineIndex) {
+            evaluateBilingualLive(js)
+        }
     }
 
     /// Build inject JS for ONE materialized section against its OWN cached
@@ -236,6 +249,11 @@ extension EPUBReaderContainerView {
             pendingHighlightJS = js
         }
     }
+
+    // Feature #77 WI-5: `handleBilingualPrefetchChangeContinuous` (the
+    // continuous-scroll loading-shimmer reconcile) lives in
+    // `EPUBReaderContainerView+ContinuousBilingualLoading.swift` to keep this
+    // file within the ~300-line budget.
 
     /// Whether the EPUB reader is in continuous-scroll mode (a live config is
     /// bound). The bilingual paths branch on this to choose the section-scoped

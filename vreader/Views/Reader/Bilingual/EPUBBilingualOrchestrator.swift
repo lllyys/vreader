@@ -213,8 +213,12 @@ final class EPUBBilingualOrchestrator {
     /// failed / cancelled prefetch), leaving landed translations intact. The
     /// translation-landed path replaces a shimmer in place, so the shimmer must
     /// NOT be removed there — only here, for the no-translation outcome.
-    func clearLoadingJS() -> String {
-        EPUBBilingualJS.bilingualClearLoadingJS()
+    ///
+    /// Feature #77 WI-5: `spineIndex` scopes the clear to one stitched
+    /// continuous-scroll section (a global clear would remove OTHER still-fetching
+    /// sections' shimmers). `nil` (the paged default) clears the whole document.
+    func clearLoadingJS(spineIndex: Int? = nil) -> String {
+        EPUBBilingualJS.bilingualClearLoadingJS(spineIndex: spineIndex)
     }
 
     /// Feature #71 WI-7 (Gate-4 round-2 HIGH 2): build ONE inject JS payload

@@ -578,11 +578,45 @@ enum EPUBBilingualJS {
     /// translation-landed path replaces the shimmer in place via the inject
     /// class-clear, so it must NOT be removed there. Idempotent (safe on a spine
     /// with no loading nodes). Mirrors `globalClearJS`' node-removal shape.
-    static func bilingualClearLoadingJS() -> String {
+    ///
+    /// Feature #77 WI-5: `spineIndex` scopes the clear to ONE stitched
+    /// continuous-scroll section — a global clear would wrongly remove OTHER
+    /// still-fetching sections' shimmers. `nil` (the paged / disable default)
+    /// clears every loading node in the document.
+    static func bilingualClearLoadingJS(spineIndex: Int? = nil) -> String {
+        guard let idx = spineIndex else {
+            return globalClearLoadingJS()
+        }
+        return scopedClearLoadingJS(spineIndex: idx)
+    }
+
+    private static func globalClearLoadingJS() -> String {
         """
         (function() {
             try {
                 var nodes = document.querySelectorAll(
+                    '.\(loadingClassName)[\(decorationAttribute)]'
+                );
+                for (var i = 0; i < nodes.length; i++) {
+                    var n = nodes[i];
+                    if (n.parentNode) {
+                        n.parentNode.removeChild(n);
+                    }
+                }
+            } catch (e) {}
+        })();
+        """
+    }
+
+    private static func scopedClearLoadingJS(spineIndex idx: Int) -> String {
+        // `idx` is an integer literal in a CSS attribute selector — never a
+        // user-supplied string — so no escape is required.
+        """
+        (function() {
+            try {
+                var root = document.querySelector('[\(spineIndexAttribute)="\(idx)"]');
+                if (!root) { return; }
+                var nodes = root.querySelectorAll(
                     '.\(loadingClassName)[\(decorationAttribute)]'
                 );
                 for (var i = 0; i < nodes.length; i++) {
