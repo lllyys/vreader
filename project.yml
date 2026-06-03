@@ -212,8 +212,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vreader.app
-        CURRENT_PROJECT_VERSION: 850
-        MARKETING_VERSION: 3.50.7
+        CURRENT_PROJECT_VERSION: 851
+        MARKETING_VERSION: 3.50.8
         # Feature #42 Phase-2 WI-1b: compile + link the vendored libmobi C.
         # USE_LIBXML2 turns on libmobi's OPF/XML writer (KF8→EPUB needs it);
         # the iOS SDK ships libxml2 headers at $(SDKROOT)/usr/include/libxml2
