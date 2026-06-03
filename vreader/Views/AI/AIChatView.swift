@@ -30,8 +30,10 @@ import SwiftUI
 struct AIChatView: View {
 
     @Bindable var viewModel: AIChatViewModel
-    @State private var inputText: String = ""
-    @FocusState private var isInputFocused: Bool
+    // Internal (not private) so the composer extracted into AIChatView+Composer.swift
+    // can read them (Feature #86 WI-4: keep AIChatView.swift under the size guide).
+    @State var inputText: String = ""
+    @FocusState var isInputFocused: Bool
 
     /// Visual-identity-v2 theme tokens (feature #65 WI-2). Defaults to
     /// `.paper` so existing callers / previews that omit it keep working.
@@ -288,131 +290,5 @@ struct AIChatView: View {
         .accessibilityIdentifier("chatErrorBanner")
     }
 
-    // MARK: - Input Bar
-
-    /// The design's rounded pill input field with a circular send
-    /// button — `vreader-panels.jsx` `ChatView`'s input row. The
-    /// previous plain `TextField` + `arrow.up.circle.fill` button is
-    /// replaced; the multiline (`axis: .vertical`, `lineLimit(1...5)`)
-    /// behaviour and the bug-#94 focus / submit wiring are preserved.
-    @ViewBuilder
-    private var inputBar: some View {
-        // Feature #86 WI-3: the cluster's single top rule now lives on the docked
-        // ChatContextBar above this composer (design #1455 — one shared rule around
-        // bar + composer), so the composer no longer draws its own.
-        HStack(spacing: 8) {
-            ZStack(alignment: .topLeading) {
-                // Bug #310: themed placeholder. SwiftUI ignores `.foregroundStyle`
-                // on a `TextField`'s own placeholder (it stays the system
-                // appearance-aware colour — ~1.07:1, near-invisible over the cream
-                // sheet in Dark Mode), so overlay a `Text` in the designed `sub`
-                // token. Identical font + the shared padding below keep it aligned
-                // with the entered text.
-                if inputText.isEmpty {
-                    Text(inputPlaceholder)
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color(Self.secondaryContentColor(for: theme)))
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-                TextField("", text: $inputText, axis: .vertical)
-                    .lineLimit(1...5)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color(theme.inkColor))
-                    .textFieldStyle(.plain)
-                    .focused($isInputFocused)
-                    .onSubmit {
-                        sendCurrentMessage()
-                    }
-                    .accessibilityIdentifier("chatInputField")
-                    // Bug #310 (Codex Gate-4 Medium): the empty prompt `""`
-                    // would leave VoiceOver an unlabeled field (the overlay
-                    // placeholder is accessibilityHidden), so carry the label
-                    // explicitly.
-                    .accessibilityLabel(inputPlaceholder)
-            }
-            .padding(.leading, 14)
-            .padding(.vertical, 6)
-
-            Button {
-                sendCurrentMessage()
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        Circle().fill(Color(sendButtonFillColor))
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .accessibilityIdentifier("chatSendButton")
-            .accessibilityLabel("Send message")
-        }
-        .padding(6)
-        .background(
-            Capsule().fill(Color(pillFillColor))
-        )
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 16)
-    }
-
-    // MARK: - Private
-
-    /// The input placeholder mirrors the empty state's book/no-book
-    /// split: the reader AI-sheet chat (`bookFingerprint != nil`) uses
-    /// the design's book-specific copy; the Library general-chat sheet
-    /// (`bookFingerprint == nil`) keeps the neutral pre-v2 wording so
-    /// the WI-2 re-skin does not regress that reused surface.
-    private var inputPlaceholder: String {
-        viewModel.bookFingerprint != nil
-            ? "Ask about this book\u{2026}"
-            : "Type a message\u{2026}"
-    }
-
-    private var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !viewModel.isLoading
-    }
-
-    /// Bug #310: the empty-state (icon + headline) and the input placeholder
-    /// must read the designed cream-aware `sub` token — NOT the system
-    /// appearance-aware `.secondary`, which resolves to ~1.07:1 (near-white)
-    /// over the cream AI sheet (`#fcf8f0`) in Dark Mode. Same restore-to-
-    /// designed-token fix as the sibling `AIReaderPanelHeader` subtitle
-    /// (#285 / #297 / #300 class). `static` so a contrast test can pin it
-    /// without rendering the view.
-    static func secondaryContentColor(for theme: ReaderThemeV2) -> UIColor {
-        theme.subColor
-    }
-
-    /// The pill's neutral wash — design `ChatView` input container.
-    private var pillFillColor: UIColor {
-        theme.isDark
-            ? UIColor.white.withAlphaComponent(0.06)
-            : UIColor.black.withAlphaComponent(0.04)
-    }
-
-    /// The send button's fill — accent when a message can be sent,
-    /// a neutral wash otherwise (design `ChatView`'s `draft.trim()`
-    /// conditional).
-    private var sendButtonFillColor: UIColor {
-        guard canSend else {
-            return theme.isDark
-                ? UIColor.white.withAlphaComponent(0.12)
-                : UIColor.black.withAlphaComponent(0.10)
-        }
-        return theme.accentColor
-    }
-
-    private func sendCurrentMessage() {
-        let text = inputText
-        inputText = ""
-        Task {
-            await viewModel.sendMessage(text)
-        }
-    }
 }
 #endif

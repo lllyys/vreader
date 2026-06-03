@@ -45,6 +45,10 @@ final class ChatAnnotationCache {
     /// after all references are gone — no concurrent access. `NotificationCenter`
     /// removal is itself thread-safe.
     nonisolated(unsafe) private var changeObserver: NSObjectProtocol?
+    /// Monotonic load generation — guards against interleaved reloads (Gate-4
+    /// High): rapid `.readerAnnotationsDidChange` posts spawn overlapping
+    /// `load()` Tasks, and only the newest may publish state + fire `onChange`.
+    private var loadGeneration = 0
 
     init(
         fingerprintKey: String,
@@ -75,9 +79,17 @@ final class ChatAnnotationCache {
     /// on each `.readerAnnotationsDidChange`. A fetch failure leaves that kind
     /// empty (the AI context simply omits it — never blocks the chat).
     func load() async {
-        annotations = (try? await annotationStore.fetchAnnotations(forBookWithKey: fingerprintKey)) ?? []
-        highlights = (try? await highlightStore.fetchHighlights(forBookWithKey: fingerprintKey)) ?? []
-        bookmarks = (try? await bookmarkStore.fetchBookmarks(forBookWithKey: fingerprintKey)) ?? []
+        loadGeneration += 1
+        let generation = loadGeneration
+        // Fetch into locals across the awaits, THEN commit atomically — so an
+        // older reload that finishes last can't leave a mixed/stale snapshot.
+        let fetchedAnnotations = (try? await annotationStore.fetchAnnotations(forBookWithKey: fingerprintKey)) ?? []
+        let fetchedHighlights = (try? await highlightStore.fetchHighlights(forBookWithKey: fingerprintKey)) ?? []
+        let fetchedBookmarks = (try? await bookmarkStore.fetchBookmarks(forBookWithKey: fingerprintKey)) ?? []
+        guard generation == loadGeneration else { return }   // a newer load superseded us
+        annotations = fetchedAnnotations
+        highlights = fetchedHighlights
+        bookmarks = fetchedBookmarks
         onChange?()
     }
 
