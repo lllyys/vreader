@@ -110,4 +110,71 @@ struct HighlightableTextViewLandingTests {
         #expect(lm?.landingHighlight == nil)
     }
 }
+
+/// Feature #74 WI-2: the bloom intensity curve (design §3 motion / §5 reduce-motion).
+@Suite("LandingBloomCurve (Feature #74 WI-2)")
+struct LandingBloomCurveTests {
+
+    @Test func intensity_rest_isZero() {
+        #expect(LandingBloomCurve.intensity(elapsedMs: 0, reduceMotion: false) == 0)
+    }
+
+    @Test func intensity_duringHold_isPeak() {
+        #expect(LandingBloomCurve.intensity(elapsedMs: 250, reduceMotion: false) == 1)
+    }
+
+    @Test func intensity_decaysMonotonicallyAfterHold() {
+        let a = LandingBloomCurve.intensity(elapsedMs: 500, reduceMotion: false)
+        let b = LandingBloomCurve.intensity(elapsedMs: 900, reduceMotion: false)
+        #expect(a > b)
+        #expect(b > 0)
+    }
+
+    @Test func intensity_atEnd_isZero_andComplete() {
+        #expect(LandingBloomCurve.intensity(elapsedMs: 1500, reduceMotion: false) == 0)
+        #expect(LandingBloomCurve.isComplete(elapsedMs: 1500, reduceMotion: false))
+        #expect(!LandingBloomCurve.isComplete(elapsedMs: 1400, reduceMotion: false))
+    }
+
+    @Test func reduceMotion_jumpsToPeak_holdsThenFades() {
+        #expect(LandingBloomCurve.intensity(elapsedMs: 0, reduceMotion: true) == 1)
+        #expect(LandingBloomCurve.intensity(elapsedMs: 1200, reduceMotion: true) == 1)
+        #expect(LandingBloomCurve.intensity(elapsedMs: 1360, reduceMotion: true) > 0)
+        #expect(LandingBloomCurve.intensity(elapsedMs: 1520, reduceMotion: true) == 0)
+    }
+}
+
+/// Feature #74 WI-2: the navigate-from-list trigger + theme-family resolution +
+/// the reduce-motion glow suppression.
+@Suite("LandingBloom trigger + family (Feature #74 WI-2)")
+@MainActor
+struct LandingBloomTriggerTests {
+
+    @Test func landingTrigger_firesOnlyForAPersistedRangeMatch() {
+        let h = PaintedHighlight(range: NSRange(location: 10, length: 5), colorName: "green")
+        // Exact match (a list tap on the saved highlight) → bloom with its color.
+        #expect(TXTTextViewBridge.landingTrigger(
+            highlightRange: NSRange(location: 10, length: 5), persisted: [h])?.colorName == "green")
+        // A search hit (range matches no persisted highlight) → no bloom.
+        #expect(TXTTextViewBridge.landingTrigger(
+            highlightRange: NSRange(location: 11, length: 5), persisted: [h]) == nil)
+        // No nav range → no bloom.
+        #expect(TXTTextViewBridge.landingTrigger(highlightRange: nil, persisted: [h]) == nil)
+    }
+
+    @Test func bloomThemeFamily_byBackgroundLuminance() {
+        #expect(TXTTextViewBridge.bloomThemeFamily(for: .white) == .light)
+        #expect(TXTTextViewBridge.bloomThemeFamily(for: .black) == .dark)
+    }
+
+    @Test func paint_reduceMotion_suppressesGlowKeepsRing() {
+        let p = LandingBloomPaint(intensity: 1, family: .dark, reduceMotion: true)
+        #expect(p.glowRadius == 0)
+        #expect(p.glowAlpha == 0)
+        #expect(approxCG(p.ringWidth, 1.6))
+        #expect(approxCG(p.washAlpha, 0.86))
+    }
+
+    private func approxCG(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 0.0001 }
+}
 #endif

@@ -38,13 +38,17 @@ struct LandingBloomPaint: Equatable {
     /// highlight's source alpha) to 0.86 at peak; the ring (1.6 pt), glow radius
     /// (16 pt), and glow alpha (0.55 light / 0.85 dark) scale linearly with
     /// intensity. `intensity` is clamped to `[0, 1]`.
-    init(intensity: CGFloat, family: LandingBloomThemeFamily) {
+    /// `reduceMotion` (design §5) suppresses the glow spread entirely (no
+    /// blur/halo) — the wash + solid ring carry the cue with zero movement. The
+    /// wash and ring still scale with intensity so the driver's opacity-style
+    /// fade works.
+    init(intensity: CGFloat, family: LandingBloomThemeFamily, reduceMotion: Bool = false) {
         let i = min(max(intensity, 0), 1)
         let base = HighlightPaintColor.fillAlpha
         washAlpha = base + (0.86 - base) * i
         ringWidth = 1.6 * i
-        glowRadius = 16 * i
-        glowAlpha = (family == .light ? 0.55 : 0.85) * i
+        glowRadius = reduceMotion ? 0 : 16 * i
+        glowAlpha = reduceMotion ? 0 : (family == .light ? 0.55 : 0.85) * i
     }
 
     /// Whether the landing wash REPLACES the persisted fill for `persistedRange`

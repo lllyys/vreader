@@ -319,6 +319,21 @@ struct TXTTextViewBridge: UIViewRepresentable {
                 highlightRange: highlightRange,
                 snapToTop: snapToTop
             )
+            // Feature #74 WI-2: if this navigation landed on a SAVED highlight (a
+            // Notes/Highlights row tap — the nav range exactly matches a persisted
+            // highlight), play the locate bloom ONCE after the scroll settles. A
+            // search hit (range matches no persisted highlight) does not bloom.
+            if let landed = Self.landingTrigger(
+                highlightRange: highlightRange, persisted: persistedHighlights) {
+                let family = Self.bloomThemeFamily(for: config.backgroundColor)
+                let reduceMotion = UIAccessibility.isReduceMotionEnabled
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak textView] in
+                    (textView as? HighlightableTextView)?.playLandingBloom(
+                        range: landed.range, colorName: landed.colorName,
+                        family: family, reduceMotion: reduceMotion
+                    )
+                }
+            }
         }
 
         // Scroll position restore is one-shot only (handled in makeUIView).
@@ -332,6 +347,27 @@ struct TXTTextViewBridge: UIViewRepresentable {
     }
 
     // MARK: - Static seams (testable)
+
+    /// Feature #74 WI-2: the saved highlight a navigation landed on — the
+    /// persisted highlight whose range EXACTLY matches the nav target (a
+    /// Notes/Highlights list tap), or nil for a search hit / non-highlight nav
+    /// (so only a real "jump to my saved highlight" blooms).
+    static func landingTrigger(
+        highlightRange: NSRange?, persisted: [PaintedHighlight]
+    ) -> PaintedHighlight? {
+        guard let highlightRange, highlightRange.length > 0 else { return nil }
+        return persisted.first { $0.range == highlightRange }
+    }
+
+    /// Feature #74 WI-2 (design §6): the bloom theme family from the reader
+    /// background — light (Paper/Sepia) vs dark (Dark/OLED/Photo) — by relative
+    /// luminance, so the glow alpha picks the right knob.
+    static func bloomThemeFamily(for backgroundColor: UIColor) -> LandingBloomThemeFamily {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        backgroundColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        return luminance < 0.5 ? .dark : .light
+    }
 
     /// Bug #154 / GH #443: decides whether the temporary search/navigation
     /// highlight should be re-applied (and its 3 s auto-clear timer re-armed).
