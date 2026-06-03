@@ -229,4 +229,48 @@ struct FoliateBilingualOrchestratorTests {
         )
         #expect(js == nil)
     }
+
+    // MARK: - loading shimmer (Feature #77 WI-3)
+
+    @Test("buildLoadingJS returns nil when no blocks are known")
+    func buildLoadingJSNoBlocks() {
+        let orchestrator = FoliateBilingualOrchestrator()
+        #expect(orchestrator.buildLoadingJS() == nil)
+        #expect(orchestrator.buildLoadingJS(sectionIndex: 0) == nil)
+    }
+
+    @Test("buildLoadingJS contains every known block's bid + calls the host loading API")
+    func buildLoadingJSContainsBids() throws {
+        let orchestrator = FoliateBilingualOrchestrator()
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "Hello"),
+            BilingualBlock(bid: "b2", text: "World")
+        ])
+        let js = try #require(orchestrator.buildLoadingJS())
+        #expect(js.contains("'b1'"))
+        #expect(js.contains("'b2'"))
+        #expect(js.contains("readerAPI.bilingualInjectLoading"))
+    }
+
+    @Test("buildLoadingJS(sectionIndex:) scopes to that section's blocks only")
+    func buildLoadingJSSectionScoped() throws {
+        let orchestrator = FoliateBilingualOrchestrator()
+        orchestrator.updateBlocks(
+            [BilingualBlock(bid: "s0a", text: "A", sectionIndex: 0)],
+            forSection: 0)
+        orchestrator.updateBlocks(
+            [BilingualBlock(bid: "s1a", text: "B", sectionIndex: 1)],
+            forSection: 1)
+        let js = try #require(orchestrator.buildLoadingJS(sectionIndex: 0))
+        #expect(js.contains("'s0a'"))
+        #expect(!js.contains("'s1a'"))
+        #expect(js.contains("targetSectionIndex: 0"))
+    }
+
+    @Test("clearLoadingJS scopes to the section")
+    func clearLoadingJSScopes() {
+        let orchestrator = FoliateBilingualOrchestrator()
+        let js = orchestrator.clearLoadingJS(sectionIndex: 4)
+        #expect(js.contains("readerAPI.bilingualClearLoading(4)"))
+    }
 }

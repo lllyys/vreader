@@ -192,6 +192,19 @@ struct FoliateBilingualContainerView: View {
             guard key == fingerprintKey else { return }
             handleBilingualDidChange()
         }
+        // Feature #77 WI-3: the prefetch-state bus drives the inline loading
+        // shimmer for AZW3/MOBI — show it while the current section's unit is
+        // fetching, remove it on a failed/cancelled prefetch (a landed one is
+        // replaced in place by the inject above).
+        .onReceive(
+            NotificationCenter.default.publisher(for: .readerBilingualPrefetchDidChange)
+        ) { notification in
+            let key = notification.userInfo?["fingerprintKey"] as? String
+            guard key == fingerprintKey else { return }
+            let inFlight = notification.userInfo?["inFlightUnits"]
+                as? Set<TranslationUnitID> ?? []
+            handleBilingualPrefetchChange(inFlightUnits: inFlight)
+        }
         // Feature #56 WI-15: a re-translate result for this book —
         // refresh the VM's in-memory cache so the open chapter re-renders.
         .onReceive(
@@ -579,6 +592,17 @@ struct FoliateBilingualContainerView: View {
         // current unit + its next, and (b) push an inject scoped to
         // the new section if translations are cached.
         if previousIndex != nextIndex {
+            // Feature #77: clear any stale LOADING shimmer on the section we just
+            // LEFT — a prefetch that was in flight there may land or fail
+            // off-current, and the prefetch-change handler below only targets the
+            // NEW current section. Unlike Readium's single-spine eval channel,
+            // Foliate can target the left section directly, so the stale shimmer
+            // never lingers. (A landed translation is unaffected — clearLoading is
+            // loading-only.) On return, `injectIfCached` re-injects a cached
+            // translation or the prefetch re-triggers a fresh shimmer.
+            if let prev = previousIndex {
+                evalBilingualJS(bilingualOrchestrator.clearLoadingJS(sectionIndex: prev))
+            }
             // The user moved into a new (already-loaded) section.
             // Refresh enumerate so the block list reflects the new
             // section's DOM — section-load may not fire when
@@ -611,6 +635,41 @@ struct FoliateBilingualContainerView: View {
                 sectionIndex: scopedIndex
             ) {
                 evalBilingualJS(js)
+            }
+        }
+    }
+
+    /// Feature #77 WI-3: `.readerBilingualPrefetchDidChange` handler — show or
+    /// remove the inline LOADING shimmer for the current section as the in-flight
+    /// unit set changes (the FULL set is carried in the notification). When the
+    /// current section's unit is fetching, inject a shimmer after each
+    /// still-untranslated block of that section (`bilingualInjectLoading` skips
+    /// already-decorated blocks, so it never downgrades a landed row). When the
+    /// unit leaves the set, the translation arrives via `.readerBilingualDidChange`
+    /// and the inject replaces the shimmer IN PLACE — so a landed unit must NOT be
+    /// cleared here; only a failed / cancelled prefetch (no cached translation)
+    /// has its leftover shimmer removed. A shimmer on a section the user has since
+    /// left is cleared by `handleRelocated`.
+    private func handleBilingualPrefetchChange(inFlightUnits: Set<TranslationUnitID>) {
+        guard let vm = bilingualViewModel, vm.isEnabled else { return }
+        Task { @MainActor in
+            // Resolve against LIVE state (not state captured before the task), and
+            // re-check the section after the unit-resolve await — a relocate during
+            // the await would otherwise let this task inject a shimmer back into a
+            // just-left section that `handleRelocated` already cleared (Gate-4
+            // Medium). The section-stability guard makes the work owner-scoped.
+            let scopedIndex = currentSectionIndex
+            guard let locator = makeCurrentLocator(),
+                  let provider = vm.textProvider,
+                  let unit = await provider.unit(containing: locator) else { return }
+            guard currentSectionIndex == scopedIndex else { return }
+            if inFlightUnits.contains(unit) {
+                if let js = bilingualOrchestrator.buildLoadingJS(sectionIndex: scopedIndex) {
+                    evalBilingualJS(js)
+                }
+            } else if vm.translations(for: unit) == nil {
+                evalBilingualJS(
+                    bilingualOrchestrator.clearLoadingJS(sectionIndex: scopedIndex))
             }
         }
     }

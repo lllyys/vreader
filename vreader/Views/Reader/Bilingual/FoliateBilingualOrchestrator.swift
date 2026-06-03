@@ -177,5 +177,36 @@ final class FoliateBilingualOrchestrator {
         )
     }
 
+    // MARK: - loading shimmer (Feature #77 WI-3)
+
+    /// Feature #77: build the LOADING-shimmer inject JS for a section's enumerated
+    /// bids (the in-flight unit's blocks get a shimmer until each translation
+    /// lands and replaces it in place). `sectionIndex == nil` uses the flattened
+    /// `currentBlocks`. Returns `nil` when the scope has no blocks. The host's
+    /// `bilingualInjectLoading` skips any bid that already has a decoration, so it
+    /// never downgrades a landed translation. Mirrors `buildInjectJS`'s scoping
+    /// (per-section cache → legacy `-1` bucket fallback).
+    func buildLoadingJS(sectionIndex: Int? = nil) -> String? {
+        let scoped: [BilingualBlock]
+        if let sectionIndex {
+            scoped = blocksBySection[sectionIndex]
+                ?? blocksBySection[-1]
+                ?? []
+        } else {
+            scoped = currentBlocks
+        }
+        guard !scoped.isEmpty else { return nil }
+        return FoliateBilingualJS.bilingualInjectLoadingJS(
+            loadingBids: scoped.map(\.bid),
+            targetSectionIndex: sectionIndex
+        )
+    }
+
+    /// Feature #77: JS that removes ONLY the loading-shimmer decorations (a
+    /// failed / cancelled prefetch), leaving landed translations intact.
+    func clearLoadingJS(sectionIndex: Int? = nil) -> String {
+        FoliateBilingualJS.bilingualClearLoadingJS(targetSectionIndex: sectionIndex)
+    }
+
 }
 #endif

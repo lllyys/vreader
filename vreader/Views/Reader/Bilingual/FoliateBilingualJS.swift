@@ -74,6 +74,13 @@ enum FoliateBilingualJS {
     /// Pinned by name in CSS + the clear path.
     static let blockClassName = "vreader-bilingual"
 
+    /// Feature #77: the modifier class marking a decoration node as the in-flight
+    /// LOADING shimmer (vs a landed translation). Shared with
+    /// `EPUBBilingualJS.loadingClassName` — the cross-format CSS + clear contract.
+    static let loadingClassName = "vreader-bilingual-loading"
+    /// Feature #77: the shimmer-bar element class inside a loading decoration.
+    static let shimmerBarClassName = "vreader-shimmer-bar"
+
     /// The WKScriptMessageHandler name the enumerate payload posts
     /// to. Wired up in `FoliateSpikeView.makeUIView`.
     static let enumerateMessageHandlerName = "bilingualEnumerate"
@@ -253,6 +260,78 @@ enum FoliateBilingualJS {
             try {
                 if (window.readerAPI && typeof readerAPI.bilingualClear === 'function') {
                     readerAPI.bilingualClear(\(arg));
+                }
+            } catch (e) {}
+        })();
+        """
+    }
+
+    // MARK: - loading shimmer (Feature #77 WI-3)
+
+    /// JS that calls the Foliate host's `readerAPI.bilingualInjectLoading`
+    /// helper with the supplied bids. The helper inserts an inline shimmer
+    /// decoration (2 shimmer bars) after each block, skipping any that already
+    /// carry a decoration (never downgrades a landed translation). `nil`
+    /// `targetSectionIndex` walks every loaded section.
+    ///
+    /// Each bid routes through `FoliateJSEscaper.escapeForJSString` for the JS
+    /// literal; the host applies a defensive `CSS.escape` for the selector.
+    static func bilingualInjectLoadingJS(
+        loadingBids: [String],
+        targetSectionIndex: Int? = nil
+    ) -> String {
+        let bidArray = loadingBids.sorted()
+            .map { "'\(FoliateJSEscaper.escapeForJSString($0))'" }
+            .joined(separator: ", ")
+        let sectionArg: String
+        if let idx = targetSectionIndex {
+            sectionArg = String(idx)
+        } else {
+            sectionArg = "null"
+        }
+        return """
+        (function() {
+            var loadingBids = [\(bidArray)];
+            var DECO = '\(decorationAttribute)';
+            var BID = '\(blockIDAttribute)';
+            var CLS = '\(blockClassName)';
+            var LOADING_CLS = '\(loadingClassName)';
+            var BAR_CLS = '\(shimmerBarClassName)';
+            try {
+                if (window.readerAPI && typeof readerAPI.bilingualInjectLoading === 'function') {
+                    readerAPI.bilingualInjectLoading({
+                        loadingBids: loadingBids,
+                        decorationAttribute: DECO,
+                        blockIDAttribute: BID,
+                        blockClassName: CLS,
+                        loadingClassName: LOADING_CLS,
+                        shimmerBarClassName: BAR_CLS,
+                        styleCssText: 'user-select: none; -webkit-user-select: none;',
+                        targetSectionIndex: \(sectionArg)
+                    });
+                }
+            } catch (e) {}
+        })();
+        """
+    }
+
+    /// JS that calls `readerAPI.bilingualClearLoading()` — removes ONLY the
+    /// loading-shimmer decoration nodes (a failed / cancelled prefetch), leaving
+    /// landed translations intact. `nil` clears every loaded section.
+    static func bilingualClearLoadingJS(
+        targetSectionIndex: Int? = nil
+    ) -> String {
+        let arg: String
+        if let idx = targetSectionIndex {
+            arg = String(idx)
+        } else {
+            arg = "null"
+        }
+        return """
+        (function() {
+            try {
+                if (window.readerAPI && typeof readerAPI.bilingualClearLoading === 'function') {
+                    readerAPI.bilingualClearLoading(\(arg));
                 }
             } catch (e) {}
         })();

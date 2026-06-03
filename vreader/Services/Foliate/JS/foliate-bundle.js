@@ -7475,6 +7475,7 @@ ${doc.querySelector("parsererror").innerText}`);
             if (!block) continue;
             const next = block.nextElementSibling;
             if (next && next.hasAttribute && next.hasAttribute(DECO) && next.classList && next.classList.contains(CLS)) {
+              next.classList.remove("vreader-bilingual-loading");
               next.textContent = translations[bid];
               continue;
             }
@@ -7519,6 +7520,93 @@ ${doc.querySelector("parsererror").innerText}`);
         }
       } catch (e3) {
         console.warn("[foliate-host] bilingualClear failed:", e3);
+      }
+    },
+    // Feature #77: insert an inline LOADING shimmer decoration after each
+    // of `opts.loadingBids`' blocks while that unit's translation is being
+    // fetched. Skips any block that already carries a decoration (a landed
+    // translation OR an existing shimmer) so it never downgrades a translated
+    // row or stacks duplicates. The shimmer node is `<div class="vreader-
+    // bilingual vreader-bilingual-loading" data-vreader-decoration>` with two
+    // `<div class="vreader-shimmer-bar">` children; the inject path above
+    // replaces it in place (dropping the loading class) when the translation
+    // lands. Mirrors `EPUBBilingualJS.bilingualInjectLoadingJS`.
+    bilingualInjectLoading(opts) {
+      try {
+        const loadingBids = Array.isArray(opts?.loadingBids) ? opts.loadingBids : [];
+        if (loadingBids.length === 0) return;
+        const DECO = opts?.decorationAttribute || "data-vreader-decoration";
+        const BID = opts?.blockIDAttribute || "data-vreader-bid";
+        const CLS = opts?.blockClassName || "vreader-bilingual";
+        const LOADING_CLS = opts?.loadingClassName || "vreader-bilingual-loading";
+        const BAR_CLS = opts?.shimmerBarClassName || "vreader-shimmer-bar";
+        const STYLE = opts?.styleCssText || "user-select: none; -webkit-user-select: none;";
+        const targetSectionIndex = opts?.targetSectionIndex;
+        const WIDTHS = ["92%", "54%"];
+        const contents = view.renderer?.getContents?.();
+        if (!Array.isArray(contents) || contents.length === 0) return;
+        const esc = typeof CSS !== "undefined" && CSS.escape ? CSS.escape : (s3) => String(s3).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+        for (const entry of contents) {
+          const doc = entry?.doc;
+          if (!doc) continue;
+          const sectionIndex = typeof entry.index === "number" ? entry.index : -1;
+          if (targetSectionIndex != null && sectionIndex !== targetSectionIndex) {
+            continue;
+          }
+          for (let b3 = 0; b3 < loadingBids.length; b3++) {
+            const block = doc.querySelector(
+              "[" + BID + '="' + esc(loadingBids[b3]) + '"]'
+            );
+            if (!block) continue;
+            const next = block.nextElementSibling;
+            if (next && next.hasAttribute && next.hasAttribute(DECO) && next.classList && next.classList.contains(CLS)) {
+              continue;
+            }
+            const div = doc.createElement("div");
+            div.className = CLS + " " + LOADING_CLS;
+            div.setAttribute(DECO, "");
+            div.style.cssText = STYLE;
+            for (let w2 = 0; w2 < WIDTHS.length; w2++) {
+              const bar = doc.createElement("div");
+              bar.className = BAR_CLS;
+              bar.style.width = WIDTHS[w2];
+              div.appendChild(bar);
+            }
+            if (block.parentNode) {
+              block.parentNode.insertBefore(div, block.nextSibling);
+            }
+          }
+        }
+      } catch (e3) {
+        console.warn("[foliate-host] bilingualInjectLoading failed:", e3);
+      }
+    },
+    // Feature #77: remove ONLY the loading-shimmer decoration nodes (a failed
+    // / cancelled prefetch), leaving landed translations intact. With
+    // `targetSectionIndex` omitted, walks every loaded section. Idempotent.
+    bilingualClearLoading(targetSectionIndex) {
+      try {
+        const contents = view.renderer?.getContents?.();
+        if (!Array.isArray(contents) || contents.length === 0) return;
+        for (const entry of contents) {
+          const doc = entry?.doc;
+          if (!doc) continue;
+          const sectionIndex = typeof entry.index === "number" ? entry.index : -1;
+          if (targetSectionIndex != null && sectionIndex !== targetSectionIndex) {
+            continue;
+          }
+          const nodes = doc.querySelectorAll(
+            ".vreader-bilingual-loading[data-vreader-decoration]"
+          );
+          for (let i3 = 0; i3 < nodes.length; i3++) {
+            const n3 = nodes[i3];
+            if (n3.parentNode) {
+              n3.parentNode.removeChild(n3);
+            }
+          }
+        }
+      } catch (e3) {
+        console.warn("[foliate-host] bilingualClearLoading failed:", e3);
       }
     },
     // Cleanup

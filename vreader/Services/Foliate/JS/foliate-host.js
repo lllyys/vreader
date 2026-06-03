@@ -605,6 +605,12 @@ window.readerAPI = {
                         && next.hasAttribute(DECO)
                         && next.classList
                         && next.classList.contains(CLS)) {
+                        // Feature #77: if this decoration is currently a
+                        // LOADING shimmer, drop the loading modifier so the
+                        // same node becomes the final translation block in
+                        // place (no flicker / re-insert) — the shimmer bars
+                        // are wiped by the textContent assignment below.
+                        next.classList.remove('vreader-bilingual-loading')
                         next.textContent = translations[bid]
                         continue
                     }
@@ -652,6 +658,108 @@ window.readerAPI = {
             }
         } catch (e) {
             console.warn('[foliate-host] bilingualClear failed:', e)
+        }
+    },
+
+    // Feature #77: insert an inline LOADING shimmer decoration after each
+    // of `opts.loadingBids`' blocks while that unit's translation is being
+    // fetched. Skips any block that already carries a decoration (a landed
+    // translation OR an existing shimmer) so it never downgrades a translated
+    // row or stacks duplicates. The shimmer node is `<div class="vreader-
+    // bilingual vreader-bilingual-loading" data-vreader-decoration>` with two
+    // `<div class="vreader-shimmer-bar">` children; the inject path above
+    // replaces it in place (dropping the loading class) when the translation
+    // lands. Mirrors `EPUBBilingualJS.bilingualInjectLoadingJS`.
+    bilingualInjectLoading(opts) {
+        try {
+            const loadingBids = Array.isArray(opts?.loadingBids)
+                ? opts.loadingBids : []
+            if (loadingBids.length === 0) return
+            const DECO = opts?.decorationAttribute || 'data-vreader-decoration'
+            const BID = opts?.blockIDAttribute || 'data-vreader-bid'
+            const CLS = opts?.blockClassName || 'vreader-bilingual'
+            const LOADING_CLS = opts?.loadingClassName || 'vreader-bilingual-loading'
+            const BAR_CLS = opts?.shimmerBarClassName || 'vreader-shimmer-bar'
+            const STYLE = opts?.styleCssText ||
+                'user-select: none; -webkit-user-select: none;'
+            const targetSectionIndex = opts?.targetSectionIndex
+            const WIDTHS = ['92%', '54%']
+
+            const contents = view.renderer?.getContents?.()
+            if (!Array.isArray(contents) || contents.length === 0) return
+            const esc = (typeof CSS !== 'undefined' && CSS.escape)
+                ? CSS.escape
+                : (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&')
+            for (const entry of contents) {
+                const doc = entry?.doc
+                if (!doc) continue
+                const sectionIndex = (typeof entry.index === 'number')
+                    ? entry.index : -1
+                if (targetSectionIndex != null
+                    && sectionIndex !== targetSectionIndex) {
+                    continue
+                }
+                for (let b = 0; b < loadingBids.length; b++) {
+                    const block = doc.querySelector(
+                        '[' + BID + '="' + esc(loadingBids[b]) + '"]'
+                    )
+                    if (!block) continue
+                    const next = block.nextElementSibling
+                    if (next
+                        && next.hasAttribute
+                        && next.hasAttribute(DECO)
+                        && next.classList
+                        && next.classList.contains(CLS)) {
+                        continue // already decorated — don't downgrade / duplicate
+                    }
+                    const div = doc.createElement('div')
+                    div.className = CLS + ' ' + LOADING_CLS
+                    div.setAttribute(DECO, '')
+                    div.style.cssText = STYLE
+                    for (let w = 0; w < WIDTHS.length; w++) {
+                        const bar = doc.createElement('div')
+                        bar.className = BAR_CLS
+                        bar.style.width = WIDTHS[w]
+                        div.appendChild(bar)
+                    }
+                    if (block.parentNode) {
+                        block.parentNode.insertBefore(div, block.nextSibling)
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[foliate-host] bilingualInjectLoading failed:', e)
+        }
+    },
+
+    // Feature #77: remove ONLY the loading-shimmer decoration nodes (a failed
+    // / cancelled prefetch), leaving landed translations intact. With
+    // `targetSectionIndex` omitted, walks every loaded section. Idempotent.
+    bilingualClearLoading(targetSectionIndex) {
+        try {
+            const contents = view.renderer?.getContents?.()
+            if (!Array.isArray(contents) || contents.length === 0) return
+            for (const entry of contents) {
+                const doc = entry?.doc
+                if (!doc) continue
+                const sectionIndex = (typeof entry.index === 'number')
+                    ? entry.index : -1
+                if (targetSectionIndex != null
+                    && sectionIndex !== targetSectionIndex) {
+                    continue
+                }
+                const nodes = doc.querySelectorAll(
+                    '.vreader-bilingual-loading[data-vreader-decoration]'
+                )
+                for (let i = 0; i < nodes.length; i++) {
+                    const n = nodes[i]
+                    if (n.parentNode) {
+                        n.parentNode.removeChild(n)
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[foliate-host] bilingualClearLoading failed:', e)
         }
     },
 

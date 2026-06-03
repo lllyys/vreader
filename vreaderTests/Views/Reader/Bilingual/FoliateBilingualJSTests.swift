@@ -206,4 +206,37 @@ struct FoliateBilingualJSTests {
             "scoped clear JS must call `readerAPI.bilingualClear(2)` so the host helper scopes its clear walk to section 2."
         )
     }
+
+    // MARK: - loading shimmer (Feature #77 WI-3)
+
+    @Test("loading-inject JS calls readerAPI.bilingualInjectLoading with the bids")
+    func loadingInjectCallsHostAPI() {
+        let js = FoliateBilingualJS.bilingualInjectLoadingJS(loadingBids: ["b1", "b2"])
+        #expect(js.contains("readerAPI.bilingualInjectLoading"))
+        #expect(js.contains("'b1'"))
+        #expect(js.contains("'b2'"))
+        // Carries the loading + shimmer-bar class contract so the host builds
+        // the shimmer node + the shared CSS targets it.
+        #expect(js.contains(FoliateBilingualJS.loadingClassName))
+        #expect(js.contains(FoliateBilingualJS.shimmerBarClassName))
+    }
+
+    @Test("loading-inject JS escapes a single-quote bid")
+    func loadingInjectEscapesBid() {
+        let js = FoliateBilingualJS.bilingualInjectLoadingJS(loadingBids: ["b'1"])
+        #expect(js.contains("'b\\'1'"))
+    }
+
+    @Test("loading-inject JS scopes to the target section")
+    func loadingInjectScopesToSection() {
+        let js = FoliateBilingualJS.bilingualInjectLoadingJS(
+            loadingBids: ["b1"], targetSectionIndex: 3)
+        #expect(js.contains("targetSectionIndex: 3"))
+    }
+
+    @Test("clear-loading JS calls readerAPI.bilingualClearLoading scoped to the section")
+    func clearLoadingScopesToSection() {
+        let js = FoliateBilingualJS.bilingualClearLoadingJS(targetSectionIndex: 2)
+        #expect(js.contains("readerAPI.bilingualClearLoading(2)"))
+    }
 }

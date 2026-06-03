@@ -74,7 +74,13 @@ struct FoliateSpikeView: View {
         // bilingual blocks the Foliate bilingual JS injects get the designed
         // style (AZW3/MOBI render via Foliate `setStyles`, which never threaded
         // `epubOverrideCSS`). Harmless when no bilingual content exists.
-        let parts = [base, store?.theme.bilingualBlockCSSRule()].compactMap { $0 }
+        // Feature #77: also append the loading-shimmer rule so the in-flight
+        // shimmer the bilingual JS injects renders (harmless when absent).
+        let parts = [
+            base,
+            store?.theme.bilingualBlockCSSRule(),
+            store?.theme.bilingualLoadingCSSRule()
+        ].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
