@@ -27,6 +27,12 @@ final class ReaderAICoordinator {
     /// Used by AIContextExtractor to determine which section to send as AI context.
     var currentLocator: Locator?
 
+    /// Feature #86 WI-1: the reader's TOC entries, synced from the host so
+    /// `chatContext` can resolve the current chapter's span. Empty until the host
+    /// loads + syncs the TOC (a late TOC upgrades the chat context on the next
+    /// `refreshChatContext()`).
+    var tocEntries: [TOCEntry] = []
+
     /// Whether the AI assistant button should be visible.
     var isAIAvailable: Bool {
         AIReaderAvailability.isAvailable(
@@ -53,6 +59,43 @@ final class ReaderAICoordinator {
         }
         // Fallback: extract from beginning
         return String(loaded.prefix(extractor.targetCharacterCount))
+    }
+
+    /// Feature #86 WI-1: the Chat tab's book context — the WHOLE current chapter
+    /// (not the fixed ~2500-char `.section` window), bounded by the
+    /// `AIContextBudget.defaultMaxUTF16` (12_000) budget. Resolves the chapter via
+    /// the #69 scope stack (`SummaryScopeResolver` + `AIContextExtractor`). When
+    /// the chapter can't be resolved — EPUB / non-char-offset TOC, no locator, or
+    /// no loaded text — it **degrades to `currentTextContent` (`.section`)**, so
+    /// EPUB chat and the no-context fallback are unchanged.
+    var chatContext: String {
+        let section = currentTextContent
+        guard let loaded = loadedTextContent, !loaded.isEmpty,
+              let locator = currentLocator,
+              let bounds = SummaryScopeResolver.chapterBounds(
+                  for: locator,
+                  tocEntries: tocEntries,
+                  totalTextLengthUTF16: loaded.utf16.count
+              )
+        else { return section }
+        let extracted = AIContextExtractor().extractContext(
+            locator: locator,
+            fullText: loaded,
+            format: bookFormat,
+            scope: .chapter,
+            chapterBounds: bounds,
+            maxUTF16: AIContextBudget.defaultMaxUTF16
+        )
+        return extracted.isEmpty ? section : extracted
+    }
+
+    /// Feature #86 WI-1: the SINGLE place the chat's `bookContext` is assigned.
+    /// Idempotent — recomputes `chatContext` from the current
+    /// `loadedTextContent` / `currentLocator` / `tocEntries`. The host calls this
+    /// on every state change (text load, locator change, TOC arrival) so a late
+    /// TOC upgrades the context and a scroll never reverts it to section.
+    func refreshChatContext() {
+        chatViewModel?.bookContext = chatContext
     }
 
     /// Book title used as fallback when no text content is available.
@@ -87,8 +130,10 @@ final class ReaderAICoordinator {
 
         let fingerprint = DocumentFingerprint(canonicalKey: fingerprintKey)
         let chatVM = AIChatViewModel(aiService: service, bookFingerprint: fingerprint)
-        chatVM.bookContext = currentTextContent
         chatViewModel = chatVM
+        // Feature #86 WI-1: assign chatViewModel FIRST, then refresh — else the
+        // refresh no-ops against a nil VM (Gate-2 round-2 note).
+        refreshChatContext()
     }
 
     /// Loads text content from the book file for AI context extraction.
@@ -144,8 +189,9 @@ final class ReaderAICoordinator {
 
         if let text, !text.isEmpty {
             loadedTextContent = text
-            // Update chat VM book context with extracted section (not full text)
-            chatViewModel?.bookContext = currentTextContent
+            // Feature #86 WI-1: refresh the chat context (chapter-scoped) through
+            // the single funnel, not a direct section write.
+            refreshChatContext()
         }
     }
 }

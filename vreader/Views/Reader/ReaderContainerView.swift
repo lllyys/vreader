@@ -546,15 +546,19 @@ struct ReaderContainerView: View {
             onEntries: { entries in
                 tocEntries = entries
                 tocDidLoad = true
+                // Feature #86 WI-1: sync the TOC to the AI coordinator + refresh,
+                // so a TOC that lands AFTER text upgrades the chat to chapter scope.
+                resolvedAICoordinator.tocEntries = entries
+                resolvedAICoordinator.refreshChatContext()
             }
         ))
         .onReceive(NotificationCenter.default.publisher(for: .readerPositionDidChange)) { notification in
             guard let locator = notification.object as? Locator else { return }
             currentLocator = locator
             resolvedAICoordinator.currentLocator = locator
-            if resolvedAICoordinator.loadedTextContent != nil {
-                resolvedAICoordinator.chatViewModel?.bookContext = resolvedAICoordinator.currentTextContent
-            }
+            // Feature #86 WI-1: re-resolve the chapter on every relocate via the
+            // funnel — never a section snapshot that a scroll would freeze in.
+            resolvedAICoordinator.refreshChatContext()
             #if DEBUG
             // Bug #257: surface the live reading position into the DebugBridge
             // probe so `snapshot.position` reflects where the reader actually

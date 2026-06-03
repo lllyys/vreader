@@ -123,6 +123,11 @@ extension ReaderContainerView {
             guard ai.loadedTextContent == nil else { return }
             guard let text, !text.isEmpty else { return }
             ai.loadedTextContent = text
+            // Feature #86 WI-1 (Gate-4 MED): this AZW3/Foliate TTS path also
+            // populates loadedTextContent — funnel it through the chat-context
+            // writer too, else "start TTS first, then open Chat" leaves bookContext
+            // on the stale fallback until a later locator/TOC event.
+            ai.refreshChatContext()
             speakLoadedText(ai: ai)
         }
     }
@@ -149,7 +154,8 @@ extension ReaderContainerView {
             if format == "txt" || format == "md" {
                 if let text = await contentCache.getText(for: resolvedFileURL, format: format) {
                     ai.loadedTextContent = text
-                    ai.chatViewModel?.bookContext = ai.currentTextContent
+                    // Feature #86 WI-1: chapter-scoped chat context via the funnel.
+                    ai.refreshChatContext()
                 } else {
                     await ai.loadBookTextContent(fileURL: resolvedFileURL, format: format)
                 }
@@ -192,6 +198,10 @@ extension ReaderContainerView {
                 fingerprint: fingerprint
             )
             tocDidLoad = true
+            // Feature #86 WI-1: sync the freshly-built TOC to the AI coordinator
+            // + refresh, so a late TOC upgrades the chat context to chapter scope.
+            resolvedAICoordinator.tocEntries = tocEntries
+            resolvedAICoordinator.refreshChatContext()
         }
     }
 
