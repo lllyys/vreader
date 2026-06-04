@@ -56,7 +56,7 @@ struct OpenAICompatibleProvider: AIProvider, Sendable {
     let baseURL: URL
     let apiKey: String
     let model: String
-    private let session: URLSession
+    let session: URLSession
 
     init(
         providerName: String = "OpenAI",
@@ -133,17 +133,7 @@ struct OpenAICompatibleProvider: AIProvider, Sendable {
     // MARK: - Private
 
     private func buildURLRequest(for request: AIRequest, stream: Bool) throws -> URLRequest {
-        // Only send API key over HTTPS (or localhost for local LLM testing)
-        let isLocalhost = baseURL.host == "localhost" || baseURL.host == "127.0.0.1"
-        guard baseURL.scheme == "https" || isLocalhost else {
-            throw AIError.networkError("API key requires HTTPS connection (got \(baseURL.scheme ?? "none"))")
-        }
-
-        let endpoint = baseURL.appendingPathComponent("chat/completions")
-        var urlRequest = URLRequest(url: endpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        var urlRequest = try makeChatCompletionsURLRequest()
 
         let systemPrompt = buildSystemPrompt(for: request.actionType)
         let userMessage = buildUserMessage(for: request)
@@ -160,6 +150,24 @@ struct OpenAICompatibleProvider: AIProvider, Sendable {
         }
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return urlRequest
+    }
+
+    /// Shared `/chat/completions` POST scaffolding (HTTPS check + endpoint +
+    /// headers) for both the plain-chat `buildURLRequest` and the Feature #91
+    /// tool-use `buildToolURLRequest`. The caller sets `httpBody`.
+    func makeChatCompletionsURLRequest() throws -> URLRequest {
+        // Only send API key over HTTPS (or localhost for local LLM testing)
+        let isLocalhost = baseURL.host == "localhost" || baseURL.host == "127.0.0.1"
+        guard baseURL.scheme == "https" || isLocalhost else {
+            throw AIError.networkError("API key requires HTTPS connection (got \(baseURL.scheme ?? "none"))")
+        }
+
+        let endpoint = baseURL.appendingPathComponent("chat/completions")
+        var urlRequest = URLRequest(url: endpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         return urlRequest
     }
 
@@ -189,7 +197,7 @@ struct OpenAICompatibleProvider: AIProvider, Sendable {
         return message
     }
 
-    private func validateHTTPResponse(_ response: URLResponse, data: Data?) throws {
+    func validateHTTPResponse(_ response: URLResponse, data: Data?) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AIError.networkError("Invalid response type")
         }

@@ -208,6 +208,54 @@ struct AIToolRequest: Sendable, Equatable {
     let maxTokens: Int
 }
 
+/// Feature #91: shared validation of a tool-use message history — the
+/// provider-agnostic `ToolTurnMessage` invariants BOTH Anthropic (WI-3) and
+/// OpenAI (WI-4) require, so a malformed caller fails fast HERE instead of
+/// burning a provider 400 round-trip. Throws `AIError.providerError`.
+enum ToolHistoryValidator {
+    static func validate(_ messages: [ToolTurnMessage]) throws {
+        for (i, message) in messages.enumerated() {
+            let toolUseIDs: Set<String> = Set(message.content.compactMap {
+                if case .toolUse(let call) = $0 { return call.id } else { return nil }
+            })
+            if message.role == .assistant, !toolUseIDs.isEmpty {
+                guard i + 1 < messages.count, messages[i + 1].role == .user else {
+                    throw AIError.providerError(
+                        "malformed tool-use history: an assistant tool_use turn must be immediately followed by a user tool_result turn.")
+                }
+                let next = messages[i + 1]
+                guard case .toolResult = next.content.first else {
+                    throw AIError.providerError(
+                        "malformed tool-use history: the user turn after a tool_use must lead with tool_result blocks.")
+                }
+                // Every tool_use id MUST have a matching tool_result (providers
+                // 400 on a missing id).
+                let resultIDs: Set<String> = Set(next.content.compactMap {
+                    if case .toolResult(let r) = $0 { return r.toolUseID } else { return nil }
+                })
+                guard toolUseIDs.isSubset(of: resultIDs) else {
+                    throw AIError.providerError(
+                        "malformed tool-use history: every tool_use must have a matching tool_result (missing: \(toolUseIDs.subtracting(resultIDs).sorted().joined(separator: ", "))).")
+                }
+            }
+            // tool_result-blocks-first within any user message.
+            if message.role == .user {
+                var seenNonResult = false
+                for block in message.content {
+                    if case .toolResult = block {
+                        if seenNonResult {
+                            throw AIError.providerError(
+                                "malformed tool-use history: tool_result blocks must come before any other block in a user message.")
+                        }
+                    } else {
+                        seenNonResult = true
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The parsed result of one provider turn: either the model produced a final
 /// answer with NO tool calls, or its turn contains at least one `tool_use`.
 ///
