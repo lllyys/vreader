@@ -329,6 +329,17 @@ extension ReaderThemeV2 {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
+    // MARK: - Feature #93: theme colors as CSS strings (Foliate AZW3/MOBI parity)
+
+    /// The theme's text-container surface as a CSS color string (`rgb(...)`),
+    /// for the Foliate book iframe `body { background }`. Mirrors the color
+    /// EPUB paints onto `body { background-color }` in `epubOverrideCSS`.
+    var paperColorCSS: String { Self.cssColor(self.paperColor) }
+
+    /// The theme's primary body-text color as a CSS color string. Mirrors
+    /// EPUB's `color: ink`.
+    var inkColorCSS: String { Self.cssColor(self.inkColor) }
+
     /// Renders a UIColor as a CSS `rgb(...)` or `rgba(...)` string,
     /// preserving the alpha channel that the design tokens encode on
     /// `paperColor` / `subColor` / `ruleColor`. Opaque colors emit

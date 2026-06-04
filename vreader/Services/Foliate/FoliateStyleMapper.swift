@@ -61,10 +61,13 @@ enum FoliateStyleMapper {
         // wraps content in HTML5 semantic containers (`section`, `article`,
         // `figure`, etc.) that often carry their own `em` font-size, so those
         // are added here to widen compounding immunity beyond EPUB's list
-        // (Gate-4 audit Medium). `color` is deliberately omitted — the Foliate
-        // style mapper does not theme colors (AZW3/MOBI theme-color parity is a
-        // separate gap), so resetting it would overreach. `line-height:
-        // inherit` keeps descendant line-height from fighting the body value.
+        // (Gate-4 audit Medium). `color` is deliberately omitted from THIS
+        // (unconditional) rule — the descendant color reset for AZW/MOBI
+        // theme-color parity (feature #93) lives in the `textColor` branch
+        // below, so it is emitted only when a theme color is actually applied
+        // (resetting color here, with no theme ink to inherit, would overreach
+        // the font-size-only path). `line-height: inherit` keeps descendant
+        // line-height from fighting the body value.
         rules.append(
             "p, div, span, li, td, th, dd, dt, blockquote, figcaption, "
             + "section, article, aside, main, header, footer, figure { "
@@ -85,6 +88,24 @@ enum FoliateStyleMapper {
         // Text color — omitted when nil or empty.
         if let color = FoliateJSEscaper.sanitizeCSSColor(textColor) {
             rules.append("body { color: \(color) !important; }")
+
+            // Feature #93: AZW3/MOBI theme-color parity. `body { color }` alone
+            // is not enough — a publisher's per-element ink (`<span style>`,
+            // legacy `<font color>`, heading colors, container colors) survives
+            // the body rule and stays dark on a dark theme. Mirror EPUB's
+            // `epubOverrideCSS` descendant `color: inherit !important` reset so
+            // descendant ink resolves to the inherited (theme) body color. The
+            // selector list mirrors the font-size flatten rule above PLUS
+            // headings `h1`-`h6` (Gate-4: publisher chapter-title colors must
+            // also yield, matching EPUB's `h1...h6 { color }`) and legacy
+            // `font` (Kindle/MOBI content frequently uses `<font color>`).
+            // Emitted ONLY when a text color is applied, so the font-size-only
+            // path (feature #70, nil textColor) is unchanged.
+            rules.append(
+                "h1, h2, h3, h4, h5, h6, p, div, span, li, td, th, dd, dt, "
+                + "blockquote, figcaption, section, article, aside, main, "
+                + "header, footer, figure, font { color: inherit !important; }"
+            )
         }
 
         // Background color — omitted when nil or empty.

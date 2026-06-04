@@ -51,24 +51,35 @@ struct FoliateSpikeView: View {
     /// at a size perceptually consistent with TXT (the calibration anchor) at
     /// the same slider value; the line height rides with it.
     ///
-    /// Theme colors / font-family are deliberately NOT wired here — the spike
-    /// never themed those and AZW3/MOBI theme-color parity is a separate gap
-    /// (see the feature #70 plan's "files OUT of scope"). The CSS sets
-    /// `font-size` + `line-height` only.
+    /// Feature #93 — AZW3/MOBI theme-color parity. The theme's `paperColor`
+    /// (iframe `body` background, which neutralizes the publisher's
+    /// `background-image`) + `inkColor` (body text + descendant reset) are
+    /// threaded into the `setStyles` CSS so the app's paper/sepia/dark theme
+    /// wins. `font-family` is still NOT wired (separate concern). **Photo theme
+    /// is excluded** — its `paperColor` is an alpha overlay for a background
+    /// IMAGE, so applying it would bleed the publisher image; Photo-theme AZW3
+    /// keeps the font-size-only CSS (AZW3 custom-background is a separate,
+    /// possibly-designed feature).
     ///
     /// A `nil` store falls back to the documented default unified size (18)
-    /// so previews / tests never crash. Extracted as a pure static helper so
-    /// the WI-4 CSS-construction seam is directly unit-testable.
+    /// so previews / tests never crash (and emits no color rules). Extracted
+    /// as a pure static helper so the CSS-construction seam is unit-testable.
     static func themeCSS(for store: ReaderSettingsStore?) -> String? {
         let unified = store?.typography.fontSize ?? defaultUnifiedFontSize
         let lineHeight = Double(store?.typography.lineSpacing ?? 1.4)
         let calibrator = store?.calibrator ?? FontSizeCalibrator()
+        // Feature #93: theme colors, EXCEPT Photo (alpha paper would bleed the
+        // publisher background image) and nil-store (previews/tests).
+        let themeColors: (background: String, ink: String)? = {
+            guard let theme = store?.theme, theme != .photo else { return nil }
+            return (theme.paperColorCSS, theme.inkColorCSS)
+        }()
         let base = FoliateStyleMapper.themeCSS(
             fontSize: calibrator.calibratedFoliateSize(forUnified: unified),
             lineHeight: lineHeight,
             fontFamily: nil,
-            textColor: nil,
-            backgroundColor: nil
+            textColor: themeColors?.ink,
+            backgroundColor: themeColors?.background
         )
         // Bug #304: append the `.vreader-bilingual` interlinear rule so the
         // bilingual blocks the Foliate bilingual JS injects get the designed
@@ -84,6 +95,20 @@ struct FoliateSpikeView: View {
         return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
+    /// Feature #93: the DEFENSIVE host-shell background for the store's theme —
+    /// the theme's OUTER `backgroundColor` (matching EPUB's `html` frame), set
+    /// on the WKWebView (with `isOpaque = false`) so any area Foliate does not
+    /// itself repaint (a top band around `<foliate-view>`) shows the theme
+    /// frame instead of white. The iframe `setStyles` CSS (themeCSS) is the
+    /// PRIMARY gutter fix — Foliate repaints its paginator background from the
+    /// section document; this is a belt-and-braces fallback. `nil` (no store /
+    /// Photo theme) → keep the WebView default (no host fill). Pure helper so
+    /// the color-selection seam is unit-testable without a live WebView.
+    static func hostShellBackgroundColor(for store: ReaderSettingsStore?) -> UIColor? {
+        guard let theme = store?.theme, theme != .photo else { return nil }
+        return theme.backgroundColor
+    }
+
     var body: some View {
         ZStack {
             FoliateSpikeWebView(
@@ -92,6 +117,7 @@ struct FoliateSpikeView: View {
                 readerToken: readerToken,
                 layoutFlow: FoliateLayoutFlowMapper.layoutFlow(for: settingsStore?.epubLayout),
                 themeCSS: Self.themeCSS(for: settingsStore),
+                hostBackgroundColor: Self.hostShellBackgroundColor(for: settingsStore),
                 coordinatorBox: coordinatorBox,
                 onBookReady: { title in
                     isBookReady = true
@@ -189,6 +215,12 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
     /// branch pushes it via `readerAPI.setStyles`. `nil` only when the spike
     /// has no `settingsStore` (previews / tests).
     let themeCSS: String?
+    /// Feature #93: the host-shell background (theme OUTER frame color), or
+    /// `nil` to keep the WebView default (no store / Photo theme). Pre-computed
+    /// in `FoliateSpikeView.body` via `hostShellBackgroundColor(for:)` —
+    /// mirrors `themeCSS`. Applied with `isOpaque = false` in makeUIView and
+    /// re-applied live in updateUIView so a theme switch re-tints the frame.
+    let hostBackgroundColor: UIColor?
     /// Feature #57: parent-owned handle; `makeCoordinator()` assigns the
     /// live Coordinator into it so the TTS path can call
     /// `extractPlainText()`.
@@ -269,6 +301,13 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isInspectable = true
         webView.navigationDelegate = coordinator
+        // Feature #93: defensive host-shell theming. With `isOpaque = false`,
+        // the WebView's backgroundColor shows behind any area Foliate does not
+        // itself repaint (the iframe `setStyles` CSS themes the column). `nil`
+        // (no store / Photo theme) keeps the default opaque white.
+        webView.isOpaque = (hostBackgroundColor == nil)
+        webView.backgroundColor = hostBackgroundColor
+        webView.scrollView.backgroundColor = hostBackgroundColor
         // Bug #189: scrollView is the outer container the document renders into.
         // In paginated mode foliate-js consumes touches and paginates internally
         // (outer scroll must be off). In scrolled mode the document is one long
@@ -384,6 +423,14 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
                 }
             }
         }
+
+        // --- Host-shell branch (feature #93) ---
+        // Live re-tint on theme change. Cheap + idempotent (unlike the diffed
+        // setStyles push), so assigned unconditionally. Reverting to `nil`
+        // (Photo theme / no store) restores the opaque default frame.
+        uiView.isOpaque = (hostBackgroundColor == nil)
+        uiView.backgroundColor = hostBackgroundColor
+        uiView.scrollView.backgroundColor = hostBackgroundColor
     }
 }
 

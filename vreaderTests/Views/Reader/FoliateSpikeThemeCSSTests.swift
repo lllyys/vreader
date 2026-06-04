@@ -13,12 +13,15 @@ import Foundation
 @MainActor
 struct FoliateSpikeThemeCSSTests {
 
-    private func makeStore(fontSize: CGFloat, lineSpacing: CGFloat = 1.4) -> ReaderSettingsStore {
+    private func makeStore(
+        fontSize: CGFloat, lineSpacing: CGFloat = 1.4, theme: ReaderThemeV2 = .paper
+    ) -> ReaderSettingsStore {
         let s = ReaderSettingsStore(
             defaults: UserDefaults(suiteName: "FoliateSpikeThemeCSSTests-\(UUID().uuidString)")!
         )
         s.typography.fontSize = fontSize
         s.typography.lineSpacing = lineSpacing
+        s.theme = theme
         return s
     }
 
@@ -226,6 +229,93 @@ struct FoliateSpikeThemeCSSTests {
         // `currentThemeCSS` survives the ready transition — the reconcile
         // `setStyles` in the handler applies exactly this value.
         #expect(coordinator.currentThemeCSS == css)
+    }
+
+    // MARK: - Feature #93: AZW3/MOBI theme-color parity
+
+    /// A paper-theme store's `themeCSS` injects the theme paper as the iframe
+    /// `body` background (the `background` shorthand neutralizes the
+    /// publisher's `background-image`).
+    @Test func themeCSSEmitsThemePaperBackground() {
+        let css = FoliateSpikeView.themeCSS(for: makeStore(fontSize: 18, theme: .paper))!
+        #expect(css.contains("body { background: rgb(250,246,234) !important; }"))
+    }
+
+    /// …and the theme ink as the body text color.
+    @Test func themeCSSEmitsThemeInk() {
+        let css = FoliateSpikeView.themeCSS(for: makeStore(fontSize: 18, theme: .paper))!
+        #expect(css.contains("body { color: rgb(29,26,20) !important; }"))
+    }
+
+    /// Dark theme injects the dark paper + dark ink — the whole point of the
+    /// feature (a publisher's near-black text becomes legible).
+    @Test func themeCSSDarkThemeEmitsDarkPaperAndInk() {
+        let css = FoliateSpikeView.themeCSS(for: makeStore(fontSize: 18, theme: .dark))!
+        #expect(css.contains("body { background: rgb(33,32,28) !important; }"))
+        #expect(css.contains("body { color: rgb(216,210,197) !important; }"))
+    }
+
+    /// A themed store also emits the descendant `color: inherit` reset (incl.
+    /// legacy `<font>`) so publisher per-element ink yields to the theme ink.
+    @Test func themeCSSEmitsDescendantColorResetWhenThemed() {
+        let css = FoliateSpikeView.themeCSS(for: makeStore(fontSize: 18, theme: .dark))!
+        #expect(css.contains("font { color: inherit !important; }"))
+    }
+
+    /// A `nil` store (previews / tests) emits NO color/background/descendant
+    /// rules — the font-size-only fallback is preserved (regression guard).
+    @Test func themeCSSNilStoreEmitsNoColorRules() {
+        let css = FoliateSpikeView.themeCSS(for: nil)!
+        #expect(!css.contains("body { background:"))
+        #expect(!css.contains("body { color:"))
+        #expect(!css.contains("color: inherit"))
+    }
+
+    /// Photo theme is EXCLUDED from color theming — its `paperColor` is an
+    /// alpha overlay for a background IMAGE; applying it would bleed the
+    /// publisher image. Photo-theme AZW3 keeps the font-size-only CSS.
+    @Test func themeCSSPhotoThemeEmitsNoColorRules() {
+        let css = FoliateSpikeView.themeCSS(for: makeStore(fontSize: 18, theme: .photo))!
+        #expect(!css.contains("body { background:"))
+        #expect(!css.contains("body { color:"))
+        #expect(!css.contains("color: inherit"))
+    }
+
+    /// Switching the store's theme changes the emitted colors — drives the
+    /// live-switch contract (`updateUIView` diffs the themeCSS string and
+    /// re-pushes `setStyles`).
+    @Test func themeCSSColorRulesChangeWithTheme() {
+        let store = makeStore(fontSize: 18, theme: .paper)
+        let lightCSS = FoliateSpikeView.themeCSS(for: store)!
+        store.theme = .dark
+        let darkCSS = FoliateSpikeView.themeCSS(for: store)!
+        #expect(lightCSS.contains("rgb(250,246,234)"))
+        #expect(darkCSS.contains("rgb(33,32,28)"))
+        #expect(lightCSS != darkCSS)
+    }
+
+    // MARK: - Feature #93: theme CSS-color accessors
+
+    @Test(arguments: [
+        (ReaderThemeV2.paper, "rgb(250,246,234)", "rgb(29,26,20)"),
+        (ReaderThemeV2.dark,  "rgb(33,32,28)",    "rgb(216,210,197)"),
+    ])
+    func themeColorCSSAccessors(theme: ReaderThemeV2, paper: String, ink: String) {
+        #expect(theme.paperColorCSS == paper)
+        #expect(theme.inkColorCSS == ink)
+    }
+
+    // MARK: - Feature #93: host-shell background uses the OUTER token
+
+    /// The defensive host-shell fill uses the theme's OUTER `backgroundColor`
+    /// (matching EPUB's `html` frame), NOT `paperColor`. Nil store / Photo
+    /// theme → no host fill (keep the WebView default).
+    @Test func hostShellBackgroundColorUsesOuterToken() {
+        let dark = makeStore(fontSize: 18, theme: .dark)
+        #expect(FoliateSpikeView.hostShellBackgroundColor(for: dark) == ReaderThemeV2.dark.backgroundColor)
+        #expect(FoliateSpikeView.hostShellBackgroundColor(for: nil) == nil)
+        let photo = makeStore(fontSize: 18, theme: .photo)
+        #expect(FoliateSpikeView.hostShellBackgroundColor(for: photo) == nil)
     }
 }
 
