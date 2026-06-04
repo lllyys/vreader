@@ -159,7 +159,7 @@ struct FeatureFlagsTests {
     // MARK: - Flag Enum
 
     @Test func flagKeysAreExhaustive() {
-        #expect(FeatureFlagKey.allCases.count == 7)
+        #expect(FeatureFlagKey.allCases.count == 8)
         #expect(FeatureFlagKey.allCases.contains(.aiAssistant))
         #expect(FeatureFlagKey.allCases.contains(.sync))
         #expect(FeatureFlagKey.allCases.contains(.searchIndexingVerboseLogs))
@@ -167,6 +167,39 @@ struct FeatureFlagsTests {
         #expect(FeatureFlagKey.allCases.contains(.epubContinuousScroll))
         #expect(FeatureFlagKey.allCases.contains(.readiumEPUBEngine))
         #expect(FeatureFlagKey.allCases.contains(.kindleConvertOnImport))
+        #expect(FeatureFlagKey.allCases.contains(.agenticTools))
+    }
+
+    // MARK: - Feature #91: agenticTools
+
+    @Test func agenticToolsDefaultOffEverywhere() {
+        // Ships dark — the chat is unchanged until the override turns it on.
+        for env in [AppEnvironment.prod, .staging, .dev] {
+            #expect(FeatureFlags(environment: env).isEnabled(.agenticTools) == false)
+            #expect(FeatureFlags(environment: env).agenticTools == false)
+        }
+    }
+
+    @Test func agenticToolsOverridePersists() {
+        // Gate-4 r2 Medium: prove `.agenticTools` is actually in `persistedFlags` —
+        // a persisted ON override must survive a reload, beating the OFF default.
+        // Persist `true` (NOT the OFF default) so the reload assertion is
+        // discriminating: a regression dropping `.agenticTools` from
+        // `persistedFlags` would read the OFF default and fail this test.
+        let suiteName = "test.agenticTools.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let flags = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        flags.setOverride(true, for: .agenticTools)
+        #expect(defaults.bool(forKey: "com.vreader.featureFlags.agenticTools") == true)
+
+        // A fresh instance over the same defaults reads the persisted ON override.
+        let reloaded = FeatureFlags(environment: .prod, persistenceDefaults: defaults)
+        #expect(reloaded.agenticTools == true)
+        // Removing the persisted override restores the OFF default.
+        reloaded.removeOverride(for: .agenticTools)
+        #expect(reloaded.agenticTools == false)
     }
 
     // MARK: - Feature #42: readiumEPUBEngine

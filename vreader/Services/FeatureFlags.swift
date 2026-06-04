@@ -45,6 +45,13 @@ enum FeatureFlagKey: String, Sendable, CaseIterable {
     /// override OFF to keep native AZW3 import + Foliate rendering. Affects only NEW
     /// imports — already-imported native `.azw3` books are unchanged.
     case kindleConvertOnImport
+    /// Feature #91: agentic tool-calling in AI chat. When ON (AND the active
+    /// provider `supportsToolUse`), the chat routes through `AgenticChatDriver` —
+    /// the model can call read-only tools (search current/other books, get book
+    /// content) and the loop runs silently, surfacing only the final answer.
+    /// **Ships dark (default OFF)** until verified; a persisted override turns it
+    /// on. When off or unsupported, the chat behaves exactly as today.
+    case agenticTools
 }
 
 /// Runtime feature flags with environment-based defaults, override support,
@@ -70,7 +77,7 @@ nonisolated final class FeatureFlags: Sendable {
     private static let persistenceKeyPrefix = "com.vreader.featureFlags."
 
     /// Flags that are persisted to UserDefaults when overridden.
-    private static let persistedFlags: Set<FeatureFlagKey> = [.aiAssistant, .epubContinuousScroll, .readiumEPUBEngine, .kindleConvertOnImport]
+    private static let persistedFlags: Set<FeatureFlagKey> = [.aiAssistant, .epubContinuousScroll, .readiumEPUBEngine, .kindleConvertOnImport, .agenticTools]
 
     // MARK: - Shared Singleton
 
@@ -141,6 +148,9 @@ nonisolated final class FeatureFlags: Sendable {
 
     /// Whether the AI assistant feature is enabled.
     var aiAssistant: Bool { isEnabled(.aiAssistant) }
+
+    /// Feature #91: agentic tool-calling in AI chat (default OFF — see the enum doc).
+    var agenticTools: Bool { isEnabled(.agenticTools) }
 
     /// Whether sync is enabled.
     var sync: Bool { isEnabled(.sync) }
@@ -258,6 +268,10 @@ nonisolated final class FeatureFlags: Sendable {
             // Users can revert to native Foliate-rendered Kindle via the persisted
             // override OFF (see `persistedFlags`).
             return true
+        case .agenticTools:
+            // Feature #91: ships dark — enabled via the persisted override after
+            // device verification (the aiAssistant pattern).
+            return false
         }
     }
 }
