@@ -76,7 +76,7 @@ struct SearchCurrentBookTool: AITool {
         // The query is echoed back in the header / error text, so bound it to one
         // short line first — an oversized model-supplied query can't blow the
         // tool_result budget (every return path is clamped below).
-        let displayQuery = Self.oneLine(query, maxChars: 120)
+        let displayQuery = ToolResultText.oneLine(query, maxChars: 120)
         do {
             let page = try await search.search(
                 query: query, bookFingerprint: bookFingerprint, page: 0, pageSize: maxResults)
@@ -95,7 +95,8 @@ struct SearchCurrentBookTool: AITool {
 
     /// An `isError` result whose content is byte-clamped like the success path.
     private func errorResult(_ message: String) -> ToolResult {
-        ToolResult(toolUseID: "", content: Self.clamp(message, toBytes: maxContentBytes), isError: true)
+        ToolResult(
+            toolUseID: "", content: ToolResultText.clamp(message, toBytes: maxContentBytes), isError: true)
     }
 
     // MARK: - Formatting
@@ -105,7 +106,8 @@ struct SearchCurrentBookTool: AITool {
     static func format(displayQuery: String, page: SearchResultPage, maxResults: Int, maxBytes: Int) -> String {
         let shown = Array(page.results.prefix(maxResults))
         guard !shown.isEmpty else {
-            return clamp("No matches for \"\(displayQuery)\" in the current book.", toBytes: maxBytes)
+            return ToolResultText.clamp(
+                "No matches for \"\(displayQuery)\" in the current book.", toBytes: maxBytes)
         }
         let count = page.totalEstimate ?? shown.count
         let countLabel = "\(count)\(page.hasMore ? "+" : "")"
@@ -115,40 +117,10 @@ struct SearchCurrentBookTool: AITool {
             // BOTH to one line, and put the source at line-end (em-dash separator,
             // no closing bracket a chapter title could spoof) so the one-line-per-
             // result contract holds regardless of book metadata.
-            let snippet = oneLine(result.snippet, maxChars: 400)
-            let source = oneLine(result.sourceContext, maxChars: 80)
+            let snippet = ToolResultText.oneLine(result.snippet, maxChars: 400)
+            let source = ToolResultText.oneLine(result.sourceContext, maxChars: 80)
             lines.append("\(i + 1). \(snippet) — \(source)")
         }
-        return clamp(lines.joined(separator: "\n"), toBytes: maxBytes)
-    }
-
-    /// Strip FTS5 `<b>…</b>` highlight markers, collapse all whitespace/newlines to
-    /// single spaces, and cap the character length — so any book-controlled text
-    /// (snippet or chapter title) renders as one bounded line.
-    static func oneLine(_ text: String, maxChars: Int) -> String {
-        let collapsed = text
-            .replacingOccurrences(of: "<b>", with: "")
-            .replacingOccurrences(of: "</b>", with: "")
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .joined(separator: " ")
-        guard collapsed.count > maxChars else { return collapsed }
-        return String(collapsed.prefix(maxChars)) + "…"
-    }
-
-    /// Truncate to a UTF-8 byte budget on a Character boundary, appending a marker
-    /// when truncated (so the model knows the result was cut).
-    static func clamp(_ string: String, toBytes maxBytes: Int) -> String {
-        guard string.utf8.count > maxBytes else { return string }
-        let suffix = "\n…(truncated)"
-        let budget = max(0, maxBytes - suffix.utf8.count)
-        var out = ""
-        var used = 0
-        for ch in string {
-            let n = String(ch).utf8.count
-            if used + n > budget { break }
-            out.append(ch)
-            used += n
-        }
-        return out + suffix
+        return ToolResultText.clamp(lines.joined(separator: "\n"), toBytes: maxBytes)
     }
 }
