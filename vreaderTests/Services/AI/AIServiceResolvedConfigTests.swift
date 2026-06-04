@@ -247,6 +247,38 @@ struct AIServiceResolvedConfigTests {
         }
     }
 
+    @Test func aiServiceToolUseAdapter_forwardsThroughSendToolTurn() async throws {
+        let (store, keychain) = Self.makeTestStore()
+        let profile = Self.makeOpenAIProfile()
+        try keychain.saveAPIKey("sk-openai-active", forProfile: profile.id)
+        await store.upsert(profile)
+        await store.setActiveProfileID(profile.id)
+
+        let service = Self.makeService(store: store, keychain: keychain, provider: ToolCapableStub())
+        let (config, _) = try await service.resolveToolProvider()
+        let adapter = AIServiceToolUseAdapter(service: service, config: config)
+        let turn = try await adapter.sendToolRequest(Self.toolRequest())
+        #expect(turn == .text("tool answer"))   // forwarded to the stub via sendToolTurn
+    }
+
+    @Test func aiServiceToolUseAdapter_failsClosedOnMidLoopGateRevoke() async throws {
+        let (store, keychain) = Self.makeTestStore()
+        let profile = Self.makeOpenAIProfile()
+        try keychain.saveAPIKey("sk-openai-active", forProfile: profile.id)
+        await store.upsert(profile)
+        await store.setActiveProfileID(profile.id)
+
+        let (service, flags) = Self.makeServiceHoldingFlags(
+            store: store, keychain: keychain, provider: ToolCapableStub())
+        let (config, _) = try await service.resolveToolProvider()
+        let adapter = AIServiceToolUseAdapter(service: service, config: config)
+
+        flags.setOverride(false, for: .aiAssistant)   // AI disabled mid-loop
+        await #expect(throws: AIError.featureDisabled) {
+            _ = try await adapter.sendToolRequest(Self.toolRequest())
+        }
+    }
+
     // MARK: - resolveProviderConfig(profileID:modelOverride:)
 
     @Test func resolveProviderConfig_resolvesANamedNonActiveProfile() async throws {

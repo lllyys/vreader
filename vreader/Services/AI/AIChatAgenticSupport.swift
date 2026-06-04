@@ -62,12 +62,15 @@ enum AIChatHistoryMapper {
     }
 }
 
-/// Bridges a resolved `any AIProvider` to the driver's narrow `ToolUseSending`
-/// seam (`AIProvider` already vends `sendToolRequest`). Keeps `AgenticChatDriver`
-/// decoupled from the full provider protocol + trivially testable.
-struct ProviderToolUseAdapter: ToolUseSending {
-    let provider: any AIProvider
+/// The PRODUCTION `ToolUseSending` for the agentic chat loop: each driver turn
+/// goes back through `AIService.sendToolTurn(_:using:)`, which RE-CHECKS the live
+/// `aiAssistant` flag + consent each turn (a mid-loop disable / consent revoke
+/// fails closed — Gate-4 Medium) while reusing the PINNED `config` so the
+/// provider/model/key never drift (Gate-2 Medium).
+struct AIServiceToolUseAdapter: ToolUseSending {
+    let service: AIService
+    let config: ResolvedAIProviderConfig
     func sendToolRequest(_ request: AIToolRequest) async throws -> AIToolTurn {
-        try await provider.sendToolRequest(request)
+        try await service.sendToolTurn(request, using: config)
     }
 }
