@@ -751,6 +751,7 @@
 		762B3F65978080FE7D26BF4C /* AnnotationModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11E9DBFB16DA26DD0659851 /* AnnotationModelTests.swift */; };
 		768E594123AD4AA389E2BEAC /* AISummaryTabViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABA307AD0EDD85730C6DE77A /* AISummaryTabViewTests.swift */; };
 		76B75FF4AC85FDA4239E43DE /* ProviderProfileMigratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE7C16F12BA653A217A5439C /* ProviderProfileMigratorTests.swift */; };
+		76C4B24F985A8C36C9C52527 /* PersistentSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94CC92DECDB568314F73FE4B /* PersistentSearchIndex.swift */; };
 		770CE6C30927E26DC0DB017F /* FoliateScrolledWindowMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03AECD22002DD170A5BF984A /* FoliateScrolledWindowMathTests.swift */; };
 		7778CE2B4527836E7E8B3FD7 /* PDFHighlightTapResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21285A9149B2F11210A9430 /* PDFHighlightTapResolverTests.swift */; };
 		7783FE9E844F919F1D722742 /* EPUBBilingualJS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 904A30F4AD7E5862C2D3C955 /* EPUBBilingualJS.swift */; };
@@ -2493,6 +2494,7 @@
 		9452FAFFDEBDF03FF6CCEBB1 /* MDParserProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDParserProtocol.swift; sourceTree = "<group>"; };
 		94AF8D98E6FAD355A8B3416B /* TranslateLanguageRailTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslateLanguageRailTests.swift; sourceTree = "<group>"; };
 		94C32FCAEDE0062125F6A51E /* DebugSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugSnapshot.swift; sourceTree = "<group>"; };
+		94CC92DECDB568314F73FE4B /* PersistentSearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistentSearchIndex.swift; sourceTree = "<group>"; };
 		94E1127A71F704F53ABC1B50 /* AIChatMessageRowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMessageRowTests.swift; sourceTree = "<group>"; };
 		95424A5FBB4CD4804BFDB61D /* ReaderBridgeSideTapWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderBridgeSideTapWiringTests.swift; sourceTree = "<group>"; };
 		954E578C5D58FF04DD5D582F /* LibraryNavBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryNavBar.swift; sourceTree = "<group>"; };
@@ -4912,6 +4914,7 @@
 				533D2D4F8B5502E8D51A714E /* EPUBTextExtractor.swift */,
 				F9D9F31A3F96B73C8E3653E6 /* MDTextExtractor.swift */,
 				428A4370B8DB59563F9EE768 /* PDFTextExtractor.swift */,
+				94CC92DECDB568314F73FE4B /* PersistentSearchIndex.swift */,
 				40A2CD5F8AD4DEC1A14A255A /* SearchHitToLocatorResolver.swift */,
 				14418F18DF9D9A3B912AC090 /* SearchIndexCore.swift */,
 				9DB1CCA367AE0B610F4526FC /* SearchIndexStore.swift */,
@@ -7062,6 +7065,7 @@
 				D451E5FB27521C48F0A54FEA /* PersistenceActor+Stats.swift in Sources */,
 				A190FE66621610AD2D04739D /* PersistenceActor.swift in Sources */,
 				26D79FC598918201D178F348 /* PersistenceActorEnvironment.swift in Sources */,
+				76C4B24F985A8C36C9C52527 /* PersistentSearchIndex.swift in Sources */,
 				1BE57FEAD56B11B8BB4F4B97 /* PillSwitch.swift in Sources */,
 				B72492B7B87AC29EBFE19BEB /* PipelineTypes.swift in Sources */,
 				39ED0E66F0AC131788A16FEB /* PreferenceStore.swift in Sources */,

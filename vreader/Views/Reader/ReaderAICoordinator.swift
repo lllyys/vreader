@@ -260,6 +260,18 @@ final class ReaderAICoordinator {
         let fingerprint = DocumentFingerprint(canonicalKey: fingerprintKey)
         let chatVM = AIChatViewModel(aiService: service, bookFingerprint: fingerprint)
         chatViewModel = chatVM
+        // Feature #91: when agenticTools is ON, build the agentic tool registry over
+        // the persistent FTS store + the persistence actor (also a LibraryPersisting)
+        // OFF-MAIN (the cold SQLite open is heavy), then inject it. A build failure
+        // (e.g. the store can't open) → nil → the chat stays on the non-agentic path.
+        // Gated on the flag so there's zero cost OFF.
+        if FeatureFlags.shared.agenticTools, let library = annotationStores as? any LibraryPersisting {
+            Task { @MainActor [weak chatVM] in
+                let registry = try? await AgenticToolRegistryBuilder.buildLive(
+                    currentBook: fingerprint, library: library)
+                chatVM?.setAgenticRegistry(registry)
+            }
+        }
         pinnedAIService = service
         // Feature #86 WI-5b: the whole-book retrieval state machine.
         chatVM.wholeBookRetrieval = WholeBookRetrievalViewModel()

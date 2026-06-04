@@ -40,11 +40,22 @@ struct LibraryBookSearchGateTests {
 
     // MARK: - TXT / MD staleness guards
 
-    @Test("a TXT/MD book needing reindex is excluded (offsets may mis-align)", arguments: ["txt", "md"])
-    func txtMdRequiresReindexExcluded(format: String) {
+    @Test("a TXT book needing reindex is excluded (stale offsets may mis-align)")
+    func txtRequiresReindexExcluded() {
         #expect(LibraryBookSearchGate.evaluate(
-            format: format, state: state(reindex: true, offsets: [0: 0]))
+            format: "txt", state: state(reindex: true, offsets: [0: 0]))
             == .excluded(.requiresReindex))
+    }
+
+    @Test("an MD book needing reindex is NOT excluded — reindex is TXT-only (matches the reader)")
+    func mdRequiresReindexNotExcluded() {
+        // The reader (ReaderSearchCoordinator.setup) force-reindexes txt only; MD
+        // offsets are stable across decode versions, so a legacy MD row stays
+        // searchable rather than being silently dropped from agentic search.
+        let offsets = [0: 0]
+        #expect(LibraryBookSearchGate.evaluate(
+            format: "md", state: state(reindex: true, offsets: offsets))
+            == .searchable(restoreOffsets: offsets))
     }
 
     @Test("an indexed TXT/MD book with NIL offsets is excluded as stale", arguments: ["txt", "md"])

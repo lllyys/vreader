@@ -132,8 +132,16 @@ final class AIChatViewModel {
 
     /// Feature #91: the agentic tool registry. nil/empty (or a non-tool provider, or
     /// the flag OFF) → the chat uses the existing streaming path unchanged. The
-    /// construction site builds + injects this; activation is gated on the live flag.
-    private let agenticRegistry: AIToolRegistry?
+    /// construction site builds it OFF-MAIN and injects it via `setAgenticRegistry`
+    /// (a message sent before it lands simply streams); activation is gated on the
+    /// live flag.
+    private(set) var agenticRegistry: AIToolRegistry?
+
+    /// Inject the agentic registry after construction (the live build opens the
+    /// persistent FTS store off-main, so it can't be ready at init).
+    func setAgenticRegistry(_ registry: AIToolRegistry?) {
+        agenticRegistry = registry
+    }
 
     // MARK: - Init
 

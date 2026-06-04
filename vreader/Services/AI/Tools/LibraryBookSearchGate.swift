@@ -75,8 +75,12 @@ enum LibraryBookSearchGate {
             // offsets.
             return .searchable(restoreOffsets: nil)
         }
-        // TXT/MD: must not be stale, and must carry restorable offsets.
-        if state.requiresReindex { return .excluded(.requiresReindex) }
+        // TXT/MD: must carry restorable offsets. The decode-version staleness
+        // (`requiresReindex`) only force-reindexes TXT — the bug-#99 change was the
+        // TXT decode pipeline; MD offsets are stable across decode versions. Mirror
+        // `ReaderSearchCoordinator.setup` (which reindexes `format == "txt"` only),
+        // else a legacy MD row the reader still searches would be wrongly excluded.
+        if format == "txt", state.requiresReindex { return .excluded(.requiresReindex) }
         guard let offsets = state.segmentOffsets else { return .excluded(.staleOffsets) }
         return .searchable(restoreOffsets: offsets)
     }

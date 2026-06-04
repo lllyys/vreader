@@ -410,7 +410,19 @@ struct LibraryView: View {
             keychainService: KeychainService(),
             profileStore: ProviderProfileStore.shared
         )
-        return AIChatViewModel(aiService: service, bookFingerprint: nil)
+        let vm = AIChatViewModel(aiService: service, bookFingerprint: nil)
+        // Feature #91: when agenticTools is ON, build a library-only agentic registry
+        // (no open book → no search_current_book; search_other_books + get_book_content
+        // span the whole library) OFF-MAIN, then inject it. nil → non-agentic chat.
+        if FeatureFlags.shared.agenticTools {
+            let persistence = PersistenceActor(modelContainer: modelContext.container)
+            Task { @MainActor [weak vm] in
+                let registry = try? await AgenticToolRegistryBuilder.buildLive(
+                    currentBook: nil, library: persistence)
+                vm?.setAgenticRegistry(registry)
+            }
+        }
+        return vm
     }
 
     // MARK: - Update Checker (D07a)

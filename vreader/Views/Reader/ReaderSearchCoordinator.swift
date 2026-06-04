@@ -201,9 +201,7 @@ final class ReaderSearchCoordinator {
     /// so `makePersistentStore` (production) and `wipeSearchIndex` (the
     /// Bug #264 DEBUG reset-wipe) agree on the path.
     nonisolated static var searchIndexDirectoryURL: URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("SearchIndex", isDirectory: true)
+        PersistentSearchIndex.directoryURL   // single source of truth (Services layer)
     }
 
     /// Removes the persistent FTS store directory. Idempotent — succeeds when
@@ -238,15 +236,7 @@ final class ReaderSearchCoordinator {
     /// returns an `@unchecked Sendable` store, so `prepareService` invokes it on
     /// a detached task and only hops back to the actor for the state assignment.
     nonisolated private static func makePersistentStore() throws -> SearchIndexStore {
-        let dir = searchIndexDirectoryURL
-        let dbPath = dir.appendingPathComponent("search.sqlite3")
-        do {
-            let core = try SearchIndexCore(databasePath: dbPath.path)
-            return try SearchIndexStore(core: core)
-        } catch {
-            logger.warning("Persistent index failed, using in-memory: \(error.localizedDescription)")
-            return try SearchIndexStore()
-        }
+        try PersistentSearchIndex.makeStore()   // single source of truth (Services layer)
     }
 
     /// Extracts text units and enqueues them for background indexing (WI-F05).
