@@ -455,4 +455,35 @@ struct NativeTextPaginatorTests {
         let found0 = paginator.pageContaining(offsetUTF16: page0End)
         #expect(found0 == 0, "Last char of page 0 (offset \(page0End)) should map to page 0")
     }
+
+    // MARK: - Feature #92: justification does not drift page boundaries
+
+    /// Justification adjusts intra-line spacing only; TextKit determines line
+    /// breaks BEFORE alignment, so a `.justified` attributed string paginates
+    /// to the SAME page boundaries (count + per-page char ranges) as the
+    /// `.natural` equivalent. Pins the feature-#92 invariant that turning on
+    /// justified alignment can't shift a saved position onto a different page.
+    @Test func justificationDoesNotChangePageBoundaries() {
+        let text = generateLongText(
+            lineCount: 200,
+            lineContent: "你好世界，这是一段用于测试分页边界的中文文本内容。"
+        )
+
+        func paginate(_ alignment: NSTextAlignment) -> [NativePageInfo] {
+            let style = NSMutableParagraphStyle()
+            style.lineBreakMode = .byWordWrapping
+            style.alignment = alignment
+            let attr = NSAttributedString(
+                string: text, attributes: [.font: defaultFont, .paragraphStyle: style]
+            )
+            return NativeTextPaginator().paginateAttributed(
+                attributedText: attr, viewportSize: phoneViewport
+            )
+        }
+
+        let natural = paginate(.natural)
+        let justified = paginate(.justified)
+        #expect(natural.count > 1, "fixture must span multiple pages")
+        #expect(justified == natural, "justification must not move page boundaries")
+    }
 }

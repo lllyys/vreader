@@ -44,6 +44,16 @@ enum TXTAttributedStringBuilder {
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = config.lineSpacing
+        // Feature #92: justify so both margins are flush (the convention CJK
+        // readers expect — CJK fills per full-width cell, so the ragged right
+        // edge that read as "uneven margins" disappears). TextKit justifies
+        // only non-terminal lines, leaving each paragraph's last line natural,
+        // so there's no stretched final line. Justification adjusts intra-line
+        // spacing ONLY; it does NOT move line breaks, so paged-mode page
+        // boundaries (line-count based) and all character offsets are
+        // unchanged. The chapter-start decorator overrides the heading line to
+        // `.center` on a fresh style, so headings stay centered.
+        paragraphStyle.alignment = .justified
 
         var attributes: [NSAttributedString.Key: Any] = [
             .font: font,

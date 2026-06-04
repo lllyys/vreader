@@ -89,6 +89,26 @@ struct TXTAttributedStringBuilderChapterStartTests {
         #expect(style?.paragraphSpacingBefore == ChapterStartTypography.headingSpacingBefore)
     }
 
+    /// Feature #92: the chapter-start BODY inherits the justified base
+    /// alignment (the decorator copies the base style for the drop-cap
+    /// paragraph) while the heading stays centered (the decorator sets a
+    /// fresh `.center` style) — the two coexist.
+    @Test("feature #92 — heading centered, body justified")
+    func chapterStartBodyIsJustifiedHeadingCentered() {
+        let heading = "Chapter One"
+        let text = "\(heading)\nBody text that should be justified across the page."
+        let headingLen = (heading as NSString).length
+        let result = TXTAttributedStringBuilder.buildChapterStart(
+            text: text, config: config(), headingLineLength: headingLen
+        )
+        // Heading paragraph (inside the heading line) stays centered.
+        let headingStyle = result.attribute(.paragraphStyle, at: 2, effectiveRange: nil) as? NSParagraphStyle
+        #expect(headingStyle?.alignment == .center)
+        // Body paragraph (well past the heading + newline) is justified.
+        let bodyStyle = result.attribute(.paragraphStyle, at: headingLen + 5, effectiveRange: nil) as? NSParagraphStyle
+        #expect(bodyStyle?.alignment == .justified)
+    }
+
     @Test("heading text characters are byte-identical — no uppercase transform")
     func headingNoUppercase() {
         // German ß would change length under .uppercased() (ß -> SS).

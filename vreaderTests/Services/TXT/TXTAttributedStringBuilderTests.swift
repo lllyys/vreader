@@ -107,5 +107,47 @@ struct TXTAttributedStringBuilderTests {
         let kern = result.attribute(.kern, at: 0, effectiveRange: nil) as? CGFloat
         #expect(kern == 0.05)
     }
+
+    // MARK: - Feature #92: justified alignment
+
+    /// The builder justifies body text so both margins are flush (CJK reader
+    /// convention) — the missing capability behind feature #92.
+    @Test func buildAppliesJustifiedAlignment() {
+        let result = TXTAttributedStringBuilder.build(text: "Hello world", config: TXTViewConfig())
+        let style = result.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        #expect(style?.alignment == .justified)
+    }
+
+    /// Justification is script-agnostic — CJK, Latin, and mixed all justify
+    /// (CJK was the reported case; Latin/mixed justify too, last line natural).
+    @Test(arguments: ["你好世界，这是一段中文文本。", "Hello world, a line of latin text.", "Mixed 混合 text 文本"])
+    func buildJustifiesAnyScript(text: String) {
+        let result = TXTAttributedStringBuilder.build(text: text, config: TXTViewConfig())
+        let style = result.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        #expect(style?.alignment == .justified)
+    }
+
+    /// A single character still carries the `.justified` attribute (TextKit
+    /// renders the single/last line natural, but the attribute is present).
+    @Test(arguments: ["a", "字"])
+    func buildJustifiesSingleChar(text: String) {
+        let result = TXTAttributedStringBuilder.build(text: text, config: TXTViewConfig())
+        let style = result.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        #expect(style?.alignment == .justified)
+    }
+
+    /// Adding justification must not drop the other paragraph/character
+    /// attributes (lineSpacing, font, color) — they coexist on one style.
+    @Test func buildPreservesAttributesWithJustify() {
+        var config = TXTViewConfig()
+        config.lineSpacing = 8
+        config.textColor = .red
+        let result = TXTAttributedStringBuilder.build(text: "Test 文本", config: config)
+        let style = result.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        #expect(style?.alignment == .justified)
+        #expect(style?.lineSpacing == 8)
+        #expect(result.attribute(.font, at: 0, effectiveRange: nil) as? UIFont != nil)
+        #expect(result.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor == .red)
+    }
 }
 #endif
