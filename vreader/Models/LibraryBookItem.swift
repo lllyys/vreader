@@ -169,15 +169,7 @@ struct LibraryBookItem: Sendable, Identifiable, Equatable, Hashable {
     /// Uses the same convention as BookImporter: fingerprintKey with colons replaced
     /// by underscores, stored under Application Support/ImportedBooks/.
     var resolvedFileURL: URL {
-        let booksDir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ImportedBooks", isDirectory: true)
-        let safeName = fingerprintKey.replacingOccurrences(of: ":", with: "_")
-        let bookFormat = BookFormat(rawValue: format.lowercased())
-        let ext = bookFormat?.fileExtensions.first ?? format.lowercased()
-        return booksDir
-            .appendingPathComponent(safeName)
-            .appendingPathExtension(ext)
+        ImportedBookFileURL.resolve(fingerprintKey: fingerprintKey, format: format)
     }
 
     /// SF Symbol name for the book's format.
