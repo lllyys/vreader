@@ -129,6 +129,124 @@ struct AIServiceResolvedConfigTests {
         }
     }
 
+    // MARK: - resolveToolProvider / sendToolTurn (Feature #91 WI-8)
+
+    /// A tool-capable provider stub (supportsToolUse = true, returns a canned tool
+    /// turn) — the injected `provider:` short-circuits `providerInstance(for:)`.
+    private final class ToolCapableStub: AIProvider, @unchecked Sendable {
+        let providerName = "ToolStub"
+        var supportsToolUse: Bool { true }
+        func sendRequest(_ request: AIRequest) async throws -> AIResponse {
+            throw AIError.invalidResponse
+        }
+        func streamRequest(_ request: AIRequest) -> AsyncThrowingStream<AIStreamChunk, Error> {
+            AsyncThrowingStream { $0.finish() }
+        }
+        func sendToolRequest(_ request: AIToolRequest) async throws -> AIToolTurn {
+            .text("tool answer")
+        }
+    }
+
+    private static func toolRequest() -> AIToolRequest {
+        AIToolRequest(
+            systemPrompt: "s", messages: [ToolTurnMessage(role: .user, content: [.text("q")])],
+            tools: [], maxTokens: 128)
+    }
+
+    /// Build a service with a held FeatureFlags handle so a test can flip a gate
+    /// mid-loop.
+    private static func makeServiceHoldingFlags(
+        store: ProviderProfileStore, keychain: KeychainService,
+        provider: any AIProvider
+    ) -> (AIService, FeatureFlags) {
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .aiAssistant)
+        let service = AIService(
+            featureFlags: flags,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            keychainService: keychain, provider: provider, profileStore: store)
+        return (service, flags)
+    }
+
+    @Test func resolveToolProvider_returnsConfigCapabilityAndMaxTokens() async throws {
+        let (store, keychain) = Self.makeTestStore()
+        let profile = Self.makeAnthropicProfile()   // maxTokens 4321
+        try keychain.saveAPIKey("sk-ant-active", forProfile: profile.id)
+        await store.upsert(profile)
+        await store.setActiveProfileID(profile.id)
+
+        let service = Self.makeService(store: store, keychain: keychain, provider: ToolCapableStub())
+        let (config, supports) = try await service.resolveToolProvider()
+        #expect(supports == true)
+        #expect(config.maxTokens == 4321)            // pinned from the resolved config
+        #expect(config.kind == .anthropicNative)
+    }
+
+    @Test func resolveToolProvider_reportsUnsupportedForNonToolProvider() async throws {
+        let (store, keychain) = Self.makeTestStore()
+        let profile = Self.makeOpenAIProfile()
+        try keychain.saveAPIKey("sk-openai-active", forProfile: profile.id)
+        await store.upsert(profile)
+        await store.setActiveProfileID(profile.id)
+
+        let service = Self.makeService(store: store, keychain: keychain, provider: StubAIProvider())
+        let (_, supports) = try await service.resolveToolProvider()
+        #expect(supports == false)   // StubAIProvider defaults supportsToolUse=false
+    }
+
+    @Test func resolveToolProvider_failsClosedOnEveryGate() async throws {
+        // Same gate set as resolveActiveProviderConfig — the agentic path never
+        // reaches a provider when AI is off / no consent / no key.
+        let (store, keychain) = Self.makeTestStore()
+        await #expect(throws: AIError.featureDisabled) {
+            _ = try await Self.makeService(store: store, keychain: keychain, aiEnabled: false)
+                .resolveToolProvider()
+        }
+        await #expect(throws: AIError.consentRequired) {
+            _ = try await Self.makeService(store: store, keychain: keychain, hasConsent: false)
+                .resolveToolProvider()
+        }
+        // Active profile but no stored key → apiKeyMissing.
+        let profile = Self.makeOpenAIProfile()
+        await store.upsert(profile)
+        await store.setActiveProfileID(profile.id)
+        await #expect(throws: AIError.apiKeyMissing) {
+            _ = try await Self.makeService(store: store, keychain: keychain).resolveToolProvider()
+        }
+    }
+
+    @Test func sendToolTurn_forwardsThroughThePinnedConfigWhenGatesPass() async throws {
+        let (store, keychain) = Self.makeTestStore()
+        let profile = Self.makeOpenAIProfile()
+        try keychain.saveAPIKey("sk-openai-active", forProfile: profile.id)
+        await store.upsert(profile)
+        await store.setActiveProfileID(profile.id)
+
+        let service = Self.makeService(store: store, keychain: keychain, provider: ToolCapableStub())
+        let (config, _) = try await service.resolveToolProvider()
+        let turn = try await service.sendToolTurn(Self.toolRequest(), using: config)
+        #expect(turn == .text("tool answer"))
+    }
+
+    @Test func sendToolTurn_reChecksTheLiveFlagEachTurn() async throws {
+        // Gate-4 Medium: a flag flip / consent revoke MID-loop must fail the next
+        // tool turn closed, even though the config was already resolved.
+        let (store, keychain) = Self.makeTestStore()
+        let profile = Self.makeOpenAIProfile()
+        try keychain.saveAPIKey("sk-openai-active", forProfile: profile.id)
+        await store.upsert(profile)
+        await store.setActiveProfileID(profile.id)
+
+        let (service, flags) = Self.makeServiceHoldingFlags(
+            store: store, keychain: keychain, provider: ToolCapableStub())
+        let (config, _) = try await service.resolveToolProvider()
+
+        flags.setOverride(false, for: .aiAssistant)   // AI disabled mid-loop
+        await #expect(throws: AIError.featureDisabled) {
+            _ = try await service.sendToolTurn(Self.toolRequest(), using: config)
+        }
+    }
+
     // MARK: - resolveProviderConfig(profileID:modelOverride:)
 
     @Test func resolveProviderConfig_resolvesANamedNonActiveProfile() async throws {

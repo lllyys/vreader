@@ -211,6 +211,31 @@ actor AIService {
         return try config(from: snapshot, modelOverride: nil)
     }
 
+    /// Feature #91: resolve the active provider config ONCE for an agentic tool-use
+    /// turn — the same flag + consent + active-profile + key gates as
+    /// `resolveActiveProviderConfig` — and report whether the built provider
+    /// supports tool-use. The driver pins THIS config for the whole loop (no
+    /// provider/model/key drift mid-operation — Gate-2 Medium); each round-trip
+    /// goes back through `sendToolTurn(_:using:)`, which re-checks the LIVE gates
+    /// (Gate-4 Medium). `maxTokens` comes from `config.maxTokens`.
+    func resolveToolProvider() async throws -> (config: ResolvedAIProviderConfig, supportsToolUse: Bool) {
+        let config = try await resolveActiveProviderConfig()
+        return (config, providerInstance(for: config).supportsToolUse)
+    }
+
+    /// Send ONE tool-use turn through a PINNED resolved config. Re-checks the live
+    /// `aiAssistant` flag + consent EACH turn (Gate-4 Medium: a multi-turn agentic
+    /// loop must stop the instant AI is disabled or consent is revoked mid-loop),
+    /// while reusing the same `config` so the provider/model/key never drift
+    /// (Gate-2 Medium).
+    func sendToolTurn(
+        _ request: AIToolRequest, using config: ResolvedAIProviderConfig
+    ) async throws -> AIToolTurn {
+        guard featureFlags.aiAssistant else { throw AIError.featureDisabled }
+        guard consentManager.hasConsent else { throw AIError.consentRequired }
+        return try await providerInstance(for: config).sendToolRequest(request)
+    }
+
     /// Resolves a *named* provider profile (not necessarily the active one)
     /// into a config snapshot, applying an optional `modelOverride`. Used by
     /// the re-translate flow's provider-override picker. Throws `providerError`
