@@ -41,6 +41,12 @@ enum AIError: Error, LocalizedError, Sendable, Equatable {
     /// No cached response found. Internal only — not user-facing.
     case cacheMiss
 
+    /// Feature #91: the active provider does not support tool/function calling,
+    /// so the agentic loop cannot run. The chat falls back to the non-tool path —
+    /// this is the default `AIProvider.sendToolRequest` behavior for any provider
+    /// that doesn't override it.
+    case toolUseUnsupported
+
     var errorDescription: String? {
         switch self {
         case .featureDisabled:
@@ -64,6 +70,8 @@ enum AIError: Error, LocalizedError, Sendable, Equatable {
             return "Received an invalid response from the AI provider."
         case .cacheMiss:
             return "No cached response available."
+        case .toolUseUnsupported:
+            return "This AI provider does not support tool calling."
         }
     }
 }

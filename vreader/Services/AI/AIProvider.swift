@@ -23,6 +23,29 @@ protocol AIProvider: Sendable {
 
     /// Human-readable name for this provider (e.g., "OpenAI", "Local LLM").
     var providerName: String { get }
+
+    // MARK: - Feature #91: tool/function calling (capability-gated)
+
+    /// Whether this provider supports tool/function calling. Defaults to `false`;
+    /// providers that implement `sendToolRequest` override it to `true`. The
+    /// agentic loop is gated on this — an unsupported provider keeps the chat on
+    /// the existing non-tool path (no user-visible failure).
+    var supportsToolUse: Bool { get }
+
+    /// Sends one turn of a tool-use conversation and returns the parsed turn —
+    /// either final text or a `tool_use` turn the loop runs + re-sends. Defaults
+    /// to throwing `AIError.toolUseUnsupported` so a provider that doesn't
+    /// implement tool-use compiles unchanged and fails closed.
+    func sendToolRequest(_ request: AIToolRequest) async throws -> AIToolTurn
+}
+
+/// Default tool-use behavior — a provider opts IN by overriding both members.
+extension AIProvider {
+    var supportsToolUse: Bool { false }
+
+    func sendToolRequest(_ request: AIToolRequest) async throws -> AIToolTurn {
+        throw AIError.toolUseUnsupported
+    }
 }
 
 /// An AI provider that speaks the OpenAI-compatible chat completions API.

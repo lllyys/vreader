@@ -85,6 +85,10 @@ enum ErrorMessageAuditor {
         case .cacheMiss:
             // Internal-only error; should not reach UI. Generic fallback.
             return genericMessage
+        case .toolUseUnsupported:
+            // Feature #91: capability gate; the chat falls back to the non-tool
+            // path, so this should not surface — generic fallback if it does.
+            return genericMessage
         }
     }
 
