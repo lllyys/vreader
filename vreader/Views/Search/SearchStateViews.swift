@@ -92,7 +92,13 @@ struct SearchPromptView: View {
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Bug #319: fill the FULL sheet height (not just the content band) so
+        // `SearchView`'s `.background(theme.sheetSurfaceColor)` covers the whole
+        // sheet — otherwise the cream surface stops at the prompt text and the
+        // rest down to the keyboard is a black void. `topLeading` keeps the
+        // prompt content pinned to the top, matching the sibling fill states
+        // (`SearchNoResultsView` / `loadingView`) and the design's `SearchEmptyState`.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 18)
         .padding(.top, 16)
         .accessibilityIdentifier("searchEmptyPromptView")

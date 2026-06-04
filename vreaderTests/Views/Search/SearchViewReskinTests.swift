@@ -12,6 +12,7 @@
 
 import Testing
 import Foundation
+import SwiftUI
 @testable import vreader
 
 @Suite("Search sheet re-skin — feature #63 WI-1")
@@ -207,5 +208,28 @@ struct SearchViewReskinTests {
             noResultsFound: false, query: "bingley"
         )
         #expect(state == .results)
+    }
+
+    // MARK: - Bug #319: empty-prompt fills the sheet height (no black void)
+
+    @Test("SearchPromptView fills the available height so the cream surface covers the whole sheet (Bug #319)")
+    func promptFillsAvailableHeight() {
+        // Bug #319: `SearchPromptView` lacked `maxHeight: .infinity`, so its
+        // VStack sized to its CONTENT height and `SearchView`'s
+        // `.background(theme.sheetSurfaceColor)` covered only the top band —
+        // leaving a black void below the prompt down to the keyboard. The
+        // sibling states (`SearchNoResultsView`, `loadingView`) already fill the
+        // height; the empty prompt must too.
+        let host = UIHostingController(rootView: SearchPromptView(theme: .paper))
+        let proposed = CGSize(width: 390, height: 800)
+        let fitted = host.sizeThatFits(in: proposed)
+        // With the fix (`maxHeight: .infinity`) the prompt expands to fill the
+        // proposed height (so the cream `.background` covers the whole sheet).
+        // Without it the view collapses to its ~content height (≈100pt) and the
+        // void appears.
+        #expect(
+            fitted.height >= 700,
+            "SearchPromptView must fill the available height (got \(fitted.height) of \(proposed.height)); without maxHeight:.infinity it collapses to content height and leaves a black void below the prompt."
+        )
     }
 }
