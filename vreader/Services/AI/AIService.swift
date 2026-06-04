@@ -133,6 +133,18 @@ actor AIService {
         return resolvedProvider.streamRequest(request)
     }
 
+    /// Stream through a PINNED resolved config (re-checking the live flag + consent),
+    /// so a caller that already resolved once — e.g. the agentic chat probing
+    /// `supportsToolUse` — can fall back to streaming WITHOUT re-resolving (no
+    /// profile/model/key drift between the probe and the stream — Feature #91 Gate-4).
+    func streamRequest(
+        _ request: AIRequest, using config: ResolvedAIProviderConfig
+    ) async throws -> AsyncThrowingStream<AIStreamChunk, Error> {
+        guard featureFlags.aiAssistant else { throw AIError.featureDisabled }
+        guard consentManager.hasConsent else { throw AIError.consentRequired }
+        return providerInstance(for: config).streamRequest(request)
+    }
+
     /// Clears the response cache. Called when consent is revoked.
     func clearCache() async {
         await cache.clearAll()

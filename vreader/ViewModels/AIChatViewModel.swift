@@ -125,6 +125,16 @@ final class AIChatViewModel {
 
     private let aiService: AIService
 
+    /// Feature #91: live feature-flag source, so the agentic path re-checks the
+    /// CURRENT `agenticTools` value each send (a mid-session OFF flip falls back to
+    /// streaming — Gate-4 Medium), not a value latched at construction.
+    private let featureFlags: FeatureFlags
+
+    /// Feature #91: the agentic tool registry. nil/empty (or a non-tool provider, or
+    /// the flag OFF) → the chat uses the existing streaming path unchanged. The
+    /// construction site builds + injects this; activation is gated on the live flag.
+    private let agenticRegistry: AIToolRegistry?
+
     // MARK: - Init
 
     /// Creates a new chat view model.
@@ -133,14 +143,22 @@ final class AIChatViewModel {
     ///   - aiService: The AI service for sending requests.
     ///   - bookFingerprint: If non-nil, book context is included in requests.
     ///   - contextWindowSize: Max messages in the sliding context window (default 10).
+    ///   - featureFlags: live flag source for the agentic gate (default `.shared`).
+    ///   - agenticRegistry: Feature #91 — when non-nil + non-empty AND `agenticTools`
+    ///     is on AND the resolved provider supports tool-use, the chat routes through
+    ///     the agentic loop.
     init(
         aiService: AIService,
         bookFingerprint: DocumentFingerprint? = nil,
-        contextWindowSize: Int = 10
+        contextWindowSize: Int = 10,
+        featureFlags: FeatureFlags = .shared,
+        agenticRegistry: AIToolRegistry? = nil
     ) {
         self.aiService = aiService
         self.bookFingerprint = bookFingerprint
         self.contextWindowSize = contextWindowSize
+        self.featureFlags = featureFlags
+        self.agenticRegistry = agenticRegistry
     }
 
     // MARK: - Actions
@@ -193,14 +211,20 @@ final class AIChatViewModel {
             messages.append(assistantMessage)
             let assistantIndex = messages.count - 1
 
-            let stream = try await aiService.streamRequest(request)
-            for try await chunk in stream {
-                messages[assistantIndex].content += chunk.text
-            }
-
-            // If streaming produced no content, remove the empty message
-            if messages[assistantIndex].content.isEmpty {
-                messages.remove(at: assistantIndex)
+            // Feature #91: when `agenticTools` is on (live) AND a non-empty registry is
+            // injected, resolve the provider ONCE. If it supports tool-use, run the
+            // agentic loop; otherwise stream through the SAME pinned config (no second
+            // resolution — Gate-4 Medium). Otherwise the default streaming path.
+            if featureFlags.agenticTools, let registry = agenticRegistry, !registry.isEmpty {
+                let (config, supportsToolUse) = try await aiService.resolveToolProvider()
+                if supportsToolUse {
+                    try await runAgenticTurn(assistantIndex: assistantIndex, config: config, registry: registry)
+                } else {
+                    try await consumeStream(
+                        aiService.streamRequest(request, using: config), into: assistantIndex)
+                }
+            } else {
+                try await consumeStream(aiService.streamRequest(request), into: assistantIndex)
             }
         } catch let aiError as AIError {
             // Remove empty assistant message if it was added
@@ -214,6 +238,51 @@ final class AIChatViewModel {
                 messages.removeLast()
             }
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Consume a stream into the assistant message, removing it if no content
+    /// arrived (the historical streaming behavior, factored out so the agentic
+    /// fallback shares it).
+    private func consumeStream(
+        _ stream: AsyncThrowingStream<AIStreamChunk, Error>, into assistantIndex: Int
+    ) async throws {
+        for try await chunk in stream {
+            messages[assistantIndex].content += chunk.text
+        }
+        if messages[assistantIndex].content.isEmpty {
+            messages.remove(at: assistantIndex)
+        }
+    }
+
+    /// Feature #91: run the bounded agentic loop through the PINNED `config` and
+    /// write the single final answer into the assistant message. Suppresses the
+    /// "Drew on" citation stamp on a tool-driven reply (the pre-send snapshot
+    /// doesn't reflect what tools read — Gate-2 Medium 3). Throws propagate to
+    /// `sendMessage`'s catch, which clears the empty assistant message.
+    private func runAgenticTurn(
+        assistantIndex: Int, config: ResolvedAIProviderConfig, registry: AIToolRegistry
+    ) async throws {
+        // The empty assistant placeholder appended above is dropped by the mapper,
+        // so the history ends on the user's prompt; the current book's UNTRUSTED
+        // context rides as a leading user turn.
+        var history = AIChatHistoryMapper.toolTurns(from: messages, window: contextWindowSize)
+        if let prelude = AIChatHistoryMapper.contextPrelude(bookContext: bookContext) {
+            history.insert(prelude, at: 0)
+        }
+        let result = try await AgenticChatDriver().run(
+            systemPrompt: AIChatHistoryMapper.systemPrompt(),
+            history: history,
+            registry: registry,
+            provider: AIServiceToolUseAdapter(service: aiService, config: config),
+            maxTokens: config.maxTokens)
+
+        messages[assistantIndex].content = result.finalText
+        if result.usedTools {
+            messages[assistantIndex].citations = []
+        }
+        if messages[assistantIndex].content.isEmpty {
+            messages.remove(at: assistantIndex)
         }
     }
 
