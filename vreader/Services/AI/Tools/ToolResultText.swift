@@ -24,20 +24,27 @@ enum ToolResultText {
         return String(collapsed.prefix(maxChars)) + "…"
     }
 
+    /// Truncate to a UTF-8 byte budget on a Character boundary — NO marker. Use
+    /// when the caller appends its own marker / needs the exact included length
+    /// (e.g. get_book_content's range header must report what was actually kept).
+    static func truncateToBytes(_ string: String, _ maxBytes: Int) -> String {
+        guard string.utf8.count > maxBytes else { return string }
+        var out = ""
+        var used = 0
+        for ch in string {
+            let n = String(ch).utf8.count
+            if used + n > maxBytes { break }
+            out.append(ch)
+            used += n
+        }
+        return out
+    }
+
     /// Truncate to a UTF-8 byte budget on a Character boundary, appending a marker
     /// when truncated (so the model knows the result was cut).
     static func clamp(_ string: String, toBytes maxBytes: Int) -> String {
         guard string.utf8.count > maxBytes else { return string }
         let suffix = "\n…(truncated)"
-        let budget = max(0, maxBytes - suffix.utf8.count)
-        var out = ""
-        var used = 0
-        for ch in string {
-            let n = String(ch).utf8.count
-            if used + n > budget { break }
-            out.append(ch)
-            used += n
-        }
-        return out + suffix
+        return truncateToBytes(string, max(0, maxBytes - suffix.utf8.count)) + suffix
     }
 }
