@@ -110,15 +110,43 @@ struct AnthropicProvider: AIProvider, Sendable {
     // MARK: - Request construction
 
     func buildURLRequest(for request: AIRequest, stream: Bool) throws -> URLRequest {
+        var urlRequest = try makeMessagesURLRequest(validatingMaxTokens: maxTokens)
+
+        let systemPrompt = buildSystemPrompt(for: request.actionType)
+        let userMessage = buildUserMessage(for: request)
+
+        var body: [String: Any] = [
+            "model": model,
+            "max_tokens": maxTokens,
+            "system": systemPrompt,
+            "messages": [
+                ["role": "user", "content": userMessage]
+            ]
+        ]
+        if stream {
+            body["stream"] = true
+        }
+
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return urlRequest
+    }
+
+    /// Shared `/v1/messages` POST scaffolding (validation + endpoint + headers)
+    /// for both the plain-chat `buildURLRequest` and the Feature #91 tool-use
+    /// `buildToolURLRequest`. The caller sets `httpBody`. `validatingMaxTokens` is
+    /// the EFFECTIVE budget the caller will actually emit (Gate-4 Low: the tool
+    /// path's per-request override means the profile value alone is the wrong
+    /// thing to validate).
+    func makeMessagesURLRequest(validatingMaxTokens effectiveMaxTokens: Int) throws -> URLRequest {
         // Anthropic requires `max_tokens >= 1` (per Messages API docs). We
         // validate here rather than at init so misconfigured profiles
         // surface as a clean `AIError` to UI instead of a precondition
         // trap on profile load. Sending the value untouched would also
         // work (the API returns 400) but burns a network round trip and
         // produces a less specific error message.
-        guard maxTokens >= 1 else {
+        guard effectiveMaxTokens >= 1 else {
             throw AIError.providerError(
-                "\(providerName) profile is misconfigured: max_tokens must be >= 1 (got \(maxTokens))."
+                "\(providerName) profile is misconfigured: max_tokens must be >= 1 (got \(effectiveMaxTokens))."
             )
         }
 
@@ -140,23 +168,6 @@ struct AnthropicProvider: AIProvider, Sendable {
             Self.anthropicVersionHeader,
             forHTTPHeaderField: "anthropic-version"
         )
-
-        let systemPrompt = buildSystemPrompt(for: request.actionType)
-        let userMessage = buildUserMessage(for: request)
-
-        var body: [String: Any] = [
-            "model": model,
-            "max_tokens": maxTokens,
-            "system": systemPrompt,
-            "messages": [
-                ["role": "user", "content": userMessage]
-            ]
-        ]
-        if stream {
-            body["stream"] = true
-        }
-
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
         return urlRequest
     }
 
