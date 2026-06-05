@@ -90,7 +90,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 
 ### Sync & Backup
 
-- **WebDAV backup** — Archive to any WebDAV server (Nutstore compatible). For a self-hosted Mac setup with iCloud Drive sync, see [`lllyys/vreader-webdav-host`](https://github.com/lllyys/vreader-webdav-host). Tailscale-fronted servers work over plain HTTP; if the Test Connection returns `502` while `localhost` succeeds, your Mac's system HTTP proxy is intercepting Tailscale traffic — add `*.ts.net` and `100.64.0.0/10` to its bypass list.
+- **WebDAV backup** — Archive to any WebDAV server (Nutstore compatible) — books, annotations, reading positions, reading history, and **AI conversation history** all round-trip and restore on a fresh device. For a self-hosted Mac setup with iCloud Drive sync, see [`lllyys/vreader-webdav-host`](https://github.com/lllyys/vreader-webdav-host). Tailscale-fronted servers work over plain HTTP; if the Test Connection returns `502` while `localhost` succeeds, your Mac's system HTTP proxy is intercepting Tailscale traffic — add `*.ts.net` and `100.64.0.0/10` to its bypass list.
 - **Per-book settings** — Font, theme, spacing overrides per book (JSON-persisted)
 - **Theme backgrounds** — Custom background images via PhotosPicker with per-theme opacity
 

@@ -247,10 +247,32 @@ SwiftData SchemaV9 entities:
 
 **Feature #46 — WebDAV materializing restore (data layer)**: backup ZIPs now carry an additional `library-manifest.json` section (one `BackupLibraryEntry` per book, including content-addressed `blobPath`). On `backup`, `WebDAVProvider` uploads each missing book blob atomically — `WebDAVBlobStore` PUTs to `VReader/uploads/tmp/<uuid>.part`, PROPFIND-verifies the size, then `MOVE`s into the canonical `VReader/books/<format>/<sha256>_<byteCount>.<ext>` path. Repeat backups skip already-published blobs via PROPFIND-by-size dedupe. On `restore`, when the manifest is present and a `BookImporter` is wired in (production: via `\.bookImporter` SwiftUI Environment), `BookFileMaterializer` downloads + verifies + imports each missing blob before metadata sections apply. v1-format backups (no manifest) restore as before — books silently skipped if missing locally. The 412 response from `MOVE Overwrite: F` is treated as "blob already converged" (content-addressing). 501 from `MOVE` raises `BackupBlobStoreError.serverCapabilityMissing` — no silent atomicity loss.
 
+**Feature #89 — AI conversations backup (data layer)**: backup ZIPs carry an
+additive `ai-conversations.json` section (`BackupAIConversationsEnvelope` +
+`BackupChatSession` in `vreader/Services/Backup/BackupAIConversations.swift`)
+that round-trips the #88 `ChatSession` rows so AI history survives device loss.
+`BackupDataCollector.collectAIConversations` emits every session via
+`PersistenceActor.fetchAllChatSessionsForBackup()` (a Sendable value-type
+projection — the raw `ChatSessionPayload` message blob is carried byte-exact as
+`messagesPayloadData: Data?`, never a lossy String transcode); `BackupDataRestorer`
+ingests via `decodeAndValidate` → `PersistenceActor.restoreAIConversations(_:)`
+(both new methods in `PersistenceActor+ChatSessionsBackup.swift`). Restore UPSERTs
+by the unique `sessionId`, always re-keys `bookFingerprintKey` to the backup
+("backup value wins"), re-associates `row.book` when the book is present locally
+and clears it (`row.book = nil`) when absent (the session stays queryable by key),
+and honors the #88 `ChatSessionPayloadMapper.isReadable` never-clobber so a
+future-version blob is preserved. Additive + version-tolerant, the #58
+reading-history precedent.
+
 Backup section JSONs (`vreader/Services/Backup/BackupSectionDTOs.swift`) are
-versioned via the `BackupVersionedEnvelope` protocol. Restore validates exact
-`schemaVersion == 1` and raises `BackupRestoreError.unsupportedSchemaVersion`
-on mismatch, so a future v2 archive can't silently apply on a v1 client.
+versioned via the `BackupVersionedEnvelope` protocol. The global
+`kBackupCurrentSchemaVersion` is **3** (v2 added reading-history #58, v3 added
+ai-conversations #89); `decodeAndValidate` accepts
+`kBackupAcceptedSchemaVersions = [1, 2, 3]` and raises
+`BackupRestoreError.unsupportedSchemaVersion` for any newer (v4+) section, so a
+future archive can't silently half-apply on an older client. The additive
+sections are forward-compatible: an older archive simply lacks the newer JSON
+entry and the restore loop `try?`-skips it.
 
 Key types:
 
