@@ -699,4 +699,33 @@ struct AITranslationViewModelTests {
         let finalCallCount = await gated.sendRequestCallCount
         #expect(finalCallCount == 1)
     }
+
+    // MARK: - Stop control (feature #87 WI-2)
+
+    @Test @MainActor func cancelStreaming_stopsTranslate_clearsLoading_noError() async {
+        // Feature #87 WI-2: a user Stop aborts an in-flight translate — `isLoading`
+        // clears immediately, no error surfaces, and the cancelled task lands no
+        // result (the post-`await` guard in `translate` + `applyFailure` hold).
+        let (vm, gated) = makeGatedViewModel()
+        await gated.stubResponse(
+            AIResponse(content: "译文", actionType: .translate, promptVersion: "v1", createdAt: Date()),
+            forCall: 0)
+
+        let t = Task { @MainActor in
+            await vm.translate(originalText: "hello", locator: WI11TestHelpers.makeLocator(),
+                               format: .txt, targetLanguage: "Chinese")
+        }
+        while await gated.sendRequestCallCount < 1 { await Task.yield() }   // parked on the gate
+        #expect(vm.isLoading == true)
+
+        vm.cancelStreaming()
+        #expect(vm.isLoading == false)
+        #expect(vm.errorMessage == nil)
+
+        // Release the gate; the cancelled task must not write a result or an error.
+        await gated.release(callIndex: 0)
+        await t.value
+        #expect(vm.translatedText == nil, "a stopped translate lands no result")
+        #expect(vm.errorMessage == nil, "a user stop is not an error")
+    }
 }

@@ -54,7 +54,9 @@ struct TranslationPanel: View {
                 languages: viewModel.supportedLanguages,
                 selected: viewModel.targetLanguage,
                 theme: theme,
-                onSelect: requestTranslation
+                onSelect: requestTranslation,
+                isLoading: viewModel.isLoading,           // #87 WI-2: active pill → Stop
+                onStop: { viewModel.cancelStreaming() }
             )
 
             Color(theme.ruleColor).frame(height: 0.5)
@@ -142,6 +144,9 @@ struct TranslationPanel: View {
 
     @ViewBuilder
     private var loadingView: some View {
+        // Feature #87 WI-2: the Stop affordance lives on the active language pill
+        // (the rail's selected pill morphs to Stop while loading — see
+        // TranslateLanguageRail). This view is just the in-flight status.
         VStack(spacing: 14) {
             Spacer()
 
@@ -149,8 +154,9 @@ struct TranslationPanel: View {
                 .controlSize(.large)
                 .tint(Color(theme.accentColor))
 
-            Text("Translating\u{2026}")
+            Text("Translating\u{2026} Tap the active language to stop")
                 .font(.system(size: 13))
+                .multilineTextAlignment(.center)
                 .foregroundStyle(Color(theme.subColor))
 
             Spacer()

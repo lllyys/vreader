@@ -205,4 +205,15 @@ final class AITranslationViewModel {
         errorMessage = nil
         isLoading = false
     }
+
+    /// Feature #87 WI-2: user-triggered Stop of an in-flight translate. Cancels the
+    /// task and clears `isLoading`; surfaces NO error (a user stop is not a failure
+    /// — the post-`await` guard in `translate` + `applyFailure` already drop a
+    /// cancelled task's result/error). Does NOT wipe `originalText`/`translatedText`
+    /// (a Stop keeps any prior result; that's `reset()`'s job).
+    func cancelStreaming() {
+        translateTask?.cancel()
+        translateTask = nil
+        isLoading = false
+    }
 }

@@ -45,6 +45,15 @@ struct TranslateLanguageRail: View {
     /// EVERY tap — including a re-tap of `selected`.
     var onSelect: (String) -> Void
 
+    /// Feature #87 WI-2: true while a translate is in flight. The active
+    /// (`selected`) pill then morphs IN PLACE into the Stop affordance (the
+    /// design's "the language control doubles as the stop affordance"), and
+    /// tapping it runs `onStop` instead of re-requesting that language.
+    var isLoading: Bool = false
+
+    /// Runs when the morphed Stop pill is tapped (aborts the in-flight translate).
+    var onStop: () -> Void = {}
+
     // MARK: - Tap behaviour
 
     /// Builds the tap action for a single pill. Exposed `static` so the
@@ -82,11 +91,10 @@ struct TranslateLanguageRail: View {
     /// still fires `onSelect`.
     private func pill(for language: String) -> some View {
         let isSelected = language == selected
-        return Button(action: Self.tapAction(for: language, onSelect: onSelect)) {
-            Text(language)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isSelected ? Color.white : Color(theme.inkColor))
-                .lineLimit(1)
+        // Feature #87 WI-2: the active pill becomes the Stop control while loading.
+        let isStop = isLoading && isSelected
+        return Button(action: isStop ? onStop : Self.tapAction(for: language, onSelect: onSelect)) {
+            pillLabel(language: language, isSelected: isSelected, isStop: isStop)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(
@@ -94,8 +102,37 @@ struct TranslateLanguageRail: View {
                 )
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("translateLanguagePill-\(language)")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier(isStop ? "translateStopPill" : "translateLanguagePill-\(language)")
+        .accessibilityLabel(isStop ? "Stop" : language)
+        .accessibilityAddTraits(isSelected && !isStop ? .isSelected : [])
+    }
+
+    /// The pill's content: the language label, or — when this pill is the active
+    /// Stop control — a white square + sweeping ring + "Stop" (the Chat stop visual).
+    @ViewBuilder
+    private func pillLabel(language: String, isSelected: Bool, isStop: Bool) -> some View {
+        if isStop {
+            HStack(spacing: 5) {
+                ZStack {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .scaleEffect(0.7)
+                    Image(systemName: "square.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 14, height: 14)
+                Text("Stop")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.white)
+            }
+        } else {
+            Text(language)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isSelected ? Color.white : Color(theme.inkColor))
+                .lineLimit(1)
+        }
     }
 
     // MARK: - Palette
