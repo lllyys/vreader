@@ -309,6 +309,50 @@ struct EPUBHighlightActionsSectionRestoreTests {
             highlights: [r], href: "ch9.xhtml", spineIndex: 9).isEmpty)
     }
 
+    // MARK: - Feature #85 WI-2: cross-engine quote re-anchor
+
+    private func emptyRange() -> EPUBSerializedRange {
+        EPUBSerializedRange(startContainerPath: "", startOffset: 0,
+                            endContainerPath: "", endOffset: 0)
+    }
+
+    /// A Readium-created highlight persists a quote but an EMPTY serialized
+    /// range — it must re-anchor by quote (the byQuote API), not the path API.
+    @Test("empty serialized range re-anchors by QUOTE")
+    func emptyRangeUsesQuoteReanchor() {
+        let r = makeHighlightRecord(href: "ch1.xhtml", range: emptyRange(),
+                                    selectedText: "the quoted phrase")
+        let js = EPUBHighlightActions.restoreHighlightsInSectionJS(
+            highlights: [r], href: "ch1.xhtml", spineIndex: 2)
+        #expect(js.contains("__vreader_createHighlightInSectionByQuote"))
+        #expect(js.contains("the quoted phrase"))
+        // No path-based section call for an empty-range record.
+        #expect(sectionCallCount(js) == 0)
+    }
+
+    /// A normal (non-empty) serialized range keeps the precise path restore.
+    @Test("non-empty serialized range still uses the path restore")
+    func nonEmptyRangeUsesPathRestore() {
+        let r = makeHighlightRecord(href: "ch1.xhtml", range: makeTestRange())
+        let js = EPUBHighlightActions.restoreHighlightsInSectionJS(
+            highlights: [r], href: "ch1.xhtml", spineIndex: 1)
+        #expect(js.contains("__vreader_createHighlightInSection("))
+        #expect(!js.contains("ByQuote"))
+    }
+
+    /// Mixed records emit BOTH the path restore and the quote re-anchor.
+    @Test("mixed records emit both path and quote re-anchors")
+    func mixedRecordsEmitBoth() {
+        let pathR = makeHighlightRecord(href: "ch1.xhtml", range: makeTestRange())
+        let emptyR = makeHighlightRecord(href: "ch1.xhtml", range: emptyRange(),
+                                         selectedText: "quote here")
+        let js = EPUBHighlightActions.restoreHighlightsInSectionJS(
+            highlights: [pathR, emptyR], href: "ch1.xhtml", spineIndex: 4)
+        #expect(js.contains("__vreader_createHighlightInSection("))
+        #expect(js.contains("__vreader_createHighlightInSectionByQuote"))
+        #expect(js.contains("quote here"))
+    }
+
     @Test("carries the spineIndex, range paths/offsets, and color")
     func carriesRangeData() {
         let r = makeHighlightRecord(

@@ -304,6 +304,113 @@ extension EPUBHighlightBridge {
             applyHighlightRange(id, range, color);
         };
 
+        // Feature #85 WI-2: build a Range from a text QUOTE within a content
+        // root — the re-anchor for empty-`serializedRange` highlight records
+        // (Readium-created highlights persist a quote + context but no DOM
+        // range, so the path-based restore above can't paint them; with
+        // approach C they surface when scroll mode renders this legacy stitch).
+        // Walks text nodes (SKIPPING injected bilingual `data-vreader-decoration`
+        // subtrees), flattens to a string with an offset→node map, finds the
+        // quote (preferring the occurrence whose preceding text matches the
+        // stored context, so a repeated phrase disambiguates), and creates a
+        // Range. Returns null when the quote isn't found.
+        function findQuoteRangeInRoot(root, quote, contextBefore, contextAfter) {
+            if (!root || !quote) return null;
+            var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+                acceptNode: function(n) {
+                    var p = n.parentNode;
+                    while (p && p !== root) {
+                        if (p.nodeType === 1 && p.hasAttribute &&
+                            p.hasAttribute('data-vreader-decoration')) {
+                            return NodeFilter.FILTER_REJECT;
+                        }
+                        p = p.parentNode;
+                    }
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+            });
+            var nodes = [], starts = [], flat = '', node;
+            while ((node = walker.nextNode())) {
+                starts.push(flat.length);
+                nodes.push(node);
+                flat += node.nodeValue;
+            }
+            if (!nodes.length) return null;
+            // Mirror Swift `QuoteRecovery`: enumerate ALL occurrences and
+            // disambiguate by scoring BOTH the preceding (contextBefore) and
+            // following (contextAfter) context, so a repeated quote anchors to
+            // the right occurrence (Gate-4 Medium — contextBefore-only could
+            // silently mis-anchor). Case-insensitive fallback for cross-engine
+            // normalization drift (Gate-4 Low); whitespace-normalized matching
+            // is intentionally NOT ported (the offset re-mapping is complex in
+            // JS) — a quote that matches neither exactly nor case-insensitively
+            // degrades to a no-op (no paint), never a WRONG anchor.
+            function allIndexes(hay, needle) {
+                var out = [], i = hay.indexOf(needle);
+                while (i >= 0) { out.push(i); i = hay.indexOf(needle, i + 1); }
+                return out;
+            }
+            function choose(hits, hay, needleLen, cb, ca) {
+                if (hits.length === 1) return hits[0];
+                var best = hits[0], bestScore = -1;
+                for (var k = 0; k < hits.length; k++) {
+                    var pos = hits[k], score = 0;
+                    if (cb) {
+                        var pre = hay.slice(Math.max(0, pos - cb.length), pos);
+                        if (pre === cb) score += 2;
+                        else if (pre && cb.slice(-pre.length) === pre) score += 1;
+                    }
+                    if (ca) {
+                        var post = hay.slice(pos + needleLen, pos + needleLen + ca.length);
+                        if (post === ca) score += 2;
+                        else if (post && ca.slice(0, post.length) === post) score += 1;
+                    }
+                    if (score > bestScore) { bestScore = score; best = pos; }
+                }
+                return best;
+            }
+            var idx = -1;
+            var exact = allIndexes(flat, quote);
+            if (exact.length) {
+                idx = choose(exact, flat, quote.length, contextBefore, contextAfter);
+            } else {
+                var lf = flat.toLowerCase();
+                var ci = allIndexes(lf, quote.toLowerCase());
+                if (ci.length) {
+                    idx = choose(ci, lf, quote.length,
+                        contextBefore ? contextBefore.toLowerCase() : contextBefore,
+                        contextAfter ? contextAfter.toLowerCase() : contextAfter);
+                }
+            }
+            if (idx < 0) return null;
+            var endIdx = idx + quote.length;
+            function locate(off) {
+                for (var i = nodes.length - 1; i >= 0; i--) {
+                    if (starts[i] <= off) return { node: nodes[i], offset: off - starts[i] };
+                }
+                return { node: nodes[0], offset: 0 };
+            }
+            var s = locate(idx), e = locate(endIdx);
+            try {
+                var r = document.createRange();
+                r.setStart(s.node, Math.min(s.offset, s.node.length || 0));
+                r.setEnd(e.node, Math.min(e.offset, e.node.length || 0));
+                return r.collapsed ? null : r;
+            } catch (err) { return null; }
+        }
+
+        // Feature #85 WI-2: paint a quote-anchored highlight in a stitched
+        // section — routes through the SAME `applyHighlightRange` pipeline as
+        // the path-based restore, so tap-to-edit + delete keep working.
+        window.__vreader_createHighlightInSectionByQuote = function(spineIndex, id, quote, color, contextBefore, contextAfter) {
+            var section = document.querySelector('[data-vreader-spine-index="' + spineIndex + '"]');
+            if (!section) return;
+            var contentRoot = section.querySelector('.vreader-chapter-content') || section;
+            var range = findQuoteRangeInRoot(contentRoot, quote, contextBefore, contextAfter);
+            if (!range) return;
+            applyHighlightRange(id, range, color);
+        };
+
         // Bug #212 / GH #828: deleting a CSS Highlight API entry does
         // not reliably invalidate an already-composited paged/columned
         // EPUB column, so a removed highlight's yellow paint lingered

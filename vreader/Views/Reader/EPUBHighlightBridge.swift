@@ -209,27 +209,48 @@ enum EPUBHighlightBridge {
     /// `__vreader_createHighlightInSection`. Returns "" for an empty set.
     static func restoreHighlightsInSectionJS(
         spineIndex: Int,
-        highlights: [(id: String, range: EPUBSerializedRange, color: String)]
+        highlights: [(id: String, range: EPUBSerializedRange, color: String,
+                      quote: String, contextBefore: String?, contextAfter: String?)]
     ) -> String {
         guard !highlights.isEmpty else { return "" }
 
         var calls: [String] = []
         for hl in highlights {
             let escapedId = jsEscape(hl.id)
-            let escapedStartPath = jsEscape(hl.range.startContainerPath)
-            let escapedEndPath = jsEscape(hl.range.endContainerPath)
             let escapedColor = jsEscape(hl.color)
-            calls.append("""
-                window.__vreader_createHighlightInSection(
-                    \(spineIndex),
-                    '\(escapedId)',
-                    '\(escapedStartPath)',
-                    \(hl.range.startOffset),
-                    '\(escapedEndPath)',
-                    \(hl.range.endOffset),
-                    '\(escapedColor)'
-                );
-            """)
+            // Feature #85 WI-2: an EMPTY serialized range means a Readium-created
+            // highlight (it persists a quote + context but no DOM path). Re-anchor
+            // it by quote through the same `applyHighlightRange` pipeline so it
+            // paints in scroll-via-legacy and stays tap/delete-able.
+            if hl.range.startContainerPath.isEmpty && hl.range.endContainerPath.isEmpty {
+                let escapedQuote = jsEscape(hl.quote)
+                let escapedBefore = jsEscape(hl.contextBefore ?? "")
+                let escapedAfter = jsEscape(hl.contextAfter ?? "")
+                calls.append("""
+                    window.__vreader_createHighlightInSectionByQuote(
+                        \(spineIndex),
+                        '\(escapedId)',
+                        '\(escapedQuote)',
+                        '\(escapedColor)',
+                        '\(escapedBefore)',
+                        '\(escapedAfter)'
+                    );
+                """)
+            } else {
+                let escapedStartPath = jsEscape(hl.range.startContainerPath)
+                let escapedEndPath = jsEscape(hl.range.endContainerPath)
+                calls.append("""
+                    window.__vreader_createHighlightInSection(
+                        \(spineIndex),
+                        '\(escapedId)',
+                        '\(escapedStartPath)',
+                        \(hl.range.startOffset),
+                        '\(escapedEndPath)',
+                        \(hl.range.endOffset),
+                        '\(escapedColor)'
+                    );
+                """)
+            }
         }
 
         return """

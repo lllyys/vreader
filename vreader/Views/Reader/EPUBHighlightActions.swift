@@ -67,14 +67,21 @@ enum EPUBHighlightActions {
     ) -> String {
         guard !href.isEmpty else { return "" }
 
-        let matching: [(id: String, range: EPUBSerializedRange, color: String)] = highlights
+        // Feature #85 WI-2: carry the quote + context so an empty-serializedRange
+        // (Readium-created) record re-anchors by quote in the legacy section
+        // renderer.
+        let matching: [(id: String, range: EPUBSerializedRange, color: String,
+                        quote: String, contextBefore: String?, contextAfter: String?)] = highlights
             .compactMap { record in
                 guard let anchor = record.anchor,
                       case .epub(let anchorHref, _, let range) = anchor,
                       anchorHref == href else {
                     return nil
                 }
-                return (id: record.highlightId.uuidString, range: range, color: record.color)
+                return (id: record.highlightId.uuidString, range: range, color: record.color,
+                        quote: record.selectedText,
+                        contextBefore: record.locator.textContextBefore,
+                        contextAfter: record.locator.textContextAfter)
             }
 
         return EPUBHighlightBridge.restoreHighlightsInSectionJS(
