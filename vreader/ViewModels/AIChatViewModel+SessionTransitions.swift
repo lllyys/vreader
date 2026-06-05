@@ -43,6 +43,7 @@ extension AIChatViewModel {
         messages = []
         settledMessages = []
         activeSessionId = nil
+        storedActiveTitle = nil   // #88 WI-4: a fresh thread derives its title from messages
         errorMessage = nil
     }
 
@@ -70,6 +71,7 @@ extension AIChatViewModel {
             messages = record.messages
             settledMessages = record.messages   // a loaded session is fully settled
             activeSessionId = record.sessionId
+            storedActiveTitle = record.title    // #88 WI-4: the bar shows the stored title
             errorMessage = nil
         } catch {
             transitionLog.error("switchToSession failed: \(String(describing: error), privacy: .public)")
@@ -133,6 +135,7 @@ extension AIChatViewModel {
         messages = []
         settledMessages = []
         activeSessionId = nil
+        storedActiveTitle = nil   // #88 WI-4 (reset; loadMostRecentRemaining re-sets it if a session remains)
         errorMessage = nil
         await loadMostRecentRemaining(token: token)
     }
@@ -163,7 +166,11 @@ extension AIChatViewModel {
         let title = derivedTitle(from: snapshot)
         do {
             if let id = activeSessionId {
-                _ = try await store.updateChatSession(sessionId: id, messages: snapshot, title: title)
+                // PRESERVE the stored title on seal-update (#88 WI-4 audit r2 Medium):
+                // leaving a renamed session via new/switch must not revert its
+                // persisted title to the first user message. Title is set only at
+                // CREATE (below) + on rename (WI-5).
+                _ = try await store.updateChatSession(sessionId: id, messages: snapshot, title: nil)
             } else {
                 let record = try await store.createChatSession(
                     bookFingerprintKey: key, title: title ?? Self.defaultSessionTitle,
@@ -189,6 +196,7 @@ extension AIChatViewModel {
             messages = record.messages
             settledMessages = record.messages   // a loaded session is fully settled
             activeSessionId = record.sessionId
+            storedActiveTitle = record.title    // #88 WI-4: the bar shows the stored title
         } catch {
             transitionLog.error("loadMostRecentRemaining failed: \(String(describing: error), privacy: .public)")
         }

@@ -35,6 +35,22 @@ final class AIChatViewModel {
     /// properties — can update it. Drives the WI-4 session bar.
     internal(set) var activeSessionId: UUID?
 
+    /// The STORED title of the active session (set when a session is loaded /
+    /// switched-to / its first turn creates it; WI-5's rename updates it). Nil for
+    /// an unsaved / fresh thread — then `activeSessionTitle` derives from the
+    /// thread instead. Observed so the session bar repaints on a switch/rename.
+    /// `internal(set)` so the `+Sessions` / `+SessionTransitions` lifecycle sets it.
+    internal(set) var storedActiveTitle: String?
+
+    /// The active conversation's display title for the session bar (#88 WI-4): the
+    /// loaded/switched/renamed session's STORED title wins; otherwise the derived
+    /// title of the in-progress thread (the title it will be saved under), else the
+    /// default for a fresh/empty thread. Reading `messages` keeps it observed so the
+    /// bar updates live as the first turn is typed.
+    var activeSessionTitle: String {
+        storedActiveTitle ?? derivedTitle(from: messages) ?? Self.defaultSessionTitle
+    }
+
     // Feature #88 session plumbing. Stored on the base class (extensions cannot add
     // stored properties); `internal` so `+Sessions` / `+Streaming` reach them;
     // `@ObservationIgnored` keeps them out of SwiftUI observation (internal

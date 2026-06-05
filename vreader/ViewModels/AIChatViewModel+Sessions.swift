@@ -74,6 +74,7 @@ extension AIChatViewModel {
             messages = record.messages
             settledMessages = record.messages   // a loaded session is fully settled
             activeSessionId = record.sessionId
+            storedActiveTitle = record.title    // #88 WI-4: the bar shows the stored title
         } catch {
             sessionLog.error("loadSessions failed: \(String(describing: error), privacy: .public)")
         }
@@ -133,7 +134,13 @@ extension AIChatViewModel {
                 // stale data. (`messages` here is the same session's settled history,
                 // so it's safe to promote eagerly.)
                 settledMessages = snapshot
-                _ = try await store.updateChatSession(sessionId: id, messages: snapshot, title: title)
+                // PRESERVE the stored title on update (#88 WI-4 audit r2 Medium):
+                // pass `title: nil` so a later settled turn never reverts a renamed
+                // (or otherwise stored-title-differs) session back to the first
+                // user message. The title is set only at CREATE (below) + on rename
+                // (WI-5). The store's carry-forward contract keeps the existing title
+                // when `title == nil`.
+                _ = try await store.updateChatSession(sessionId: id, messages: snapshot, title: nil)
             } else {
                 let record = try await store.createChatSession(
                     bookFingerprintKey: key, title: title ?? Self.defaultSessionTitle,
@@ -161,6 +168,7 @@ extension AIChatViewModel {
                 }
                 activeSessionId = record.sessionId
                 settledMessages = snapshot
+                storedActiveTitle = title ?? Self.defaultSessionTitle   // #88 WI-4
             }
         } catch {
             sessionLog.error("saveSettledTurn failed: \(String(describing: error), privacy: .public)")

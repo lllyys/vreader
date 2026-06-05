@@ -46,6 +46,20 @@ struct AIChatView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
+                // Feature #88 WI-4: the Chat-tab session bar (book chat only) —
+                // the active conversation's title + a "New" compose button. It
+                // sits ABOVE the message list, scoped to book chat because
+                // conversations don't exist for general chat.
+                if viewModel.bookFingerprint != nil {
+                    ChatSessionBar(
+                        title: viewModel.activeSessionTitle,
+                        isOpen: false,   // WI-5 binds this to the Conversations sheet presentation
+                        theme: theme,
+                        onTitleTap: {},   // WI-5 presents the Conversations sheet here
+                        onNew: { Task { await viewModel.newConversation() } }
+                    )
+                }
+
                 messageList
 
                 if let error = viewModel.errorMessage {
@@ -118,19 +132,24 @@ struct AIChatView: View {
         }
         .animation(.spring(response: 0.28, dampingFraction: 0.85), value: openMenu)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    // Feature #88 WI-3: the former clear-history button now starts a
-                    // NEW conversation — it seals the current session (if it has
-                    // content) and resets to the empty state, instead of a destructive
-                    // wipe. The session-bar "New" button (WI-4) lands separately.
-                    Task { await viewModel.newConversation() }
-                } label: {
-                    Image(systemName: "trash")
+            // Feature #88 WI-4: the toolbar "new conversation" button is now
+            // GENERAL-chat-only — for book chat the session bar's "New" pill
+            // replaces it (the bar isn't shown for general chat).
+            if viewModel.bookFingerprint == nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        // Feature #88 WI-3: the former clear-history button now starts a
+                        // NEW conversation — it seals the current session (if it has
+                        // content) and resets to the empty state, instead of a destructive
+                        // wipe.
+                        Task { await viewModel.newConversation() }
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(viewModel.messages.isEmpty)
+                    .accessibilityIdentifier("chatClearButton")
+                    .accessibilityLabel("Clear chat history")
                 }
-                .disabled(viewModel.messages.isEmpty)
-                .accessibilityIdentifier("chatClearButton")
-                .accessibilityLabel("Clear chat history")
             }
             // Bug #94: keyboard-toolbar Done button as secondary dismissal —
             // covers the case where the message list is short or empty and
