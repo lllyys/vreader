@@ -84,6 +84,14 @@ extension AIAssistantViewModel {
         opCounter &+= 1
         let opId = opCounter
 
+        // Feature #90 WI-1 (Gate-4 r1 High): a fresh action (incl. a
+        // re-summarize) must invalidate any in-flight bilingual-summary
+        // translation BEFORE `responseText` is cleared, so a translation of the
+        // OLD summary cannot land stale against the NEW one. (`reset()` already
+        // does this for the dismiss path; re-summarize goes through here, not
+        // `reset()`.)
+        cancelSummaryTranslation()
+
         // Regenerate-preserve snapshot (feature #87 WI-3): capture the
         // currently-completed summary BEFORE `responseText` is cleared so
         // `cancelStreaming()` can restore it if this request is a Stop'd

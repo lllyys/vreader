@@ -55,6 +55,34 @@ final class AIAssistantViewModel {
     /// (the pre-feature-#69 behavior). Mutated only via `setScope`.
     private(set) var selectedScope: SummaryScope = .section
 
+    // MARK: - Bilingual summary (feature #90 WI-1)
+    // The display mode + target language + translation sub-state are OBSERVED
+    // (drive the Summarize card); the mutation logic lives in
+    // `AIAssistantViewModel+BilingualSummary.swift`. Stored properties cannot
+    // live in an extension, so they stay here, with `private(set)` setters
+    // routed through the synchronous mutators in that file.
+
+    /// How the completed summary is presented: as the model produced it
+    /// (`.originalOnly`, the default — no translation), translated to
+    /// `summaryTargetLanguage` only (`.translatedOnly`), or both stacked
+    /// (`.interlinear`). `internal(set)` (not `private(set)`) so the
+    /// `+BilingualSummary.swift` extension can drive it via its synchronous
+    /// `setSummaryDisplayMode` mutator (same reason `state`/`responseText` are
+    /// `internal(set)` — a `private(set)` setter is invisible to a same-type
+    /// extension in a separate file).
+    internal(set) var summaryDisplayMode: SummaryDisplayMode = .originalOnly
+
+    /// The bilingual target language for the translated/interlinear modes.
+    /// Defaults to the first `BilingualLanguage.all` entry; the reader host
+    /// seeds the per-book `bilingualTargetLanguage` once on first appear
+    /// (WI-2). Mutated only via `setSummaryTargetLanguage`.
+    internal(set) var summaryTargetLanguage: BilingualLanguage =
+        BilingualLanguage.all.first ?? BilingualLanguage(key: "Chinese", glyph: "中", script: .cjk)
+
+    /// The second-step translation sub-state, independent of `state`/`responseText`
+    /// so the summary can ship while its translation loads / fails / completes.
+    internal(set) var summaryTranslation: SummaryTranslationState = .none
+
     // MARK: - Dependencies
     // `internal` (not `private`) so the streaming/cancel extension file
     // can reach them.
@@ -85,6 +113,16 @@ final class AIAssistantViewModel {
     /// `nil` when the in-flight request is an INITIAL summarize (Stop →
     /// `.idle`).
     @ObservationIgnored var priorCompletedSummary: String?
+
+    /// The bilingual summary's SEPARATE translation task (feature #90 WI-1),
+    /// retained so a re-summarize / mode-flip / language-change / reset can
+    /// cancel it. Distinct from `streamTask` (which owns the summarize call).
+    @ObservationIgnored var summaryTranslationTask: Task<Void, Never>?
+
+    /// Monotonic op token for the translation half. Every kick bumps it; a
+    /// translation's post-`await` writes are gated on `token == summaryTranslationToken`
+    /// so a superseded / cancelled translation cannot clobber a newer one.
+    @ObservationIgnored var summaryTranslationToken: UInt64 = 0
 
     // MARK: - Init
 
@@ -206,6 +244,9 @@ final class AIAssistantViewModel {
         streamTask?.cancel()
         streamTask = nil
         priorCompletedSummary = nil
+        // Feature #90 WI-1: a summary-translation task could outlive `reset()` /
+        // sheet dismiss and later write STALE bilingual state. Tear it down here.
+        cancelSummaryTranslation()
         state = .idle
         responseText = ""
         currentAction = nil
