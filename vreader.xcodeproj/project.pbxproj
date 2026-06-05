@@ -403,6 +403,7 @@
 		3D31B039400E1A83C4A1DF6D /* EPUBMetadataExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F003D569BCC0F29113468A /* EPUBMetadataExtractorTests.swift */; };
 		3D32DA9E354C6BA5A74A09C6 /* Feature31AutoPageTurnVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC6BE724AEC4E98F6180228E /* Feature31AutoPageTurnVerificationTests.swift */; };
 		3D3D595F747F17868E8CB120 /* AITool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62389E1899D77BB9A41C659B /* AITool.swift */; };
+		3DE16350C418C89304748874 /* PersistenceActor+ChatSessionsBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38D14E982E19B687CCB48453 /* PersistenceActor+ChatSessionsBackup.swift */; };
 		3DE8687C45492DB6E076D65E /* QuoteRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92AB43BED5AC7096E7278A16 /* QuoteRecoveryTests.swift */; };
 		3DED10DB4A0FA7B18DE2E431 /* TranslationChunkContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9BD495685BB360AF81EDAE3 /* TranslationChunkContract.swift */; };
 		3DF0D817A67D0CEBD6C9BEC3 /* LibraryStatsReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = EABA033B2052115B50F445EF /* LibraryStatsReading.swift */; };
@@ -418,6 +419,7 @@
 		3FB6C5452F598755573BFB4F /* TXTChapterStartDecorator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EF994B8B9C677990960D7F2 /* TXTChapterStartDecorator.swift */; };
 		401E58831F4DC6EB06E53738 /* HTTPTTSConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10C9907D3479515B56338825 /* HTTPTTSConfig.swift */; };
 		4036FC6433130C55784610E7 /* SettingsHeaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56912BE618BA41A3B17325C5 /* SettingsHeaderViewModelTests.swift */; };
+		403A2FEB89760E50142E7ECA /* BackupAIConversationsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4EA1C8202C4D559BB9E44CB /* BackupAIConversationsTests.swift */; };
 		403C9821CB00B588C84E27BB /* PersistenceActor+ChatSessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 316651D10E0833914F8EB8F0 /* PersistenceActor+ChatSessionsTests.swift */; };
 		40479825289343F4985EF7C7 /* SelectiveRestorePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C1A92ABEE677825BB310F05 /* SelectiveRestorePicker.swift */; };
 		4066570D77F8395FDF24C4A5 /* ChapterSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0DD73D7B4AC6420A155014 /* ChapterSegmenter.swift */; };
@@ -1239,6 +1241,7 @@
 		C3129F763BDCF3AB47BC7098 /* BackupDataCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAAF285B1D1B4F09E3AAD56 /* BackupDataCollector.swift */; };
 		C320E44AF92161F0A556FDA7 /* EPUBReaderViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DAD9A773D4AA9098981720D /* EPUBReaderViewModelTests.swift */; };
 		C32AAC75E3E671C0FB74F84F /* ReaderSettingsStoreCalibrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12FBBBC16EB3E7F31AD7A126 /* ReaderSettingsStoreCalibrationTests.swift */; };
+		C335912ACF9A676E82F9C00A /* BackupAIConversations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29D40790D781E98ABDFE737F /* BackupAIConversations.swift */; };
 		C33D6398694BEB59B3827AE9 /* meta.c in Sources */ = {isa = PBXBuildFile; fileRef = 201AFC5B16E679291704CAAF /* meta.c */; settings = {COMPILER_FLAGS = "-w"; }; };
 		C35B2A71395E812536EDFEBD /* AnnotationImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BCFD179C107F7E997AEB88 /* AnnotationImporterTests.swift */; };
 		C36236EF98C50E9D4C074A01 /* BookDetailsSheet+Cards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C78911337C79BBAE9B2AB7C /* BookDetailsSheet+Cards.swift */; };
@@ -1871,6 +1874,7 @@
 		295EA8A8C9A0188CCD2416B4 /* AISettingsViewModelEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsViewModelEditorTests.swift; sourceTree = "<group>"; };
 		2960011CAB51F25CFF002132 /* KindResetPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KindResetPolicy.swift; sourceTree = "<group>"; };
 		29BC3DE43B503CF6FBF2A33F /* SchemaV9.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaV9.swift; sourceTree = "<group>"; };
+		29D40790D781E98ABDFE737F /* BackupAIConversations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupAIConversations.swift; sourceTree = "<group>"; };
 		29FC6C8B57A45954AF4A20C0 /* BilingualLanguagePickerCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualLanguagePickerCell.swift; sourceTree = "<group>"; };
 		2A513D5E8C4467B8FE45E0AC /* AnnotationRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationRecord.swift; sourceTree = "<group>"; };
 		2B29ECB0699594B79632E3EE /* ReadiumEPUBHost+BilingualDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReadiumEPUBHost+BilingualDriver.swift"; sourceTree = "<group>"; };
@@ -1952,6 +1956,7 @@
 		388862ACF8F83F9A1C8A6A6C /* BookSourceChapterListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookSourceChapterListView.swift; sourceTree = "<group>"; };
 		389E1ABA0D009B5CC9E4B20B /* HTTPTTSSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTTSSettingsView.swift; sourceTree = "<group>"; };
 		38A104E5CBC93D0266E6C21E /* ReadingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSession.swift; sourceTree = "<group>"; };
+		38D14E982E19B687CCB48453 /* PersistenceActor+ChatSessionsBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersistenceActor+ChatSessionsBackup.swift"; sourceTree = "<group>"; };
 		38E51E6D76FE0DDF87E537AB /* NativeTextPaginator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTextPaginator.swift; sourceTree = "<group>"; };
 		3910DCA9C9F588B700679D76 /* TXTChapterIndexBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterIndexBuilder.swift; sourceTree = "<group>"; };
 		398F1BAF549E7AC80E9CE320 /* ReadingSessionTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionTrackerTests.swift; sourceTree = "<group>"; };
@@ -3167,6 +3172,7 @@
 		F44DBB94C251A533844E33BD /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
 		F4C18F1E19149F8DBAE36A31 /* AIResponseCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIResponseCache.swift; sourceTree = "<group>"; };
 		F4C752B466744D1F453BE351 /* TOCTitleFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOCTitleFilterTests.swift; sourceTree = "<group>"; };
+		F4EA1C8202C4D559BB9E44CB /* BackupAIConversationsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupAIConversationsTests.swift; sourceTree = "<group>"; };
 		F518E98F02B1A2000C41AAB2 /* TXTChapterIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterIntegrationTests.swift; sourceTree = "<group>"; };
 		F560EA65913036C78284C138 /* ErrorScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorScreenTests.swift; sourceTree = "<group>"; };
 		F59A9AD0DFA1903B19F49D85 /* PDFChapterTextProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFChapterTextProvider.swift; sourceTree = "<group>"; };
@@ -3478,6 +3484,7 @@
 			isa = PBXGroup;
 			children = (
 				B2A04EAFA37410DA616E33D6 /* BackgroundDownloadSession.swift */,
+				29D40790D781E98ABDFE737F /* BackupAIConversations.swift */,
 				837009678FE3EE7B38B7CD8B /* BackupBlobStore.swift */,
 				DAAAF285B1D1B4F09E3AAD56 /* BackupDataCollector.swift */,
 				DA823268583E27AF564272EC /* BackupDataRestorer.swift */,
@@ -5219,6 +5226,7 @@
 		D18FC2F3DB2B1B40D884B7A1 /* Backup */ = {
 			isa = PBXGroup;
 			children = (
+				F4EA1C8202C4D559BB9E44CB /* BackupAIConversationsTests.swift */,
 				EFABA0F5E3E749CC8108947C /* BackupBookProjectionTests.swift */,
 				A17676C4AE9DD328C39176D8 /* BackupDataCollectorRestorerTests.swift */,
 				F64BCF588EF860DD6C214737 /* BackupLibraryManifestTests.swift */,
@@ -5515,6 +5523,7 @@
 				2832B213595B426B8FFC8B6B /* PersistenceActor+Backup.swift */,
 				815A2F870C4D8EC102254ACC /* PersistenceActor+Bookmarks.swift */,
 				4A220CAE7A402DC0BA98D19A /* PersistenceActor+ChatSessions.swift */,
+				38D14E982E19B687CCB48453 /* PersistenceActor+ChatSessionsBackup.swift */,
 				00814B9C69A0E1190146095E /* PersistenceActor+Collections.swift */,
 				AC517B8E3581F795DEDEC934 /* PersistenceActor+Highlights.swift */,
 				E46A786B20AA87E763D00F45 /* PersistenceActor+Library.swift */,
@@ -6138,6 +6147,7 @@
 				A2B7E3D8BAEC3C9A9375D3E4 /* AppConfigurationTests.swift in Sources */,
 				5BCD69B7FFD787F33D6E0C8D /* AutoPageTurnerTests.swift in Sources */,
 				C9D2AE1A81222E67A05CA05C /* BackgroundIndexingCoordinatorTests.swift in Sources */,
+				403A2FEB89760E50142E7ECA /* BackupAIConversationsTests.swift in Sources */,
 				50D3F5B291DB7188E2BB0442 /* BackupBookProjectionTests.swift in Sources */,
 				22612350C6FC7C43096271E9 /* BackupDataCollectorRestorerTests.swift in Sources */,
 				A1C0DD5C147F74C3C21B932B /* BackupLibraryManifestTests.swift in Sources */,
@@ -6816,6 +6826,7 @@
 				64709D1B5C006D3299C8ABAF /* AutoPageTurner.swift in Sources */,
 				4CACC9F4BA8C17144C30C113 /* BackgroundDownloadSession.swift in Sources */,
 				6274548A4C4DDC1FCA13397C /* BackgroundIndexingCoordinator.swift in Sources */,
+				C335912ACF9A676E82F9C00A /* BackupAIConversations.swift in Sources */,
 				CE3CD75789B4E025F0F87CF5 /* BackupBlobStore.swift in Sources */,
 				C3129F763BDCF3AB47BC7098 /* BackupDataCollector.swift in Sources */,
 				DDFB32D1CC4508E794A67573 /* BackupDataRestorer.swift in Sources */,
@@ -7214,6 +7225,7 @@
 				FB0A5F6990BB44BA58C1F366 /* PersistenceActor+Backup.swift in Sources */,
 				E7CA24CCF3F1D348E85E0C37 /* PersistenceActor+Bookmarks.swift in Sources */,
 				274B2B942155456B51B38ABF /* PersistenceActor+ChatSessions.swift in Sources */,
+				3DE16350C418C89304748874 /* PersistenceActor+ChatSessionsBackup.swift in Sources */,
 				CC5A3B33193938B59254FD8A /* PersistenceActor+Collections.swift in Sources */,
 				38661CFAC1618DB7526ACB28 /* PersistenceActor+Highlights.swift in Sources */,
 				CD9751D76A3A9DBF872CA5D7 /* PersistenceActor+Library.swift in Sources */,
@@ -7709,7 +7721,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 899;
+				CURRENT_PROJECT_VERSION = 900;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7717,7 +7729,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.58.0;
+				MARKETING_VERSION = 3.59.0;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
@@ -7863,7 +7875,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 899;
+				CURRENT_PROJECT_VERSION = 900;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7871,7 +7883,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.58.0;
+				MARKETING_VERSION = 3.59.0;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
