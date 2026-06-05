@@ -41,26 +41,50 @@ final class AIAssistantViewModel {
     // MARK: - Published State
 
     /// Current state of the AI assistant.
-    private(set) var state: AIAssistantState = .idle
+    /// `internal(set)` (not `private(set)`) so the streaming/cancel
+    /// concern in `AIAssistantViewModel+Streaming.swift` can drive it.
+    internal(set) var state: AIAssistantState = .idle
 
     /// Accumulated response text (from streaming or complete response).
-    private(set) var responseText: String = ""
+    internal(set) var responseText: String = ""
 
     /// The action type of the current/last request.
-    private(set) var currentAction: AIActionType?
+    internal(set) var currentAction: AIActionType?
 
     /// The AI Summarize tab's selected scope chip. Defaults to `.section`
     /// (the pre-feature-#69 behavior). Mutated only via `setScope`.
     private(set) var selectedScope: SummaryScope = .section
 
     // MARK: - Dependencies
+    // `internal` (not `private`) so the streaming/cancel extension file
+    // can reach them.
 
-    private let aiService: AIService
-    private let contextExtractor: any AIContextExtracting
+    let aiService: AIService
+    let contextExtractor: any AIContextExtracting
 
     // MARK: - Private
+    // These lifecycle vars are `@ObservationIgnored` (not UI-observed) and
+    // `internal` so `AIAssistantViewModel+Streaming.swift` can mutate them.
+    // Stored properties cannot live in an extension, so they stay here.
 
-    private var streamTask: Task<Void, Never>?
+    /// The currently-running request task, retained so a user Stop
+    /// (`cancelStreaming`) or a superseding request can cancel it. Now
+    /// actually assigned (feature #87 WI-3): the VM owns its one-shot
+    /// `sendRequest` rather than awaiting it inline.
+    @ObservationIgnored var streamTask: Task<Void, Never>?
+
+    /// Monotonic operation id. Every launch bumps it; a request's
+    /// post-`await` writes are gated on `opId == opCounter` so a stale,
+    /// superseded, or cancelled task cannot clobber a newer op's state.
+    @ObservationIgnored var opCounter: UInt64 = 0
+
+    /// The summary that was `.complete` when the CURRENT in-flight
+    /// request launched, snapshotted before `responseText` is cleared.
+    /// On a Stop, `cancelStreaming()` restores it (regenerate-preserve
+    /// contract) so stopping a regenerate keeps the last good summary;
+    /// `nil` when the in-flight request is an INITIAL summarize (Stop →
+    /// `.idle`).
+    @ObservationIgnored var priorCompletedSummary: String?
 
     // MARK: - Init
 
@@ -181,74 +205,9 @@ final class AIAssistantViewModel {
     func reset() {
         streamTask?.cancel()
         streamTask = nil
+        priorCompletedSummary = nil
         state = .idle
         responseText = ""
         currentAction = nil
-    }
-
-    // MARK: - Private
-
-    private func performAction(
-        type: AIActionType,
-        locator: Locator,
-        fullText: String,
-        format: BookFormat,
-        scope: SummaryScope = .section,
-        chapterBounds: ChapterBounds? = nil,
-        userPrompt: String? = nil,
-        targetLanguage: String? = nil
-    ) async {
-        // Cancel any pending stream
-        streamTask?.cancel()
-        streamTask = nil
-
-        state = .loading
-        responseText = ""
-        currentAction = type
-
-        // `contextExtractor` is `any AIContextExtracting`, so the 6-arg
-        // requirement is called with `maxUTF16` passed explicitly — a
-        // protocol-requirement default argument is not visible through
-        // the existential (see AIContextExtracting.swift).
-        let context = contextExtractor.extractContext(
-            locator: locator,
-            fullText: fullText,
-            format: format,
-            scope: scope,
-            chapterBounds: chapterBounds,
-            maxUTF16: AIContextBudget.defaultMaxUTF16
-        )
-
-        guard !context.isEmpty else {
-            state = .error(AIError.contextExtractionFailed.localizedDescription)
-            return
-        }
-
-        let request = AIRequest(
-            actionType: type,
-            bookFingerprint: locator.bookFingerprint,
-            locator: locator,
-            contextText: context,
-            userPrompt: userPrompt,
-            targetLanguage: targetLanguage,
-            promptVersion: "v1"
-        )
-
-        do {
-            let response = try await aiService.sendRequest(request)
-            responseText = response.content
-            state = .complete
-        } catch let error as AIError {
-            switch error {
-            case .featureDisabled:
-                state = .featureDisabled
-            case .consentRequired:
-                state = .consentRequired
-            default:
-                state = .error(error.localizedDescription)
-            }
-        } catch {
-            state = .error(error.localizedDescription)
-        }
     }
 }

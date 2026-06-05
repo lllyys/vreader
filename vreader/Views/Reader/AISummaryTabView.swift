@@ -176,16 +176,38 @@ struct AISummaryTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// The loading state — a progress indicator + serif caption.
+    /// The loading state — while a summary is in flight the generate
+    /// control IS the Stop affordance (feature #87 WI-3, design note
+    /// "the generate/language control doubles as the stop affordance").
+    /// Per Rule 51 there is NO separate standalone stop button: the
+    /// in-flight indicator itself morphs into a tappable Stop disc (white
+    /// `square.fill` + sweeping ring, matching the Chat/Translate stop
+    /// visual); tapping it aborts via `cancelStreaming()`.
     @ViewBuilder
     private var loadingSection: some View {
         VStack(spacing: 14) {
             Spacer()
-            ProgressView()
-                .controlSize(.large)
-                .tint(Color(theme.accentColor))
-            Text("Generating summary\u{2026}")
+            Button(action: { viewModel.cancelStreaming() }) {
+                ZStack {
+                    Circle()
+                        .fill(Color(theme.accentColor))
+                    Image(systemName: "square.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                    // The sweeping ring signals the in-flight request.
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .scaleEffect(0.85)
+                }
+                .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("aiSummaryStopButton")
+            .accessibilityLabel("Stop")
+            Text("Generating summary\u{2026} Tap to stop")
                 .font(.system(size: 13))
+                .multilineTextAlignment(.center)
                 .foregroundStyle(Color(theme.subColor))
             Spacer()
         }

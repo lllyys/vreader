@@ -187,6 +187,152 @@ struct AISummaryTabViewTests {
         await gate.release()
     }
 
+    // MARK: - Stop / cancellation (feature #87 WI-3)
+
+    @Test("cancelStreaming() during an INITIAL summarize returns to .idle, no error")
+    func cancelStreaming_initialSummary_returnsToIdle_noError() async {
+        // Abort the very first summarize (no prior completed result): the
+        // VM must fall back to the idle prompt, not surface an error.
+        let gate = GatedAIProvider()
+        gate.stubbedResponse = WI11TestHelpers.makeResponse(content: "Summary.")
+        let vm = Self.makeViewModel(provider: gate)
+
+        let task = Task { await vm.summarize(
+            locator: WI11TestHelpers.makeLocator(),
+            fullText: "Some text content for testing.",
+            format: .txt
+        ) }
+        await gate.awaitEntered()
+        #expect(vm.state == .loading)
+
+        vm.cancelStreaming()
+
+        // Cancelling an initial request with no prior result → .idle.
+        #expect(vm.state == .idle)
+        if case .error = vm.state {
+            #expect(Bool(false), "A user Stop must not surface an error")
+        }
+        #expect(vm.responseText.isEmpty)
+
+        await gate.release()
+        _ = await task.value
+        // The post-`await` guard must hold even after the gated provider
+        // returns: a cancelled task must NOT flip the state to .complete.
+        #expect(vm.state == .idle)
+    }
+
+    @Test("cancelStreaming() after the provider returned normally does not write .complete")
+    func cancelStreaming_afterProviderReturnedNormally_doesNotWriteCompleted() async {
+        // Round-2 High: Swift cancellation is cooperative — a one-shot
+        // request that was cancelled can still RETURN NORMALLY from the
+        // provider. The post-`await` `guard !Task.isCancelled, opId ==
+        // opCounter` (not just a CancellationError catch) is what prevents
+        // a stale `.complete` / responseText write.
+        let gate = GatedAIProvider()
+        gate.stubbedResponse = WI11TestHelpers.makeResponse(content: "Stale summary.")
+        let vm = Self.makeViewModel(provider: gate)
+
+        let task = Task { await vm.summarize(
+            locator: WI11TestHelpers.makeLocator(),
+            fullText: "Some text content for testing.",
+            format: .txt
+        ) }
+        await gate.awaitEntered()
+        #expect(vm.state == .loading)
+
+        // Cancel BEFORE releasing the gate — the task is cancelled while
+        // suspended inside the provider, then the provider returns normally.
+        vm.cancelStreaming()
+        await gate.release()
+        _ = await task.value
+
+        // The guard must drop the returned response: no .complete, no text.
+        #expect(vm.state != .complete)
+        #expect(vm.state == .idle)
+        #expect(vm.responseText.isEmpty,
+                "A cancelled one-shot request must not write responseText")
+    }
+
+    @Test("cancelStreaming() during a REGENERATE preserves the prior summary")
+    func cancelStreaming_duringRegenerate_preservesPriorSummary() async {
+        // Round-2 Medium: `performAction` clears `responseText` before
+        // launch, so a naive `.idle` on cancel would drop a previously-
+        // completed summary on a REGENERATE. Snapshot the prior `.complete`
+        // before clearing; `cancelStreaming()` restores it.
+        //
+        // `SecondCallGatedProvider` returns the first summarize
+        // immediately, then blocks the second (regenerate) so it can be
+        // pinned mid-flight and cancelled.
+        let gate = SecondCallGatedProvider(
+            firstResponse: WI11TestHelpers.makeResponse(content: "First good summary."),
+            secondResponse: WI11TestHelpers.makeResponse(content: "Should be discarded.")
+        )
+        let vm = Self.makeViewModel(provider: gate)
+
+        // 1. Complete an initial summary (call #1 returns immediately).
+        await vm.summarize(
+            locator: WI11TestHelpers.makeLocator(),
+            fullText: "Original chapter text.",
+            format: .txt
+        )
+        #expect(vm.state == .complete)
+        #expect(vm.responseText == "First good summary.")
+        let priorSummary = vm.responseText
+
+        // 2. Regenerate on DIFFERENT content (cache miss) → call #2 blocks.
+        let regenTask = Task { await vm.summarize(
+            locator: WI11TestHelpers.makeLocator(),
+            fullText: "A completely different chapter for regenerate.",
+            format: .txt
+        ) }
+        await gate.awaitSecondEntered()
+        #expect(vm.state == .loading)
+
+        vm.cancelStreaming()
+
+        // The prior summary is RESTORED — not dropped to .idle.
+        #expect(vm.state == .complete)
+        #expect(vm.responseText == priorSummary)
+
+        await gate.releaseSecond()
+        _ = await regenTask.value
+        // The discarded regenerate response must not overwrite the prior.
+        #expect(vm.state == .complete)
+        #expect(vm.responseText == priorSummary)
+    }
+
+    @Test("summarize() owns a retained, cancellable task")
+    func summarize_ownsRetainedTask_cancellable() async {
+        // The refactor: `streamTask` is now actually ASSIGNED (it was
+        // vestigial before). Proof: a `cancelStreaming()` mid-flight tears
+        // the request down (the provider's continuation is abandoned).
+        let gate = GatedAIProvider()
+        gate.stubbedResponse = WI11TestHelpers.makeResponse(content: "Summary.")
+        let vm = Self.makeViewModel(provider: gate)
+
+        let task = Task { await vm.summarize(
+            locator: WI11TestHelpers.makeLocator(),
+            fullText: "Some text content for testing.",
+            format: .txt
+        ) }
+        await gate.awaitEntered()
+        #expect(vm.state == .loading)
+
+        vm.cancelStreaming()
+        #expect(vm.state != .loading, "cancelStreaming must leave .loading")
+
+        await gate.release()
+        _ = await task.value
+        // The cancelled task wrote no terminal success state.
+        #expect(vm.state != .complete)
+        // PROOF of task ownership (Gate-4 Medium): the retained `streamTask` was
+        // actually cancelled — the provider saw `Task.isCancelled` when it resumed.
+        // This would be FALSE if `streamTask` were never assigned (the opId bump
+        // alone suppresses the write but wouldn't cancel the task).
+        #expect(await gate.observedCancellation == true,
+                "the retained request task must be cancelled, not just its write suppressed")
+    }
+
     // MARK: - shareText contract
 
     @Test("`shareText` mirrors the view model's responseText")
@@ -284,10 +430,19 @@ struct AISummaryTabViewTests {
 /// #69 WI-5) can reuse the same gate rather than duplicate it.
 actor GateState {
     private(set) var sendRequestCallCount = 0
+    /// Whether the request's task was already cancelled when it resumed past the
+    /// gate — lets a test PROVE the retained `streamTask` was actually cancelled
+    /// (not merely that a late write was suppressed by the opId bump).
+    private(set) var observedCancellation = false
     private var entered = false
     private var released = false
     private var enteredContinuation: CheckedContinuation<Void, Never>?
     private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    /// Records (sticky) whether the resuming request task saw cancellation.
+    func recordCancellation(_ cancelled: Bool) {
+        if cancelled { observedCancellation = true }
+    }
 
     /// Records entry into `sendRequest` and wakes any `awaitEntered()`.
     func markEntered() {
@@ -351,6 +506,11 @@ final class GatedAIProvider: AIProvider, Sendable {
         get async { await gate.sendRequestCallCount }
     }
 
+    /// Whether the request task was cancelled when it resumed past the gate.
+    var observedCancellation: Bool {
+        get async { await gate.observedCancellation }
+    }
+
     /// Resolves once `sendRequest` has been entered at least once.
     func awaitEntered() async { await gate.awaitEntered() }
 
@@ -361,6 +521,9 @@ final class GatedAIProvider: AIProvider, Sendable {
     func sendRequest(_ request: AIRequest) async throws -> AIResponse {
         await gate.markEntered()
         await gate.gateOpen()
+        // Record whether the retained task was cancelled (feature #87 WI-3 Gate-4:
+        // proves task ownership — the cancel reached THIS task, not just a write).
+        await gate.recordCancellation(Task.isCancelled)
         guard let response = stubbedResponseBox.value else {
             throw AIError.invalidResponse
         }
@@ -373,5 +536,98 @@ final class GatedAIProvider: AIProvider, Sendable {
         AsyncThrowingStream { continuation in
             continuation.finish()
         }
+    }
+}
+
+// MARK: - Second-call-gated provider (feature #87 WI-3 regenerate test)
+
+/// An `AIProvider` that returns its FIRST `sendRequest` immediately and
+/// blocks its SECOND until `releaseSecond()` is called — used to drive a
+/// VM to a completed summary, then pin a regenerate mid-flight so a Stop
+/// during regenerate can be observed deterministically. Mutable state is
+/// actor-isolated for Swift 6 strict concurrency.
+final class SecondCallGatedProvider: AIProvider, Sendable {
+    let providerName = "SecondCallGated"
+    private let responses: ResponseStore
+    private let gate = SecondCallGate()
+
+    final class ResponseStore: @unchecked Sendable {
+        let first: AIResponse
+        let second: AIResponse
+        init(first: AIResponse, second: AIResponse) {
+            self.first = first
+            self.second = second
+        }
+    }
+
+    init(firstResponse: AIResponse, secondResponse: AIResponse) {
+        responses = ResponseStore(first: firstResponse, second: secondResponse)
+    }
+
+    /// Resolves once the SECOND `sendRequest` has been entered.
+    func awaitSecondEntered() async { await gate.awaitSecondEntered() }
+
+    /// Unblocks the suspended second `sendRequest`.
+    func releaseSecond() async { await gate.releaseSecond() }
+
+    func sendRequest(_ request: AIRequest) async throws -> AIResponse {
+        let callIndex = await gate.markEntered()
+        if callIndex == 1 {
+            return responses.first
+        }
+        await gate.gateSecond()
+        return responses.second
+    }
+
+    func streamRequest(
+        _ request: AIRequest
+    ) -> AsyncThrowingStream<AIStreamChunk, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+}
+
+/// Actor backing `SecondCallGatedProvider` — order-independent gate for
+/// the second call only.
+actor SecondCallGate {
+    private var callCount = 0
+    private var secondEntered = false
+    private var secondReleased = false
+    private var secondEnteredContinuation: CheckedContinuation<Void, Never>?
+    private var secondReleaseContinuation: CheckedContinuation<Void, Never>?
+
+    /// Records an entry; returns the 1-based call index.
+    func markEntered() -> Int {
+        callCount += 1
+        if callCount == 2 {
+            secondEntered = true
+            secondEnteredContinuation?.resume()
+            secondEnteredContinuation = nil
+        }
+        return callCount
+    }
+
+    /// Suspends the second call until `releaseSecond()` fires.
+    func gateSecond() async {
+        if secondReleased { return }
+        await withCheckedContinuation { continuation in
+            secondReleaseContinuation = continuation
+        }
+    }
+
+    /// Resolves once the second call has been entered.
+    func awaitSecondEntered() async {
+        if secondEntered { return }
+        await withCheckedContinuation { continuation in
+            secondEnteredContinuation = continuation
+        }
+    }
+
+    /// Unblocks the suspended second call (or arms an early release).
+    func releaseSecond() {
+        secondReleased = true
+        secondReleaseContinuation?.resume()
+        secondReleaseContinuation = nil
     }
 }

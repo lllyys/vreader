@@ -202,6 +202,7 @@
 		1FEEB14E71BC2235A040FAC9 /* SyncOutboundQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81816D53162945723E79FB9B /* SyncOutboundQueue.swift */; };
 		201D1474F216D8F16D76F1B6 /* MDTextExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DFC3C0DD795D886D77A6881 /* MDTextExtractorTests.swift */; };
 		20271E1F835A62799E28F741 /* BackupViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E72779818424BCA8025B0A0 /* BackupViewModel.swift */; };
+		203E839C9508EEA9ED29DC0F /* AIAssistantViewModel+Streaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF7F290BCEE8F6D864F0AC95 /* AIAssistantViewModel+Streaming.swift */; };
 		2051294D05C42778582C8172 /* OPDSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F77371DBD389CE1F1153E56E /* OPDSClient.swift */; };
 		207EEC2695C81527F2258358 /* ReadiumBilingualChapterTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D31FB55B9A6BD9B7ACA4385 /* ReadiumBilingualChapterTrackerTests.swift */; };
 		209CA5025D6BC048CCAE4012 /* SchemaV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = F379B3EEC02DC574C73F4323 /* SchemaV2.swift */; };
@@ -3162,6 +3163,7 @@
 		FF40921A35A0CD12BA7B18F3 /* TXTContinuousRenderingDecisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTContinuousRenderingDecisionTests.swift; sourceTree = "<group>"; };
 		FF69255252D28E9C698F4E20 /* LibraryViewSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewSheets.swift; sourceTree = "<group>"; };
 		FF7E3B8864B52047738D5006 /* TextHighlightRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextHighlightRenderer.swift; sourceTree = "<group>"; };
+		FF7F290BCEE8F6D864F0AC95 /* AIAssistantViewModel+Streaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIAssistantViewModel+Streaming.swift"; sourceTree = "<group>"; };
 		FFD1AE78FBFF38B3616352FF /* AIConsentManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConsentManagerTests.swift; sourceTree = "<group>"; };
 		FFE1146B1851B4122B5187A1 /* TXTServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTServiceProtocol.swift; sourceTree = "<group>"; };
 		FFE6D1B93EBECD18DEC00603 /* AIChatAgenticSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatAgenticSupport.swift; sourceTree = "<group>"; };
@@ -4650,6 +4652,7 @@
 			isa = PBXGroup;
 			children = (
 				46221600B62F5482365B0484 /* AIAssistantViewModel.swift */,
+				FF7F290BCEE8F6D864F0AC95 /* AIAssistantViewModel+Streaming.swift */,
 				206F4BCC7294731E8A3A82DB /* AIChatViewModel.swift */,
 				46AF7DE90554FB3C0C434EEF /* AIChatViewModel+Streaming.swift */,
 				43809A2F181DF2BBEAAD50C5 /* AIProviderPickerViewModel.swift */,
@@ -6626,6 +6629,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				384E9916435C82876752D9D9 /* AIAssistantView.swift in Sources */,
+				203E839C9508EEA9ED29DC0F /* AIAssistantViewModel+Streaming.swift in Sources */,
 				99456D2FCC39AA83E0B43C65 /* AIAssistantViewModel.swift in Sources */,
 				48B85C7A9B1F2E8BDEA9F2D2 /* AIChatAgenticSupport.swift in Sources */,
 				B0FDB9426F0DB83151F4D050 /* AIChatComposerState.swift in Sources */,
