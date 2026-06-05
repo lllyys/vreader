@@ -557,13 +557,30 @@ struct EPUBReaderContainerView: View {
         }
         let spineItems = metadata.spineItems
         let spineCount = metadata.spineCount
-        let anchorIndex: Int = {
-            guard let href = viewModel.currentPosition?.href,
-                  let idx = spineItems.firstIndex(where: { $0.href == href }) else {
-                return 0
-            }
-            return idx
-        }()
+        // Feature #85 WI-1: prefer the in-session handoff position (the freshest
+        // value from a just-departed paged/Readium host on a mode toggle) over
+        // the persisted one, then resolve its href tolerant of container- vs
+        // OPF-relative form so a paged→scroll restore anchors on the right
+        // chapter, not the book top (Gate-2 High).
+        let handoffLocator = ReaderPositionHandoff.shared.latestLocator(forKey: fingerprintKey ?? "")
+        let restoreHref = handoffLocator?.href ?? viewModel.currentPosition?.href
+        let restoreProgression = handoffLocator?.progression ?? viewModel.currentPosition?.progression
+        let anchorIndex = EPUBScrollAnchorResolver.anchorIndex(
+            forStoredHref: restoreHref, spineHrefs: spineItems.map(\.href))
+        // Feature #85 WI-1 (Gate-4 round-1 High): promote the handoff position
+        // into the VM's `currentPosition` BEFORE mounting, so a quick close /
+        // re-toggle that lands before the first `onWindowedPosition` callback
+        // persists the handoff-backed position via `viewModel.close()`, not the
+        // stale disk one (which would recreate cross-launch position loss).
+        if let h = handoffLocator, let href = h.href {
+            viewModel.updatePosition(EPUBPosition(
+                href: href,
+                progression: h.progression ?? 0,
+                totalProgression: EPUBProgressCalculator.progress(
+                    spineIndex: anchorIndex, scrollFraction: h.progression ?? 0,
+                    totalSpineItems: spineCount),
+                cfi: nil))
+        }
         guard let initialWindow = EPUBSpineWindow.initial(
             anchor: anchorIndex, spineCount: spineCount
         ) else {
@@ -601,7 +618,7 @@ struct EPUBReaderContainerView: View {
             // WI-6b-iii: restore the saved intra-chapter position. `anchorIndex`
             // is the saved chapter's spine index, so the coordinator scrolls it
             // to this fraction once the initial window materializes.
-            restoreFraction: viewModel.currentPosition?.progression,
+            restoreFraction: restoreProgression,  // feature #85 WI-1: handoff-preferred
             // Feature #71 WI-7 (Gate-4 round-2 MEDIUM 2): on eviction, post the
             // per-section evicted signal so the bilingual surfaces modifier
             // drops that section's stale block bucket. Captures only the book
@@ -620,7 +637,7 @@ struct EPUBReaderContainerView: View {
             coordinator: coordinator,
             totalSpineCount: spineCount,
             handle: handle,
-            onWindowedPosition: { [weak viewModel] visibleSpineIndex, intraFraction in
+            onWindowedPosition: { [weak viewModel, fpKey = fingerprintKey] visibleSpineIndex, intraFraction in
                 guard let viewModel,
                       visibleSpineIndex >= 0,
                       visibleSpineIndex < spineItems.count else { return }
@@ -638,6 +655,10 @@ struct EPUBReaderContainerView: View {
                 )
                 viewModel.updatePosition(newPosition)
                 if let locator = viewModel.makeCurrentLocator() {
+                    // Feature #85 WI-1: record the freshest scroll position so a
+                    // scroll→paged toggle/reopen restores it in the Readium host
+                    // (the in-session handoff; persistence is the durable copy).
+                    ReaderPositionHandoff.shared.record(locator, forKey: fpKey ?? "")
                     NotificationCenter.default.post(
                         name: .readerPositionDidChange, object: locator
                     )

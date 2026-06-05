@@ -20,14 +20,19 @@ import ReadiumNavigator
 @Suite("ReadiumEPUBHost (WI-5)")
 struct ReadiumEPUBHostTests {
 
-    // MARK: - Dispatch routing (pure, flag-driven)
+    // MARK: - Dispatch routing (pure, flag + layout — feature #85 approach C)
 
-    @Test func routeEPUB_flagOff_isLegacyWKWebView() {
-        #expect(ReaderEngine.routeEPUB(readiumFlagEnabled: false) == .epubWKWebView)
+    @Test(arguments: [EPUBLayoutPreference.paged, .scroll])
+    func routeEPUB_flagOff_isLegacyWKWebView(layout: EPUBLayoutPreference) {
+        #expect(ReaderEngine.routeEPUB(readiumFlagEnabled: false, layout: layout) == .epubWKWebView)
     }
 
-    @Test func routeEPUB_flagOn_isReadium() {
-        #expect(ReaderEngine.routeEPUB(readiumFlagEnabled: true) == .epubReadium)
+    @Test func routeEPUB_flagOn_paged_isReadium() {
+        #expect(ReaderEngine.routeEPUB(readiumFlagEnabled: true, layout: .paged) == .epubReadium)
+    }
+
+    @Test func routeEPUB_flagOn_scroll_isLegacyForSeamlessStitch() {
+        #expect(ReaderEngine.routeEPUB(readiumFlagEnabled: true, layout: .scroll) == .epubWKWebView)
     }
 
     /// `resolve(format:)` stays the pure format→default-engine map (the flag

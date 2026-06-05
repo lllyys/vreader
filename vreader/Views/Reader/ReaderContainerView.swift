@@ -867,9 +867,19 @@ struct ReaderContainerView: View {
                 // legacy keyed `epubWebView`. Selected on the same flag the
                 // dispatcher routes on, so eval reaches whichever engine is
                 // actually rendering this book.
-                let readiumActive = FeatureFlags.shared.isEnabled(.readiumEPUBEngine)
+                // Feature #85 WI-1: route eval by the SAME flag+layout decision
+                // the dispatcher uses (computed here at probe setup, which
+                // re-runs when `epubLayout` changes), else flag-ON + scroll
+                // renders the legacy host but the probe looks for a Readium
+                // navigator and eval fails (Gate-4 round-1 Medium — harness
+                // regression on the scroll path).
+                let store = settingsStore
                 probe.jsEvaluator = { @MainActor script in
-                    if readiumActive {
+                    // Feature #85 WI-1: evaluate the flag+layout routing LIVE at
+                    // call time (via the extracted helper, so the type-heavy
+                    // probe-setup function stays in budget) so a paged↔scroll
+                    // toggle re-targets eval to the engine actually rendering.
+                    if Self.epubEvalUsesReadiumEngine(store: store) {
                         guard let navigator = DebugReaderRegistry.shared.readiumNavigator(for: key, token: token) else {
                             throw DebugReaderProbeError.evalUnsupported(format: "epub")
                         }
@@ -1082,6 +1092,17 @@ struct ReaderContainerView: View {
     /// surfaces and pinned by `ReaderContainerViewEngineDispatchTests`;
     /// `fingerprint.format` is already a typed `BookFormat` so this
     /// dispatch reaches every case unconditionally.
+    /// Feature #85 WI-1: whether EPUB eval should target the Readium navigator
+    /// (paged) vs the legacy keyed WebView (scroll → the #71 stitch), by the
+    /// SAME flag+layout decision the dispatcher uses. Extracted so the
+    /// type-heavy DebugBridge-probe setup function stays inside the compiler's
+    /// type-check budget.
+    static func epubEvalUsesReadiumEngine(store: ReaderSettingsStore) -> Bool {
+        ReaderEngine.routeEPUB(
+            readiumFlagEnabled: FeatureFlags.shared.isEnabled(.readiumEPUBEngine),
+            layout: store.epubLayout) == .epubReadium
+    }
+
     @ViewBuilder
     func engineReaderView(fingerprint: DocumentFingerprint) -> some View {
         switch ReaderEngine.resolve(format: fingerprint.format) {
@@ -1095,7 +1116,8 @@ struct ReaderContainerView: View {
             // `case` label — the source-level dispatch guard slices on case
             // boundaries.
             if ReaderEngine.routeEPUB(
-                readiumFlagEnabled: FeatureFlags.shared.isEnabled(.readiumEPUBEngine)
+                readiumFlagEnabled: FeatureFlags.shared.isEnabled(.readiumEPUBEngine),
+                layout: settingsStore.epubLayout
             ) == .epubReadium {
                 ReadiumEPUBHost(
                     fileURL: resolvedFileURL,

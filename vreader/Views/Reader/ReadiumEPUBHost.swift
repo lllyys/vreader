@@ -144,6 +144,16 @@ struct ReadiumEPUBHost: View {
     /// a prefetch-landed inject that carries none of its own.
     @State var lastKnownReadiumLocator: ReadiumShared.Locator?
 
+    /// Feature #85 WI-1: a CROSS-ENGINE restore position (an engine-neutral
+    /// `Locator` from a just-departed legacy scroll host's handoff, or the disk
+    /// legacy locator after a scroll session cleared the Readium envelope). It
+    /// can't be a pre-mount `initialLocation` because converting its href needs
+    /// the publication's reading order, available only post-open — so it is
+    /// applied ONCE in the navigator's first `onLocationChange` (the navigator
+    /// is attached there, so `navCommander.navigate` is valid). Nil for the
+    /// normal same-engine envelope restore.
+    @State var pendingCrossEngineRestore: Locator?
+
     /// WI-7 photo/custom-background compositing: tracks whether a decorative
     /// background image is stored for the current theme. Reloaded on appear and
     /// whenever the theme / custom-background toggle / revision changes (mirrors

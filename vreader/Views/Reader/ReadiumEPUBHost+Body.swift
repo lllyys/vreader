@@ -114,11 +114,41 @@ extension ReadiumEPUBHost {
             // WI-6: forward `locationDidChange` into the VM's debounced save.
             // `@MainActor @Sendable` so the coordinator stays decoupled from the VM.
             onLocationChange: { [weak viewModel] locator in
+                // Feature #85 WI-1: cross-engine restore one-shot — BEFORE any
+                // save/record. The FIRST relocate fired at the book START
+                // (the cross-engine fallback opened there). Convert the staged
+                // position against THIS publication's reading order
+                // (container-relative; the navigator is attached now, so
+                // navCommander is valid) and navigate ONCE, then RETURN —
+                // skipping the transient-start save (Gate-4 round-1 High: a
+                // dismiss-before-navigate must NOT persist book-start over the
+                // scroll position) + record + downstream. The navigate's own
+                // relocate handles persistence at the real position. A failed
+                // conversion clears the pending and falls through (best-effort
+                // save of start), never stranding the open.
+                if let pending = pendingCrossEngineRestore {
+                    pendingCrossEngineRestore = nil
+                    if let target = ReadiumEPUBReaderViewModel.readiumLocator(
+                        fromVReader: pending,
+                        spineHrefs: publication.readingOrder.map(\.href)
+                    ) {
+                        navCommander.navigate(to: target)
+                        return
+                    }
+                }
                 viewModel?.save(readiumLocator: locator)  // WI-6 save
                 // Gate-4 HIGH-1: remember the live locator so a first-enable toggle
                 // (no location change of its own) resolves the VISIBLE chapter.
                 // Compose — the WI-6 save above still runs.
                 lastKnownReadiumLocator = locator
+                // Feature #85 WI-1: record the freshest engine-neutral position
+                // for the next host to read on a mode toggle / reopen.
+                if let neutral = ReadiumEPUBReaderViewModel.makeVReaderLocator(
+                    from: locator, fingerprintKey: fingerprint.canonicalKey,
+                    fingerprint: fingerprint, originalFormat: fingerprint.format
+                )?.legacyLocator {
+                    ReaderPositionHandoff.shared.record(neutral, forKey: fingerprint.canonicalKey)
+                }
                 // WI-11b: drive the chapter-change enumerate off the same callback
                 // (href change + enabled → enumerate; intra-chapter deduped). HIGH-2:
                 // a persisted-on book enumerates on its FIRST locator.
@@ -202,7 +232,24 @@ extension ReadiumEPUBHost {
         // representable is only built once `state == .ready`) so the navigator
         // opens directly at the restored locator instead of the start. nil →
         // open at the start (first-open / nothing saved).
-        restoredLocator = await vm.restoredReadiumLocator()
+        // Feature #85 WI-1: same-engine restore (the `.readium` envelope) opens
+        // directly at the position via `initialLocation`. If the envelope is
+        // absent (a scroll-mode legacy #71 session CLEARS it + writes a standard
+        // legacy `Locator`), stage a CROSS-ENGINE restore — the freshest
+        // in-session handoff position, else the disk legacy locator — applied
+        // ONCE post-open in the navigator's first `onLocationChange`, because
+        // converting its href needs the publication's reading order (only
+        // available after `vm.open()`). Avoids the scroll→paged book-top restart
+        // (Gate-2 Critical) without the pre-mount race (Gate-4 round-1 High).
+        if let envelope = await vm.restoredReadiumLocator() {
+            restoredLocator = envelope
+        } else if let handoff = ReaderPositionHandoff.shared
+            .latestLocator(forKey: fingerprint.canonicalKey) {
+            pendingCrossEngineRestore = handoff
+        } else {
+            pendingCrossEngineRestore = try? await persistence.loadPosition(
+                bookFingerprintKey: fingerprint.canonicalKey)
+        }
         // WI-11b Gate-4 round-3 HIGH-1 (persisted-on open race): build the
         // bilingual parser + VM BEFORE `vm.open()` flips `state = .ready` and
         // mounts the navigator, so the navigator's initial `locationDidChange`

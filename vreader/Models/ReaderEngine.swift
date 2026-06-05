@@ -58,8 +58,22 @@ enum ReaderEngine: String, Sendable, Hashable, CaseIterable {
     /// Picks the EPUB rendering engine given the `readiumEPUBEngine` flag state.
     /// Pure (no flag read inside — the caller passes the resolved flag value) so
     /// the dispatcher's routing decision is unit-testable. Feature #42 Phase 1:
-    /// flag ON → the Readium host; flag OFF → the legacy `EPUBWebViewBridge`.
-    static func routeEPUB(readiumFlagEnabled: Bool) -> ReaderEngine {
-        readiumFlagEnabled ? .epubReadium : .epubWKWebView
+    /// flag ON → the Readium host (paged) or the legacy host (scroll); flag OFF
+    /// → the legacy `EPUBWebViewBridge` for both modes.
+    ///
+    /// Feature #85 (approach C): Readium's per-resource paginator has an
+    /// inherent chapter-boundary SEAM in **scroll** mode (its closed paginator
+    /// has no stitch injection point). Route EPUB scroll to the legacy
+    /// `epubWKWebView` engine — which activates the feature-#71 continuous-scroll
+    /// stitch (single-column, seamless) — even when Readium is the default.
+    /// **Paged** mode keeps Readium (no seam there; Readium's paged parity is the
+    /// WI-13 acceptance work). Pure (the caller passes the resolved flag +
+    /// layout) so the routing truth table is unit-testable.
+    static func routeEPUB(
+        readiumFlagEnabled: Bool,
+        layout: EPUBLayoutPreference
+    ) -> ReaderEngine {
+        guard readiumFlagEnabled else { return .epubWKWebView }
+        return layout == .scroll ? .epubWKWebView : .epubReadium
     }
 }
