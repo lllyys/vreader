@@ -72,29 +72,43 @@ enum ChatSessionPayloadMapper {
 
     // MARK: - Decode
 
+    /// A minimal forward-compatible header — decodes ONLY the top-level `version`
+    /// so a future blob whose full message shape changed is still recognized as
+    /// a future version (and protected) rather than mistaken for garbage.
+    private struct VersionHeader: Codable { var version: Int }
+
+    /// The top-level payload version of `data`, or nil if there is no version
+    /// field at all (genuine garbage / non-payload bytes).
+    private static func headerVersion(_ data: Data) -> Int? {
+        (try? JSONDecoder().decode(VersionHeader.self, from: data))?.version
+    }
+
     static func decode(_ data: Data?) -> [ChatMessage] {
         guard let data, !data.isEmpty else { return [] }
+        // Version gate (Gate-4 WI-2 Medium): inspect the top-level version FIRST.
+        // A FUTURE version (written by a newer build) returns [] rather than
+        // attempting — and possibly succeeding partially on — an incompatible
+        // shape. `isReadable(_:)` uses the same header so the WI-2 save layer
+        // PRESERVES the stored blob instead of clobbering it.
+        if let v = headerVersion(data), v > payloadVersion { return [] }
         guard let payload = try? JSONDecoder().decode(ChatSessionPayload.self, from: data) else {
             return []
         }
-        // Version gate (Gate-4 Medium 2): `payloadVersion` is now READ — only a
-        // known version is interpreted. A FUTURE, potentially-incompatible version
-        // (written by a newer build) returns [] here rather than silently
-        // flattening unknown data; `isReadable(_:)` lets the WI-2 save layer detect
-        // this and PRESERVE the stored blob instead of clobbering it.
         guard payload.version <= payloadVersion else { return [] }
         return payload.messages.map(domain)
     }
 
-    /// Whether this build can interpret `data` (nil/empty, or a known payload
-    /// version). The WI-2 save layer checks this before re-encoding a session, so
-    /// a blob written by a future build is preserved, not overwritten.
+    /// Whether this build can SAFELY REWRITE `data` (nil/empty, genuine garbage,
+    /// or a known payload version). A future, higher-version blob is NOT readable
+    /// — even if its full message shape can't decode today — so the WI-2 save
+    /// layer preserves it. The check inspects ONLY the top-level version header
+    /// (Gate-4 WI-2 Medium: don't depend on the full shape decoding).
     static func isReadable(_ data: Data?) -> Bool {
         guard let data, !data.isEmpty else { return true }
-        guard let payload = try? JSONDecoder().decode(ChatSessionPayload.self, from: data) else {
-            return true   // unparseable/garbage → treat as readable (decodes to []), not a future version to protect
+        guard let version = headerVersion(data) else {
+            return true   // no version field → garbage / non-payload → safe to overwrite (decodes to [])
         }
-        return payload.version <= payloadVersion
+        return version <= payloadVersion
     }
 
     // MARK: - Domain ⇄ Persisted
