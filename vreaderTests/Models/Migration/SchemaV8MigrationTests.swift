@@ -30,14 +30,20 @@ struct SchemaV8MigrationTests {
         #expect(v8Names == v7Names)
     }
 
-    @Test func migrationPlanIncludesV8AsLast() {
-        let last = VReaderMigrationPlan.schemas.last
-        #expect(last != nil)
-        #expect(String(describing: last!) == String(describing: SchemaV8.self))
+    @Test func migrationPlanIncludesV8BeforeV9() {
+        // V8 is no longer the tail (SchemaV9 was appended by Feature #88 WI-1);
+        // V8's stable invariant is that it is present and ordered before V9.
+        let names = VReaderMigrationPlan.schemas.map { String(describing: $0) }
+        let v8Index = names.firstIndex(of: String(describing: SchemaV8.self))
+        let v9Index = names.firstIndex(of: String(describing: SchemaV9.self))
+        let v8 = try! #require(v8Index)
+        let v9 = try! #require(v9Index)
+        #expect(v8 < v9)
     }
 
-    @Test func migrationPlanLengthIsEight() {
-        #expect(VReaderMigrationPlan.schemas.count == 8)
+    @Test func migrationPlanContainsV8() {
+        let names = VReaderMigrationPlan.schemas.map { String(describing: $0) }
+        #expect(names.contains(String(describing: SchemaV8.self)))
     }
 
     @Test func migrationPlanHasNoExplicitStages() {

@@ -104,6 +104,7 @@ final class Book {
     @Relationship(deleteRule: .cascade) var bookmarks: [Bookmark]
     @Relationship(deleteRule: .cascade) var highlights: [Highlight]
     @Relationship(deleteRule: .cascade) var annotations: [AnnotationNote]
+    @Relationship(deleteRule: .cascade) var chatSessions: [ChatSession]
 
     /// Collections this book belongs to. Managed by BookCollection's inverse relationship.
     var bookCollections: [BookCollection]
@@ -138,6 +139,7 @@ final class Book {
         self.bookmarks = []
         self.highlights = []
         self.annotations = []
+        self.chatSessions = []
         self.bookCollections = []
     }
 
