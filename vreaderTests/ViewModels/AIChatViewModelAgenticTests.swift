@@ -12,17 +12,37 @@ import Testing
 import Foundation
 @testable import vreader
 
+/// A one-shot gate so a test can suspend the agentic tool call mid-turn (to drive
+/// the cooperative-cancel guard) and observe when the call has entered.
+private actor ToolGate {
+    private var cont: CheckedContinuation<Void, Never>?
+    private var released = false
+    private(set) var entered = false
+    func wait() async {
+        entered = true
+        if released { return }
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            if released { c.resume() } else { cont = c }
+        }
+    }
+    func release() { released = true; cont?.resume(); cont = nil }
+    var hasEntered: Bool { entered }
+}
+
 private final class ScriptedToolProvider: AIProvider, @unchecked Sendable {
     let providerName = "Scripted"
     let supports: Bool
     private var turns: [AIToolTurn]
     let throwsOnTool: Bool
+    private let gate: ToolGate?
     private(set) var streamCalled = false
 
-    init(supports: Bool = true, turns: [AIToolTurn] = [.text("agentic answer")], throwsOnTool: Bool = false) {
+    init(supports: Bool = true, turns: [AIToolTurn] = [.text("agentic answer")],
+         throwsOnTool: Bool = false, gate: ToolGate? = nil) {
         self.supports = supports
         self.turns = turns
         self.throwsOnTool = throwsOnTool
+        self.gate = gate
     }
     var supportsToolUse: Bool { supports }
     func sendRequest(_ request: AIRequest) async throws -> AIResponse { throw AIError.invalidResponse }
@@ -33,6 +53,7 @@ private final class ScriptedToolProvider: AIProvider, @unchecked Sendable {
         }
     }
     func sendToolRequest(_ request: AIToolRequest) async throws -> AIToolTurn {
+        if let gate { await gate.wait() }
         if throwsOnTool { throw AIError.invalidResponse }
         return turns.isEmpty ? .text("(end)") : turns.removeFirst()
     }
@@ -141,5 +162,28 @@ struct AIChatViewModelAgenticTests {
         #expect(vm.errorMessage == nil)
         #expect(vm.messages.last?.role == .user)   // empty agentic answer → message removed
         #expect(vm.messages.count == 1)
+    }
+
+    @Test @MainActor func agenticCancel_abortsTurn_noPartialNoError() async {
+        // Feature #87 WI-1 (Gate-2 round-2 High): agentic Stop = abort, no partial.
+        // AgenticChatDriver writes `result.finalText` after its `await`, and Swift
+        // cancellation is cooperative — a cancelled task can return normally. The
+        // post-`await` guard must prevent the cancelled turn from landing a reply.
+        let gate = ToolGate()
+        let provider = ScriptedToolProvider(turns: [.text("should not land")], gate: gate)
+        let vm = await makeSUT(provider: provider, registry: AIToolRegistry([NoopTool()]))
+
+        let send = Task { @MainActor in await vm.sendMessage("q") }
+        // Wait until the agentic tool call has parked on the gate (turn in flight).
+        while await gate.hasEntered == false { await Task.yield() }
+
+        vm.cancelStreaming()      // Stop mid-turn
+        await gate.release()      // let the driver return normally (cooperative cancel)
+        await send.value
+
+        #expect(vm.errorMessage == nil, "agentic Stop is not an error")
+        #expect(vm.messages.last?.role == .user, "no agentic reply lands after Stop")
+        #expect(vm.messages.count == 1, "the empty placeholder is removed; only the user msg remains")
+        #expect(vm.isLoading == false)
     }
 }

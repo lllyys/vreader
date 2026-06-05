@@ -110,6 +110,7 @@
 		0F2C1D4B2C4B0377F4946E12 /* BilingualCSSInjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FF4B27402111C6B812D565E /* BilingualCSSInjectionTests.swift */; };
 		0F753635DD7185A076DE4196 /* SchemaV5.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71A6667FB5A4B6534854FD37 /* SchemaV5.swift */; };
 		0FC8E41F85E5BF4E60834E77 /* DebugReaderProbeAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4184F6CBC1069C92654BCB19 /* DebugReaderProbeAdapterTests.swift */; };
+		0FDA2E710B308C43DA57EEBA /* AIChatViewModel+Streaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AF7DE90554FB3C0C434EEF /* AIChatViewModel+Streaming.swift */; };
 		100386D17F552B073DDBD696 /* BilingualAIReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68FE9266FB938B801CBD71C9 /* BilingualAIReadinessTests.swift */; };
 		10835FE4B33B176F7668ADF7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1F9542255A6791C9BCB034DB /* Assets.xcassets */; };
 		10D0E47D5358AADBB9223B9D /* legado_source_with_unknown_fields.json in Resources */ = {isa = PBXBuildFile; fileRef = 6B4F95A22D8731A420F20CB2 /* legado_source_with_unknown_fields.json */; };
@@ -1099,6 +1100,7 @@
 		B086340BE996C111A4B374BD /* UnifiedMDTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1EF16A1A352B2C6BAE84556 /* UnifiedMDTests.swift */; };
 		B08F762F1EA363C6B0D91FDD /* ReadiumEPUBHost+BilingualLoading.swift in Sources */ = {isa = PBXBuildFile; fileRef = 538847189108CD32041C570F /* ReadiumEPUBHost+BilingualLoading.swift */; };
 		B0EF6095B892F032F27CB690 /* LibraryAccessibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24D3FC7488318277468A7F0 /* LibraryAccessibilityTests.swift */; };
+		B0FDB9426F0DB83151F4D050 /* AIChatComposerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5886DA832D8EF50079E36054 /* AIChatComposerState.swift */; };
 		B15D8D7E5117125033EC60A2 /* ChapterSegmenterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 999A100638E91D93F3353B66 /* ChapterSegmenterTests.swift */; };
 		B1A8FA2FDB410239A5DA8FD4 /* AISettingsSectionRestyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D67D4978B5D27755900D2DE /* AISettingsSectionRestyleTests.swift */; };
 		B1B9E936492D58B0768C0785 /* TXTTextExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8707DA3A6FC024EAC4F63E76 /* TXTTextExtractorTests.swift */; };
@@ -2007,6 +2009,7 @@
 		4630258E354B2D34ADB23182 /* WebDAVProfileListViewModelEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProfileListViewModelEditorTests.swift; sourceTree = "<group>"; };
 		469230212394815593F6047E /* xmlwriter.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = xmlwriter.c; sourceTree = "<group>"; };
 		469B267E0D3DB05D1D8F530A /* FoliateHighlightJSBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateHighlightJSBridgeTests.swift; sourceTree = "<group>"; };
+		46AF7DE90554FB3C0C434EEF /* AIChatViewModel+Streaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+Streaming.swift"; sourceTree = "<group>"; };
 		46BCC142F6FF2ABE9B5BA64B /* PositionPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionPersistenceTests.swift; sourceTree = "<group>"; };
 		46C22F30DF9F05C20CF8DDBC /* AITypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITypes.swift; sourceTree = "<group>"; };
 		470BBE13ED7BCDD6E60D3400 /* SchemaV3.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaV3.swift; sourceTree = "<group>"; };
@@ -2136,6 +2139,7 @@
 		582AD3C3AF9773965AC0340F /* LibraryView+Body.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LibraryView+Body.swift"; sourceTree = "<group>"; };
 		584B96C4075536A21E49E647 /* BilingualOffsetRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualOffsetRouterTests.swift; sourceTree = "<group>"; };
 		58705D22AE9F6101164D5FA3 /* PDFViewBridgeThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFViewBridgeThemeTests.swift; sourceTree = "<group>"; };
+		5886DA832D8EF50079E36054 /* AIChatComposerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatComposerState.swift; sourceTree = "<group>"; };
 		58CB10F386B36EF83C36873F /* FoliateJSEscaper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateJSEscaper.swift; sourceTree = "<group>"; };
 		58E49BCEDC674BC5776103CE /* SearchTokenizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTokenizer.swift; sourceTree = "<group>"; };
 		58F5ACDA719E20E4BFA9BAB3 /* FoliateReaderContainerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateReaderContainerViewTests.swift; sourceTree = "<group>"; };
@@ -4259,6 +4263,7 @@
 			isa = PBXGroup;
 			children = (
 				6A5928551FF9FBB8D2E87E6F /* AIAssistantView.swift */,
+				5886DA832D8EF50079E36054 /* AIChatComposerState.swift */,
 				BA0216684C6AC6F1F2DA5EF4 /* AIChatMessageRow.swift */,
 				539FEE4A23AFA226048A12A4 /* AIChatView.swift */,
 				4B55B710BEC6ADA4EE00C594 /* AIChatView+Composer.swift */,
@@ -4646,6 +4651,7 @@
 			children = (
 				46221600B62F5482365B0484 /* AIAssistantViewModel.swift */,
 				206F4BCC7294731E8A3A82DB /* AIChatViewModel.swift */,
+				46AF7DE90554FB3C0C434EEF /* AIChatViewModel+Streaming.swift */,
 				43809A2F181DF2BBEAAD50C5 /* AIProviderPickerViewModel.swift */,
 				82B992B24F86DF8CA23E1215 /* AITranslationViewModel.swift */,
 				7A980DB0017049401DAB3E93 /* AnnotationListViewModel.swift */,
@@ -6622,9 +6628,11 @@
 				384E9916435C82876752D9D9 /* AIAssistantView.swift in Sources */,
 				99456D2FCC39AA83E0B43C65 /* AIAssistantViewModel.swift in Sources */,
 				48B85C7A9B1F2E8BDEA9F2D2 /* AIChatAgenticSupport.swift in Sources */,
+				B0FDB9426F0DB83151F4D050 /* AIChatComposerState.swift in Sources */,
 				56A9335B5F44D301240C81B7 /* AIChatMessageRow.swift in Sources */,
 				5C7330D1B5481B25BA637DA7 /* AIChatView+Composer.swift in Sources */,
 				8E936BF32CF0850398C9D742 /* AIChatView.swift in Sources */,
+				0FDA2E710B308C43DA57EEBA /* AIChatViewModel+Streaming.swift in Sources */,
 				C8AC5FD914F26F89DA69AA8C /* AIChatViewModel.swift in Sources */,
 				4CC9567091E0CABFDD800F6C /* AIConfiguration.swift in Sources */,
 				2AD43547691478569AA638EB /* AIConfigurationStore.swift in Sources */,

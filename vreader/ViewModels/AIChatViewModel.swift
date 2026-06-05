@@ -24,10 +24,20 @@ final class AIChatViewModel {
     // MARK: - Published State
 
     /// Full conversation history (for display).
-    private(set) var messages: [ChatMessage] = []
+    /// `internal(set)` so the streaming extension (`+Streaming`) can mutate it.
+    internal(set) var messages: [ChatMessage] = []
 
     /// Whether a request is currently in flight.
-    private(set) var isLoading: Bool = false
+    /// `internal(set)` so the streaming extension can clear it on cancel.
+    internal(set) var isLoading: Bool = false
+
+    // Feature #87 WI-1: the in-flight streaming task + an operation counter for
+    // the resend race guard. Stored here (extensions cannot add stored
+    // properties); `@ObservationIgnored` keeps them out of SwiftUI observation
+    // (they are internal plumbing, not rendered state). Mutated by the launcher
+    // + cancel API in `AIChatViewModel+Streaming.swift`.
+    @ObservationIgnored var streamTask: Task<Void, Never>?
+    @ObservationIgnored var opCounter: UInt64 = 0
 
     /// Error message from the last failed request, nil if no error.
     var errorMessage: String?
@@ -123,12 +133,13 @@ final class AIChatViewModel {
 
     // MARK: - Dependencies
 
-    private let aiService: AIService
+    // `internal` (not `private`) so the streaming extension can reach them.
+    let aiService: AIService
 
     /// Feature #91: live feature-flag source, so the agentic path re-checks the
     /// CURRENT `agenticTools` value each send (a mid-session OFF flip falls back to
     /// streaming — Gate-4 Medium), not a value latched at construction.
-    private let featureFlags: FeatureFlags
+    let featureFlags: FeatureFlags
 
     /// Feature #91: the agentic tool registry. nil/empty (or a non-tool provider, or
     /// the flag OFF) → the chat uses the existing streaming path unchanged. The
@@ -171,171 +182,18 @@ final class AIChatViewModel {
 
     // MARK: - Actions
 
-    /// Sends a user message and streams the AI response incrementally.
-    /// Empty or whitespace-only messages are silently ignored.
-    func sendMessage(_ text: String) async {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        // Clear previous error
-        errorMessage = nil
-
-        // Add user message to history
-        let userMessage = ChatMessage(role: .user, content: trimmed)
-        messages.append(userMessage)
-
-        isLoading = true
-        defer { isLoading = false }
-
-        // Feature #86 WI-5b: the Whole-book scope reads on the FIRST question
-        // ("reads on your next question"). Trigger the on-demand read and await it
-        // so the digest is folded into `bookContext` before the answer is built.
-        if scope == .wholeBook, let retrieval = wholeBookRetrieval, !retrieval.isReady {
-            await onWholeBookReadRequested?()
-        }
-
-        // Feature #86 WI-6: SNAPSHOT the citations the context drew on, AFTER any
-        // whole-book read (so the snapshot reflects the digest) but BEFORE the
-        // async stream — so a scope/source change mid-send can't mis-stamp the reply.
-        let citationSnapshot = pendingCitations
-
-        // Build context from conversation history (sliding window)
-        let contextText = buildContextText()
-
-        let request = AIRequest(
-            actionType: .questionAnswer,
-            bookFingerprint: bookFingerprint,
-            locator: nil,
-            contextText: contextText,
-            userPrompt: trimmed,
-            targetLanguage: nil,
-            promptVersion: "v1"
-        )
-
-        do {
-            // Create an empty assistant message (stamped with the citation snapshot)
-            // for incremental streaming.
-            let assistantMessage = ChatMessage(role: .assistant, content: "", citations: citationSnapshot)
-            messages.append(assistantMessage)
-            let assistantIndex = messages.count - 1
-
-            // Feature #91: when `agenticTools` is on (live) AND a non-empty registry is
-            // injected, resolve the provider ONCE. If it supports tool-use, run the
-            // agentic loop; otherwise stream through the SAME pinned config (no second
-            // resolution — Gate-4 Medium). Otherwise the default streaming path.
-            if featureFlags.agenticTools, let registry = agenticRegistry, !registry.isEmpty {
-                let (config, supportsToolUse) = try await aiService.resolveToolProvider()
-                if supportsToolUse {
-                    try await runAgenticTurn(assistantIndex: assistantIndex, config: config, registry: registry)
-                } else {
-                    try await consumeStream(
-                        aiService.streamRequest(request, using: config), into: assistantIndex)
-                }
-            } else {
-                try await consumeStream(aiService.streamRequest(request), into: assistantIndex)
-            }
-        } catch let aiError as AIError {
-            // Remove empty assistant message if it was added
-            if let last = messages.last, last.role == .assistant && last.content.isEmpty {
-                messages.removeLast()
-            }
-            errorMessage = aiError.localizedDescription
-        } catch {
-            // Remove empty assistant message if it was added
-            if let last = messages.last, last.role == .assistant && last.content.isEmpty {
-                messages.removeLast()
-            }
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    /// Consume a stream into the assistant message, removing it if no content
-    /// arrived (the historical streaming behavior, factored out so the agentic
-    /// fallback shares it).
-    private func consumeStream(
-        _ stream: AsyncThrowingStream<AIStreamChunk, Error>, into assistantIndex: Int
-    ) async throws {
-        for try await chunk in stream {
-            messages[assistantIndex].content += chunk.text
-        }
-        if messages[assistantIndex].content.isEmpty {
-            messages.remove(at: assistantIndex)
-        }
-    }
-
-    /// Feature #91: run the bounded agentic loop through the PINNED `config` and
-    /// write the single final answer into the assistant message. Suppresses the
-    /// "Drew on" citation stamp on a tool-driven reply (the pre-send snapshot
-    /// doesn't reflect what tools read — Gate-2 Medium 3). Throws propagate to
-    /// `sendMessage`'s catch, which clears the empty assistant message.
-    private func runAgenticTurn(
-        assistantIndex: Int, config: ResolvedAIProviderConfig, registry: AIToolRegistry
-    ) async throws {
-        // The empty assistant placeholder appended above is dropped by the mapper,
-        // so the history ends on the user's prompt; the current book's UNTRUSTED
-        // context rides as a leading user turn.
-        var history = AIChatHistoryMapper.toolTurns(from: messages, window: contextWindowSize)
-        if let prelude = AIChatHistoryMapper.contextPrelude(bookContext: bookContext) {
-            history.insert(prelude, at: 0)
-        }
-        let result = try await AgenticChatDriver().run(
-            systemPrompt: AIChatHistoryMapper.systemPrompt(),
-            history: history,
-            registry: registry,
-            provider: AIServiceToolUseAdapter(service: aiService, config: config),
-            maxTokens: config.maxTokens)
-
-        messages[assistantIndex].content = result.finalText
-        if result.usedTools {
-            messages[assistantIndex].citations = []
-        }
-        if messages[assistantIndex].content.isEmpty {
-            messages.remove(at: assistantIndex)
-        }
-    }
-
-    /// Clears the entire conversation history and resets state.
+    /// Clears the entire conversation history and resets state. Feature #87 WI-1:
+    /// cancels any in-flight stream FIRST (combined with id-based writes in the
+    /// streaming extension, a mid-flight clear cannot index-corrupt the thread).
     func clearHistory() {
+        cancelStreaming()
         messages = []
         isLoading = false
         errorMessage = nil
     }
 
-    // MARK: - Private
-
-    /// Builds a serialized context string from the recent conversation history.
-    /// Uses the sliding window to limit context size.
-    /// When `bookContext` is set, prepends it as a "[Book Context]" section.
-    private func buildContextText() -> String {
-        var parts: [String] = []
-
-        // Prepend book context if available
-        if let ctx = bookContext, !ctx.isEmpty {
-            parts.append("[Book Context]\n\(ctx)")
-        }
-
-        let windowMessages = recentMessages()
-        if !windowMessages.isEmpty {
-            let historyText = windowMessages.map { msg in
-                let roleLabel: String
-                switch msg.role {
-                case .user: roleLabel = "User"
-                case .assistant: roleLabel = "Assistant"
-                case .system: roleLabel = "System"
-                }
-                return "\(roleLabel): \(msg.content)"
-            }.joined(separator: "\n")
-            parts.append(historyText)
-        }
-
-        return parts.joined(separator: "\n\n")
-    }
-
-    /// Returns the most recent messages within the context window size.
-    private func recentMessages() -> [ChatMessage] {
-        if messages.count <= contextWindowSize {
-            return messages
-        }
-        return Array(messages.suffix(contextWindowSize))
-    }
+    // The streaming + cancellation concern (sendMessage launcher, runSend,
+    // cancelStreaming, consumeStream, runAgenticTurn, context builders, and the
+    // id-based write helper) lives in `AIChatViewModel+Streaming.swift` to keep
+    // this base file under the ~300-line guide.
 }

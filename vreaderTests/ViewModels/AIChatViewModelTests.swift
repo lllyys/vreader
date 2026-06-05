@@ -551,6 +551,251 @@ struct AIChatViewModelTests {
         #expect(vm.errorMessage == nil, "Error should clear on successful send")
         #expect(vm.messages.count == 3, "Should have: Hello, Hello again, Hi there!")
     }
+
+    // MARK: - Feature #87 WI-1: Chat cancellation primitive
+
+    /// Builds a VM wired to a `GatedChatAIProvider` so a test can stream a
+    /// partial reply and pin exactly when the (cancelled) producer would emit
+    /// its remaining chunk.
+    @MainActor
+    private func makeGatedSUT(
+        provider: GatedChatAIProvider,
+        bookFingerprint: DocumentFingerprint? = nil
+    ) -> AIChatViewModel {
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .aiAssistant)
+        let service = AIService(
+            featureFlags: flags,
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            keychainService: WI11TestHelpers.makeKeychainService(),
+            provider: provider
+        )
+        return AIChatViewModel(
+            aiService: service,
+            bookFingerprint: bookFingerprint,
+            contextWindowSize: 10
+        )
+    }
+
+    @Test @MainActor func sendMessage_thenCancelStreaming_keepsPartial() async {
+        // The view's pattern: fire-and-forget the launcher Task, then cancel.
+        let gated = GatedChatAIProvider()
+        gated.firstChunk = "partial reply "
+        gated.secondChunk = "that should never land"
+        let vm = makeGatedSUT(provider: gated)
+
+        let send = Task { @MainActor in await vm.sendMessage("Explain this") }
+
+        // Wait until the first chunk has streamed into the assistant message.
+        while vm.messages.last?.content.isEmpty ?? true { await Task.yield() }
+        #expect(vm.messages.last?.content == "partial reply ")
+
+        vm.cancelStreaming()
+        // cancelStreaming clears isLoading optimistically.
+        #expect(vm.isLoading == false)
+
+        // Release the now-stale producer; its second chunk must be discarded.
+        await gated.releaseGate(callIndex: 0)
+        await send.value
+
+        #expect(vm.messages.count == 2)
+        #expect(vm.messages.last?.role == .assistant)
+        #expect(vm.messages.last?.content == "partial reply ",
+                "the streamed-so-far partial must be kept; the post-cancel chunk dropped")
+        #expect(vm.isLoading == false)
+        #expect(vm.errorMessage == nil, "a user stop is not an error")
+    }
+
+    @Test @MainActor func cancelStreaming_beforeFirstChunk_removesEmptyAssistantPlaceholder() async {
+        let gated = GatedChatAIProvider()
+        gated.withholdFirstChunk = true   // nothing streams until the gate releases
+        let vm = makeGatedSUT(provider: gated)
+
+        let send = Task { @MainActor in await vm.sendMessage("Hi") }
+
+        // Wait until the empty assistant placeholder has been appended.
+        while vm.messages.count < 2 { await Task.yield() }
+        #expect(vm.messages.last?.content.isEmpty == true)
+
+        vm.cancelStreaming()
+        await gated.releaseGate(callIndex: 0)   // let the cancelled producer unwind
+        await send.value
+
+        // The empty placeholder is removed; the user message remains.
+        #expect(vm.messages.count == 1)
+        #expect(vm.messages.first?.role == .user)
+        #expect(vm.messages.first?.content == "Hi")
+        #expect(vm.isLoading == false)
+        #expect(vm.errorMessage == nil)
+    }
+
+    @Test @MainActor func cancelStreaming_noActiveStream_isNoOp() {
+        let (vm, _) = makeSUT()
+        // Nothing in flight — must not crash or mutate state.
+        vm.cancelStreaming()
+        #expect(vm.messages.isEmpty)
+        #expect(vm.isLoading == false)
+        #expect(vm.errorMessage == nil)
+    }
+
+    @Test @MainActor func resendDoesNotClobberLoading() async {
+        // op1 in flight; op2 supersedes it. When op1's now-stale task finally
+        // unwinds, its teardown must NOT clobber op2's isLoading.
+        let gated = GatedChatAIProvider()
+        let vm = makeGatedSUT(provider: gated)
+
+        let first = Task { @MainActor in await vm.sendMessage("First") }
+        // op1 reached the provider (first chunk streamed into the assistant msg).
+        while await gated.streamRequestCallCount < 1 { await Task.yield() }
+        while vm.messages.last?.content.isEmpty ?? true { await Task.yield() }
+        #expect(vm.isLoading == true)
+
+        // op2 supersedes op1 (sendMessage cancels the in-flight task first).
+        let second = Task { @MainActor in await vm.sendMessage("Second") }
+        while await gated.streamRequestCallCount < 2 { await Task.yield() }
+        #expect(vm.isLoading == true)
+
+        // Release op1's stale producer (callIndex 0) FIRST; its late teardown
+        // must be ignored (opId != opCounter).
+        await gated.releaseGate(callIndex: 0)
+        await first.value
+        #expect(vm.isLoading == true, "the superseded op's teardown must not clear op2's isLoading")
+
+        // Now let op2 finish (callIndex 1).
+        await gated.releaseGate(callIndex: 1)
+        await second.value
+        #expect(vm.isLoading == false)
+    }
+
+    @Test @MainActor func clearHistory_midStream_cancelsAndDoesNotCorrupt() async {
+        let gated = GatedChatAIProvider()
+        let vm = makeGatedSUT(provider: gated)
+
+        let send = Task { @MainActor in await vm.sendMessage("Question") }
+        while vm.messages.last?.content.isEmpty ?? true { await Task.yield() }
+
+        vm.clearHistory()
+        #expect(vm.messages.isEmpty)
+        #expect(vm.isLoading == false)
+        #expect(vm.errorMessage == nil)
+
+        // Let the cancelled producer unwind — no crash, history stays empty.
+        await gated.releaseGate(callIndex: 0)
+        await send.value
+        #expect(vm.messages.isEmpty)
+        #expect(vm.isLoading == false)
+    }
+
+    @Test @MainActor func cancelStreaming_duringWholeBookPreRead_clearsLoadingImmediately_landsNoReply() async {
+        // .wholeBook scope awaits `onWholeBookReadRequested` BEFORE the provider
+        // request. A Stop during that pre-read must clear isLoading immediately
+        // and land NO assistant reply (the post-await guard holds).
+        let gated = GatedChatAIProvider()
+        let vm = makeGatedSUT(provider: gated)
+
+        // Drive the .wholeBook pre-read branch: scope == .wholeBook + a not-ready
+        // retrieval VM + a gated read closure.
+        let readGate = ChatStreamGate()
+        vm.wholeBookRetrieval = WholeBookRetrievalViewModel()
+        vm.onWholeBookReadRequested = { await readGate.waitForRelease() }
+        vm.setScope(.wholeBook)
+
+        let send = Task { @MainActor in await vm.sendMessage("Summarize the whole book") }
+        // Wait until the send is parked on the pre-read await (isLoading true).
+        while vm.isLoading == false { await Task.yield() }
+
+        vm.cancelStreaming()
+        #expect(vm.isLoading == false, "Stop during pre-read clears isLoading immediately")
+
+        // Release the pre-read; the cancelled task's post-await guard must prevent
+        // any provider call / assistant reply.
+        await readGate.release()
+        await send.value
+
+        let providerCalls = await gated.streamRequestCallCount
+        #expect(providerCalls == 0, "no provider request after a pre-read Stop")
+        let assistantReplies = vm.messages.filter { $0.role == .assistant && !$0.content.isEmpty }
+        #expect(assistantReplies.isEmpty, "no assistant reply lands after a pre-read Stop")
+        #expect(vm.isLoading == false)
+        #expect(vm.errorMessage == nil)
+    }
+
+    @Test @MainActor func cancelledOpErroring_doesNotSurfaceStaleError() async {
+        // Gate-4 High: cooperative cancellation also applies to the ERROR catch
+        // arms. A cancelled op whose provider throws a NON-CancellationError (a late
+        // network/provider failure) must NOT surface `errorMessage` — "a user stop
+        // is not an error". Drive: stream a partial, cancel, then let the gated
+        // stream finish-throwing; assert no error surfaces and the partial is kept.
+        let gated = GatedChatAIProvider()
+        gated.firstChunk = "partial "
+        gated.errorAfterGate = AIError.networkError("late provider failure")
+        let vm = makeGatedSUT(provider: gated)
+
+        let send = Task { @MainActor in await vm.sendMessage("Hi") }
+        while vm.messages.last?.content.isEmpty ?? true { await Task.yield() }   // first chunk landed
+
+        vm.cancelStreaming()                    // cancel mid-stream
+        await gated.releaseGate(callIndex: 0)   // gate releases → stream finishes THROWING
+        await send.value
+
+        #expect(vm.errorMessage == nil,
+                "a cancelled op's late provider error must not surface (Gate-4 High)")
+        #expect(vm.isLoading == false)
+        #expect(vm.messages.last?.content == "partial ", "the partial reply is kept on cancel")
+    }
+
+    @Test @MainActor func supersededOpErroring_doesNotSurfaceStaleError() async {
+        // Gate-4 r2 Medium: pins the RESEND path through the catch-arm guard — a
+        // superseded op whose provider throws must not surface `errorMessage` while
+        // a newer op is in flight.
+        let gated = GatedChatAIProvider()
+        gated.firstChunk = "op1 "
+        gated.errorAfterGate = AIError.networkError("op1 late failure")
+        let vm = makeGatedSUT(provider: gated)
+
+        let t1 = Task { @MainActor in await vm.sendMessage("first") }
+        while await gated.streamRequestCallCount < 1 { await Task.yield() }
+        while vm.messages.last?.content.isEmpty ?? true { await Task.yield() }   // op1 streamed
+
+        // op2 supersedes op1 (cancels op1's task + bumps opCounter).
+        let t2 = Task { @MainActor in await vm.sendMessage("second") }
+        while await gated.streamRequestCallCount < 2 { await Task.yield() }
+
+        // Release op1's now-stale gate → op1's stream finishes-throwing.
+        await gated.releaseGate(callIndex: 0)
+        await t1.value
+
+        #expect(vm.errorMessage == nil,
+                "a superseded op's late provider error must not surface (catch-arm guard)")
+
+        // Clean up op2 (it errors as the current op — fine, the assertion is done).
+        await gated.releaseGate(callIndex: 1)
+        await t2.value
+    }
+}
+
+// MARK: - ComposerSendState (feature #87 WI-1)
+
+@Suite("ComposerSendState")
+struct ComposerSendStateTests {
+
+    @Test(arguments: [
+        // (isLoading, hasInput, isComposerDisabled, expected)
+        (true,  true,  false, ComposerSendState.stop),     // loading → stop regardless
+        (true,  false, false, ComposerSendState.stop),     // loading wins even w/o input
+        (true,  true,  true,  ComposerSendState.stop),     // loading wins even when disabled
+        (false, true,  false, ComposerSendState.send),     // has input, not disabled → send
+        (false, false, false, ComposerSendState.disabled), // no input → disabled
+        (false, true,  true,  ComposerSendState.disabled), // composer disabled → disabled
+        (false, false, true,  ComposerSendState.disabled), // no input + disabled → disabled
+    ])
+    func resolve(_ isLoading: Bool, _ hasInput: Bool, _ isComposerDisabled: Bool,
+                 _ expected: ComposerSendState) {
+        #expect(ComposerSendState.resolve(
+            isLoading: isLoading,
+            hasInput: hasInput,
+            isComposerDisabled: isComposerDisabled) == expected)
+    }
 }
 
 // MARK: - ChatMessage Tests
@@ -629,6 +874,131 @@ final class StubChatAIProvider: AIProvider, @unchecked Sendable {
             }
             continuation.yield(AIStreamChunk(text: response.content, isComplete: true))
             continuation.finish()
+        }
+    }
+}
+
+// MARK: - GatedChatAIProvider (feature #87 WI-1)
+
+/// A single-shot gate (one continuation) that a test releases to let a parked
+/// stream producer proceed. One instance PER `streamRequest` call so two
+/// overlapping streams (resend) never share/clobber a continuation. Safe to
+/// release before or after the producer parks.
+private actor ChatStreamGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released: Bool
+
+    init(preReleased: Bool = false) { released = preReleased }
+
+    func release() {
+        if let continuation {
+            self.continuation = nil
+            continuation.resume()
+        } else {
+            released = true
+        }
+    }
+
+    func waitForRelease() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            if released {
+                released = false
+                cont.resume()
+            } else {
+                continuation = cont
+            }
+        }
+    }
+}
+
+/// The actor that owns the per-call gates for `GatedChatAIProvider`, so a test
+/// can release each `streamRequest` call's gate independently and in a pinned
+/// order (mirrors `WI3TranslationGate`, but gates a STREAM's chunks).
+private actor ChatStreamGateRegistry {
+    private var gates: [Int: ChatStreamGate] = [:]
+    /// Releases that arrived BEFORE their call registered (Gate-4 r2 Medium: a
+    /// release of an unregistered index must not be lost, else the producer parks
+    /// forever and the test hangs).
+    private var pendingReleases: Set<Int> = []
+    private(set) var callCount = 0
+
+    /// Registers a new stream call and returns its 0-based index + its gate. If a
+    /// release for this index already arrived, the gate is created pre-released.
+    func registerCall() -> (index: Int, gate: ChatStreamGate) {
+        let index = callCount
+        callCount += 1
+        let gate = ChatStreamGate(preReleased: pendingReleases.remove(index) != nil)
+        gates[index] = gate
+        return (index, gate)
+    }
+
+    /// Releases the gate for `index`; if the call hasn't registered yet, the
+    /// release is buffered and applied at registration (tolerant of order).
+    func release(callIndex index: Int) async {
+        if let gate = gates[index] {
+            await gate.release()
+        } else {
+            pendingReleases.insert(index)
+        }
+    }
+}
+
+/// A chat provider whose `streamRequest` yields ONE chunk immediately, then
+/// suspends on a PER-CALL actor gate until `releaseGate(callIndex:)` is called —
+/// so a test can stream a partial reply, cancel mid-stream, and deterministically
+/// control when each (possibly cancelled) producer would emit its second chunk.
+/// No `Task.sleep`. `releaseNextGate()` is a convenience that releases gates in
+/// call order for the single-stream tests.
+final class GatedChatAIProvider: AIProvider, @unchecked Sendable {
+    let providerName = "GatedChat"
+
+    /// Text of the first (pre-gate) chunk.
+    var firstChunk: String = "partial "
+    /// Text of the second (post-gate) chunk — only reached if the consumer is
+    /// still alive when the gate releases.
+    var secondChunk: String = "rest"
+    /// When true the first chunk is also withheld until the gate releases, so a
+    /// test can cancel BEFORE any chunk lands.
+    var withholdFirstChunk: Bool = false
+    /// When set, the stream FINISHES THROWING this error after the gate releases
+    /// (instead of yielding `secondChunk`) — used to drive the cooperative-cancel
+    /// stale-error race (Gate-4 High): a cancelled/superseded op's late provider
+    /// error must not surface.
+    var errorAfterGate: Error?
+
+    private let registry = ChatStreamGateRegistry()
+
+    /// The number of `streamRequest` calls observed so far.
+    var streamRequestCallCount: Int { get async { await registry.callCount } }
+
+    /// Releases the gate for the given call index (0-based).
+    func releaseGate(callIndex index: Int) async { await registry.release(callIndex: index) }
+
+    func sendRequest(_ request: AIRequest) async throws -> AIResponse {
+        throw AIError.invalidResponse
+    }
+
+    func streamRequest(_ request: AIRequest) -> AsyncThrowingStream<AIStreamChunk, Error> {
+        let registry = self.registry
+        let first = firstChunk
+        let second = secondChunk
+        let withholdFirst = withholdFirstChunk
+        let errAfter = errorAfterGate
+        return AsyncThrowingStream { continuation in
+            Task {
+                let (_, gate) = await registry.registerCall()
+                if withholdFirst {
+                    await gate.waitForRelease()
+                    if let errAfter { continuation.finish(throwing: errAfter); return }
+                    continuation.yield(AIStreamChunk(text: first, isComplete: false))
+                } else {
+                    continuation.yield(AIStreamChunk(text: first, isComplete: false))
+                    await gate.waitForRelease()
+                    if let errAfter { continuation.finish(throwing: errAfter); return }
+                }
+                continuation.yield(AIStreamChunk(text: second, isComplete: true))
+                continuation.finish()
+            }
         }
     }
 }

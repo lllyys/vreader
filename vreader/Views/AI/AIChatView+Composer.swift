@@ -59,19 +59,20 @@ extension AIChatView {
             .padding(.leading, 14)
             .padding(.vertical, 6)
 
+            let sendState = composerSendState
             Button {
-                sendCurrentMessage()
+                switch sendState {
+                case .stop: viewModel.cancelStreaming()
+                case .send: sendCurrentMessage()
+                case .disabled: break
+                }
             } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(Color(sendButtonFillColor)))
+                sendDisc(for: sendState)
             }
             .buttonStyle(.plain)
-            .disabled(!canSend)
+            .disabled(sendState == .disabled)
             .accessibilityIdentifier("chatSendButton")
-            .accessibilityLabel("Send message")
+            .accessibilityLabel(sendState == .stop ? "Stop" : "Send")
         }
         .padding(6)
         .background(Capsule().fill(Color(pillFillColor)))
@@ -95,10 +96,57 @@ extension AIChatView {
             : "Type a message\u{2026}"
     }
 
-    var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !viewModel.isLoading
-            && !viewModel.isComposerDisabled   // Feature #86 WI-5b: disabled while reading
+    /// Feature #87 WI-1: the send disc's resolved state (disabled / send / stop).
+    /// A request in flight morphs the disc into the Stop control.
+    var composerSendState: ComposerSendState {
+        ComposerSendState.resolve(
+            isLoading: viewModel.isLoading,
+            hasInput: !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            isComposerDisabled: viewModel.isComposerDisabled)
+    }
+
+    /// Feature #87 WI-1: the 32px send disc rendered for `state`. Three looks per
+    /// the design (`stop-control-87.md`): disabled (neutral disc, muted arrow);
+    /// send (accent disc, white `arrow.up`); stop (accent disc, white
+    /// `square.fill` + a sweeping ring overlay).
+    @ViewBuilder
+    func sendDisc(for state: ComposerSendState) -> some View {
+        ZStack {
+            Circle().fill(Color(sendDiscFillColor(for: state)))
+            switch state {
+            case .stop:
+                Image(systemName: "square.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                // The sweeping ring overlay signals an in-flight request.
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+                    .scaleEffect(0.7)
+            case .send:
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+            case .disabled:
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color(Self.secondaryContentColor(for: theme)))
+            }
+        }
+        .frame(width: 32, height: 32)
+    }
+
+    /// The send disc's fill for a given state — accent for `.send`/`.stop`, a
+    /// neutral wash for `.disabled`.
+    func sendDiscFillColor(for state: ComposerSendState) -> UIColor {
+        switch state {
+        case .disabled:
+            return theme.isDark
+                ? UIColor.white.withAlphaComponent(0.12)
+                : UIColor.black.withAlphaComponent(0.10)
+        case .send, .stop:
+            return theme.accentColor
+        }
     }
 
     /// Bug #310: the empty-state + the placeholder must read the designed
@@ -114,16 +162,6 @@ extension AIChatView {
         theme.isDark
             ? UIColor.white.withAlphaComponent(0.06)
             : UIColor.black.withAlphaComponent(0.04)
-    }
-
-    /// The send button's fill — accent when sendable, a neutral wash otherwise.
-    var sendButtonFillColor: UIColor {
-        guard canSend else {
-            return theme.isDark
-                ? UIColor.white.withAlphaComponent(0.12)
-                : UIColor.black.withAlphaComponent(0.10)
-        }
-        return theme.accentColor
     }
 
     func sendCurrentMessage() {
