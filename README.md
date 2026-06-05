@@ -64,7 +64,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 ### AI
 
 - **Summarization** — scoped summaries (Section / Chapter / Book-so-far) via OpenAI-compatible API
-- **Chat** — Multi-turn conversation with book context
+- **Chat** — Multi-turn conversation with book context, with **switchable conversation sessions per book**: a slim session bar under the Chat tab (active conversation title + "New") opens a Conversations sheet to browse, switch, rename, and delete past threads — chat history is persisted (SwiftData) instead of a single ephemeral thread
 - **Translation** — Bilingual interlinear (9 languages) with persistent disk cache, "Translate entire book" background job, and per-chapter re-translation with provider/style override. Set up the translation provider inline from the bilingual sheet's "Set up" / "Change…" button — a scoped in-reader AI Providers list, no trip to Settings
 - **General chat** — AI chat without book context
 - **Stop control** — interrupt an in-flight AI request on any tab: the Chat composer's send disc, the Translate language pill, and the Summarize indicator each morph into a Stop control while a request is in flight (tapping aborts; a partial chat reply is kept)
