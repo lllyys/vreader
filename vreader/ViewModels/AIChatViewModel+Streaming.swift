@@ -51,6 +51,18 @@ extension AIChatViewModel {
         isLoading = false
     }
 
+    /// Feature #88 (Gate-2 High 3): the FIRST step of every session transition —
+    /// cancel the in-flight stream AND bump `opCounter` so a late provider reply
+    /// from the superseded op cannot land in (or seal) the new / deleted session.
+    /// The in-flight `runSend`'s post-await `opId == opCounter` guards then discard
+    /// its placeholder cleanup write + its settled-turn save. Distinct from
+    /// `cancelStreaming()` (the Stop button), which keeps the op id stable so the
+    /// stopped turn's partial is still saved as a real turn.
+    func cancelStreamingForTransition() {
+        cancelStreaming()
+        opCounter &+= 1
+    }
+
     // MARK: - Send pipeline
 
     /// One send operation. `opId` tags this op so a superseded predecessor's late
@@ -64,6 +76,15 @@ extension AIChatViewModel {
 
         // Clear previous error
         errorMessage = nil
+
+        // Feature #88: if this is the first real turn of an unsaved thread, bump the
+        // session transition token NOW (synchronously, before any await) so an
+        // in-flight loadSessions fails its post-await re-check and cannot overwrite
+        // the thread this turn is starting (cold-open race, Gate-2 round-4). Snapshot
+        // the active session id so the settled-turn save only writes if the reply
+        // still belongs to the session it was sent for (streaming handoff guard).
+        noteFirstTurnStartedIfNeeded()
+        let sessionAtSend = activeSessionId
 
         // Add user message to history
         let userMessage = ChatMessage(role: .user, content: trimmed)
@@ -144,6 +165,18 @@ extension AIChatViewModel {
         // cancel-mid-stream → non-empty → kept; provider returned nothing → removed).
         if let assistant = message(withId: assistantId), assistant.content.isEmpty {
             removeMessage(withId: assistantId)
+        }
+
+        // Feature #88: persist the SETTLED turn (debounced — one write here, never
+        // per chunk). Only the CURRENT, live op writes: a superseded (resent) op
+        // must not save (opId != opCounter), and the save itself re-checks that the
+        // active session still matches the one captured at send time (a switch /
+        // new / delete mid-send cancelled this op + changed the active session, so
+        // its reply must not land in — or seal — the wrong session). A cancelled op
+        // that kept a partial reply is still a real turn worth saving, so we do NOT
+        // gate on `Task.isCancelled` here — only on op + session identity.
+        if opId == opCounter {
+            await saveSettledTurn(capturedSessionId: sessionAtSend)
         }
     }
 

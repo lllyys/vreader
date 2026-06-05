@@ -228,16 +228,24 @@ final class ReaderAICoordinator {
     /// conforms to all three). Nil when persistence isn't injected.
     private let annotationStores: (any AnnotationPersisting & HighlightPersisting & BookmarkPersisting)?
 
+    /// Feature #88: the chat-session store (the `PersistenceActor`, which conforms
+    /// to `ChatSessionPersisting`). Injected into the book-chat VM so a reader chat
+    /// persists multiple switchable conversations. Nil when no persistence is
+    /// injected (the chat stays ephemeral).
+    private let chatSessionStore: (any ChatSessionPersisting)?
+
     init(
         fallbackTitle: String,
         bookFormat: BookFormat,
         fingerprintKey: String,
-        annotationStores: (any AnnotationPersisting & HighlightPersisting & BookmarkPersisting)? = nil
+        annotationStores: (any AnnotationPersisting & HighlightPersisting & BookmarkPersisting)? = nil,
+        chatSessionStore: (any ChatSessionPersisting)? = nil
     ) {
         self.fallbackTitle = fallbackTitle
         self.bookFormat = bookFormat
         self.fingerprintKey = fingerprintKey
         self.annotationStores = annotationStores
+        self.chatSessionStore = chatSessionStore
     }
 
     /// Creates the AI ViewModels if AI features are available.
@@ -258,8 +266,19 @@ final class ReaderAICoordinator {
         translationViewModel = AITranslationViewModel(aiService: service)
 
         let fingerprint = DocumentFingerprint(canonicalKey: fingerprintKey)
-        let chatVM = AIChatViewModel(aiService: service, bookFingerprint: fingerprint)
+        let chatVM = AIChatViewModel(
+            aiService: service,
+            bookFingerprint: fingerprint,
+            chatSessionStore: chatSessionStore   // Feature #88: persisted sessions (nil ⇒ ephemeral)
+        )
         chatViewModel = chatVM
+        // Feature #88 WI-3: trigger the ONE-SHOT session load from the long-lived
+        // coordinator (idempotent + non-clobbering), NOT from `AIChatView.task`
+        // (which reruns on every Chat-tab re-entry and would clobber a fresh /
+        // unsaved thread — Gate-2 round-3). A nil store / general chat no-ops.
+        if chatSessionStore != nil {
+            Task { @MainActor [weak chatVM] in await chatVM?.loadSessions() }
+        }
         // Feature #91: when agenticTools is ON, build the agentic tool registry over
         // the persistent FTS store + the persistence actor (also a LibraryPersisting)
         // OFF-MAIN (the cold SQLite open is heavy), then inject it. A build failure

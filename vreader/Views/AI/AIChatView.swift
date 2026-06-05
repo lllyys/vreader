@@ -120,7 +120,11 @@ struct AIChatView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    viewModel.clearHistory()
+                    // Feature #88 WI-3: the former clear-history button now starts a
+                    // NEW conversation — it seals the current session (if it has
+                    // content) and resets to the empty state, instead of a destructive
+                    // wipe. The session-bar "New" button (WI-4) lands separately.
+                    Task { await viewModel.newConversation() }
                 } label: {
                     Image(systemName: "trash")
                 }

@@ -1009,7 +1009,8 @@ struct ReaderContainerView: View {
             fallbackTitle: book.title,
             bookFormat: resolvedBookFormat,
             fingerprintKey: book.fingerprintKey,
-            annotationStores: aiAnnotationStores   // Feature #86 WI-4 (nil when no persistence)
+            annotationStores: aiAnnotationStores,   // Feature #86 WI-4 (nil when no persistence)
+            chatSessionStore: persistenceActor       // Feature #88 (nil when no persistence)
         )
         // SwiftUI will apply the mutation at the end of the render pass
         DispatchQueue.main.async {

@@ -27,6 +27,43 @@ final class AIChatViewModel {
     /// `internal(set)` so the streaming extension (`+Streaming`) can mutate it.
     internal(set) var messages: [ChatMessage] = []
 
+    // MARK: - Feature #88 session state
+
+    /// The persisted session currently shown, or nil for the empty (not-yet-saved)
+    /// state. The setter is `internal` so the session lifecycle (`+Sessions`) and
+    /// the streaming save hook (`+Streaming`) — extensions that cannot add stored
+    /// properties — can update it. Drives the WI-4 session bar.
+    internal(set) var activeSessionId: UUID?
+
+    // Feature #88 session plumbing. Stored on the base class (extensions cannot add
+    // stored properties); `internal` so `+Sessions` / `+Streaming` reach them;
+    // `@ObservationIgnored` keeps them out of SwiftUI observation (internal
+    // plumbing, not rendered state — mirrors `streamTask`/`opCounter`).
+
+    /// Idempotency guard for the one-shot `loadSessions()` — once it has run for a
+    /// fingerprint key it never re-loads (a Chat-tab re-entry must not clobber a
+    /// fresh / unsaved thread).
+    @ObservationIgnored var loadedFingerprintKey: String?
+
+    /// Monotonic token bumped synchronously at the START of every session
+    /// transition (switch / new / delete) AND the lazy-create-on-first-turn path.
+    /// Each transition re-checks `token == sessionTransitionToken` after every
+    /// await before applying — so a newer transition (or a just-started turn)
+    /// supersedes an in-flight older load/switch (Gate-2 rounds 3+4).
+    @ObservationIgnored var sessionTransitionToken: UInt64 = 0
+
+    /// The session id the most-recent `switchToSession(_:)` requested, stashed
+    /// synchronously before its first await so a rapid B→C switch can detect that
+    /// an older B load was superseded (paired with the token).
+    @ObservationIgnored var requestedSessionId: UUID?
+
+    /// The messages as of the LAST successfully-settled-and-persisted turn (or a
+    /// freshly loaded session). A transition (`switch`/`new`/`delete`) seals THIS
+    /// snapshot — never the live `messages` — so a cancelled in-flight turn
+    /// (partial / empty assistant) is abandoned, not saved into the old session
+    /// (Gate-4 WI-3 High). Empty until the first turn settles.
+    @ObservationIgnored var settledMessages: [ChatMessage] = []
+
     /// Whether a request is currently in flight.
     /// `internal(set)` so the streaming extension can clear it on cancel.
     internal(set) var isLoading: Bool = false
@@ -38,6 +75,33 @@ final class AIChatViewModel {
     // + cancel API in `AIChatViewModel+Streaming.swift`.
     @ObservationIgnored var streamTask: Task<Void, Never>?
     @ObservationIgnored var opCounter: UInt64 = 0
+
+    // Feature #88 WI-3 (Gate-4 structural fix): the single serialized lane every
+    // session-mutating op runs through, so two ops can never interleave across an
+    // `await` on the @MainActor (the whole lost-message / wrong-active-session /
+    // duplicate-orphan / stuck-load interleaving-race class). Stored on the base
+    // class (extensions cannot add stored properties); `@ObservationIgnored`
+    // keeps it out of SwiftUI observation (internal plumbing).
+    @ObservationIgnored private var sessionOpChain: Task<Void, Never>?
+
+    /// Runs `body` on a single serialized lane: it waits for the prior session op
+    /// to FULLY complete (across its awaits) before running, so two
+    /// session-mutating ops can never interleave. Runs on the @MainActor; the
+    /// prior task is captured synchronously, so the ordering is the call order.
+    ///
+    /// DEADLOCK CONSTRAINT: a laned op's body must NEVER call another laned PUBLIC
+    /// op — that would `await` the current chain head (this op) and deadlock. The
+    /// internal helpers `sealCurrentSessionIfNeeded()` / `loadMostRecentRemaining`
+    /// are invoked WITHIN laned bodies, so they stay NON-laned.
+    func runSerializedSessionOp(_ body: @escaping @MainActor () async -> Void) async {
+        let prior = sessionOpChain
+        let task = Task { @MainActor in
+            await prior?.value
+            await body()
+        }
+        sessionOpChain = task
+        await task.value
+    }
 
     /// Error message from the last failed request, nil if no error.
     var errorMessage: String?
@@ -154,6 +218,17 @@ final class AIChatViewModel {
         agenticRegistry = registry
     }
 
+    /// Feature #88: chat-session persistence. `nil` ⇒ ephemeral behavior (general
+    /// chat / tests that don't exercise sessions) — `loadSessions()` no-ops and no
+    /// session is ever created/saved, so the pre-#88 single-thread flow is
+    /// unchanged. Non-nil (book chat) ⇒ multiple switchable persisted sessions.
+    /// `internal` so the `+Sessions` / `+Streaming` extensions can reach it.
+    let chatSessionStore: (any ChatSessionPersisting)?
+
+    /// The book's primitive lookup key (matches `Book.fingerprintKey`), derived
+    /// from `bookFingerprint`. Nil for general chat. The session store keys on it.
+    var bookFingerprintKey: String? { bookFingerprint?.canonicalKey }
+
     // MARK: - Init
 
     /// Creates a new chat view model.
@@ -166,18 +241,23 @@ final class AIChatViewModel {
     ///   - agenticRegistry: Feature #91 — when non-nil + non-empty AND `agenticTools`
     ///     is on AND the resolved provider supports tool-use, the chat routes through
     ///     the agentic loop.
+    ///   - chatSessionStore: Feature #88 — when non-nil (book chat), enables multiple
+    ///     switchable persisted conversations. nil (general chat / tests) keeps the
+    ///     pre-#88 ephemeral single-thread behavior.
     init(
         aiService: AIService,
         bookFingerprint: DocumentFingerprint? = nil,
         contextWindowSize: Int = 10,
         featureFlags: FeatureFlags = .shared,
-        agenticRegistry: AIToolRegistry? = nil
+        agenticRegistry: AIToolRegistry? = nil,
+        chatSessionStore: (any ChatSessionPersisting)? = nil
     ) {
         self.aiService = aiService
         self.bookFingerprint = bookFingerprint
         self.contextWindowSize = contextWindowSize
         self.featureFlags = featureFlags
         self.agenticRegistry = agenticRegistry
+        self.chatSessionStore = chatSessionStore
     }
 
     // MARK: - Actions
@@ -185,6 +265,11 @@ final class AIChatViewModel {
     /// Clears the entire conversation history and resets state. Feature #87 WI-1:
     /// cancels any in-flight stream FIRST (combined with id-based writes in the
     /// streaming extension, a mid-flight clear cannot index-corrupt the thread).
+    ///
+    /// Feature #88: this is the LOW-LEVEL clear (the cancel path). It does NOT seal
+    /// the active session — `newConversation()` (in `+Sessions`) is the session-aware
+    /// entry point that seals + resets `activeSessionId`. `clearHistory` leaves
+    /// `activeSessionId` untouched so a cancel doesn't orphan the session identity.
     func clearHistory() {
         cancelStreaming()
         messages = []
@@ -194,6 +279,9 @@ final class AIChatViewModel {
 
     // The streaming + cancellation concern (sendMessage launcher, runSend,
     // cancelStreaming, consumeStream, runAgenticTurn, context builders, and the
-    // id-based write helper) lives in `AIChatViewModel+Streaming.swift` to keep
-    // this base file under the ~300-line guide.
+    // id-based write helper) lives in `AIChatViewModel+Streaming.swift`; the
+    // Feature #88 session lifecycle (loadSessions / newConversation / switch /
+    // rename / delete + the settled-turn save hook) lives in
+    // `AIChatViewModel+Sessions.swift`, both to keep this base file under the
+    // ~300-line guide.
 }
