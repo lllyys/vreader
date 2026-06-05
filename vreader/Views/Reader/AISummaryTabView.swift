@@ -168,76 +168,10 @@ struct AISummaryTabView: View {
 
     // MARK: - Sections
 
-    /// The idle prompt — design's sparkle glyph + serif headline + a
-    /// pill primary action, re-skinned to v2 tokens.
-    @ViewBuilder
-    private var idleSection: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "sparkles")
-                .font(.system(size: 36))
-                .foregroundStyle(Color(theme.accentColor))
-                .accessibilityHidden(true)
-            Text("Summarize the current section")
-                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 16)))
-                .foregroundStyle(Color(theme.inkColor))
-            Button(action: runSummarize) {
-                Text("Summarize")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: 220)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(theme.accentColor))
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("aiSummarizeButton")
-            Spacer()
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// The loading state — while a summary is in flight the generate
-    /// control IS the Stop affordance (feature #87 WI-3, design note
-    /// "the generate/language control doubles as the stop affordance").
-    /// Per Rule 51 there is NO separate standalone stop button: the
-    /// in-flight indicator itself morphs into a tappable Stop disc (white
-    /// `square.fill` + sweeping ring, matching the Chat/Translate stop
-    /// visual); tapping it aborts via `cancelStreaming()`.
-    @ViewBuilder
-    private var loadingSection: some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Button(action: { viewModel.cancelStreaming() }) {
-                ZStack {
-                    Circle()
-                        .fill(Color(theme.accentColor))
-                    Image(systemName: "square.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                    // The sweeping ring signals the in-flight request.
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                        .scaleEffect(0.85)
-                }
-                .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("aiSummaryStopButton")
-            .accessibilityLabel("Stop")
-            Text("Generating summary\u{2026} Tap to stop")
-                .font(.system(size: 13))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(Color(theme.subColor))
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier("aiPanelLoading")
-    }
+    // The non-summary state sections (idle / loading / error /
+    // feature-disabled / consent-required + the shared `infoState`) live in
+    // `AISummaryTabView+Sections.swift` to keep this file under the ~300-line
+    // guide (Gate-4 Low). `stateBody` above routes to them.
 
     /// The completed / streaming state — the design's accent summary
     /// card with the Share + Regenerate chip footer.
@@ -246,118 +180,15 @@ struct AISummaryTabView: View {
         AISummaryCard(
             summaryText: viewModel.responseText,
             theme: theme,
+            displayMode: viewModel.summaryDisplayMode,
+            translation: viewModel.summaryTranslation,
+            targetLanguage: viewModel.summaryTargetLanguage,
             onRegenerate: runSummarize,
-            onShare: { onShare(shareText) }
+            onShare: { onShare(shareText) },
+            onRetryTranslation: { Task { await viewModel.retrySummaryTranslation() } },
+            onKeepOriginal: { viewModel.setSummaryDisplayMode(.originalOnly) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// The error state — a warning glyph + the message + a retry chip.
-    @ViewBuilder
-    private var errorSection: some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 34))
-                .foregroundStyle(Color(theme.accentColor))
-                .accessibilityHidden(true)
-            Text(errorMessage)
-                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 14)))
-                .foregroundStyle(Color(theme.inkColor))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Button(action: runSummarize) {
-                Text("Try Again")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color(theme.accentColor))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(
-                        Capsule().fill(Color(chipFillColor))
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("aiRetryButton")
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier("aiPanelError")
-    }
-
-    /// The feature-disabled state — a slashed-sparkle glyph + copy.
-    @ViewBuilder
-    private var featureDisabledSection: some View {
-        infoState(
-            systemImage: "sparkles.slash",
-            title: "AI features are currently disabled.",
-            detail: "Enable AI in Settings to use this feature.",
-            identifier: "aiPanelDisabled"
-        )
-    }
-
-    /// The consent-required state — a raised-hand glyph + a grant chip.
-    @ViewBuilder
-    private var consentRequiredSection: some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: "hand.raised")
-                .font(.system(size: 34))
-                .foregroundStyle(Color(theme.subColor))
-                .accessibilityHidden(true)
-            Text("AI features require your consent.")
-                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 14)))
-                .foregroundStyle(Color(theme.inkColor))
-                .multilineTextAlignment(.center)
-            Text("Grant consent in Settings to use AI features.")
-                .font(.system(size: 12))
-                .foregroundStyle(Color(theme.subColor))
-            Button { viewModel.grantConsent() } label: {
-                Text("Grant Consent")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(theme.accentColor))
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("aiGrantConsentButton")
-            Spacer()
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier("aiPanelConsent")
-    }
-
-    /// Shared layout for the glyph + title + detail info states.
-    @ViewBuilder
-    private func infoState(
-        systemImage: String,
-        title: String,
-        detail: String,
-        identifier: String
-    ) -> some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: systemImage)
-                .font(.system(size: 34))
-                .foregroundStyle(Color(theme.subColor))
-                .accessibilityHidden(true)
-            Text(title)
-                .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 14)))
-                .foregroundStyle(Color(theme.inkColor))
-                .multilineTextAlignment(.center)
-            Text(detail)
-                .font(.system(size: 12))
-                .foregroundStyle(Color(theme.subColor))
-                .multilineTextAlignment(.center)
-            Spacer()
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier(identifier)
     }
 
     // MARK: - Helpers
@@ -367,12 +198,6 @@ struct AISummaryTabView: View {
     /// the share-payload contract is unit-testable without a render pass.
     var shareText: String {
         viewModel.responseText
-    }
-
-    /// The current error message, if the state is `.error`.
-    private var errorMessage: String {
-        if case .error(let message) = viewModel.state { return message }
-        return ""
     }
 
     /// Re-runs the summarize action — wired to the idle / error /
@@ -404,14 +229,17 @@ struct AISummaryTabView: View {
                 scope: viewModel.selectedScope,
                 chapterBounds: chapterBounds
             )
+            // Feature #90 WI-3 (Gate-4 High): `summarize` goes through
+            // `performAction`, which resets the translation to `.none` — and the
+            // card selector maps `(translatedOnly | interlinear, .none)` back to
+            // `.original`. So a fresh / regenerated summary with Single or
+            // Bilingual already selected would render original-only until the
+            // user re-toggled the control. Kick the (re)translation here so the
+            // chosen mode applies immediately. `refreshSummaryTranslationIfNeeded`
+            // is a no-op for `.originalOnly`, and its own op-token guard drops the
+            // result if the summary was superseded meanwhile.
+            await viewModel.refreshSummaryTranslationIfNeeded()
         }
-    }
-
-    /// The neutral chip wash — design `chipBtn`.
-    private var chipFillColor: UIColor {
-        theme.isDark
-            ? UIColor.white.withAlphaComponent(0.07)
-            : UIColor.black.withAlphaComponent(0.05)
     }
 }
 #endif

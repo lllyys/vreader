@@ -32,22 +32,34 @@ struct AISummaryCard: View {
     let summaryText: String
     /// Visual-identity-v2 theme tokens for the card surface + ink.
     let theme: ReaderThemeV2
+    /// Feature #90 WI-3: how the summary is presented (original-only /
+    /// target-only / interlinear). Drives the bilingual body switch.
+    var displayMode: SummaryDisplayMode = .originalOnly
+    /// Feature #90 WI-3: the second-step translation sub-state — drives the
+    /// loading skeleton / failure recovery / translated text.
+    var translation: SummaryTranslationState = .none
+    /// Feature #90 WI-3: the bilingual target language — its name appears in the
+    /// failure heading; its script picks the CJK font for the target paragraph.
+    var targetLanguage: BilingualLanguage =
+        BilingualLanguage.all.first ?? BilingualLanguage(key: "Chinese", glyph: "中", script: .cjk)
     /// Runs when the Regenerate chip is tapped — re-runs summarize.
     var onRegenerate: () -> Void
     /// Runs when the Share chip is tapped — the tab view presents
     /// `ShareActivityView` with the summary text.
     var onShare: () -> Void
+    /// Feature #90 WI-3: re-runs ONLY the translation half (the failure card's
+    /// "Retry translation"). Defaulted so the existing single-mode call sites
+    /// (and the #65 composition tests) compile unchanged.
+    var onRetryTranslation: () -> Void = {}
+    /// Feature #90 WI-3: drops back to original-only (the failure card's
+    /// "Keep original").
+    var onKeepOriginal: () -> Void = {}
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 sparkleLabel
-                Text(summaryText)
-                    .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 15)))
-                    .lineSpacing(4)
-                    .foregroundStyle(Color(theme.inkColor))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                bilingualBody
                     .padding(.top, 10)
                 Color(theme.ruleColor)
                     .frame(height: 0.5)

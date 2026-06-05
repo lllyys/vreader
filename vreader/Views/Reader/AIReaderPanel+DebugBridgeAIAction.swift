@@ -112,6 +112,13 @@ extension AIReaderPanel {
                     scope: viewModel.selectedScope,
                     chapterBounds: chapterBounds
                 )
+                // Feature #90 WI-3 (Gate-4 round-2): mirror
+                // `AISummaryTabView.runSummarize` — `summarize` resets the
+                // translation to `.none`, so re-kick it here too, otherwise a
+                // DEBUG `ai?action=summarize` with Single/Bilingual selected
+                // (e.g. the CU-free Gate-5 verification path) would render
+                // original-only. No-op for `.originalOnly`; op-token guarded.
+                await viewModel.refreshSummaryTranslationIfNeeded()
             }
 
         case .chat(let message):
