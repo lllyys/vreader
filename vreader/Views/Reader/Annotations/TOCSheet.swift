@@ -61,6 +61,10 @@ struct TOCSheet: View {
     /// false "No bookmarks yet" empty state on first paint while the
     /// load is still in flight (Gate-4 finding).
     @State var bookmarksDidLoad = false
+    /// Feature #94 — the Contents-tab title filter query. Kept `internal`
+    /// (not `private`) so the `TOCSheet+Filter.swift` extension can read
+    /// it, same as `selectedTab` / `bookmarkVM` (Gate-2 round-2 Medium).
+    @State var filterQuery = ""
 
     init(
         bookTitle: String,
@@ -97,11 +101,14 @@ struct TOCSheet: View {
                     .padding(.horizontal, 18)
                     .padding(.top, 8)
 
-                ScrollView {
-                    switch selectedTab {
-                    case .contents:  contentsBody
-                    case .bookmarks: bookmarksBody
-                    }
+                // Feature #94 Gate-2 H2 — the scroll is split BY TAB so the
+                // Contents filter field can be PINNED (placed outside the
+                // contents list's own scroll) while the Bookmarks tab keeps
+                // its own scroll. The previous single outer `ScrollView`
+                // wrapping both tabs would have scrolled the field away.
+                switch selectedTab {
+                case .contents:  contentsBody
+                case .bookmarks: ScrollView { bookmarksBody }
                 }
             }
         }
@@ -190,7 +197,33 @@ struct TOCSheet: View {
     @ViewBuilder
     private var contentsBody: some View {
         if !tocEntries.isEmpty {
-            tocEntryList
+            // Feature #94 — the filter field is PINNED above the list
+            // (outside `tocEntryList`'s inner `ScrollView`) so it stays put
+            // while the chapter list scrolls (Gate-2 H2). It is shown only
+            // when the book ships a TOC (per the design's no-TOC suppress).
+            VStack(spacing: 0) {
+                TOCFilterField(
+                    theme: theme,
+                    query: $filterQuery,
+                    visibleCount: visibleEntries.count,
+                    totalCount: tocEntries.count
+                )
+                // Feature #94 Gate-4: keep the current chapter reachable when
+                // the query filters it out — the design's pinned "Reading" row.
+                if let pinned = pinnedCurrentEntry {
+                    PinnedCurrentRow(
+                        theme: theme,
+                        title: pinned.title,
+                        page: Self.displayPage(pinned.locator.page),
+                        onTap: { onDismiss(); onNavigate(pinned.locator) }
+                    )
+                }
+                if isFilterNoMatch {
+                    filterNoMatchBody
+                } else {
+                    tocEntryList
+                }
+            }
         } else if tocDidLoad {
             // Empty state shown only once the host's TOC build has
             // completed — a Contents tap during the build must not
@@ -213,61 +246,9 @@ struct TOCSheet: View {
         }
     }
 
-    @ViewBuilder
-    private var tocEntryList: some View {
-        // `ScrollViewReader` + per-row `.id(entry.id)` restores the
-        // auto-scroll-to-current-chapter capability feature #62 WI-5 dropped
-        // (Bug #248). The `.task(id:)` loop issues an immediate (t=0,
-        // unanimated) scroll so a materialized row lands the instant the
-        // sheet appears, then a short animated fallback ladder
-        // (`scrollRetryDelaysMilliseconds`) for the long-TOC case where the
-        // target row isn't yet built in the `LazyVStack`. Bug #282 replaced
-        // the legacy always-sleep-first schedule that crept over ~1.3s.
-        ScrollViewReader { proxy in
-            LazyVStack(spacing: 0) {
-                ForEach(Array(tocEntries.enumerated()), id: \.element.id) { index, entry in
-                    TOCContentsRow(
-                        theme: theme,
-                        chapterOrdinal: index + 1,
-                        title: entry.title,
-                        page: Self.displayPage(entry.locator.page),
-                        isCurrent: index == activeEntryIndex,
-                        // Bug #288: dismiss BEFORE navigating so the sheet is
-                        // already animating out when `currentLocator` changes —
-                        // avoids the whole-list re-instantiation + re-animation
-                        // flash that a locator change on a still-visible sheet
-                        // triggers via the `.task(id:)` ladder.
-                        onTap: { onDismiss(); onNavigate(entry.locator) }
-                    )
-                    .id(entry.id)
-                    .accessibilityIdentifier("tocRow-\(entry.id)")
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 14)
-            .task(id: currentChapterScrollTarget) {
-                guard let targetID = currentChapterScrollTarget else { return }
-                var elapsed = 0
-                for (attempt, cumulative) in Self.scrollRetryDelaysMilliseconds.enumerated() {
-                    // Sleep only the incremental gap to the next attempt so
-                    // the first (cumulative 0) attempt fires with no delay.
-                    let gap = cumulative - elapsed
-                    if gap > 0 {
-                        try? await Task.sleep(nanoseconds: UInt64(gap) * 1_000_000)
-                    }
-                    elapsed = cumulative
-                    guard !Task.isCancelled else { return }
-                    if attempt == 0 {
-                        proxy.scrollTo(targetID, anchor: .center)   // instant (Bug #282)
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            proxy.scrollTo(targetID, anchor: .center)
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Feature #94: `tocEntryList` (the filtered chapter list + its inner
+    // ScrollView + the auto-scroll ladder) lives in `TOCSheet+Filter.swift`
+    // to keep this file under the ~300-line guideline (Gate-4 file-size fix).
 
     // MARK: - Bookmarks body
 

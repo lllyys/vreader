@@ -29,11 +29,34 @@ struct TOCContentsRow: View {
     /// 1-based chapter ordinal shown right-aligned.
     let chapterOrdinal: Int
     let title: String
+    /// Feature #94 — the non-overlapping ranges of the active filter query
+    /// inside `title` (empty when not filtering). Every matched run is
+    /// tinted; the plain-`Text` fast path is taken when this is empty so
+    /// the unfiltered list pays no `AttributedString` cost.
+    let matchRanges: [Range<String.Index>]
     /// Page number — nil for formats without a page concept (TXT/MD/EPUB).
     let page: Int?
     /// True when this row is the reader's current chapter.
     let isCurrent: Bool
     let onTap: () -> Void
+
+    init(
+        theme: ReaderThemeV2,
+        chapterOrdinal: Int,
+        title: String,
+        matchRanges: [Range<String.Index>] = [],
+        page: Int?,
+        isCurrent: Bool,
+        onTap: @escaping () -> Void
+    ) {
+        self.theme = theme
+        self.chapterOrdinal = chapterOrdinal
+        self.title = title
+        self.matchRanges = matchRanges
+        self.page = page
+        self.isCurrent = isCurrent
+        self.onTap = onTap
+    }
 
     /// The current-chapter visual treatment, derived once from `theme` +
     /// `isCurrent` so the highlight decision is a single named value the
@@ -71,7 +94,7 @@ struct TOCContentsRow: View {
                     .foregroundStyle(Color(theme.subColor))
                     .frame(width: 24, alignment: .trailing)
 
-                Text(title)
+                titleText(style: style)
                     .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 16)))
                     .fontWeight(style.titleWeight)
                     .foregroundStyle(Color(style.titleColor))
@@ -90,6 +113,51 @@ struct TOCContentsRow: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// The chapter title. Plain `Text` when not filtering (no
+    /// `AttributedString` overhead); a match-tinted `AttributedString`
+    /// when the filter query matched runs in the title. The accent ink +
+    /// bold of the current-chapter row come from the `.foregroundStyle` /
+    /// `.fontWeight` modifiers on the returned `Text`, so the match tint
+    /// (background + underline) composes UNDER them (Feature #94 design).
+    @ViewBuilder
+    private func titleText(style: Style) -> some View {
+        if matchRanges.isEmpty {
+            Text(title)
+        } else {
+            Text(Self.highlightedTitle(title, matchRanges: matchRanges, accent: theme.accentColor))
+        }
+    }
+
+    /// Builds the match-tinted attributed title — every matched run gets a
+    /// 15%-opacity accent background and a 40%-opacity accent underline
+    /// (the in-text-highlight vocabulary, scaled to inline type). Marks
+    /// ALL occurrences, not just the first.
+    static func highlightedTitle(
+        _ title: String,
+        matchRanges: [Range<String.Index>],
+        accent: UIColor
+    ) -> AttributedString {
+        var attributed = AttributedString(title)
+        let tint = Color(accent).opacity(0.15)
+        let underlineUIColor = accent.withAlphaComponent(0.40)
+        for range in matchRanges {
+            // Map the `String.Index` range onto the `AttributedString`.
+            guard let lower = AttributedString.Index(range.lowerBound, within: attributed),
+                  let upper = AttributedString.Index(range.upperBound, within: attributed)
+            else { continue }
+            // Background tint resolves through the SwiftUI attribute scope.
+            attributed[lower..<upper].backgroundColor = tint
+            // The colored underline lives in the UIKit attribute scope —
+            // `Text(AttributedString)` honours it and it carries its own
+            // colour independent of the run's foreground (the design's
+            // 40%-accent underline composes under the current-row accent
+            // ink + bold).
+            attributed[lower..<upper].uiKit.underlineStyle = .single
+            attributed[lower..<upper].uiKit.underlineColor = underlineUIColor
+        }
+        return attributed
     }
 }
 
@@ -164,5 +232,55 @@ struct TOCBookmarkRow: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Feature #94 — the pinned "Reading" row shown above the filtered Contents
+/// list when the active chapter has been filtered OUT, so the current location
+/// stays reachable (the design's `PinnedCurrentRow`). Tapping navigates to it.
+struct PinnedCurrentRow: View {
+    let theme: ReaderThemeV2
+    let title: String
+    /// 1-based page, nil for formats without a page concept.
+    let page: Int?
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("READING")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(Color(theme.accentColor))
+                    Text(title)
+                        .font(.system(size: 14.5, weight: .semibold, design: .serif))
+                        .foregroundStyle(Color(theme.accentColor))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let page {
+                        Text("p.\(page)")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Color(theme.accentColor).opacity(0.8))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(theme.accentColor).opacity(theme.isDark ? 0.12 : 0.06))
+                )
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
+                Rectangle()
+                    .fill(Color(theme.ruleColor))
+                    .frame(height: 0.5)
+                    .padding(.top, 8)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("tocPinnedCurrentRow")
+        .accessibilityLabel("Reading: \(title)")
     }
 }
