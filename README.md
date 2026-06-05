@@ -58,7 +58,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 
 - **Full-text search** — SQLite FTS5 with CJK tokenization, persistent index
 - **Reading progress bar** — Draggable scrubber (continuous, page-based, chapter-based)
-- **Table of contents** — EPUB nav/NCX, PDF outline, TXT auto-detection (25 Legado rules), MD headings
+- **Table of contents** — EPUB nav/NCX, PDF outline, TXT auto-detection (25 Legado rules), MD headings; a **filter field** narrows the chapter list by title as you type (case-insensitive, diacritic-folded, CJK substring), so long-TOC books stay navigable
 - **Dictionary** — System dictionary lookup + AI translation on text selection
 
 ### AI
