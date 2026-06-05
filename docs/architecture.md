@@ -9,7 +9,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 ```
 ┌──────────────────────────────────────────────────────┐
 │                    VReaderApp                         │
-│  SwiftData SchemaV8 · PersistenceActor · BookImporter│
+│  SwiftData SchemaV9 · PersistenceActor · BookImporter│
 └─────────────────────┬────────────────────────────────┘
                       │
           ┌───────────┴───────────┐
@@ -34,7 +34,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 
 ### 1. App Layer (`vreader/App/`)
 
-- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV8), migration plan (V1→V2→V3→V4→V5→V6→V7→V8), test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature. Adopts `@UIApplicationDelegateAdaptor(VReaderAppDelegate.self)` for background-URLSession completion-handler delivery (feature #47).
+- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV9), migration plan (V1→V2→V3→V4→V5→V6→V7→V8→V9), test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature. Adopts `@UIApplicationDelegateAdaptor(VReaderAppDelegate.self)` for background-URLSession completion-handler delivery (feature #47).
 - `VReaderAppDelegate.swift` — `UIApplicationDelegate` adapter that captures `application(_:handleEventsForBackgroundURLSession:completionHandler:)` into a MainActor-isolated static dictionary keyed by URLSession identifier. The lazy-download coordinator retrieves and invokes the handler from `LazyDownloadDelegate.urlSessionDidFinishEvents` so iOS releases the app's background-launch grace period.
 
 ### 2. Library Layer (`vreader/Views/LibraryView.swift`, `vreader/ViewModels/LibraryViewModel.swift`)
@@ -233,12 +233,13 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 
 ### 6. Data Layer (`vreader/Models/`)
 
-SwiftData SchemaV8 entities:
+SwiftData SchemaV9 entities:
 
-- `Book` (fingerprintKey unique; gains `originalExtension: String?` in SchemaV5 for backup blob extension preservation; gains `fileState: String` and `blobPath: String?` in SchemaV6 for feature #47's lazy-load row state) → `ReadingPosition` (gains `vreaderLocatorData: Data?` in SchemaV8 — feature #42's engine-agnostic `VReaderLocator` envelope, stored as raw JSON `Data?` mirroring `Highlight.anchorData`; additive/optional → lightweight migration, no stage), `Highlight`, `Bookmark`, `AnnotationNote`, `BookCollection`
+- `Book` (fingerprintKey unique; gains `originalExtension: String?` in SchemaV5 for backup blob extension preservation; gains `fileState: String` and `blobPath: String?` in SchemaV6 for feature #47's lazy-load row state) → `ReadingPosition` (gains `vreaderLocatorData: Data?` in SchemaV8 — feature #42's engine-agnostic `VReaderLocator` envelope, stored as raw JSON `Data?` mirroring `Highlight.anchorData`; additive/optional → lightweight migration, no stage), `Highlight`, `Bookmark`, `AnnotationNote`, `BookCollection`, `ChatSession` (SchemaV9 cascade child)
 - `ReadingSession`, `ReadingStats`
 - `BookSource`, `ContentReplacementRule` (added in SchemaV4)
 - `ChapterTranslation` (added in SchemaV7 — feature #56 bilingual-reading persistent translation cache; independent entity, no `@Relationship` to `Book`; `lookupKey: String` is the `@Attribute(.unique)` dedupe key joined from `bookFingerprintKey` + `unitStorageKey` + `targetLanguage` + `providerProfileID` + `promptVersion`)
+- `ChatSession` (added in SchemaV9 — feature #88 AI conversation sessions; a `Book.chatSessions` cascade child, one row per persisted chat thread keyed by `bookFingerprintKey`. The conversation is stored as a `ChatSessionPayload` Codable envelope encoded to a `payloadData: Data?` blob — decoupled from the non-Codable runtime `ChatMessage`/`ChatCitation` types; encode-never-wipes + version-gated decode. Carries `title` + `lastMessageSnippet` + `messageCount` + `createdAt`/`updatedAt` for the session list. `PersistenceActor+ChatSessions` is the CRUD seam; `AIChatViewModel`'s session lifecycle (load / lazy-create-on-first-turn / settled-turn save / switch·new·rename·delete transitions) runs every session-mutating op through one serialized async lane so they cannot interleave across `await`s — feature #88 WI-3)
 
 `PersistenceActor.fetchAllBooksForBackup() -> [BackupBookProjection]` (in `PersistenceActor+Backup.swift`) returns a Sendable value-type view of every book — used by feature #46's WebDAV backup to emit `library-manifest.json` without leaking `@Model` instances across the actor boundary. Legacy V4 rows (no `originalExtension`) coalesce to the canonical extension for their format.
 
