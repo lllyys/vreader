@@ -399,6 +399,20 @@ final class MockBackupDataCollector: BackupDataCollecting, @unchecked Sendable {
         try JSONSerialization.data(withJSONObject: ["rules": []])
     }
 
+    /// Feature #89: emit a NON-EMPTY ai-conversations.json so backup-orchestration
+    /// tests can assert the section is wired into the ZIP with real content.
+    var aiSessions: [BackupChatSession] = []
+
+    func collectAIConversations() async throws -> Data {
+        let env = BackupAIConversationsEnvelope(
+            schemaVersion: kBackupCurrentSchemaVersion, sessions: aiSessions
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(env)
+    }
+
     func getBookCount() async -> Int {
         bookCount
     }
@@ -415,12 +429,21 @@ final class MockBackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
     var restoredBookSources: Data?
     var restoredPerBookSettings: Data?
     var restoredReplacementRules: Data?
+    /// Feature #58: captures the reading-history.json bytes. Previously the mock
+    /// left this on the protocol-default no-op, so the "all restored" count
+    /// under-counted by one and would miss a dropped reading-history wire
+    /// (Gate-4 Low).
+    var restoredReadingHistory: Data?
+    /// Feature #89: captures the ai-conversations.json bytes the provider delegates.
+    var restoredAIConversations: Data?
 
-    /// Count of restore calls for verification.
+    /// Count of restore calls for verification. Must enumerate EVERY section the
+    /// provider's `restore` loop delegates, else a dropped wire goes unnoticed.
     var restoreCallCount: Int {
         [restoredAnnotations, restoredPositions, restoredSettings,
          restoredCollections, restoredBookSources, restoredPerBookSettings,
-         restoredReplacementRules].compactMap({ $0 }).count
+         restoredReplacementRules, restoredReadingHistory,
+         restoredAIConversations].compactMap({ $0 }).count
     }
 
     func restoreAnnotations(from data: Data) async throws {
@@ -449,6 +472,14 @@ final class MockBackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
 
     func restoreReplacementRules(from data: Data) async throws {
         restoredReplacementRules = data
+    }
+
+    func restoreReadingHistory(from data: Data) async throws {
+        restoredReadingHistory = data
+    }
+
+    func restoreAIConversations(from data: Data) async throws {
+        restoredAIConversations = data
     }
 }
 
@@ -754,7 +785,52 @@ struct WebDAVProviderTests {
 
         try await provider.restore(backupId: metadata.id) { _ in }
 
-        #expect(restorer.restoreCallCount == 7, "All 7 data types should be restored")
+        #expect(restorer.restoreCallCount == 9, "All 9 data types should be restored")
+    }
+
+    // MARK: - AI Conversations section (feature #89)
+
+    @Test func backup_includesAIConversationsSection() async throws {
+        // Drive the full backup against a capturing collector that emits a
+        // real session, and assert the ZIP carries ai-conversations.json with
+        // that session — proves the section is wired, not just the collector.
+        let collector = MockBackupDataCollector()
+        collector.aiSessions = [
+            BackupChatSession(
+                sessionId: UUID(),
+                bookFingerprintKey: "epub:\(String(repeating: "a", count: 64)):4096",
+                title: "Wired chat",
+                messagesPayloadData: Data([0x01, 0x02, 0x03]),
+                lastMessageSnippet: "snip", messageCount: 2,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+            )
+        ]
+        let (provider, transport, _, _) = makeProvider(dataCollector: collector)
+
+        _ = try await provider.backup { _ in }
+
+        let uploadedPaths = transport.files.keys.filter { $0.hasSuffix(".vreader.zip") }
+        let zipData = try #require(transport.files[uploadedPaths.first!])
+        let entries = try ZIPWriter.listEntryNames(in: zipData)
+        #expect(entries.contains("ai-conversations.json"))
+
+        let sectionData = try ZIPWriter.extractEntry(named: "ai-conversations.json", from: zipData)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let env = try decoder.decode(BackupAIConversationsEnvelope.self, from: sectionData)
+        #expect(env.schemaVersion == kBackupCurrentSchemaVersion)
+        #expect(env.sessions.first?.title == "Wired chat")
+    }
+
+    @Test func restore_delegatesToRestorer_aiConversations() async throws {
+        let restorer = MockBackupDataRestorer()
+        let (provider, _, _, _) = makeProvider(dataRestorer: restorer)
+        let metadata = try await provider.backup { _ in }
+
+        try await provider.restore(backupId: metadata.id) { _ in }
+
+        #expect(restorer.restoredAIConversations != nil, "AI conversations should be restored")
     }
 
     // MARK: - Backup Includes Replacement Rules (Issue 2)

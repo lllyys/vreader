@@ -711,7 +711,7 @@ struct BackupCollectorRestorerSuite {
         let data = try await collector.collectCollections()
         let envelope = try JSONDecoder().decode(BackupCollectionsEnvelope.self, from: data)
         #expect(envelope.schemaVersion == kBackupCurrentSchemaVersion)
-        #expect(envelope.schemaVersion == 2)
+        #expect(envelope.schemaVersion == 3)
     }
 
     @Test func restorerAcceptsAV1Section() async throws {

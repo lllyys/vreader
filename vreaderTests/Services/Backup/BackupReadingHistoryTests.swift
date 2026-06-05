@@ -98,11 +98,11 @@ struct BackupReadingHistoryTests {
 
     // MARK: - Collector
 
-    @Test func collectEmitsSchemaVersion2() async throws {
+    @Test func collectEmitsCurrentSchemaVersion() async throws {
         let container = try makeContainer()
         let data = try await collector(container).collectReadingHistory()
         let envelope = try decode(data)
-        #expect(envelope.schemaVersion == 2)
+        #expect(envelope.schemaVersion == 3)
         #expect(envelope.schemaVersion == kBackupCurrentSchemaVersion)
     }
 
@@ -339,13 +339,15 @@ struct BackupReadingHistoryTests {
         #expect(sessions.count == 1)
     }
 
-    @Test func syntheticV3SectionThrowsUnsupportedSchemaVersion() async throws {
-        let v3Envelope = BackupReadingHistoryEnvelope(
-            schemaVersion: 3, sessions: [], stats: []
+    @Test func syntheticV4SectionThrowsUnsupportedSchemaVersion() async throws {
+        // v3 is now accepted (feature #89 bump); a genuinely-newer v4 archive
+        // still throws.
+        let v4Envelope = BackupReadingHistoryEnvelope(
+            schemaVersion: 4, sessions: [], stats: []
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(v3Envelope)
+        let data = try encoder.encode(v4Envelope)
 
         let fresh = try makeContainer()
         await #expect(throws: BackupRestoreError.self) {

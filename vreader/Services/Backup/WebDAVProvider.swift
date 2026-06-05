@@ -42,6 +42,11 @@ protocol BackupDataCollecting: Sendable {
     /// `ReadingSession` + `ReadingStats` row. Default impl returns an empty
     /// envelope so existing mock collectors stay source-compatible.
     func collectReadingHistory() async throws -> Data
+
+    /// Feature #89: emits `ai-conversations.json` carrying every persisted
+    /// `ChatSession` (with its message blob). Default impl returns an empty
+    /// envelope so existing mock collectors stay source-compatible.
+    func collectAIConversations() async throws -> Data
 }
 
 extension BackupDataCollecting {
@@ -59,6 +64,16 @@ extension BackupDataCollecting {
     func collectReadingHistory() async throws -> Data {
         let envelope = BackupReadingHistoryEnvelope(
             schemaVersion: kBackupCurrentSchemaVersion, sessions: [], stats: []
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(envelope)
+    }
+
+    func collectAIConversations() async throws -> Data {
+        let envelope = BackupAIConversationsEnvelope(
+            schemaVersion: kBackupCurrentSchemaVersion, sessions: []
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -83,10 +98,18 @@ protocol BackupDataRestoring: Sendable {
     /// Feature #58 (WI-5): restores the `reading-history.json` section.
     /// Default impl is a no-op so existing mock restorers stay source-compatible.
     func restoreReadingHistory(from data: Data) async throws
+
+    /// Feature #89: restores the `ai-conversations.json` section.
+    /// Default impl is a no-op so existing mock restorers stay source-compatible.
+    func restoreAIConversations(from data: Data) async throws
 }
 
 extension BackupDataRestoring {
     func restoreReadingHistory(from data: Data) async throws {
+        // Default: no-op. The production BackupDataRestorer overrides this.
+    }
+
+    func restoreAIConversations(from data: Data) async throws {
         // Default: no-op. The production BackupDataRestorer overrides this.
     }
 }
@@ -167,6 +190,7 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
             let pbs = try await dataCollector.collectPerBookSettings(); progress(0.24)
             let rr = try await dataCollector.collectReplacementRules(); progress(0.25)
             let rh = try await dataCollector.collectReadingHistory(); progress(0.27)
+            let ai = try await dataCollector.collectAIConversations(); progress(0.28)
             manifestData = try await dataCollector.collectLibraryManifest(); progress(0.29)
             bookCount = await dataCollector.getBookCount(); progress(0.30)
             collected = [
@@ -174,6 +198,7 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
                 ("collections.json", c), ("book-sources.json", bs), ("per-book-settings.json", pbs),
                 ("replacement-rules.json", rr),
                 ("reading-history.json", rh),
+                ("ai-conversations.json", ai),
                 ("library-manifest.json", manifestData),
             ]
 
@@ -374,6 +399,7 @@ final class WebDAVProvider: BackupProvider, @unchecked Sendable {
             ("per-book-settings.json", "per-book settings", dataRestorer.restorePerBookSettings),
             ("replacement-rules.json", "replacement rules", dataRestorer.restoreReplacementRules),
             ("reading-history.json", "reading history", dataRestorer.restoreReadingHistory),
+            ("ai-conversations.json", "AI conversations", dataRestorer.restoreAIConversations),
         ]
 
         let restorePhaseStart = (bookImporter != nil) ? 0.75 : 0.55

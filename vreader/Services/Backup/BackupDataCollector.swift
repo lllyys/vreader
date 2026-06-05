@@ -279,6 +279,21 @@ final class BackupDataCollector: BackupDataCollecting, @unchecked Sendable {
         return try encode(envelope)
     }
 
+    /// Feature #89: emits `ai-conversations.json` carrying every persisted
+    /// `ChatSession` (with its raw message blob), so a restore reproduces AI
+    /// conversation history exactly. New in backup schema v3.
+    ///
+    /// The persistence fetch is NOT `try?`-swallowed: a read failure must fail
+    /// the backup loudly rather than silently emitting an empty section (which
+    /// would discard the user's AI history on the next restore).
+    func collectAIConversations() async throws -> Data {
+        let sessions = try await persistence.fetchAllChatSessionsForBackup()
+        let envelope = BackupAIConversationsEnvelope(
+            schemaVersion: kBackupCurrentSchemaVersion, sessions: sessions
+        )
+        return try encode(envelope)
+    }
+
     // MARK: - Helpers
 
     private func encode<T: Encodable>(_ value: T) throws -> Data {

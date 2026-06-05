@@ -107,6 +107,13 @@ final class BackupDataRestorer: BackupDataRestoring, @unchecked Sendable {
         try await persistence.restoreReadingHistory(envelope)
     }
 
+    func restoreAIConversations(from data: Data) async throws {
+        let envelope = try decodeAndValidate(
+            BackupAIConversationsEnvelope.self, from: data, section: "ai-conversations"
+        )
+        try await persistence.restoreAIConversations(envelope)
+    }
+
     // MARK: - Helpers
 
     private func decodeAndValidate<T: Decodable & BackupVersionedEnvelope>(

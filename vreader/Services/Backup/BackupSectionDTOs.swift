@@ -10,15 +10,18 @@ import Foundation
 /// All section JSONs share a `schemaVersion` field so future revs can branch on it.
 ///
 /// What the COLLECTOR emits. v2 (feature #58 WI-5) adds the `reading-history.json`
-/// section; the pre-v2 sections are byte-identical between v1 and v2 (only this
-/// integer differs — no field migration), so a v1 archive still restores.
-let kBackupCurrentSchemaVersion = 2
+/// section; v3 (feature #89) adds the `ai-conversations.json` section. The
+/// pre-v3 sections are byte-identical across v1/v2/v3 (only this integer differs
+/// — no field migration), so a v1/v2 archive still restores (the newer section
+/// is simply absent).
+let kBackupCurrentSchemaVersion = 3
 
 /// What the RESTORER accepts. Decoupled from `kBackupCurrentSchemaVersion` so a
-/// version bump doesn't reject every older backup: the v1↔v2 envelope shapes for
-/// the pre-v2 sections are identical, so accepting v1 is sound. A genuinely-newer
-/// archive (v3+) is NOT in this set and still throws `unsupportedSchemaVersion`.
-let kBackupAcceptedSchemaVersions: Set<Int> = [1, 2]
+/// version bump doesn't reject every older backup: the v1↔v2↔v3 envelope shapes
+/// for the pre-v3 sections are identical, so accepting v1/v2 is sound. A
+/// genuinely-newer archive (v4+) is NOT in this set and still throws
+/// `unsupportedSchemaVersion`.
+let kBackupAcceptedSchemaVersions: Set<Int> = [1, 2, 3]
 
 /// Common shape every section envelope honors so the restorer can validate
 /// `schemaVersion` without 7 special cases.
@@ -280,3 +283,9 @@ struct BackupLibraryEntry: Codable, Sendable, Equatable {
 // The `reading-history.json` section's DTOs — `BackupReadingHistoryEnvelope`,
 // `BackupReadingSession`, `BackupReadingStats` — live in `BackupReadingHistory.swift`
 // to keep this file under the ~300-line guideline. New in backup schema v2.
+
+// MARK: - AI Conversations (feature #89)
+
+// The `ai-conversations.json` section's DTOs — `BackupAIConversationsEnvelope`,
+// `BackupChatSession` — live in `BackupAIConversations.swift` (same reason as
+// reading-history). New in backup schema v3.
