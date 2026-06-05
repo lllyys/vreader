@@ -91,8 +91,37 @@ extension AIChatViewModel {
         guard !trimmed.isEmpty else { return }
         do {
             try await store.renameChatSession(sessionId: id, title: trimmed)
+            // M1 follow-up (#88 WI-5): repaint the session bar — the active
+            // session's stored title now wins over the derived one.
+            storedActiveTitle = trimmed
         } catch {
             transitionLog.error("renameActiveSession failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Renames ANY session by id (the Conversations sheet's inline rename — #88
+    /// WI-5). When the renamed session is the ACTIVE one, also updates
+    /// `storedActiveTitle` so the session bar repaints. A no-op when there is no
+    /// store or the trimmed title is empty/whitespace. Does not touch `messages`
+    /// / `activeSessionId`. Routed through the serialized lane like every other
+    /// session-mutating op.
+    func renameSession(id: UUID, to title: String) async {
+        guard chatSessionStore != nil else { return }
+        await runSerializedSessionOp { await self._renameSession(id: id, to: title) }
+    }
+
+    private func _renameSession(id: UUID, to title: String) async {
+        guard let store = chatSessionStore else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await store.renameChatSession(sessionId: id, title: trimmed)
+            // Repaint the bar only if the renamed session is the active one.
+            if id == activeSessionId {
+                storedActiveTitle = trimmed
+            }
+        } catch {
+            transitionLog.error("renameSession failed: \(String(describing: error), privacy: .public)")
         }
     }
 

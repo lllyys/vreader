@@ -86,6 +86,24 @@ extension AIChatViewModel {
         activeSessionId == nil && messages.isEmpty && token == sessionTransitionToken
     }
 
+    // MARK: - Summaries (Conversations sheet list source — WI-5)
+
+    /// Fetches the list-row summaries for the current book (most-recent first),
+    /// the Conversations sheet's list source (#88 WI-5). Read-only: it does NOT
+    /// touch `messages` / `activeSessionId`, so it is safe to call from the
+    /// sheet's `.task` without going through the serialized session lane. Returns
+    /// an empty array for a nil store / nil fingerprint (general chat) or on a
+    /// fetch error (the failure is logged, not surfaced).
+    func loadSessionSummaries() async -> [ChatSessionSummary] {
+        guard let store = chatSessionStore, let key = bookFingerprintKey else { return [] }
+        do {
+            return try await store.fetchChatSessionSummaries(forBookWithKey: key)
+        } catch {
+            sessionLog.error("loadSessionSummaries failed: \(String(describing: error), privacy: .public)")
+            return []
+        }
+    }
+
     // MARK: - Lazy create + settled-turn save (called from +Streaming)
 
     /// Called synchronously at the START of a send when this is the first real user

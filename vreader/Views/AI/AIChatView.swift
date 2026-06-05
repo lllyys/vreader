@@ -43,6 +43,9 @@ struct AIChatView: View {
     @State private var openMenu: ContextMenuKind?
     private enum ContextMenuKind { case scope, sources }
 
+    /// Feature #88 WI-5: whether the Conversations switcher sheet is presented.
+    @State private var showConversations = false
+
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
@@ -53,9 +56,9 @@ struct AIChatView: View {
                 if viewModel.bookFingerprint != nil {
                     ChatSessionBar(
                         title: viewModel.activeSessionTitle,
-                        isOpen: false,   // WI-5 binds this to the Conversations sheet presentation
+                        isOpen: showConversations,
                         theme: theme,
-                        onTitleTap: {},   // WI-5 presents the Conversations sheet here
+                        onTitleTap: { showConversations = true },
                         onNew: { Task { await viewModel.newConversation() } }
                     )
                 }
@@ -168,6 +171,16 @@ struct AIChatView: View {
         // consumer would miss the first seed and open Chat with an empty input.
         .onAppear { applySeedIfPossible() }
         .task(id: viewModel.seededInput) { applySeedIfPossible() }
+        // Feature #88 WI-5: the Conversations switcher, presented from the
+        // session bar's title pill (book chat only — the bar isn't shown for
+        // general chat).
+        .sheet(isPresented: $showConversations) {
+            ConversationsSheet(
+                viewModel: viewModel,
+                theme: theme,
+                onDismiss: { showConversations = false }
+            )
+        }
     }
 
     /// Feature #78: the pure decision for consuming a pending Ask-AI seed —
