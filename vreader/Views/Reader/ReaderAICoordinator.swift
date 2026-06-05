@@ -262,7 +262,18 @@ final class ReaderAICoordinator {
             keychainService: keychain,
             profileStore: ProviderProfileStore.shared
         )
-        aiViewModel = AIAssistantViewModel(aiService: service)
+        let summaryVM = AIAssistantViewModel(aiService: service)
+        aiViewModel = summaryVM
+        // Feature #90 WI-2 (Gate-4 M1): seed the Summarize-tab bilingual target
+        // language from the book's ESTABLISHED per-book bilingual setting, so the
+        // summary inherits the reader's chosen language instead of the global
+        // default. Sets the language only — no translation kicks at setup (there
+        // is no summary yet).
+        if let override = PerBookSettingsStore.settings(
+            for: fingerprintKey, baseURL: ReaderContainerView.perBookSettingsBaseURL),
+           let langKey = override.bilingualTargetLanguage {
+            summaryVM.setSummaryTargetLanguage(BilingualLanguage.findOrDefault(key: langKey))
+        }
         translationViewModel = AITranslationViewModel(aiService: service)
 
         let fingerprint = DocumentFingerprint(canonicalKey: fingerprintKey)

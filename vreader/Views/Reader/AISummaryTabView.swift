@@ -55,6 +55,11 @@ struct AISummaryTabView: View {
     /// presents `ShareActivityView` with the summary text.
     var onShare: (String) -> Void
 
+    /// Feature #90 WI-2: whether the language popover is presented. Owned here
+    /// (the `body` presents the popover); the lang-row wiring lives in the
+    /// `+Bilingual` extension to keep this file under the ~300-line guide.
+    @State var isLangPopoverPresented = false
+
     // MARK: - State sections
 
     /// The distinct visual sections the Summarize tab can show. One
@@ -95,8 +100,27 @@ struct AISummaryTabView: View {
                 theme: theme,
                 onSelect: selectScope
             )
+            // Feature #90 WI-2: the second control row — language + a
+            // Single/Bilingual toggle — beneath the scope chips (design's
+            // "two rows, not one crowded row").
+            AISummaryLangRow(
+                language: viewModel.summaryTargetLanguage,
+                mode: viewModel.summaryDisplayMode,
+                theme: theme,
+                isPopoverOpen: isLangPopoverPresented,
+                onTapLanguage: toggleLangPopover,
+                onSelectMode: selectDisplayMode
+            )
+            .padding(.horizontal, 18)
+            .padding(.top, 11)
+            .padding(.bottom, 2)
             stateBody
         }
+        // The language popover overlays the control block, anchored under the
+        // lang row — matching the artboard's absolutely-positioned `LangPopover`
+        // (an iPhone `.popover` would render as a sheet, breaking the design).
+        // The overlay body lives in the `+Bilingual` extension.
+        .overlay(alignment: .topLeading) { langPopoverOverlay }
     }
 
     /// The state-routed body, below the chip strip.
