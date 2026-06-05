@@ -67,6 +67,7 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 - **Chat** — Multi-turn conversation with book context
 - **Translation** — Bilingual interlinear (9 languages) with persistent disk cache, "Translate entire book" background job, and per-chapter re-translation with provider/style override. Set up the translation provider inline from the bilingual sheet's "Set up" / "Change…" button — a scoped in-reader AI Providers list, no trip to Settings
 - **General chat** — AI chat without book context
+- **Stop control** — interrupt an in-flight AI request on any tab: the Chat composer's send disc, the Translate language pill, and the Summarize indicator each morph into a Stop control while a request is in flight (tapping aborts; a partial chat reply is kept)
 
 ### Library
 
