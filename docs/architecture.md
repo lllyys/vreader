@@ -82,7 +82,20 @@ JSON files.
   (`ReaderContainerView.engineReaderView` → `ReaderEngine.routeEPUB`), not in
   `resolve`, so a flag-unaware caller still gets the legacy `EPUBReaderHost`. The
   `.epubReadium` engine case exists for switch totality; `resolve` never returns
-  it.
+  it. **Feature #85 (approach C) makes the routing layout-aware**:
+  `routeEPUB(readiumFlagEnabled:layout:)` sends EPUB **scroll** mode to the
+  legacy `EPUBReaderHost` (which activates the seamless feature-#71
+  continuous-scroll stitch) even when the Readium flag is ON — Readium's
+  per-resource paginator has an inherent chapter-boundary seam in scroll mode —
+  while **paged** mode keeps Readium. Because the SAME book is then rendered by
+  two engines depending on mode, a reading-mode toggle SWAPS hosts; an in-memory
+  `ReaderPositionHandoff` (a `@MainActor` per-book cache both hosts write
+  synchronously on every location change + read on open before persistence)
+  carries the position across the swap without loss, and a Readium open with no
+  `.readium` envelope (a scroll session cleared it) restores the legacy locator
+  post-open via `publication.readingOrder` + a one-shot `navCommander.navigate`.
+  `EPUBScrollAnchorResolver` tolerates the container- vs OPF-relative href forms
+  the two engines persist.
 
 #### Chrome
 
