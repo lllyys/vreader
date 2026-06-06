@@ -104,6 +104,39 @@ struct TOCEntryTests {
         #expect(entries[1].title == "Chapter 3")
     }
 
+    // MARK: - Bug #321 — un-nav'd spine items must not pollute the Contents list
+
+    @Test("EPUBMetadata.withResolvedTitles nils un-nav'd items so the TOC reflects the nav doc only")
+    func withResolvedTitles_dropsSectionNPlaceholders_whenNavDocExists() {
+        let fp = DocumentFingerprint(
+            contentSHA256: "toc_test_sha256_0000000000000000000000000000000000000000000000000",
+            fileByteCount: 1000,
+            format: .epub
+        )
+        // M=4 spine items, each with the synthetic "Section N" placeholder EPUBParser
+        // assigns at OPF-parse time (navTitles empty there).
+        let placeholderSpine = (1...4).map {
+            EPUBSpineItem(id: "s\($0)", href: "ch\($0).xhtml", title: "Section \($0)", index: $0 - 1)
+        }
+        let metadata = EPUBMetadata(
+            title: "The Half Second", author: nil, language: nil,
+            readingDirection: .ltr, layout: .reflowable,
+            spineItems: placeholderSpine, coverImageHref: nil
+        )
+        // N=2 nav-doc entries (ch1, ch3). ch2 + ch4 are un-nav'd spine items.
+        let navTitles = ["ch1.xhtml": "Prologue", "ch3.xhtml": "Chapter Two"]
+
+        let resolved = metadata.withResolvedTitles(navTitles)
+        // Un-nav'd items are nil-titled (NOT left as "Section 2"/"Section 4").
+        #expect(resolved.spineItems.map(\.title) == ["Prologue", nil, "Chapter Two", nil])
+
+        // End-to-end: the Contents list has exactly the N nav entries — no
+        // "Section N" pollution interleaved with the real chapters.
+        let entries = TOCBuilder.fromSpineItems(resolved.spineItems, fingerprint: fp)
+        #expect(entries.count == 2)
+        #expect(entries.map(\.title) == ["Prologue", "Chapter Two"])
+    }
+
     @Test("PDF TOC from outline entries")
     func pdfTOCFromOutline() {
         let fp = DocumentFingerprint(

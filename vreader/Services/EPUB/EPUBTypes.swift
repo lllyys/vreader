@@ -56,12 +56,20 @@ struct EPUBMetadata: Sendable, Equatable {
 
     /// Returns a copy with spine item titles resolved from nav/NCX data. (bug #74)
     /// Titles from the navigation document override "Section N" fallbacks.
+    /// Resolves nav-doc titles onto the spine. Bug #321: this is only invoked
+    /// when a real nav doc exists (`navTitles` non-empty), so an un-nav'd spine
+    /// item must NOT keep the synthetic "Section N" placeholder `EPUBParser`
+    /// assigned at OPF-parse time — it is nil-titled here so
+    /// `TOCBuilder.fromSpineItems` skips it, leaving the Contents list to reflect
+    /// the publisher's nav-doc TOC alone (no interleaved "Section N" pollution).
+    /// A nav-LESS EPUB never calls this, so its placeholders survive (TOC stays
+    /// navigable).
     func withResolvedTitles(_ navTitles: [String: String]) -> EPUBMetadata {
         let resolved = spineItems.map { item -> EPUBSpineItem in
             if let navTitle = navTitles[item.href] {
                 return EPUBSpineItem(id: item.id, href: item.href, title: navTitle, index: item.index)
             }
-            return item
+            return EPUBSpineItem(id: item.id, href: item.href, title: nil, index: item.index)
         }
         return EPUBMetadata(
             title: title, author: author, language: language,

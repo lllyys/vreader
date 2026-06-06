@@ -314,7 +314,12 @@ actor EPUBParser: EPUBParserProtocol {
         let title = delegate.title ?? "Untitled"
         let author = delegate.author
 
-        // Build spine items from spine references + manifest
+        // Build spine items from spine references + manifest. The "Section N"
+        // title here is a PLACEHOLDER (`navTitles` is empty at OPF-parse time —
+        // the nav doc is extracted + resolved later via `withResolvedTitles`).
+        // Bug #321: `withResolvedTitles` nils out un-nav'd items when a real nav
+        // doc exists (so they're skipped, no Contents pollution); this placeholder
+        // only survives a nav-LESS EPUB, keeping its TOC navigable.
         var spineItems: [EPUBSpineItem] = []
         for (index, idref) in delegate.spineIdrefs.enumerated() {
             guard let href = delegate.manifest[idref] else { continue }
