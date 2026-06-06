@@ -73,4 +73,64 @@ struct AIChatViewModelTurn2HangTests {
         // The mock answer must be present (proves the streamed reply landed).
         #expect(vm.messages.contains { $0.role == .assistant && $0.content.contains("[MOCK]") })
     }
+
+    /// Polls an async `condition` on the @MainActor, yielding (via a short sleep)
+    /// between checks so an in-flight DETACHED send can make progress. Returns false
+    /// on timeout — a deterministic failure, never a wall-clock hang.
+    @MainActor
+    private func waitUntil(timeout seconds: Double, _ condition: @MainActor () async -> Bool) async -> Bool {
+        let iterations = max(1, Int(seconds * 1000 / 5))
+        for _ in 0..<iterations {
+            if await condition() { return true }
+            try? await Task.sleep(nanoseconds: 5_000_000)   // 5ms — yields the MainActor
+        }
+        return await condition()
+    }
+
+    /// Bug #323 — the PRIMARY (deterministic) cause: the user-visible turn
+    /// completion must NOT be gated on the persistence save. Here turn 2's session
+    /// save is STALLED on the serialized session lane (mirroring a slow cold-store
+    /// `loadSessions()` still parked ahead of it). Once the save has actually PARKED
+    /// (the reply already streamed and `runSend` reached `saveSettledTurn`), the
+    /// composer MUST already be re-enabled (`isLoading == false`). Pre-fix, `runSend`
+    /// awaits the stalled save BEFORE its `defer` resets `isLoading`, so `isLoading`
+    /// stays true → the composer's `canSend` (`!isLoading`) is false → the Send
+    /// button is disabled → the user can't send turn 2 ("second message hangs").
+    @Test @MainActor func secondMessage_composerReEnables_whenSessionSaveStalls() async {
+        let store = MockChatSessionStore()
+        let vm = makeVM(store: store)
+
+        // Turn 1 — completes normally; lazily creates the persisted session.
+        await vm.sendMessage("first question")
+        #expect(vm.isLoading == false, "composer re-enables after turn 1")
+        #expect(vm.activeSessionId != nil, "turn 1 lazily created a session")
+        let countAfterTurn1 = vm.messages.count
+
+        // STALL the next session save (turn 2's update) on the serialized lane.
+        await store.gateUpdate()
+
+        // Turn 2 — launch DETACHED: pre-fix `sendMessage` never returns (it awaits
+        // the stalled save), so awaiting it would hang. The bug is the FROZEN
+        // COMPOSER, asserted via `isLoading` — independent of the send returning.
+        let send2 = Task { @MainActor in await vm.sendMessage("second question") }
+
+        // Wait until turn 2's save has actually PARKED on the gate — i.e. the reply
+        // streamed and `runSend` reached the save. NOW the discriminator is live.
+        let parked = await waitUntil(timeout: 5) { await store.parkedUpdateCount >= 1 }
+        #expect(parked, "turn 2 reached the (stalled) session save")
+        #expect(vm.messages.count > countAfterTurn1, "turn 2's reply landed before the save")
+        #expect(
+            vm.messages.contains { $0.role == .assistant && $0.content.contains("[MOCK]") },
+            "the streamed reply is visible while the save is still parked")
+        // THE BUG: with the save parked, the composer must already be usable.
+        #expect(vm.isLoading == false,
+            "BUG #323: composer must re-enable after the reply even while the session save is parked")
+
+        // Release the parked save; bounded-drain the detached send (never hang the
+        // suite — `finished` races the task against a timeout).
+        await store.releaseUpdate()
+        let drained = await finished(send2, within: 5)
+        #expect(drained, "the detached send drained after the save was released")
+        #expect(store.updateCallCount >= 1, "the settled turn eventually persisted")
+    }
 }

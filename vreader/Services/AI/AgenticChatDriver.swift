@@ -67,6 +67,13 @@ struct AgenticChatDriver: Sendable {
         let tools = registry.definitions()
 
         for iteration in 0..<maxIterations {
+            // Bug #323: a Stop (or a session transition) cancels the streaming task
+            // that awaits this loop. Observe it at the top of every round so a
+            // runaway tool loop aborts PROMPTLY instead of grinding to the iteration
+            // cap with the chat's `isLoading` stuck true. CancellationError unwinds
+            // to `runSend`'s `catch is CancellationError` (a user Stop is not an
+            // error), which keeps any partial reply.
+            try Task.checkCancellation()
             let request = AIToolRequest(
                 systemPrompt: systemPrompt, messages: messages, tools: tools, maxTokens: maxTokens)
             let turn = try await provider.sendToolRequest(request)
@@ -84,6 +91,14 @@ struct AgenticChatDriver: Sendable {
                 // tool_result-leading user turn (provider history invariant).
                 var resultBlocks: [ToolContentBlock] = []
                 for call in turn.toolCalls {
+                    // Bug #323 (Gate-4 Medium): also observe cancellation BETWEEN
+                    // in-round tool calls, so a Stop during a multi-tool round aborts
+                    // promptly instead of running the rest of the round. (A single
+                    // long-running tool that ignores cancellation internally still
+                    // can't be interrupted mid-call — the in-app tools are local +
+                    // fast; deeper per-tool cancellation would require making
+                    // `AITool.run` cancellation-aware, tracked as a follow-up.)
+                    try Task.checkCancellation()
                     let result = await registry.run(call)
                     resultBlocks.append(.toolResult(result))
                 }

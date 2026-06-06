@@ -167,14 +167,32 @@ extension AIChatViewModel {
             removeMessage(withId: assistantId)
         }
 
+        // Bug #323: the user-visible turn is DONE the moment the reply has settled.
+        // Reset the composer state HERE — BEFORE the persistence save — so a stalled
+        // session-op lane (e.g. a slow cold-store `loadSessions()` still parked ahead
+        // of this turn's save on the serialized `sessionOpChain`) can NEVER keep
+        // `isLoading` true and freeze the composer. Pre-fix this reset lived only in
+        // the trailing `defer`, which runs at scope exit — AFTER the awaited save
+        // below — so a stuck save left `isLoading == true`, the Send button disabled
+        // (`canSend` ⇒ `!isLoading`), and the user unable to send the next message.
+        // The `defer` remains the safety net for the early cancel/guard returns
+        // above; this is the normal-completion reset.
+        if opId == opCounter {
+            isLoading = false
+            streamTask = nil
+        }
+
         // Feature #88: persist the SETTLED turn (debounced — one write here, never
-        // per chunk). Only the CURRENT, live op writes: a superseded (resent) op
-        // must not save (opId != opCounter), and the save itself re-checks that the
-        // active session still matches the one captured at send time (a switch /
-        // new / delete mid-send cancelled this op + changed the active session, so
-        // its reply must not land in — or seal — the wrong session). A cancelled op
-        // that kept a partial reply is still a real turn worth saving, so we do NOT
-        // gate on `Task.isCancelled` here — only on op + session identity.
+        // per chunk). Still AWAITED so callers/tests observe the write, but it no
+        // longer gates the composer (reset above): a slow/stuck save jams only the
+        // persistence lane, never the chat (Bug #323). Only the CURRENT, live op
+        // writes: a superseded (resent) op must not save (opId != opCounter), and the
+        // save itself re-checks that the active session still matches the one
+        // captured at send time (a switch / new / delete mid-send cancelled this op +
+        // changed the active session, so its reply must not land in — or seal — the
+        // wrong session). A cancelled op that kept a partial reply is still a real
+        // turn worth saving, so we do NOT gate on `Task.isCancelled` here — only on
+        // op + session identity.
         if opId == opCounter {
             await saveSettledTurn(capturedSessionId: sessionAtSend)
         }

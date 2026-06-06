@@ -60,6 +60,40 @@ private actor ScriptedProvider: ToolUseSending {
     }
 }
 
+/// An actor that records run count and PARKS the first entrant until `release()` —
+/// so a test can cancel the surrounding task while a tool is mid-execution.
+private actor ToolGate {
+    private(set) var runCount = 0
+    private var parkCont: CheckedContinuation<Void, Never>?
+    private var released = false
+    func enterAndParkFirst() async {
+        runCount += 1
+        guard runCount == 1, !released else { return }   // only the first call parks
+        await withCheckedContinuation { cont in parkCont = cont }
+    }
+    func release() {
+        released = true
+        parkCont?.resume(); parkCont = nil
+    }
+}
+
+/// A tool whose FIRST `run` parks until released — lets a test cancel the driver
+/// task mid-round and assert the driver stops before the NEXT in-round tool call.
+private final class GatedProbeTool: AITool, @unchecked Sendable {
+    let toolName: String
+    private let gate = ToolGate()
+    init(name: String) { self.toolName = name }
+    var definition: ToolDefinition {
+        ToolDefinition(name: toolName, description: "gated probe", inputSchema: .object([:]))
+    }
+    var runCount: Int { get async { await gate.runCount } }
+    func release() async { await gate.release() }
+    func run(_ input: JSONValue) async -> ToolResult {
+        await gate.enterAndParkFirst()
+        return ToolResult(toolUseID: "IGNORED", content: "ok", isError: false)
+    }
+}
+
 @Suite("Feature #91 WI-7 — AgenticChatDriver")
 struct AgenticChatDriverTests {
 
@@ -221,5 +255,77 @@ struct AgenticChatDriverTests {
         await #expect(throws: ScriptedProviderError.self) {
             try await run(provider, AIToolRegistry([]))
         }
+    }
+
+    // MARK: - Cancellation (Bug #323: a Stop must break a runaway tool loop)
+
+    @Test("a cancelled task breaks the loop promptly instead of running to the cap")
+    func cancellationBreaksLoop() async {
+        // A provider that ALWAYS asks for another tool → absent a cancellation
+        // check the loop would run to the (large) iteration cap, keeping the chat's
+        // `isLoading` true the whole time (the Bug #323 'tool call cannot freeze the
+        // chat' clause). A Stop cancels the streaming task; the driver must observe
+        // it and abort.
+        let provider = ScriptedProvider(
+            [Self.toolUseTurn(callID: "c", name: "search")], loopLast: true)
+        let registry = AIToolRegistry([ProbeTool(name: "search")])
+        let driver = AgenticChatDriver(maxIterations: 200)
+
+        let task = Task {
+            try await driver.run(
+                systemPrompt: "sys", history: Self.history("question"),
+                registry: registry, provider: provider, maxTokens: 1024)
+        }
+        task.cancel()
+
+        let result = await task.result
+        switch result {
+        case .failure(let error):
+            #expect(error is CancellationError, "a cancelled agentic loop throws CancellationError")
+        case .success:
+            Issue.record("BUG #323: a cancelled agentic loop must stop, not run to the cap")
+        }
+        // It must NOT have run anywhere near the 200-iteration cap.
+        #expect(await provider.requests.count < 5, "cancellation bounded the loop, not the cap")
+    }
+
+    @Test("a Stop during a multi-tool round aborts before the NEXT in-round tool call")
+    func cancellationBreaksInRound() async {
+        // One round with TWO tool calls; the first tool parks. We cancel while it's
+        // parked, then release — the driver's inner cancellation check must fire
+        // BEFORE the second `registry.run`, so the second tool never runs.
+        let blocks: [ToolContentBlock] = [
+            .toolUse(ToolCall(id: "a", name: "search", input: .object([:]))),
+            .toolUse(ToolCall(id: "b", name: "search", input: .object([:]))),
+        ]
+        let provider = ScriptedProvider([.toolUse(blocks: blocks), .text("done")])
+        let tool = GatedProbeTool(name: "search")
+        let registry = AIToolRegistry([tool])
+        let driver = AgenticChatDriver(maxIterations: 6)
+
+        let task = Task {
+            try await driver.run(
+                systemPrompt: "sys", history: Self.history("question"),
+                registry: registry, provider: provider, maxTokens: 1024)
+        }
+
+        // Wait (bounded) until the first tool call has started + parked.
+        var spins = 0
+        while await tool.runCount < 1, spins < 1000 {
+            spins += 1
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        #expect(await tool.runCount == 1, "the first tool call started")
+        task.cancel()
+        await tool.release()
+
+        let result = await task.result
+        switch result {
+        case .failure(let error):
+            #expect(error is CancellationError, "a cancelled mid-round loop throws CancellationError")
+        case .success:
+            Issue.record("BUG #323: a cancelled multi-tool round must abort before the next tool call")
+        }
+        #expect(await tool.runCount == 1, "the second in-round tool call must NOT run after cancellation")
     }
 }
