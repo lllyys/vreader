@@ -107,6 +107,13 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         Coordinator(delegate: delegate)
     }
 
+    static func dismantleUIView(_ uiView: UITableView, coordinator: Coordinator) {
+        // Bug #322 / GH #1542 (mirrors TXTTextViewBridge.dismantleUIView): cancel
+        // any pending/in-flight locate bloom when the reader tears down, so a
+        // queued work item doesn't fire against a detached table / cell.
+        coordinator.cancelLandingBloom()
+    }
+
     // MARK: - Chunk Resolution (pure, testable)
 
     /// Bug #1230 / GH #1230: per-chunk Simplified↔Traditional conversion for the
@@ -156,6 +163,30 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             }
         }
         return lo
+    }
+
+    /// Bug #322 / GH #1542: resolves the matched locate-bloom highlight's
+    /// document-global range to the cell that should bloom — its chunk index
+    /// and the chunk-LOCAL `NSRange` to pass to that cell's
+    /// `HighlightableTextView.playLandingBloom`. Mirrors the non-chunked path:
+    /// `TXTTextViewBridge.landingTrigger` decides WHETHER to bloom (the nav
+    /// range exactly matches a persisted highlight); this maps WHERE. Pure +
+    /// static so it is unit-testable without a `UITableView`. Returns nil for an
+    /// empty offsets array or a zero-length range (no glyph to wash).
+    static func landingBloomTarget(
+        matchedRange: NSRange, chunkStartOffsets: [Int]
+    ) -> (chunkIndex: Int, chunkLocalRange: NSRange)? {
+        guard matchedRange.length > 0,
+              let chunkIndex = chunkIndex(
+                  forGlobalOffset: matchedRange.location,
+                  chunkStartOffsets: chunkStartOffsets
+              ) else { return nil }
+        let localStart = matchedRange.location - chunkStartOffsets[chunkIndex]
+        guard localStart >= 0 else { return nil }
+        return (
+            chunkIndex,
+            NSRange(location: localStart, length: matchedRange.length)
+        )
     }
 
     /// Computes the intra-chunk fraction (0.0–1.0) of a document-global offset
@@ -365,6 +396,61 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
                 context.coordinator.applyHighlight(range, in: tableView, isTemporary: highlightIsTemporary)
             }
         }
+
+        scheduleLandingBloomIfNeeded(tableView: tableView, coordinator: context.coordinator)
+    }
+
+    /// Bug #322 / GH #1542: schedule the #74 locate bloom when a navigate lands
+    /// on a SAVED highlight in the chunked reader — parity with the non-chunked
+    /// `TXTTextViewBridge.updateUIView` trigger. Gated on the navigate NONCE
+    /// (advances on every nav incl. a re-tap on the same highlight) so a re-tap
+    /// re-blooms; NOT on scroll dedupe. The trigger is a CANCELLABLE work item:
+    /// a superseding nav cancels the prior pending bloom (via
+    /// `cancelLandingBloom`), and a user tap/scroll cancels it too (design §3
+    /// interruptibility). The 0.35 s delay matches the non-chunked path so the
+    /// navigate's scroll brings the target chunk's cell on-screen + laid out
+    /// before the bloom fires.
+    private func scheduleLandingBloomIfNeeded(
+        tableView: UITableView, coordinator: Coordinator
+    ) {
+        guard highlightNonce != coordinator.lastBloomNonce else { return }
+        coordinator.lastBloomNonce = highlightNonce
+        coordinator.cancelLandingBloom()  // supersede any prior bloom
+        guard let landed = TXTTextViewBridge.landingTrigger(
+            highlightRange: highlightRange, persisted: persistedHighlights
+        ), let target = TXTChunkedReaderBridge.landingBloomTarget(
+            matchedRange: landed.range,
+            chunkStartOffsets: coordinator.chunkStartOffsets
+        ) else { return }
+
+        let family = TXTTextViewBridge.bloomThemeFamily(for: config.backgroundColor)
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        let colorName = landed.colorName
+        let chunkIndex = target.chunkIndex
+        let localRange = target.chunkLocalRange
+        coordinator.bloomingChunkIndex = chunkIndex
+        let work = DispatchWorkItem { [weak tableView, weak coordinator] in
+            guard let tableView, let coordinator else { return }
+            // The navigate's scroll-to-offset brings the target chunk on-screen;
+            // by the 0.35 s settle the cell is normally dequeued + laid out. If
+            // it is still off-screen (very late layout), the cell-render path in
+            // `cellForRowAt` would paint the persisted highlight — the bloom is a
+            // transient cue, so dropping it for an un-dequeued cell is acceptable
+            // (mirrors the non-chunked path, where a navigate that doesn't bring
+            // the range on-screen also can't bloom).
+            guard let cell = tableView.cellForRow(
+                at: IndexPath(row: chunkIndex, section: 0)
+            ) as? ChunkedTextCell else {
+                coordinator.bloomingChunkIndex = nil
+                return
+            }
+            cell.textContentView.playLandingBloom(
+                range: localRange, colorName: colorName,
+                family: family, reduceMotion: reduceMotion
+            )
+        }
+        coordinator.pendingBloom = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
     }
 
     // MARK: - Cell
@@ -449,6 +535,28 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         /// occurred — re-paint the temporary highlight + re-arm the 3 s
         /// auto-clear timer even if `lastHighlightRange` is unchanged.
         var lastHighlightNonce: Int = 0
+
+        /// Bug #322 / GH #1542: the last navigate-nonce a locate bloom fired
+        /// for. SEPARATE from `lastHighlightNonce` so the bloom gate advances
+        /// independently of the temporary-highlight repaint gate; the bloom is
+        /// keyed on the nonce (which advances on every navigate, incl. a re-tap
+        /// on the same highlight) so a re-tap re-blooms. `.min` so the first nav
+        /// fires. Mirrors the non-chunked `TXTTextViewBridge.Coordinator`.
+        var lastBloomNonce: Int = .min
+
+        /// Bug #322 / GH #1542: the cancellable scroll-settle-delayed bloom
+        /// trigger. A superseding navigation cancels it before it fires, and a
+        /// user tap / user-driven scroll cancels it too (design §3
+        /// interruptibility). Mirrors the non-chunked bridge's `pendingBloom`.
+        var pendingBloom: DispatchWorkItem?
+
+        /// Bug #322 / GH #1542: chunk index whose cell a bloom was started on,
+        /// so `cancelLandingBloom` can tear the in-flight bloom down on that
+        /// specific cell. nil when no bloom has been fired (or after cancel).
+        /// The bloom cancel/user-scroll helpers live in
+        /// `TXTChunkedHighlightHelper.swift` alongside the other coordinator
+        /// highlight methods.
+        var bloomingChunkIndex: Int?
 
         /// Bug #154 / GH #443 (Codex audit): fired whenever a temporary
         /// search/navigation highlight is cleared — the 3 s auto-clear timer,
@@ -711,6 +819,16 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         // MARK: UITableViewDelegate
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            // Bug #322 / GH #1542 (design §3): cancel a pending/in-flight locate
+            // bloom on a USER-driven scroll. Gated on the same user-scroll
+            // signal as the temporary-highlight clear (`isTracking ||
+            // isDragging || isDecelerating`) so the navigate's OWN programmatic
+            // scroll (which has those flags false) does not self-cancel the
+            // about-to-fire bloom. A SEPARATE call from
+            // `clearTemporaryHighlightIfNeeded` because the bloom fires on a
+            // PERSISTENT highlight, so the temporary-highlight guard there would
+            // skip it.
+            cancelLandingBloomIfUserScroll(scrollView)
             // Bug #232 / GH #960: clear a temporary search/navigation
             // highlight when the user drives the scroll. The helper gates on
             // `isTracking || isDragging || isDecelerating`, so programmatic
@@ -736,6 +854,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             // true inside this callback, so the helper's user-scroll guard
             // passes.
             if !decelerate {
+                // Bug #322 / GH #1542: a user-driven drag that ends without
+                // deceleration is still a real interaction — cancel the bloom.
+                cancelLandingBloomIfUserScroll(scrollView)
                 clearTemporaryHighlightIfNeeded(scrollView: scrollView)
                 reportScrollPosition(scrollView)
             }
@@ -744,6 +865,11 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         // MARK: - Content Tap (Toolbar Toggle / Tap-on-Highlight)
 
         @objc func handleContentTap(_ gesture: UITapGestureRecognizer) {
+            // Bug #322 / GH #1542 (design §3 interruptibility): a tap is a user
+            // interaction — cancel any pending/in-flight locate bloom before
+            // dispatching the tap (highlight-tap popover OR chrome toggle).
+            // Mirrors the non-chunked coordinator's `handleContentTap`.
+            cancelLandingBloom()
             // Feature #64 WI-6: if the tap lands inside a persisted highlight
             // range, fire `.readerHighlightTapped` instead of toggling chrome.
             // A tap on a highlight opens the unified highlight-action popover

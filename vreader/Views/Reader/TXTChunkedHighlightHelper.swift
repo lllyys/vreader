@@ -9,6 +9,38 @@ import UIKit
 
 extension TXTChunkedReaderBridge.Coordinator {
 
+    // MARK: - Locate Bloom (Bug #322 / GH #1542)
+
+    /// Cancel a pending OR in-flight #74 locate bloom — called on a user tap /
+    /// user-driven scroll (design §3: any interaction during the bloom cancels
+    /// it) and when a superseding navigation arrives. Cancels the pending work
+    /// item, then tears down the bloom on the cell it was started on (if still
+    /// dequeued). Mirrors the non-chunked
+    /// `TXTTextViewBridge.Coordinator.cancelLandingBloom`.
+    func cancelLandingBloom() {
+        pendingBloom?.cancel()
+        pendingBloom = nil
+        if let index = bloomingChunkIndex,
+           let cell = tableView?.cellForRow(
+               at: IndexPath(row: index, section: 0)
+           ) as? TXTChunkedReaderBridge.ChunkedTextCell {
+            cell.textContentView.cancelLandingBloom()
+        }
+        bloomingChunkIndex = nil
+    }
+
+    /// Cancel the locate bloom only for a USER-driven scroll — the navigate's
+    /// own programmatic `scrollToGlobalOffset` (which has
+    /// `isTracking/isDragging/isDecelerating` all false) must NOT self-cancel the
+    /// bloom it is scrolling toward. Mirrors the non-chunked coordinator's
+    /// user-scroll guard in `clearSearchHighlightIfTemporary`.
+    func cancelLandingBloomIfUserScroll(_ scrollView: UIScrollView) {
+        guard scrollView.isTracking
+            || scrollView.isDragging
+            || scrollView.isDecelerating else { return }
+        cancelLandingBloom()
+    }
+
     // MARK: - Dynamic Navigation (Bug #52)
 
     /// Scrolls the table view to the chunk containing the given document-global
