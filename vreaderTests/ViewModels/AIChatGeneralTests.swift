@@ -139,7 +139,8 @@ struct AIChatGeneralTests {
         let available = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            providerPreferences: MockPreferenceStore()
         )
         #expect(available, "AI chat should be available when flag is on, API key is set, and consent is granted")
     }
@@ -156,7 +157,8 @@ struct AIChatGeneralTests {
         let available = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            providerPreferences: MockPreferenceStore()
         )
         #expect(!available, "AI chat should be hidden when feature flag is OFF")
     }
@@ -173,7 +175,8 @@ struct AIChatGeneralTests {
         let available = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            providerPreferences: MockPreferenceStore()
         )
         #expect(!available, "AI chat should be hidden when no API key is set")
     }
@@ -190,7 +193,8 @@ struct AIChatGeneralTests {
         let available = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false),
+            providerPreferences: MockPreferenceStore()
         )
         #expect(!available, "Bug #90: AI chat must hide when user consent is revoked")
     }

@@ -115,7 +115,8 @@ struct AIReaderIntegrationTests {
         let isAvailable = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            providerPreferences: MockPreferenceStore()
         )
 
         #expect(!isAvailable, "AI button should be hidden when feature flag is OFF")
@@ -374,7 +375,8 @@ struct AIReaderAvailabilityTests {
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            providerPreferences: MockPreferenceStore()
         )
 
         #expect(result == true)
@@ -389,7 +391,8 @@ struct AIReaderAvailabilityTests {
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            providerPreferences: MockPreferenceStore()
         )
 
         #expect(result == false)
@@ -404,7 +407,8 @@ struct AIReaderAvailabilityTests {
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            providerPreferences: MockPreferenceStore()
         )
 
         #expect(result == false)
@@ -419,7 +423,8 @@ struct AIReaderAvailabilityTests {
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: true),
+            providerPreferences: MockPreferenceStore()
         )
 
         #expect(result == false)
@@ -439,7 +444,8 @@ struct AIReaderAvailabilityTests {
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false),
+            providerPreferences: MockPreferenceStore()
         )
 
         #expect(result == false, "Bug #90: AI buttons must hide when consent is revoked")
@@ -456,15 +462,20 @@ struct AIReaderAvailabilityTests {
         let suiteName = "com.vreader.test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let manager = AIConsentManager(defaults: defaults)
+        // Bug #326: isolate from process-global UserDefaults.standard so hasAPIKey
+        // takes the legacy-key gate this test verifies, not the active-profile branch.
+        let prefs = MockPreferenceStore()
 
         manager.grantConsent()
         #expect(AIReaderAvailability.isAvailable(
-            featureFlags: flags, keychainService: keychain, consentManager: manager
+            featureFlags: flags, keychainService: keychain, consentManager: manager,
+            providerPreferences: prefs
         ) == true, "Available right after grant")
 
         manager.revokeConsent()
         #expect(AIReaderAvailability.isAvailable(
-            featureFlags: flags, keychainService: keychain, consentManager: manager
+            featureFlags: flags, keychainService: keychain, consentManager: manager,
+            providerPreferences: prefs
         ) == false, "Unavailable right after revoke")
     }
 
@@ -472,7 +483,8 @@ struct AIReaderAvailabilityTests {
         let keychain = WI11TestHelpers.makeKeychainService()
         try? keychain.saveString("sk-test", forAccount: AIService.apiKeyAccount)
 
-        let result = AIReaderAvailability.hasAPIKey(keychainService: keychain)
+        let result = AIReaderAvailability.hasAPIKey(
+            keychainService: keychain, providerPreferences: MockPreferenceStore())
 
         #expect(result == true)
     }
@@ -480,7 +492,8 @@ struct AIReaderAvailabilityTests {
     @Test func hasAPIKeyReturnsFalseWhenNoKey() {
         let keychain = WI11TestHelpers.makeKeychainService()
 
-        let result = AIReaderAvailability.hasAPIKey(keychainService: keychain)
+        let result = AIReaderAvailability.hasAPIKey(
+            keychainService: keychain, providerPreferences: MockPreferenceStore())
 
         #expect(result == false)
     }
@@ -502,7 +515,8 @@ struct AIReaderAvailabilityTests {
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false),
+            providerPreferences: MockPreferenceStore()
         )
 
         #expect(result == true, "Bug #237: --enable-ai override must force AI surfaces visible")
@@ -519,7 +533,8 @@ struct AIReaderAvailabilityTests {
         let result = AIReaderAvailability.isAvailable(
             featureFlags: flags,
             keychainService: keychain,
-            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false)
+            consentManager: WI11TestHelpers.makeConsentManager(hasConsent: false),
+            providerPreferences: MockPreferenceStore()
         )
 
         #expect(result == false, "Override off: real gates apply, all fail")
