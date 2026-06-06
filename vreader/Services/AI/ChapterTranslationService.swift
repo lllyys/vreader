@@ -331,6 +331,10 @@ actor ChapterTranslationService {
         } catch let error as ChapterTranslationError {
             throw error
         } catch {
+            // Bug #320: keep the RAW detail (enum-case syntax + provider JSON) in
+            // the log only; the thrown `.providerFailed` carries a sanitized,
+            // user-facing message (`sanitizedProviderMessage`).
+            log.error("Chapter translation failed: \(String(describing: error), privacy: .public)")
             throw Self.mapTransportError(error)
         }
     }
@@ -351,9 +355,23 @@ actor ChapterTranslationService {
                  .dataNotAllowed, .cannotConnectToHost, .timedOut:
                 return .offline
             default:
-                return .providerFailed(String(describing: error))
+                return .providerFailed(sanitizedProviderMessage(error))
             }
         }
-        return .providerFailed(String(describing: error))
+        return .providerFailed(sanitizedProviderMessage(error))
+    }
+
+    /// Bug #320: the user-facing message for a non-offline translation failure.
+    /// NEVER `String(describing: error)` — that stringifies an `AIError` to its
+    /// enum-case syntax + raw provider JSON (e.g. `providerError("HTTP 400: {…}")`),
+    /// which leaks internals and reads as a crash. Mirrors the sanitized path the
+    /// Chat/Summarize/Translate tabs use: a known `AIError` → its `errorDescription`,
+    /// anything else → `localizedDescription`. The raw detail is kept in the log
+    /// only (logged at the catch site).
+    static func sanitizedProviderMessage(_ error: Error) -> String {
+        if let aiError = error as? AIError, let description = aiError.errorDescription {
+            return description
+        }
+        return error.localizedDescription
     }
 }

@@ -402,4 +402,26 @@ struct ChapterTranslationServiceTests {
         #expect(result == ["译一", "译二"])
         #expect(await sender.requestCount == 3)  // 1 whole-chunk attempt + 2 per-segment
     }
+
+    // MARK: - Bug #320 — sanitized provider failure message (no raw Swift dump)
+
+    @Test func sanitizedProviderMessage_AIError_usesErrorDescription_notRawDump() {
+        // A provider HTTP error must surface as the sanitized `errorDescription`
+        // (the same path the Chat/Summarize/Translate tabs use), NOT
+        // `String(describing:)` — which stringifies to `providerError("HTTP 400:
+        // {…raw JSON…}")` (enum-case syntax + raw blob, reading as a crash).
+        let raw = AIError.providerError("HTTP 400: {\"error\":\"bad request\"}")
+        let message = ChapterTranslationService.sanitizedProviderMessage(raw)
+        #expect(message == raw.errorDescription)
+        #expect(!message.contains("providerError("))      // no enum-case syntax
+        #expect(message.hasPrefix("AI provider error:"))   // the sanitized prefix
+    }
+
+    @Test func sanitizedProviderMessage_genericError_usesLocalizedDescription() {
+        struct Boom: Error {}
+        let error: Error = Boom()
+        let message = ChapterTranslationService.sanitizedProviderMessage(error)
+        #expect(message == error.localizedDescription)
+        #expect(message != String(describing: error))      // never the raw dump
+    }
 }
