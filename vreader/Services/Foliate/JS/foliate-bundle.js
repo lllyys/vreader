@@ -5050,7 +5050,19 @@ ${doc.querySelector("parsererror").innerText}`);
           if (!this.#windowedScroll || !this.scrolled) return;
           const range = this.#windowRange(this.#index, this.sections.length, this.#K);
           if (!range) return;
-          const [lo, hi] = range;
+          let [lo, hi] = range;
+          // Bug #325: a section SHORTER than the viewport can never become the
+          // current #index via scroll-offset resolution (the max scroll offset
+          // stays below its start), so #index can't advance past it and the
+          // section AFTER it never mounts — the scroll dead-ends at the short
+          // divider. While the bottom-of-window section is mounted and measures
+          // shorter than the viewport, extend the window one section further so
+          // the content past the divider is pre-mounted. No #index change (so
+          // relocate + #265 restore are unchanged); never fires for tall
+          // sections, so #73/#76 windowing is byte-for-byte unchanged.
+          while (hi + 1 < this.sections.length && this.#mountedSectionHeight(hi) < this.size) {
+            hi += 1;
+          }
           for (let i3 = lo; i3 <= hi; i3++) {
             if (i3 === this.#index) continue;
             if (!this.#scrolledViews.some((v3) => v3.wi73Index === i3)) {
@@ -5062,6 +5074,10 @@ ${doc.querySelector("parsererror").innerText}`);
             }
           }
           this.#evictOutsideWindow(lo, hi);
+        }
+        #mountedSectionHeight(i3) {
+          const v3 = i3 === this.#index ? this.#view : this.#scrolledViews.find((x3) => (x3.wi73Index ?? this.#index) === i3);
+          return v3?.element ? this.#elementAxisSize(v3.element) : Infinity;
         }
         // Feature #73 WI-4: bound memory to the K-window. Unmount + unload any
         // neighbour outside [lo,hi]; the anchor `#view` (#index) is never in

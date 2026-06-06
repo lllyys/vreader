@@ -47,6 +47,15 @@ enum DebugFixtureCatalog {
         // one importer path; Foliate-js sniffs the magic bytes at runtime.
         // 128 KB compressed. Unblocks Foliate eval device-verification (bug #143).
         DebugFixture(name: "mini-azw3",     format: .azw3, resourceName: "mini-azw3",     resourceExtension: "azw3"),
+        // Bug #325: a SYNTHETIC public-domain AZW3 (KF8, built via Calibre
+        // ebook-convert from a hand-authored EPUB) whose spine alternates
+        // heading-only "PART ONE"/"PART TWO" DIVIDER sections (shorter than a
+        // viewport) with long content sections — the exact structure that sticks
+        // the Foliate windowed scroller (`#ensureWindow` can't advance `#index`
+        // past a sub-viewport section, so the next content section never mounts).
+        // Requires `--disable-kindle-convert` so it stays native-Foliate (default
+        // convert-on-import would turn it into an EPUB rendered by Readium).
+        DebugFixture(name: "divider-azw3",  format: .azw3, resourceName: "divider-azw3",  resourceExtension: "azw3"),
         // Feature #70 WI-4: a small synthetic Markdown fixture so the `.md`
         // reader path is automatable — needed for feature #70's final
         // 4-format (TXT/MD/EPUB/AZW3) calibration acceptance pass. The MD

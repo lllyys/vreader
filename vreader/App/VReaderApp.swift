@@ -105,6 +105,7 @@ struct VReaderApp: App {
                     || config.seedMDMultiPage
                     || config.seedEPUBFixture
                     || config.seedAZW3Fixture
+                    || config.seedDividerAZW3
                     || config.seedKeepExisting
                 modelConfig = needsDiskBackedStore
                     ? ModelConfiguration()
@@ -201,6 +202,12 @@ struct VReaderApp: App {
             if config.enableKindleConvert {
                 FeatureFlags.shared.setOverride(true, for: .kindleConvertOnImport)
             }
+            // Bug #325 verification: force convert-on-import OFF so a seeded AZW3
+            // stays native-Foliate (the windowed scroller under test) instead of
+            // converting to an EPUB rendered by Readium.
+            if config.disableKindleConvert {
+                FeatureFlags.shared.setOverride(false, for: .kindleConvertOnImport)
+            }
 
             // Seed test data before creating the ViewModel to avoid race with LibraryView.loadBooks().
             // Uses Task.detached + semaphore to block init until seeding completes.
@@ -270,6 +277,8 @@ struct VReaderApp: App {
                         await TestSeeder.seedMiniEPUB(persistence: persistence)
                     } else if seedConfig.seedAZW3Fixture {
                         await TestSeeder.seedMiniAZW3(persistence: persistence)
+                    } else if seedConfig.seedDividerAZW3 {
+                        await TestSeeder.seedDividerAZW3(persistence: persistence)
                     } else if seedConfig.seedTwoBooks {
                         await TestSeeder.seedTwoBooks(persistence: persistence)
                     } else if seedConfig.seedBooks {
@@ -513,6 +522,9 @@ struct TestLaunchConfig: Sendable {
     /// (AZW3/MOBI TTS). Mirrors `seedEPUBFixture` — implies a disk-backed
     /// store (AZW3 import touches the filesystem).
     let seedAZW3Fixture: Bool
+    /// `--seed-divider-azw3` (DEBUG, Bug #325): seed the synthetic
+    /// divider-structured AZW3 native-to-Foliate for the windowed-scroll repro.
+    let seedDividerAZW3: Bool
     let seedCorruptDB: Bool
     /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
     /// SwiftData store to remain. Used for terminate-then-relaunch tests
@@ -557,6 +569,10 @@ struct TestLaunchConfig: Sendable {
     /// Kindle file and confirm it converts to a first-class EPUB. The flag is
     /// otherwise default-OFF (ships dark until the human-gated flip).
     let enableKindleConvert: Bool
+    /// `--disable-kindle-convert` (DEBUG, Bug #325): force
+    /// `FeatureFlags.kindleConvertOnImport` OFF so a seeded AZW3 stays
+    /// native-Foliate for the windowed-scroll repro.
+    let disableKindleConvert: Bool
 
     /// Parses launch arguments into a typed config.
     /// Unknown flags are silently ignored.
@@ -606,6 +622,7 @@ struct TestLaunchConfig: Sendable {
             seedTwoBooks: args.contains("--seed-two-books"),
             seedEPUBFixture: args.contains("--seed-epub-fixture"),
             seedAZW3Fixture: args.contains("--seed-azw3-fixture"),
+            seedDividerAZW3: args.contains("--seed-divider-azw3"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
@@ -617,7 +634,8 @@ struct TestLaunchConfig: Sendable {
             enableSync: args.contains("--enable-sync"),
             reduceMotion: args.contains("--reduce-motion"),
             ttsTestMode: args.contains("--tts-test-mode"),
-            enableKindleConvert: args.contains("--enable-kindle-convert")
+            enableKindleConvert: args.contains("--enable-kindle-convert"),
+            disableKindleConvert: args.contains("--disable-kindle-convert")
         )
     }
 
@@ -633,6 +651,7 @@ struct TestLaunchConfig: Sendable {
         seedTwoBooks: false,
         seedEPUBFixture: false,
         seedAZW3Fixture: false,
+        seedDividerAZW3: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,
@@ -644,7 +663,8 @@ struct TestLaunchConfig: Sendable {
         enableSync: false,
         reduceMotion: false,
         ttsTestMode: false,
-        enableKindleConvert: false
+        enableKindleConvert: false,
+        disableKindleConvert: false
     )
 }
 

@@ -1045,7 +1045,22 @@ export class Paginator extends HTMLElement {
         if (!this.#windowedScroll || !this.scrolled) return
         const range = this.#windowRange(this.#index, this.sections.length, this.#K)
         if (!range) return
-        const [lo, hi] = range
+        let [lo, hi] = range
+        // Bug #325: a section SHORTER than the viewport can never become the
+        // current `#index` via scroll-offset resolution — the max container
+        // scroll offset stays below the short section's start, so the offset
+        // never enters its range, `#index` can't advance past it, and the section
+        // AFTER it never enters the window. The scroll then dead-ends at the
+        // short divider (e.g. a heading-only "Part N"). Fix: while the
+        // bottom-of-window section is already mounted and measures shorter than
+        // the viewport, extend the window one section further so the content past
+        // the divider is pre-mounted. This does NOT touch `#index` (so the
+        // relocate fraction + Bug #265 position restore are unchanged) and never
+        // fires for tall sections (the offset reaches their range normally), so
+        // the Feature #73/#76 windowing is byte-for-byte unchanged.
+        while (hi + 1 < this.sections.length && this.#mountedSectionHeight(hi) < this.size) {
+            hi += 1
+        }
         for (let i = lo; i <= hi; i++) {
             if (i === this.#index) continue
             if (!this.#scrolledViews.some(v => v.wi73Index === i)) {
@@ -1053,6 +1068,16 @@ export class Paginator extends HTMLElement {
             }
         }
         this.#evictOutsideWindow(lo, hi)
+    }
+    // Bug #325: live axis-extent of the mounted section at absolute index `i`
+    // (the anchor `#view` or a neighbour in `#scrolledViews`), or Infinity when
+    // not yet mounted — so the window-extension check treats an unmeasured
+    // section as "tall" (don't pre-extend until it has actually measured short).
+    #mountedSectionHeight(i) {
+        const v = i === this.#index
+            ? this.#view
+            : this.#scrolledViews.find(x => (x.wi73Index ?? this.#index) === i)
+        return v?.element ? this.#elementAxisSize(v.element) : Infinity
     }
     // Feature #73 WI-4: bound memory to the K-window. Unmount + unload any
     // neighbour outside [lo,hi]; the anchor `#view` (#index) is never in

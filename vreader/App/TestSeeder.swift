@@ -523,6 +523,55 @@ enum TestSeeder {
         }
     }
 
+    /// Bug #325: seeds the synthetic divider-structured AZW3 (`divider-azw3.azw3`,
+    /// Calibre-built from a hand-authored EPUB) as a NATIVE `.azw3` — bypassing
+    /// the importer's convert-on-import, so it routes to the Foliate windowed
+    /// scroller (not Readium) for the cross-section windowed-scroll repro. Its
+    /// spine alternates heading-only "PART ONE"/"PART TWO" divider sections
+    /// (shorter than a viewport) with long content sections. Mirrors `seedMiniAZW3`.
+    static func seedDividerAZW3(persistence: PersistenceActor) async {
+        await clearAllBooks(persistence: persistence)
+
+        guard let bundleURL = Bundle.main.url(
+            forResource: "divider-azw3", withExtension: "azw3", subdirectory: "DebugFixtures"
+        ) else {
+            AppLogger.general.warning("divider-azw3.azw3 not found in DebugFixtures bundle")
+            return
+        }
+        guard let data = try? Data(contentsOf: bundleURL) else {
+            AppLogger.general.warning("failed to read divider-azw3.azw3 from bundle")
+            return
+        }
+
+        let hash = "00000000000000000000000000000000000000000000000000000000a2730325"
+        let fingerprint = DocumentFingerprint(
+            contentSHA256: hash, fileByteCount: Int64(data.count), format: .azw3)
+
+        let booksDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedBooks", isDirectory: true)
+        let safeName = fingerprint.canonicalKey.replacingOccurrences(of: ":", with: "_")
+        let filePath = booksDir.appendingPathComponent(safeName).appendingPathExtension("azw3")
+        do {
+            try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+            try data.write(to: filePath)
+        } catch {
+            AppLogger.general.warning("failed to write divider-azw3 backing file: \(error)")
+            return
+        }
+
+        let provenance = ImportProvenance(source: .localCopy, importedAt: Date(), originalURLBookmarkData: nil)
+        let record = BookRecord(
+            fingerprintKey: fingerprint.canonicalKey,
+            title: "Divider AZW3 Fixture", author: "VReader Tests", coverImagePath: nil,
+            fingerprint: fingerprint, provenance: provenance, detectedEncoding: nil, addedAt: Date())
+        do {
+            _ = try await persistence.insertBook(record)
+        } catch {
+            AppLogger.general.warning("failed to seed divider-azw3: \(error)")
+        }
+    }
+
     /// Seeds two real-file TXT books for Feature #37's per-book-settings
     /// isolation test, which needs two distinct *openable* books. The
     /// `.books` seed's fixtures are metadata-only (no backing file) and

@@ -52,6 +52,9 @@ enum TestSeedState {
     /// `--seed-azw3-fixture` via `extraLaunchArguments`, EPUB wins (it is
     /// checked first). Use this enum case to seed AZW3 unambiguously.
     case azw3Fixture
+    /// Bug #325: the synthetic divider-structured AZW3, seeded native-to-Foliate
+    /// for the windowed-scroll repro.
+    case dividerAZW3
     /// Keep existing database state (no seeding). For relaunch tests.
     case keepExisting
     /// Corrupted database (triggers init error screen).
@@ -69,6 +72,7 @@ enum TestSeedState {
         case .twoBooks: return "--seed-two-books"
         case .epubFixture: return "--seed-epub-fixture"
         case .azw3Fixture: return "--seed-azw3-fixture"
+        case .dividerAZW3: return "--seed-divider-azw3"
         case .keepExisting: return "--uitesting-no-seed"
         case .corruptDB: return "--seed-corrupt-db"
         }
