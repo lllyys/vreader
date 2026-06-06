@@ -147,14 +147,23 @@ extension EPUBScrollBoundarySignal {
     /// (a JS `true` is not index 1) and a fractional Double (`3.9` is malformed,
     /// not index 3) rather than silently coercing them.
     private nonisolated static func intValue(_ any: Any?) -> Int? {
-        if any is Bool { return nil }
-        if let i = any as? Int { return i }
+        // Bug #327: handle NSNumber FIRST and distinguish a real boolean only via
+        // `CFGetTypeID == CFBooleanGetTypeID`. The live WKScriptMessage bridges
+        // every JS number to NSNumber, and `any is Bool` / `as? Int` CONFLATE
+        // NSNumber(0)/NSNumber(1) with a Swift Bool (NSNumber↔Bool bridge) — which
+        // dropped a JS index `0` (the cover-top case: a real book reports
+        // visibleSpineIndex 0 while the reader sits above section 0's offsetTop),
+        // so the continuous-scroll window never extended and reading got stuck.
+        // Swift-native Int/Double/Bool all bridge through `as? NSNumber` too, so
+        // this one branch covers them; the fallbacks below are defensive.
         if let n = any as? NSNumber {
             if CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
             let d = n.doubleValue
             guard d.isFinite, d == d.rounded() else { return nil }
             return n.intValue
         }
+        if any is Bool { return nil }
+        if let i = any as? Int { return i }
         if let d = any as? Double {
             guard d.isFinite, d == d.rounded() else { return nil }
             return Int(d)
@@ -165,12 +174,16 @@ extension EPUBScrollBoundarySignal {
     /// Finite Double coercion. Rejects a bool-backed `NSNumber` (a JS boolean is
     /// not a fraction) so a malformed `intraFraction: true` isn't read as `1.0`.
     private nonisolated static func doubleValue(_ any: Any?) -> Double? {
-        if any is Bool { return nil }
-        if let d = any as? Double { return d.isFinite ? d : nil }
+        // Bug #327: NSNumber first (CFBoolean check) — a JS `0` fraction bridges to
+        // NSNumber(0), and the `any is Bool` shortcut conflated it with a Bool and
+        // dropped the whole boundary signal (the cover-top case where intraFraction
+        // is exactly 0). See `intValue`.
         if let n = any as? NSNumber {
             if CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
             return n.doubleValue.isFinite ? n.doubleValue : nil
         }
+        if any is Bool { return nil }
+        if let d = any as? Double { return d.isFinite ? d : nil }
         if let i = any as? Int { return Double(i) }
         return nil
     }
@@ -203,14 +216,23 @@ struct EPUBSectionMaterialized: Equatable, Sendable {
     }
 
     private nonisolated static func intValue(_ any: Any?) -> Int? {
-        if any is Bool { return nil }
-        if let i = any as? Int { return i }
+        // Bug #327: handle NSNumber FIRST and distinguish a real boolean only via
+        // `CFGetTypeID == CFBooleanGetTypeID`. The live WKScriptMessage bridges
+        // every JS number to NSNumber, and `any is Bool` / `as? Int` CONFLATE
+        // NSNumber(0)/NSNumber(1) with a Swift Bool (NSNumber↔Bool bridge) — which
+        // dropped a JS index `0` (the cover-top case: a real book reports
+        // visibleSpineIndex 0 while the reader sits above section 0's offsetTop),
+        // so the continuous-scroll window never extended and reading got stuck.
+        // Swift-native Int/Double/Bool all bridge through `as? NSNumber` too, so
+        // this one branch covers them; the fallbacks below are defensive.
         if let n = any as? NSNumber {
             if CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
             let d = n.doubleValue
             guard d.isFinite, d == d.rounded() else { return nil }
             return n.intValue
         }
+        if any is Bool { return nil }
+        if let i = any as? Int { return i }
         if let d = any as? Double {
             guard d.isFinite, d == d.rounded() else { return nil }
             return Int(d)

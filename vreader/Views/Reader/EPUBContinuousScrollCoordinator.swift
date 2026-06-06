@@ -46,14 +46,6 @@ struct EPUBScrollBoundarySignal: Equatable, Sendable {
     let nearTopBoundary: Bool
     /// The viewport is within the prefetch margin of the BOTTOM of the materialized doc.
     let nearBottomBoundary: Bool
-
-    init(visibleSpineIndex: Int, intraFraction: Double,
-         nearTopBoundary: Bool, nearBottomBoundary: Bool) {
-        self.visibleSpineIndex = visibleSpineIndex
-        self.intraFraction = intraFraction
-        self.nearTopBoundary = nearTopBoundary
-        self.nearBottomBoundary = nearBottomBoundary
-    }
 }
 
 @MainActor
@@ -135,7 +127,10 @@ final class EPUBContinuousScrollCoordinator {
         // Extend toward whichever boundary the viewport is near. Both can be true
         // at once (a short chapter in a tall viewport) — handle each sequentially
         // so neither side starves (Gate-4 round-1 [M3]); `extend` is a no-op when
-        // that side can't grow.
+        // that side can't grow. Eviction after each extend is DIRECTIONAL
+        // (`evictTrailing`): it trims the trailing edge behind the reader and
+        // keeps the chapter just loaded ahead of them, so a run of short
+        // front-matter chapters no longer deadlocks the scroll (Bug #327).
         if signal.nearBottomBoundary, window.canExtendForward {
             await extend(forward: true)
         }
@@ -342,8 +337,8 @@ final class EPUBContinuousScrollCoordinator {
         }
         guard gen == generation else { return }
 
-        // Eval succeeded → the new chapter is in the DOM. Evict far chapters one
-        // at a time, advancing `committed` ONLY as each remove succeeds, so the
+        // Eval succeeded → the new chapter is in the DOM. Evict trailing chapters
+        // one at a time, advancing `committed` ONLY as each remove succeeds, so the
         // published window always matches the DOM even under a partial (cascade)
         // remove failure (Gate-4 round-2 [M5]). `window` is assigned ONCE at the
         // end, gen-guarded, so a mode-switch DURING eviction can't publish this
@@ -351,12 +346,21 @@ final class EPUBContinuousScrollCoordinator {
         // evicting, `window` stays at its pre-extend value; `isExtending` blocks
         // any reader meanwhile.
         let extended = forward ? window.extendForward() : window.extendBackward()
-        let targetSpan = extended.evictFarFromAnchor(maxSpan: maxSpan).span
+        // Bug #327: eviction is DIRECTIONAL — `evictTrailing` trims only the
+        // trailing edge behind the reader and NEVER the chapter just loaded ahead
+        // of them. Through a run of short front-matter chapters the topmost-visible
+        // anchor lags the leading edge, so a far-from-anchor trim used to remove
+        // the very chapter the reader was about to reach (deadlocking the scroll on
+        // the cover); trailing-only eviction keeps it. When the anchor sits within
+        // `maxSpan-1` of the trailing edge the window is left larger than `maxSpan`
+        // and shrinks back naturally as the anchor advances.
+        let targetSpan = extended.evictTrailing(forward: forward, maxSpan: maxSpan).span
         var committed = extended
         while committed.span > targetSpan {
             guard gen == generation else { return } // stale → emit nothing, publish nothing
-            // Trim exactly the ONE farthest-from-anchor chapter this step.
-            let next = committed.evictFarFromAnchor(maxSpan: committed.span - 1)
+            // Trim exactly the ONE trailing chapter this step (the `lo` end on a
+            // forward extend, the `hi` end on a backward extend).
+            let next = committed.evictTrailing(forward: forward, maxSpan: committed.span - 1)
             guard let index = singleDroppedIndex(from: committed, to: next) else { break }
             do {
                 try await evaluate(EPUBContinuousScrollJS.removeChapterSectionJS(spineIndex: index))

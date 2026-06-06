@@ -137,7 +137,7 @@ enum EPUBContinuousScrollJS {
     /// JS that removes the materialized section for `spineIndex` (far-end
     /// eviction to bound memory). No-op if the section isn't present.
     ///
-    /// Scroll compensation (Codex Gate-4): `evictFarFromAnchor` can trim the
+    /// Scroll compensation (Codex Gate-4): `evictTrailing` can trim the
     /// TOP end (the `lo` side, when the reader has scrolled down). Removing a
     /// section ABOVE the viewport collapses content upward, so — mirroring the
     /// prepend anchor — when the removed section sits above `scrollTop` we

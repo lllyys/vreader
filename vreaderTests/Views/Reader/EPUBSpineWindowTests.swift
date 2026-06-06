@@ -127,74 +127,88 @@ struct EPUBSpineWindowTests {
         #expect(window.contains(7) == false)
     }
 
-    // MARK: - evictFarFromAnchor(maxSpan:)
+    // MARK: - evictTrailing(forward:maxSpan:)
 
-    @Test("eviction is a no-op when span is within maxSpan")
-    func evictNoOpWithinMaxSpan() throws {
+    @Test("eviction is a no-op when span is within maxSpan (forward)")
+    func evictTrailingNoOpForward() throws {
         var window = try #require(EPUBSpineWindow.initial(anchor: 5, spineCount: 20))
-        window = window.extendForward().extendBackward() // 4...6, span 3
-        let evicted = window.evictFarFromAnchor(maxSpan: 3)
-        #expect(evicted == window)
+        window = window.extendForward().extendBackward() // 4...6, anchor 5, span 3
+        #expect(window.evictTrailing(forward: true, maxSpan: 3) == window)
     }
 
-    @Test("eviction trims the end farther from the anchor first")
-    func evictTrimsFarEndFirst() throws {
-        // Anchor 6, window 4...8 (span 5). Anchor is 2 from lo, 2 from hi —
-        // symmetric. Extend forward once more: 4...9 (span 6), anchor 6 is
-        // 2 from lo(4), 3 from hi(9): hi is farther, so eviction trims hi.
-        var window = try #require(EPUBSpineWindow.initial(anchor: 6, spineCount: 20))
-        window = window.extendBackward().extendBackward() // 4...6
-            .extendForward().extendForward().extendForward() // 4...9
-        #expect(window.lo == 4 && window.hi == 9) // span 6
-        let evicted = window.evictFarFromAnchor(maxSpan: 5)
-        #expect(evicted.hi == 8) // far end (hi) trimmed
-        #expect(evicted.lo == 4)
-        #expect(evicted.contains(6)) // anchor stays inside
+    @Test("eviction is a no-op when span is within maxSpan (backward)")
+    func evictTrailingNoOpBackward() throws {
+        var window = try #require(EPUBSpineWindow.initial(anchor: 5, spineCount: 20))
+        window = window.extendForward().extendBackward() // 4...6
+        #expect(window.evictTrailing(forward: false, maxSpan: 3) == window)
     }
 
-    @Test("eviction keeps the anchor inside the window")
-    func evictKeepsAnchorInside() throws {
-        // Build a wide window anchored near lo so eviction must trim hi
-        // repeatedly without ever dropping the anchor.
+    @Test("forward eviction trims the trailing (lo) end, keeping the leading (hi) section")
+    func evictTrailingForwardTrimsLo() throws {
+        // Window 1...4 anchored at 2 — the Bug #327 lagging-anchor case: the
+        // reader is at the window bottom while the topmost-visible section is 2.
+        var window = try #require(EPUBSpineWindow.initial(anchor: 2, spineCount: 20))
+        window = window.extendBackward()                  // 1...2
+            .extendForward().extendForward()              // 1...4, anchor 2
+        #expect(window.lo == 1 && window.hi == 4)
+        let evicted = window.evictTrailing(forward: true, maxSpan: 3)
+        #expect(evicted.lo == 2)        // trailing (lo) trimmed
+        #expect(evicted.hi == 4)        // leading (hi) section KEPT — reader can reach it
+        #expect(evicted.contains(2))    // anchor stays inside
+    }
+
+    @Test("backward eviction trims the trailing (hi) end, keeping the leading (lo) section")
+    func evictTrailingBackwardTrimsHi() throws {
+        var window = try #require(EPUBSpineWindow.initial(anchor: 3, spineCount: 20))
+        window = window.extendForward()                   // 3...4
+            .extendBackward().extendBackward()            // 1...4, anchor 3
+        #expect(window.lo == 1 && window.hi == 4)
+        let evicted = window.evictTrailing(forward: false, maxSpan: 3)
+        #expect(evicted.hi == 3)        // trailing (hi) trimmed
+        #expect(evicted.lo == 1)        // leading (lo) section KEPT
+        #expect(evicted.contains(3))    // anchor stays inside
+    }
+
+    @Test("forward eviction never trims the anchor or ahead — window stays > maxSpan when the anchor lags near lo")
+    func evictTrailingForwardKeepsAnchorAndAhead() throws {
+        // Anchor 1 == lo, window 1...6 (span 6). Forward eviction can only trim
+        // BEHIND the anchor (lo < anchor); lo == anchor, so nothing is trimmed and
+        // the window is left LARGER than maxSpan. This is the deadlock-break: the
+        // chapters ahead of the reader are never evicted out from under them; the
+        // window shrinks to maxSpan naturally as the anchor advances.
         var window = try #require(EPUBSpineWindow.initial(anchor: 1, spineCount: 30))
-        for _ in 0..<10 { window = window.extendForward() } // 1...11
-        let evicted = window.evictFarFromAnchor(maxSpan: 3)
-        #expect(evicted.contains(1))
-        #expect(evicted.hi - evicted.lo + 1 <= 3)
-        #expect(evicted.anchor == 1)
+        for _ in 0..<5 { window = window.extendForward() } // 1...6, anchor 1
+        #expect(window.evictTrailing(forward: true, maxSpan: 3) == window)
     }
 
-    @Test("eviction trims lo when the anchor sits near hi")
-    func evictTrimsLoWhenAnchorNearHi() throws {
-        var window = try #require(EPUBSpineWindow.initial(anchor: 11, spineCount: 30))
-        for _ in 0..<10 { window = window.extendBackward() } // 1...11, anchor 11
-        let evicted = window.evictFarFromAnchor(maxSpan: 3)
-        #expect(evicted.contains(11))
-        #expect(evicted.hi == 11)
-        #expect(evicted.hi - evicted.lo + 1 <= 3)
+    @Test("forward eviction trims down to maxSpan once the anchor has advanced")
+    func evictTrailingForwardTrimsOnceAnchorAdvanced() throws {
+        // Same wide window 1...6 but re-anchored at 4 (reader moved forward). The
+        // trailing chapters behind the anchor are now trimmable: [1,6] → [4,6].
+        var window = try #require(EPUBSpineWindow.initial(anchor: 1, spineCount: 30))
+        for _ in 0..<5 { window = window.extendForward() } // 1...6
+        window = window.reanchored(to: 4)
+        let evicted = window.evictTrailing(forward: true, maxSpan: 3)
+        #expect(evicted.lo == 4 && evicted.hi == 6)
+        #expect(evicted.contains(4))
     }
 
-    @Test("eviction with maxSpan 1 collapses to the anchor")
-    func evictMaxSpanOneCollapsesToAnchor() throws {
+    @Test("backward eviction never trims the anchor or behind when the anchor lags near hi")
+    func evictTrailingBackwardKeepsAnchorAndBehind() throws {
+        var window = try #require(EPUBSpineWindow.initial(anchor: 6, spineCount: 30))
+        for _ in 0..<5 { window = window.extendBackward() } // 1...6, anchor 6
+        #expect(window.evictTrailing(forward: false, maxSpan: 3) == window)
+    }
+
+    @Test("maxSpan clamps to ≥ 1 — even then the leading section survives")
+    func evictTrailingMaxSpanClampsToOne() throws {
         var window = try #require(EPUBSpineWindow.initial(anchor: 4, spineCount: 10))
-        window = window.extendForward().extendBackward() // 3...5
-        let evicted = window.evictFarFromAnchor(maxSpan: 1)
-        #expect(evicted.lo == 4)
-        #expect(evicted.hi == 4)
-        #expect(evicted.anchor == 4)
-    }
-
-    @Test("symmetric window evicting by one trims hi (ties favor the start)")
-    func evictSymmetricTieTrimsHi() throws {
-        // Anchor 4, window 3...5 (span 3), anchor equidistant from both ends.
-        // Reducing maxSpan to 2 forces exactly one trim; the `>=` tie-break
-        // trims hi → 3...4. Pins the tie-break policy so a `>=`→`>` regression
-        // is caught (a `>` would trim lo → 4...5 instead).
-        var window = try #require(EPUBSpineWindow.initial(anchor: 4, spineCount: 10))
-        window = window.extendForward().extendBackward() // 3...5
-        let evicted = window.evictFarFromAnchor(maxSpan: 2)
-        #expect(evicted.lo == 3)
-        #expect(evicted.hi == 4)
+        window = window.extendForward().extendBackward() // 3...5, anchor 4
+        // forward, maxSpan 0 → cap 1: trim lo while span>1 && lo<anchor: 3→4 →
+        // [4,5]. The anchor + the leading section 5 are retained (directional
+        // eviction never drops the chapter ahead of the reader).
+        let evicted = window.evictTrailing(forward: true, maxSpan: 0)
+        #expect(evicted.lo == 4 && evicted.hi == 5)
         #expect(evicted.anchor == 4)
     }
 
@@ -227,8 +241,8 @@ struct EPUBSpineWindowTests {
         let r = w.reanchored(to: 3)
         #expect(r.lo == 0 && r.hi == 4)        // materialized range unchanged
         #expect(r.anchor == 3)                 // anchor moved
-        // Eviction now trims behind (toward lo), keeping the reading chapter.
-        let evicted = r.evictFarFromAnchor(maxSpan: 3)
+        // Forward eviction now trims behind (toward lo), keeping the reading chapter.
+        let evicted = r.evictTrailing(forward: true, maxSpan: 3)
         #expect(evicted.contains(3))
         #expect(evicted.lo > 0)                // far-behind chapters trimmed
     }

@@ -67,6 +67,28 @@ struct EPUBContinuousScrollCoordinatorTests {
             evaluate: { try await eval.evaluate($0) })
     }
 
+    // MARK: - Bug #327: parse the live integer-0 boundary signal
+
+    /// The live JS report posts NSNumber values. When the reader sits at/above a
+    /// section top (Bug #327 real-book repro: "The Half Second" cover keeps the
+    /// reader above section 0's offsetTop, so the report computes
+    /// visibleSpineIndex 0 AND intraFraction 0 — both integer 0), `parse` MUST
+    /// still accept the signal. If it drops it, the window never extends and the
+    /// reader is stuck. The synthetic fixture (scrolls into tall chapters →
+    /// non-zero fraction) never exercised this.
+    @Test func parse_acceptsIntegerZeroFields_liveReport() {
+        let body: [String: Any] = [
+            "visibleSpineIndex": NSNumber(value: 0),
+            "intraFraction": NSNumber(value: 0),
+            "nearTopBoundary": NSNumber(value: true),
+            "nearBottomBoundary": NSNumber(value: true),
+        ]
+        let parsed = EPUBScrollBoundarySignal.parse(body)
+        #expect(parsed != nil, "Bug #327: parse must accept integer-0 visibleSpineIndex/intraFraction")
+        #expect(parsed?.visibleSpineIndex == 0)
+        #expect(parsed?.nearBottomBoundary == true)
+    }
+
     // MARK: - extend forward / backward
 
     @Test func nearBottom_extendsForward_emitsOneAppend() async {
@@ -77,6 +99,25 @@ struct EPUBContinuousScrollCoordinatorTests {
         #expect(c.window.lo == 0)
         #expect(eval.appends.count == 1)
         #expect(eval.prepends.isEmpty)
+    }
+
+    /// Bug #327 (real-book device repro): "The Half Second" (54 short spine
+    /// sections). After the initial window materializes to [0,1] (anchor 0 +
+    /// forward ±1), the loaded content is only ~1 viewport — so the JS observer
+    /// reports nearBottom (AND nearTop, both true for a short window) with
+    /// visibleSpineIndex 0. The window MUST extend forward to section 2 (and keep
+    /// going), else the reader is stuck after ~1 screen and can't continue
+    /// scrolling. This mirrors the exact device boundary signal.
+    @Test func shortSections_initialThenNearBottom_extendsForward() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 0, spineCount: 54, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.materializeInitialWindow()
+        #expect(c.window.lo == 0, "initial window anchored at 0")
+        #expect(c.window.hi == 1, "initial window fills forward ±1 → [0,1]")
+        // The live report: short window → nearBottom AND nearTop both true, visible 0.
+        await c.handleBoundarySignal(signal(visible: 0, top: true, bottom: true))
+        #expect(c.window.hi == 2,
+            "Bug #327: a short-section window must extend forward to section 2 on nearBottom (got hi=\(c.window.hi))")
     }
 
     @Test func nearTop_extendsBackward_emitsOnePrepend() async {
@@ -179,6 +220,55 @@ struct EPUBContinuousScrollCoordinatorTests {
         #expect(c.window.hi == 3)
         #expect(c.window.contains(2))            // the reading chapter is kept
         #expect(eval.removedSpineIndex(0))       // the far-behind chapter was removed
+    }
+
+    /// Bug #327 (real-book device repro, root cause #2 — the windowing deadlock):
+    /// through a run of short front-matter sections ("The Half Second"
+    /// cover/title/copyright) the topmost-visible anchor LAGS the window's leading
+    /// edge — the reader sits at the window's bottom while the topmost-visible
+    /// section is still, say, 2. A forward extend at maxSpan then used to evict the
+    /// section JUST loaded ahead of the reader (far-from-anchor), so the reader
+    /// could never scroll into it and continuous scroll deadlocked at the front
+    /// matter. With DIRECTIONAL eviction the leading section is retained and the
+    /// trailing one is dropped instead: [1,3] anchor 2 → [2,4]. The device repro
+    /// got stuck oscillating at [1,3]; this asserts the window advances.
+    @Test func shortFrontMatter_laggingAnchor_extendForwardKeepsLeadingSection() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 0, spineCount: 10, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        // Drive to a full maxSpan window [1,3] anchored at 2.
+        await c.handleBoundarySignal(signal(visible: 0, bottom: true)) // [0,1]
+        await c.handleBoundarySignal(signal(visible: 1, bottom: true)) // [0,2]
+        await c.handleBoundarySignal(signal(visible: 2, bottom: true)) // [0,3]→evict→[1,3]
+        #expect(c.window.lo == 1 && c.window.hi == 3, "precondition: window at maxSpan [1,3] anchor 2")
+        eval.evaluatedJS.removeAll()
+        // The anchor is STILL 2 (short sections → topmost-visible lags the bottom).
+        // nearBottom fires again: the window must slide forward, keeping the newly
+        // loaded section 4 and dropping the trailing section 1.
+        await c.handleBoundarySignal(signal(visible: 2, bottom: true))
+        #expect(c.window.hi == 4,
+            "Bug #327: forward extend must KEEP the just-loaded leading section (got hi=\(c.window.hi))")
+        #expect(c.window.lo == 2, "and drop the trailing section → [2,4]")
+        #expect(c.window.contains(4), "section 4 — the chapter the reader is about to reach — survives")
+        #expect(eval.removedSpineIndex(1), "the trailing section 1 is the one removed")
+        #expect(!eval.removedSpineIndex(4), "the leading section 4 is NEVER removed")
+    }
+
+    /// Bug #327 — the same directionality backward: when the reader scrolls UP into
+    /// short front matter, a backward extend must keep the just-prepended LEADING
+    /// (lower) section and drop the trailing (higher) one.
+    @Test func shortFrontMatter_laggingAnchor_extendBackwardKeepsLeadingSection() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 9, spineCount: 10, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(signal(visible: 9, top: true)) // [8,9]
+        await c.handleBoundarySignal(signal(visible: 8, top: true)) // [7,9]
+        await c.handleBoundarySignal(signal(visible: 7, top: true)) // [6,9]→evict→[6,8]
+        #expect(c.window.lo == 6 && c.window.hi == 8, "precondition: window at maxSpan [6,8] anchor 7")
+        eval.evaluatedJS.removeAll()
+        await c.handleBoundarySignal(signal(visible: 7, top: true))
+        #expect(c.window.lo == 5, "backward extend must KEEP the just-loaded leading section 5")
+        #expect(c.window.hi == 7, "and drop the trailing section → [5,7]")
+        #expect(eval.removedSpineIndex(8), "the trailing section 8 is the one removed")
+        #expect(!eval.removedSpineIndex(5), "the leading section 5 is NEVER removed")
     }
 
     @Test func eviction_firesOnSectionEvictedWithRemovedIndex() async {

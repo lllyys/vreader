@@ -19,8 +19,11 @@
 //   ambiguous "empty range" representation that the transition functions
 //   would otherwise have to special-case everywhere.
 // - `anchor` is the chapter the reader is currently reading; it is the
-//   fixed point eviction trims around (the far end from the anchor is
-//   trimmed first), so the user's current chapter is never evicted.
+//   fixed point eviction trims around — the window trims its TRAILING edge
+//   (behind the reader, in the scroll direction) and never the anchor or the
+//   freshly-loaded leading chapter, so the user's current chapter is never
+//   evicted and the chapter just loaded ahead of them survives long enough to
+//   scroll into (Bug #327).
 // - All transitions are pure (`func` returning a new value), value-type
 //   `Equatable` — no shared mutable state, mirroring `EPUBChapterNavigationRouter`
 //   and `EPUBProgressCalculator`.
@@ -100,41 +103,54 @@ struct EPUBSpineWindow: Equatable {
         return EPUBSpineWindow(lo: lo - 1, hi: hi, anchor: anchor, spineCount: spineCount)
     }
 
-    /// Trims the window down to at most `maxSpan` chapters, removing whole
-    /// chapters from the end farther from the `anchor` first so the
-    /// reader's current chapter is always retained.
+    /// Trims the window toward its TRAILING edge in the reader's direction of
+    /// travel, keeping the freshly-materialized LEADING chapter so the reader can
+    /// scroll into it. When the reader scrolled forward (`forward == true`, the
+    /// window just grew at `hi`), chapters are dropped from `lo` — but only those
+    /// the reader has already passed (`lo < anchor`); the anchor's chapter and
+    /// everything ahead of it are always retained. Symmetric for backward travel:
+    /// drop from `hi` while `hi > anchor`.
     ///
-    /// - Parameter maxSpan: the maximum number of chapters to keep
-    ///   materialized (clamped to ≥ 1 — a window always keeps the anchor).
-    func evictFarFromAnchor(maxSpan: Int) -> EPUBSpineWindow {
+    /// Bug #327 — why this is directional rather than "far from the anchor":
+    /// through a run of short chapters (a real book's cover / title / copyright
+    /// front matter) the viewport spans more than one chapter, so the
+    /// topmost-visible `anchor` LAGS the window's leading edge by more than one
+    /// chapter. A far-from-anchor trim then removes the very chapter just loaded
+    /// ahead of the reader — the reader can never scroll into it, the window
+    /// oscillates, and continuous scroll deadlocks at the front matter. Dropping
+    /// strictly from the trailing edge keeps the leading chapter, breaking the
+    /// deadlock. When the anchor sits within `maxSpan - 1` of the trailing edge
+    /// (reader near the window start, or a short-chapter run keeps the anchor
+    /// behind), the window is left LARGER than `maxSpan` rather than evicting
+    /// ahead of the reader; it shrinks back to `maxSpan` naturally as the anchor
+    /// advances. Short chapters are cheap, so the temporary overage is bounded
+    /// (≈ one viewport of chapters) and inexpensive.
+    ///
+    /// - Parameters:
+    ///   - forward: the direction the reader scrolled (the side the window just
+    ///     grew on). `true` ⇒ trim from `lo`; `false` ⇒ trim from `hi`.
+    ///   - maxSpan: the target number of chapters to keep materialized (clamped
+    ///     to ≥ 1 — a window always keeps the anchor).
+    func evictTrailing(forward: Bool, maxSpan: Int) -> EPUBSpineWindow {
         let cap = max(maxSpan, 1)
         var newLo = lo
         var newHi = hi
-        while (newHi - newLo + 1) > cap {
-            // The window still spans more than one chapter (`cap >= 1` and
-            // the guard holds), so at least one side is strictly past the
-            // anchor and can be trimmed without dropping it. Trim the side
-            // farther from the anchor first; ties trim `hi` (so a symmetric
-            // window shrinks toward the start). Exactly one branch makes
-            // progress each iteration → the loop always terminates.
-            let distanceToLo = anchor - newLo
-            let distanceToHi = newHi - anchor
-            if newHi > anchor, distanceToHi >= distanceToLo || newLo >= anchor {
-                newHi -= 1
-            } else {
-                // `newLo < anchor` here: the only remaining trimmable side.
-                newLo += 1
-            }
+        if forward {
+            // Trim from the back, never the anchor or anything ahead of it.
+            while (newHi - newLo + 1) > cap, newLo < anchor { newLo += 1 }
+        } else {
+            // Trim from the front, never the anchor or anything behind it.
+            while (newHi - newLo + 1) > cap, newHi > anchor { newHi -= 1 }
         }
         return EPUBSpineWindow(lo: newLo, hi: newHi, anchor: anchor, spineCount: spineCount)
     }
 
     /// Returns a window with the anchor moved to `newAnchor`, clamped into the
     /// current materialized `[lo, hi]` span. The materialized RANGE is unchanged
-    /// — only which chapter `evictFarFromAnchor` treats as "keep" moves. Feature
+    /// — only which chapter `evictTrailing` treats as "keep" moves. Feature
     /// #71 WI-4: the continuous-scroll coordinator re-anchors to the reading
     /// chapter as the user scrolls so eviction trims chapters BEHIND the reader
-    /// (far from the current position), not the one being read. Pure; re-anchor
+    /// (the trailing edge), not the one being read. Pure; re-anchor
     /// does not touch the DOM (no `lo`/`hi` change), so the coordinator may apply
     /// it without a JS eval.
     func reanchored(to newAnchor: Int) -> EPUBSpineWindow {
