@@ -167,6 +167,14 @@ final class NativePagedContainer: UIView {
         textView.backgroundColor = config.backgroundColor
         textView.textColor = config.textColor
         backgroundColor = config.backgroundColor
+        // Bug #324 / GH #1546: tint the selection (caret, grab handles,
+        // selection-highlight) with the reader theme accent instead of the
+        // system default blue. `applyConfig` runs on every theme change, so the
+        // refresh path is covered. Only assign when changed (mirrors the other
+        // color props' implicit no-op-on-equal behaviour).
+        if textView.tintColor != config.accentColor {
+            textView.tintColor = config.accentColor
+        }
     }
 
     // MARK: - Content Tap

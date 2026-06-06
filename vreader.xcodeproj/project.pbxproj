@@ -1513,6 +1513,7 @@
 		EF1B83368D1AE23FFD738752 /* HTTPTTSProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CE6D5875C20698F83D6EC1E /* HTTPTTSProvider.swift */; };
 		EF1F3F42EE0664A058F2304D /* ReadingPositionPersisting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CF764016CF051DDD94C586F /* ReadingPositionPersisting.swift */; };
 		EFA070B6FC93ED602B4ACCAA /* ReaderSafeAreaResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEA3693DF8AC58A111AFB692 /* ReaderSafeAreaResolver.swift */; };
+		EFC0B64D39B38A75CF24186B /* TXTSelectionTintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75044E44216620F6BE815174 /* TXTSelectionTintTests.swift */; };
 		F017AB8749D17949AC040CAA /* FoliateTOCConverterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91F653CA8E9B107CA2CA4CA /* FoliateTOCConverterTests.swift */; };
 		F064D551F461B2FA4C778D56 /* TXTOffsetTranslatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15D804BC38A65B71FB212B03 /* TXTOffsetTranslatorTests.swift */; };
 		F0A36C4FB1AD5746B8636062 /* AIReaderPanelHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A46EC81A33304A8D024F7CA /* AIReaderPanelHeader.swift */; };
@@ -2378,6 +2379,7 @@
 		7456EC54564FFE74772E88E8 /* NativeTextPagedViewSideTapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTextPagedViewSideTapTests.swift; sourceTree = "<group>"; };
 		746091C5D6814B751FAA32B0 /* LegadoBookSourceDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegadoBookSourceDTO.swift; sourceTree = "<group>"; };
 		74BC81AA927F17D2572106F6 /* BookFormatIsSupportedExtensionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFormatIsSupportedExtensionTests.swift; sourceTree = "<group>"; };
+		75044E44216620F6BE815174 /* TXTSelectionTintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTSelectionTintTests.swift; sourceTree = "<group>"; };
 		759C78EC56C473977FA14017 /* SearchResultGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultGrouping.swift; sourceTree = "<group>"; };
 		75C98D1301031FAFF68ABDD9 /* AITestSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITestSetupTests.swift; sourceTree = "<group>"; };
 		765DA2396E1D41FEDF5652AD /* ReaderSheetChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSheetChrome.swift; sourceTree = "<group>"; };
@@ -3942,6 +3944,7 @@
 				C0DCDE7714C1D65B4D045D3B /* TXTReaderContainerViewChapterStartTests.swift */,
 				541D98DEB1DF611A369D7E54 /* TXTReaderContainerViewChineseConversionTests.swift */,
 				552781BB888D9F5ACA8B6B80 /* TXTReaderContainerViewPagedLayoutTests.swift */,
+				75044E44216620F6BE815174 /* TXTSelectionTintTests.swift */,
 				77A6970A21B903B77B011DE8 /* TXTTextViewBridgeEditMenuTests.swift */,
 				ABF97E254D3F3DCCDAEF6185 /* TXTTextViewBridgeSafeAreaInsetTests.swift */,
 				6FD939A141F12D7003A40C3D /* UIKitHighlightPopoverPresenterTests.swift */,
@@ -6690,6 +6693,7 @@
 				1848C8FC21B07468D5F95EA0 /* TXTReaderViewModelChapterHeadingTests.swift in Sources */,
 				D265D45BCD1884BF67E03DF9 /* TXTReaderViewModelContinuousTests.swift in Sources */,
 				4D4A49E8738329EC2B336683 /* TXTReaderViewModelTests.swift in Sources */,
+				EFC0B64D39B38A75CF24186B /* TXTSelectionTintTests.swift in Sources */,
 				B3E77B47634165E42FA68E11 /* TXTServiceTests.swift in Sources */,
 				631E89297E6BE25DF74556B7 /* TXTStreamingOpenTests.swift in Sources */,
 				01450E848C5A2110A56DDD21 /* TXTTextChunkerTests.swift in Sources */,
@@ -7733,7 +7737,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 906;
+				CURRENT_PROJECT_VERSION = 907;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7741,7 +7745,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.59.6;
+				MARKETING_VERSION = 3.59.7;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
@@ -7887,7 +7891,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 906;
+				CURRENT_PROJECT_VERSION = 907;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7895,7 +7899,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.59.6;
+				MARKETING_VERSION = 3.59.7;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;

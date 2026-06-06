@@ -111,6 +111,11 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // TextKit 1 will only compute layout for the visible region + buffer.
         textView.layoutManager.allowsNonContiguousLayout = true
 
+        // Bug #324 / GH #1546: tint the selection (caret, grab handles,
+        // selection-highlight) with the reader theme accent instead of the
+        // system default blue, which clashes with sepia/paper backgrounds.
+        Self.applyTintColor(to: textView, config: config)
+
         // Tap gesture for toolbar toggle — fires alongside UITextView's own gestures
         let tapRecognizer = UITapGestureRecognizer(
             target: context.coordinator,
@@ -443,6 +448,22 @@ struct TXTTextViewBridge: UIViewRepresentable {
         textView.setSourceText(base)
         textView.adjustsFontForContentSizeCategory = true
         textView.backgroundColor = config.backgroundColor
+        // Bug #324 / GH #1546: re-apply the accent tint on a config change so a
+        // live theme switch updates the selection color in lockstep with the
+        // background/text colors.
+        Self.applyTintColor(to: textView, config: config)
+    }
+
+    /// Bug #324 / GH #1546: applies the reader theme accent
+    /// (`config.accentColor`) as the text view's `tintColor`, which drives the
+    /// selection caret, grab handles, and selection-highlight color. Only
+    /// assigns when the value differs, mirroring the bridge's existing
+    /// `backgroundColor` re-apply discipline. Static + internal so it is unit-
+    /// testable with a plain `UITextView` (no `Context` needed).
+    static func applyTintColor(to textView: UITextView, config: TXTViewConfig) {
+        if textView.tintColor != config.accentColor {
+            textView.tintColor = config.accentColor
+        }
     }
 
     /// Updates highlight visualization via the layout manager (bug #47 v12).

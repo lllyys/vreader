@@ -206,6 +206,18 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         return max(0, min(1, local / CGFloat(chunkLen)))
     }
 
+    /// Bug #324 / GH #1546: applies the reader theme accent
+    /// (`config.accentColor`) as the cell text view's `tintColor`, which drives
+    /// the selection caret, grab handles, and selection-highlight color. Only
+    /// assigns when the value differs, mirroring the bridge's existing
+    /// `backgroundColor` re-apply discipline. Static + internal so it is unit-
+    /// testable with a plain `UITextView` (no `UITableView` needed).
+    static func applyTintColor(to textView: UITextView, config: TXTViewConfig) {
+        if textView.tintColor != config.accentColor {
+            textView.tintColor = config.accentColor
+        }
+    }
+
     func makeUIView(context: Context) -> UITableView {
         let tableView = UITableView(frame: .zero, style: .plain)
         tableView.register(ChunkedTextCell.self, forCellReuseIdentifier: ChunkedTextCell.reuseID)
@@ -800,6 +812,13 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             let (persisted, active) = chunkLocalHighlightRanges(forChunk: index)
             cell.textContentView.setHighlightRanges(persisted: persisted, active: active)
             cell.textContentView.backgroundColor = config.backgroundColor
+            // Bug #324 / GH #1546: tint each cell's selection (caret, grab
+            // handles, selection-highlight) with the reader theme accent so it
+            // matches the sepia/paper theme instead of the system blue. Applied
+            // per cell here (the chunked path has one UITextView per cell); a
+            // theme change reloads the table, re-running this with the new
+            // config, so the refresh path is covered too.
+            TXTChunkedReaderBridge.applyTintColor(to: cell.textContentView, config: config)
             cell.textContentView.delegate = self
             cell.textContentView.tag = index  // Store chunk index for offset calculation
 
