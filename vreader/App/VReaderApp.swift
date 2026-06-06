@@ -106,6 +106,7 @@ struct VReaderApp: App {
                     || config.seedEPUBFixture
                     || config.seedAZW3Fixture
                     || config.seedDividerAZW3
+                    || config.seedMultiChapterEPUB
                     || config.seedKeepExisting
                 modelConfig = needsDiskBackedStore
                     ? ModelConfiguration()
@@ -279,6 +280,8 @@ struct VReaderApp: App {
                         await TestSeeder.seedMiniAZW3(persistence: persistence)
                     } else if seedConfig.seedDividerAZW3 {
                         await TestSeeder.seedDividerAZW3(persistence: persistence)
+                    } else if seedConfig.seedMultiChapterEPUB {
+                        await TestSeeder.seedMultiChapterEPUB(persistence: persistence)
                     } else if seedConfig.seedTwoBooks {
                         await TestSeeder.seedTwoBooks(persistence: persistence)
                     } else if seedConfig.seedBooks {
@@ -525,6 +528,11 @@ struct TestLaunchConfig: Sendable {
     /// `--seed-divider-azw3` (DEBUG, Bug #325): seed the synthetic
     /// divider-structured AZW3 native-to-Foliate for the windowed-scroll repro.
     let seedDividerAZW3: Bool
+    /// `--seed-multi-chapter-epub` (Bug #1561 / Feature #85): seed the bundled
+    /// `multi-chapter-epub.epub` (4 viewport-tall chapters) as a real, openable
+    /// EPUB so an XCUITest can drive a REAL cross-chapter scroll in the legacy #71
+    /// continuous-stitch path. Implies a disk-backed store.
+    let seedMultiChapterEPUB: Bool
     let seedCorruptDB: Bool
     /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
     /// SwiftData store to remain. Used for terminate-then-relaunch tests
@@ -623,6 +631,7 @@ struct TestLaunchConfig: Sendable {
             seedEPUBFixture: args.contains("--seed-epub-fixture"),
             seedAZW3Fixture: args.contains("--seed-azw3-fixture"),
             seedDividerAZW3: args.contains("--seed-divider-azw3"),
+            seedMultiChapterEPUB: args.contains("--seed-multi-chapter-epub"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
@@ -652,6 +661,7 @@ struct TestLaunchConfig: Sendable {
         seedEPUBFixture: false,
         seedAZW3Fixture: false,
         seedDividerAZW3: false,
+        seedMultiChapterEPUB: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,

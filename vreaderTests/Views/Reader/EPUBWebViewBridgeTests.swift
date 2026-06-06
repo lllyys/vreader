@@ -660,4 +660,30 @@ private extension WKWebView {
         }
     }
 }
+
+// MARK: - Bug #1561: single-scroller decision (EPUB double-scroller fix)
+
+@Suite("EPUBWebViewBridge - outerScrollEnabled (Bug #1561 double scroller)")
+struct EPUBWebViewBridgeOuterScrollEnabledTests {
+
+    @Test("legacy single-chapter scroll keeps the outer scrollView (the only scroller)")
+    func legacySingleChapterScrollEnablesOuter() {
+        #expect(EPUBWebViewBridge.outerScrollEnabled(isPaged: false, hasContinuousConfig: false) == true)
+    }
+
+    @Test("paged mode disables the outer scrollView (the WKWebView paginates)")
+    func pagedDisablesOuter() {
+        #expect(EPUBWebViewBridge.outerScrollEnabled(isPaged: true, hasContinuousConfig: false) == false)
+    }
+
+    @Test("continuous-stitch path disables the outer scrollView — inner #vreader-scroll-root owns it (Bug #1561)")
+    func continuousStitchDisablesOuter() {
+        #expect(EPUBWebViewBridge.outerScrollEnabled(isPaged: false, hasContinuousConfig: true) == false)
+    }
+
+    @Test("paged + continuous (defensive) still disables the outer scrollView")
+    func pagedAndContinuousDisablesOuter() {
+        #expect(EPUBWebViewBridge.outerScrollEnabled(isPaged: true, hasContinuousConfig: true) == false)
+    }
+}
 #endif

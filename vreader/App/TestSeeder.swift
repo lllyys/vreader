@@ -443,6 +443,69 @@ enum TestSeeder {
         }
     }
 
+    /// Seeds the bundled `multi-chapter-epub.epub` fixture (4 viewport-tall
+    /// chapters) as a real, openable EPUB. Bug #1561 / Feature #85: the launch-arg
+    /// analogue of the DebugBridge `multi-chapter-epub` seed, so an XCUITest can
+    /// drive a REAL cross-chapter scroll in the legacy #71 continuous-stitch path
+    /// (the DebugBridge openurl seed is flaky on this host). Mirrors `seedMiniEPUB`;
+    /// the reader resolves the file by `fingerprintKey`, so the synthetic SHA is
+    /// harmless.
+    static func seedMultiChapterEPUB(persistence: PersistenceActor) async {
+        await clearAllBooks(persistence: persistence)
+
+        guard let bundleURL = Bundle.main.url(
+            forResource: "multi-chapter-epub",
+            withExtension: "epub",
+            subdirectory: "DebugFixtures"
+        ) else {
+            AppLogger.general.warning("multi-chapter-epub.epub not found in DebugFixtures bundle")
+            return
+        }
+
+        guard let data = try? Data(contentsOf: bundleURL) else {
+            AppLogger.general.warning("failed to read multi-chapter-epub.epub from bundle")
+            return
+        }
+
+        let hash = "00000000000000000000000000000000000000000000000000000000e9bcc001"
+        let fingerprint = DocumentFingerprint(
+            contentSHA256: hash,
+            fileByteCount: Int64(data.count),
+            format: .epub
+        )
+
+        let booksDir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedBooks", isDirectory: true)
+        try? FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+
+        let safeName = fingerprint.canonicalKey.replacingOccurrences(of: ":", with: "_")
+        let filePath = booksDir.appendingPathComponent(safeName).appendingPathExtension("epub")
+        try? data.write(to: filePath)
+
+        let provenance = ImportProvenance(
+            source: .localCopy,
+            importedAt: Date(),
+            originalURLBookmarkData: nil
+        )
+        let record = BookRecord(
+            fingerprintKey: fingerprint.canonicalKey,
+            title: "Multi-Chapter EPUB Fixture",
+            author: "VReader Tests",
+            coverImagePath: nil,
+            fingerprint: fingerprint,
+            provenance: provenance,
+            detectedEncoding: nil,
+            addedAt: Date()
+        )
+
+        do {
+            _ = try await persistence.insertBook(record)
+        } catch {
+            AppLogger.general.warning("failed to seed multi-chapter-epub: \(error)")
+        }
+    }
+
     /// Seeds a single real, openable AZW3 book — the bundled `mini-azw3.azw3`
     /// (Project Gutenberg #1064, "The Masque of the Red Death").
     ///

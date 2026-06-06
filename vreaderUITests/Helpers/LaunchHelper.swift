@@ -55,6 +55,10 @@ enum TestSeedState {
     /// Bug #325: the synthetic divider-structured AZW3, seeded native-to-Foliate
     /// for the windowed-scroll repro.
     case dividerAZW3
+    /// Bug #1561 / Feature #85: the synthetic `multi-chapter-epub` (4 viewport-tall
+    /// chapters), seeded as a real openable EPUB so an XCUITest can drive a REAL
+    /// cross-chapter scroll in the legacy #71 continuous-stitch path.
+    case multiChapterEPUB
     /// Keep existing database state (no seeding). For relaunch tests.
     case keepExisting
     /// Corrupted database (triggers init error screen).
@@ -73,6 +77,7 @@ enum TestSeedState {
         case .epubFixture: return "--seed-epub-fixture"
         case .azw3Fixture: return "--seed-azw3-fixture"
         case .dividerAZW3: return "--seed-divider-azw3"
+        case .multiChapterEPUB: return "--seed-multi-chapter-epub"
         case .keepExisting: return "--uitesting-no-seed"
         case .corruptDB: return "--seed-corrupt-db"
         }

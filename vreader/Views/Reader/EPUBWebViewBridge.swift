@@ -131,6 +131,21 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         Coordinator(onProgressChange: onProgressChange, onLoadError: onLoadError)
     }
 
+    /// Bug #1561: whether the OUTER `WKWebView.scrollView` should own vertical
+    /// scrolling. It must be OFF when a single inner scroller already owns it —
+    /// paged mode (the WKWebView paginates) OR the legacy continuous-stitch path
+    /// (the inner `#vreader-scroll-root` is the designed scroller: the rAF
+    /// `onWindowedPosition` observer, windowing, relocate, and restore all key off
+    /// `root.scrollTop`). Leaving the outer scrollView enabled in continuous mode
+    /// created TWO fighting vertical scrollers — two scroll bars, and the outer
+    /// (which maxes at ~64px) consuming the gesture so the inner column never
+    /// advanced (stuck scroll). Only the legacy single-chapter scroll path
+    /// (`!isPaged && !hasContinuousConfig`) keeps the outer scrollView as its
+    /// scroller (it has no inner overflow column).
+    nonisolated static func outerScrollEnabled(isPaged: Bool, hasContinuousConfig: Bool) -> Bool {
+        !(isPaged || hasContinuousConfig)
+    }
+
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         let userContentController = WKUserContentController()
@@ -304,10 +319,12 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         webView.allowsBackForwardNavigationGestures = false
         webView.accessibilityIdentifier = "epubWebView"
 
-        // Disable vertical scrolling in paged mode
-        if isPaged {
-            webView.scrollView.isScrollEnabled = false
-        }
+        // Bug #1561: collapse to ONE vertical scroller. Paged mode AND the legacy
+        // continuous-stitch path (`continuousScroll != nil`, whose inner
+        // `#vreader-scroll-root` is the designed scroller) both disable the outer
+        // WKWebView scrollView; only the legacy single-chapter scroll path keeps it.
+        webView.scrollView.isScrollEnabled = Self.outerScrollEnabled(
+            isPaged: isPaged, hasContinuousConfig: continuousScroll != nil)
 
         return webView
     }
@@ -326,8 +343,10 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         context.coordinator.onPaginationReady = onPaginationReady
         context.coordinator.continuousScroll = continuousScroll
 
-        // Update scroll enabled state when layout mode changes
-        webView.scrollView.isScrollEnabled = !isPaged
+        // Update scroll enabled state when layout mode changes (Bug #1561: the
+        // continuous-stitch path also disables the outer scroller — see makeUIView).
+        webView.scrollView.isScrollEnabled = Self.outerScrollEnabled(
+            isPaged: isPaged, hasContinuousConfig: continuousScroll != nil)
 
         // Feature #71 WI-6b-i: continuous mode loads ONE bootstrap document and
         // then stitches chapter sections into it via the coordinator's evaluator
