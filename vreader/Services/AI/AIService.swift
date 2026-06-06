@@ -158,6 +158,9 @@ actor AIService {
     // the right snapshot fields.
 
     func resolveProvider() async throws -> any AIProvider {
+        #if DEBUG
+        if let mock = AITestOverride.mockProvider { return mock }
+        #endif
         if let provider {
             return provider
         }
@@ -313,6 +316,9 @@ actor AIService {
     /// existing `(ProviderProfile, String) -> any AIProvider` factory shape
     /// is reused (a test observes the resolved `model` / `apiKey` it carries).
     private func providerInstance(for config: ResolvedAIProviderConfig) -> any AIProvider {
+        #if DEBUG
+        if let mock = AITestOverride.mockProvider { return mock }
+        #endif
         if let provider {
             return provider
         }

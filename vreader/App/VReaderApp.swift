@@ -188,6 +188,7 @@ struct VReaderApp: App {
             // throw featureDisabled/consentRequired. AITestSetup sets all three.
             AITestSetup.apply(
                 enableAI: config.enableAI,
+                mockAI: config.mockAI,
                 featureFlags: .shared,
                 consentManager: AIConsentManager()
             )
@@ -539,6 +540,10 @@ struct TestLaunchConfig: Sendable {
     let colorSchemeOverride: ColorScheme?
     let dynamicTypeOverride: DynamicTypeSize?
     let enableAI: Bool
+    /// `--mock-ai` — inject the DEBUG deterministic key-free `MockAIProvider`
+    /// so AI flows (chat #86, bilingual #85, multi-turn hang repro #323) are
+    /// CU-free verifiable without entering a real API key.
+    let mockAI: Bool
     let enableSync: Bool
     let reduceMotion: Bool
     /// `--tts-test-mode` — feature #45 WI-4e. Swap `AVSpeechSynthesizer`
@@ -608,6 +613,7 @@ struct TestLaunchConfig: Sendable {
             colorSchemeOverride: colorScheme,
             dynamicTypeOverride: dynamicType,
             enableAI: args.contains("--enable-ai"),
+            mockAI: args.contains("--mock-ai"),
             enableSync: args.contains("--enable-sync"),
             reduceMotion: args.contains("--reduce-motion"),
             ttsTestMode: args.contains("--tts-test-mode"),
@@ -634,6 +640,7 @@ struct TestLaunchConfig: Sendable {
         colorSchemeOverride: nil,
         dynamicTypeOverride: nil,
         enableAI: false,
+        mockAI: false,
         enableSync: false,
         reduceMotion: false,
         ttsTestMode: false,

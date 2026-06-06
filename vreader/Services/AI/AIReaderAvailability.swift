@@ -115,5 +115,13 @@ enum AITestOverride {
     /// When true, `AIReaderAvailability.isAvailable` short-circuits to
     /// `true`, bypassing the feature-flag + API-key + consent gates.
     static var forceAvailable = false
+
+    /// When set (via the `--mock-ai` launch flag), `AIService.resolveProvider`
+    /// and `providerInstance(for:)` return this provider ahead of any real
+    /// profile resolution — so AI flows run key-free + deterministic for CU-free
+    /// verification. `nonisolated(unsafe)`: set ONCE at launch (before any AI
+    /// request) and read-only thereafter, including from the `AIService` actor;
+    /// `any AIProvider` is `Sendable`, so the read is data-race-free in practice.
+    nonisolated(unsafe) static var mockProvider: (any AIProvider)?
 }
 #endif

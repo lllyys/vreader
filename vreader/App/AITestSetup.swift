@@ -34,11 +34,17 @@ enum AITestSetup {
     /// configured them stays configured.
     static func apply(
         enableAI: Bool,
+        mockAI: Bool = false,
         featureFlags: FeatureFlags,
         consentManager: AIConsentManager
     ) {
-        AITestOverride.forceAvailable = enableAI
-        guard enableAI else { return }
+        // `--mock-ai` injects a deterministic, KEY-FREE provider (MockAIProvider)
+        // so AI flows are CU-free verifiable without entering a real API key.
+        // It implies availability (you can't drive AI with the gates closed) and
+        // grants the same flag + consent `--enable-ai` does.
+        AITestOverride.forceAvailable = enableAI || mockAI
+        AITestOverride.mockProvider = mockAI ? MockAIProvider() : nil
+        guard enableAI || mockAI else { return }
         featureFlags.setOverride(true, for: .aiAssistant)
         consentManager.grantConsent()
     }
