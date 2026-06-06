@@ -465,6 +465,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func navigate(spineIndex: Int, fraction: Double?) async throws {
         await record("navigate:\(spineIndex):\(fraction.map { String($0) } ?? "nil")")
     }
+    func locate(highlightIndex: Int) async throws {
+        await record("locate:\(highlightIndex)")
+    }
     func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws {
         await record("scroll-boundary:\(spineIndex):\(near.rawValue)")
     }
@@ -513,6 +516,7 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
         case seekFraction(fraction: Double)
         case scrollSheet(target: DebugCommand.ScrollTarget)
         case navigate(spineIndex: Int, fraction: Double?)
+        case locate(highlightIndex: Int)
         case scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge)
         case pdfHighlight(page: Int, rect: NormalizedRect, color: String?)
         case setLayout(layout: DebugCommand.LayoutMode)
@@ -566,6 +570,9 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     }
     func navigate(spineIndex: Int, fraction: Double?) async throws {
         calls.append(.navigate(spineIndex: spineIndex, fraction: fraction))
+    }
+    func locate(highlightIndex: Int) async throws {
+        calls.append(.locate(highlightIndex: highlightIndex))
     }
     func scrollBoundary(spineIndex: Int, near: DebugCommand.ScrollBoundaryEdge) async throws {
         calls.append(.scrollBoundary(spineIndex: spineIndex, near: near))

@@ -13,7 +13,7 @@ final class DebugFixtureCatalogTests: XCTestCase {
     func test_all_returnsKnownFixtureNames() {
         let names = DebugFixtureCatalog.all().map { $0.name }
         XCTAssertEqual(Set(names), [
-            "war-and-peace", "mini-epub3", "mini-azw3", "mini-markdown",
+            "war-and-peace", "bloom-sample", "mini-epub3", "mini-azw3", "mini-markdown",
             "multi-chapter-epub", "multi-page-pdf",
             "mini-epub2", "mini-rtl", "mini-cjk", "mini-cjk-vlong",
         ])

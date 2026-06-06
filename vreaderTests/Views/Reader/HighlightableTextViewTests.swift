@@ -150,6 +150,72 @@ struct HighlightableTextViewTests {
         lm.ensureLayout(forCharacterRange: NSRange(location: 0, length: 5))
     }
 
+    // MARK: - Feature #74: locate-bloom readback (DEBUG verification harness)
+
+    #if DEBUG
+    @Test @MainActor func bloomReadbackStartsAtZero() {
+        let tv = HighlightableTextView()
+        #expect(tv.bloomPlayCount == 0)
+        #expect(tv.lastBloomPeakIntensity == 0)
+    }
+
+    @Test @MainActor func playLandingBloomIncrementsPlayCount() {
+        let tv = HighlightableTextView()
+        tv.setSourceText(NSAttributedString(string: "Hello World"))
+        tv.playLandingBloom(
+            range: NSRange(location: 0, length: 5), colorName: "yellow",
+            family: .light, reduceMotion: false
+        )
+        #expect(tv.bloomPlayCount == 1)
+        // Seeding frame 0 (motion curve t=0 → intensity 0) shouldn't yet lift
+        // the recorded peak above resting; a driven tick does.
+        tv.recordBloomTickForTests(elapsedMs: 200)  // hold band → intensity 1
+        #expect(tv.lastBloomPeakIntensity > 0.4)
+        tv.cancelLandingBloom()
+    }
+
+    @Test @MainActor func bloomPeakPersistsAfterCancel() {
+        // The readback must survive teardown so a POST-settle snapshot proves
+        // the bloom fired + reached a peak.
+        let tv = HighlightableTextView()
+        tv.setSourceText(NSAttributedString(string: "Hello World"))
+        tv.playLandingBloom(
+            range: NSRange(location: 0, length: 5), colorName: "yellow",
+            family: .light, reduceMotion: false
+        )
+        tv.recordBloomTickForTests(elapsedMs: 200)
+        let peak = tv.lastBloomPeakIntensity
+        tv.cancelLandingBloom()
+        #expect(tv.lastBloomPeakIntensity == peak)
+        #expect(tv.bloomPlayCount == 1)
+    }
+
+    @Test @MainActor func bloomPlayCountAccumulatesAcrossPlays() {
+        let tv = HighlightableTextView()
+        tv.setSourceText(NSAttributedString(string: "Hello World"))
+        let range = NSRange(location: 0, length: 5)
+        tv.playLandingBloom(range: range, colorName: "yellow", family: .light, reduceMotion: false)
+        tv.cancelLandingBloom()
+        tv.playLandingBloom(range: range, colorName: "yellow", family: .light, reduceMotion: false)
+        #expect(tv.bloomPlayCount == 2)
+        tv.cancelLandingBloom()
+    }
+
+    @Test @MainActor func bloomPeakRecordsMaxAcrossTicks() {
+        let tv = HighlightableTextView()
+        tv.setSourceText(NSAttributedString(string: "Hello World"))
+        tv.playLandingBloom(
+            range: NSRange(location: 0, length: 5), colorName: "yellow",
+            family: .light, reduceMotion: false
+        )
+        tv.recordBloomTickForTests(elapsedMs: 200)  // intensity 1 (hold)
+        tv.recordBloomTickForTests(elapsedMs: 1400) // decaying — lower intensity
+        // Peak must hold the max, not the most-recent tick value.
+        #expect(tv.lastBloomPeakIntensity > 0.4)
+        tv.cancelLandingBloom()
+    }
+    #endif
+
     // MARK: - Convenience init
 
     @Test @MainActor func convenienceInitCreatesHighlightingLayoutManager() {

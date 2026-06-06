@@ -12,10 +12,151 @@ final class DebugSnapshotTests: XCTestCase {
 
     // MARK: - Feature #49 WI-1 schema v2
 
-    func test_currentSchemaVersion_isV2() {
+    func test_currentSchemaVersion_isV3() {
         // Tests + consumers pin on this constant when validating that they
-        // read a schema they understand.
-        XCTAssertEqual(DebugSnapshot.currentSchemaVersion, 2)
+        // read a schema they understand. v3 (feature #74) adds
+        // landingBloomCount + landingBloomPeakIntensity.
+        XCTAssertEqual(DebugSnapshot.currentSchemaVersion, 3)
+    }
+
+    // MARK: - Feature #74 schema v3 (locate-bloom readback)
+
+    func test_v3Init_defaultsBloomFieldsToNil() {
+        // Existing call sites construct snapshots without the v3 params;
+        // the explicit init's defaults must hold so we don't break them.
+        let snap = DebugSnapshot(
+            schemaVersion: 3,
+            ts: "2026-06-06T10:00:00Z",
+            currentBookId: nil,
+            format: nil,
+            position: nil,
+            theme: nil,
+            fontSize: nil,
+            selection: nil,
+            highlightCount: 0,
+            renderPhase: DebugSnapshot.RenderPhaseValue.idle,
+            lastError: nil,
+            partial: nil
+        )
+        XCTAssertNil(snap.landingBloomCount)
+        XCTAssertNil(snap.landingBloomPeakIntensity)
+    }
+
+    func test_v3Init_acceptsBloomFields() {
+        let snap = DebugSnapshot(
+            schemaVersion: 3,
+            ts: "2026-06-06T10:00:00Z",
+            currentBookId: "bk",
+            format: "txt",
+            position: "0",
+            theme: "light",
+            fontSize: 16,
+            selection: nil,
+            highlightCount: 0,
+            renderPhase: DebugSnapshot.RenderPhaseValue.idle,
+            lastError: nil,
+            partial: nil,
+            landingBloomCount: 2,
+            landingBloomPeakIntensity: 0.86
+        )
+        XCTAssertEqual(snap.landingBloomCount, 2)
+        XCTAssertEqual(snap.landingBloomPeakIntensity, 0.86)
+    }
+
+    func test_encode_v3Snapshot_includesBloomKeys() throws {
+        let snap = DebugSnapshot(
+            schemaVersion: 3,
+            ts: "2026-06-06T10:00:00Z",
+            currentBookId: "bk",
+            format: "txt",
+            position: "0",
+            theme: "light",
+            fontSize: 16,
+            selection: nil,
+            highlightCount: 0,
+            renderPhase: DebugSnapshot.RenderPhaseValue.idle,
+            lastError: nil,
+            partial: nil,
+            landingBloomCount: 1,
+            landingBloomPeakIntensity: 0.7
+        )
+        let dict = try encodeAsDictionary(snap)
+        XCTAssertEqual(dict["landingBloomCount"] as? Int, 1)
+        XCTAssertEqual(dict["landingBloomPeakIntensity"] as? Double, 0.7)
+    }
+
+    func test_encode_v3DefaultsExplicitlyEmitNullForMissing() throws {
+        // nil optional bloom fields encode as JSON null (not "absent") so
+        // consumers distinguish "absent" from "unknown".
+        let snap = DebugSnapshot(
+            schemaVersion: 3,
+            ts: "t",
+            currentBookId: nil,
+            format: nil,
+            position: nil,
+            theme: nil,
+            fontSize: nil,
+            selection: nil,
+            highlightCount: 0,
+            renderPhase: DebugSnapshot.RenderPhaseValue.idle,
+            lastError: nil,
+            partial: nil
+        )
+        let data = try DebugSnapshot.encoder.encode(snap)
+        let json = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertTrue(json.contains("\"landingBloomCount\" : null"), "landingBloomCount should encode as null when nil")
+        XCTAssertTrue(json.contains("\"landingBloomPeakIntensity\" : null"), "landingBloomPeakIntensity should encode as null when nil")
+    }
+
+    func test_decode_v2Archive_setsBloomFieldsToNil() throws {
+        // Backward compat: a v2-format JSON snapshot (no v3 bloom keys) must
+        // decode without error, with the v3 fields set to nil.
+        let v2JSON = """
+        {
+          "schemaVersion": 2,
+          "ts": "2026-06-06T10:00:00Z",
+          "currentBookId": null,
+          "format": null,
+          "position": null,
+          "theme": null,
+          "fontSize": null,
+          "selection": null,
+          "highlightCount": 0,
+          "renderPhase": "idle",
+          "lastError": null,
+          "partial": null,
+          "ttsState": null,
+          "ttsOffsetUTF16": null,
+          "settingsProvenance": null
+        }
+        """
+        let data = Data(v2JSON.utf8)
+        let snap = try JSONDecoder().decode(DebugSnapshot.self, from: data)
+        XCTAssertEqual(snap.schemaVersion, 2)
+        XCTAssertNil(snap.landingBloomCount)
+        XCTAssertNil(snap.landingBloomPeakIntensity)
+    }
+
+    func test_roundTrip_preservesBloomFields() throws {
+        let original = DebugSnapshot(
+            schemaVersion: 3,
+            ts: "2026-06-06T10:00:00Z",
+            currentBookId: "uuid",
+            format: "txt",
+            position: "100",
+            theme: "dark",
+            fontSize: 20,
+            selection: nil,
+            highlightCount: 1,
+            renderPhase: "settled",
+            lastError: nil,
+            partial: nil,
+            landingBloomCount: 3,
+            landingBloomPeakIntensity: 0.86
+        )
+        let data = try DebugSnapshot.encoder.encode(original)
+        let decoded = try JSONDecoder().decode(DebugSnapshot.self, from: data)
+        XCTAssertEqual(decoded, original)
     }
 
     func test_v2Init_defaultsTtsAndProvenanceFieldsToNil() {
@@ -183,6 +324,8 @@ final class DebugSnapshotTests: XCTestCase {
             "renderPhase", "lastError", "partial",
             // v2 (feature #49 WI-1)
             "ttsState", "ttsOffsetUTF16", "settingsProvenance",
+            // v3 (feature #74)
+            "landingBloomCount", "landingBloomPeakIntensity",
         ]
         XCTAssertEqual(Set(dict.keys), expectedKeys)
     }

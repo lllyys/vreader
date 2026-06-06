@@ -37,6 +37,12 @@ extension RealDebugBridgeContext {
         let ttsState = probe?.currentTTSState
         let ttsOffsetUTF16 = probe?.currentTTSOffsetUTF16
 
+        // Schema v3 locate-bloom readback (feature #74). Only a probe surfaces
+        // it; nil (and partial) when no reader is active so consumers can tell
+        // "no reader" apart from "reader present, no bloom yet" (count 0).
+        let landingBloomCount = probe.map { $0.landingBloomCount }
+        let landingBloomPeakIntensity = probe.map { $0.landingBloomPeakIntensity }
+
         // Build `partial` dynamically. A reader-derived field stays
         // partial when the probe can't supply a value:
         // - currentBookId/format require a probe at all
@@ -55,6 +61,9 @@ extension RealDebugBridgeContext {
         }
         if ttsState == nil { partial.append("ttsState") }
         if ttsOffsetUTF16 == nil { partial.append("ttsOffsetUTF16") }
+        // Bloom fields are partial only when no probe supplies them (no reader).
+        if landingBloomCount == nil { partial.append("landingBloomCount") }
+        if landingBloomPeakIntensity == nil { partial.append("landingBloomPeakIntensity") }
 
         let snap = DebugSnapshot(
             schemaVersion: DebugSnapshot.currentSchemaVersion,
@@ -70,7 +79,9 @@ extension RealDebugBridgeContext {
             lastError: lastErrorMessage,
             partial: partial,
             ttsState: ttsState,
-            ttsOffsetUTF16: ttsOffsetUTF16
+            ttsOffsetUTF16: ttsOffsetUTF16,
+            landingBloomCount: landingBloomCount,
+            landingBloomPeakIntensity: landingBloomPeakIntensity
         )
 
         let data = try DebugSnapshot.encoder.encode(snap)

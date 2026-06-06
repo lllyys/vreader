@@ -174,6 +174,22 @@ enum DebugCommand: Equatable {
     /// `.readerNavigateToLocator`.
     case navigate(spineIndex: Int, fraction: Double?)
 
+    /// Feature #74 — `locate?highlight=<N>` drives `.readerNavigateToLocator`
+    /// for the active TXT/MD reader CU-free so the locate "bloom" can be
+    /// asserted. The bloom is a ~1.5s sub-second wash-lift that cannot be
+    /// screenshot/video-captured on the Screen-Sharing virtual display; this
+    /// command fires the SAME channel a Notes/Highlights row tap uses, so the
+    /// bloom fires on the real render path and the DEBUG snapshot's
+    /// `landingBloomCount` / `landingBloomPeakIntensity` prove it fired. The
+    /// handler resolves the `highlight`-indexed persisted highlight for the
+    /// active book (`PersistenceActor.fetchHighlights`, the same order the
+    /// annotations sheet shows) and posts its saved `Locator` on
+    /// `.readerNavigateToLocator`. `highlight` is required and must be a
+    /// non-negative integer (the Nth highlight, 0-based). No-op when no
+    /// TXT/MD reader is presented or no Nth highlight exists (mirrors
+    /// `navigate` / `seek` / `present`).
+    case locate(highlightIndex: Int)
+
     /// Feature #71 WI-6b — `scroll-boundary?spine=<N>&near=<top|bottom>` drives
     /// `EPUBContinuousScrollCoordinator.handleBoundarySignal(_:)` CU-free. The
     /// production `continuousScrollObserverJS` is rAF-throttled and rAF is paused
@@ -892,6 +908,22 @@ extension DebugCommand {
                 fraction = nil
             }
             return .navigate(spineIndex: spine, fraction: fraction)
+
+        case "locate":
+            // Feature #74: drive `.readerNavigateToLocator` for the active
+            // TXT/MD reader CU-free so the locate bloom can be asserted via the
+            // DEBUG snapshot. `highlight` is required and must be a non-negative
+            // integer (the Nth persisted highlight, 0-based — the same order the
+            // annotations sheet shows). Same validation posture as `navigate`'s
+            // `spine`: empty ⇒ missingParam; negative / non-integer ⇒ invalidParam.
+            let rawIndex = try requireParam("highlight", in: params)
+            guard let index = Int(rawIndex), index >= 0 else {
+                throw DebugCommandError.invalidParam(
+                    "highlight",
+                    reason: "expected a non-negative integer, got \(rawIndex)"
+                )
+            }
+            return .locate(highlightIndex: index)
 
         case "scroll-boundary":
             // Feature #71 WI-6b: drive `handleBoundarySignal` CU-free. `spine` is

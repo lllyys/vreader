@@ -66,6 +66,15 @@ final class DebugReaderProbeAdapter: DebugReaderProbe {
     /// `(state.publicName, .idle ? nil : currentOffsetUTF16)`.
     var ttsProbe: (@MainActor () -> (state: String, offsetUTF16: Int?))?
 
+    /// Feature #74: optional locate-bloom readback probe. When set,
+    /// `landingBloomCount` / `landingBloomPeakIntensity` delegate to the
+    /// closure's tuple. When nil, both fall back to the protocol's default 0.
+    /// Wire pattern: `ReaderContainerView` sets this from the TXT host's
+    /// pushed `(bloomPlayCount, lastBloomPeakIntensity)` (the active
+    /// `HighlightableTextView`'s persisted bloom counters), so a post-settle
+    /// `snapshot` proves the locate bloom fired through the real render path.
+    var landingBloomProbe: (@MainActor () -> (count: Int, peakIntensity: Double))?
+
     init(
         fingerprintKey: String,
         format: String,
@@ -90,6 +99,14 @@ final class DebugReaderProbeAdapter: DebugReaderProbe {
 
     var currentRenderedText: String? {
         renderedText
+    }
+
+    var landingBloomCount: Int {
+        landingBloomProbe?().count ?? 0
+    }
+
+    var landingBloomPeakIntensity: Double {
+        landingBloomProbe?().peakIntensity ?? 0
     }
 
     func awaitSettle(timeout: TimeInterval) async throws {

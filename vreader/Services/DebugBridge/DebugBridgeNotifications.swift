@@ -293,6 +293,23 @@ extension Notification.Name {
     /// - `"text"`: String — the rendered (post-conversion) chapter text.
     static let debugBridgeRenderedTextChanged = Notification.Name("vreader.debug.renderedTextChanged")
 
+    /// Feature #74 — posted by `HighlightableTextView` whenever its persisted
+    /// locate-bloom counters change (each `playLandingBloom` + each display-link
+    /// tick). `ReaderContainerView`'s observer, when the `fingerprintKey`
+    /// matches the active book, caches `(count, peakIntensity)` so
+    /// `DebugReaderProbeAdapter.landingBloomProbe` reads it — the DEBUG snapshot
+    /// then surfaces `landingBloomCount` / `landingBloomPeakIntensity`, proving
+    /// the bloom fired through the real render path (the ~1.5s sub-second visual
+    /// can't be screenshot/video-captured on the Screen-Sharing virtual
+    /// display). Only the TXT/MD host posts this; harmless for other formats (no
+    /// observer fires for a non-matching key). NOT posted in Release (`#if DEBUG`).
+    ///
+    /// userInfo:
+    /// - `"fingerprintKey"`: String — the book's canonical key.
+    /// - `"count"`: Int — `HighlightableTextView.bloomPlayCount`.
+    /// - `"peakIntensity"`: Double — `HighlightableTextView.lastBloomPeakIntensity`.
+    static let debugBridgeLandingBloomChanged = Notification.Name("vreader.debug.landingBloomChanged")
+
     // Note: the `provider` command (Bug #243) does NOT have a bridge-specific
     // notification. The handler mutates `ProviderProfileStore` directly and
     // the store posts `.providerProfilesDidChange` itself; any in-app picker

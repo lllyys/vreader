@@ -270,6 +270,56 @@ final class HighlightableTextView: UITextView {
     private var bloomFamily: LandingBloomThemeFamily = .light
     private var bloomReduceMotion = false
 
+    #if DEBUG
+    // MARK: - Feature #74: DEBUG-only bloom readback (CU-free verification)
+    //
+    // The bloom VISUAL (~1.5s sub-second wash-lift) cannot be screenshot /
+    // video-captured on the Screen-Sharing virtual display, so the DebugBridge
+    // reads these counters back instead — proving the bloom FIRED through the
+    // REAL render path. Both PERSIST after the bloom settles, so a post-settle
+    // snapshot proves it bloomed + reached a peak above the resting 0.4 wash.
+
+    /// Number of times `playLandingBloom` has been invoked on this view.
+    private(set) var bloomPlayCount: Int = 0
+    /// Highest bloom `intensity` (0…1 curve value) recorded across every
+    /// display-link tick of every play — `max`-accumulated, never reset to 0
+    /// on settle, so a single post-settle read proves the peak was reached.
+    private(set) var lastBloomPeakIntensity: CGFloat = 0
+
+    /// Record one bloom tick's intensity into the persisted peak. Called from
+    /// `playLandingBloom`'s seeded frame 0 and every `bloomTick`. The peak only
+    /// rises (`max`), so it survives the decay tail + settle.
+    private func recordBloomPeak(_ intensity: CGFloat) {
+        lastBloomPeakIntensity = max(lastBloomPeakIntensity, intensity)
+        postBloomReadback()
+    }
+
+    /// Push the persisted bloom counters onto the DebugBridge probe via
+    /// `.debugBridgeLandingBloomChanged`. No fingerprintKey is included: a
+    /// locate bloom only fires on the currently-active TXT/MD reader, and
+    /// `ReaderContainerView`'s observer caches it onto the active probe — the
+    /// same reader the snapshot reads. Posted whenever the counters change so a
+    /// post-settle snapshot reflects the run's final (persisted) peak + count.
+    private func postBloomReadback() {
+        NotificationCenter.default.post(
+            name: .debugBridgeLandingBloomChanged,
+            object: nil,
+            userInfo: [
+                "count": bloomPlayCount,
+                "peakIntensity": Double(lastBloomPeakIntensity)
+            ]
+        )
+    }
+
+    /// Test seam — drive a single bloom tick at `elapsedMs` deterministically
+    /// (the `CADisplayLink` cannot run in a unit test). Records the curve's
+    /// intensity at that time into the peak, mirroring `bloomTick`'s recording.
+    func recordBloomTickForTests(elapsedMs: Double) {
+        let i = LandingBloomCurve.intensity(elapsedMs: elapsedMs, reduceMotion: bloomReduceMotion)
+        recordBloomPeak(i)
+    }
+    #endif
+
     /// Plays the locate bloom once over the `LandingBloomCurve` (design §3 / §5),
     /// driving `intensity` per display frame and tearing the layer down when the
     /// run completes. Cancels any in-flight bloom first (single fire).
@@ -283,12 +333,19 @@ final class HighlightableTextView: UITextView {
         bloomFamily = family
         bloomReduceMotion = reduceMotion
         bloomStart = 0
+        #if DEBUG
+        bloomPlayCount += 1
+        #endif
         // Seed the FIRST frame at the curve's t=0 value — 0 for motion (rises in),
         // 1 for reduce-motion (jumps to peak per §5), so there is no rest-frame
         // flash before the first display tick (Gate-4 Medium).
+        let seedIntensity = LandingBloomCurve.intensity(elapsedMs: 0, reduceMotion: reduceMotion)
+        #if DEBUG
+        recordBloomPeak(seedIntensity)
+        #endif
         setLandingHighlight(
             range: range, colorName: colorName,
-            intensity: LandingBloomCurve.intensity(elapsedMs: 0, reduceMotion: reduceMotion),
+            intensity: seedIntensity,
             family: family, reduceMotion: reduceMotion
         )
         let link = CADisplayLink(target: self, selector: #selector(bloomTick(_:)))
@@ -304,6 +361,9 @@ final class HighlightableTextView: UITextView {
             return
         }
         let i = LandingBloomCurve.intensity(elapsedMs: elapsedMs, reduceMotion: bloomReduceMotion)
+        #if DEBUG
+        recordBloomPeak(i)
+        #endif
         setLandingHighlight(
             range: bloomRange, colorName: bloomColorName, intensity: i,
             family: bloomFamily, reduceMotion: bloomReduceMotion

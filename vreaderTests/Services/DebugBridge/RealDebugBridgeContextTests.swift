@@ -471,17 +471,22 @@ final class RealDebugBridgeContextTests: XCTestCase {
         XCTAssertNil(snap.selection)
         // No active reader → reader fields are partial. ttsState/
         // ttsOffsetUTF16 also partial (no probe → no ttsProbe wired);
-        // settingsProvenance always partial until feature #50.
+        // settingsProvenance always partial until feature #50. Feature #74:
+        // landingBloomCount/landingBloomPeakIntensity are partial too — no
+        // probe supplies them (a present probe defaults them to 0, not nil).
         XCTAssertEqual(
             Set(snap.partial ?? []),
             Set([
                 "currentBookId", "format", "position", "selection",
                 "ttsState", "ttsOffsetUTF16", "settingsProvenance",
+                "landingBloomCount", "landingBloomPeakIntensity",
             ])
         )
         XCTAssertNil(snap.ttsState)
         XCTAssertNil(snap.ttsOffsetUTF16)
         XCTAssertNil(snap.settingsProvenance)
+        XCTAssertNil(snap.landingBloomCount)
+        XCTAssertNil(snap.landingBloomPeakIntensity)
         try? FileManager.default.removeItem(at: url)
     }
 
@@ -519,6 +524,12 @@ final class RealDebugBridgeContextTests: XCTestCase {
             "without a positionProvider the position field stays partial; "
             + "without a ttsProbe the TTS fields stay partial too"
         )
+        // Feature #74: a present probe with no bloom yet reports 0 (NOT nil),
+        // so the bloom fields are authoritative — never in `partial`.
+        XCTAssertEqual(snap.landingBloomCount, 0)
+        XCTAssertEqual(snap.landingBloomPeakIntensity, 0)
+        XCTAssertFalse(Set(snap.partial ?? []).contains("landingBloomCount"))
+        XCTAssertFalse(Set(snap.partial ?? []).contains("landingBloomPeakIntensity"))
         try? FileManager.default.removeItem(at: url)
     }
 
@@ -910,6 +921,96 @@ final class RealDebugBridgeContextTests: XCTestCase {
         await fulfillment(of: [exp], timeout: 2.0)
         XCTAssertEqual(receivedSpine, 0)
         XCTAssertFalse(hasFractionKey)
+    }
+
+    // MARK: - locate (feature #74 — CU-free locate-bloom harness)
+
+    @MainActor
+    func test_locate_withoutActiveReader_isNoOp() async throws {
+        // No reader registered → no `.readerNavigateToLocator` post (mirrors
+        // navigate / seek / present no-op posture).
+        DebugReaderRegistry.shared.reset()
+        let exp = expectation(description: "no navigate post")
+        exp.isInverted = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { _ in exp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.locate(highlightIndex: 0)
+        await fulfillment(of: [exp], timeout: 0.5)
+    }
+
+    @MainActor
+    func test_locate_postsSavedLocatorForNthHighlight() async throws {
+        // Register a probe for a book that has a persisted highlight; locate?0
+        // posts that highlight's saved Locator on .readerNavigateToLocator —
+        // the SAME channel a Notes/Highlights row tap uses, so the bloom fires.
+        let key = try await CollectionTestHelper.insertBook(persistence: persistence)
+        let fp = DocumentFingerprint(canonicalKey: key)!
+        let locator = LocatorFactory.txtRange(
+            fingerprint: fp, charRangeStartUTF16: 10, charRangeEndUTF16: 20
+        )!
+        _ = try await persistence.addHighlight(
+            locator: locator, selectedText: "ten to twenty",
+            color: "yellow", note: nil, toBookWithKey: key
+        )
+
+        let probe = DebugReaderProbeAdapter(fingerprintKey: key, format: "txt")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let exp = expectation(description: "navigate posted with locator")
+        nonisolated(unsafe) var receivedStart: Int?
+        nonisolated(unsafe) var receivedEnd: Int?
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { notification in
+            let loc = notification.object as? Locator
+            receivedStart = loc?.charRangeStartUTF16
+            receivedEnd = loc?.charRangeEndUTF16
+            exp.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.locate(highlightIndex: 0)
+        await fulfillment(of: [exp], timeout: 2.0)
+        XCTAssertEqual(receivedStart, 10)
+        XCTAssertEqual(receivedEnd, 20)
+    }
+
+    @MainActor
+    func test_locate_indexOutOfRange_isNoOp() async throws {
+        // A reader with zero highlights, asked for index 0 → no post.
+        let key = try await CollectionTestHelper.insertBook(persistence: persistence)
+        let probe = DebugReaderProbeAdapter(fingerprintKey: key, format: "txt")
+        DebugReaderRegistry.shared.register(probe)
+        defer { DebugReaderRegistry.shared.unregister(probe) }
+
+        let exp = expectation(description: "no navigate post")
+        exp.isInverted = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerNavigateToLocator, object: nil, queue: .main
+        ) { _ in exp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let context = RealDebugBridgeContext(
+            persistence: persistence,
+            importer: importer,
+            userDefaults: defaults
+        )
+        try await context.locate(highlightIndex: 0)
+        await fulfillment(of: [exp], timeout: 0.5)
     }
 
     @MainActor

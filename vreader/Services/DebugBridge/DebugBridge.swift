@@ -120,6 +120,17 @@ protocol DebugBridgeContext {
     /// channel a TOC/bookmark/search tap uses. If no matching EPUB reader is
     /// loaded, the action is a no-op (matches `seek` / `search` / `present`).
     func navigate(spineIndex: Int, fraction: Double?) async throws
+    /// Feature #74 — drive `.readerNavigateToLocator` for the active TXT/MD
+    /// reader CU-free so the locate "bloom" can be asserted via the DEBUG
+    /// snapshot's `landingBloomCount` / `landingBloomPeakIntensity` (the
+    /// sub-second visual can't be captured on the virtual display). The handler
+    /// resolves the `highlightIndex`-th persisted highlight for the active book
+    /// (the same order the annotations sheet shows) and posts its saved
+    /// `Locator` on `.readerNavigateToLocator` — the SAME channel a
+    /// Notes/Highlights row tap uses, so the bloom fires on the real render
+    /// path. No-op when no TXT/MD reader is presented or no Nth highlight
+    /// exists (matches `navigate` / `seek` / `present`).
+    func locate(highlightIndex: Int) async throws
     /// Feature #71 WI-6b — drive `EPUBContinuousScrollCoordinator.handleBoundarySignal`
     /// CU-free. The production `continuousScrollObserverJS` is rAF-throttled and
     /// rAF is paused on the headless/virtual-display test environment, so a
@@ -299,6 +310,8 @@ final class DebugBridge {
             try await context.scrollSheet(target: target)
         case .navigate(let spineIndex, let fraction):
             try await context.navigate(spineIndex: spineIndex, fraction: fraction)
+        case .locate(let highlightIndex):
+            try await context.locate(highlightIndex: highlightIndex)
         case .scrollBoundary(let spineIndex, let near):
             try await context.scrollBoundary(spineIndex: spineIndex, near: near)
         case .pdfHighlight(let page, let rect, let color):

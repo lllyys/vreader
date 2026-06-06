@@ -62,6 +62,37 @@ final class DebugReaderProbeAdapterTests: XCTestCase {
         XCTAssertNil(adapter.currentTTSOffsetUTF16)
     }
 
+    // MARK: - Landing-bloom probe (feature #74)
+
+    func test_landingBloomCount_isZeroWhenProbeUnset() {
+        // Protocol-default + adapter both report 0 (no bloom recorded yet) so
+        // non-TXT probes compile + read cleanly.
+        let adapter = DebugReaderProbeAdapter(
+            fingerprintKey: "txt:abc:1024",
+            format: "txt"
+        )
+        XCTAssertEqual(adapter.landingBloomCount, 0)
+        XCTAssertEqual(adapter.landingBloomPeakIntensity, 0)
+    }
+
+    func test_landingBloomCount_returnsClosureValue() {
+        let adapter = DebugReaderProbeAdapter(
+            fingerprintKey: "txt:abc:1024",
+            format: "txt"
+        )
+        adapter.landingBloomProbe = { (count: 2, peakIntensity: 0.86) }
+        XCTAssertEqual(adapter.landingBloomCount, 2)
+    }
+
+    func test_landingBloomPeakIntensity_returnsClosureValue() {
+        let adapter = DebugReaderProbeAdapter(
+            fingerprintKey: "txt:abc:1024",
+            format: "txt"
+        )
+        adapter.landingBloomProbe = { (count: 1, peakIntensity: 0.7) }
+        XCTAssertEqual(adapter.landingBloomPeakIntensity, 0.7)
+    }
+
     // MARK: - awaitSettle strategy wiring (bug #141)
 
     func test_awaitSettle_usesStrategyWhenSet() async throws {

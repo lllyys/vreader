@@ -74,6 +74,24 @@ protocol DebugReaderProbe: AnyObject, Sendable {
     /// command can read the post-Simp→Trad text that XCUITest cannot reach
     /// through the flattened accessibility tree on iOS 26.
     var currentRenderedText: String? { get }
+
+    // MARK: - Feature #74 accessors (locate-bloom readback)
+    //
+    // Default-implemented (0) so non-TXT probes compile unchanged. The TXT
+    // host wires these from the active `HighlightableTextView`'s persisted
+    // bloom counters (pushed via `.debugBridgeLandingBloomChanged`), so a
+    // post-settle `snapshot` proves the locate bloom FIRED through the real
+    // render path — the ~1.5s sub-second visual can't be screenshot/video-
+    // captured on the Screen-Sharing virtual display.
+
+    /// Number of locate-bloom plays the active TXT/MD reader has fired. 0 when
+    /// no bloom has run (or for non-TXT readers).
+    var landingBloomCount: Int { get }
+
+    /// Highest bloom intensity (0…1) the active TXT/MD reader's bloom reached.
+    /// 0 at rest / when no bloom has run; a value > the resting 0.4 wash proves
+    /// a real bloom peaked.
+    var landingBloomPeakIntensity: Double { get }
 }
 
 // Default implementations so existing adopters compile without per-host
@@ -85,6 +103,8 @@ extension DebugReaderProbe {
     var currentRenderPhase: String { DebugSnapshot.RenderPhaseValue.idle }
     var currentSettingsProvenance: String? { nil }
     var currentRenderedText: String? { nil }
+    var landingBloomCount: Int { 0 }
+    var landingBloomPeakIntensity: Double { 0 }
 }
 
 #if DEBUG

@@ -39,6 +39,7 @@ enum DebugFixtureCatalog {
     /// `DebugFixtureCatalogTests` enforces (a).
     private static let entries: [DebugFixture] = [
         DebugFixture(name: "war-and-peace", format: .txt,  resourceName: "war-and-peace", resourceExtension: "txt"),
+        DebugFixture(name: "bloom-sample",  format: .txt,  resourceName: "bloom-sample",  resourceExtension: "txt"),
         DebugFixture(name: "mini-epub3",    format: .epub, resourceName: "mini-epub3",    resourceExtension: "epub"),
         // Public-domain MOBI ("The Masque of the Red Death", Edgar Allan Poe,
         // Project Gutenberg ebook 1064). Stored under the .azw3 extension

@@ -21,6 +21,8 @@ struct DebugSnapshot: Codable, Equatable {
     /// Schema version. Increment on field add/remove/semantics-change.
     /// **v2 (feature #49 WI-1)**: adds `ttsState`, `ttsOffsetUTF16`,
     /// `settingsProvenance`. Existing v1 fields unchanged.
+    /// **v3 (feature #74)**: adds `landingBloomCount`,
+    /// `landingBloomPeakIntensity`. Existing v1/v2 fields unchanged.
     let schemaVersion: Int
     let ts: String
     let currentBookId: String?
@@ -58,9 +60,24 @@ struct DebugSnapshot: Codable, Equatable {
     /// nil field is authoritative.
     let partial: [String]?
 
+    // MARK: - Schema v3 additions (feature #74 locate-bloom readback)
+
+    /// Number of locate-bloom plays the active TXT/MD reader has fired since
+    /// it was presented. Nil when no reader is active or the host doesn't
+    /// surface bloom state (non-TXT). 0 means a reader is present but no bloom
+    /// has run yet; ≥1 proves the locate bloom fired through the real render
+    /// path (the ~1.5s sub-second visual can't be screenshot/video-captured
+    /// on the Screen-Sharing virtual display).
+    let landingBloomCount: Int?
+
+    /// Highest bloom intensity (0…1) the active TXT/MD reader's bloom reached.
+    /// Nil under the same conditions as `landingBloomCount`. A value above the
+    /// resting 0.4 wash proves a real bloom peaked.
+    let landingBloomPeakIntensity: Double?
+
     /// Current schema version. Update with care — consumers may pin a
     /// version they recognize.
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     /// Stable wire values for `renderPhase`. Tests + consumers pin against
     /// these constants instead of free-form strings.
@@ -111,7 +128,9 @@ struct DebugSnapshot: Codable, Equatable {
         partial: [String]?,
         ttsState: String? = nil,
         ttsOffsetUTF16: Int? = nil,
-        settingsProvenance: String? = nil
+        settingsProvenance: String? = nil,
+        landingBloomCount: Int? = nil,
+        landingBloomPeakIntensity: Double? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.ts = ts
@@ -128,6 +147,8 @@ struct DebugSnapshot: Codable, Equatable {
         self.ttsState = ttsState
         self.ttsOffsetUTF16 = ttsOffsetUTF16
         self.settingsProvenance = settingsProvenance
+        self.landingBloomCount = landingBloomCount
+        self.landingBloomPeakIntensity = landingBloomPeakIntensity
     }
 
     /// Decoder must accept v1 archives (which lack the v2 fields). Treat
@@ -150,6 +171,8 @@ struct DebugSnapshot: Codable, Equatable {
         self.ttsState = try c.decodeIfPresent(String.self, forKey: .ttsState)
         self.ttsOffsetUTF16 = try c.decodeIfPresent(Int.self, forKey: .ttsOffsetUTF16)
         self.settingsProvenance = try c.decodeIfPresent(String.self, forKey: .settingsProvenance)
+        self.landingBloomCount = try c.decodeIfPresent(Int.self, forKey: .landingBloomCount)
+        self.landingBloomPeakIntensity = try c.decodeIfPresent(Double.self, forKey: .landingBloomPeakIntensity)
     }
 
     /// Encoder configured for stable, byte-comparable output.
@@ -167,6 +190,7 @@ struct DebugSnapshot: Codable, Equatable {
         case schemaVersion, ts, currentBookId, format, position, theme, fontSize
         case selection, highlightCount, renderPhase, lastError, partial
         case ttsState, ttsOffsetUTF16, settingsProvenance
+        case landingBloomCount, landingBloomPeakIntensity
     }
 
     /// Custom encoder: emits every field, writing `null` for nil optionals
@@ -189,6 +213,9 @@ struct DebugSnapshot: Codable, Equatable {
         try Self.encodeOptional(ttsState, forKey: .ttsState, in: &c)
         try Self.encodeOptional(ttsOffsetUTF16, forKey: .ttsOffsetUTF16, in: &c)
         try Self.encodeOptional(settingsProvenance, forKey: .settingsProvenance, in: &c)
+        // v3 fields (feature #74)
+        try Self.encodeOptional(landingBloomCount, forKey: .landingBloomCount, in: &c)
+        try Self.encodeOptional(landingBloomPeakIntensity, forKey: .landingBloomPeakIntensity, in: &c)
     }
 
     private static func encodeOptional<T: Encodable>(

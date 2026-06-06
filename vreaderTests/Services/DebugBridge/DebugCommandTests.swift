@@ -2001,6 +2001,61 @@ final class DebugCommandTests: XCTestCase {
         }
     }
 
+    // MARK: - locate (feature #74 — CU-free locate-bloom harness)
+    //   `vreader-debug://locate?highlight=<N>`
+
+    func test_parse_locateHighlightZero_returnsCommand() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://locate?highlight=0")!)
+        XCTAssertEqual(cmd, .locate(highlightIndex: 0))
+    }
+
+    func test_parse_locateHighlightPositive_returnsCommand() throws {
+        let cmd = try DebugCommand.parse(URL(string: "vreader-debug://locate?highlight=3")!)
+        XCTAssertEqual(cmd, .locate(highlightIndex: 3))
+    }
+
+    func test_parse_locateMissingHighlight_throwsMissingParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://locate")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "highlight")
+        }
+    }
+
+    func test_parse_locateEmptyHighlight_throwsMissingParam() {
+        // Empty value is treated as missing by requireParam — same posture as
+        // every other command's required param.
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://locate?highlight=")!)) { error in
+            guard case DebugCommandError.missingParam(let name) = error else {
+                XCTFail("expected missingParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "highlight")
+        }
+    }
+
+    func test_parse_locateNegativeHighlight_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://locate?highlight=-1")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "highlight")
+        }
+    }
+
+    func test_parse_locateNonIntegerHighlight_throwsInvalidParam() {
+        XCTAssertThrowsError(try DebugCommand.parse(URL(string: "vreader-debug://locate?highlight=two")!)) { error in
+            guard case DebugCommandError.invalidParam(let name, _) = error else {
+                XCTFail("expected invalidParam, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "highlight")
+        }
+    }
+
     // MARK: - scroll-boundary (feature #71 WI-6b — CU-free continuous-scroll
     //   boundary-signal harness)
     //   `vreader-debug://scroll-boundary?spine=<N>&near=<top|bottom>`

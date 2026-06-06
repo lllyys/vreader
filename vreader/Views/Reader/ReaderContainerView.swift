@@ -687,6 +687,20 @@ struct ReaderContainerView: View {
                 debugProbe?.renderedText = text
             }
         ))
+        // Feature #74 — surface the active TXT/MD reader's persisted locate-bloom
+        // counters into the DebugBridge probe so a post-settle `snapshot` proves
+        // the bloom fired (the ~1.5s sub-second visual can't be screenshot /
+        // video-captured on the Screen-Sharing virtual display).
+        // `HighlightableTextView` posts `(count, peakIntensity)` on each play +
+        // tick; this caches the latest tuple onto the active probe's
+        // `landingBloomProbe` closure (which the snapshot reads). Same dedicated-
+        // ViewModifier precedent as the rendered-text observer above so it
+        // doesn't push `body` over SwiftUI's type-inference budget.
+        .modifier(ReaderDebugBridgeLandingBloomObserver(
+            onBloom: { count, peakIntensity in
+                debugProbe?.landingBloomProbe = { (count: count, peakIntensity: peakIntensity) }
+            }
+        ))
         // Feature #75 — CU-free EPUB layout switch (paged/scroll). Lives HERE at
         // the dispatcher (not inside the EPUB host) so it sets the shared
         // `settingsStore.epubLayout` that BOTH engines read reactively — the
