@@ -55,6 +55,14 @@ struct EPUBContinuousScrollCoordinatorTests {
                                  nearTopBoundary: top, nearBottomBoundary: bottom)
     }
 
+    /// Progress-aware signal (Bug #329 direction tests): the windowed progress is
+    /// `visible + intra`, so varying `intra` across signals drives the scroll
+    /// direction the coordinator infers.
+    private func sig(_ visible: Int, _ intra: Double, top: Bool = false, bottom: Bool = false) -> EPUBScrollBoundarySignal {
+        EPUBScrollBoundarySignal(visibleSpineIndex: visible, intraFraction: intra,
+                                 nearTopBoundary: top, nearBottomBoundary: bottom)
+    }
+
     private func makeCoordinator(
         anchor: Int, spineCount: Int, maxSpan: Int = 3,
         eval: RecordingEvaluator,
@@ -269,6 +277,69 @@ struct EPUBContinuousScrollCoordinatorTests {
         #expect(c.window.hi == 7, "and drop the trailing section → [5,7]")
         #expect(eval.removedSpineIndex(8), "the trailing section 8 is the one removed")
         #expect(!eval.removedSpineIndex(5), "the leading section 5 is NEVER removed")
+    }
+
+    // MARK: - Bug #329: directional prefetch (no evict→reload oscillation)
+
+    /// Bug #329: while scrolling FORWARD, a spurious `nearTop` (the eviction drops
+    /// scrollTop below the prefetch threshold, so the JS observer falsely reports
+    /// nearTop) must NOT trigger a backward extend — that would reload the section
+    /// the reader just scrolled past, oscillating the window. Only the forward
+    /// extend should happen.
+    @Test func forwardScroll_spuriousNearTop_doesNotPrefetchBackward() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        // Seed a mid-book window [4,6] (first signal = no known direction → both).
+        await c.handleBoundarySignal(sig(5, 0.5, top: true, bottom: true))
+        #expect(c.window.lo == 4 && c.window.hi == 6, "precondition: window [4,6]")
+        // Establish FORWARD motion (progress 5.5 → 5.9).
+        await c.handleBoundarySignal(sig(5, 0.9))
+        eval.evaluatedJS.removeAll()
+        // Spurious nearTop arrives WITH nearBottom, still moving forward (6.1 > 5.9).
+        await c.handleBoundarySignal(sig(6, 0.1, top: true, bottom: true))
+        #expect(eval.prepends.isEmpty,
+            "Bug #329: forward scroll must NOT prefetch backward on a spurious nearTop")
+        #expect(!eval.appends.isEmpty, "the forward extend still happens")
+    }
+
+    /// Symmetric: while scrolling BACKWARD, a spurious `nearBottom` must NOT
+    /// trigger a forward extend.
+    @Test func backwardScroll_spuriousNearBottom_doesNotPrefetchForward() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(sig(5, 0.5, top: true, bottom: true)) // [4,6]
+        await c.handleBoundarySignal(sig(5, 0.1)) // backward (5.5 → 5.1)
+        eval.evaluatedJS.removeAll()
+        await c.handleBoundarySignal(sig(4, 0.9, top: true, bottom: true)) // 4.9 < 5.1 → backward
+        #expect(eval.appends.isEmpty,
+            "Bug #329: backward scroll must NOT prefetch forward on a spurious nearBottom")
+        #expect(!eval.prepends.isEmpty, "the backward extend still happens")
+    }
+
+    /// The bias is STICKY: a "stationary" signal (progress unchanged, exactly what
+    /// the eviction scroll-compensation produces) keeps the prior forward bias, so
+    /// the spurious post-eviction nearTop is still suppressed.
+    @Test func stickyBias_stationarySignalKeepsForwardBias() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(sig(5, 0.5, top: true, bottom: true)) // [4,6]
+        await c.handleBoundarySignal(sig(6, 0.2)) // forward (5.5 → 6.2)
+        eval.evaluatedJS.removeAll()
+        // STATIONARY (progress 6.2 unchanged) + spurious nearTop → bias stays forward.
+        await c.handleBoundarySignal(sig(6, 0.2, top: true, bottom: false))
+        #expect(eval.prepends.isEmpty,
+            "Bug #329: a stationary signal keeps the forward bias — no backward reload")
+    }
+
+    /// The bias flips when the reader genuinely reverses.
+    @Test func scrollBias_flipsToBackwardOnReverse() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(sig(5, 0.5, top: true, bottom: true)) // [4,6]
+        await c.handleBoundarySignal(sig(6, 0.2)) // forward
+        #expect(c.scrollBias == .forward)
+        await c.handleBoundarySignal(sig(5, 0.1)) // reverse → backward (was 6.2, now 5.1)
+        #expect(c.scrollBias == .backward, "Bug #329: bias flips when the reader reverses")
     }
 
     @Test func eviction_firesOnSectionEvictedWithRemovedIndex() async {

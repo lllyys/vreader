@@ -83,6 +83,27 @@ final class EPUBContinuousScrollCoordinator {
     /// burst of near-boundary reports appends exactly one chapter.
     private(set) var isExtending = false
 
+    /// Bug #329: the reader's windowed progress (`visibleSpineIndex + intraFraction`)
+    /// at the previous boundary signal, used to infer the scroll direction. `nil`
+    /// until the first signal.
+    private var lastProgress: Double?
+
+    /// Bug #329: STICKY scroll direction. The coordinator only prefetches in the
+    /// reader's direction of travel; the bias persists through "stationary"
+    /// signals so a spurious post-eviction `nearTop` (the eviction drops
+    /// `scrollTop` below the prefetch threshold WITHOUT moving the reader's
+    /// content position) does NOT reload the just-evicted section. Flips only
+    /// when the reader demonstrably scrolls the other way (progress moves by
+    /// more than `directionEpsilon`).
+    enum ScrollBias { case none, forward, backward }
+    private(set) var scrollBias: ScrollBias = .none
+
+    /// Minimum progress delta between two signals to count as a direction change.
+    /// Below this the previous `scrollBias` is KEPT (sticky) — guards float noise
+    /// and the eviction scroll-compensation, which moves `scrollTop` but not
+    /// `visibleSpineIndex + intraFraction`.
+    private static let directionEpsilon = 0.0005
+
     /// WI-6b-iii: intra-chapter progression (0...1) to scroll the anchor section
     /// to after the initial window materializes (saved-position restore). Nil /
     /// ≤0 opens at the chapter top.
@@ -111,6 +132,8 @@ final class EPUBContinuousScrollCoordinator {
     func invalidate() {
         generation = UUID()
         isExtending = false
+        lastProgress = nil      // Bug #329: a reopen starts with no known direction.
+        scrollBias = .none
     }
 
     /// React to a scroll boundary signal: re-anchor to the reading chapter, then
@@ -123,18 +146,32 @@ final class EPUBContinuousScrollCoordinator {
         if window.contains(signal.visibleSpineIndex) {
             window = window.reanchored(to: signal.visibleSpineIndex)
         }
+        // Bug #329: update the STICKY scroll-direction bias from the reader's
+        // windowed progress. Only flip on a real move (> epsilon); a "stationary"
+        // signal keeps the prior bias. This is what stops the evict→reload
+        // oscillation: a forward extend evicts the trailing section,
+        // `removeChapterSectionJS` drops `scrollTop` below the `nearTop` prefetch
+        // threshold, and the next report falsely says `nearTop` — but the
+        // reader's content position (hence progress) hasn't moved backward, so
+        // the bias stays `.forward` and the spurious backward reload is skipped.
+        let progress = Double(signal.visibleSpineIndex) + signal.intraFraction
+        if let last = lastProgress {
+            if progress > last + Self.directionEpsilon { scrollBias = .forward }
+            else if progress < last - Self.directionEpsilon { scrollBias = .backward }
+            // else: stationary → keep the sticky bias.
+        }
+        lastProgress = progress
+
         guard !isExtending else { return }
-        // Extend toward whichever boundary the viewport is near. Both can be true
-        // at once (a short chapter in a tall viewport) — handle each sequentially
-        // so neither side starves (Gate-4 round-1 [M3]); `extend` is a no-op when
-        // that side can't grow. Eviction after each extend is DIRECTIONAL
-        // (`evictTrailing`): it trims the trailing edge behind the reader and
-        // keeps the chapter just loaded ahead of them, so a run of short
-        // front-matter chapters no longer deadlocks the scroll (Bug #327).
-        if signal.nearBottomBoundary, window.canExtendForward {
+        // Prefetch ONLY in the direction of travel (Bug #329). `.none` (before the
+        // reader has moved) allows both, preserving the initial-fill behaviour.
+        // Eviction after each extend stays DIRECTIONAL (`evictTrailing`, Bug #327).
+        let allowForward = scrollBias != .backward
+        let allowBackward = scrollBias != .forward
+        if signal.nearBottomBoundary, allowForward, window.canExtendForward {
             await extend(forward: true)
         }
-        if signal.nearTopBoundary, window.canExtendBackward {
+        if signal.nearTopBoundary, allowBackward, window.canExtendBackward {
             await extend(forward: false)
         }
     }
