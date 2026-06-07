@@ -108,6 +108,35 @@ final class BookTranslationViewModel {
         observationTask = nil
     }
 
+    // MARK: - Row-tap routing (Bug #328)
+
+    /// Routes a tap on the Book Details "Translate entire book…" row. While a
+    /// job is ALREADY running for this book, open the in-progress status sheet
+    /// (progress + cancel) instead of re-running the estimate→confirm flow —
+    /// re-confirming a live job can't reach progress and risks a duplicate
+    /// start (Bug #328). Idle / finished / cancelled / failed books fall
+    /// through to the normal estimate→confirm flow.
+    ///
+    /// `progress` is refreshed from the shared coordinator first so the routing
+    /// reflects the live job state even if this VM instance hasn't observed a
+    /// stream tick yet (a Book Details sheet opened mid-job before
+    /// `startObserving()` ran).
+    func handleTranslateRowTap(
+        textProvider: any ChapterTextProviding,
+        targetLanguage: String,
+        resolveProviderLabel: (@Sendable () async -> String?)? = nil
+    ) async {
+        progress = await coordinator.currentProgress(forBookWithKey: bookFingerprintKey)
+        if progress.isRunning {
+            isShowingStatusSheet = true
+            return
+        }
+        await presentConfirm(
+            textProvider: textProvider,
+            targetLanguage: targetLanguage,
+            resolveProviderLabel: resolveProviderLabel)
+    }
+
     // MARK: - Confirm flow
 
     /// Loads the estimate and shows the confirm alert. Used by the Book
@@ -131,6 +160,17 @@ final class BookTranslationViewModel {
             if let resolver = resolveProviderLabel,
                let fresh = await resolver() {
                 providerLabel = fresh
+            }
+            // Bug #328 (Codex race finding): a job may have started on another
+            // surface (library long-press, reader chrome) DURING the estimate
+            // await above. Re-check before showing the confirm alert — if it is
+            // now running, route to the status sheet instead so the user reaches
+            // progress/cancel and can't re-confirm a duplicate. Covers every
+            // `presentConfirm` caller, not just the Book Details row tap.
+            progress = await coordinator.currentProgress(forBookWithKey: bookFingerprintKey)
+            guard !progress.isRunning else {
+                isShowingStatusSheet = true
+                return
             }
             isShowingConfirmAlert = true
         } catch {
@@ -159,6 +199,16 @@ final class BookTranslationViewModel {
         style: TranslationStyle
     ) async {
         isShowingConfirmAlert = false
+        // Bug #328 (Codex): if a job started on another surface while this
+        // confirm alert was up, show its progress rather than issuing a
+        // redundant start (the coordinator's one-job-per-book invariant would
+        // no-op the start anyway — this makes the intent explicit).
+        progress = await coordinator.currentProgress(forBookWithKey: bookFingerprintKey)
+        if progress.isRunning {
+            await startObserving()
+            isShowingStatusSheet = true
+            return
+        }
         await startObserving()
         isShowingStatusSheet = true
         await coordinator.start(

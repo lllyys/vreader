@@ -114,6 +114,106 @@ struct BookTranslationViewModelTests {
         #expect(progress.phase == .completed)
     }
 
+    // MARK: - Row-tap routing (Bug #328)
+
+    /// Bug #328: tapping "Translate entire book…" while a job is ALREADY
+    /// running must open the in-progress status sheet (progress + cancel),
+    /// NOT re-open the estimate→confirm alert (which can't reach progress and
+    /// risks a duplicate start). The user has dismissed the status sheet but
+    /// the job keeps running — the row tap must bring it back.
+    @Test func handleTranslateRowTap_whileRunning_opensStatusSheet_notConfirm() async throws {
+        let units = (1...4).map { Self.unit("ch\($0)") }
+        var texts: [TranslationUnitID: String] = [:]
+        for u in units { texts[u] = "p" }
+        let provider = MockChapterTextProvider(units: units, texts: texts)
+        let sender = SlowTranslationSender(
+            responses: units.map { _ in "[\"x\"]" }, perRequestNanos: 200_000_000)
+        let store = try Self.makeStore()
+        let coordinator = Self.makeCoordinator(store: store, sender: sender)
+        let viewModel = BookTranslationViewModel(
+            bookFingerprintKey: Self.bookKey, coordinator: coordinator)
+
+        // Start a job, then simulate the user dismissing the status sheet
+        // while the job keeps running.
+        await viewModel.presentConfirm(textProvider: provider, targetLanguage: "Chinese")
+        await viewModel.confirmTranslate(
+            textProvider: provider, targetLanguage: "Chinese",
+            providerProfileID: Self.providerID, config: Self.makeConfig(), style: .natural)
+        try await Task.sleep(nanoseconds: 120_000_000) // let the job claim a unit → .running
+        viewModel.closeStatusSheet()
+        #expect(await coordinator.currentProgress(forBookWithKey: Self.bookKey).phase == .running,
+                "precondition: the job is running")
+
+        // Tap the row again.
+        await viewModel.handleTranslateRowTap(textProvider: provider, targetLanguage: "Chinese")
+
+        #expect(viewModel.isShowingStatusSheet == true,
+                "Bug #328: a running job's row tap must re-open the status sheet")
+        #expect(viewModel.isShowingConfirmAlert == false,
+                "Bug #328: it must NOT re-open the setup/confirm alert while running")
+
+        // Clean up the slow job.
+        viewModel.requestCancel()
+        await viewModel.confirmCancel()
+        try? await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+    }
+
+    /// Bug #328 (Codex race-hardening): `presentConfirm` itself re-checks the
+    /// live job state after resolving the estimate. If a job is running (e.g.
+    /// started on another surface during the estimate await), it routes to the
+    /// status sheet instead of the confirm alert — so the race can't surface a
+    /// confirm alert for a now-running job. Covers all `presentConfirm` callers,
+    /// not just the Book Details row tap.
+    @Test func presentConfirm_whileRunning_routesToStatusSheet_notConfirm() async throws {
+        let units = (1...4).map { Self.unit("ch\($0)") }
+        var texts: [TranslationUnitID: String] = [:]
+        for u in units { texts[u] = "p" }
+        let provider = MockChapterTextProvider(units: units, texts: texts)
+        let sender = SlowTranslationSender(
+            responses: units.map { _ in "[\"x\"]" }, perRequestNanos: 200_000_000)
+        let store = try Self.makeStore()
+        let coordinator = Self.makeCoordinator(store: store, sender: sender)
+        let viewModel = BookTranslationViewModel(
+            bookFingerprintKey: Self.bookKey, coordinator: coordinator)
+
+        await viewModel.presentConfirm(textProvider: provider, targetLanguage: "Chinese")
+        await viewModel.confirmTranslate(
+            textProvider: provider, targetLanguage: "Chinese",
+            providerProfileID: Self.providerID, config: Self.makeConfig(), style: .natural)
+        try await Task.sleep(nanoseconds: 120_000_000) // job is now running
+        viewModel.closeStatusSheet()
+        viewModel.dismissConfirm()
+
+        // A second surface reaches presentConfirm while the job runs.
+        await viewModel.presentConfirm(textProvider: provider, targetLanguage: "Chinese")
+        #expect(viewModel.isShowingStatusSheet == true,
+                "Bug #328: presentConfirm must route a running job to the status sheet")
+        #expect(viewModel.isShowingConfirmAlert == false,
+                "Bug #328: no confirm alert may surface for a running job")
+
+        viewModel.requestCancel()
+        await viewModel.confirmCancel()
+        try? await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+    }
+
+    /// The other branch: when no job is running (idle), the row tap runs the
+    /// normal estimate→confirm flow.
+    @Test func handleTranslateRowTap_whenIdle_runsConfirmFlow() async throws {
+        let units = [Self.unit("ch1"), Self.unit("ch2")]
+        let provider = MockChapterTextProvider(units: units, texts: [units[0]: "p", units[1]: "p"])
+        let store = try Self.makeStore()
+        let coordinator = Self.makeCoordinator(store: store)
+        let viewModel = BookTranslationViewModel(
+            bookFingerprintKey: Self.bookKey, coordinator: coordinator)
+
+        await viewModel.handleTranslateRowTap(textProvider: provider, targetLanguage: "Chinese")
+
+        #expect(viewModel.isShowingConfirmAlert == true,
+                "idle book: row tap runs the estimate→confirm flow")
+        #expect(viewModel.isShowingStatusSheet == false)
+        #expect(viewModel.estimate?.unitCount == 2)
+    }
+
     // MARK: - Status sheet
 
     @Test func openStatusSheet_setsFlag_andCloseClearsIt() async throws {

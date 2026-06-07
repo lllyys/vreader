@@ -36,14 +36,16 @@ extension BookDetailsSheet {
         case .exportAnnotations:
             onExportAnnotations()
         case .translateBook:
-            // Feature #56 WI-14 — kick off the confirm flow. Provider
-            // label is resolved fresh inside the VM so a profile change
-            // between Book Details open and the translate tap is
-            // reflected in the alert copy (Codex Gate-4 medium finding).
+            // Feature #56 WI-14 — route the row tap. Bug #328: while a job is
+            // already running, this opens the in-progress status sheet instead
+            // of re-running the confirm flow (the VM branches on the live
+            // `progress.phase`). Provider label is resolved fresh inside the VM
+            // so a profile change between Book Details open and the translate
+            // tap is reflected in the alert copy (Codex Gate-4 medium finding).
             guard let vm = translateBookViewModel,
                   let provider = translateBookTextProvider else { return }
             Task { @MainActor in
-                await vm.presentConfirm(
+                await vm.handleTranslateRowTap(
                     textProvider: provider,
                     targetLanguage: translateBookTargetLanguage,
                     resolveProviderLabel: {
