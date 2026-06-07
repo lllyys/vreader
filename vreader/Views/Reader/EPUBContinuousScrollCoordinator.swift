@@ -83,26 +83,23 @@ final class EPUBContinuousScrollCoordinator {
     /// burst of near-boundary reports appends exactly one chapter.
     private(set) var isExtending = false
 
-    /// Bug #329: the reader's windowed progress (`visibleSpineIndex + intraFraction`)
-    /// at the previous boundary signal, used to infer the scroll direction. `nil`
-    /// until the first signal.
-    private var lastProgress: Double?
-
-    /// Bug #329: STICKY scroll direction. The coordinator only prefetches in the
-    /// reader's direction of travel; the bias persists through "stationary"
-    /// signals so a spurious post-eviction `nearTop` (the eviction drops
-    /// `scrollTop` below the prefetch threshold WITHOUT moving the reader's
-    /// content position) does NOT reload the just-evicted section. Flips only
-    /// when the reader demonstrably scrolls the other way (progress moves by
-    /// more than `directionEpsilon`).
-    enum ScrollBias { case none, forward, backward }
-    private(set) var scrollBias: ScrollBias = .none
-
-    /// Minimum progress delta between two signals to count as a direction change.
-    /// Below this the previous `scrollBias` is KEPT (sticky) — guards float noise
-    /// and the eviction scroll-compensation, which moves `scrollTop` but not
-    /// `visibleSpineIndex + intraFraction`.
-    private static let directionEpsilon = 0.0005
+    /// Bug #329: ignore the SINGLE spurious boundary signal that an eviction
+    /// echoes. A forward extend evicts the trailing section;
+    /// `removeChapterSectionJS` compensates with `scrollTop -= removedHeight`,
+    /// which can drop `scrollTop` below the observer's `nearTop` prefetch
+    /// threshold — so the very next report falsely says `nearTop` even though the
+    /// reader is scrolling forward. Honoring it would reload the just-evicted
+    /// section → the window oscillates and forward progress stalls. So after a
+    /// forward eviction we ignore the next `nearTop` (and symmetrically the next
+    /// `nearBottom` after a backward eviction). This suppresses ONLY the echo —
+    /// it never blocks the reader's actual travel direction (the matching
+    /// `nearBottom`/`nearTop` is always honored), and a genuine reversal is at
+    /// most one signal delayed. (The earlier sticky-direction approach inferred
+    /// direction from `visibleSpineIndex + intraFraction`, but the eviction
+    /// corrupts that very signal, so it could wedge forward progress — regression
+    /// fixed here.)
+    private var ignoreNextNearTop = false
+    private var ignoreNextNearBottom = false
 
     /// WI-6b-iii: intra-chapter progression (0...1) to scroll the anchor section
     /// to after the initial window materializes (saved-position restore). Nil /
@@ -132,8 +129,8 @@ final class EPUBContinuousScrollCoordinator {
     func invalidate() {
         generation = UUID()
         isExtending = false
-        lastProgress = nil      // Bug #329: a reopen starts with no known direction.
-        scrollBias = .none
+        ignoreNextNearTop = false      // Bug #329: a reopen carries no pending echo.
+        ignoreNextNearBottom = false
     }
 
     /// React to a scroll boundary signal: re-anchor to the reading chapter, then
@@ -146,32 +143,32 @@ final class EPUBContinuousScrollCoordinator {
         if window.contains(signal.visibleSpineIndex) {
             window = window.reanchored(to: signal.visibleSpineIndex)
         }
-        // Bug #329: update the STICKY scroll-direction bias from the reader's
-        // windowed progress. Only flip on a real move (> epsilon); a "stationary"
-        // signal keeps the prior bias. This is what stops the evict→reload
-        // oscillation: a forward extend evicts the trailing section,
-        // `removeChapterSectionJS` drops `scrollTop` below the `nearTop` prefetch
-        // threshold, and the next report falsely says `nearTop` — but the
-        // reader's content position (hence progress) hasn't moved backward, so
-        // the bias stays `.forward` and the spurious backward reload is skipped.
-        let progress = Double(signal.visibleSpineIndex) + signal.intraFraction
-        if let last = lastProgress {
-            if progress > last + Self.directionEpsilon { scrollBias = .forward }
-            else if progress < last - Self.directionEpsilon { scrollBias = .backward }
-            // else: stationary → keep the sticky bias.
-        }
-        lastProgress = progress
+        // Bug #329: consume the eviction-echo suppression for THIS signal. A
+        // forward eviction in a prior signal set `ignoreNextNearTop`; the spurious
+        // post-eviction `nearTop` arrives in this next signal and must be ignored
+        // (else it reloads the just-evicted section → oscillation + stall).
+        // Suppress ONLY the echoed boundary — never the reader's travel direction.
+        let suppressNearTop = ignoreNextNearTop
+        let suppressNearBottom = ignoreNextNearBottom
+        ignoreNextNearTop = false
+        ignoreNextNearBottom = false
 
         guard !isExtending else { return }
-        // Prefetch ONLY in the direction of travel (Bug #329). `.none` (before the
-        // reader has moved) allows both, preserving the initial-fill behaviour.
-        // Eviction after each extend stays DIRECTIONAL (`evictTrailing`, Bug #327).
-        let allowForward = scrollBias != .backward
-        let allowBackward = scrollBias != .forward
-        if signal.nearBottomBoundary, allowForward, window.canExtendForward {
+        // Extend toward whichever boundary the viewport is near. `extend` arms the
+        // opposite-side echo suppression iff it evicts (Bug #329). Eviction stays
+        // DIRECTIONAL (`evictTrailing`, Bug #327).
+        if signal.nearBottomBoundary, !suppressNearBottom, window.canExtendForward {
             await extend(forward: true)
+            // Bug #329 (Codex hotfix-audit, High): if that forward extend EVICTED
+            // it armed `ignoreNextNearTop`. In a DUAL-boundary signal (short window
+            // → nearTop AND nearBottom both true) the `nearTop` below is the same
+            // eviction's echo, but `suppressNearTop` was captured before this await
+            // so it wouldn't catch it. Skip the backward branch now — otherwise we
+            // immediately reload the just-evicted section and the oscillation
+            // returns. The next-signal echo is still covered by `ignoreNextNearTop`.
+            if ignoreNextNearTop { return }
         }
-        if signal.nearTopBoundary, allowBackward, window.canExtendBackward {
+        if signal.nearTopBoundary, !suppressNearTop, window.canExtendBackward {
             await extend(forward: false)
         }
     }
@@ -426,6 +423,16 @@ final class EPUBContinuousScrollCoordinator {
             committed = next
         }
         guard gen == generation else { return }
+        // Bug #329: if this extend evicted a trailing section, the eviction's
+        // `scrollTop -= removedHeight` can drop scrollTop past the prefetch
+        // threshold, so the very next report falsely fires the OPPOSITE boundary.
+        // Arm a one-signal suppression for it so it doesn't reload the section we
+        // just evicted (the evict→reload oscillation). Forward extend evicted from
+        // `lo` → suppress the next `nearTop`; backward extend evicted from `hi` →
+        // suppress the next `nearBottom`.
+        if committed.span < extended.span {
+            if forward { ignoreNextNearTop = true } else { ignoreNextNearBottom = true }
+        }
         window = committed
     }
 

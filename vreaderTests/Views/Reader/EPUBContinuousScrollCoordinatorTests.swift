@@ -55,14 +55,6 @@ struct EPUBContinuousScrollCoordinatorTests {
                                  nearTopBoundary: top, nearBottomBoundary: bottom)
     }
 
-    /// Progress-aware signal (Bug #329 direction tests): the windowed progress is
-    /// `visible + intra`, so varying `intra` across signals drives the scroll
-    /// direction the coordinator infers.
-    private func sig(_ visible: Int, _ intra: Double, top: Bool = false, bottom: Bool = false) -> EPUBScrollBoundarySignal {
-        EPUBScrollBoundarySignal(visibleSpineIndex: visible, intraFraction: intra,
-                                 nearTopBoundary: top, nearBottomBoundary: bottom)
-    }
-
     private func makeCoordinator(
         anchor: Int, spineCount: Int, maxSpan: Int = 3,
         eval: RecordingEvaluator,
@@ -279,67 +271,90 @@ struct EPUBContinuousScrollCoordinatorTests {
         #expect(!eval.removedSpineIndex(5), "the leading section 5 is NEVER removed")
     }
 
-    // MARK: - Bug #329: directional prefetch (no evict→reload oscillation)
+    // MARK: - Bug #329: eviction-echo suppression (no evict→reload oscillation)
 
-    /// Bug #329: while scrolling FORWARD, a spurious `nearTop` (the eviction drops
-    /// scrollTop below the prefetch threshold, so the JS observer falsely reports
-    /// nearTop) must NOT trigger a backward extend — that would reload the section
-    /// the reader just scrolled past, oscillating the window. Only the forward
-    /// extend should happen.
-    @Test func forwardScroll_spuriousNearTop_doesNotPrefetchBackward() async {
+    /// Bug #329: a forward extend that evicts the trailing section drops scrollTop
+    /// (via `removeChapterSectionJS`), so the very next report falsely fires
+    /// `nearTop`. That echo must be IGNORED — honoring it would reload the
+    /// just-evicted section and oscillate the window.
+    @Test func forwardEviction_suppressesNextSpuriousNearTop() async {
         let eval = RecordingEvaluator()
-        let c = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval, provider: { self.body($0) })
-        // Seed a mid-book window [4,6] (first signal = no known direction → both).
-        await c.handleBoundarySignal(sig(5, 0.5, top: true, bottom: true))
-        #expect(c.window.lo == 4 && c.window.hi == 6, "precondition: window [4,6]")
-        // Establish FORWARD motion (progress 5.5 → 5.9).
-        await c.handleBoundarySignal(sig(5, 0.9))
+        let c = makeCoordinator(anchor: 0, spineCount: 10, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(signal(visible: 0, bottom: true)) // [0,1]
+        await c.handleBoundarySignal(signal(visible: 1, bottom: true)) // [0,2]
+        await c.handleBoundarySignal(signal(visible: 2, bottom: true)) // [0,3]→evict 0→[1,3]; arms ignoreNextNearTop
         eval.evaluatedJS.removeAll()
-        // Spurious nearTop arrives WITH nearBottom, still moving forward (6.1 > 5.9).
-        await c.handleBoundarySignal(sig(6, 0.1, top: true, bottom: true))
+        // The spurious post-eviction nearTop must be ignored.
+        await c.handleBoundarySignal(signal(visible: 2, top: true))
         #expect(eval.prepends.isEmpty,
-            "Bug #329: forward scroll must NOT prefetch backward on a spurious nearTop")
-        #expect(!eval.appends.isEmpty, "the forward extend still happens")
+            "Bug #329: the post-eviction nearTop echo must be ignored (no reload)")
     }
 
-    /// Symmetric: while scrolling BACKWARD, a spurious `nearBottom` must NOT
-    /// trigger a forward extend.
-    @Test func backwardScroll_spuriousNearBottom_doesNotPrefetchForward() async {
+    /// Bug #329 REGRESSION GUARD: suppressing the echo must NEVER block the
+    /// reader's actual forward progress. After a forward eviction, the next
+    /// genuine `nearBottom` must still extend forward. (The earlier sticky-bias
+    /// approach flipped to `.backward` on the eviction-corrupted progress and
+    /// wedged forward scrolling here — the device regression this guards against.)
+    @Test func forwardProgress_notBlockedAfterEviction() async {
         let eval = RecordingEvaluator()
-        let c = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval, provider: { self.body($0) })
-        await c.handleBoundarySignal(sig(5, 0.5, top: true, bottom: true)) // [4,6]
-        await c.handleBoundarySignal(sig(5, 0.1)) // backward (5.5 → 5.1)
+        let c = makeCoordinator(anchor: 0, spineCount: 10, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(signal(visible: 0, bottom: true)) // [0,1]
+        await c.handleBoundarySignal(signal(visible: 1, bottom: true)) // [0,2]
+        await c.handleBoundarySignal(signal(visible: 2, bottom: true)) // [1,3]; arms ignoreNextNearTop
         eval.evaluatedJS.removeAll()
-        await c.handleBoundarySignal(sig(4, 0.9, top: true, bottom: true)) // 4.9 < 5.1 → backward
+        // Reader keeps scrolling forward — forward extend must NOT be blocked.
+        await c.handleBoundarySignal(signal(visible: 3, bottom: true))
+        #expect(!eval.appends.isEmpty,
+            "Bug #329 regression: forward progress must not be blocked after an eviction")
+        #expect(c.window.hi == 4, "window extends forward to 4 (got \(c.window.hi))")
+    }
+
+    /// Symmetric: a backward extend that evicts arms suppression of the next
+    /// spurious `nearBottom`.
+    @Test func backwardEviction_suppressesNextSpuriousNearBottom() async {
+        let eval = RecordingEvaluator()
+        let c = makeCoordinator(anchor: 9, spineCount: 10, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(signal(visible: 9, top: true)) // [8,9]
+        await c.handleBoundarySignal(signal(visible: 8, top: true)) // [7,9]
+        await c.handleBoundarySignal(signal(visible: 7, top: true)) // [6,9]→evict 9→[6,8]; arms ignoreNextNearBottom
+        eval.evaluatedJS.removeAll()
+        await c.handleBoundarySignal(signal(visible: 7, bottom: true))
         #expect(eval.appends.isEmpty,
-            "Bug #329: backward scroll must NOT prefetch forward on a spurious nearBottom")
-        #expect(!eval.prepends.isEmpty, "the backward extend still happens")
+            "Bug #329: the post-eviction nearBottom echo must be ignored (no reload)")
     }
 
-    /// The bias is STICKY: a "stationary" signal (progress unchanged, exactly what
-    /// the eviction scroll-compensation produces) keeps the prior forward bias, so
-    /// the spurious post-eviction nearTop is still suppressed.
-    @Test func stickyBias_stationarySignalKeepsForwardBias() async {
+    /// Only the SINGLE echo is suppressed — a later genuine `nearTop` is honored.
+    @Test func suppressedNearTop_isOnlyOneSignal() async {
         let eval = RecordingEvaluator()
-        let c = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval, provider: { self.body($0) })
-        await c.handleBoundarySignal(sig(5, 0.5, top: true, bottom: true)) // [4,6]
-        await c.handleBoundarySignal(sig(6, 0.2)) // forward (5.5 → 6.2)
+        let c = makeCoordinator(anchor: 0, spineCount: 10, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(signal(visible: 0, bottom: true))
+        await c.handleBoundarySignal(signal(visible: 1, bottom: true))
+        await c.handleBoundarySignal(signal(visible: 2, bottom: true)) // arms ignoreNextNearTop
+        await c.handleBoundarySignal(signal(visible: 2, top: true))     // echo suppressed (consumes the flag)
         eval.evaluatedJS.removeAll()
-        // STATIONARY (progress 6.2 unchanged) + spurious nearTop → bias stays forward.
-        await c.handleBoundarySignal(sig(6, 0.2, top: true, bottom: false))
-        #expect(eval.prepends.isEmpty,
-            "Bug #329: a stationary signal keeps the forward bias — no backward reload")
+        // A SECOND nearTop (a genuine reversal) is now honored.
+        await c.handleBoundarySignal(signal(visible: 1, top: true))
+        #expect(!eval.prepends.isEmpty,
+            "Bug #329: only the single echo is suppressed; a later nearTop reloads normally")
     }
 
-    /// The bias flips when the reader genuinely reverses.
-    @Test func scrollBias_flipsToBackwardOnReverse() async {
+    /// Bug #329 (Codex hotfix-audit High): a DUAL-boundary signal (short window →
+    /// nearTop AND nearBottom both true) whose forward extend evicts must NOT also
+    /// run the same-signal nearTop branch — that would reload the just-evicted
+    /// section in the SAME signal (the captured `suppressNearTop` predates the
+    /// extend's await, so only the in-line `ignoreNextNearTop` guard catches it).
+    @Test func dualBoundary_evictingForward_doesNotReloadInSameSignal() async {
         let eval = RecordingEvaluator()
-        let c = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval, provider: { self.body($0) })
-        await c.handleBoundarySignal(sig(5, 0.5, top: true, bottom: true)) // [4,6]
-        await c.handleBoundarySignal(sig(6, 0.2)) // forward
-        #expect(c.scrollBias == .forward)
-        await c.handleBoundarySignal(sig(5, 0.1)) // reverse → backward (was 6.2, now 5.1)
-        #expect(c.scrollBias == .backward, "Bug #329: bias flips when the reader reverses")
+        let c = makeCoordinator(anchor: 0, spineCount: 10, maxSpan: 3, eval: eval, provider: { self.body($0) })
+        await c.handleBoundarySignal(signal(visible: 0, bottom: true)) // [0,1]
+        await c.handleBoundarySignal(signal(visible: 1, bottom: true)) // [0,2]
+        eval.evaluatedJS.removeAll()
+        // Dual-boundary: forward extend evicts 0 → must NOT reload 0 in this signal.
+        await c.handleBoundarySignal(signal(visible: 2, top: true, bottom: true))
+        #expect(c.window.lo == 1 && c.window.hi == 3, "forward extend → [1,3] (got [\(c.window.lo),\(c.window.hi)])")
+        #expect(eval.prepends.isEmpty,
+            "Bug #329: a dual-boundary evicting forward extend must not reload in the same signal")
+        #expect(eval.removedSpineIndex(0), "section 0 was evicted (and stays evicted)")
     }
 
     @Test func eviction_firesOnSectionEvictedWithRemovedIndex() async {
