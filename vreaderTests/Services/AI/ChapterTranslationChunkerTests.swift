@@ -98,4 +98,41 @@ struct ChapterTranslationChunkerTests {
         let chunks = ChapterTranslationChunker.chunk(segments: ["x", "y"], maxCharsPerChunk: -5)
         #expect(chunks.flatMap { $0 } == [0, 1])
     }
+
+    // MARK: - Bug #330: subSplit (oversized-paragraph sub-splitting)
+
+    @Test func subSplit_underBudget_returnsUnchanged() {
+        #expect(ChapterTranslationChunker.subSplit("hello", maxChars: 10) == ["hello"])
+        #expect(ChapterTranslationChunker.subSplit("", maxChars: 10) == [""])
+    }
+
+    @Test func subSplit_overBudget_piecesAreUnderBudget_andRejoinLossless() {
+        let text = "one two three four five six seven eight"  // spaced, > 10
+        let pieces = ChapterTranslationChunker.subSplit(text, maxChars: 10)
+        #expect(pieces.count > 1)
+        #expect(pieces.allSatisfy { $0.count <= 10 })
+        #expect(pieces.joined() == text, "concatenation is lossless")
+    }
+
+    @Test func subSplit_breaksAtWhitespace_notMidWord() {
+        // "alpha beta" is 10 chars; the split should keep "alpha " then "beta".
+        let pieces = ChapterTranslationChunker.subSplit("alpha beta gamma", maxChars: 10)
+        #expect(pieces.first == "alpha ", "broke at the whitespace within the window")
+        #expect(pieces.joined() == "alpha beta gamma")
+    }
+
+    @Test func subSplit_cjkNoWhitespace_hardSplitsAtBudget() {
+        let text = String(repeating: "字", count: 25)   // 25 CJK chars, no spaces
+        let pieces = ChapterTranslationChunker.subSplit(text, maxChars: 10)
+        #expect(pieces.map(\.count) == [10, 10, 5])
+        #expect(pieces.joined() == text)
+    }
+
+    @Test func subSplit_multiScalarGraphemes_neverSplitAGrapheme() {
+        // Family emoji are single Characters made of multiple scalars/surrogates.
+        let text = String(repeating: "👨‍👩‍👧", count: 8)  // 8 graphemes
+        let pieces = ChapterTranslationChunker.subSplit(text, maxChars: 3)
+        #expect(pieces.allSatisfy { $0.count <= 3 })
+        #expect(pieces.joined() == text, "no grapheme/surrogate split — lossless rejoin")
+    }
 }

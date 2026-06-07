@@ -70,4 +70,40 @@ enum ChapterTranslationChunker {
         }
         return chunks
     }
+
+    /// Bug #330: sub-splits a SINGLE over-budget segment (an oversized paragraph)
+    /// into ordered pieces each `≤ maxChars`, so it can be translated piece by
+    /// piece instead of sent whole (which overflows the provider context window
+    /// → error). Splits on the last whitespace within each budget window when one
+    /// exists (keeps words/sentences intact for space-delimited languages); falls
+    /// back to a hard character boundary for a long unbroken run (e.g. CJK, which
+    /// has no inter-word whitespace). Grapheme-based (`Character`/`String.Index`),
+    /// so it never splits a surrogate pair or combining sequence.
+    ///
+    /// - Returns: `[text]` unchanged when `text.count ≤ maxChars`; otherwise the
+    ///   ordered pieces, which concatenate back to `text`.
+    static func subSplit(_ text: String, maxChars: Int) -> [String] {
+        let cap = max(1, maxChars)
+        guard text.count > cap else { return [text] }
+
+        var pieces: [String] = []
+        var remaining = Substring(text)
+        while remaining.count > cap {
+            let hardEnd = remaining.index(remaining.startIndex, offsetBy: cap)
+            // Back up to the last whitespace within the [start, hardEnd) window.
+            var breakAt = hardEnd
+            var i = hardEnd
+            while i > remaining.startIndex {
+                let prev = remaining.index(before: i)
+                if remaining[prev].isWhitespace { breakAt = i; break }
+                i = prev
+            }
+            // No whitespace in the window (one long token) → hard split at cap.
+            if breakAt == remaining.startIndex { breakAt = hardEnd }
+            pieces.append(String(remaining[remaining.startIndex..<breakAt]))
+            remaining = remaining[breakAt...]
+        }
+        if !remaining.isEmpty { pieces.append(String(remaining)) }
+        return pieces
+    }
 }

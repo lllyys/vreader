@@ -190,44 +190,75 @@ actor ChapterTranslationService {
             segments: segments, maxCharsPerChunk: maxCharsPerChunk)
         var translated = [String](repeating: "", count: segments.count)
 
-        do {
-            var completedChunks = 0
-            for chunk in chunks {
+        // Bug #330: a single chunk's provider failure must NOT abort the whole
+        // chapter — leave that chunk's segments source-only (empty translation)
+        // and continue. But if EVERY chunk fails (a genuine outage, not just one
+        // over-budget chunk), surface the error rather than silently returning an
+        // all-source-only result.
+        var completedChunks = 0
+        var anyChunkSucceeded = false
+        var lastChunkError: Error?
+        for chunk in chunks {
+            do {
                 try Task.checkCancellation()
-                let chunkSegments = chunk.map { segments[$0] }
+            } catch {
+                throw ChapterTranslationError.cancelled
+            }
+            let chunkSegments = chunk.map { segments[$0] }
+            do {
                 let chunkResult = try await translateChunk(
                     chunkSegments, targetLanguage: targetLanguage, config: config, style: style)
                 for (offset, segmentIndex) in chunk.enumerated() {
                     translated[segmentIndex] = chunkResult[offset]
                 }
-                // Bug #311: real N-of-M progress — fire AFTER the chunk's
-                // segments land so the count reflects committed work.
-                completedChunks += 1
-                onChunkProgress?(completedChunks, chunks.count)
+                anyChunkSucceeded = true
+            } catch is CancellationError {
+                // The between-chunk / per-piece Task.checkCancellation() throws a
+                // raw CancellationError — surface it as the typed .cancelled.
+                throw ChapterTranslationError.cancelled
+            } catch ChapterTranslationError.cancelled {
+                // Bug #330 (Codex): `send()` maps a provider-side cancellation to
+                // the TYPED `.cancelled`. It must NOT be degraded-and-continued —
+                // a cancel aborts the whole translation. Rethrow before the
+                // generic degradation catch below.
+                throw ChapterTranslationError.cancelled
+            } catch {
+                // Bug #330: degrade this chunk to source-only and keep going.
+                log.error("Chunk failed (segments \(chunk) left source-only): \(String(describing: error), privacy: .public)")
+                lastChunkError = error
             }
-        } catch is CancellationError {
-            // The between-chunk Task.checkCancellation() throws a raw
-            // CancellationError — surface it as the typed .cancelled so every
-            // translate(...) failure is a ChapterTranslationError (the
-            // re-translate VM / global coordinator handle that one type).
-            throw ChapterTranslationError.cancelled
+            // Bug #311: real N-of-M progress — fire AFTER the chunk resolves
+            // (success or graceful-degrade) so the count reflects committed work.
+            completedChunks += 1
+            onChunkProgress?(completedChunks, chunks.count)
+        }
+        if !anyChunkSucceeded, let err = lastChunkError {
+            throw err
         }
 
         // Cache-write the recombined ordered translation. A store-write
         // failure does not fail the translation — the caller still gets the
         // freshly translated text; it just won't be cached this time. The
         // swallow is logged so the failure is visible (rule 50 §6).
-        do {
-            try await store.upsert(ChapterTranslationRecord(
-                bookFingerprintKey: bookFingerprintKey,
-                unitStorageKey: unit.storageKey,
-                targetLanguage: targetLanguage,
-                providerProfileID: providerProfileID,
-                promptVersion: promptVersion,
-                translatedSegments: translated,
-                sourceParagraphCount: segments.count))
-        } catch {
-            log.error("Cache-write failed (translation still returned): \(String(describing: error), privacy: .public)")
+        //
+        // Bug #330: do NOT cache a PARTIALLY-degraded result. If a chunk failed
+        // (its segments are source-only ""), caching would make the gap permanent
+        // — a later read would hit the cache and never retry the failed chunk.
+        // Skip the write so a re-read re-attempts the failed segments; the caller
+        // still gets this run's partial result.
+        if lastChunkError == nil {
+            do {
+                try await store.upsert(ChapterTranslationRecord(
+                    bookFingerprintKey: bookFingerprintKey,
+                    unitStorageKey: unit.storageKey,
+                    targetLanguage: targetLanguage,
+                    providerProfileID: providerProfileID,
+                    promptVersion: promptVersion,
+                    translatedSegments: translated,
+                    sourceParagraphCount: segments.count))
+            } catch {
+                log.error("Cache-write failed (translation still returned): \(String(describing: error), privacy: .public)")
+            }
         }
 
         return ChapterTranslationResult(segments: translated, fromCache: false)
@@ -253,18 +284,38 @@ actor ChapterTranslationService {
         let chunks = ChapterTranslationChunker.chunk(
             segments: segments, maxCharsPerChunk: maxCharsPerChunk)
         var translated = [String](repeating: "", count: segments.count)
-        do {
-            for chunk in chunks {
+        // Bug #330: same graceful degradation as `translate` — a single chunk's
+        // failure leaves its segments source-only; an all-chunks failure surfaces
+        // the error.
+        var anyChunkSucceeded = false
+        var lastChunkError: Error?
+        for chunk in chunks {
+            do {
                 try Task.checkCancellation()
-                let chunkSegments = chunk.map { segments[$0] }
+            } catch {
+                throw ChapterTranslationError.cancelled
+            }
+            let chunkSegments = chunk.map { segments[$0] }
+            do {
                 let chunkResult = try await translateChunk(
                     chunkSegments, targetLanguage: targetLanguage, config: config, style: style)
                 for (offset, segmentIndex) in chunk.enumerated() {
                     translated[segmentIndex] = chunkResult[offset]
                 }
+                anyChunkSucceeded = true
+            } catch is CancellationError {
+                throw ChapterTranslationError.cancelled
+            } catch ChapterTranslationError.cancelled {
+                // Bug #330 (Codex): typed cancellation from `send()` must abort,
+                // not degrade.
+                throw ChapterTranslationError.cancelled
+            } catch {
+                log.error("Pre-segmented chunk failed (segments \(chunk) source-only): \(String(describing: error), privacy: .public)")
+                lastChunkError = error
             }
-        } catch is CancellationError {
-            throw ChapterTranslationError.cancelled
+        }
+        if !anyChunkSucceeded, let err = lastChunkError {
+            throw err
         }
         return translated
     }
@@ -280,6 +331,32 @@ actor ChapterTranslationService {
         config: ResolvedAIProviderConfig,
         style: TranslationStyle
     ) async throws -> [String] {
+        // Bug #330: an oversized SINGLE segment (the chunker gives it its own
+        // chunk but does NOT sub-split it) is sub-split into ≤budget pieces,
+        // translated piece by piece, and rejoined into the one segment's
+        // translation — sending the whole oversized paragraph would overflow the
+        // provider's context window → error.
+        if chunkSegments.count == 1 {
+            let pieces = ChapterTranslationChunker.subSplit(
+                chunkSegments[0], maxChars: maxCharsPerChunk)
+            if pieces.count > 1 {
+                var joined = ""
+                for piece in pieces {
+                    try Task.checkCancellation()
+                    let piecePrompt = TranslationChunkContract.userPrompt(
+                        segments: [piece], targetLanguage: targetLanguage, style: style)
+                    let pieceResponse = try await send(prompt: piecePrompt, config: config)
+                    if let decoded = try? TranslationChunkContract.decode(
+                        pieceResponse.content, expectedCount: 1) {
+                        joined += decoded[0]
+                    } else {
+                        joined += pieceResponse.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+                return [joined]
+            }
+        }
+
         // First attempt — the whole chunk in one request.
         let prompt = TranslationChunkContract.userPrompt(
             segments: chunkSegments, targetLanguage: targetLanguage, style: style)

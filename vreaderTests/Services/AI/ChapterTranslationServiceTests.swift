@@ -41,8 +41,16 @@ struct ChapterTranslationServiceTests {
         private var responses: [String]
         private(set) var requests: [AIRequest] = []
         private var errorToThrow: Error?
+        /// Bug #330: throw `.providerFailed` on exactly this 0-based index.
+        private var throwOnRequestIndex: Int?
+        /// Bug #330: throw the TYPED `.cancelled` on exactly this 0-based index.
+        private var cancelOnRequestIndex: Int?
 
-        init(responses: [String]) { self.responses = responses }
+        init(responses: [String], throwOnRequestIndex: Int? = nil, cancelOnRequestIndex: Int? = nil) {
+            self.responses = responses
+            self.throwOnRequestIndex = throwOnRequestIndex
+            self.cancelOnRequestIndex = cancelOnRequestIndex
+        }
 
         func setErrorToThrow(_ error: Error?) { self.errorToThrow = error }
 
@@ -51,8 +59,15 @@ struct ChapterTranslationServiceTests {
         func sendTranslationRequest(
             _ request: AIRequest, using config: ResolvedAIProviderConfig
         ) async throws -> AIResponse {
+            let index = requests.count
             requests.append(request)
             if let errorToThrow { throw errorToThrow }
+            if index == cancelOnRequestIndex {
+                throw ChapterTranslationError.cancelled
+            }
+            if index == throwOnRequestIndex {
+                throw ChapterTranslationError.providerFailed("mock chunk failure")
+            }
             let next = responses.isEmpty ? "[]" : responses.removeFirst()
             return AIResponse(
                 content: next, actionType: .translate, promptVersion: "v1", createdAt: Date())
@@ -60,9 +75,11 @@ struct ChapterTranslationServiceTests {
     }
 
     private func makeService(
-        sender: MockTranslationSender, store: ChapterTranslationStore
+        sender: MockTranslationSender, store: ChapterTranslationStore,
+        maxChars: Int = ChapterTranslationService.defaultMaxCharsPerChunk
     ) -> ChapterTranslationService {
-        ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        ChapterTranslationService(
+            sender: sender, store: store, promptVersion: "v1", maxCharsPerChunk: maxChars)
     }
 
     // MARK: - Cache hit
@@ -423,5 +440,116 @@ struct ChapterTranslationServiceTests {
         let message = ChapterTranslationService.sanitizedProviderMessage(error)
         #expect(message == error.localizedDescription)
         #expect(message != String(describing: error))      // never the raw dump
+    }
+
+    // MARK: - Bug #330: oversized paragraph + graceful degradation
+
+    /// An oversized SINGLE paragraph (> budget) must be sub-split into pieces and
+    /// translated piece-by-piece, then rejoined — NOT sent whole (which overflows
+    /// the provider context → error).
+    @Test func oversizedParagraph_isSubSplitAndRejoined() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        // One CJK paragraph of 25 chars (no whitespace → deterministic hard split
+        // at budget 10 → pieces of 10/10/5 → 3 piece requests).
+        let source = String(repeating: "字", count: 25)
+        let sender = MockTranslationSender(responses: [#"["A"]"#, #"["B"]"#, #"["C"]"#])
+        let service = makeService(sender: sender, store: store, maxChars: 10)
+
+        let result = try await service.translate(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: source, targetLanguage: "Chinese",
+            providerProfileID: Self.profileID, config: config, style: .natural)
+
+        #expect(result.segments.count == 1)
+        #expect(result.segments[0] == "ABC", "the sub-split piece translations rejoin into the segment")
+        #expect(await sender.requestCount == 3, "one request per sub-split piece")
+    }
+
+    /// Bug #330: a SINGLE chunk's provider failure degrades to source-only for
+    /// that chunk and the chapter still completes (the others translate).
+    @Test func oneChunkFails_degradesToSourceOnly_chapterCompletes() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        // Two short paragraphs (6 + 7 chars) → two chunks at budget 10 (they
+        // don't pack together, neither is oversized so no sub-split → one request
+        // each). The 2nd request throws.
+        let source = "First.\n\nSecond."
+        let sender = MockTranslationSender(responses: [#"["第一"]"#], throwOnRequestIndex: 1)
+        let service = makeService(sender: sender, store: store, maxChars: 10)
+
+        let result = try await service.translate(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: source, targetLanguage: "Chinese",
+            providerProfileID: Self.profileID, config: config, style: .natural)
+
+        #expect(result.segments.count == 2)
+        #expect(result.segments[0] == "第一", "the first chunk translated")
+        #expect(result.segments[1] == "", "the failed chunk is left source-only (empty), not aborted")
+    }
+
+    /// Bug #330: but if EVERY chunk fails (a genuine outage, not one over-budget
+    /// chunk), the error surfaces rather than silently returning all-source-only.
+    @Test func allChunksFail_surfacesTheError() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let source = "First.\n\nSecond."
+        let sender = MockTranslationSender(responses: [])
+        await sender.setErrorToThrow(ChapterTranslationError.offline)
+        let service = makeService(sender: sender, store: store, maxChars: 10)
+
+        await #expect(throws: ChapterTranslationError.self) {
+            _ = try await service.translate(
+                bookFingerprintKey: "fp", unit: Self.unit(),
+                sourceText: source, targetLanguage: "Chinese",
+                providerProfileID: Self.profileID, config: config, style: .natural)
+        }
+    }
+
+    /// Bug #330: a PARTIALLY-degraded result must NOT be cached — otherwise a
+    /// transient chunk failure would be served as source-only forever. A re-read
+    /// must miss the cache and re-attempt the failed chunk.
+    @Test func partialDegradation_isNotCached_soReReadRetries() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let source = "First.\n\nSecond."
+        let sender = MockTranslationSender(
+            responses: [#"["第一"]"#, #"["第一b"]"#, #"["第二b"]"#], throwOnRequestIndex: 1)
+        let service = makeService(sender: sender, store: store, maxChars: 10)
+
+        let first = try await service.translate(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: source, targetLanguage: "Chinese",
+            providerProfileID: Self.profileID, config: config, style: .natural)
+        #expect(first.fromCache == false)
+        #expect(first.segments[1] == "", "second chunk degraded to source-only")
+        let afterFirst = await sender.requestCount
+
+        let second = try await service.translate(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: source, targetLanguage: "Chinese",
+            providerProfileID: Self.profileID, config: config, style: .natural)
+        #expect(second.fromCache == false, "the partial result must not be cached")
+        #expect(await sender.requestCount > afterFirst, "the provider was re-called, not served from cache")
+        #expect(second.segments == ["第一b", "第二b"], "the re-read succeeds fully this time")
+    }
+
+    /// Bug #330 (Codex): a TYPED `.cancelled` from `send()` during a chunk must
+    /// ABORT the whole translation (not be degraded-and-continued), even after an
+    /// earlier chunk already succeeded.
+    @Test func typedCancellationOnLaterChunk_aborts_afterEarlierSuccess() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let source = "First.\n\nSecond."
+        // chunk 0 (req 0) succeeds; chunk 1 (req 1) throws the typed .cancelled.
+        let sender = MockTranslationSender(responses: [#"["第一"]"#], cancelOnRequestIndex: 1)
+        let service = makeService(sender: sender, store: store, maxChars: 10)
+
+        await #expect(throws: ChapterTranslationError.cancelled) {
+            _ = try await service.translate(
+                bookFingerprintKey: "fp", unit: Self.unit(),
+                sourceText: source, targetLanguage: "Chinese",
+                providerProfileID: Self.profileID, config: config, style: .natural)
+        }
     }
 }
