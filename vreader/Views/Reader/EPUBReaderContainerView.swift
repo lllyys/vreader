@@ -90,6 +90,10 @@ struct EPUBReaderContainerView: View {
     /// for Photo with "Custom Background" off).
     @State private var photoBackgroundDataURL: URL?
 
+    /// Feature #54 Phase D-1: the book's enabled content-replacement rules,
+    /// fetched on open and compiled into the injection JS passed to the bridge.
+    @State private var replacementRules: [ReplacementRuleDescriptor] = []
+
     /// Feature #71 WI-6b-i: continuous cross-chapter scroll config — the window
     /// coordinator + late-binding evaluator handle, built ONCE per open (in the
     /// open `.task`) when `epubLayout == .scroll`. Nil in paged mode, before
@@ -194,6 +198,12 @@ struct EPUBReaderContainerView: View {
                     guard !Task.isCancelled else { return }
                     resourceBase = base
                     extractedRoot = root
+                    // Feature #54 Phase D-1: fetch the book's content-replacement
+                    // rules so the bridge applies them (CFI-safe) on each chapter's
+                    // didFinish. Same fetcher the native MD path uses.
+                    replacementRules = await MDReplacementRuleFetcher.rules(
+                        container: modelContainer, bookKey: fingerprintKey ?? ""
+                    )
                     // Restore intra-chapter scroll position (bug #58).
                     // The restored position includes progression (0.0-1.0)
                     // which must be passed to EPUBWebViewBridge as seekScrollFraction
@@ -732,6 +742,9 @@ struct EPUBReaderContainerView: View {
                         backgroundImageURL: photoBackgroundDataURL
                     )
                 },
+                // Feature #54 Phase D-1: compile the book's replacement rules into
+                // the CFI-safe injection JS the bridge runs on each chapter load.
+                replacementJS: EPUBReplacementJS.injectionJS(rules: replacementRules),
                 themeBackgroundColor: settingsStore?.theme.backgroundColor,
                 safeAreaTopInset: proxy.safeAreaInsets.top,
                 scrollFraction: seekScrollFraction,

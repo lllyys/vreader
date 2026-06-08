@@ -30,17 +30,18 @@ struct ReplacementRulesViewBannerTests {
         #expect(!ReplacementRulesView.nativeModeBannerText.isEmpty)
     }
 
-    @Test func bannerText_namesMarkdownAsSupported() {
-        // Post-#54: native Markdown is the one format that DOES apply
-        // replacement rules today (WI-7 wired the transform chain into
-        // `MDFileLoader`). The banner's informational core is naming that
-        // format by its full user-facing name — we require "Markdown" (not
-        // the loose "MD" substring, which would also match unrelated tokens
-        // like "AZW3, MD, ..."). A future copy change that drops the
-        // Markdown call-out trips this test.
+    @Test func bannerText_namesMarkdownAndEPUBAsSupported() {
+        // Post-#54 + Phase D-1: native Markdown (WI-7) AND EPUB (Phase D-1 via
+        // `EPUBReplacementJS`) both apply replacement rules today. The banner's
+        // informational core is naming the supported formats by their full
+        // user-facing names. A future copy change that drops either call-out
+        // trips this test.
+        let banner = ReplacementRulesView.nativeModeBannerText
         #expect(ReplacementRulesViewBannerTests.containsCaseInsensitive(
-            haystack: ReplacementRulesView.nativeModeBannerText,
-            needle: "Markdown"
+            haystack: banner, needle: "Markdown"
+        ))
+        #expect(ReplacementRulesViewBannerTests.containsCaseInsensitive(
+            haystack: banner, needle: "EPUB"
         ))
     }
 
@@ -64,17 +65,13 @@ struct ReplacementRulesViewBannerTests {
         ))
     }
 
-    @Test func bannerText_namesPendingFormats_EPUB_AZW3_TXT() {
-        // EPUB / AZW3 / TXT currently do NOT apply replacement rules — Phase
-        // D / feature #42 will wire them. The banner's job is to tell users
-        // exactly which formats are pending so they don't silently configure
-        // rules expecting them to take effect today. A copy change that
-        // drops any one of the three pending formats trips this test and
-        // forces a deliberate update.
+    @Test func bannerText_namesPendingFormats_AZW3_TXT() {
+        // AZW3 / TXT currently do NOT apply replacement rules — they're the
+        // remaining pending formats after Phase D-1 wired EPUB. The banner's
+        // job is to tell users exactly which formats are pending so they don't
+        // silently configure rules expecting them to take effect today. A copy
+        // change that drops either pending format trips this test.
         let banner = ReplacementRulesView.nativeModeBannerText
-        #expect(ReplacementRulesViewBannerTests.containsCaseInsensitive(
-            haystack: banner, needle: "EPUB"
-        ))
         #expect(ReplacementRulesViewBannerTests.containsCaseInsensitive(
             haystack: banner, needle: "AZW3"
         ))

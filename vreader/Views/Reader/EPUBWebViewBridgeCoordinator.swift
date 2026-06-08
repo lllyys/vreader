@@ -12,6 +12,11 @@ extension EPUBWebViewBridge {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var currentURL: URL?
         var themeCSS: String?
+        /// Feature #54 Phase D-1: the content-replacement injection JS
+        /// (`EPUBReplacementJS.injectionJS`), or nil when no rule applies.
+        /// Injected on `didFinish`; the baked scroll-root observer covers
+        /// later-appended chapter sections. Set in `makeUIView`.
+        var replacementJS: String?
         /// Bug #167: themed background color for the WKWebView's scroll
         /// view. Tracked here so `updateUIView` can detect a theme change
         /// and restyle the rubber-band overscroll area without reloading
@@ -576,6 +581,16 @@ extension EPUBWebViewBridge {
                 }
                 Task { @MainActor in
                     completion?()
+                }
+            }
+
+            // Feature #54 Phase D-1: apply content-replacement rules to the
+            // loaded section's text nodes (CFI-safe — original HTML untouched)
+            // and install the scroll-root observer so chapters appended later
+            // (continuous mode) are covered too. No-op when no rule applies.
+            if let replacementJS, !replacementJS.isEmpty {
+                webView.evaluateJavaScript(replacementJS) { _, error in
+                    if let error { AppLogger.epub.error("replacement inject error: \(error)") }
                 }
             }
 

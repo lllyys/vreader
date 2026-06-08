@@ -51,6 +51,13 @@ final class ReadiumReaderCoordinator: NSObject {
     /// Default `false` keeps the opaque theme-color path unchanged.
     var transparentBackground = false
 
+    /// Feature #54 Phase D-1: the enabled content-replacement rules for this
+    /// book (set by the representable; mutate via `setReplacementRules` for live
+    /// changes). Applied CFI-safely to each rendered spine's text nodes by the
+    /// `+Replacement` extension's `applyReplacement()` — see
+    /// `ReadiumReaderCoordinator+Replacement.swift`. Default `[]` is a no-op.
+    var replacementRules: [ReplacementRuleDescriptor] = []
+
     /// WI-9a: the host-owned navigation sink. `attach` binds this coordinator's
     /// nav methods into it; `detach` clears it so a late page-turn / jump intent
     /// no-ops after teardown. Optional because a non-nav call site (DebugBridge
@@ -247,6 +254,11 @@ extension ReadiumReaderCoordinator: EPUBNavigatorDelegate {
         // the same origin (the self-gating applier alone would honor the stale
         // value). Idempotent + cheap; the `+Transparency` extension owns it.
         syncTransparentState()
+        // Feature #54 Phase D-1: apply content-replacement rules to the freshly
+        // rendered spine's text nodes (CFI-safe — the original resource HTML is
+        // untouched). Idempotent per document via the JS guard flag; cheap no-op
+        // when no rules are configured. Owned by the `+Replacement` extension.
+        applyReplacement()
         // WI-4 probe wiring: register the active navigator + signal settle the
         // first time a spine is rendered and a location is reported, so the
         // DebugBridge eval/settle probes (eval?bridge=epub) reach this host.

@@ -61,6 +61,11 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     /// the opaque theme-color path unchanged.
     var transparentBackground: Bool = false
 
+    /// Feature #54 Phase D-1: the enabled content-replacement rules for this
+    /// book, forwarded to the coordinator which applies them CFI-safely to each
+    /// rendered spine's text nodes. Default `[]` is a no-op.
+    var replacementRules: [ReplacementRuleDescriptor] = []
+
     func makeCoordinator() -> ReadiumReaderCoordinator {
         ReadiumReaderCoordinator(
             fingerprintKey: fingerprintKey,
@@ -86,6 +91,9 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
         // `setupUserScripts` (called as each spine WebView loads) injects the
         // transparent-`:root` style for the photo/custom-bg path.
         context.coordinator.transparentBackground = transparentBackground
+        // Feature #54 Phase D-1: seed the rules before the navigator builds so
+        // the coordinator applies them on the first spine's locationDidChange.
+        context.coordinator.replacementRules = replacementRules
         let config = EPUBNavigatorViewController.Configuration(preferences: preferences)
         do {
             let navigator = try EPUBNavigatorViewController(
@@ -152,6 +160,9 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             // already-loaded spreads (not just future ones). No-ops when the flag
             // is unchanged.
             context.coordinator.setTransparentBackground(transparentBackground)
+            // Feature #54 Phase D-1: forward a live rules change so already-open
+            // spreads pick it up (re-applied on the visible spine; idempotent).
+            context.coordinator.setReplacementRules(replacementRules)
             // The pref re-submit (theme/font/scroll) must run before the
             // container-view re-paint, since `submitPreferences` itself re-paints
             // the navigator view to `effectiveBackgroundColor`.

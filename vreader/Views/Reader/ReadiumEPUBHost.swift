@@ -85,6 +85,11 @@ struct ReadiumEPUBHost: View {
     /// legacy `EPUBSelectionTokenCache`; wiring in `ReadiumEPUBHost+Highlights`.
     @State var readiumSelectionTokenCache = ReadiumSelectionTokenCache<Selection>()
 
+    /// Feature #54 Phase D-1: enabled content-replacement rules for this book,
+    /// fetched in `openHostTask` and forwarded to `ReadiumNavigatorRepresentable`
+    /// → the coordinator, which applies them CFI-safely to each rendered spine.
+    @State var replacementRules: [ReplacementRuleDescriptor] = []
+
     // MARK: - Bug #303: select → Note (annotation) parity
 
     // The Readium host had no `.readerAnnotationRequested` observer + no note

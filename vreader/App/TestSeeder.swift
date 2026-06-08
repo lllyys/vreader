@@ -13,9 +13,32 @@
 #if DEBUG
 
 import Foundation
+import SwiftData
 
 /// Creates fixture book entries for UI testing.
 enum TestSeeder {
+
+    /// Feature #54 Phase D-1: seeds one deterministic GLOBAL content-replacement
+    /// rule ("Chapter" → "Sektion") so EPUB replacement-rule application is
+    /// verifiable CU-free (`--seed-replacement-rule`). Idempotent — skips if a
+    /// rule with the same pattern already exists.
+    static func seedReplacementRule(container: ModelContainer) async {
+        let ctx = ModelContext(container)
+        let pattern = "Chapter"
+        let existing = (try? ctx.fetch(FetchDescriptor<ContentReplacementRule>(
+            predicate: #Predicate { $0.pattern == pattern }
+        ))) ?? []
+        guard existing.isEmpty else { return }
+        ctx.insert(ContentReplacementRule(
+            pattern: pattern,
+            replacement: "Sektion",
+            scopeKey: "",
+            enabled: true,
+            order: 0,
+            label: "Phase D-1 verification rule"
+        ))
+        try? ctx.save()
+    }
 
     /// Seeds the database with fixture books for UI test scenarios.
     ///

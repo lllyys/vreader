@@ -287,6 +287,11 @@ struct VReaderApp: App {
                     } else if seedConfig.seedBooks {
                         await TestSeeder.seedBooks(persistence: persistence)
                     }
+                    // Feature #54 Phase D-1: independent of the book seed — seed a
+                    // deterministic global replacement rule for CU-free verification.
+                    if seedConfig.seedReplacementRule {
+                        await TestSeeder.seedReplacementRule(container: container)
+                    }
                     semaphore.signal()
                 }
                 let waitResult = semaphore.wait(timeout: .now() + 5.0)
@@ -533,6 +538,10 @@ struct TestLaunchConfig: Sendable {
     /// EPUB so an XCUITest can drive a REAL cross-chapter scroll in the legacy #71
     /// continuous-stitch path. Implies a disk-backed store.
     let seedMultiChapterEPUB: Bool
+    /// Feature #54 Phase D-1: seed a deterministic global content-replacement
+    /// rule ("Chapter" → "Sektion") so EPUB replacement-rule application is
+    /// verifiable CU-free. Combine with a book seed (e.g. --seed-multi-chapter-epub).
+    let seedReplacementRule: Bool
     let seedCorruptDB: Bool
     /// `--uitesting-no-seed` — skip seeding, expect the previous launch's
     /// SwiftData store to remain. Used for terminate-then-relaunch tests
@@ -632,6 +641,7 @@ struct TestLaunchConfig: Sendable {
             seedAZW3Fixture: args.contains("--seed-azw3-fixture"),
             seedDividerAZW3: args.contains("--seed-divider-azw3"),
             seedMultiChapterEPUB: args.contains("--seed-multi-chapter-epub"),
+            seedReplacementRule: args.contains("--seed-replacement-rule"),
             seedCorruptDB: args.contains("--seed-corrupt-db"),
             seedKeepExisting: args.contains("--uitesting-no-seed"),
             seedResetPreferences: args.contains("--reset-preferences"),
@@ -662,6 +672,7 @@ struct TestLaunchConfig: Sendable {
         seedAZW3Fixture: false,
         seedDividerAZW3: false,
         seedMultiChapterEPUB: false,
+        seedReplacementRule: false,
         seedCorruptDB: false,
         seedKeepExisting: false,
         seedResetPreferences: false,

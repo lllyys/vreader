@@ -25,14 +25,15 @@ struct ReplacementRulesView: View {
     /// the reader's Settings → Reading Mode") pointed users at a deleted
     /// control and its "only when reading in Unified mode" premise was
     /// stale for MD. The rewritten copy states the post-#54 reality: rules
-    /// apply automatically when reading Markdown today; EPUB / AZW3 / TXT
-    /// support is pending (feature #54 plan §4 Phase D and feature #42);
-    /// PDF is not supported. Pinned as a static constant so
+    /// apply automatically when reading Markdown and EPUB today (feature #54
+    /// Phase D-1 wired EPUB via `EPUBReplacementJS` on both the Readium and the
+    /// legacy WKWebView engines); AZW3 / TXT support is pending; PDF is not
+    /// supported. Pinned as a static constant so
     /// `ReplacementRulesViewBannerTests` can regression-guard the copy
     /// without inspecting the view tree. Update the test in lockstep with
     /// any copy change.
     static let nativeModeBannerText =
-        "Rules apply automatically when reading Markdown files. Support for EPUB, AZW3, and TXT is coming in a later update; PDF is not supported."
+        "Rules apply automatically when reading Markdown and EPUB files. Support for AZW3 and TXT is coming in a later update; PDF is not supported."
 
     var body: some View {
         List {

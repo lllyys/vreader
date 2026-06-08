@@ -51,6 +51,11 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     let baseDirectory: URL
     /// Optional CSS `<style>` tag to inject for theme overrides.
     var themeCSS: String?
+    /// Feature #54 Phase D-1: content-replacement injection JS
+    /// (`EPUBReplacementJS.injectionJS`) applied to each chapter's text nodes
+    /// CFI-safely on `didFinish` (+ a baked observer for appended chapters).
+    /// nil when no rule applies.
+    var replacementJS: String?
     /// Bug #167: opaque background color for the WKWebView's scroll view, so
     /// the rubber-band overscroll area paints in the current theme color
     /// instead of falling through to the host UIView (white by default).
@@ -294,6 +299,8 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         Self.applySafeAreaTopInset(to: webView.scrollView, top: safeAreaTopInset)
         context.coordinator.safeAreaTopInset = safeAreaTopInset
         context.coordinator.themeCSS = themeCSS
+        // Feature #54 Phase D-1: thread the replacement JS so `didFinish` applies it.
+        context.coordinator.replacementJS = replacementJS
         context.coordinator.themeBackgroundColor = themeBackgroundColor
         context.coordinator.allowedRoot = baseDirectory
         context.coordinator.currentHref = currentHref
@@ -332,6 +339,11 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         // Keep coordinator in sync with current props
         context.coordinator.currentHref = currentHref
+        // Feature #54 Phase D-1: keep the replacement JS current so a value that
+        // arrives after `makeUIView` (the async rule fetch) reaches any later
+        // chapter `didFinish`. (Already-rendered, marked sections aren't re-run;
+        // a live rules change takes effect on next open — v1 scope.)
+        context.coordinator.replacementJS = replacementJS
         #if DEBUG
         context.coordinator.fingerprintKey = fingerprintKey
         context.coordinator.readerToken = readerToken

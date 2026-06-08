@@ -185,7 +185,10 @@ extension ReadiumEPUBHost {
             bilingualCommander: bilingualCommander,
             // WI-7: make the navigator view + spine WebViews transparent so the
             // ThemeBackgroundView composited behind shows through.
-            transparentBackground: shouldRenderTransparentBackground
+            transparentBackground: shouldRenderTransparentBackground,
+            // Feature #54 Phase D-1: the enabled content-replacement rules for
+            // this book — applied CFI-safely to each spine's text nodes.
+            replacementRules: replacementRules
         )
         .ignoresSafeArea()
         // WI-9a: the jump observer resolves a (legacy, OPF-relative) vreader
@@ -211,6 +214,13 @@ extension ReadiumEPUBHost {
     func openHostTask() async {
         guard viewModel == nil else { return }
         let persistence = PersistenceActor(modelContainer: modelContainer)
+        // Feature #54 Phase D-1: fetch the book's enabled content-replacement
+        // rules (global + book-scoped) before the navigator mounts, so the
+        // representable seeds them onto the coordinator for the first spine.
+        // Same fetcher the native MD path uses (format-neutral despite the name).
+        replacementRules = await MDReplacementRuleFetcher.rules(
+            container: modelContainer, bookKey: fingerprint.canonicalKey
+        )
         let vm = ReadiumEPUBReaderViewModel(
             fileURL: fileURL,
             fingerprint: fingerprint,
