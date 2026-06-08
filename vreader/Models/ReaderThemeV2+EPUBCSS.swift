@@ -83,12 +83,15 @@ extension ReaderThemeV2 {
             for: self, url: backgroundImageURL, outerBG: outerBG
         )
 
-        // Feature #68: chapter-start drop-cap. `body > p:first-of-type`
-        // (child combinator) targets the first top-level <p> directly
-        // under <body> — exactly one drop-cap for the common flat-<p>
-        // EPUB shape; a section-wrapped first <p> is safely missed (no
-        // wrong drop-cap). `accent` is the theme's oxblood token,
-        // already computed above. The book's own <h1>..<h6> rule is
+        // Feature #68 (+ bug #331): chapter-start drop-cap.
+        // `:is(body, .vreader-chapter-content) > p:first-of-type` (child
+        // combinator under either parent) targets the first top-level <p>
+        // of a chapter in BOTH the paged shape (body > p) and the #71
+        // continuous-scroll stitch, where the chapter body is wrapped in
+        // <div class="vreader-chapter-content"> inside the spine <section>.
+        // A section-wrapped first <p> inside the chapter's own markup is
+        // safely missed (no wrong drop-cap). `accent` is the theme's oxblood
+        // token, already computed above. The book's own <h1>..<h6> rule is
         // untouched — no VReader heading is injected (no duplicate).
         let dropCapRule = Self.dropCapCSSRule(accent: accent)
 
@@ -254,18 +257,28 @@ extension ReaderThemeV2 {
     // MARK: - Helpers
 
     /// Feature #68: builds the chapter-start drop-cap CSS rule appended
-    /// to the EPUB override blob. The selector `body > p:first-of-type::
-    /// first-letter` uses the child combinator so it matches the first
-    /// `<p>` that is a *direct* child of `<body>` — exactly one drop-cap
-    /// for the flat-top-level-`<p>` EPUB shape. A `<p>` nested inside a
-    /// section wrapper is not matched (a safe miss — no wrong drop-cap).
+    /// to the EPUB override blob. The selector
+    /// `:is(body, .vreader-chapter-content) > p:first-of-type::first-letter`
+    /// uses the child combinator under EITHER parent so it matches the first
+    /// top-level `<p>` of a chapter in BOTH render shapes:
+    /// - **paged / single-section** (legacy `loadFileURL`): `body > p` — the
+    ///   chapter's own `<body>` holds the `<p>` directly.
+    /// - **continuous-scroll stitch** (feature #71, bug #331): each chapter's
+    ///   body is stitched as
+    ///   `<section data-vreader-spine-index="N"> … <div class="vreader-chapter-content">{body}</div></section>`
+    ///   (see `EPUBContinuousScrollJS.sectionHTML` +
+    ///   `EPUBChapterCSSScoper.chapterContentSelector`), so the first `<p>` is a
+    ///   child of `.vreader-chapter-content`, not `<body>` —
+    ///   `.vreader-chapter-content > p` matches it, one drop-cap per chapter.
+    ///   A `<p>` nested deeper inside the chapter's own markup is still safely
+    ///   missed (no wrong drop-cap).
     /// Declarations mirror the design (`vreader-reader.jsx:383-390`) and
     /// the `ChapterStartTypography` constants; `accent` is the theme's
     /// oxblood token.
     private static func dropCapCSSRule(accent: String) -> String {
         let serifStack = ReaderTypography.cssFontStack(for: .sourceSerif4)
         return """
-        body > p:first-of-type::first-letter { \
+        :is(body, .vreader-chapter-content) > p:first-of-type::first-letter { \
           font-family: \(serifStack) !important; \
           font-size: \(ChapterStartTypography.dropCapCSSFontSizeEm) !important; \
           font-weight: 600 !important; \

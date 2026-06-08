@@ -34,7 +34,7 @@ struct ReaderThemeV2EPUBCSSChapterStartTests {
     /// the rule is absent.
     private func dropCapBlock(_ theme: ReaderThemeV2) -> String? {
         let css = normalize(theme.epubOverrideCSS(fontSize: 18))
-        let selector = "body > p:first-of-type::first-letter {"
+        let selector = ":is(body, .vreader-chapter-content) > p:first-of-type::first-letter {"
         guard let selRange = css.range(of: selector) else { return nil }
         guard let closeBrace = css[selRange.upperBound...].firstIndex(of: "}")
         else { return nil }
@@ -44,21 +44,36 @@ struct ReaderThemeV2EPUBCSSChapterStartTests {
     @Test("emits exactly the pinned child-combinator drop-cap selector")
     func emitsPinnedSelector() {
         let css = normalize(ReaderThemeV2.paper.epubOverrideCSS(fontSize: 18))
-        #expect(css.contains("body > p:first-of-type::first-letter"),
-                "Drop-cap selector must use the child combinator")
+        // Bug #331: the selector must match BOTH paged (body > p) and the
+        // #71 continuous stitch (.vreader-chapter-content > p) shapes,
+        // via :is(body, .vreader-chapter-content) > p.
+        #expect(css.contains(":is(body, .vreader-chapter-content) > p:first-of-type::first-letter"),
+                "Drop-cap selector must use the :is(body, .vreader-chapter-content) child combinator")
         // There must be NO loose `p:first-of-type::first-letter` rule —
         // i.e. every occurrence of `p:first-of-type::first-letter` must be
-        // preceded by the `body > ` child combinator (R6 guard).
+        // preceded by the `> ` child combinator (R6 guard — no over-match
+        // on nested <p>s).
         var searchStart = css.startIndex
         while let r = css.range(of: "p:first-of-type::first-letter",
                                 range: searchStart..<css.endIndex) {
-            let prefixStart = css.index(r.lowerBound, offsetBy: -7,
+            let prefixStart = css.index(r.lowerBound, offsetBy: -2,
                                         limitedBy: css.startIndex) ?? css.startIndex
             let prefix = String(css[prefixStart..<r.lowerBound])
-            #expect(prefix == "body > ",
+            #expect(prefix == "> ",
                     "Every p:first-of-type::first-letter must be a child-combinator selector — found a loose one")
             searchStart = r.upperBound
         }
+    }
+
+    @Test("drop-cap selector also matches the continuous-scroll chapter-content first <p> (bug #331)")
+    func dropCapMatchesContinuousStitchSection() {
+        // Bug #331: in #71 continuous-scroll mode each chapter's <body>
+        // becomes <section data-vreader-spine-index="N">, so `body > p`
+        // never matches and the drop-cap silently fails. The rule must also
+        // target the first <p> directly under the spine section.
+        let css = normalize(ReaderThemeV2.paper.epubOverrideCSS(fontSize: 18))
+        #expect(css.contains(".vreader-chapter-content"),
+                "Drop-cap selector must also match the chapter-content first <p> for continuous-scroll mode")
     }
 
     @Test("only one ::first-letter rule is emitted")
@@ -152,7 +167,7 @@ struct ReaderThemeV2EPUBCSSChapterStartTests {
     func allThemesEmitDropCap() {
         for theme in ReaderThemeV2.allCases {
             let css = normalize(theme.epubOverrideCSS(fontSize: 18))
-            #expect(css.contains("body > p:first-of-type::first-letter"),
+            #expect(css.contains(":is(body, .vreader-chapter-content) > p:first-of-type::first-letter"),
                     "Theme \(theme) must emit the drop-cap rule")
         }
     }
