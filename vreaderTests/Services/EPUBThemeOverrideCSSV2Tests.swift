@@ -250,4 +250,21 @@ struct EPUBThemeOverrideCSSV2Tests {
     @Test func legacyDarkMapsToDark() {
         #expect(ReaderTheme.dark.asV2 == .dark)
     }
+
+    // MARK: - Feature #95 — justify default
+
+    @Test func bodyProseIsJustifiedByDefault() {
+        let css = normalize(ReaderThemeV2.paper.epubOverrideCSS(fontSize: 18))
+        #expect(css.contains("text-align: justify !important"))
+        // Scoped to prose <p>, guarded against intentional alignment.
+        #expect(css.contains("p:not([style*=\"text-align\"]):not([align]):not([class*=\"center\"]):not([class*=\"right\"]) { text-align: justify !important; }"))
+        // The justify selector is p-only — headings keep their own alignment.
+        #expect(!css.contains("h1,h2,h3,h4,h5,h6 { text-align: justify"))
+    }
+
+    @Test(arguments: [ReaderThemeV2.paper, .dark, .sepia])
+    func justifyAppliesAcrossThemes(_ theme: ReaderThemeV2) {
+        let css = normalize(theme.epubOverrideCSS(fontSize: 18))
+        #expect(css.contains("text-align: justify !important"))
+    }
 }

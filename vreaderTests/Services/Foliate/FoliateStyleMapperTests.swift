@@ -46,6 +46,16 @@ struct FoliateStyleMapperTests {
         #expect(css.contains("font-size: 12px"), "Must handle min font size")
     }
 
+    // Feature #95: prose <p> justified by default, guarded against intentional alignment.
+    @Test func themeCSSJustifiesProseParagraphs() {
+        let css = FoliateStyleMapper.themeCSS(
+            fontSize: 18, lineHeight: 1.5,
+            fontFamily: nil, textColor: nil, backgroundColor: nil
+        )
+        #expect(css.contains("text-align: justify !important"))
+        #expect(css.contains("p:not([style*=\"text-align\"]):not([align]):not([class*=\"center\"]):not([class*=\"right\"])"))
+    }
+
     // MARK: - themeCSS: Line Height
 
     @Test func themeCSSIncludesLineHeight() {

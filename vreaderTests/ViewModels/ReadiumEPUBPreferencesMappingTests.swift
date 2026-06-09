@@ -53,6 +53,11 @@ struct ReadiumEPUBPreferencesMappingTests {
         #expect(prefs(theme: vTheme).theme?.rawValue == expectedRaw)
     }
 
+    // Feature #95: body text justified by default (Readium-native textAlign).
+    @Test func textAlignDefaultsToJustify() {
+        #expect(prefs().textAlign == .justify)
+    }
+
     @Test(arguments: [
         ReaderThemeV2.paper, .sepia, .dark, .oled, .photo,
     ])

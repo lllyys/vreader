@@ -113,6 +113,15 @@ enum FoliateStyleMapper {
             rules.append("body { background: \(bg) !important; }")
         }
 
+        // Feature #95: justify body prose by default (the EPUB analog of #92
+        // TXT), guarded against intentionally-aligned paragraphs (inline
+        // text-align / the deprecated `align` attr / common center|right
+        // classes). Headings (`h1–h6`) and non-`p` elements are untouched.
+        rules.append(
+            "p:not([style*=\"text-align\"]):not([align])"
+            + ":not([class*=\"center\"]):not([class*=\"right\"]) "
+            + "{ text-align: justify !important; }")
+
         // Feature #68: chapter-start drop-cap. The accent is sanitized
         // through `FoliateJSEscaper.sanitizeCSSColor` exactly like the
         // other colors — a value with injection characters is rejected

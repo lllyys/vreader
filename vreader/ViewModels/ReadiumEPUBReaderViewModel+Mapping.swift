@@ -129,6 +129,10 @@ extension ReadiumEPUBReaderViewModel {
             pageMargins: defaultPageMargins,
             publisherStyles: false,
             scroll: layout == .scroll,
+            // Feature #95: justify body text by default (the EPUB analog of #92
+            // TXT). Readium owns its own per-paragraph cascade + auto-enables
+            // hyphenation + blockquote/figcaption exclusions when justify is on.
+            textAlign: .justify,
             textColor: Color(uiColor: theme.inkColor),
             theme: readiumTheme(for: theme)
         )

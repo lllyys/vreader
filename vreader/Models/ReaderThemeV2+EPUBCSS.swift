@@ -132,6 +132,9 @@ extension ReaderThemeV2 {
           line-height: 1.3 !important; \
           color: \(ink) !important; \
         }\
+        p:not([style*="text-align"]):not([align]):not([class*="center"]):not([class*="right"]) { \
+          text-align: justify !important; \
+        }\
         body * { \
           font-family: inherit !important; \
         }\
