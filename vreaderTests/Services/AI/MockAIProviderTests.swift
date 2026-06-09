@@ -60,6 +60,28 @@ struct MockAIProviderTests {
         #expect(r.contains("[MOCK]"))
         #expect(r.contains("5 chars"))
     }
+
+    // Feature #77 Gate-5b: `requestDelayNanos` holds `sendRequest` in-flight so
+    // the bilingual loading shimmer is snapshottable CU-free before the
+    // translation lands. Default 0 stays instant (asserted by the tests above).
+    @Test func sendRequest_withRequestDelay_holdsInFlightThenReturns() async throws {
+        // 80ms delay — long enough to assert a measurable floor without making
+        // the suite slow. Content is unchanged (delay only affects timing).
+        let provider = MockAIProvider(chunkDelayNanos: 0, requestDelayNanos: 80_000_000)
+        let start = DispatchTime.now()
+        let resp = try await provider.sendRequest(request(action: .translate, prompt: "床前明月光"))
+        let elapsedNanos = DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds
+        #expect(elapsedNanos >= 60_000_000)        // honored the delay (margin for scheduler)
+        #expect(resp.content.contains("[MOCK译]")) // still deterministic content
+    }
+
+    @Test func sendRequest_zeroRequestDelay_returnsPromptly() async throws {
+        let provider = MockAIProvider(chunkDelayNanos: 0, requestDelayNanos: 0)
+        let start = DispatchTime.now()
+        _ = try await provider.sendRequest(request())
+        let elapsedNanos = DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds
+        #expect(elapsedNanos < 50_000_000)         // no artificial hold
+    }
 }
 
 #endif

@@ -168,6 +168,12 @@ struct FoliateBilingualContainerView: View {
         .onReceive(
             NotificationCenter.default.publisher(for: .readerContentTapped)
         ) { _ in isChromeVisible.toggle() }
+        // Feature #77 — DebugBridge bilingual-driver observer (enable/disable/
+        // status CU-free for the Foliate AZW3/MOBI loading-shimmer verification).
+        // Attached at the short `body` level (not the near-budget spike chain).
+        #if DEBUG
+        .modifier(debugBilingualObserver)
+        #endif
     }
 
     /// The live AZW3/MOBI spike plus the bilingual enumerate / inject /
@@ -697,6 +703,48 @@ struct FoliateBilingualContainerView: View {
         vm.setEnabled(false)
         showBilingualSetupSheet = false
     }
+
+    #if DEBUG
+    // MARK: - Feature #77 DebugBridge harness (bilingual?action=…)
+
+    /// Enable bilingual CU-free on the Foliate (AZW3/MOBI) engine, BYPASSING the
+    /// setup sheet, then enumerate the current section (the prefetch that drives
+    /// the loading shimmer in `foliate-host.js`).
+    func handleDebugBilingualEnable(lang: String?, granularity: String?) {
+        ensureBilingualViewModel()
+        guard let vm = bilingualViewModel else { return }
+        if let lang { vm.setTargetLanguage(lang) }
+        if let granularity, let g = TranslationGranularity(rawValue: granularity) {
+            vm.setGranularity(g)
+        }
+        vm.dismissSetupSheet()
+        showBilingualSetupSheet = false
+        vm.setEnabled(true)
+        evalBilingualJS(
+            bilingualOrchestrator.enumerateJS(sectionIndex: currentSectionIndex)
+        )
+    }
+
+    func handleDebugBilingualDisable() {
+        guard let vm = bilingualViewModel else { return }
+        vm.setEnabled(false)
+        evalBilingualJS(bilingualOrchestrator.clearJS())
+    }
+
+    func handleDebugBilingualStatus(dest: String) {
+        DebugBridgeBilingualStatus.write(dest: dest, engine: "foliate", vm: bilingualViewModel)
+    }
+
+    /// The DebugBridge bilingual-driver observer, factored out of the body chain
+    /// to keep SwiftUI's per-node type-inference within budget.
+    var debugBilingualObserver: ReaderDebugBridgeBilingualObserver {
+        ReaderDebugBridgeBilingualObserver(
+            onEnable: { lang, gran in handleDebugBilingualEnable(lang: lang, granularity: gran) },
+            onDisable: { handleDebugBilingualDisable() },
+            onStatus: { dest in handleDebugBilingualStatus(dest: dest) }
+        )
+    }
+    #endif
 
     // MARK: - Helpers
 

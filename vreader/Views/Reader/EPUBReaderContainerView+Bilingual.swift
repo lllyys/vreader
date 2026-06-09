@@ -397,6 +397,40 @@ extension EPUBReaderContainerView {
         showBilingualSetupSheet = false
     }
 
+    #if DEBUG
+    // MARK: - Feature #77 DebugBridge harness (bilingual?action=…)
+
+    /// Enable bilingual mode CU-free, BYPASSING the setup sheet (same effect as
+    /// the sheet's `confirmBilingualSetup`, but driven by the `bilingual?action=
+    /// enable` command's optional `lang`/`granularity`). Triggers the prefetch.
+    func handleDebugBilingualEnable(lang: String?, granularity: String?) {
+        ensureBilingualViewModel()
+        guard let vm = bilingualViewModel else { return }
+        if let lang { vm.setTargetLanguage(lang) }
+        if let granularity, let g = TranslationGranularity(rawValue: granularity) {
+            vm.setGranularity(g)
+        }
+        vm.dismissSetupSheet()
+        showBilingualSetupSheet = false
+        vm.setEnabled(true)
+        Task { await vm.refreshAIConfigured() }
+        // Trigger the prefetch (mirrors `confirmBilingualSetup`).
+        if isBilingualContinuousMode {
+            enableBilingualContinuousAllSections()
+        } else {
+            pendingHighlightJS = bilingualOrchestrator.enumerateJS()
+        }
+    }
+
+    func handleDebugBilingualDisable() {
+        bilingualViewModel?.setEnabled(false)
+    }
+
+    func handleDebugBilingualStatus(dest: String) {
+        DebugBridgeBilingualStatus.write(dest: dest, engine: "epub-legacy", vm: bilingualViewModel)
+    }
+    #endif
+
     /// SwiftUI modifier bundling all bilingual reading event hooks.
     /// Wraps the chapter-spine lazy-init, the More-menu toggle, the
     /// inject/clear pipeline, and the first-enable setup sheet

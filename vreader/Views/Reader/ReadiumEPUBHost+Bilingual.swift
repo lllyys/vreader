@@ -167,6 +167,37 @@ extension ReadiumEPUBHost {
         showBilingualSetupSheet = false
     }
 
+    #if DEBUG
+    // MARK: - Feature #77 DebugBridge harness (bilingual?action=…)
+
+    /// Enable bilingual CU-free on the DEFAULT Readium engine, BYPASSING the
+    /// setup sheet, then enumerate the current chapter (the prefetch that drives
+    /// the loading shimmer).
+    func handleDebugBilingualEnable(lang: String?, granularity: String?) {
+        ensureBilingualViewModel()
+        guard let vm = bilingualViewModel else { return }
+        if let lang { vm.setTargetLanguage(lang) }
+        if let granularity, let g = TranslationGranularity(rawValue: granularity) {
+            vm.setGranularity(g)
+        }
+        vm.dismissSetupSheet()
+        showBilingualSetupSheet = false
+        vm.setEnabled(true)
+        runBilingualEnumerateForCurrentChapter()
+    }
+
+    func handleDebugBilingualDisable() {
+        guard let vm = bilingualViewModel else { return }
+        vm.setEnabled(false)
+        bilingualChapterTracker.reset()
+        Task { await bilingualCommander.clear() }
+    }
+
+    func handleDebugBilingualStatus(dest: String) {
+        DebugBridgeBilingualStatus.write(dest: dest, engine: "readium", vm: bilingualViewModel)
+    }
+    #endif
+
     // MARK: - Body surfaces
 
     /// The bilingual body modifiers, factored out of `ReadiumEPUBHost.body` for the
@@ -215,6 +246,21 @@ extension ReadiumEPUBHost {
                 }
             }
             .sheet(isPresented: $showBilingualSetupSheet) { bilingualSetupSheetView }
+            .modifier(debugBilingualObserver)
+    }
+
+    /// Feature #77 — DebugBridge bilingual-driver observer (DEBUG-only; a no-op
+    /// `EmptyModifier` in Release). Enables/disables/reads-out bilingual CU-free.
+    var debugBilingualObserver: some ViewModifier {
+        #if DEBUG
+        return ReaderDebugBridgeBilingualObserver(
+            onEnable: { lang, gran in handleDebugBilingualEnable(lang: lang, granularity: gran) },
+            onDisable: { handleDebugBilingualDisable() },
+            onStatus: { dest in handleDebugBilingualStatus(dest: dest) }
+        )
+        #else
+        return EmptyModifier()
+        #endif
     }
 
     // MARK: - Setup sheet

@@ -142,6 +142,14 @@ enum DebugCommand: Equatable {
     case eval(bridge: String, js: String)
     case tts(action: String)
     case search(query: String, index: Int?)
+    /// Feature #77 verification harness — `bilingual?action=<enable|disable|status>`
+    /// drives interlinear bilingual mode CU-free (the setup-sheet + provider
+    /// gates are not idb-reliable). `enable` carries optional `lang` /
+    /// `granularity` and bypasses the setup sheet; `status` writes a readout
+    /// (isEnabled / aiConfigured / inFlight) to `dest`. The handler posts
+    /// `.debugBridgeBilingualCommand`; the per-format `+Bilingual` host observers
+    /// enable + prefetch (or write the status).
+    case bilingual(action: BilingualAction)
     case highlight(startUTF16: Int, endUTF16: Int, color: String?)
     case provider(action: ProviderAction)
     case present(sheet: SheetKind, tab: String?, detent: SheetDetent?)
@@ -429,6 +437,20 @@ enum DebugCommand: Equatable {
         case remove(name: String)
         case clear
     }
+
+    /// Feature #77 verification harness — sub-actions for the `bilingual` command.
+    enum BilingualAction: Equatable {
+        /// Enable interlinear bilingual mode on the active reader, bypassing the
+        /// setup sheet. Optional `lang` (target-language key, e.g. "zh-Hans") +
+        /// `granularity` ("paragraph" | "sentence"); nil keeps the persisted /
+        /// default value. Enabling triggers the host's existing prefetch.
+        case enable(lang: String?, granularity: String?)
+        /// Disable bilingual mode on the active reader.
+        case disable
+        /// Write a readout (isEnabled / aiConfigured / target / granularity /
+        /// inFlight count) to `Caches/DebugBridge/<dest>`.
+        case status(dest: String)
+    }
 }
 
 /// A normalized highlight rect in PDF page coordinate space — each component
@@ -591,6 +613,40 @@ extension DebugCommand {
                 index = nil
             }
             return .search(query: query, index: index)
+
+        case "bilingual":
+            // Feature #77 verification harness — drive interlinear bilingual mode.
+            let action = try requireParam("action", in: params)
+            switch action {
+            case "enable":
+                // Validate `granularity` at the parser boundary (Codex Gate-4
+                // Medium): fail loud on a typo instead of silently falling back
+                // to the persisted/default via the host's optional rawValue parse.
+                let granularity = nonEmpty(params["granularity"])
+                if let granularity, TranslationGranularity(rawValue: granularity) == nil {
+                    throw DebugCommandError.invalidParam(
+                        "granularity",
+                        reason: "expected paragraph|sentence, got \(granularity)"
+                    )
+                }
+                return .bilingual(action: .enable(
+                    lang: nonEmpty(params["lang"]),
+                    granularity: granularity
+                ))
+            case "disable":
+                return .bilingual(action: .disable)
+            case "status":
+                let dest = nonEmpty(params["dest"]) ?? "bilingual-status.json"
+                // Path-safety (Codex Gate-4 Low): same basename contract as
+                // snapshot / txt-content — the value is written via
+                // `dir.appendingPathComponent(dest)` downstream.
+                try validateBasename(dest, paramName: "dest")
+                return .bilingual(action: .status(dest: dest))
+            default:
+                throw DebugCommandError.invalidParam(
+                    "action", reason: "expected enable|disable|status, got \(action)"
+                )
+            }
 
         case "highlight":
             // Bug #237: verification harness highlight-creator. Builds a

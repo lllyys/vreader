@@ -410,6 +410,29 @@ final class RealDebugBridgeContext: DebugBridgeContext {
         )
     }
 
+    /// Feature #77 — drive interlinear bilingual mode CU-free. Posts
+    /// `.debugBridgeBilingualCommand`; the per-format `+Bilingual` host
+    /// observers enable/disable (bypassing the setup sheet) or write a status
+    /// readout. No-op when no reader is loaded (same posture as `search`).
+    func bilingual(action: DebugCommand.BilingualAction) async throws {
+        var userInfo: [AnyHashable: Any] = [:]
+        switch action {
+        case .enable(let lang, let granularity):
+            userInfo["action"] = "enable"
+            if let lang { userInfo["lang"] = lang }
+            if let granularity { userInfo["granularity"] = granularity }
+        case .disable:
+            userInfo["action"] = "disable"
+        case .status(let dest):
+            userInfo["action"] = "status"
+            userInfo["dest"] = dest
+        }
+        NotificationCenter.default.post(
+            name: .debugBridgeBilingualCommand, object: nil, userInfo: userInfo
+        )
+        log.info("bilingual: posted notification action=\(userInfo["action"] as? String ?? "?", privacy: .public)")
+    }
+
     /// Bug #237 — create a highlight over a UTF-16 range in the active reader,
     /// bypassing the long-press + `SelectionPopoverView` gesture path that
     /// XCUITest cannot synthesize on iOS 26.

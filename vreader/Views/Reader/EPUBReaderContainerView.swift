@@ -472,6 +472,15 @@ struct EPUBReaderContainerView: View {
         // dedicated `ViewModifier` to keep this body under the
         // compiler's type-inference budget.
         .modifier(bilingualSurfacesModifier)
+        #if DEBUG
+        // Feature #77 — DebugBridge bilingual-driver observer (enable/disable/
+        // status CU-free, bypassing the setup sheet + the idb-unreliable menu).
+        .modifier(ReaderDebugBridgeBilingualObserver(
+            onEnable: { lang, gran in handleDebugBilingualEnable(lang: lang, granularity: gran) },
+            onDisable: { handleDebugBilingualDisable() },
+            onStatus: { dest in handleDebugBilingualStatus(dest: dest) }
+        ))
+        #endif
         // Bug #220 / GH #845 — DebugBridge highlight-driver observer.
         // DEBUG-only; attached inside the EPUB host (not the generic
         // `ReaderContainerView`) so the orchestration can JS-walk the

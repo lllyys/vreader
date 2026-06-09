@@ -35,6 +35,7 @@ enum AITestSetup {
     static func apply(
         enableAI: Bool,
         mockAI: Bool = false,
+        mockAITranslateDelayMS: Int = 0,
         featureFlags: FeatureFlags,
         consentManager: AIConsentManager
     ) {
@@ -42,11 +43,25 @@ enum AITestSetup {
         // so AI flows are CU-free verifiable without entering a real API key.
         // It implies availability (you can't drive AI with the gates closed) and
         // grants the same flag + consent `--enable-ai` does.
+        // Feature #77 Gate-5b: `--mock-ai-translate-delay-ms=<N>` widens the
+        // `sendRequest` in-flight window so the bilingual loading shimmer can be
+        // snapshotted CU-free before the translation lands.
         AITestOverride.forceAvailable = enableAI || mockAI
-        AITestOverride.mockProvider = mockAI ? MockAIProvider() : nil
+        AITestOverride.mockProvider = mockAI
+            ? MockAIProvider(requestDelayNanos: nanosForDelayMS(mockAITranslateDelayMS))
+            : nil
         guard enableAI || mockAI else { return }
         featureFlags.setOverride(true, for: .aiAssistant)
         consentManager.grantConsent()
+    }
+
+    /// Convert a millisecond delay to nanoseconds without trapping on overflow
+    /// (Codex Gate-4 Medium). Negative → 0; a value large enough to overflow the
+    /// `* 1_000_000` is capped at a 60s ceiling — a verification harness never
+    /// needs a longer in-flight hold, and a typo'd huge value won't crash DEBUG.
+    static func nanosForDelayMS(_ ms: Int) -> UInt64 {
+        let clampedMS = UInt64(max(0, min(ms, 60_000)))
+        return clampedMS * 1_000_000
     }
 }
 

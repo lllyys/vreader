@@ -34,14 +34,27 @@ final class MockAIProvider: AIProvider {
     /// is exercised the way a real over-the-wire stream would be.
     private let chunkDelayNanos: UInt64
 
-    init(chunkDelayNanos: UInt64 = 20_000_000) { // 20ms/chunk
+    /// Whole-request delay applied to the non-streaming `sendRequest` path
+    /// (bilingual translate uses `sendRequest`, not `streamRequest`). Default 0
+    /// keeps the instant deterministic behavior existing AI verification relies
+    /// on. Feature #77 Gate-5b sets this (via `--mock-ai-translate-delay-ms`) so
+    /// the bilingual translate stays IN-FLIGHT long enough for a CU-free snapshot
+    /// to catch the loading shimmer before the translation lands and clears it.
+    private let requestDelayNanos: UInt64
+
+    init(chunkDelayNanos: UInt64 = 20_000_000, // 20ms/chunk
+         requestDelayNanos: UInt64 = 0) {
         self.chunkDelayNanos = chunkDelayNanos
+        self.requestDelayNanos = requestDelayNanos
     }
 
     var providerName: String { "MockAIProvider" }
 
     func sendRequest(_ request: AIRequest) async throws -> AIResponse {
-        AIResponse(
+        if requestDelayNanos > 0 {
+            try? await Task.sleep(nanoseconds: requestDelayNanos)
+        }
+        return AIResponse(
             content: Self.reply(for: request),
             actionType: request.actionType,
             promptVersion: request.promptVersion,

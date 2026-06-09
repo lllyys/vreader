@@ -67,5 +67,16 @@ struct AITestSetupTests {
         #expect(flags.aiAssistant == false, "no --enable-ai → the real aiAssistant flag stays off")
         #expect(consent.hasConsent == false, "no --enable-ai → consent is not auto-granted")
     }
+
+    // Feature #77 Gate-5b (Codex Gate-4 Medium): the ms→ns conversion must not
+    // trap on overflow for a typo'd huge value, and must floor negatives at 0.
+    @Test("nanosForDelayMS converts, floors negatives, and caps to 60s without overflow")
+    func nanosForDelayMS_clampsAndConverts() {
+        #expect(AITestSetup.nanosForDelayMS(0) == 0)
+        #expect(AITestSetup.nanosForDelayMS(2000) == 2_000_000_000)   // 2s
+        #expect(AITestSetup.nanosForDelayMS(-5) == 0)                 // negative floored
+        // A value that would overflow `* 1_000_000` is capped at the 60s ceiling.
+        #expect(AITestSetup.nanosForDelayMS(Int.max) == 60_000 * 1_000_000)
+    }
 }
 #endif

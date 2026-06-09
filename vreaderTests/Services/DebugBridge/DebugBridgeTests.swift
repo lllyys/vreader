@@ -441,6 +441,9 @@ final class SlowDebugBridgeContext: DebugBridgeContext {
     func search(query: String, index: Int?) async throws {
         await record("search:\(query):\(index.map(String.init) ?? "nil")")
     }
+    func bilingual(action: DebugCommand.BilingualAction) async throws {
+        await record("bilingual:\(action)")
+    }
     func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws {
         await record("highlight:\(startUTF16):\(endUTF16):\(color ?? "nil")")
     }
@@ -547,6 +550,8 @@ final class RecordingDebugBridgeContext: DebugBridgeContext {
     func search(query: String, index: Int?) async throws {
         calls.append(.search(query: query, index: index))
     }
+    // Feature #77: not exercised by the recording tests — no-op stub.
+    func bilingual(action: DebugCommand.BilingualAction) async throws {}
     func highlight(startUTF16: Int, endUTF16: Int, color: String?) async throws {
         calls.append(.highlight(startUTF16: startUTF16, endUTF16: endUTF16, color: color))
     }

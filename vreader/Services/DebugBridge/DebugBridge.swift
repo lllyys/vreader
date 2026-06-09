@@ -48,6 +48,10 @@ protocol DebugBridgeContext {
     /// notification observed by the active reader. If no reader is
     /// loaded, the action is a no-op (matches `tts` / `theme`).
     func search(query: String, index: Int?) async throws
+    /// Feature #77 — drive interlinear bilingual mode (enable/disable/status)
+    /// on the active reader via `.debugBridgeBilingualCommand`. No-op when no
+    /// reader is loaded (matches `search` / `tts`).
+    func bilingual(action: DebugCommand.BilingualAction) async throws
     /// Bug #237 — create a highlight over a UTF-16 range in the active
     /// reader, bypassing the long-press + SelectionPopoverView gesture
     /// path that XCUITest cannot synthesize on iOS 26. The handler posts
@@ -291,6 +295,8 @@ final class DebugBridge {
             try await context.tts(action: action)
         case .search(let query, let index):
             try await context.search(query: query, index: index)
+        case .bilingual(let action):
+            try await context.bilingual(action: action)
         case .highlight(let start, let end, let color):
             try await context.highlight(startUTF16: start, endUTF16: end, color: color)
         case .provider(let action):

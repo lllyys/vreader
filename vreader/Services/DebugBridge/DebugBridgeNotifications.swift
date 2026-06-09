@@ -73,6 +73,17 @@ extension Notification.Name {
     ///   absent, observers run the query only.
     static let debugBridgeSearchCommand = Notification.Name("vreader.debugBridge.searchCommand")
 
+    /// Feature #77 — posted by `RealDebugBridgeContext.bilingual` to drive
+    /// interlinear bilingual mode CU-free. Observed by the per-format
+    /// `+Bilingual` host extensions, which enable/disable (bypassing the setup
+    /// sheet) or write a status readout.
+    /// userInfo:
+    /// - `"action"`: String — "enable" | "disable" | "status".
+    /// - `"lang"`: String? — target-language key for "enable" (nil keeps default).
+    /// - `"granularity"`: String? — "paragraph" | "sentence" for "enable".
+    /// - `"dest"`: String? — readout filename for "status".
+    static let debugBridgeBilingualCommand = Notification.Name("vreader.debugBridge.bilingualCommand")
+
     /// Posted by RealDebugBridgeContext.highlight to create a highlight in
     /// the active reader, bypassing the long-press + SelectionPopoverView
     /// gesture path (Bug #237 verification harness — XCUITest cannot

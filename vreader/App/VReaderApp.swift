@@ -191,6 +191,7 @@ struct VReaderApp: App {
             AITestSetup.apply(
                 enableAI: config.enableAI,
                 mockAI: config.mockAI,
+                mockAITranslateDelayMS: config.mockAITranslateDelayMS,
                 featureFlags: .shared,
                 consentManager: AIConsentManager()
             )
@@ -573,6 +574,10 @@ struct TestLaunchConfig: Sendable {
     /// so AI flows (chat #86, bilingual #85, multi-turn hang repro #323) are
     /// CU-free verifiable without entering a real API key.
     let mockAI: Bool
+    /// `--mock-ai-translate-delay-ms=<N>` — feature #77 Gate-5b. Hold the mock
+    /// provider's `sendRequest` in-flight for N ms so the bilingual loading
+    /// shimmer is snapshottable CU-free before the translation lands. 0 = instant.
+    let mockAITranslateDelayMS: Int
     let enableSync: Bool
     let reduceMotion: Bool
     /// `--tts-test-mode` — feature #45 WI-4e. Swap `AVSpeechSynthesizer`
@@ -616,6 +621,14 @@ struct TestLaunchConfig: Sendable {
             dynamicType = nil
         }
 
+        // Parse --mock-ai-translate-delay-ms=<N>. Last occurrence wins; invalid
+        // → 0. Feature #77 Gate-5b shimmer-window widening (see field doc).
+        var mockAITranslateDelayMS = 0
+        for arg in arguments where arg.hasPrefix("--mock-ai-translate-delay-ms=") {
+            let value = String(arg.dropFirst("--mock-ai-translate-delay-ms=".count))
+            mockAITranslateDelayMS = Int(value) ?? 0
+        }
+
         // Parse --reader-default-layout=<value>. Last occurrence wins.
         // Invalid raw values fall through to nil (no override).
         var defaultEPUBLayout: EPUBLayoutPreference? = nil
@@ -650,6 +663,7 @@ struct TestLaunchConfig: Sendable {
             dynamicTypeOverride: dynamicType,
             enableAI: args.contains("--enable-ai"),
             mockAI: args.contains("--mock-ai"),
+            mockAITranslateDelayMS: mockAITranslateDelayMS,
             enableSync: args.contains("--enable-sync"),
             reduceMotion: args.contains("--reduce-motion"),
             ttsTestMode: args.contains("--tts-test-mode"),
@@ -681,6 +695,7 @@ struct TestLaunchConfig: Sendable {
         dynamicTypeOverride: nil,
         enableAI: false,
         mockAI: false,
+        mockAITranslateDelayMS: 0,
         enableSync: false,
         reduceMotion: false,
         ttsTestMode: false,
