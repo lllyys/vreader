@@ -200,12 +200,37 @@ extension AIChatViewModel {
 
     /// Consume a stream into the assistant message (by stable id), stopping early
     /// if the op is cancelled.
+    ///
+    /// Bug #323: streamed deltas are COALESCED (`StreamCoalescer`) so the
+    /// `@Observable messages` array is re-published at a capped rate (~30/s or per
+    /// ~96 chars) instead of on every token. Per-token mutation re-rendered the
+    /// entire transcript on every token and saturated the main thread on long
+    /// replies → whole-app freeze. The first token still shows promptly, the final
+    /// remainder is drained on completion, and nothing is lost.
     private func consumeStream(
         _ stream: AsyncThrowingStream<AIStreamChunk, Error>, into assistantId: UUID
     ) async throws {
-        for try await chunk in stream {
-            if Task.isCancelled { break }
-            appendToAssistant(id: assistantId, chunk.text)
+        var coalescer = StreamCoalescer()
+        // Bug #323 (Codex audit High): drain on EVERY exit path — normal completion,
+        // a `break` on Stop, OR a thrown CancellationError / provider error. A throw
+        // would otherwise skip the post-loop drain and drop the last buffered batch,
+        // regressing the "keep the partial reply" contract (pre-fix, each token was
+        // appended immediately, so a throw kept everything received so far).
+        do {
+            for try await chunk in stream {
+                if Task.isCancelled { break }
+                if let flush = coalescer.accept(chunk.text, now: DispatchTime.now().uptimeNanoseconds) {
+                    appendToAssistant(id: assistantId, flush)
+                }
+            }
+        } catch {
+            if let remainder = coalescer.drain() {
+                appendToAssistant(id: assistantId, remainder)
+            }
+            throw error
+        }
+        if let remainder = coalescer.drain() {
+            appendToAssistant(id: assistantId, remainder)
         }
     }
 
