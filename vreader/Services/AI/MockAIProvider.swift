@@ -87,13 +87,49 @@ final class MockAIProvider: AIProvider {
         let prompt = request.userPrompt ?? ""
         switch request.actionType {
         case .translate:
-            // Bilingual (#85) asserts an interlinear translation rendered.
+            // Feature #56 chapter-translation (`TranslationChunkContract`) asks
+            // for a JSON array of EXACTLY N translated strings. A multi-segment
+            // chunk whose mock reply isn't that array forces the slow + fragile
+            // per-segment fallback (N sequential requests). Returning the
+            // contract-shaped JSON array lets the FIRST decode succeed, so the
+            // bilingual translate→inject lands promptly on multi-paragraph units
+            // (e.g. the Foliate engine — feature #77 Gate-5b / GH #1585).
+            if let arrayReply = chunkContractArrayReply(prompt: prompt) {
+                return arrayReply
+            }
+            // Bilingual (#85) single-string interlinear translation.
             return "[MOCK译] \(prompt.isEmpty ? request.contextText.prefix(40) : prompt.prefix(40))"
         case .summarize:
             return "[MOCK] Summary of \(request.contextText.count) chars of context."
         default:
             return "[MOCK] Re: \(prompt). Drew on \(request.contextText.count) chars of context."
         }
+    }
+
+    /// If `prompt` is a `TranslationChunkContract.userPrompt` (N numbered source
+    /// segments + "JSON array of exactly N string(s)"), return a JSON array of N
+    /// `[MOCK译] …` strings in source order so the strict decode passes. Returns
+    /// nil for any non-chunk translate prompt (the single-string path handles it).
+    static func chunkContractArrayReply(prompt: String) -> String? {
+        guard prompt.contains("JSON array of exactly"),
+              let range = prompt.range(of: "Source segments:") else { return nil }
+        let body = prompt[range.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Segments are joined by a blank line; each starts with `[<index>] `.
+        let segments = body.components(separatedBy: "\n\n")
+            .map { $0.replacingOccurrences(of: #"^\s*\[\d+\]\s*"#, with: "",
+                                           options: .regularExpression) }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !segments.isEmpty else { return nil }
+        let translated = segments.map { seg -> String in
+            let prefix = seg.trimmingCharacters(in: .whitespacesAndNewlines).prefix(30)
+            return "[MOCK译] \(prefix)"
+        }
+        // Encode as a strict JSON array of strings (sorted-keys irrelevant for an
+        // array; no fence — the decoder tolerates one but doesn't need it).
+        guard let data = try? JSONSerialization.data(withJSONObject: translated),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        return json
     }
 }
 
