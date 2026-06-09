@@ -217,13 +217,29 @@ enum EPUBChapterBodyRewriter {
         out = rewriteAttribute(out, attr: "aria-labelledby", transform: nsList)
         out = rewriteAttribute(out, attr: "aria-describedby", transform: nsList)
 
-        // href / xlink:href: only intra-doc #fragments are namespaced; every
-        // other href (cross-document, external) is left untouched.
+        // href: only intra-doc #fragments are namespaced; every other href
+        // (cross-document <a> navigation, external) is left untouched — absolutizing
+        // an <a href="chapter2.xhtml"> would break spine navigation.
         let nsFragment: (String) -> String = { value in
             value.hasPrefix("#") ? "#" + ns + value.dropFirst() : value
         }
         out = rewriteAttribute(out, attr: "href", transform: nsFragment)
-        out = rewriteAttribute(out, attr: "xlink:href", transform: nsFragment)
+
+        // xlink:href (Bug #332): an intra-doc #fragment is namespaced; an absolute /
+        // external value is left; a RELATIVE value is a resource ref (SVG
+        // <image>/<use>) and MUST be absolutized against the chapter dir — exactly
+        // like `src`. EPUB cover/title pages are commonly
+        // `<svg><image xlink:href="cover.jpg"/>`; in the #71 continuous-scroll stitch
+        // N chapters share ONE base URL, so a relative xlink:href that wasn't
+        // absolutized resolved against the wrong dir → 404 → broken-image glyph
+        // (paged loads each chapter as its own document, so it resolved there).
+        let nsFragmentOrResource: (String) -> String = { value in
+            if value.hasPrefix("#") { return "#" + ns + value.dropFirst() }
+            if EPUBChapterResourceURL.isAbsoluteOrFragment(value) { return value }
+            return resourceBaseAbsolutePrefix
+                + EPUBChapterResourceURL.join(dir: chapterDir, relative: value)
+        }
+        out = rewriteAttribute(out, attr: "xlink:href", transform: nsFragmentOrResource)
 
         // src: absolutize relative resource URLs against the chapter dir.
         out = rewriteAttribute(out, attr: "src") { value in
@@ -232,7 +248,46 @@ enum EPUBChapterBodyRewriter {
                 : resourceBaseAbsolutePrefix + EPUBChapterResourceURL.join(dir: chapterDir, relative: value)
         }
 
+        // SVG2 `href` (Bug #332 Codex audit): WebKit honors `href` (no xlink:) on
+        // SVG resource elements — `<image href="cover.jpg">`, `<use href="…">`. The
+        // global `href` pass above is fragment-only (so `<a href>` navigation is
+        // never absolutized); this element-scoped pass absolutizes a RELATIVE `href`
+        // ONLY inside `<image>` / `<use>` tags, leaving `<a>` untouched. A `#fragment`
+        // href was already namespaced by the global pass.
+        out = rewriteSVGResourceHref(
+            out, chapterDir: chapterDir, resourceBaseAbsolutePrefix: resourceBaseAbsolutePrefix)
+
         return out
+    }
+
+    /// Absolutizes a relative `href` resource ref that appears inside an SVG
+    /// `<image>` or `<use>` opening tag (Bug #332). `<a href>` is NOT matched, so
+    /// cross-document navigation is preserved. Absolute / external / `#fragment`
+    /// values are left as-is (the latter were already namespaced upstream).
+    private static func rewriteSVGResourceHref(
+        _ html: String,
+        chapterDir: String,
+        resourceBaseAbsolutePrefix: String
+    ) -> String {
+        // group1 = `<image …href=` (no `>` before href; `(?<=\s)` keeps it off the
+        // tag name and off `xlink:href`); group2 = quote; group3 = the value.
+        let pattern = "(<(?:image|use)\\b[^>]*?(?<=\\s)href\\s*=\\s*)([\"'])([^\"']*)\\2"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return html }
+        let nsString = html as NSString
+        var result = html
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsString.length))
+        for match in matches.reversed() {
+            let prefix = nsString.substring(with: match.range(at: 1))
+            let quote = nsString.substring(with: match.range(at: 2))
+            let value = nsString.substring(with: match.range(at: 3))
+            guard !EPUBChapterResourceURL.isAbsoluteOrFragment(value) else { continue }
+            let absolute = resourceBaseAbsolutePrefix
+                + EPUBChapterResourceURL.join(dir: chapterDir, relative: value)
+            let replacement = "\(prefix)\(quote)\(absolute)\(quote)"
+            let r = Range(match.range, in: result)!
+            result.replaceSubrange(r, with: replacement)
+        }
+        return result
     }
 
     /// Rewrites every `attr="value"` / `attr='value'` occurrence (attribute

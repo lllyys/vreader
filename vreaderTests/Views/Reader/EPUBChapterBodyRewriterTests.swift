@@ -142,6 +142,66 @@ struct EPUBChapterBodyRewriterTests {
         #expect(body.bodyHTML.contains(##"xlink:href="#s3-sym2""##))
     }
 
+    // Bug #332: an SVG cover/title-page image's RELATIVE xlink:href must be
+    // absolutized against the chapter dir (like `src`) so it resolves on the #71
+    // continuous-scroll stitch's single shared base URL, instead of 404'ing into a
+    // broken-image glyph.
+    @Test("relative SVG xlink:href image is absolutized against the chapter dir")
+    func svgImageXlinkHrefAbsolutized() {
+        let body = rewrite(#"<html><body><svg><image xlink:href="../img/cover.jpg"/></svg></body></html>"#)
+        #expect(body.bodyHTML.contains(#"xlink:href="file:///root/OEBPS/img/cover.jpg""#))
+    }
+
+    @Test("same-dir SVG xlink:href image is absolutized without a leading ./")
+    func svgImageXlinkHrefSameDir() {
+        let body = rewrite(#"<html><body><svg><image xlink:href="cover.jpg"/></svg></body></html>"#)
+        #expect(body.bodyHTML.contains(#"xlink:href="file:///root/OEBPS/text/cover.jpg""#))
+    }
+
+    @Test("absolute-scheme SVG xlink:href is left untouched")
+    func svgImageXlinkHrefAbsoluteUntouched() {
+        let body = rewrite(#"<html><body><svg><image xlink:href="https://x.com/c.jpg"/></svg></body></html>"#)
+        #expect(body.bodyHTML.contains(#"xlink:href="https://x.com/c.jpg""#))
+    }
+
+    // Regression guard: a cross-document <a href> stays a navigation ref — it must
+    // NOT be absolutized into a resource URL (that would break spine navigation).
+    @Test("cross-document <a href> is still NOT absolutized")
+    func anchorHrefNotAbsolutized() {
+        let body = rewrite(#"<html><body><a href="chapter2.xhtml">next</a></body></html>"#)
+        #expect(body.bodyHTML.contains(#"href="chapter2.xhtml""#))
+    }
+
+    // Bug #332 (Codex audit): SVG2 `<image href>` (no xlink:) is a resource ref too
+    // (WebKit supports it). A relative href INSIDE <image>/<use> is absolutized;
+    // <a href> stays untouched.
+    @Test("relative SVG2 <image href> is absolutized")
+    func svg2ImageHrefAbsolutized() {
+        let body = rewrite(#"<html><body><svg><image href="../img/cover.jpg"/></svg></body></html>"#)
+        #expect(body.bodyHTML.contains(#"href="file:///root/OEBPS/img/cover.jpg""#))
+    }
+
+    @Test("relative SVG2 <use href> is absolutized")
+    func svg2UseHrefAbsolutized() {
+        let body = rewrite(#"<html><body><svg><use href="defs.svg"/></svg></body></html>"#)
+        #expect(body.bodyHTML.contains(#"href="file:///root/OEBPS/text/defs.svg""#))
+    }
+
+    @Test("absolute SVG2 <image href> is left untouched")
+    func svg2ImageHrefAbsoluteUntouched() {
+        let body = rewrite(#"<html><body><svg><image href="https://x.com/c.jpg"/></svg></body></html>"#)
+        #expect(body.bodyHTML.contains(#"href="https://x.com/c.jpg""#))
+    }
+
+    // The SVG2-href pass must not touch an <a href> that happens to sit near an
+    // <image> — only hrefs inside <image>/<use> tags are absolutized.
+    @Test("<a href> next to an <image href> stays a navigation ref")
+    func anchorHrefNearImageUntouched() {
+        let body = rewrite(#"<html><body><a href="next.xhtml">x</a><svg><image href="c.jpg"/></svg></body></html>"#)
+        #expect(body.bodyHTML.contains(#"href="next.xhtml""#))
+        #expect(body.bodyHTML.contains(#"href="file:///root/OEBPS/text/c.jpg""#))
+    }
+
     @Test("ARIA labelledby + describedby id references are namespaced (space-separated list)")
     func ariaReferencesNamespaced() {
         let body = rewrite(#"""
