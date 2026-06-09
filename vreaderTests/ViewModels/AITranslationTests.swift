@@ -728,4 +728,14 @@ struct AITranslationViewModelTests {
         #expect(vm.translatedText == nil, "a stopped translate lands no result")
         #expect(vm.errorMessage == nil, "a user stop is not an error")
     }
+
+    // Bug #314 (re-fix): the parked-selection decision the reader view applies on
+    // BOTH panel-open AND already-open (where onChange doesn't fire).
+    @Test func isExplicitSelection_decision() {
+        #expect(AITranslationViewModel.isExplicitSelection(parked: "permitted"))
+        #expect(AITranslationViewModel.isExplicitSelection(parked: "床前明月光"))
+        #expect(!AITranslationViewModel.isExplicitSelection(parked: nil))
+        #expect(!AITranslationViewModel.isExplicitSelection(parked: ""))
+        #expect(!AITranslationViewModel.isExplicitSelection(parked: "   \n\t "))
+    }
 }

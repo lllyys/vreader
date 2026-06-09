@@ -423,12 +423,19 @@ struct ReaderContainerView: View {
             // defense-in-depth layer at the sheet-presentation seam.
             guard resolvedAICoordinator.isAIAvailable else { return }
             ensureAIReady()
-            // Bug #314: park the selection; `onChange(of: showAIPanel)` applies it
-            // to the translation VM (trim-guarded) and clears the flag on cold
-            // opens — so a later cold open can't inherit this stale selection.
+            // Bug #314: park the selection for the apply path.
             pendingTranslateSelection = info.selectedText
             aiInitialTab = .translate // bug #95
-            showAIPanel = true
+            // Bug #314 (re-fix): if the panel is ALREADY open, `onChange(of:
+            // showAIPanel)` will NOT fire (no state change), so apply the selection
+            // NOW — otherwise a selection-translate-while-open dropped to the cold
+            // context path (front-matter). For a closed panel, opening it triggers
+            // onChange, which calls the same `applyPendingTranslateSelection()`.
+            if showAIPanel {
+                applyPendingTranslateSelection()
+            } else {
+                showAIPanel = true
+            }
         }
         // Feature #78: "Ask AI" / "Read" on a selection. Extracted to a
         // ViewModifier so the body stays under SwiftUI's type-inference budget
@@ -477,17 +484,9 @@ struct ReaderContainerView: View {
                 // selection, so `hasExplicitSelection` is cleared and the Translate
                 // tab falls back to the context window; a selection-translate parked
                 // one, so it's translated verbatim. Whitespace-only → cleared.
-                if let trans = resolvedAICoordinator.translationViewModel {
-                    let parked = pendingTranslateSelection
-                    if let parked,
-                       !parked.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        trans.originalText = parked
-                        trans.hasExplicitSelection = true
-                    } else {
-                        trans.hasExplicitSelection = false
-                    }
-                }
-                pendingTranslateSelection = nil
+                // (Shared with the already-open path in the `.readerTranslateRequested`
+                // handler — see `applyPendingTranslateSelection()`.)
+                applyPendingTranslateSelection()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerBilingualDidChange)) { notification in

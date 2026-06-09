@@ -165,6 +165,26 @@ extension ReaderContainerView {
         }
     }
 
+    /// Bug #314 (re-fix): apply the PARKED translate-selection to the translation
+    /// VM and consume it. A non-empty parked selection sets `hasExplicitSelection`
+    /// (translate the selection VERBATIM); a nil/whitespace one clears the flag so
+    /// a cold open falls back to the `.section` context window. The single apply
+    /// path is called from BOTH `onChange(of: showAIPanel)` (panel just opened) AND
+    /// the `.readerTranslateRequested` handler when the panel is ALREADY open —
+    /// onChange does NOT fire on an already-open panel, so relying on it alone
+    /// dropped the selection (→ cold front-matter), the reopened symptom.
+    func applyPendingTranslateSelection() {
+        guard let trans = resolvedAICoordinator.translationViewModel else { return }
+        if AITranslationViewModel.isExplicitSelection(parked: pendingTranslateSelection),
+           let parked = pendingTranslateSelection {
+            trans.originalText = parked
+            trans.hasExplicitSelection = true
+        } else {
+            trans.hasExplicitSelection = false
+        }
+        pendingTranslateSelection = nil
+    }
+
     /// Triggers full search setup (indexing) when search sheet opens.
     /// prepareService() may have already created the service; setup() handles that.
     func ensureSearchReady() {

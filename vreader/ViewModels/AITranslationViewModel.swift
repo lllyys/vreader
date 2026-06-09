@@ -194,6 +194,18 @@ final class AITranslationViewModel {
         isLoading = false
     }
 
+    /// Bug #314: decides whether a PARKED translate-selection is an explicit
+    /// selection (translate verbatim) vs a cold open (fall back to the context
+    /// window). A nil or whitespace-only parked value is NOT an explicit selection.
+    /// Pure — the single source of the apply decision used by the reader view's
+    /// `applyPendingTranslateSelection()`.
+    nonisolated static func isExplicitSelection(parked: String?) -> Bool {
+        guard let parked,
+              !parked.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+        return true
+    }
+
     /// Resets all state to initial values and cancels any in-flight
     /// translate.
     func reset() {
