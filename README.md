@@ -29,6 +29,19 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
   </tr>
 </table>
 
+## Highlights
+
+What sets VReader apart from a conventional e-reader:
+
+1. **In-reader AI assistant, bring-your-own-LLM** — chat, summarize, and translate against *your* OpenAI-compatible API key. Nothing is locked to a single vendor or hidden behind a subscription.
+2. **Agentic AI chat with tool-calling** *(opt-in)* — when enabled, the assistant can search the current book, reach into your other books, and pull content on demand to answer, instead of replying from a fixed context window.
+3. **Bilingual interlinear reading** — every paragraph rendered source-over-target across all formats, with a persistent on-disk translation cache so re-opens are instant.
+4. **Whole-book AI translation** — pre-translate an entire book in the background, with per-chapter re-translation and per-chapter provider/style override.
+5. **Multiple AI providers, your choice per task** — configure any number of provider profiles (Anthropic, OpenAI-compatible, or local), each with its own model, base URL, and keychain-held key plus a Test Connection check; point chat and translation at different backends.
+6. **Per-book AI conversation sessions, synced over WebDAV** — multiple named, persisted chat threads per book that you can switch, rename, and delete, with the full AI history backed up and restored across devices.
+7. **Transparent AI with source disclosure** — every chat reply carries a "Drew on" row naming exactly what it consulted (chapter scope, your highlights, bookmarks), so answers are auditable rather than a black box.
+8. **WebDAV materializing restore** — back up books, annotations, reading positions, reading history, and AI history to any WebDAV server and restore on a fresh device. 
+
 ## Features
 
 ### Reading
@@ -67,6 +80,9 @@ VReader's v2 visual identity — a reading-focused design system with a Source S
 - **Chat** — Multi-turn conversation with book context, with **switchable conversation sessions per book**: a slim session bar under the Chat tab (active conversation title + "New") opens a Conversations sheet to browse, switch, rename, and delete past threads — chat history is persisted (SwiftData) instead of a single ephemeral thread
 - **Translation** — Bilingual interlinear (9 languages) with persistent disk cache, "Translate entire book" background job, and per-chapter re-translation with provider/style override. Set up the translation provider inline from the bilingual sheet's "Set up" / "Change…" button — a scoped in-reader AI Providers list, no trip to Settings
 - **General chat** — AI chat without book context
+- **Multiple providers** — configure any number of AI provider profiles (Anthropic, OpenAI-compatible, or local), each with its own model, base URL, and keychain-stored key; a Test Connection check validates a profile before you rely on it, and chat / summarize / translate can each target a different provider
+- **Agentic tool-calling** *(opt-in; off by default)* — when enabled and the active provider supports tool use, chat routes through an agentic driver that can search the current book, search and pull content from your other books, and gather context on demand to answer (feature #91)
+- **Source disclosure** — each chat reply carries a "Drew on" provenance row naming exactly what context it consulted (chapter scope, highlights, bookmarks), so the assistant's answers are auditable instead of opaque (feature #86)
 - **Stop control** — interrupt an in-flight AI request on any tab: the Chat composer's send disc, the Translate language pill, and the Summarize indicator each morph into a Stop control while a request is in flight (tapping aborts; a partial chat reply is kept)
 
 ### Library
