@@ -270,6 +270,7 @@
 		2A7576C76889A35A4EFD3147 /* AgenticToolRegistryBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6B4291B435E4465DA4A10A /* AgenticToolRegistryBuilder.swift */; };
 		2A9AD149CEFDF663E4C7CB5D /* ReaderBridgeSideTapWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95424A5FBB4CD4804BFDB61D /* ReaderBridgeSideTapWiringTests.swift */; };
 		2AB9286D902B8B6A8BB1DD16 /* FoliateBilingualJS.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC7CBC6DECE0826C5C95D76D /* FoliateBilingualJS.swift */; };
+		2AC6ADAFE5B1BE487382119C /* StreamCoalescerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D337EB4EECF9BADC58B3E5EC /* StreamCoalescerTests.swift */; };
 		2ACDD49C29110C6459556A71 /* SheetSectionContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529E7234A3FC73811D573A6C /* SheetSectionContract.swift */; };
 		2AD43547691478569AA638EB /* AIConfigurationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8038AAB18412F30C09CBDD9 /* AIConfigurationStore.swift */; };
 		2ADFD1412F7B843F92463C57 /* SettingsSectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EEC4C32DD9D914F5F5B623 /* SettingsSectionHeader.swift */; };
@@ -713,6 +714,7 @@
 		6BEC4693E4FE9F9EFC9FDE41 /* DebugBridgeNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA44E51EB0E783E5A874DA11 /* DebugBridgeNotifications.swift */; };
 		6C41D6561B43B7D3F6C87B80 /* WebDAVProfileListViewModel+Editor.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFF7C2C5D545B6802C698F2D /* WebDAVProfileListViewModel+Editor.swift */; };
 		6C4BDAADD228F84C65CE3CE6 /* ModeSwitchPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25642951BDB16B5C59BF39CF /* ModeSwitchPersistenceTests.swift */; };
+		6C55EC64476F834C86AC54AD /* StreamCoalescer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AC3D8ED736D98CB6DD00382 /* StreamCoalescer.swift */; };
 		6C56C40C260D289E023BCEE9 /* AnnotationPersisting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2556DC1CBB43434072B19479 /* AnnotationPersisting.swift */; };
 		6CC40A6DE2F14BB94A53006B /* FoliateMessageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB35F648E8E697C82E4C41DE /* FoliateMessageParserTests.swift */; };
 		6CFD5F91EEF10C009963AEB0 /* TextReaderUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E25002586402AAE67B29CE6 /* TextReaderUIState.swift */; };
@@ -741,6 +743,7 @@
 		70C6F95011CBEC3AF8F1D44B /* TOCChapterProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E3AA514298AACD2F963913C /* TOCChapterProgress.swift */; };
 		70DA481383CC5F3047D96E83 /* CollectionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02275826847D45CA3746D53D /* CollectionSidebar.swift */; };
 		70DE1B7FECAF10D2C2D53BE7 /* NotesActionMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 958438144E0D4CC1945E550E /* NotesActionMenu.swift */; };
+		713287E1C3D0BC5E6978A267 /* AIChatStreamCoalesceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87C2B91780DB2304E839475 /* AIChatStreamCoalesceTests.swift */; };
 		71397E1DB2920A02C5CEE39E /* PDFPageNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103B5BF35C8DC9FB2BE4998F /* PDFPageNavigator.swift */; };
 		7153BC66A08A1652A8D15A03 /* DebugReaderRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BD4CC018110BC0C96E2788 /* DebugReaderRegistryTests.swift */; };
 		72269EDBA7EA565DE2F8E687 /* SettingsRowPaletteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 450FC9EBF7835D39CA42C0EC /* SettingsRowPaletteTests.swift */; };
@@ -1896,6 +1899,7 @@
 		29D40790D781E98ABDFE737F /* BackupAIConversations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupAIConversations.swift; sourceTree = "<group>"; };
 		29FC6C8B57A45954AF4A20C0 /* BilingualLanguagePickerCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualLanguagePickerCell.swift; sourceTree = "<group>"; };
 		2A513D5E8C4467B8FE45E0AC /* AnnotationRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationRecord.swift; sourceTree = "<group>"; };
+		2AC3D8ED736D98CB6DD00382 /* StreamCoalescer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamCoalescer.swift; sourceTree = "<group>"; };
 		2B29ECB0699594B79632E3EE /* ReadiumEPUBHost+BilingualDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReadiumEPUBHost+BilingualDriver.swift"; sourceTree = "<group>"; };
 		2B41E933EF843E0AC73B3E37 /* progress.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = progress.js; sourceTree = "<group>"; };
 		2B7C59839A119870BE9B6FF9 /* ReaderSelectionEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSelectionEventTests.swift; sourceTree = "<group>"; };
@@ -2985,6 +2989,7 @@
 		D31265D2F8B445FADB98DDFC /* WebDAVProfileListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVProfileListViewModelTests.swift; sourceTree = "<group>"; };
 		D313521AE0A256629A2B0244 /* PersistenceActorStatsReadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceActorStatsReadTests.swift; sourceTree = "<group>"; };
 		D31AE45779D6F79B237D8BFE /* BookContentProviderAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookContentProviderAdapter.swift; sourceTree = "<group>"; };
+		D337EB4EECF9BADC58B3E5EC /* StreamCoalescerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamCoalescerTests.swift; sourceTree = "<group>"; };
 		D35CDC4131829818B115292B /* BilingualSetupSheet+Sections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BilingualSetupSheet+Sections.swift"; sourceTree = "<group>"; };
 		D363190FCDF47ED48A1D7BC1 /* ReaderLifecycleHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderLifecycleHelper.swift; sourceTree = "<group>"; };
 		D36D5CFF47A223349C004E39 /* VReaderAnnotationParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VReaderAnnotationParserTests.swift; sourceTree = "<group>"; };
@@ -3224,6 +3229,7 @@
 		F82AD6F50703DBCA984EBAAC /* UnifiedPagedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedPagedView.swift; sourceTree = "<group>"; };
 		F85E36013A798EB205697B9A /* AISettingsViewModelMultiProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsViewModelMultiProfileTests.swift; sourceTree = "<group>"; };
 		F866E3BC39A82C966DE4AA52 /* AIChatViewModel+SessionTransitions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+SessionTransitions.swift"; sourceTree = "<group>"; };
+		F87C2B91780DB2304E839475 /* AIChatStreamCoalesceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatStreamCoalesceTests.swift; sourceTree = "<group>"; };
 		F87E658802E17533BD215DAA /* DebugCommandBilingualTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugCommandBilingualTests.swift; sourceTree = "<group>"; };
 		F89BB1B1D01EB18947B00C09 /* config.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = config.h; sourceTree = "<group>"; };
 		F8DB79901C559905D3015DD3 /* ChapterPrefetching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterPrefetching.swift; sourceTree = "<group>"; };
@@ -3614,6 +3620,7 @@
 				1EE0734EE0796711AE09253D /* AIAssistantViewModelScopeTests.swift */,
 				EA401D8FC3B4F17213528B27 /* AIAssistantViewModelTests.swift */,
 				B90F4EB83CC68406DA14DD94 /* AIChatGeneralTests.swift */,
+				F87C2B91780DB2304E839475 /* AIChatStreamCoalesceTests.swift */,
 				795229C80DBDAAE4FE8E66F2 /* AIChatViewModelAgenticTests.swift */,
 				C4DC0576C2BB5F79C6744494 /* AIChatViewModelSessionsTestHelpers.swift */,
 				6683E529266E0E54B1A85BA0 /* AIChatViewModelSessionsTests.swift */,
@@ -3651,6 +3658,7 @@
 				30F27108727D22B92F94001C /* ReadiumEPUBReaderViewModelTests.swift */,
 				576F111E93E863C656BDEC70 /* SearchViewModelTests.swift */,
 				56912BE618BA41A3B17325C5 /* SettingsHeaderViewModelTests.swift */,
+				D337EB4EECF9BADC58B3E5EC /* StreamCoalescerTests.swift */,
 				55633F1E05B29D20C4A4D0D5 /* TXTReaderPositionBackCompatTests.swift */,
 				96A2462C6A873DEC45025230 /* TXTReaderViewModelChapterHeadingTests.swift */,
 				510A755F74250CC74B14021D /* TXTReaderViewModelContinuousTests.swift */,
@@ -4828,6 +4836,7 @@
 				0D40C8AC1C6099E72E545AD8 /* ReadiumEPUBReaderViewModel+Navigation.swift */,
 				864A1B050775A46ADBE3304F /* SearchViewModel.swift */,
 				8500C7EDCB2A51F928910E7F /* SettingsHeaderViewModel.swift */,
+				2AC3D8ED736D98CB6DD00382 /* StreamCoalescer.swift */,
 				E19A1FE14FDE4829AF0F5913 /* TXTReaderViewModel.swift */,
 				7056486BA460E0BE06235F54 /* UnifiedTextRendererViewModel.swift */,
 				231C9DC05EBE4F64D94633EA /* WholeBookRetrievalViewModel.swift */,
@@ -6146,6 +6155,7 @@
 				118E5FFED1C799410FFC4214 /* AIChatAgenticSupportTests.swift in Sources */,
 				369D003DCE5F36A64E5C1C06 /* AIChatGeneralTests.swift in Sources */,
 				62BE094A6E99C25AD7880CE4 /* AIChatMessageRowTests.swift in Sources */,
+				713287E1C3D0BC5E6978A267 /* AIChatStreamCoalesceTests.swift in Sources */,
 				4553F7F292278C1995E28192 /* AIChatViewContrastTests.swift in Sources */,
 				899A8EDE1AC66460CA1992EB /* AIChatViewModelAgenticTests.swift in Sources */,
 				9CB284CFAFA7A0984032BDA8 /* AIChatViewModelSessionsTestHelpers.swift in Sources */,
@@ -6678,6 +6688,7 @@
 				5D53F7068BB4C5DD2621CE3D /* StatsPerBookTableTests.swift in Sources */,
 				78D60642EBBFC160B21C140F /* StatsTimeWindowBarTests.swift in Sources */,
 				594A2BE63A5D10BAF70D604A /* StatusBarTintingTests.swift in Sources */,
+				2AC6ADAFE5B1BE487382119C /* StreamCoalescerTests.swift in Sources */,
 				4D323FB1DB077A50154AFC72 /* SummaryScopeResolverTests.swift in Sources */,
 				C52D4B03AE65EC124C626291 /* SummaryScopeTests.swift in Sources */,
 				1316119F5F616DBE405F7E38 /* SwiftDataSessionStoreTests.swift in Sources */,
@@ -7490,6 +7501,7 @@
 				7F8BACA8231195C0465A126E /* StatsCustomRangePickerState.swift in Sources */,
 				BC77FDE10F4F855ED0F9F3FE /* StatsPerBookTable.swift in Sources */,
 				5565D6CFF2A7610CDA45D441 /* StatsTimeWindowBar.swift in Sources */,
+				6C55EC64476F834C86AC54AD /* StreamCoalescer.swift in Sources */,
 				2CD1D6C0686DD8C096580AB3 /* SummaryScope.swift in Sources */,
 				E86EC184E85E4C11143B1A14 /* SummaryScopeResolver.swift in Sources */,
 				84A03EDA45DB68CE01456609 /* SwiftDataSessionStore.swift in Sources */,
@@ -7793,7 +7805,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 932;
+				CURRENT_PROJECT_VERSION = 933;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7801,7 +7813,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.59.32;
+				MARKETING_VERSION = 3.59.33;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
@@ -7947,7 +7959,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 932;
+				CURRENT_PROJECT_VERSION = 933;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7955,7 +7967,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.59.32;
+				MARKETING_VERSION = 3.59.33;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
