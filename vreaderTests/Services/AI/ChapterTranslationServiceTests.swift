@@ -255,6 +255,50 @@ struct ChapterTranslationServiceTests {
         }
     }
 
+    // Bug #333: a request timeout (often a too-large chapter) must NOT be
+    // mislabeled offline — it maps to the distinct `.timedOut`.
+    @Test func timedOutURLError_throwsTimedOutNotOffline() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let sender = MockTranslationSender(responses: [])
+        await sender.setErrorToThrow(URLError(.timedOut))
+        let service = makeService(sender: sender, store: store)
+        await #expect(throws: ChapterTranslationError.timedOut) {
+            _ = try await service.translate(
+                bookFingerprintKey: "fp", unit: Self.unit(),
+                sourceText: "Text.", targetLanguage: "Chinese",
+                providerProfileID: Self.profileID, config: config, style: .natural)
+        }
+    }
+
+    // Bug #333: host-unreachable is a provider/config fault, not the device being
+    // offline — it maps to `.providerFailed`, never `.offline`.
+    @Test func cannotConnectToHostURLError_throwsProviderFailedNotOffline() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let sender = MockTranslationSender(responses: [])
+        await sender.setErrorToThrow(URLError(.cannotConnectToHost))
+        let service = makeService(sender: sender, store: store)
+        await #expect(throws: ChapterTranslationError.self) {
+            _ = try await service.translate(
+                bookFingerprintKey: "fp", unit: Self.unit(),
+                sourceText: "Text.", targetLanguage: "Chinese",
+                providerProfileID: Self.profileID, config: config, style: .natural)
+        }
+        // And specifically NOT .offline / .timedOut.
+        do {
+            _ = try await service.translate(
+                bookFingerprintKey: "fp2", unit: Self.unit(),
+                sourceText: "Text.", targetLanguage: "Chinese",
+                providerProfileID: Self.profileID, config: config, style: .natural)
+            Issue.record("expected a throw")
+        } catch let e as ChapterTranslationError {
+            if case .providerFailed = e {} else {
+                Issue.record("expected .providerFailed, got \(e)")
+            }
+        }
+    }
+
     @Test func aiNetworkError_mapsToProviderFailedNotOffline() async throws {
         // AIError.networkError is a catch-all (also thrown for invalid
         // responses / misconfigured URLs) — it must NOT map to .offline, which

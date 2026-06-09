@@ -416,6 +416,10 @@ final class ChapterReTranslateViewModel {
             switch translationError {
             case .offline:
                 return "You appear to be offline. Try again when you have a connection."
+            case .timedOut:
+                // Bug #333: a timeout is NOT an offline state — it's usually a
+                // chapter too large for the provider's latency budget.
+                return "The translation request timed out — the chapter may be too long. Try again, or translate a smaller scope."
             case .providerFailed(let message):
                 return "Translation failed: \(message)"
             case .cancelled:

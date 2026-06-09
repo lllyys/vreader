@@ -46,8 +46,14 @@ extension AIService: TranslationRequestSending {
 
 /// A typed failure from chapter translation.
 enum ChapterTranslationError: Error, Equatable {
-    /// The device is offline and the unit is not cached.
+    /// The device is offline and the unit is not cached. Bug #333: reserved for
+    /// GENUINE device-connectivity failures only — NOT a request timeout (which
+    /// is transient + often means the chapter is too large) and NOT a
+    /// host-unreachable (a provider/config fault, not the device being offline).
     case offline
+    /// Bug #333: the provider request timed out — typically a chapter too large
+    /// for the provider's latency budget, NOT the device being offline.
+    case timedOut
     /// The provider call failed (network / API error).
     case providerFailed(String)
     /// The translation was cancelled.
@@ -428,9 +434,16 @@ actor ChapterTranslationService {
     private static func mapTransportError(_ error: Error) -> ChapterTranslationError {
         if let urlError = error as? URLError {
             switch urlError.code {
-            case .notConnectedToInternet, .networkConnectionLost,
-                 .dataNotAllowed, .cannotConnectToHost, .timedOut:
+            // Bug #333: GENUINE device-connectivity codes → offline.
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
                 return .offline
+            // A timeout is transient + usually a too-large chapter, NOT offline.
+            case .timedOut:
+                return .timedOut
+            // Host unreachable is a provider/config fault (bad base URL, provider
+            // down), not the device being offline → surface as a provider failure.
+            case .cannotConnectToHost:
+                return .providerFailed(sanitizedProviderMessage(error))
             default:
                 return .providerFailed(sanitizedProviderMessage(error))
             }

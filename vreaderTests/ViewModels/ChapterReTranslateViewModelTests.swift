@@ -356,6 +356,21 @@ struct ChapterReTranslateViewModelTests {
         #expect(vm.lastError?.contains("upstream offline") == true)
     }
 
+    // Bug #333: a timeout renders a distinct "timed out" message, NOT the
+    // misleading "You appear to be offline" copy.
+    @Test func submit_timeout_showsTimedOutNotOffline() async throws {
+        let store = try Self.makeStore()
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .failure(ChapterTranslationError.timedOut))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        #expect(vm.lastError?.lowercased().contains("timed out") == true)
+        #expect(vm.lastError?.lowercased().contains("offline") == false)
+    }
+
     @Test func submit_resolverFails_setsErrorState() async throws {
         struct StubError: Error { let message: String }
         let store = try Self.makeStore()

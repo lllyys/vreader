@@ -12,8 +12,10 @@
 //   paragraph/sentence — exactly what the VM stores in `translationsByUnit`.
 // - Failure surfaces as the existing `ChapterTranslationError`: `.offline`
 //   drives the silent-source-fallback (plan Decision 2 — no invented
-//   affordance), `.cancelled` is swallowed by the epoch guard, other failures
-//   leave the unit unfetched so a later position change retries.
+//   affordance), `.cancelled` is swallowed by the epoch guard, and every other
+//   failure — `.providerFailed` AND `.timedOut` (Bug #333: a transient timeout,
+//   NOT an offline state) — leaves the unit unfetched so a later position
+//   change retries.
 //
 // @coordinates-with: BilingualReadingViewModel.swift,
 //   ChapterTranslationService.swift, ChapterTextProviding.swift,
