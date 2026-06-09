@@ -7018,6 +7018,28 @@ ${doc.querySelector("parsererror").innerText}`);
     if (!rect) return null;
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
   }
+  const BILINGUAL_BLOCK_TAGS = { p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1 };
+  const BILINGUAL_BLOCK_SELECTOR = Object.keys(BILINGUAL_BLOCK_TAGS).join(",");
+  function bilingualNormalizeBlockText(el) {
+    return ((el && el.textContent) || "").replace(/\s+/g, " ").trim();
+  }
+  function bilingualLeafBlockElements(doc) {
+    if (!doc) return [];
+    const root = doc.body || doc;
+    if (!root || !root.getElementsByTagName) return [];
+    const all = root.getElementsByTagName("*");
+    const out = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      const tag = (el.localName || "").toLowerCase();
+      if (!BILINGUAL_BLOCK_TAGS[tag]) continue;
+      if (el.hasAttribute && el.hasAttribute("data-vreader-decoration")) continue;
+      if (el.querySelector && el.querySelector(BILINGUAL_BLOCK_SELECTOR)) continue;
+      if (!bilingualNormalizeBlockText(el)) continue;
+      out.push(el);
+    }
+    return out;
+  }
   view.addEventListener("relocate", (e3) => {
     const d2 = e3.detail;
     post("relocate", {
@@ -7327,6 +7349,8 @@ ${doc.querySelector("parsererror").innerText}`);
       if (typeof s3?.createDocument !== "function") return "";
       try {
         const doc = await s3.createDocument();
+        const texts = bilingualLeafBlockElements(doc).map(bilingualNormalizeBlockText).filter(Boolean);
+        if (texts.length > 0) return texts.join("\n\n");
         return (doc?.body?.textContent ?? "").trim();
       } catch (e3) {
         console.warn("[foliate-host] bilingualSectionText section failed:", e3);
@@ -7378,15 +7402,6 @@ ${doc.querySelector("parsererror").innerText}`);
           });
           return;
         }
-        const BLOCK_TAGS = {
-          p: 1,
-          li: 1,
-          blockquote: 1,
-          pre: 1,
-          dd: 1,
-          dt: 1
-        };
-        const BLOCK_SELECTOR = Object.keys(BLOCK_TAGS).join(",");
         const TRUSTED_BID = /^fb\d+$/;
         const out = [];
         for (const entry of contents) {
@@ -7396,19 +7411,10 @@ ${doc.querySelector("parsererror").innerText}`);
           if (targetSectionIndex != null && sectionIndex !== targetSectionIndex) {
             continue;
           }
-          const all = doc.body ? doc.body.getElementsByTagName("*") : doc.getElementsByTagName("*");
           let seq = doc.__vreaderBilingualSeq ?? 0;
-          for (let i3 = 0; i3 < all.length; i3++) {
-            const el = all[i3];
-            const tag = (el.localName || "").toLowerCase();
-            if (!BLOCK_TAGS[tag]) continue;
-            if (el.hasAttribute && el.hasAttribute("data-vreader-decoration")) {
-              continue;
-            }
-            if (el.querySelector && el.querySelector(BLOCK_SELECTOR)) continue;
-            let txt = el.textContent || "";
-            txt = txt.replace(/\s+/g, " ").trim();
-            if (!txt) continue;
+          const els = bilingualLeafBlockElements(doc);
+          for (const el of els) {
+            const txt = bilingualNormalizeBlockText(el);
             let bid = el.getAttribute("data-vreader-bid");
             if (!bid || !TRUSTED_BID.test(bid)) {
               seq += 1;

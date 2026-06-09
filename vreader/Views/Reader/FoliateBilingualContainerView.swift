@@ -641,6 +641,15 @@ struct FoliateBilingualContainerView: View {
                 sectionIndex: scopedIndex
             ) {
                 evalBilingualJS(js)
+            } else {
+                // Bug #334 (Codex audit): translations exist for this unit but the
+                // pairing produced no inject map — i.e. a residual block/segment
+                // count mismatch from any future cause. Fail safe to source-only by
+                // clearing this section's loading shimmer so it can NEVER get stuck
+                // (the original #334 symptom). The shared leaf-block selector makes
+                // the mismatch unreachable today; this is the belt-and-suspenders.
+                evalBilingualJS(
+                    bilingualOrchestrator.clearLoadingJS(sectionIndex: scopedIndex))
             }
         }
     }

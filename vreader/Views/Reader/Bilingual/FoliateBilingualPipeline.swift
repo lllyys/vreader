@@ -163,10 +163,16 @@ enum FoliateBilingualPipeline {
     /// ONLY when `blocks.count == segments.count`.
     ///
     /// Bug #266: a count mismatch (or `translatedSegments == nil`) returns an
-    /// empty map → source-only. AZW3/MOBI shares EPUB's nested-block
-    /// double-count (`foliate-host.js` walks `getElementsByTagName('*')`), so
-    /// on a nested chapter `blocks > segments` and this returns source-only —
-    /// fail-safe (never a wrong pairing) until the host enumerate is leaf-fixed.
+    /// empty map → source-only — fail-safe (never a wrong pairing).
+    ///
+    /// Bug #334: the AZW3/MOBI count match is now load-bearing. The enumerate
+    /// (`foliate-host.js bilingualEnumerate`) and the translate source
+    /// (`bilingualSectionText`) walk the SAME shared `bilingualLeafBlockElements`
+    /// selector, so `blocks.count == segments.count` holds for a normal section
+    /// and the translation injects. Before #334 the section text was the
+    /// whole-body `textContent` (no paragraph boundaries), so `segments` (Swift
+    /// `ChapterSegmenter.paragraphs`) collapsed to ~1 while `blocks` stayed N →
+    /// permanent mismatch → the loading shimmer never got replaced.
     static func translationsByBid(
         blocks: [BilingualBlock],
         translatedSegments: [String]?

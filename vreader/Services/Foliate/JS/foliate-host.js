@@ -21,6 +21,44 @@ function serializeRect(rect) {
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
 }
 
+// Bug #334: the SINGLE source of the bilingual leaf-block selection. The
+// translate path's paragraph count (`bilingualSectionText` → Swift
+// `ChapterSegmenter.paragraphs`) MUST equal the enumerate path's block count
+// (`bilingualEnumerate`), or the 1:1 inject pairing fails and the translation
+// never replaces the loading shimmer (it stays stuck). Both paths walk THIS
+// helper so they can never diverge again. Returns the ordered leaf-block
+// elements of a section document (document order). A leaf block is a
+// `BILINGUAL_BLOCK_TAGS` element that is NOT already a decoration sibling and
+// does NOT contain another block (Bug #268 leaf rule), and whose
+// whitespace-normalized text is non-empty.
+const BILINGUAL_BLOCK_TAGS = { p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1 }
+const BILINGUAL_BLOCK_SELECTOR = Object.keys(BILINGUAL_BLOCK_TAGS).join(',')
+
+function bilingualNormalizeBlockText(el) {
+    return ((el && el.textContent) || '').replace(/\s+/g, ' ').trim()
+}
+
+function bilingualLeafBlockElements(doc) {
+    if (!doc) return []
+    const root = doc.body || doc
+    if (!root || !root.getElementsByTagName) return []
+    const all = root.getElementsByTagName('*')
+    const out = []
+    for (let i = 0; i < all.length; i++) {
+        const el = all[i]
+        const tag = (el.localName || '').toLowerCase()
+        if (!BILINGUAL_BLOCK_TAGS[tag]) continue
+        if (el.hasAttribute && el.hasAttribute('data-vreader-decoration')) continue
+        // Bug #268: leaf blocks only — a block that contains another block
+        // (e.g. <blockquote><p>…</p></blockquote>) is skipped; its inner block
+        // is enumerated instead, so the container isn't double-counted.
+        if (el.querySelector && el.querySelector(BILINGUAL_BLOCK_SELECTOR)) continue
+        if (!bilingualNormalizeBlockText(el)) continue
+        out.push(el)
+    }
+    return out
+}
+
 // --- Event Forwarding ---
 
 view.addEventListener('relocate', e => {
@@ -411,6 +449,21 @@ window.readerAPI = {
         if (typeof s?.createDocument !== 'function') return ''
         try {
             const doc = await s.createDocument()
+            // Bug #334: extract ONE paragraph per leaf block, joined by a blank
+            // line, instead of the whole-body `textContent` (which mushes every
+            // paragraph into a single string with no boundaries). Swift's
+            // `ChapterSegmenter.paragraphs` splits on blank lines, so this makes
+            // the translate's segment count EQUAL the `bilingualEnumerate` block
+            // count — without that equality the 1:1 inject pairing returns an
+            // empty map and the loading shimmer never gets replaced. Uses the
+            // SAME shared selector as the enumerate so the two can't drift.
+            const texts = bilingualLeafBlockElements(doc)
+                .map(bilingualNormalizeBlockText)
+                .filter(Boolean)
+            if (texts.length > 0) return texts.join('\n\n')
+            // Fallback: a section with no recognized leaf blocks (rare — e.g. a
+            // cover page that's pure text) keeps the legacy whole-body behavior
+            // so it still translates as a single segment.
             return (doc?.body?.textContent ?? '').trim()
         } catch (e) {
             console.warn('[foliate-host] bilingualSectionText section failed:', e)
@@ -470,14 +523,6 @@ window.readerAPI = {
                 })
                 return
             }
-            const BLOCK_TAGS = {
-                p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1,
-            }
-            // Bug #268: the CSS selector for "any block tag", used to detect a
-            // NON-leaf block (a block element that contains another block).
-            // Mirrors the EPUB leaf-enumerate (Bug #266) so the AZW3/MOBI host
-            // counts the same unit model — see the `querySelector` skip below.
-            const BLOCK_SELECTOR = Object.keys(BLOCK_TAGS).join(',')
             const TRUSTED_BID = /^fb\d+$/
             const out = []
             for (const entry of contents) {
@@ -489,29 +534,14 @@ window.readerAPI = {
                     && sectionIndex !== targetSectionIndex) {
                     continue
                 }
-                const all = doc.body
-                    ? doc.body.getElementsByTagName('*')
-                    : doc.getElementsByTagName('*')
                 let seq = (doc.__vreaderBilingualSeq ?? 0)
-                for (let i = 0; i < all.length; i++) {
-                    const el = all[i]
-                    const tag = (el.localName || '').toLowerCase()
-                    if (!BLOCK_TAGS[tag]) continue
-                    if (el.hasAttribute && el.hasAttribute('data-vreader-decoration')) {
-                        continue
-                    }
-                    // Bug #268: enumerate LEAF blocks only. A block element that
-                    // contains another block (e.g. <blockquote><p>…</p></blockquote>,
-                    // <li><p>…</p></li>) would otherwise enumerate BOTH the
-                    // container and its child, double-counting against the
-                    // plain-text paragraph segmentation and drifting every later
-                    // translation pairing into a count mismatch (→ source-only).
-                    // Enumerate the inner leaf; skip the container (its text is
-                    // covered by its block descendants). Mirrors the EPUB fix (#266).
-                    if (el.querySelector && el.querySelector(BLOCK_SELECTOR)) continue
-                    let txt = el.textContent || ''
-                    txt = txt.replace(/\s+/g, ' ').trim()
-                    if (!txt) continue
+                // Bug #334: source the leaf blocks from the shared selector so the
+                // enumerate's block set is byte-identical to what
+                // `bilingualSectionText` feeds the translate — see
+                // `bilingualLeafBlockElements`.
+                const els = bilingualLeafBlockElements(doc)
+                for (const el of els) {
+                    const txt = bilingualNormalizeBlockText(el)
                     let bid = el.getAttribute('data-vreader-bid')
                     if (!bid || !TRUSTED_BID.test(bid)) {
                         seq += 1
