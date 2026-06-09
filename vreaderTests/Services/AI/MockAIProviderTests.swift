@@ -102,6 +102,30 @@ struct MockAIProviderTests {
         #expect(decoded[2].contains("Third"))
     }
 
+    // Codex audit Medium: a source segment that itself contains a blank line
+    // must NOT over-split — N headers → N array elements.
+    @Test func reply_chunkContract_segmentWithInternalBlankLine_keepsCount() throws {
+        let segments = ["Line one.\n\nStill segment zero.", "Segment one."]
+        let prompt = TranslationChunkContract.userPrompt(
+            segments: segments, targetLanguage: "German", style: .literal)
+        let reply = MockAIProvider.reply(for: request(action: .translate, prompt: prompt, context: ""))
+        let decoded = try TranslationChunkContract.decode(reply, expectedCount: 2)
+        #expect(decoded.count == 2)
+        #expect(decoded[0].contains("Line one"))
+    }
+
+    // Codex audit Low: an empty source segment still yields one array element so
+    // the length equals N (decode passes).
+    @Test func reply_chunkContract_emptySegment_stillEmitsElement() throws {
+        let segments = ["First.", "", "Third."]
+        let prompt = TranslationChunkContract.userPrompt(
+            segments: segments, targetLanguage: "French", style: .natural)
+        let reply = MockAIProvider.reply(for: request(action: .translate, prompt: prompt, context: ""))
+        let decoded = try TranslationChunkContract.decode(reply, expectedCount: 3)
+        #expect(decoded.count == 3)
+        #expect(decoded.allSatisfy { $0.contains("[MOCK译]") })
+    }
+
     @Test func reply_singleSegmentTranslate_staysSingleString() {
         // A plain (non-chunk) translate prompt keeps the single-string reply —
         // the chunk-array path only triggers on the JSON-array contract prompt.

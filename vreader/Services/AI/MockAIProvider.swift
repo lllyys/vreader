@@ -113,20 +113,27 @@ final class MockAIProvider: AIProvider {
     static func chunkContractArrayReply(prompt: String) -> String? {
         guard prompt.contains("JSON array of exactly"),
               let range = prompt.range(of: "Source segments:") else { return nil }
-        let body = prompt[range.upperBound...]
+        let body = String(prompt[range.upperBound...])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        // Segments are joined by a blank line; each starts with `[<index>] `.
-        let segments = body.components(separatedBy: "\n\n")
-            .map { $0.replacingOccurrences(of: #"^\s*\[\d+\]\s*"#, with: "",
-                                           options: .regularExpression) }
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard !segments.isEmpty else { return nil }
-        let translated = segments.map { seg -> String in
+        // Parse by the numbered headers `[<index>] `, NOT raw blank lines: a
+        // segment may itself contain a blank line (Codex audit Medium), so a
+        // header only counts when it follows the start or a blank line. Capture
+        // each segment's body up to the NEXT such header (or the end), and emit
+        // exactly one element per header — including empty bodies (audit Low) so
+        // the array length always equals N.
+        let pattern = #"(?:\A|\n\n)\[\d+\]\s?([\s\S]*?)(?=\n\n\[\d+\]\s|\z)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = body as NSString
+        let matches = regex.matches(in: body, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return nil }
+        let translated: [String] = matches.map { match in
+            let seg = match.range(at: 1).location != NSNotFound
+                ? ns.substring(with: match.range(at: 1)) : ""
             let prefix = seg.trimmingCharacters(in: .whitespacesAndNewlines).prefix(30)
             return "[MOCK译] \(prefix)"
         }
-        // Encode as a strict JSON array of strings (sorted-keys irrelevant for an
-        // array; no fence — the decoder tolerates one but doesn't need it).
+        // Strict JSON array of strings — no fence (the decoder tolerates one but
+        // doesn't need it).
         guard let data = try? JSONSerialization.data(withJSONObject: translated),
               let json = String(data: data, encoding: .utf8) else { return nil }
         return json
