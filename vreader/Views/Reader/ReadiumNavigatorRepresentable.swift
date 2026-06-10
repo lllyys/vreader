@@ -66,6 +66,14 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
     /// rendered spine's text nodes. Default `[]` is a no-op.
     var replacementRules: [ReplacementRuleDescriptor] = []
 
+    /// Bug #340: the theme's selection-wash colors (CSS strings) + the accent
+    /// `tintColor` driving the UIKit selection handles/caret. Threaded to the
+    /// coordinator (CSS, injected per spread) and onto the navigator's view
+    /// (tint inherits down to the lazily-created spread WKWebViews).
+    var selectionAccentCSS: String = ""
+    var selectionTextCSS: String = ""
+    var selectionTintColor: UIColor?
+
     func makeCoordinator() -> ReadiumReaderCoordinator {
         ReadiumReaderCoordinator(
             fingerprintKey: fingerprintKey,
@@ -94,7 +102,26 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
         // Feature #54 Phase D-1: seed the rules before the navigator builds so
         // the coordinator applies them on the first spine's locationDidChange.
         context.coordinator.replacementRules = replacementRules
-        let config = EPUBNavigatorViewController.Configuration(preferences: preferences)
+        // Bug #340: seed the selection colors before the navigator builds so
+        // the first spread's locationDidChange injects the themed wash.
+        context.coordinator.selectionAccentCSS = selectionAccentCSS
+        context.coordinator.selectionTextCSS = selectionTextCSS
+        // Bug #339: `editingActions` defaults to the FULL system set
+        // (`EditingAction.defaultActions`), which surfaced the stock iOS edit
+        // menu (Copy/Look Up/Translate) ALONGSIDE the designed selection card —
+        // the coordinator's `shouldShowMenuForSelection → false` gates Readium's
+        // `isEnabled` but the system menu items still pass `canPerformAction`
+        // when listed here. An empty set makes `canPerformAction` false for
+        // every selector, so the designed card is the SOLE selection surface —
+        // matching TXT/MD/legacy-EPUB, which suppress the entire system menu
+        // (`UIMenu(children: [])`) and ship no Copy either (the designed
+        // `vreader-reader.jsx::SelectionPopover` has no Copy action). The
+        // selection→popover callback is unaffected: it fires from the
+        // navigator's selection didSet, independent of this list.
+        let config = EPUBNavigatorViewController.Configuration(
+            preferences: preferences,
+            editingActions: []
+        )
         do {
             let navigator = try EPUBNavigatorViewController(
                 publication: publication,
@@ -124,6 +151,9 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             // created lazily as spine items load, so `updateUIViewController`
             // re-applies as they appear.
             Self.applyTransparency(transparentBackground, to: navigator)
+            // Bug #340: accent handles/caret — tintColor inherits down to the
+            // lazily-created spread WKWebViews (#324's UITextView sibling).
+            if let tint = selectionTintColor { navigator.view.tintColor = tint }
             return navigator
         } catch {
             context.coordinator.log.error(
@@ -163,6 +193,16 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             // Feature #54 Phase D-1: forward a live rules change so already-open
             // spreads pick it up (re-applied on the visible spine; idempotent).
             context.coordinator.setReplacementRules(replacementRules)
+            // Bug #340: forward a live theme change to the selection wash +
+            // handles. `syncSelectionStyle` re-asserts the (possibly new)
+            // colors into the visible spread; future spreads read the stored
+            // state via the persistent applier. Idempotent + cheap.
+            context.coordinator.selectionAccentCSS = selectionAccentCSS
+            context.coordinator.selectionTextCSS = selectionTextCSS
+            context.coordinator.syncSelectionStyle()
+            if let tint = selectionTintColor, navigator.view.tintColor != tint {
+                navigator.view.tintColor = tint
+            }
             // The pref re-submit (theme/font/scroll) must run before the
             // container-view re-paint, since `submitPreferences` itself re-paints
             // the navigator view to `effectiveBackgroundColor`.

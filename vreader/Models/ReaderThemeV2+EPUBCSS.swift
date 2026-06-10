@@ -358,6 +358,22 @@ extension ReaderThemeV2 {
     /// EPUB's `color: ink`.
     var inkColorCSS: String { Self.cssColor(self.inkColor) }
 
+    /// Bug #340: the bare `::selection` rule (no `<style>` wrapper) for
+    /// renderers that assemble their own stylesheet (Foliate `setStyles`).
+    /// Same colors as the legacy engine's themeCSS rule.
+    func selectionCSSRule() -> String {
+        let colors = selectionCSSColors
+        return "::selection{background-color:\(colors.accent) !important;color:\(colors.text) !important;}"
+    }
+
+    /// Bug #340: the selection-wash colors as CSS strings — the same
+    /// `(accent, paper)` pair the legacy engine's `::selection` rule uses
+    /// (`themeCSS` above), exposed so the Readium engine can inject an
+    /// identical rule through its own channel.
+    var selectionCSSColors: (accent: String, text: String) {
+        (Self.cssColor(accentColor), Self.cssColor(paperColor))
+    }
+
     /// Renders a UIColor as a CSS `rgb(...)` or `rgba(...)` string,
     /// preserving the alpha channel that the design tokens encode on
     /// `paperColor` / `subColor` / `ruleColor`. Opaque colors emit

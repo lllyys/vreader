@@ -75,6 +75,14 @@ extension ReadiumReaderCoordinator {
             source: Self.transparentStyleApplyJS,
             injectionTime: .atDocumentEnd, forMainFrameOnly: false
         ))
+        // Bug #340: persistent READ-only applier for the themed ::selection
+        // style — same self-gating localStorage model as the transparency
+        // applier above (state writes come exclusively from Swift via
+        // `syncSelectionStyle`).
+        userContentController.addUserScript(WKUserScript(
+            source: Self.selectionStyleApplyJS,
+            injectionTime: .atDocumentEnd, forMainFrameOnly: false
+        ))
         // Feature #83: cross-chapter continuous scroll — install the boundary-
         // intent observer + weak message-handler proxy so scroll mode auto-
         // advances across spine boundaries (resolves Bug #309). Self-gating to

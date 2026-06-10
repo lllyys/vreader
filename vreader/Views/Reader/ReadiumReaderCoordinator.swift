@@ -58,6 +58,13 @@ final class ReadiumReaderCoordinator: NSObject {
     /// `ReadiumReaderCoordinator+Replacement.swift`. Default `[]` is a no-op.
     var replacementRules: [ReplacementRuleDescriptor] = []
 
+    /// Bug #340: the current theme's selection-wash colors as CSS color
+    /// strings (set by the representable on build + every theme change;
+    /// `+SelectionStyle` sanitizes before any JS interpolation). Empty =
+    /// no themed selection injected.
+    var selectionAccentCSS = ""
+    var selectionTextCSS = ""
+
     /// WI-9a: the host-owned navigation sink. `attach` binds this coordinator's
     /// nav methods into it; `detach` clears it so a late page-turn / jump intent
     /// no-ops after teardown. Optional because a non-nav call site (DebugBridge
@@ -254,6 +261,9 @@ extension ReadiumReaderCoordinator: EPUBNavigatorDelegate {
         // the same origin (the self-gating applier alone would honor the stale
         // value). Idempotent + cheap; the `+Transparency` extension owns it.
         syncTransparentState()
+        // Bug #340: assert the themed ::selection style into the freshly
+        // rendered spread (same per-spread cadence as the transparency sync).
+        syncSelectionStyle()
         // Feature #54 Phase D-1: apply content-replacement rules to the freshly
         // rendered spine's text nodes (CFI-safe — the original resource HTML is
         // untouched). Idempotent per document via the JS guard flag; cheap no-op

@@ -188,7 +188,12 @@ extension ReadiumEPUBHost {
             transparentBackground: shouldRenderTransparentBackground,
             // Feature #54 Phase D-1: the enabled content-replacement rules for
             // this book — applied CFI-safely to each spine's text nodes.
-            replacementRules: replacementRules
+            replacementRules: replacementRules,
+            // Bug #340: themed selection wash + accent handles (parity with the
+            // legacy engine's ::selection rule and #324's UITextView tint).
+            selectionAccentCSS: settingsStore.theme.selectionCSSColors.accent,
+            selectionTextCSS: settingsStore.theme.selectionCSSColors.text,
+            selectionTintColor: settingsStore.theme.accentColor
         )
         .ignoresSafeArea()
         // WI-9a: the jump observer resolves a (legacy, OPF-relative) vreader

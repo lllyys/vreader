@@ -168,6 +168,22 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // Bug #338: tap-outside-to-dismiss WITHOUT a hit-blocking overlay.
+            // The old full-screen `Color.clear` tap-catcher swallowed EVERY
+            // touch that wasn't a clean tap — selection-handle drags and reader
+            // scrolling were dead while the card was up, so a selection could
+            // never be refined. A SIMULTANEOUS TapGesture on the content
+            // observes taps without claiming them: a tap dismisses the card AND
+            // still reaches the reader (which clears its native selection — the
+            // same end state as before); drags / pans / long-presses are not
+            // taps, so handle refinement and scrolling flow to the underlying
+            // UIKit views untouched. A completed handle drag makes the bridge
+            // re-post `.readerSelectionPopoverRequested` (iOS re-requests the
+            // edit menu; Readium re-fires `shouldShowMenuForSelection`), so the
+            // card's quote refreshes to the expanded selection for free.
+            .simultaneousGesture(TapGesture().onEnded {
+                if pending != nil { dismiss() }
+            })
             .onReceive(
                 NotificationCenter.default.publisher(for: .readerSelectionPopoverRequested)
             ) { note in
@@ -192,39 +208,33 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
 
     @ViewBuilder
     private func floatingCard(_ payload: SelectionPopoverRequestPayload) -> some View {
-        ZStack(alignment: .bottom) {
-            // Tap-outside-to-dismiss catcher. The design floats the card over the
-            // live reader with no dimming, so the catcher is transparent — it only
-            // captures the outside tap that closes the popover.
-            Color.clear
-                .contentShape(Rectangle())
-                .ignoresSafeArea()
-                .onTapGesture { dismiss() }
-
-            SelectionPopoverView(
-                selectionText: payload.selection.selectedText,
-                theme: theme,
-                onAction: { action in
-                    let result = SelectionPopoverActionRouter.route(
-                        action: action,
-                        payload: payload
-                    )
-                    let next = SelectionPopoverDismissPolicy.nextPending(
-                        after: result,
-                        currentPayload: payload
-                    )
-                    pending = next
-                    // Preserve the old `.sheet(onDismiss:)` contract: fire onDismiss
-                    // whenever the popover actually closes (here, the action path
-                    // resolved to no follow-up).
-                    if next == nil { onDismiss?() }
-                },
-                onClose: { dismiss() }
-            )
-            .padding(.horizontal, 18)
-            .padding(.bottom, 100)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
+        // Bug #338: no ZStack tap-catcher — the card alone occupies the overlay,
+        // so every touch outside its bounds reaches the live reader beneath
+        // (handle drags, scrolling); tap-outside dismissal is handled by the
+        // simultaneous gesture on the content above.
+        SelectionPopoverView(
+            selectionText: payload.selection.selectedText,
+            theme: theme,
+            onAction: { action in
+                let result = SelectionPopoverActionRouter.route(
+                    action: action,
+                    payload: payload
+                )
+                let next = SelectionPopoverDismissPolicy.nextPending(
+                    after: result,
+                    currentPayload: payload
+                )
+                pending = next
+                // Preserve the old `.sheet(onDismiss:)` contract: fire onDismiss
+                // whenever the popover actually closes (here, the action path
+                // resolved to no follow-up).
+                if next == nil { onDismiss?() }
+            },
+            onClose: { dismiss() }
+        )
+        .padding(.horizontal, 18)
+        .padding(.bottom, 100)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     /// Closes the popover by an outside tap or the close button, preserving the

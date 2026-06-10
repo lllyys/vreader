@@ -90,7 +90,10 @@ struct FoliateSpikeView: View {
         let parts = [
             base,
             store?.theme.bilingualBlockCSSRule(),
-            store?.theme.bilingualLoadingCSSRule()
+            store?.theme.bilingualLoadingCSSRule(),
+            // Bug #340: themed selection wash inside the Foliate iframe —
+            // parity with the legacy EPUB engine's ::selection rule.
+            store?.theme.selectionCSSRule()
         ].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
@@ -118,6 +121,7 @@ struct FoliateSpikeView: View {
                 layoutFlow: FoliateLayoutFlowMapper.layoutFlow(for: settingsStore?.epubLayout),
                 themeCSS: Self.themeCSS(for: settingsStore),
                 hostBackgroundColor: Self.hostShellBackgroundColor(for: settingsStore),
+                themeAccentColor: settingsStore?.theme.accentColor,
                 coordinatorBox: coordinatorBox,
                 onBookReady: { title in
                     isBookReady = true
@@ -221,6 +225,10 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
     /// mirrors `themeCSS`. Applied with `isOpaque = false` in makeUIView and
     /// re-applied live in updateUIView so a theme switch re-tints the frame.
     let hostBackgroundColor: UIColor?
+    /// Bug #340: the theme accent as the WKWebView `tintColor` — drives the
+    /// UIKit selection handles/caret (#324's UITextView sibling; the themed
+    /// wash itself ships inside `themeCSS`'s ::selection rule).
+    let themeAccentColor: UIColor?
     /// Feature #57: parent-owned handle; `makeCoordinator()` assigns the
     /// live Coordinator into it so the TTS path can call
     /// `extractPlainText()`.
@@ -298,7 +306,9 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
                 + "{value:\(forceVerticalRL),writable:false,configurable:false});",
             injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        // Bug #339 sibling: suppress the system selection callout — the
+        // designed selection card is the sole selection surface.
+        let webView = SelectionMenuSuppressingWebView(frame: .zero, configuration: config)
         webView.isInspectable = true
         webView.navigationDelegate = coordinator
         // Feature #93: defensive host-shell theming. With `isOpaque = false`,
@@ -308,6 +318,8 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         webView.isOpaque = (hostBackgroundColor == nil)
         webView.backgroundColor = hostBackgroundColor
         webView.scrollView.backgroundColor = hostBackgroundColor
+        // Bug #340: accent selection handles/caret (the wash ships in themeCSS).
+        if let accent = themeAccentColor { webView.tintColor = accent }
         // Bug #189: scrollView is the outer container the document renders into.
         // In paginated mode foliate-js consumes touches and paginates internally
         // (outer scroll must be off). In scrolled mode the document is one long

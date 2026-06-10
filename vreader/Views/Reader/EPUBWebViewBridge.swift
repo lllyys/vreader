@@ -70,6 +70,11 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     /// `nil` preserves the prior `.clear` behaviour for any caller that
     /// hasn't yet been threaded through.
     var themeBackgroundColor: UIColor?
+
+    /// Bug #340: the theme's accent as the WKWebView `tintColor` — drives the
+    /// UIKit selection handles/caret (#324's UITextView sibling; the themed
+    /// `::selection` wash itself ships inside `themeCSS`).
+    var themeAccentColor: UIColor?
     /// Bug #163: top safe-area inset (typically the Dynamic Island /
     /// status-bar safe area). Threaded in from the SwiftUI container so
     /// the WKWebView's scroll view positions chapter content below the
@@ -296,7 +301,9 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         config.userContentController = userContentController
         config.preferences.isElementFullscreenEnabled = false
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        // Bug #339 sibling: suppress the system selection callout — the
+        // designed selection card is the sole selection surface.
+        let webView = SelectionMenuSuppressingWebView(frame: .zero, configuration: config)
         webView.isOpaque = false
         webView.backgroundColor = .clear
         // Bug #167 wiring: keep this call. The seam itself is unit-tested in
@@ -304,6 +311,8 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         // the white-bleed regression because the call-site wiring is not
         // covered by tests (representable-context plumbing is too deep to mock).
         Self.applyScrollViewBackground(to: webView.scrollView, color: themeBackgroundColor)
+        // Bug #340: accent selection handles/caret.
+        if let accent = themeAccentColor { webView.tintColor = accent }
         // Bug #279 / GH #1256 wiring: pin zoom + lock horizontal pan so EPUB
         // content can't be pinch-zoomed or dragged off-axis. Like the bug #167 /
         // #163 seams, the contract is unit-tested in EPUBWebViewBridgeScrollLockTests
@@ -536,6 +545,10 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         if context.coordinator.themeBackgroundColor != themeBackgroundColor {
             context.coordinator.themeBackgroundColor = themeBackgroundColor
             Self.applyScrollViewBackground(to: webView.scrollView, color: themeBackgroundColor)
+        }
+        // Bug #340: live theme change re-tints the selection handles/caret.
+        if let accent = themeAccentColor, webView.tintColor != accent {
+            webView.tintColor = accent
         }
 
         // Bug #163 wiring: live-update the safe-area top inset on rotation

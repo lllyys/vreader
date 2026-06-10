@@ -759,6 +759,9 @@ struct EPUBReaderContainerView: View {
                 // the CFI-safe injection JS the bridge runs on each chapter load.
                 replacementJS: EPUBReplacementJS.injectionJS(rules: replacementRules),
                 themeBackgroundColor: settingsStore?.theme.backgroundColor,
+                // Bug #340: accent selection handles/caret (the ::selection
+                // wash already ships inside themeCSS).
+                themeAccentColor: settingsStore?.theme.accentColor,
                 safeAreaTopInset: proxy.safeAreaInsets.top,
                 scrollFraction: seekScrollFraction,
                 currentHref: viewModel.currentPosition?.href,
