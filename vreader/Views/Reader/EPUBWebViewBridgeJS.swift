@@ -339,6 +339,32 @@ extension EPUBWebViewBridge {
     })();
     """
 
+    /// Bug #336: builds a `.atDocumentEnd` script that sets the document's `lang`
+    /// (from OPF `dc:language`) when absent, so CSS `hyphens: auto` engages for
+    /// justified Latin. Returns `nil` when there is no usable language.
+    ///
+    /// The language is sanitized to the BCP-47 charset (`[A-Za-z0-9-]`) — a
+    /// language tag never contains anything else, so this is injection-proof
+    /// without needing full JS-string escaping. An empty result yields `nil`.
+    static func langInjectionJS(language: String?) -> String? {
+        guard let raw = language else { return nil }
+        let sanitized = String(raw.unicodeScalars.filter {
+            ("a"..."z").contains(Character($0)) || ("A"..."Z").contains(Character($0))
+                || ("0"..."9").contains(Character($0)) || $0 == "-"
+        })
+        guard !sanitized.isEmpty else { return nil }
+        return """
+        (function() {
+            var lang = '\(sanitized)';
+            var html = document.documentElement;
+            if (html && !html.getAttribute('lang')) { html.setAttribute('lang', lang); }
+            if (document.body && !document.body.getAttribute('lang')) {
+                document.body.setAttribute('lang', lang);
+            }
+        })();
+        """
+    }
+
     /// Scroll progress tracking with 100ms throttle to reduce callback churn.
     static let progressTrackingJS = """
     (function() {

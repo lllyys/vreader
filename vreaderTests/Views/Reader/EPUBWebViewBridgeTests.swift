@@ -686,4 +686,38 @@ struct EPUBWebViewBridgeOuterScrollEnabledTests {
         #expect(EPUBWebViewBridge.outerScrollEnabled(isPaged: true, hasContinuousConfig: true) == false)
     }
 }
+
+// Bug #336: the document-language injection that makes `hyphens: auto` engage on
+// the legacy stitched host document (whose <html> has no lang of its own).
+@Suite("EPUBWebViewBridge - langInjectionJS (bug #336)")
+struct EPUBWebViewBridgeLangJSTests {
+
+    @Test func nilOrEmptyLanguageYieldsNoScript() {
+        #expect(EPUBWebViewBridge.langInjectionJS(language: nil) == nil)
+        #expect(EPUBWebViewBridge.langInjectionJS(language: "") == nil)
+        #expect(EPUBWebViewBridge.langInjectionJS(language: "   ") == nil)  // sanitizes to empty
+    }
+
+    @Test func validLanguageSetsDocumentLangWhenAbsent() {
+        let js = EPUBWebViewBridge.langInjectionJS(language: "en")
+        #expect(js?.contains("var lang = 'en';") == true)
+        #expect(js?.contains("html.setAttribute('lang', lang)") == true)
+        #expect(js?.contains("document.body.setAttribute('lang', lang)") == true)
+        // Only sets when absent — never clobbers a chapter declaring its own lang.
+        #expect(js?.contains("!html.getAttribute('lang')") == true)
+    }
+
+    @Test func bcp47RegionTagPreserved() {
+        #expect(EPUBWebViewBridge.langInjectionJS(language: "zh-CN")?.contains("'zh-CN'") == true)
+    }
+
+    @Test func injectionCharactersAreSanitizedOut() {
+        // A hostile `dc:language` can't break out of the JS string literal — the
+        // sanitizer keeps only [A-Za-z0-9-], dropping quotes / parens / semicolons.
+        let js = EPUBWebViewBridge.langInjectionJS(language: "en'};alert(1)//")
+        #expect(js?.contains("'};") == false)        // no break-out of the literal
+        #expect(js?.contains("alert(") == false)     // the call syntax is gone
+        #expect(js?.contains("var lang = 'enalert1';") == true)  // collapsed to safe charset
+    }
+}
 #endif

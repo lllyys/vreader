@@ -751,6 +751,10 @@ struct EPUBReaderContainerView: View {
                         backgroundImageURL: photoBackgroundDataURL
                     )
                 },
+                // Bug #336: thread the OPF `dc:language` so the bridge can set
+                // `documentElement.lang` and `hyphens: auto` engages for justified
+                // Latin (the stitched host document has no `lang` of its own).
+                contentLanguage: viewModel.metadata?.language,
                 // Feature #54 Phase D-1: compile the book's replacement rules into
                 // the CFI-safe injection JS the bridge runs on each chapter load.
                 replacementJS: EPUBReplacementJS.injectionJS(rules: replacementRules),

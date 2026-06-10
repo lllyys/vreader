@@ -51,6 +51,14 @@ struct EPUBWebViewBridge: UIViewRepresentable {
     let baseDirectory: URL
     /// Optional CSS `<style>` tag to inject for theme overrides.
     var themeCSS: String?
+    /// Bug #336: the publication's BCP-47 language (OPF `dc:language`), threaded
+    /// from `viewModel.metadata?.language`. CSS `hyphens: auto` only engages when
+    /// the document declares a language; the legacy stitched host document has no
+    /// `lang` of its own, so a small `.atDocumentEnd` script sets
+    /// `document.documentElement.lang` from this when absent — making the
+    /// justified-Latin hyphenation (the #336 fix) actually engage. `nil` /
+    /// missing leaves the document unchanged (no engine can infer a safe language).
+    var contentLanguage: String?
     /// Feature #54 Phase D-1: content-replacement injection JS
     /// (`EPUBReplacementJS.injectionJS`) applied to each chapter's text nodes
     /// CFI-safely on `didFinish` (+ a baked observer for appended chapters).
@@ -187,6 +195,17 @@ struct EPUBWebViewBridge: UIViewRepresentable {
             forMainFrameOnly: true
         )
         userContentController.addUserScript(viewportLockScript)
+
+        // Bug #336: set the document language (from OPF `dc:language`) so
+        // `hyphens: auto` engages for justified Latin. The stitched host has no
+        // `lang` of its own; appended chapters inherit `documentElement.lang`.
+        if let langJS = Self.langInjectionJS(language: contentLanguage) {
+            userContentController.addUserScript(WKUserScript(
+                source: langJS,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            ))
+        }
 
         let weakHandler = WeakScriptMessageHandler(context.coordinator)
         // Feature #71 WI-5: mode-branched scroll observer. In continuous-scroll
