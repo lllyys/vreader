@@ -99,7 +99,7 @@ struct MobiEPUBConverterTests {
 
     @Test("converter version is a positive constant")
     func converterVersion() {
-        #expect(MobiEPUBConverter.version >= 1)
+        #expect(MobiEPUBConverter.version == 2)  // bump on any output-byte change
     }
 
     private func le16(_ b: [UInt8], _ o: Int) -> UInt16 {

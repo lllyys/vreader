@@ -21,7 +21,10 @@ enum MobiEPUBConverter {
     /// Converter format version. Bump whenever a change alters the produced EPUB
     /// bytes. Recorded (best-effort) in `ImportProvenance` so a future improvement
     /// is distinguishable; re-conversion is a local re-import operation (WI-4b).
-    static let version = 1
+    /// v2 (Bug #336 reopen): `content.opf` now carries the source MOBI's real
+    /// `dc:language` (was hardcoded `und`), so converted bytes differ for any
+    /// source with an embedded language.
+    static let version = 2
 
     /// Fallback EPUB title when the source has no embedded title. A FIXED string
     /// (not the filename) so the output stays a deterministic function of the

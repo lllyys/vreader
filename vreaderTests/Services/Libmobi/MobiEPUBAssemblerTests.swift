@@ -43,6 +43,23 @@ struct MobiEPUBAssemblerTests {
         #expect(isWellFormedXML(container.data))
     }
 
+    // Bug #336 reopen: the source MOBI's language threads into dc:language so
+    // language-gated rendering (CJK flush-justify) works on converted books.
+    @Test("content.opf carries the threaded dc:language; nil/empty falls back to und")
+    func opfLanguageThreading() throws {
+        let zh = try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T", language: "zh-cn")
+        let zhOPF = try #require(zh.first { $0.path == "OEBPS/content.opf" })
+        #expect(String(decoding: zhOPF.data, as: UTF8.self).contains("<dc:language>zh-cn</dc:language>"))
+
+        let none = try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T")
+        let noneOPF = try #require(none.first { $0.path == "OEBPS/content.opf" })
+        #expect(String(decoding: noneOPF.data, as: UTF8.self).contains("<dc:language>und</dc:language>"))
+
+        let empty = try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T", language: "")
+        let emptyOPF = try #require(empty.first { $0.path == "OEBPS/content.opf" })
+        #expect(String(decoding: emptyOPF.data, as: UTF8.self).contains("<dc:language>und</dc:language>"))
+    }
+
     @Test("content.opf manifests every part + nav, spine is markup in decode order")
     func opfManifestAndSpine() throws {
         let files = (try MobiEPUBAssembler.assemble(parts: sampleParts, title: "T"))
