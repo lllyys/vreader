@@ -276,4 +276,47 @@ struct BookTranslationViewModelTests {
         let progress = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
         #expect(progress.phase == .cancelled)
     }
+
+    // MARK: - Feature #98 WI-2: restartObserving
+
+    /// The coordinator's progress stream is ONE-SHOT — it finishes on any
+    /// terminal phase. `restartObserving()` is the explicit re-subscribe so
+    /// an auto-RESUMED job's snapshots reach a VM whose previous stream
+    /// already finished (Gate-2 round-1 High 1).
+    @Test func restartObserving_deliversAResumedJobsSnapshots_afterTerminalStream() async throws {
+        let units = [Self.unit("ch1"), Self.unit("ch2")]
+        let store = try Self.makeStore()
+        let sender = MockTranslationSender(responses: ["[\"a\"]", "[\"b\"]"])
+        let coordinator = Self.makeCoordinator(store: store, sender: sender)
+        let viewModel = BookTranslationViewModel(
+            bookFingerprintKey: Self.bookKey, coordinator: coordinator)
+        await viewModel.startObserving()
+
+        // Job 1 (one unit) runs to .completed — the observed stream FINISHES.
+        let provider1 = MockChapterTextProvider(units: [units[0]], texts: [units[0]: "p1."])
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey, textProvider: provider1,
+            targetLanguage: "Chinese", providerProfileID: Self.providerID,
+            config: Self.makeConfig(), style: .natural)
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(viewModel.progress.phase == .completed)
+        #expect(viewModel.progress.total == 1)
+
+        // Re-subscribe, then job 2 (two units — ch1 cached, ch2 fresh).
+        await viewModel.restartObserving()
+        let provider2 = MockChapterTextProvider(units: units, texts: [
+            units[0]: "p1.", units[1]: "p2."
+        ])
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey, textProvider: provider2,
+            targetLanguage: "Chinese", providerProfileID: Self.providerID,
+            config: Self.makeConfig(), style: .natural)
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(viewModel.progress.total == 2,
+                "the fresh stream must deliver the resumed job's snapshots — the finished one never would")
+        #expect(viewModel.progress.phase == .completed)
+    }
 }

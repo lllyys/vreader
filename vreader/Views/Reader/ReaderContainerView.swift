@@ -537,6 +537,19 @@ struct ReaderContainerView: View {
                 // Details overlay was mounted (Codex Gate-4 round-2 H1).
                 Task { @MainActor in await vm.startObserving() }
             }
+            // Feature #98 WI-2: provider arrival is the resume trigger
+            // for an expiry-interrupted whole-book job (the only moment
+            // a text provider exists). The coordinator's one-job-per-book
+            // invariant absorbs duplicate calls; on an actual resume,
+            // re-subscribe the VM — its previous stream (if any)
+            // finished at the expiry.
+            let resumeKey = book.fingerprintKey
+            Task { @MainActor in
+                let resumed = await BookTranslationCoordinator.shared
+                    .resumeInterruptedJob(
+                        bookFingerprintKey: resumeKey, textProvider: provider)
+                if resumed { await translateBookVM?.restartObserving() }
+            }
         }
         // Bug #262 / GH #1136: the live AZW3/MOBI Contents source. Folded
         // into a dedicated `ViewModifier` (not an inline `.onReceive`)

@@ -519,9 +519,288 @@ struct BookTranslationCoordinatorTests {
         let requestCount = await sender.requestCount
         #expect(requestCount == 2, "cached unit skipped on resume — 1 request per run, not a restart")
     }
+
+    // MARK: - Feature #98 WI-2: interrupted-job descriptor + resume
+
+    private static func makeDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "f98-wi2-tests-\(UUID().uuidString)")!
+    }
+
+    private static func descriptor(in defaults: UserDefaults, forKey key: String) -> InterruptedTranslationJob? {
+        InterruptedTranslationJobStore(defaults: defaults).job(forBookWithKey: key)
+    }
+
+    private static func seedDescriptor(
+        in defaults: UserDefaults,
+        bookKey: String = bookKey,
+        profileID: UUID = providerID
+    ) {
+        InterruptedTranslationJobStore(defaults: defaults).save(InterruptedTranslationJob(
+            bookFingerprintKey: bookKey,
+            targetLanguage: "Chinese",
+            style: .natural,
+            providerProfileID: profileID))
+    }
+
+    /// A REAL expiry stop persists the resume descriptor — including the
+    /// pinned `providerProfileID` (Gate-2: resuming on "current active
+    /// profile" would silently switch providers).
+    @Test func backgroundExpiry_persistsInterruptedJobDescriptor() async throws {
+        let units = [Self.unit("ch1"), Self.unit("ch2")]
+        let provider = MockChapterTextProvider(units: units, texts: [
+            units[0]: "p1.", units[1]: "p2."
+        ])
+        let store = try Self.makeStore()
+        let sender = GatedTranslationSender(responses: ["[\"a\"]", "[\"b\"]"], gatedRequestIndex: 1)
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let requester = await MockBackgroundTaskRequester()
+        let defaults = Self.makeDefaults()
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            backgroundTasks: requester,
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey, textProvider: provider,
+            targetLanguage: "Chinese", providerProfileID: Self.providerID,
+            config: Self.makeConfig(), style: .natural)
+        await sender.waitUntilGateArrived()
+        await requester.fireExpiry(rawIdentifier: 1)
+        await sender.release()
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+
+        let saved = try #require(Self.descriptor(in: defaults, forKey: Self.bookKey))
+        #expect(saved.providerProfileID == Self.providerID, "resume must pin the SAME provider profile")
+        #expect(saved.targetLanguage == "Chinese")
+        #expect(saved.style == .natural)
+        #expect(saved.v == 1)
+    }
+
+    /// Completion clears the descriptor — no zombie resume after the job
+    /// actually finished.
+    @Test func completion_clearsInterruptedJobDescriptor() async throws {
+        let units = [Self.unit("ch1")]
+        let provider = MockChapterTextProvider(units: units, texts: [units[0]: "p1."])
+        let store = try Self.makeStore()
+        let sender = MockTranslationSender(responses: ["[\"a\"]"])
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let defaults = Self.makeDefaults()
+        Self.seedDescriptor(in: defaults)
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey, textProvider: provider,
+            targetLanguage: "Chinese", providerProfileID: Self.providerID,
+            config: Self.makeConfig(), style: .natural)
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+
+        #expect(Self.descriptor(in: defaults, forKey: Self.bookKey) == nil,
+                "a completed job must clear its resume descriptor")
+    }
+
+    /// USER cancel clears the descriptor — an explicitly-cancelled job must
+    /// not auto-resume at the next reader open.
+    @Test func userCancel_clearsInterruptedJobDescriptor() async throws {
+        let units = [Self.unit("ch1"), Self.unit("ch2")]
+        let provider = MockChapterTextProvider(units: units, texts: [
+            units[0]: "p1.", units[1]: "p2."
+        ])
+        let store = try Self.makeStore()
+        let sender = GatedTranslationSender(responses: ["[\"a\"]", "[\"b\"]"], gatedRequestIndex: 1)
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let defaults = Self.makeDefaults()
+        Self.seedDescriptor(in: defaults)
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey, textProvider: provider,
+            targetLanguage: "Chinese", providerProfileID: Self.providerID,
+            config: Self.makeConfig(), style: .natural)
+        await sender.waitUntilGateArrived()
+        await coordinator.cancel(bookFingerprintKey: Self.bookKey)
+        await sender.release()
+        try? await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+
+        #expect(Self.descriptor(in: defaults, forKey: Self.bookKey) == nil,
+                "user cancel must clear the resume descriptor — no zombie resume")
+    }
+
+    /// `resumeInterruptedJob` re-resolves the PERSISTED profile id through
+    /// the injected resolver and re-enters `start` — cached units skipped
+    /// (resume, not restart), and the descriptor clears on completion.
+    @Test func resumeInterruptedJob_resolvesPersistedProfile_skipsCached_completes() async throws {
+        let units = [Self.unit("ch1"), Self.unit("ch2")]
+        let provider = MockChapterTextProvider(units: units, texts: [
+            units[0]: "p1.", units[1]: "p2."
+        ])
+        let store = try Self.makeStore()
+        // ch1 already cached — the pre-expiry checkpoint.
+        try await store.upsert(ChapterTranslationRecord(
+            bookFingerprintKey: Self.bookKey,
+            unitStorageKey: units[0].storageKey,
+            targetLanguage: "Chinese",
+            providerProfileID: Self.providerID,
+            promptVersion: "v1",
+            translatedSegments: ["一"],
+            sourceParagraphCount: 1))
+        let sender = MockTranslationSender(responses: ["[\"b\"]"])
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let defaults = Self.makeDefaults()
+        Self.seedDescriptor(in: defaults)
+        let resolver = StubProviderConfigResolver(result: .success(Self.makeConfig()))
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+        await coordinator.configure(service: service, resolver: resolver)
+
+        let resumed = await coordinator.resumeInterruptedJob(
+            bookFingerprintKey: Self.bookKey, textProvider: provider)
+        #expect(resumed, "a persisted descriptor + working resolver must start the job")
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+
+        let calls = await resolver.calls
+        #expect(calls == [Self.providerID], "must resolve the PERSISTED profile id, nothing else")
+        let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
+        #expect(final.phase == .completed)
+        let requestCount = await sender.requestCount
+        #expect(requestCount == 1, "cached unit skipped — resume, not restart")
+        #expect(Self.descriptor(in: defaults, forKey: Self.bookKey) == nil)
+    }
+
+    /// A resolver failure (deleted profile, missing key) logs, RETAINS the
+    /// descriptor for a later retry, and starts nothing (plan-authoritative
+    /// deleted-profile behavior).
+    @Test func resumeInterruptedJob_resolverThrows_retainsDescriptor_startsNothing() async throws {
+        let units = [Self.unit("ch1")]
+        let provider = MockChapterTextProvider(units: units, texts: [units[0]: "p1."])
+        let store = try Self.makeStore()
+        let sender = MockTranslationSender(responses: [])
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let defaults = Self.makeDefaults()
+        Self.seedDescriptor(in: defaults)
+        let resolver = StubProviderConfigResolver(result: .failure(
+            AIError.providerError("The selected AI provider no longer exists.")))
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+        await coordinator.configure(service: service, resolver: resolver)
+
+        let resumed = await coordinator.resumeInterruptedJob(
+            bookFingerprintKey: Self.bookKey, textProvider: provider)
+
+        #expect(!resumed)
+        let requestCount = await sender.requestCount
+        #expect(requestCount == 0, "nothing reaches the provider")
+        #expect(Self.descriptor(in: defaults, forKey: Self.bookKey) != nil,
+                "descriptor retained — a later foreground retries")
+    }
+
+    /// No descriptor → no-op. Unconfigured resolver → no-op with the
+    /// descriptor retained.
+    @Test func resumeInterruptedJob_noDescriptor_orNoResolver_noOps() async throws {
+        let units = [Self.unit("ch1")]
+        let provider = MockChapterTextProvider(units: units, texts: [units[0]: "p1."])
+        let store = try Self.makeStore()
+        let sender = MockTranslationSender(responses: [])
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let defaults = Self.makeDefaults()
+        let resolver = StubProviderConfigResolver(result: .success(Self.makeConfig()))
+
+        // (a) resolver configured, NO descriptor.
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+        await coordinator.configure(service: service, resolver: resolver)
+        #expect(await !coordinator.resumeInterruptedJob(
+            bookFingerprintKey: Self.bookKey, textProvider: provider))
+
+        // (b) descriptor present, resolver NOT configured.
+        Self.seedDescriptor(in: defaults)
+        let bare = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+        #expect(await !bare.resumeInterruptedJob(
+            bookFingerprintKey: Self.bookKey, textProvider: provider))
+        #expect(Self.descriptor(in: defaults, forKey: Self.bookKey) != nil,
+                "an unwired resolver must not destroy the descriptor")
+    }
+
+    /// While a job is already running for the book, resume is a silent no-op
+    /// (the one-job-per-book invariant absorbs duplicate calls from multiple
+    /// containers).
+    @Test func resumeInterruptedJob_whileJobRunning_isNoOp() async throws {
+        let units = [Self.unit("ch1")]
+        let provider = MockChapterTextProvider(units: units, texts: [units[0]: "p1."])
+        let store = try Self.makeStore()
+        let sender = GatedTranslationSender(responses: ["[\"a\"]"], gatedRequestIndex: 1)
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let defaults = Self.makeDefaults()
+        Self.seedDescriptor(in: defaults)
+        let resolver = StubProviderConfigResolver(result: .success(Self.makeConfig()))
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+        await coordinator.configure(service: service, resolver: resolver)
+
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey, textProvider: provider,
+            targetLanguage: "Chinese", providerProfileID: Self.providerID,
+            config: Self.makeConfig(), style: .natural)
+        await sender.waitUntilGateArrived()
+
+        let resumed = await coordinator.resumeInterruptedJob(
+            bookFingerprintKey: Self.bookKey, textProvider: provider)
+        #expect(!resumed, "one job per book — resume during a live job is a no-op")
+        let calls = await resolver.calls
+        #expect(calls.isEmpty, "no resolver round-trip for a no-op resume")
+
+        await sender.release()
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+    }
+
+    /// Undecodable / unknown-version descriptor entries are ignored
+    /// (forward compat — the `v` field guards).
+    @Test func interruptedJobStore_ignoresUnknownVersions_andGarbage() throws {
+        let defaults = Self.makeDefaults()
+        let store = InterruptedTranslationJobStore(defaults: defaults)
+        // Garbage data for one book.
+        defaults.set(
+            ["bad-book": Data("not json".utf8)],
+            forKey: InterruptedTranslationJobStore.defaultsKey)
+        #expect(store.job(forBookWithKey: "bad-book") == nil)
+
+        // Unknown future version.
+        var future = InterruptedTranslationJob(
+            bookFingerprintKey: "future-book", targetLanguage: "Chinese",
+            style: .natural, providerProfileID: Self.providerID)
+        future.v = 99
+        store.save(future)
+        #expect(store.job(forBookWithKey: "future-book") == nil,
+                "unknown schema versions are ignored, not misread")
+    }
 }
 
 // MARK: - Test doubles
+
+/// Feature #98 WI-2: records the profile ids resolved through the
+/// `ProviderConfigResolving` seam and returns a canned result.
+actor StubProviderConfigResolver: ProviderConfigResolving {
+    private(set) var calls: [UUID] = []
+    private let result: Result<ResolvedAIProviderConfig, Error>
+
+    init(result: Result<ResolvedAIProviderConfig, Error>) { self.result = result }
+
+    func resolveProviderConfig(
+        profileID: UUID, modelOverride: String?
+    ) async throws -> ResolvedAIProviderConfig {
+        calls.append(profileID)
+        return try result.get()
+    }
+}
 
 /// Read-only stub of `ChapterTextProviding` for coordinator tests.
 /// Feature #98 (Gate-4 round-1 Medium): a sender whose Nth

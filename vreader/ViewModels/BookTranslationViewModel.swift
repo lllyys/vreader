@@ -108,6 +108,16 @@ final class BookTranslationViewModel {
         observationTask = nil
     }
 
+    /// Feature #98 WI-2: explicit re-subscribe after a previous stream
+    /// finished. The coordinator's progress stream is ONE-SHOT (it finishes
+    /// on any terminal phase), so an auto-RESUMED job's snapshots would
+    /// never reach a VM still holding the dead subscription. Semantically
+    /// `startObserving()` (which already replaces the prior subscription);
+    /// named separately so resume call-sites read as intent, not accident.
+    func restartObserving() async {
+        await startObserving()
+    }
+
     // MARK: - Row-tap routing (Bug #328)
 
     /// Routes a tap on the Book Details "Translate entire book…" row. While a

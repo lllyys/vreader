@@ -62,6 +62,11 @@ actor BookTranslationCoordinator {
     /// Feature #98: grace-window seam. Optional — nil (unwired) degrades to
     /// today's behavior: no background token, the job dies on suspension.
     private var backgroundTasks: (any BackgroundTaskRequesting)?
+    /// Feature #98 WI-2: rebuilds a config from a PERSISTED profile id on
+    /// resume. Optional — nil (unwired) makes `resumeInterruptedJob` a no-op.
+    private var resolver: (any ProviderConfigResolving)?
+    /// Feature #98 WI-2: descriptor persistence for expiry-interrupted jobs.
+    private let interruptedJobs: InterruptedTranslationJobStore
     private var runningJobs: [String: Task<Void, Never>] = [:]
     private var snapshots: [String: BookTranslationProgress] = [:]
     private var continuations: [String: [UUID: AsyncStream<BookTranslationProgress>.Continuation]] = [:]
@@ -71,25 +76,30 @@ actor BookTranslationCoordinator {
         service: ChapterTranslationService?,
         store: ChapterTranslationStore,
         promptVersion: String,
-        backgroundTasks: (any BackgroundTaskRequesting)? = nil
+        backgroundTasks: (any BackgroundTaskRequesting)? = nil,
+        interruptedJobs: InterruptedTranslationJobStore = InterruptedTranslationJobStore()
     ) {
         self.service = service
         self.store = store
         self.promptVersion = promptVersion
         self.backgroundTasks = backgroundTasks
+        self.interruptedJobs = interruptedJobs
     }
 
     /// Wires the production service onto the singleton once
     /// `VReaderApp.init()` has constructed it. Idempotent — a second
     /// call replaces the wired service (harmless; production calls once).
-    /// Feature #98: also wires the background-task requester (passing nil
-    /// leaves any previously-wired requester in place).
+    /// Feature #98: also wires the background-task requester and the
+    /// provider-config resolver (passing nil leaves a previously-wired
+    /// value in place).
     func configure(
         service: ChapterTranslationService,
-        backgroundTasks: (any BackgroundTaskRequesting)? = nil
+        backgroundTasks: (any BackgroundTaskRequesting)? = nil,
+        resolver: (any ProviderConfigResolving)? = nil
     ) {
         self.service = service
         if let backgroundTasks { self.backgroundTasks = backgroundTasks }
+        if let resolver { self.resolver = resolver }
     }
 
     // MARK: - Feature #98: background expiry
@@ -176,6 +186,14 @@ actor BookTranslationCoordinator {
         // Feature #98: per-RUN expiry latch — a fresh run can never inherit
         // a stale expiry from a previous one by construction.
         let expiry = BackgroundExpiryLatch()
+        // Feature #98 WI-2: the resume descriptor this run persists if its
+        // background window expires. Pins the RESOLVED profile id — resume
+        // must not silently switch providers.
+        let resumeDescriptor = InterruptedTranslationJob(
+            bookFingerprintKey: bookFingerprintKey,
+            targetLanguage: targetLanguage,
+            style: style,
+            providerProfileID: providerProfileID)
 
         guard let service else {
             log.error("BookTranslationCoordinator: not configured with a service; ignoring start")
@@ -227,7 +245,8 @@ actor BookTranslationCoordinator {
                 if expiry.isSet {
                     await self?.recordExpiryStop(
                         forBookWithKey: bookFingerprintKey,
-                        completed: completed, total: total)
+                        completed: completed, total: total,
+                        descriptor: resumeDescriptor)
                     return
                 }
                 if cachedKeys.contains(unit.storageKey) {
@@ -302,7 +321,55 @@ actor BookTranslationCoordinator {
         if let task = runningJobs[bookFingerprintKey] {
             await task.value
         }
+        // Feature #98 WI-2: a deleted book must not auto-resume either.
+        interruptedJobs.remove(forBookWithKey: bookFingerprintKey)
         try await store.deleteTranslations(forBookWithKey: bookFingerprintKey)
+    }
+
+    // MARK: - Feature #98 WI-2: resume
+
+    /// Resumes an expiry-interrupted whole-book job, called by the reader
+    /// container when the book's text provider arrives (reader open — the
+    /// only moment a `ChapterTextProviding` exists). Rebuilds the config
+    /// from the PERSISTED `providerProfileID` through the resolver seam and
+    /// re-enters `start` (the `cachedUnits` skip IS the resume). Returns
+    /// whether a job was started so the caller knows to re-subscribe its VM.
+    ///
+    /// Deleted-profile behavior (plan-authoritative): a resolver throw logs,
+    /// RETAINS the descriptor, and starts nothing — recovery is the user's
+    /// normal manual re-start from Book Details. No descriptor, no resolver,
+    /// or an already-running job → silent no-op (the one-job-per-book
+    /// invariant absorbs duplicate calls from multiple containers).
+    func resumeInterruptedJob(
+        bookFingerprintKey: String,
+        textProvider: any ChapterTextProviding
+    ) async -> Bool {
+        guard runningJobs[bookFingerprintKey] == nil else { return false }
+        guard let descriptor = interruptedJobs.job(forBookWithKey: bookFingerprintKey) else {
+            return false
+        }
+        guard let resolver else {
+            log.error("resumeInterruptedJob: no resolver configured; keeping descriptor for \(bookFingerprintKey, privacy: .public)")
+            return false
+        }
+        let config: ResolvedAIProviderConfig
+        do {
+            config = try await resolver.resolveProviderConfig(
+                profileID: descriptor.providerProfileID, modelOverride: nil)
+        } catch {
+            // Deleted profile / missing key: keep the descriptor so a later
+            // foreground (or a manual re-start) can retry.
+            log.error("resumeInterruptedJob: resolve failed for \(bookFingerprintKey, privacy: .public): \(String(describing: error), privacy: .private)")
+            return false
+        }
+        await start(
+            bookFingerprintKey: bookFingerprintKey,
+            textProvider: textProvider,
+            targetLanguage: descriptor.targetLanguage,
+            providerProfileID: descriptor.providerProfileID,
+            config: config,
+            style: descriptor.style)
+        return runningJobs[bookFingerprintKey] != nil
     }
 
     // MARK: - Progress observation
@@ -362,6 +429,11 @@ actor BookTranslationCoordinator {
     ) {
         let phase: BookTranslationProgress.Phase =
             cancelled ? .cancelled : (completed >= total ? .completed : .cancelled)
+        // Feature #98 WI-2: completion and user cancel both clear the resume
+        // descriptor — no zombie resume. (A provider FAILURE goes through
+        // `recordFailure`, which deliberately retains any descriptor so a
+        // later foreground can retry.)
+        interruptedJobs.remove(forBookWithKey: key)
         updateProgress(forKey: key, phase: phase, completed: completed, total: total)
         runningJobs[key] = nil
     }
@@ -374,9 +446,16 @@ actor BookTranslationCoordinator {
     /// Feature #98: clean between-units stop after a background expiry.
     /// Reuses the `.failed` phase — the status sheet already renders it as
     /// the designed "PAUSED" state, and completed units stay cached as the
-    /// resume checkpoint.
-    private func recordExpiryStop(forBookWithKey key: String, completed: Int, total: Int) {
+    /// resume checkpoint. WI-2: persists the resume descriptor consumed by
+    /// `resumeInterruptedJob` at the next reader open.
+    private func recordExpiryStop(
+        forBookWithKey key: String,
+        completed: Int,
+        total: Int,
+        descriptor: InterruptedTranslationJob
+    ) {
         log.info("background window expired for \(key, privacy: .public); stopped at \(completed)/\(total) between units")
+        interruptedJobs.save(descriptor)
         updateProgress(forKey: key, phase: .failed, completed: completed, total: total)
         runningJobs[key] = nil
     }

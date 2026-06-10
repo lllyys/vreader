@@ -162,10 +162,13 @@ struct VReaderApp: App {
                     store: ChapterTranslationStore.shared,
                     promptVersion: "bilingual-v1")
                 // Feature #98: the requester lets the job renew a background
-                // grace window per unit so backgrounding doesn't kill it.
+                // grace window per unit so backgrounding doesn't kill it;
+                // the resolver (WI-2) lets resumeInterruptedJob rebuild the
+                // PERSISTED profile's config at the next reader open.
                 let backgroundTasks = await MainActor.run { UIApplication.shared }
                 await BookTranslationCoordinator.shared.configure(
-                    service: service, backgroundTasks: backgroundTasks)
+                    service: service, backgroundTasks: backgroundTasks,
+                    resolver: aiService)
             }
 
             // Feature #54 WI-5: one-shot migration retiring the
