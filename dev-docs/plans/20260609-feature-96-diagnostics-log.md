@@ -77,6 +77,75 @@ New files under `vreader/Services/Diagnostics/`:
 - The DebugBridge (`vreader-debug://`) — DEBUG-only dev harness, distinct from this Release user feature.
 - Changing any of the 75 existing `Logger` call sites (WI-1 reads them back as-is).
 
+## Surface area (WI-2 — UNBLOCKED 2026-06-10, #1597 design landed)
+
+Design source: `dev-docs/designs/vreader-fidelity-v1/project/vreader-diagnostics.jsx`
++ `design-notes/diagnostics-log-viewer.md` (committed PR #1603). The viewer binds
+to WI-1's already-built, already-tested `DiagnosticsLogStore` — no change to the
+WI-1 capture/redact/export layer.
+
+New files under `vreader/Views/Settings/Diagnostics/`:
+
+1. **`DiagnosticsLevelStyle.swift`** — PURE (Foundation-only, render-free so it
+   unit-tests without SwiftUI). `DiagnosticsLevelTint {error,info,neutral}` +
+   `DiagnosticsLevel.viewerTint` (design `diagLevelColor`: error/fault→red,
+   info→blue, else→sub); `DiagnosticsLevelFilter {all,errors,debug,info}` with a
+   `matches(_:)` predicate (`errors` includes `.fault`); `DiagnosticsDaySection`
+   + `DiagnosticsDayGrouper.sections(from:now:calendar:)` (newest-first day
+   buckets, `now`/`calendar`-injected for deterministic tests).
+2. **`DiagnosticsLogViewModel.swift`** — `@MainActor @Observable`. Owns the store
+   + the level/category filter selection + the expanded-row identity. Derives
+   `filteredEntries`, `daySections(now:)`, per-chip `count(for:)`, `categories`,
+   `exportText()` (redacted, filter-narrowed), `exportFileName(now:)`
+   (`vreader-log-YYYY-MM-DD.txt`), and `footerScope`. Changing a filter collapses
+   the expanded row.
+3. **`DiagnosticsLogRow.swift`** — one row (design `DiagLogRow`): mono timestamp ·
+   colored uppercase level · category pill over a 3-line-clamped monospace
+   message; tap expands + reveals a redacting "Copy entry". Carries the
+   `Color(diagnosticsHex:)` helper + `DiagnosticsLevelTint.color(isDark:neutral:)`.
+4. **`DiagnosticsFilterChips.swift`** — `DiagnosticsChip` (inverted-ink pill;
+   Errors chip takes the error tint when active) + `DiagnosticsFilterBar` (level
+   row with counts + scrollable category row).
+5. **`DiagnosticsLogView.swift`** — the pushed screen (design `DiagLogViewer`):
+   nav title "Diagnostics", trailing share button → writes the redacted export to
+   a temp `.txt` and presents `ShareActivityView`; filter bar + day-grouped list +
+   pinned "Capturing" footer; loading / empty / filtered-empty states
+   (`DiagnosticsEmptyState`).
+
+Modified:
+- **`SettingsRowPalette.swift`** (Models) — add the `diagnostics` spec (steel
+  `#5b6770`, `waveform.path.ecg`).
+- **`SettingsView.swift`** — add a **Support** section at the bottom with the
+  Diagnostics `NavigationLink` row pushing `DiagnosticsLogView`. `sectionsForTesting`
+  / `rowPaletteKeysForTesting` extended.
+- **`SheetSectionContract.swift`** — `appSettings.sections` gains "Support".
+
+### Files OUT of scope (WI-2)
+
+- The system share sheet itself (iOS chrome — design explicitly marks it
+  not-designed-here; only its trigger is ours).
+- The existing About rows (Help & Feedback / Version) — kept intact; Support is a
+  new sibling group, not a teardown of About.
+
+### Manual Audit Evidence (WI-2 — Gate-2 model-assumption check)
+
+Author verified against the live codebase before/while implementing:
+- **Symbols confirmed to exist**: `DiagnosticsLogStore.{entries,hasLoaded,load,
+  filtered,categories,exportText}`, `DiagnosticsLevel.{exportTag,allCases}`,
+  `DiagnosticsLogEntry` (Equatable), `DiagnosticsRedactor.redact`,
+  `ReaderThemeV2.{inkColor,subColor,ruleColor,accentColor,isDark,
+  sheetSurfaceColor}`, `SettingsRowSpec.background.color`, `SettingsIconRow`
+  (detail+showsChevron init), `ShareActivityView(activityItems:)`,
+  `SettingsSectionHeader`, `RGBComponents`.
+- **Edge cases checked**: empty store (plain empty state, share hidden), filtered
+  intersection empty (filtered-empty + Clear filters), `.fault` under the Errors
+  chip, expand-collapse on filter change, temp-file write failure (no sheet),
+  redaction applied to both export + Copy-entry, deterministic export filename.
+- **Risks accepted**: row identity uses `firstIndex(of:)` (entries are value-equal;
+  a duplicate message+date+level+category collapses to one identity — acceptable
+  for a diagnostics viewer, never a correctness issue).
+- The Gate-4 per-PR Codex audit is the binding independent audit for this WI.
+
 ## Prior art / precedent / rejected alternatives
 
 - **`OSLogStore(scope: .currentProcessIdentifier)`** reads the app's OWN current-process

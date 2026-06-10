@@ -89,7 +89,7 @@ struct SettingsView: View {
     /// "AI" group to the established feature-#50 `AISettingsSection`
     /// composite.
     var sectionsForTesting: [String] {
-        ["Cloud & Sync", "Reading", "About"]
+        ["Cloud & Sync", "Reading", "About", "Support"]
     }
 
     /// The `SettingsRowPalette` spec keys for each row this view
@@ -103,7 +103,8 @@ struct SettingsView: View {
             SettingsRowPalette.replacementRules.paletteKey,
             SettingsRowPalette.httpTTS.paletteKey,
             SettingsRowPalette.helpFeedback.paletteKey,
-            SettingsRowPalette.version.paletteKey
+            SettingsRowPalette.version.paletteKey,
+            SettingsRowPalette.diagnostics.paletteKey
         ]
     }
 
@@ -180,6 +181,7 @@ struct SettingsView: View {
                 aiSection
                 readingSection
                 aboutSection
+                supportSection
             }
             .scrollContentBackground(.hidden)
             .background(Color(theme.sheetSurfaceColor))
@@ -318,6 +320,34 @@ struct SettingsView: View {
             .accessibilityIdentifier("settingsVersion")
         } header: {
             SettingsSectionHeader(theme: theme, title: "About")
+        }
+        .listRowBackground(Color(theme.sheetCardSurfaceColor))
+    }
+
+    // MARK: - Support (feature #96 WI-2 — Diagnostics entry)
+
+    /// The Support group — its Diagnostics row pushes the in-app log viewer
+    /// (feature #96). Placed at the bottom so the scripted bug-report ask
+    /// ("Settings → Diagnostics → tap share") is one direct row, not buried
+    /// inside About. Pinned to `vreader-diagnostics.jsx` `DiagSupportGroup`.
+    @ViewBuilder
+    private var supportSection: some View {
+        Section {
+            NavigationLink {
+                DiagnosticsLogView(theme: theme)
+            } label: {
+                SettingsIconRow(
+                    theme: theme,
+                    icon: Image(systemName: SettingsRowPalette.diagnostics.symbolName),
+                    iconBackground: SettingsRowPalette.diagnostics.background.color,
+                    title: "Diagnostics",
+                    detail: "View and export app logs",
+                    showsChevron: false
+                )
+            }
+            .accessibilityIdentifier("settingsDiagnostics")
+        } header: {
+            SettingsSectionHeader(theme: theme, title: "Support")
         }
         .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }

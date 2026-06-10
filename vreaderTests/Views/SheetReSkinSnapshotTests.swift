@@ -79,7 +79,7 @@ struct SheetReSkinSnapshotTests {
     @Test("App Settings sheet sections match the design groups")
     func appSettingsSheetSections() {
         #expect(ReaderSheetKind.appSettings.sections
-            == ["Cloud & Sync", "AI", "Reading", "About"])
+            == ["Cloud & Sync", "AI", "Reading", "About", "Support"])
     }
 
     @Test("App Settings sheet title is the design 'Settings'")
@@ -244,11 +244,12 @@ struct SheetReSkinSnapshotTests {
         let view = SettingsView()
         _ = view.body
         // The re-skinned settings sheet declares the Cloud & Sync /
-        // Reading / About groups directly; the design's fourth group
-        // ("AI") is delegated to the feature-#50 `AISettingsSection`
-        // composite (re-shaping that component is out of WI-10 scope).
+        // Reading / About / Support groups directly; the design's "AI"
+        // group is delegated to the feature-#50 `AISettingsSection`
+        // composite. "Support" (Diagnostics entry) landed with feature
+        // #96 WI-2 (#1597 design).
         #expect(view.sectionsForTesting
-            == ["Cloud & Sync", "Reading", "About"])
+            == ["Cloud & Sync", "Reading", "About", "Support"])
         // The directly-declared groups are a subset of the design's
         // four-group contract, in design order.
         let designGroups = ReaderSheetKind.appSettings.sections
@@ -275,7 +276,8 @@ struct SheetReSkinSnapshotTests {
             "replacementRules",
             "httpTTS",
             "helpFeedback",
-            "version"
+            "version",
+            "diagnostics"
         ])
     }
 

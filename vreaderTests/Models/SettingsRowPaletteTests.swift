@@ -108,6 +108,16 @@ struct SettingsRowPaletteTests {
         #expect(SettingsRowPalette.version.background == RGBComponents(r: 0x99, g: 0x99, b: 0x99))
     }
 
+    // MARK: - Support group (feature #96 WI-2 — vreader-diagnostics.jsx)
+
+    @Test func diagnosticsPinsDesignSymbolAndHex() {
+        // Steel tile `#5b6770`, `DiagPulseIcon` waveform → `waveform.path.ecg`.
+        #expect(SettingsRowPalette.diagnostics.paletteKey == "diagnostics")
+        #expect(SettingsRowPalette.diagnostics.symbolName == "waveform.path.ecg")
+        #expect(SettingsRowPalette.diagnostics.background == RGBComponents(r: 0x5b, g: 0x67, b: 0x70))
+        #expect(UIImage(systemName: SettingsRowPalette.diagnostics.symbolName) != nil)
+    }
+
     // MARK: - RGBComponents
 
     @Test func rgbComponentsAreEquatableByValue() {

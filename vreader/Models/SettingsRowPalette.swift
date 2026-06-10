@@ -119,6 +119,17 @@ enum SettingsRowPalette {
         background: RGBComponents(r: 0x99, g: 0x99, b: 0x99)
     )
 
+    // MARK: - Support group (feature #96 WI-2)
+
+    /// Diagnostics — the design's steel tile `#5b6770` with the `DiagPulseIcon`
+    /// waveform glyph (`vreader-diagnostics.jsx`). `waveform.path.ecg` is the
+    /// faithful SF Symbol for the design's single-pulse line.
+    static let diagnostics = SettingsRowSpec(
+        paletteKey: "diagnostics",
+        symbolName: "waveform.path.ecg",
+        background: RGBComponents(r: 0x5b, g: 0x67, b: 0x70)
+    )
+
     // MARK: - AI group (WI-5 provider + WI-6 toggle rows)
 
     /// AI Provider — the design's `Icons.Sparkle` glyph + `#8c2f2f`
