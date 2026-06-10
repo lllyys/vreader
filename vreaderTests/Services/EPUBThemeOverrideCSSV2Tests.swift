@@ -237,6 +237,17 @@ struct EPUBThemeOverrideCSSV2Tests {
         #expect(css.contains("line-height: 1.80"), "Line height pinned")
     }
 
+    // Bug #336: the #95 `text-align: justify` rule must carry hyphenation so
+    // justified Latin lines break at hyphenation points instead of stretching
+    // inter-word spaces (the "too many gaps between words" report). CJK is
+    // unaffected (it doesn't hyphenate; justify stays clean).
+    @Test func justifyRuleEnablesHyphenationForLatin() {
+        let css = ReaderThemeV2.paper.epubOverrideCSS(fontSize: 18)
+        #expect(css.contains("text-align: justify"))
+        #expect(css.contains("-webkit-hyphens: auto"))
+        #expect(css.contains("hyphens: auto"))
+    }
+
     // MARK: - Legacy → V2 mapping
 
     @Test func legacyLightMapsToPaper() {
@@ -256,8 +267,10 @@ struct EPUBThemeOverrideCSSV2Tests {
     @Test func bodyProseIsJustifiedByDefault() {
         let css = normalize(ReaderThemeV2.paper.epubOverrideCSS(fontSize: 18))
         #expect(css.contains("text-align: justify !important"))
-        // Scoped to prose <p>, guarded against intentional alignment.
-        #expect(css.contains("p:not([style*=\"text-align\"]):not([align]):not([class*=\"center\"]):not([class*=\"right\"]) { text-align: justify !important; }"))
+        // Scoped to prose <p>, guarded against intentional alignment. Bug #336
+        // added hyphenation inside the same rule, so assert the selector + each
+        // declaration rather than the exact rule body.
+        #expect(css.contains("p:not([style*=\"text-align\"]):not([align]):not([class*=\"center\"]):not([class*=\"right\"]) { text-align: justify !important; -webkit-hyphens: auto; hyphens: auto; }"))
         // The justify selector is p-only — headings keep their own alignment.
         #expect(!css.contains("h1,h2,h3,h4,h5,h6 { text-align: justify"))
     }

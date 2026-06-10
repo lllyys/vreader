@@ -134,6 +134,8 @@ extension ReaderThemeV2 {
         }\
         p:not([style*="text-align"]):not([align]):not([class*="center"]):not([class*="right"]) { \
           text-align: justify !important; \
+          -webkit-hyphens: auto; \
+          hyphens: auto; \
         }\
         body * { \
           font-family: inherit !important; \

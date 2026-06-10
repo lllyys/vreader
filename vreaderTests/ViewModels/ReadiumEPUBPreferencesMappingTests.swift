@@ -58,6 +58,14 @@ struct ReadiumEPUBPreferencesMappingTests {
         #expect(prefs().textAlign == .justify)
     }
 
+    // Bug #336: justified Latin text without hyphenation stretches inter-word
+    // spaces ("body's␣␣␣␣chemistry"). Enable Readium hyphenation explicitly so
+    // long lines break at hyphenation points instead of gapping — #95 relied on
+    // an "auto" assumption that didn't hold.
+    @Test func hyphensEnabledToPreventGappyJustification() {
+        #expect(prefs().hyphens == true)
+    }
+
     @Test(arguments: [
         ReaderThemeV2.paper, .sepia, .dark, .oled, .photo,
     ])

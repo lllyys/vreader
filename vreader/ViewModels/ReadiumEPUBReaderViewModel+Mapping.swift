@@ -125,13 +125,21 @@ extension ReadiumEPUBReaderViewModel {
             backgroundColor: bg,
             fontFamily: readiumFontFamily(for: typography.fontFamily),
             fontSize: Double(calibratedFontSizePt / fontSizeBasePt),
+            // Bug #336: enable hyphenation explicitly. Feature #95 assumed
+            // Readium auto-enables hyphenation when justify is on, but justified
+            // Latin still stretched inter-word spaces ("body's␣␣␣␣chemistry").
+            // Setting `hyphens: true` makes ReadiumCSS break long lines at
+            // hyphenation points instead of gapping. CJK is unaffected (it
+            // doesn't hyphenate; justify stays clean). Declared before
+            // `lineHeight` per the `EPUBPreferences` init parameter order.
+            hyphens: true,
             lineHeight: Double(typography.lineSpacing),
             pageMargins: defaultPageMargins,
             publisherStyles: false,
             scroll: layout == .scroll,
             // Feature #95: justify body text by default (the EPUB analog of #92
-            // TXT). Readium owns its own per-paragraph cascade + auto-enables
-            // hyphenation + blockquote/figcaption exclusions when justify is on.
+            // TXT). Readium owns its own per-paragraph cascade + blockquote/
+            // figcaption exclusions when justify is on.
             textAlign: .justify,
             textColor: Color(uiColor: theme.inkColor),
             theme: readiumTheme(for: theme)
