@@ -46,7 +46,10 @@ struct MockAIProviderTests {
         #expect(sawComplete)
         #expect(chunkCount > 1)                 // streamed, not one shot
         #expect(assembled.contains("[MOCK]"))
-        #expect(assembled.contains("Drew on"))  // citation-style context reflection
+        #expect(assembled.contains("drew on"))  // citation-style context reflection
+        // Bug #335: the mock now emits markdown (real LLMs do) so the chat-row
+        // markdown rendering is exercised in verification.
+        #expect(assembled.contains("**bold**") || assembled.contains("- "))
     }
 
     @Test func reply_translateActionProducesInterlinearMarker() {

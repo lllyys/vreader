@@ -102,7 +102,13 @@ final class MockAIProvider: AIProvider {
         case .summarize:
             return "[MOCK] Summary of \(request.contextText.count) chars of context."
         default:
-            return "[MOCK] Re: \(prompt). Drew on \(request.contextText.count) chars of context."
+            // Bug #335: real LLMs emit markdown, so the mock does too — this keeps
+            // the chat-verification fixture faithful (the `[MOCK]` token survives
+            // for `.contains("[MOCK]")` assertions; the markup exercises the chat
+            // row's markdown rendering).
+            return "**[MOCK]** Re: \(prompt). Key points:\n"
+                + "- drew on \(request.contextText.count) chars of context\n"
+                + "- **bold** and `code` now render as formatting"
         }
     }
 
