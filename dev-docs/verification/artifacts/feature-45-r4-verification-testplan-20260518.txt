@@ -1,0 +1,103 @@
+Test Suite 'Selected tests' started at 2026-05-18 05:47:19.119.
+Test Suite 'vreaderUITests.xctest' started at 2026-05-18 05:47:19.119.
+Test Suite 'Feature11EPUBBottomChromeVerificationTests' started at 2026-05-18 05:47:19.119.
+Test Case '-[vreaderUITests.Feature11EPUBBottomChromeVerificationTests test_verify_bug_214_epub_bottom_chrome_buttons_resolve]' started.
+Test Case '-[vreaderUITests.Feature11EPUBBottomChromeVerificationTests test_verify_bug_214_epub_bottom_chrome_buttons_resolve]' passed (11.547 seconds).
+Test Case '-[vreaderUITests.Feature11EPUBBottomChromeVerificationTests test_verify_bug_214_epub_display_button_opens_settings_panel]' started.
+Test Case '-[vreaderUITests.Feature11EPUBBottomChromeVerificationTests test_verify_bug_214_epub_display_button_opens_settings_panel]' passed (11.611 seconds).
+Test Suite 'Feature11EPUBBottomChromeVerificationTests' passed at 2026-05-18 05:47:42.280.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 23.158 (23.160) seconds
+Test Suite 'Feature11EPUBHighlightVerificationTests' started at 2026-05-18 05:47:42.281.
+Test Case '-[vreaderUITests.Feature11EPUBHighlightVerificationTests test_verify_feature_11_epub_highlight_happy_path]' started.
+Test Case '-[vreaderUITests.Feature11EPUBHighlightVerificationTests test_verify_feature_11_epub_highlight_happy_path]' skipped (26.547 seconds).
+Test Case '-[vreaderUITests.Feature11EPUBHighlightVerificationTests test_verify_feature_11_epub_highlight_regression_bug77_buffering_race]' started.
+Test Case '-[vreaderUITests.Feature11EPUBHighlightVerificationTests test_verify_feature_11_epub_highlight_regression_bug77_buffering_race]' skipped (26.341 seconds).
+Test Suite 'Feature11EPUBHighlightVerificationTests' passed at 2026-05-18 05:48:35.171.
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 52.888 (52.890) seconds
+Test Suite 'Feature21PaginatedModeVerificationTests' started at 2026-05-18 05:48:35.172.
+Test Case '-[vreaderUITests.Feature21PaginatedModeVerificationTests test_verify_feature_21_paged_mode_page_navigation]' started.
+Test Case '-[vreaderUITests.Feature21PaginatedModeVerificationTests test_verify_feature_21_paged_mode_page_navigation]' skipped (14.444 seconds).
+Test Case '-[vreaderUITests.Feature21PaginatedModeVerificationTests test_verify_feature_21_paged_mode_shows_paged_view]' started.
+Test Case '-[vreaderUITests.Feature21PaginatedModeVerificationTests test_verify_feature_21_paged_mode_shows_paged_view]' skipped (14.411 seconds).
+Test Suite 'Feature21PaginatedModeVerificationTests' passed at 2026-05-18 05:49:04.029.
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 28.855 (28.857) seconds
+Test Suite 'Feature23TXTTocVerificationTests' started at 2026-05-18 05:49:04.029.
+Test Case '-[vreaderUITests.Feature23TXTTocVerificationTests test_verify_feature_23_txt_toc_navigation_jumps_to_chapter]' started.
+Test Case '-[vreaderUITests.Feature23TXTTocVerificationTests test_verify_feature_23_txt_toc_navigation_jumps_to_chapter]' passed (13.759 seconds).
+Test Case '-[vreaderUITests.Feature23TXTTocVerificationTests test_verify_feature_23_txt_toc_populated_for_chapters]' started.
+Test Case '-[vreaderUITests.Feature23TXTTocVerificationTests test_verify_feature_23_txt_toc_populated_for_chapters]' passed (12.892 seconds).
+Test Suite 'Feature23TXTTocVerificationTests' passed at 2026-05-18 05:49:30.682.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 26.651 (26.653) seconds
+Test Suite 'Feature27ReplacementRulesVerificationTests' started at 2026-05-18 05:49:30.682.
+Test Case '-[vreaderUITests.Feature27ReplacementRulesVerificationTests test_verify_feature_27_replacement_rule_ui_surface]' started.
+Test Case '-[vreaderUITests.Feature27ReplacementRulesVerificationTests test_verify_feature_27_replacement_rule_ui_surface]' passed (9.487 seconds).
+Test Suite 'Feature27ReplacementRulesVerificationTests' passed at 2026-05-18 05:49:40.170.
+	 Executed 1 test, with 0 failures (0 unexpected) in 9.487 (9.488) seconds
+Test Suite 'Feature28ChineseConversionVerificationTests' started at 2026-05-18 05:49:40.171.
+Test Case '-[vreaderUITests.Feature28ChineseConversionVerificationTests test_verify_feature_28_chinese_text_picker_present]' started.
+Test Case '-[vreaderUITests.Feature28ChineseConversionVerificationTests test_verify_feature_28_chinese_text_picker_present]' passed (16.139 seconds).
+Test Case '-[vreaderUITests.Feature28ChineseConversionVerificationTests test_verify_feature_28_conversion_applies_to_reader_content]' started.
+Test Case '-[vreaderUITests.Feature28ChineseConversionVerificationTests test_verify_feature_28_conversion_applies_to_reader_content]' skipped (3.505 seconds).
+Test Suite 'Feature28ChineseConversionVerificationTests' passed at 2026-05-18 05:49:59.817.
+	 Executed 2 tests, with 1 test skipped and 0 failures (0 unexpected) in 19.644 (19.646) seconds
+Test Suite 'Feature29WebDAVVerificationTests' started at 2026-05-18 05:49:59.818.
+Test Case '-[vreaderUITests.Feature29WebDAVVerificationTests test_verify_feature_29_webdav_backup_executes_when_configured]' started.
+Test Case '-[vreaderUITests.Feature29WebDAVVerificationTests test_verify_feature_29_webdav_backup_executes_when_configured]' skipped (3.502 seconds).
+Test Case '-[vreaderUITests.Feature29WebDAVVerificationTests test_verify_feature_29_webdav_backup_ui_available]' started.
+Test Case '-[vreaderUITests.Feature29WebDAVVerificationTests test_verify_feature_29_webdav_backup_ui_available]' passed (14.690 seconds).
+Test Suite 'Feature29WebDAVVerificationTests' passed at 2026-05-18 05:50:18.012.
+	 Executed 2 tests, with 1 test skipped and 0 failures (0 unexpected) in 18.192 (18.195) seconds
+Test Suite 'Feature31AutoPageTurnVerificationTests' started at 2026-05-18 05:50:18.013.
+Test Case '-[vreaderUITests.Feature31AutoPageTurnVerificationTests test_verify_feature_31_auto_page_turn_interval_slider_appears_on_enable]' started.
+Test Case '-[vreaderUITests.Feature31AutoPageTurnVerificationTests test_verify_feature_31_auto_page_turn_interval_slider_appears_on_enable]' skipped (20.644 seconds).
+Test Case '-[vreaderUITests.Feature31AutoPageTurnVerificationTests test_verify_feature_31_auto_page_turn_toggle_present]' started.
+Test Case '-[vreaderUITests.Feature31AutoPageTurnVerificationTests test_verify_feature_31_auto_page_turn_toggle_present]' skipped (20.608 seconds).
+Test Suite 'Feature31AutoPageTurnVerificationTests' passed at 2026-05-18 05:50:59.267.
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 41.252 (41.254) seconds
+Test Suite 'Feature34CollectionsVerificationTests' started at 2026-05-18 05:50:59.268.
+Test Case '-[vreaderUITests.Feature34CollectionsVerificationTests test_verify_feature_34_add_book_to_collection_filters_library]' started.
+Test Case '-[vreaderUITests.Feature34CollectionsVerificationTests test_verify_feature_34_add_book_to_collection_filters_library]' passed (28.045 seconds).
+Test Case '-[vreaderUITests.Feature34CollectionsVerificationTests test_verify_feature_34_create_collection_appears_in_sidebar]' started.
+Test Case '-[vreaderUITests.Feature34CollectionsVerificationTests test_verify_feature_34_create_collection_appears_in_sidebar]' passed (19.793 seconds).
+Test Suite 'Feature34CollectionsVerificationTests' passed at 2026-05-18 05:51:47.109.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 47.838 (47.841) seconds
+Test Suite 'Feature35AnnotationsExportVerificationTests' started at 2026-05-18 05:51:47.110.
+Test Case '-[vreaderUITests.Feature35AnnotationsExportVerificationTests test_verify_feature_35_export_button_is_visible]' started.
+Test Case '-[vreaderUITests.Feature35AnnotationsExportVerificationTests test_verify_feature_35_export_button_is_visible]' skipped (11.320 seconds).
+Test Case '-[vreaderUITests.Feature35AnnotationsExportVerificationTests test_verify_feature_35_import_button_is_visible]' started.
+Test Case '-[vreaderUITests.Feature35AnnotationsExportVerificationTests test_verify_feature_35_import_button_is_visible]' skipped (11.295 seconds).
+Test Suite 'Feature35AnnotationsExportVerificationTests' passed at 2026-05-18 05:52:09.727.
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 22.615 (22.618) seconds
+Test Suite 'Feature36OPDSVerificationTests' started at 2026-05-18 05:52:09.728.
+Test Case '-[vreaderUITests.Feature36OPDSVerificationTests test_verify_feature_36_opds_browse_with_live_fixture]' started.
+Test Case '-[vreaderUITests.Feature36OPDSVerificationTests test_verify_feature_36_opds_browse_with_live_fixture]' skipped (3.474 seconds).
+Test Case '-[vreaderUITests.Feature36OPDSVerificationTests test_verify_feature_36_opds_catalog_ui_surface]' started.
+Test Case '-[vreaderUITests.Feature36OPDSVerificationTests test_verify_feature_36_opds_catalog_ui_surface]' passed (14.027 seconds).
+Test Suite 'Feature36OPDSVerificationTests' passed at 2026-05-18 05:52:27.231.
+	 Executed 2 tests, with 1 test skipped and 0 failures (0 unexpected) in 17.501 (17.503) seconds
+Test Suite 'Feature37PerBookSettingsVerificationTests' started at 2026-05-18 05:52:27.232.
+Test Case '-[vreaderUITests.Feature37PerBookSettingsVerificationTests test_verify_feature_37_perbook_settings_persists_across_reopen]' started.
+Test Case '-[vreaderUITests.Feature37PerBookSettingsVerificationTests test_verify_feature_37_perbook_settings_persists_across_reopen]' passed (38.868 seconds).
+Test Case '-[vreaderUITests.Feature37PerBookSettingsVerificationTests test_verify_feature_37_perbook_settings_toggle_isolated_to_book]' started.
+Test Case '-[vreaderUITests.Feature37PerBookSettingsVerificationTests test_verify_feature_37_perbook_settings_toggle_isolated_to_book]' passed (38.916 seconds).
+Test Suite 'Feature37PerBookSettingsVerificationTests' passed at 2026-05-18 05:53:45.018.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 77.784 (77.787) seconds
+Test Suite 'Feature40TTSSentenceHighlightVerificationTests' started at 2026-05-18 05:53:45.019.
+Test Case '-[vreaderUITests.Feature40TTSSentenceHighlightVerificationTests test_verify_feature_40_tts_offset_advances_during_playback]' started.
+Test Case '-[vreaderUITests.Feature40TTSSentenceHighlightVerificationTests test_verify_feature_40_tts_offset_advances_during_playback]' skipped (14.395 seconds).
+Test Case '-[vreaderUITests.Feature40TTSSentenceHighlightVerificationTests test_verify_feature_40_tts_state_reported_after_start]' started.
+Test Case '-[vreaderUITests.Feature40TTSSentenceHighlightVerificationTests test_verify_feature_40_tts_state_reported_after_start]' skipped (14.336 seconds).
+Test Suite 'Feature40TTSSentenceHighlightVerificationTests' passed at 2026-05-18 05:54:13.752.
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 28.730 (28.733) seconds
+Test Suite 'Feature41TTSAutoScrollVerificationTests' started at 2026-05-18 05:54:13.752.
+Test Case '-[vreaderUITests.Feature41TTSAutoScrollVerificationTests test_verify_feature_41_tts_autoscroll_position_advances]' started.
+Test Case '-[vreaderUITests.Feature41TTSAutoScrollVerificationTests test_verify_feature_41_tts_autoscroll_position_advances]' skipped (14.423 seconds).
+Test Case '-[vreaderUITests.Feature41TTSAutoScrollVerificationTests test_verify_feature_41_tts_control_bar_visible_during_playback]' started.
+Test Case '-[vreaderUITests.Feature41TTSAutoScrollVerificationTests test_verify_feature_41_tts_control_bar_visible_during_playback]' skipped (14.445 seconds).
+Test Suite 'Feature41TTSAutoScrollVerificationTests' passed at 2026-05-18 05:54:42.623.
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 28.868 (28.870) seconds
+Test Suite 'vreaderUITests.xctest' passed at 2026-05-18 05:54:42.623.
+	 Executed 27 tests, with 15 tests skipped and 0 failures (0 unexpected) in 443.464 (443.504) seconds
+Test Suite 'Selected tests' passed at 2026-05-18 05:54:42.624.
+	 Executed 27 tests, with 15 tests skipped and 0 failures (0 unexpected) in 443.464 (443.505) seconds
+** TEST SUCCEEDED **

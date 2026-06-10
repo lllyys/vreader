@@ -1,0 +1,35 @@
+Bug #217 / GH #839 — ReplacementTransform regex rules no-op under dispatch-pool saturation
+Verification run on merged main
+
+  commit:      8cab12a4574304831666decf343ffc477943ae31 (v3.27.25, build 439)
+  destination: iPhone 17 Pro Simulator (iOS 26.4.1, 23E254a)
+  config:      Debug
+  gate:        VREADER_RUN_CONTENTION_TESTS=1 injected into the .xctestrun
+               EnvironmentVariables so the opt-in contention test executes
+               (not skipped)
+  command:     xcodebuild test-without-building -xctestrun vreader_All_*.xctestrun
+                 -only-testing:vreaderTests/ReplacementTransformTests
+
+=== ReplacementTransformTests — 15 tests ===
+✔ Test replacement_deletion_emptyReplacement() passed after 0.001 seconds.
+✔ Test replace_disabledRule_skipped() passed after 0.001 seconds.
+✔ Test emptyInput_noOp() passed after 0.001 seconds.
+✔ Test replacement_expansion_longerReplacement() passed after 0.001 seconds.
+✔ Test noRules_identity() passed after 0.001 seconds.
+✔ Test replace_emptyPattern_noOp() passed after 0.001 seconds.
+✔ Test offsetMap_afterReplacement_correct() passed after 0.001 seconds.
+✔ Test cjkCharacters_correct() passed after 0.001 seconds.
+✔ Test replace_multipleRules_appliedInOrder() passed after 0.001 seconds.
+✔ Test replace_simpleString_replaced() passed after 0.001 seconds.
+✔ Test replace_regex_groupCapture() passed after 0.001 seconds.
+✔ Test regex_multipleMatches() passed after 0.001 seconds.
+✔ Test replace_noMatch_unchanged() passed after 0.001 seconds.
+✔ Test replace_invalidRegex_skipped() passed after 0.001 seconds.
+✔ Test regexRule_appliesUnderGlobalQueueContention() passed after 1.600 seconds.
+✔ Suite "ReplacementTransform" passed after 1.601 seconds.
+✔ Test run with 15 tests in 1 suite passed after 1.601 seconds.
+
+=== xcodebuild verdict ===
+** TEST EXECUTE SUCCEEDED **
+
+xcresult: ~/Library/Developer/Xcode/DerivedData/vreader-fmoqhxkmgcufdqdugmmmoopycdcy/Logs/Test/Test-vreader-2026.05.18_03-51-13-+0800.xcresult
