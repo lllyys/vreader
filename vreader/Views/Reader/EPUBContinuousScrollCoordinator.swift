@@ -46,6 +46,17 @@ struct EPUBScrollBoundarySignal: Equatable, Sendable {
     let nearTopBoundary: Bool
     /// The viewport is within the prefetch margin of the BOTTOM of the materialized doc.
     let nearBottomBoundary: Bool
+    /// Bug #329 (round 3) eviction-guard geometry: px of materialized content
+    /// above the viewport top (= `scrollTop`). `nil` when the signal source
+    /// doesn't carry geometry (legacy observer, synthetic test/DebugBridge
+    /// signals) — eviction then falls back to the span-only rule.
+    var pxAbove: Int? = nil
+    /// Px of materialized content below the viewport bottom.
+    var pxBelow: Int? = nil
+    /// Each materialized section's height (px), in DOM order — index 0 is the
+    /// window's `lo` section, last is `hi`. Lets the eviction guard compute how
+    /// much trailing content a candidate eviction would leave.
+    var sectionHeights: [Int]? = nil
 }
 
 @MainActor
@@ -156,9 +167,11 @@ final class EPUBContinuousScrollCoordinator {
         guard !isExtending else { return }
         // Extend toward whichever boundary the viewport is near. `extend` arms the
         // opposite-side echo suppression iff it evicts (Bug #329). Eviction stays
-        // DIRECTIONAL (`evictTrailing`, Bug #327).
+        // DIRECTIONAL (`evictTrailing`, Bug #327) and — round 3 — px-GUARDED: the
+        // signal's geometry rides along so eviction can never strand the trailing
+        // side below the prefetch threshold (the sustained-oscillation source).
         if signal.nearBottomBoundary, !suppressNearBottom, window.canExtendForward {
-            await extend(forward: true)
+            await extend(forward: true, geometry: signal)
             // Bug #329 (Codex hotfix-audit, High): if that forward extend EVICTED
             // it armed `ignoreNextNearTop`. In a DUAL-boundary signal (short window
             // → nearTop AND nearBottom both true) the `nearTop` below is the same
@@ -169,7 +182,7 @@ final class EPUBContinuousScrollCoordinator {
             if ignoreNextNearTop { return }
         }
         if signal.nearTopBoundary, !suppressNearTop, window.canExtendBackward {
-            await extend(forward: false)
+            await extend(forward: false, geometry: signal)
         }
     }
 
@@ -328,7 +341,61 @@ final class EPUBContinuousScrollCoordinator {
 
     // MARK: - Private
 
-    private func extend(forward: Bool) async {
+    /// Bug #329 (round 3): the px margin the eviction guard keeps ON TOP of the
+    /// prefetch threshold, absorbing the drift between the signal's geometry
+    /// snapshot and the eviction. Drift in the travel direction only ADDS slack
+    /// (the snapshot under-states the trailing side); the hazardous direction is
+    /// a REVERSAL during the in-flight extend (Codex Gate-4 Medium: a stale-large
+    /// snapshot could then approve an eviction the reader is heading back into).
+    /// The extend's exposure window is milliseconds (provider + one eval), so 128
+    /// px covers any realistic reversal velocity within it; a violent flick past
+    /// that costs at most ONE evict→prepend-reload of a single section in the
+    /// reader's (new) travel direction — the prepend's in-eval compensation keeps
+    /// the viewport stable, so it is a wasted round-trip, not a visible jump, and
+    /// it cannot oscillate (the reload direction matches travel). Accepted with
+    /// this rationale in the Gate-4 audit log.
+    private static let evictionGuardMarginPx = 128
+
+    /// Bug #329 (round 3): whether evicting the next trailing candidate would
+    /// strand the trailing side of the viewport below the prefetch threshold.
+    ///
+    /// The root cause of the evict→reload oscillation is GEOMETRIC: through a
+    /// run of short sections, removing the trailing one drops `scrollTop` (its
+    /// compensation) — or shrinks the below-viewport remainder — past
+    /// `prefetchPx`, so the opposite boundary flag re-asserts on EVERY
+    /// subsequent scroll report, not just the next one. A one-shot echo
+    /// suppression can only delay each reload by one signal (the v3.59.22
+    /// regression-class). The durable rule: DEFER the eviction until the reader
+    /// has travelled far enough that the side being trimmed retains
+    /// `prefetchPx + margin` px of content. The window then floats above
+    /// `maxSpan` through short front matter (a few hundred px of extra DOM) and
+    /// tightens back over normal-length chapters.
+    ///
+    /// `evictedSoFar` accumulates the heights this extend already trimmed (the
+    /// multi-evict catch-up loop). Returns `false` (defer) when geometry is
+    /// present but the candidate's height is unindexable (a mutation raced the
+    /// report — the next signal carries fresh geometry). Returns `true` when the
+    /// signal carries NO geometry at all (synthetic/test signals keep the legacy
+    /// span-only behaviour).
+    private func evictionKeepsTrailingSlack(
+        forward: Bool,
+        candidatePosition: Int,
+        evictedSoFar: Int,
+        geometry: EPUBScrollBoundarySignal?
+    ) -> Bool {
+        guard let geometry else { return true }
+        guard let heights = geometry.sectionHeights,
+              let pxSide = forward ? geometry.pxAbove : geometry.pxBelow else { return true }
+        // Forward extends trim from the FRONT of the DOM (window.lo → index 0,
+        // then 1, …); backward extends trim from the BACK (window.hi → last,
+        // then last-1, …).
+        let index = forward ? candidatePosition : heights.count - 1 - candidatePosition
+        guard heights.indices.contains(index) else { return false } // raced — defer
+        let remaining = pxSide - evictedSoFar - heights[index]
+        return remaining > EPUBContinuousScrollJS.prefetchPx + Self.evictionGuardMarginPx
+    }
+
+    private func extend(forward: Bool, geometry: EPUBScrollBoundarySignal? = nil) async {
         // Save/restore (WI-8) rather than force-false: `navigate`'s out-of-window
         // rebuild holds `isExtending` across its remove-loop + re-materialize, and
         // the inner extends here must not clear it mid-rebuild (which would let a
@@ -390,8 +457,23 @@ final class EPUBContinuousScrollCoordinator {
         // and shrinks back naturally as the anchor advances.
         let targetSpan = extended.evictTrailing(forward: forward, maxSpan: maxSpan).span
         var committed = extended
+        // Bug #329 (round 3): position of the next eviction candidate within the
+        // SIGNAL's section-height snapshot + the px already trimmed this extend —
+        // the guard's cumulative arithmetic for the multi-evict catch-up loop.
+        var candidatePosition = 0
+        var evictedPx = 0
         while committed.span > targetSpan {
             guard gen == generation else { return } // stale → emit nothing, publish nothing
+            // Bug #329 (round 3): defer the trim (and the rest of the catch-up)
+            // when it would strand the trailing side below prefetch + margin —
+            // the geometric source of the evict→reload oscillation. A later
+            // signal carries fresher geometry and drains the backlog.
+            guard evictionKeepsTrailingSlack(
+                forward: forward,
+                candidatePosition: candidatePosition,
+                evictedSoFar: evictedPx,
+                geometry: geometry
+            ) else { break }
             // Trim exactly the ONE trailing chapter this step (the `lo` end on a
             // forward extend, the `hi` end on a backward extend).
             let next = committed.evictTrailing(forward: forward, maxSpan: committed.span - 1)
@@ -420,6 +502,13 @@ final class EPUBContinuousScrollCoordinator {
             // remove `break`s above, leaving the section + its bucket alone) and
             // AFTER the gen re-check (so a stale task never signals).
             onSectionEvicted?(index)
+            // Bug #329 (round 3): account the trimmed candidate's height into the
+            // guard's cumulative budget for the next catch-up iteration.
+            if let heights = geometry?.sectionHeights {
+                let snapshotIndex = forward ? candidatePosition : heights.count - 1 - candidatePosition
+                if heights.indices.contains(snapshotIndex) { evictedPx += heights[snapshotIndex] }
+            }
+            candidatePosition += 1
             committed = next
         }
         guard gen == generation else { return }

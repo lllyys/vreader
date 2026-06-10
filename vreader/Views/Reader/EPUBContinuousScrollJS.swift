@@ -183,17 +183,41 @@ enum EPUBContinuousScrollJS {
 
     // MARK: - scroll observer
 
+    /// The prefetch margin: a boundary report flags `nearTop`/`nearBottom` when
+    /// the viewport is within this many px of the materialized document's edge.
+    /// Declared in Swift (single source of truth) and interpolated into the
+    /// observer JS; the coordinator's Bug #329 eviction guard reads the SAME
+    /// constant so eviction can never drop the trailing side below the prefetch
+    /// threshold (which would make the opposite boundary re-assert on every
+    /// subsequent scroll signal — the evict→reload oscillation).
+    static let prefetchPx = 800
+
     /// The section-aware scroll observer user script. Replaces the single-`Double`
     /// `progressTrackingJS` in continuous mode: on a throttled scroll it reports
-    /// `{ visibleSpineIndex, intraFraction, nearTopBoundary, nearBottomBoundary }`
+    /// `{ visibleSpineIndex, intraFraction, nearTopBoundary, nearBottomBoundary,
+    ///    pxAbove, pxBelow, sectionHeights }`
     /// — the topmost section in the viewport, how far through it the viewport is,
-    /// and whether the user is within the prefetch threshold of either end.
+    /// whether the user is within the prefetch threshold of either end, and the
+    /// Bug #329 eviction-guard geometry (px of content above/below the viewport +
+    /// each materialized section's height in DOM order).
+    ///
+    /// Bug #329 (round 3) also installs a ResizeObserver: when a section that sits
+    /// ENTIRELY above the viewport grows or shrinks asynchronously (image decode
+    /// after #332, justify/hyphenation re-layout after #95/#336), the content the
+    /// reader is looking at would visibly shift — so the observer compensates
+    /// `scrollTop` by the height delta. The "entirely above" gate uses the
+    /// PRE-resize bottom (`offsetTop + oldH`) — Codex Gate-4 High: gating on the
+    /// post-resize bottom would skip the compensation exactly when a growth
+    /// crosses the viewport top (and over-compensate the symmetric shrink). The
+    /// first observation of a section only
+    /// records its baseline height (the insert-time compensation in
+    /// `prependChapterSectionJS` already covered its initial height).
     static let continuousScrollObserverJS = """
     (function() {
         var root = document.getElementById('\(scrollRootID)');
         if (!root || root.__vreaderScrollObserver) { return; }
         root.__vreaderScrollObserver = true;
-        var PREFETCH_PX = 800;
+        var PREFETCH_PX = \(prefetchPx);
         var ticking = false;
         function report() {
             ticking = false;
@@ -202,28 +226,56 @@ enum EPUBContinuousScrollJS {
             var top = root.scrollTop;
             var visibleSpineIndex = parseInt(sections[0].getAttribute('data-vreader-spine-index'), 10);
             var intraFraction = 0;
+            var sectionHeights = [];
             for (var i = 0; i < sections.length; i++) {
                 var s = sections[i];
+                sectionHeights.push(Math.round(s.offsetHeight || 0));
                 if (s.offsetTop <= top) {
                     visibleSpineIndex = parseInt(s.getAttribute('data-vreader-spine-index'), 10);
                     var h = s.offsetHeight || 1;
                     intraFraction = Math.max(0, Math.min(1, (top - s.offsetTop) / h));
                 }
             }
-            var nearTopBoundary = top <= PREFETCH_PX;
-            var nearBottomBoundary = (root.scrollHeight - (top + root.clientHeight)) <= PREFETCH_PX;
+            var pxAbove = Math.max(0, Math.round(top));
+            var pxBelow = Math.max(0, Math.round(root.scrollHeight - (top + root.clientHeight)));
+            var nearTopBoundary = pxAbove <= PREFETCH_PX;
+            var nearBottomBoundary = pxBelow <= PREFETCH_PX;
             try {
                 window.webkit.messageHandlers.continuousScrollHandler.postMessage({
                     visibleSpineIndex: visibleSpineIndex,
                     intraFraction: intraFraction,
                     nearTopBoundary: nearTopBoundary,
-                    nearBottomBoundary: nearBottomBoundary
+                    nearBottomBoundary: nearBottomBoundary,
+                    pxAbove: pxAbove,
+                    pxBelow: pxBelow,
+                    sectionHeights: sectionHeights
                 });
             } catch (e) {}
         }
         root.addEventListener('scroll', function() {
             if (!ticking) { ticking = true; requestAnimationFrame(report); }
         }, { passive: true });
+        var lastHeights = new WeakMap();
+        var resizeObserver = new ResizeObserver(function(entries) {
+            for (var i = 0; i < entries.length; i++) {
+                var el = entries[i].target;
+                var newH = el.offsetHeight || 0;
+                var oldH = lastHeights.get(el);
+                lastHeights.set(el, newH);
+                if (oldH === undefined) { continue; }
+                var delta = newH - oldH;
+                if (delta === 0) { continue; }
+                if ((el.offsetTop + oldH) <= root.scrollTop) {
+                    root.scrollTop += delta;
+                }
+            }
+        });
+        function observeSections() {
+            var sections = root.querySelectorAll('[data-vreader-spine-index]');
+            for (var i = 0; i < sections.length; i++) { resizeObserver.observe(sections[i]); }
+        }
+        new MutationObserver(observeSections).observe(root, { childList: true });
+        observeSections();
         report();
     })();
     """

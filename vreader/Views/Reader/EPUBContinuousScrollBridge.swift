@@ -138,8 +138,39 @@ extension EPUBScrollBoundarySignal {
             visibleSpineIndex: visibleSpineIndex,
             intraFraction: intraFraction,
             nearTopBoundary: boolValue(dict["nearTopBoundary"]),
-            nearBottomBoundary: boolValue(dict["nearBottomBoundary"])
+            nearBottomBoundary: boolValue(dict["nearBottomBoundary"]),
+            // Bug #329 (round 3) eviction-guard geometry. OPTIONAL by design: a
+            // missing/malformed field degrades that signal to the legacy
+            // span-only eviction (never fails the whole signal — boundary
+            // handling must survive an older observer or a truncated payload).
+            pxAbove: nonNegativeIntValue(dict["pxAbove"]),
+            pxBelow: nonNegativeIntValue(dict["pxBelow"]),
+            sectionHeights: sectionHeightsValue(dict["sectionHeights"])
         )
+    }
+
+    /// `intValue` narrowed to ≥0 (a px distance / height is never negative; a
+    /// negative arrival is malformed and yields nil so the eviction guard falls
+    /// back to legacy behaviour rather than reasoning over garbage).
+    private nonisolated static func nonNegativeIntValue(_ any: Any?) -> Int? {
+        guard let value = intValue(any), value >= 0 else { return nil }
+        return value
+    }
+
+    /// Parse the observer's `sectionHeights` array: every element must be a
+    /// non-negative integral number or the whole array is dropped (a partially
+    /// valid snapshot can't anchor the eviction guard's cumulative arithmetic).
+    /// An EMPTY array is also dropped — no materialized sections means there is
+    /// nothing for the guard to measure.
+    private nonisolated static func sectionHeightsValue(_ any: Any?) -> [Int]? {
+        guard let raw = any as? [Any], !raw.isEmpty else { return nil }
+        var heights: [Int] = []
+        heights.reserveCapacity(raw.count)
+        for element in raw {
+            guard let h = nonNegativeIntValue(element) else { return nil }
+            heights.append(h)
+        }
+        return heights
     }
 
     /// Strict integral coercion (Gate-4 round-1 Medium): a spine index must be a
