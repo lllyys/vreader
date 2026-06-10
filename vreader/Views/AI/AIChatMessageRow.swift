@@ -98,7 +98,11 @@ struct AIChatMessageRow: View {
         HStack(alignment: .top, spacing: 8) {
             sparkleAvatar
             VStack(alignment: .leading, spacing: 0) {
-                Text(message.content)
+                // Bug #335: render the LLM's markdown as formatting. `content` is
+                // a `String` variable, so `Text(_:)`'s literal-only markdown
+                // parsing left `**bold**` / `-` lists showing verbatim — the pure
+                // `ChatMarkdownRenderer` turns it into a formatted AttributedString.
+                Text(ChatMarkdownRenderer.attributedString(from: message.content))
                     .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 14.5)))
                     .lineSpacing(4)
                     .foregroundStyle(Color(theme.inkColor))

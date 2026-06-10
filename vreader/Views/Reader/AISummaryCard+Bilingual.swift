@@ -159,7 +159,9 @@ extension AISummaryCard {
 
     /// The original summary paragraph — serif 15, ink (design `single` body).
     private var originalParagraph: some View {
-        Text(summaryText)
+        // Bug #335: summaries are LLM markdown (bullets / **bold**); render it as
+        // formatting, not literal markup (same fix as the chat row).
+        Text(ChatMarkdownRenderer.attributedString(from: summaryText))
             .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 15)))
             .lineSpacing(4)
             .foregroundStyle(Color(theme.inkColor))
@@ -175,7 +177,8 @@ extension AISummaryCard {
     private func targetParagraph(spacingAbove: CGFloat) -> some View {
         let text = translatedText ?? ""
         let interlinear = spacingAbove > 0
-        Text(text)
+        // Bug #335: the translated summary mirrors the source markdown.
+        Text(ChatMarkdownRenderer.attributedString(from: text))
             .font(targetFont(interlinear: interlinear))
             .lineSpacing(interlinear ? 5 : 7)
             .foregroundStyle(Color(interlinear ? theme.subColor : theme.inkColor))
