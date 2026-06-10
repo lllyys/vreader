@@ -12,6 +12,7 @@
 import Testing
 import Foundation
 import SwiftData
+import UIKit
 @testable import vreader
 
 @Suite("BookTranslationCoordinator")
@@ -400,24 +401,31 @@ struct BookTranslationCoordinatorTests {
         let begins = await requester.begins
         let ends = await requester.ends
         #expect(begins.count == 2, "one token per translated unit; cached unit skipped")
-        #expect(ends.count == 2, "every token released at its unit boundary")
+        #expect(ends == [UIBackgroundTaskIdentifier(rawValue: 1),
+                         UIBackgroundTaskIdentifier(rawValue: 2)],
+                "each token released exactly once at its unit boundary, in order")
         let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
         #expect(final.phase == .completed)
     }
 
-    /// OS expiry mid-unit (fired through the PRODUCTION expiration-handler
-    /// wiring) stops the job cleanly BETWEEN units: the in-flight unit
+    /// OS expiry while the TRANSLATE REQUEST is in flight (fired through the
+    /// PRODUCTION expiration-handler wiring, while the sender is suspended
+    /// inside `sendTranslationRequest` — Gate-4 round-1 Medium: gating the
+    /// text provider instead would let a token that only covers source-text
+    /// loading pass). The job stops cleanly BETWEEN units: the in-flight unit
     /// completes and stays cached, no further unit is attempted, and the job
     /// records the EXISTING `.failed` phase (the status sheet's PAUSED
     /// rendering) instead of erroring or hanging.
     @Test func backgroundExpiry_stopsBetweenUnits_keepsCompletedUnitsCached_emitsFailed() async throws {
         let units = [Self.unit("ch1"), Self.unit("ch2"), Self.unit("ch3")]
-        let provider = GatedTextProvider(
-            units: units,
-            texts: [units[0]: "p1.", units[1]: "p2.", units[2]: "p3."],
-            gatedUnit: units[1])
+        let provider = MockChapterTextProvider(units: units, texts: [
+            units[0]: "p1.", units[1]: "p2.", units[2]: "p3."
+        ])
         let store = try Self.makeStore()
-        let sender = MockTranslationSender(responses: ["[\"a\"]", "[\"b\"]", "[\"c\"]"])
+        // Gate the 2nd network request — the job suspends mid-unit-2, inside
+        // the translate call the token exists to protect.
+        let sender = GatedTranslationSender(
+            responses: ["[\"a\"]", "[\"b\"]", "[\"c\"]"], gatedRequestIndex: 2)
         let service = ChapterTranslationService(
             sender: sender, store: store, promptVersion: "v1")
         let requester = await MockBackgroundTaskRequester()
@@ -433,15 +441,15 @@ struct BookTranslationCoordinatorTests {
             config: Self.makeConfig(),
             style: .natural)
 
-        // Wait until the job is suspended INSIDE unit 2 (its token — the
-        // 2nd begin — exists), then expire that token via the captured OS
-        // handler and wait for the flag to land on the actor.
-        await provider.waitUntilGateArrived()
+        // Wait until the job is suspended INSIDE unit 2's translate request
+        // (its token — the 2nd begin — exists), then expire that token via
+        // the captured OS handler and wait for the flag to land on the actor.
+        await sender.waitUntilGateArrived()
         await requester.fireExpiry(rawIdentifier: 2)
         while !(await coordinator.isJobExpiredForTesting(forBookWithKey: Self.bookKey)) {
             await Task.yield()
         }
-        await provider.release()
+        await sender.release()
         try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
 
         let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
@@ -453,6 +461,12 @@ struct BookTranslationCoordinatorTests {
             forBookWithKey: Self.bookKey, targetLanguage: "Chinese", promptVersion: "v1")
         #expect(cached.contains(units[0].storageKey) && cached.contains(units[1].storageKey),
                 "completed units stay cached — they're the resume checkpoint")
+        // Exact pairing: token 1 ended by the loop; token 2 ended ONCE by the
+        // expiry handler (the loop's later end() is an idempotent no-op).
+        let ends = await requester.ends
+        #expect(ends == [UIBackgroundTaskIdentifier(rawValue: 1),
+                         UIBackgroundTaskIdentifier(rawValue: 2)],
+                "each identifier ends exactly once, in order — no double-end, no leak")
     }
 
     /// A NEW start after an expiry stop must not insta-expire (the flag is
@@ -501,58 +515,49 @@ struct BookTranslationCoordinatorTests {
 // MARK: - Test doubles
 
 /// Read-only stub of `ChapterTextProviding` for coordinator tests.
-/// Feature #98: a text provider whose `sourceText(for:)` BLOCKS on one
-/// designated unit until the test releases it — lets a test pin the job
-/// mid-unit, fire a deterministic background expiry, then let the unit
-/// finish so the between-units expiry check is exercised without races.
-actor GatedTextProvider: ChapterTextProviding {
-    private let units: [TranslationUnitID]
-    private let texts: [TranslationUnitID: String]
-    private let gatedUnit: TranslationUnitID
+/// Feature #98 (Gate-4 round-1 Medium): a sender whose Nth
+/// `sendTranslationRequest` BLOCKS until the test releases it — pins the job
+/// inside the actual NETWORK call the background token exists to protect, so
+/// a deterministic expiry can fire mid-request and the between-units stop is
+/// exercised without races.
+actor GatedTranslationSender: TranslationRequestSending {
+    private var responses: [String]
+    private let gatedRequestIndex: Int
+    private var requests: [AIRequest] = []
     private var released = false
     private var gateContinuation: CheckedContinuation<Void, Never>?
     private var arrived = false
     private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
 
-    init(
-        units: [TranslationUnitID],
-        texts: [TranslationUnitID: String],
-        gatedUnit: TranslationUnitID
-    ) {
-        self.units = units
-        self.texts = texts
-        self.gatedUnit = gatedUnit
+    init(responses: [String], gatedRequestIndex: Int) {
+        self.responses = responses
+        self.gatedRequestIndex = gatedRequestIndex
     }
 
-    func translationUnits() async throws -> [TranslationUnitID] { units }
+    var requestCount: Int { requests.count }
 
-    func sourceText(for unit: TranslationUnitID) async throws -> String {
-        if unit == gatedUnit && !released {
+    func sendTranslationRequest(
+        _ request: AIRequest, using config: ResolvedAIProviderConfig
+    ) async throws -> AIResponse {
+        requests.append(request)
+        if requests.count == gatedRequestIndex && !released {
             arrived = true
             for waiter in arrivalWaiters { waiter.resume() }
             arrivalWaiters.removeAll()
             await withCheckedContinuation { gateContinuation = $0 }
         }
-        guard let text = texts[unit] else {
-            throw ChapterTextProviderError.unknownUnit(unit)
-        }
-        return text
+        let next = responses.isEmpty ? "[]" : responses.removeFirst()
+        return AIResponse(
+            content: next, actionType: .translate, promptVersion: "v1", createdAt: Date())
     }
 
-    func unit(containing locator: Locator) async -> TranslationUnitID? { units.first }
-
-    func unit(after unit: TranslationUnitID) async -> TranslationUnitID? {
-        guard let idx = units.firstIndex(of: unit), idx + 1 < units.count else { return nil }
-        return units[idx + 1]
-    }
-
-    /// Suspends until the job is blocked inside the gated unit's sourceText.
+    /// Suspends until the job is blocked inside the gated request.
     func waitUntilGateArrived() async {
         if arrived { return }
         await withCheckedContinuation { arrivalWaiters.append($0) }
     }
 
-    /// Releases the gate; the blocked sourceText returns its text.
+    /// Releases the gate; the blocked request returns its response.
     func release() {
         released = true
         gateContinuation?.resume()

@@ -61,44 +61,68 @@ extension UIApplication: BackgroundTaskRequesting {
 @MainActor
 final class BackgroundExecutionToken {
 
-    private var identifier: UIBackgroundTaskIdentifier = .invalid
-    private let requester: any BackgroundTaskRequesting
+    /// Shared end-state, captured STRONGLY by the expiration handler (Gate-4
+    /// round-1 Medium): a token dropped without `end()` must still self-end
+    /// at expiry — iOS terminates apps whose handlers don't end their tasks.
+    /// Both `end()` and the handler consume it idempotently.
+    @MainActor
+    private final class EndState {
+        // nonisolated(unsafe): mutated only on the main actor; the DEBUG
+        // leak log in the token's nonisolated deinit reads it best-effort.
+        nonisolated(unsafe) var identifier: UIBackgroundTaskIdentifier = .invalid
+        let requester: any BackgroundTaskRequesting
+
+        init(requester: any BackgroundTaskRequesting) {
+            self.requester = requester
+        }
+
+        func end() {
+            guard identifier != .invalid else { return }
+            let id = identifier
+            identifier = .invalid
+            requester.endTask(id)
+        }
+    }
+
+    private let state: EndState
     // nonisolated: the DEBUG leak log runs from deinit (nonisolated context).
     private nonisolated static let log = Logger(
         subsystem: "com.vreader.app", category: "BackgroundExecutionToken")
 
-    private init(requester: any BackgroundTaskRequesting) {
-        self.requester = requester
+    private init(state: EndState) {
+        self.state = state
     }
 
     /// Begins a background task and returns its token. `onExpiry` runs on the
-    /// main actor when iOS expires the window; the token self-ends right
-    /// after it. A denied request (`.invalid`) returns a no-op token.
+    /// main actor when iOS expires the window; the window self-ends right
+    /// after it — even if the token itself was already dropped, because the
+    /// handler holds the end-state strongly. A denied request (`.invalid`)
+    /// returns a no-op token.
     static func acquire(
         name: String,
         using requester: any BackgroundTaskRequesting,
         onExpiry: @escaping @MainActor () -> Void = {}
     ) -> BackgroundExecutionToken {
-        let token = BackgroundExecutionToken(requester: requester)
-        token.identifier = requester.beginTask(name: name) { [weak token] in
+        let state = EndState(requester: requester)
+        state.identifier = requester.beginTask(name: name) {
             onExpiry()
-            token?.end()
+            state.end()
         }
-        return token
+        return BackgroundExecutionToken(state: state)
     }
 
     /// Ends the background task. Idempotent — the normal completion path and
     /// the expiry self-end may both call it; only the first reaches UIKit.
     func end() {
-        guard identifier != .invalid else { return }
-        let id = identifier
-        identifier = .invalid
-        requester.endTask(id)
+        state.end()
     }
 
     deinit {
         #if DEBUG
-        if identifier != .invalid {
+        // Best-effort contract check only — the expiry handler's strong
+        // end-state capture already guarantees the window can't outlive
+        // expiry, leaked token or not.
+        if state.identifier != .invalid {
             Self.log.error("BackgroundExecutionToken leaked without end() — the background window stays open until expiry")
         }
         #endif

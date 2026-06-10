@@ -13,6 +13,7 @@
 import Testing
 import Foundation
 import SwiftData
+import UIKit
 @testable import vreader
 
 @MainActor
@@ -660,7 +661,7 @@ struct ChapterReTranslateViewModelTests {
 
         #expect(vm.sheetState == .complete)
         #expect(requester.begins.count == 1, "one token per submit")
-        #expect(requester.ends.count == 1, "released on success")
+        #expect(requester.ends == [UIBackgroundTaskIdentifier(rawValue: 1)], "released exactly once on success")
     }
 
     @Test func submit_endsBackgroundToken_onRunnerFailure() async throws {
@@ -675,7 +676,7 @@ struct ChapterReTranslateViewModelTests {
 
         #expect(vm.sheetState == .picker, "failure returns to the picker")
         #expect(requester.begins.count == 1)
-        #expect(requester.ends.count == 1, "released on runner failure — a leaked token starves later acquires")
+        #expect(requester.ends == [UIBackgroundTaskIdentifier(rawValue: 1)], "released exactly once on runner failure — a leaked token starves later acquires")
     }
 
     @Test func submit_endsBackgroundToken_onSourceTextFailure() async throws {
@@ -698,7 +699,7 @@ struct ChapterReTranslateViewModelTests {
 
         #expect(vm.sheetState == .picker)
         #expect(requester.begins.count == 1)
-        #expect(requester.ends.count == 1, "released on source-text failure")
+        #expect(requester.ends == [UIBackgroundTaskIdentifier(rawValue: 1)], "released exactly once on source-text failure")
     }
 
     @Test func submit_endsBackgroundToken_onCancellation() async throws {
@@ -711,6 +712,6 @@ struct ChapterReTranslateViewModelTests {
         await vm.submit()
 
         #expect(requester.begins.count == 1)
-        #expect(requester.ends.count == 1, "released on cancellation")
+        #expect(requester.ends == [UIBackgroundTaskIdentifier(rawValue: 1)], "released exactly once on cancellation")
     }
 }
