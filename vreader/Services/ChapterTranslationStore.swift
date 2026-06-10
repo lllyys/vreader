@@ -69,7 +69,13 @@ actor ChapterTranslationStore {
     /// Wires the singleton to the app's `ModelContainer`. Called once from
     /// `VReaderApp.init()` after the container is built. Idempotent — a
     /// second call replaces the container (harmless; production calls once).
+    /// Re-arms the legacy-key migration (Codex #342 round-1 High): a swapped
+    /// container may hold unmigrated 5-field rows the previous container's
+    /// migration pass never saw.
     func configure(modelContainer: ModelContainer) {
+        if self.modelContainer !== modelContainer {
+            didMigrateLegacyKeys = false
+        }
         self.modelContainer = modelContainer
     }
 

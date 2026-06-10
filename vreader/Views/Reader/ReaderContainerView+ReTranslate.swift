@@ -158,7 +158,6 @@ extension ReaderContainerView {
 
         let vm = ChapterReTranslateViewModel(
             bookFingerprintKey: book.fingerprintKey,
-            promptVersion: "bilingual-v1",
             initialProviderProfileID: initialProfileID,
             initialModel: initialModel,
             resolver: aiService,

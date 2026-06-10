@@ -1,17 +1,22 @@
 // Purpose: SwiftData @Model for the feature #56 bilingual-reading persistent
-// translation cache. One row per (book, translation-unit, target language,
-// provider profile, prompt version). Translations are cached to disk so they
-// survive app restarts and cost no repeat API calls (scope item 2).
+// translation cache. One CANONICAL row per (book, translation-unit, target
+// language, prompt version) — Bug #342: the provider profile is provenance
+// metadata, NOT identity, so re-translate and bilingual reading share the
+// row. Translations are cached to disk so they survive app restarts and cost
+// no repeat API calls (scope item 2).
 //
 // Key decisions:
 // - `lookupKey` is the @Attribute(.unique) dedupe key — a STORED primitive
-//   joined at insert time from the five identity fields (a Codable struct
-//   cannot be @Attribute(.unique); SchemaV1's spike documents this).
+//   joined at insert time from the four identity fields
+//   `book|unit|lang|prompt` (a Codable struct cannot be @Attribute(.unique);
+//   SchemaV1's spike documents this). Pre-#342 rows used a 5-field key with
+//   the profile UUID baked in; `ChapterTranslationStore` lazily migrates them.
 // - `unitStorageKey` is `TranslationUnitID.storageKey` — replaces the old
 //   `chapterHref` since 3 of 5 reader formats have no stable href
 //   (Decision 2.5).
 // - `providerProfileID: UUID` matches `ProviderProfile.id`'s native type;
-//   SwiftData stores UUID directly.
+//   SwiftData stores UUID directly. Since Bug #342 it is provenance metadata
+//   (which provider produced the row), not part of the lookup identity.
 // - `translatedJSON` is a JSON-encoded `[String]` (one segment per source
 //   paragraph/sentence, ordered) — storing the array lets the renderer
 //   interleave without re-segmenting.
@@ -31,7 +36,8 @@ import SwiftData
 final class ChapterTranslation {
 
     /// The persisted, indexed dedupe key — a stored primitive joined from the
-    /// five identity fields by `ChapterTranslationRecord.lookupKey(...)`.
+    /// four identity fields (book|unit|lang|prompt) by
+    /// `ChapterTranslationRecord.lookupKey(...)`.
     @Attribute(.unique) var lookupKey: String
 
     /// The book this translation belongs to (`DocumentFingerprint.canonicalKey`).

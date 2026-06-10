@@ -345,6 +345,33 @@ struct ChapterTranslationStoreTests {
         #expect(await store.debugRowCount() == 1, "the older per-profile duplicate is removed")
     }
 
+    /// Codex #342 round-1 High: `configure(modelContainer:)` swapping to a NEW
+    /// container must re-arm the migration — the new container may hold legacy
+    /// rows the previous container's pass never saw.
+    @Test func containerSwap_reArmsLegacyMigration() async throws {
+        // Container A: run the (empty) migration, setting the per-process flag.
+        let (store, _) = try makeStoreAndContainer()
+        _ = await store.translation(forKey: "warm-up")
+
+        // Container B: holds an unmigrated legacy row.
+        let schema = Schema(SchemaV7.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let containerB = try ModelContainer(for: schema, configurations: [config])
+        try await insertLegacyRow(
+            containerB, profile: Self.profileA,
+            json: #"["旧"]"#, count: 1, createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        await store.configure(modelContainer: containerB)
+
+        let canonicalKey = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp1", unitStorageKey: "epubHref:ch1",
+            targetLanguage: "zh-Hans", promptVersion: "v1")
+        #expect(await store.translation(forKey: canonicalKey)?.translatedSegments == ["旧"],
+                "the swapped-in container's legacy rows migrate too")
+        let units = await store.cachedUnits(
+            forBookWithKey: "fp1", targetLanguage: "zh-Hans", promptVersion: "v1")
+        #expect(units == ["epubHref:ch1"])
+    }
+
     /// Migration must be idempotent and must leave already-canonical rows alone.
     @Test func migration_isIdempotent_andLeavesCanonicalRowsAlone() async throws {
         let (store, container) = try makeStoreAndContainer()

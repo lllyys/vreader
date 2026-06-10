@@ -146,7 +146,6 @@ struct ChapterReTranslateViewModelTests {
     ) -> ChapterReTranslateViewModel {
         ChapterReTranslateViewModel(
             bookFingerprintKey: bookKey,
-            promptVersion: promptVersion,
             initialProviderProfileID: initialProfileID,
             initialModel: "initial-model",
             resolver: resolver,
@@ -439,7 +438,6 @@ struct ChapterReTranslateViewModelTests {
             ChapterTranslationResult(segments: [], fromCache: false)))
         let vm = ChapterReTranslateViewModel(
             bookFingerprintKey: Self.bookKey,
-            promptVersion: Self.promptVersion,
             initialProviderProfileID: Self.initialProfileID,
             initialModel: "initial-model",
             resolver: resolver,
@@ -473,7 +471,6 @@ struct ChapterReTranslateViewModelTests {
             ChapterTranslationResult(segments: [], fromCache: false)))
         let vm = ChapterReTranslateViewModel(
             bookFingerprintKey: Self.bookKey,
-            promptVersion: Self.promptVersion,
             initialProviderProfileID: Self.initialProfileID,
             initialModel: "initial-model",
             resolver: resolver,

@@ -130,7 +130,6 @@ final class ChapterReTranslateViewModel {
     // MARK: - Dependencies (injected)
 
     let bookFingerprintKey: String
-    let promptVersion: String
     let initialProviderProfileID: UUID
 
     private let resolver: any RetranslateProviderResolving
@@ -171,7 +170,6 @@ final class ChapterReTranslateViewModel {
 
     init(
         bookFingerprintKey: String,
-        promptVersion: String,
         initialProviderProfileID: UUID,
         initialModel: String,
         initialStyle: TranslationStyle = .natural,
@@ -181,7 +179,6 @@ final class ChapterReTranslateViewModel {
         sourceTextProvider: @escaping @Sendable (TranslationUnitID) async throws -> String
     ) {
         self.bookFingerprintKey = bookFingerprintKey
-        self.promptVersion = promptVersion
         self.initialProviderProfileID = initialProviderProfileID
         self.resolver = resolver
         self.runner = runner
