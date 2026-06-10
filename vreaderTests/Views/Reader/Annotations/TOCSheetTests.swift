@@ -253,6 +253,67 @@ struct TOCSheetTests {
         #expect(sheet.activeEntryIndexForTesting == nil)
     }
 
+    @Test("Percent-encoded hrefs match only on byte-identical forms (no silent decode)")
+    func encodedHref_matchesOnlyIdenticalForm() {
+        // The matcher is raw-String equality by design — both producers
+        // (EPUBParser spine + the position broadcast) emit the SAME form.
+        // Pin that an encoded variant of a spine href does NOT match, so a
+        // future one-sided decode shows up here instead of on devices.
+        let spine = ["c1.xhtml", "my chapter.xhtml", "c3.xhtml"]
+        let entries = [
+            TOCEntry(title: "One", level: 0,
+                     locator: makeEPUBLocator(href: "c1.xhtml", progression: 0)),
+            TOCEntry(title: "Two", level: 0,
+                     locator: makeEPUBLocator(href: "my chapter.xhtml", progression: 0)),
+        ]
+        // Identical form → exact match.
+        let same = makeSheet(
+            tocEntries: entries,
+            currentLocator: makeEPUBLocator(href: "my chapter.xhtml", progression: 0.2),
+            spineHrefs: spine)
+        #expect(same.activeEntryIndexForTesting == 1)
+        // Encoded variant → neither exact nor in the spine → nil (never guess).
+        let encoded = makeSheet(
+            tocEntries: entries,
+            currentLocator: makeEPUBLocator(href: "my%20chapter.xhtml", progression: 0.2),
+            spineHrefs: spine)
+        #expect(encoded.activeEntryIndexForTesting == nil)
+    }
+
+    @Test("Duplicate entry hrefs: the LAST matching entry wins (existing convention)")
+    func duplicateEntryHrefs_lastWins() {
+        let spine = ["a.xhtml", "b.xhtml"]
+        let entries = [
+            TOCEntry(title: "Part I", level: 0,
+                     locator: makeEPUBLocator(href: "a.xhtml", progression: 0)),
+            TOCEntry(title: "Part I — continued", level: 1,
+                     locator: makeEPUBLocator(href: "a.xhtml", progression: 0)),
+        ]
+        let sheet = makeSheet(
+            tocEntries: entries,
+            currentLocator: makeEPUBLocator(href: "a.xhtml", progression: 0.3),
+            spineHrefs: spine)
+        #expect(sheet.activeEntryIndexForTesting == 1)
+    }
+
+    @Test("Entries whose href is absent from the spine are skipped by the fallback")
+    func entryHrefAbsentFromSpine_isSkippedInFallback() {
+        let spine = ["c1.xhtml", "c2.xhtml", "c3.xhtml"]
+        let entries = [
+            TOCEntry(title: "One", level: 0,
+                     locator: makeEPUBLocator(href: "c1.xhtml", progression: 0)),
+            // A stale/foreign entry not in this spine — must not poison the walk.
+            TOCEntry(title: "Ghost", level: 0,
+                     locator: makeEPUBLocator(href: "ghost.xhtml", progression: 0)),
+        ]
+        let sheet = makeSheet(
+            tocEntries: entries,
+            currentLocator: makeEPUBLocator(href: "c3.xhtml", progression: 0.5),
+            spineHrefs: spine)
+        #expect(sheet.activeEntryIndexForTesting == 0,
+                "fallback resolves through the valid entry, ignoring the ghost")
+    }
+
     // MARK: - Current-chapter for TXT (the Bug #248 user repro: charOffsetUTF16)
 
     /// Builds a TXT-style TOC where each chapter starts at an increasing
