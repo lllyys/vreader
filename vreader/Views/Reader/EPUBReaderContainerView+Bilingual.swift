@@ -52,9 +52,13 @@ extension EPUBReaderContainerView {
     /// the spine list so the `EPUBChapterTextProvider` has its
     /// source ready. The adapter pins the `ChapterTranslationService`
     /// + active `AIService` for the book's lifetime in the reader.
+    /// `acceptsCountMismatchedRows` (Bug #343): pass true ONLY for hosts with
+    /// the inject-time divergence fallback (legacy EPUB, Readium) — they can
+    /// self-heal a count-drifted row; Foliate (no fallback) passes false.
     static func makePrefetcher(
         bookFingerprintKey: String,
-        textProvider: any ChapterTextProviding
+        textProvider: any ChapterTextProviding,
+        acceptsCountMismatchedRows: Bool
     ) -> ChapterTranslationPrefetcher {
         let keychain = KeychainService()
         let aiService = AIService(
@@ -73,7 +77,8 @@ extension EPUBReaderContainerView {
             textProvider: textProvider,
             translationService: service,
             aiService: aiService,
-            style: .natural
+            style: .natural,
+            acceptsCountMismatchedRows: acceptsCountMismatchedRows
         )
     }
 
@@ -116,7 +121,8 @@ extension EPUBReaderContainerView {
         vm.attachPrefetcher(
             Self.makePrefetcher(
                 bookFingerprintKey: viewModel.bookFingerprintKey,
-                textProvider: textProvider
+                textProvider: textProvider,
+                acceptsCountMismatchedRows: true
             )
         )
         bilingualViewModel = vm

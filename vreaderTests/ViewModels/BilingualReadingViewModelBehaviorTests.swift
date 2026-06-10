@@ -621,4 +621,80 @@ struct BilingualReadingViewModelBehaviorTests {
         #expect(await prefetcher.directCallCount() == 0)  // skipped — no re-translate
         #expect(vm.translations(for: unit) == ["a", "b"])
     }
+
+    // MARK: - Bug #343: divergence-fallback restores from the disk cache
+
+    /// A prefetcher with a canned cache-restore: `cachedSegmentsDirect` hits
+    /// when the expected count matches the canned row; `translatedSegmentsDirect`
+    /// records calls (the provider leg the restore must avoid).
+    private actor CachedDirectPrefetcher: ChapterPrefetching {
+        let cachedRow: [String]
+        private(set) var directCalls = 0
+        private(set) var cachedReads = 0
+        init(cachedRow: [String]) { self.cachedRow = cachedRow }
+        func translatedSegments(
+            for unit: TranslationUnitID, targetLanguage: String,
+            granularity: TranslationGranularity
+        ) async throws -> [String] { [] }
+        func translatedSegmentsDirect(
+            for unit: TranslationUnitID, sourceSegments: [String], targetLanguage: String
+        ) async throws -> [String] {
+            directCalls += 1
+            return sourceSegments.map { "T:" + $0 }
+        }
+        func cachedSegmentsDirect(
+            for unit: TranslationUnitID, expectedCount: Int, targetLanguage: String
+        ) async -> [String]? {
+            cachedReads += 1
+            return cachedRow.count == expectedCount ? cachedRow : nil
+        }
+        func counts() -> (direct: Int, cached: Int) { (directCalls, cachedReads) }
+    }
+
+    /// Bug #343: toggle OFF (clears the in-memory map) → ON → the divergence
+    /// fallback restores the persisted enumerate-contract row with ZERO
+    /// provider calls.
+    @Test func translateBlocksDirectly_afterToggleOffOn_restoresFromCache_zeroProviderCalls() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let prefetcher = CachedDirectPrefetcher(cachedRow: ["缓存一", "缓存二", "缓存三"])
+        let vm = BilingualReadingViewModel(bookFingerprintKey: Self.bookKey, perBookBaseURL: dir)
+        vm.attachProvider(StubProvider(units: Self.threeUnits))
+        vm.attachPrefetcher(prefetcher)
+        vm.setEnabled(true)
+        vm.dismissSetupSheet()
+        let unit = Self.threeUnits[0]
+
+        // Simulate the prior session/toggle: in-memory map cleared.
+        vm.setEnabled(false)
+        vm.setEnabled(true)
+        #expect(vm.translations(for: unit) == nil, "toggle-off cleared the in-memory map")
+
+        await vm.translateBlocksDirectly(["B1", "B2", "B3"], for: unit)
+
+        let counts = await prefetcher.counts()
+        #expect(vm.translations(for: unit) == ["缓存一", "缓存二", "缓存三"], "restored from the persisted row")
+        #expect(counts.cached == 1)
+        #expect(counts.direct == 0, "Bug #343: ZERO provider calls on a cache-restorable toggle")
+    }
+
+    /// When the cache restore misses (count drift — the source truly changed),
+    /// the provider leg runs and self-heals.
+    @Test func translateBlocksDirectly_cacheMiss_fallsThroughToProvider() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let prefetcher = CachedDirectPrefetcher(cachedRow: ["旧契约一", "旧契约二"])  // count 2
+        let vm = BilingualReadingViewModel(bookFingerprintKey: Self.bookKey, perBookBaseURL: dir)
+        vm.attachProvider(StubProvider(units: Self.threeUnits))
+        vm.attachPrefetcher(prefetcher)
+        vm.setEnabled(true)
+        vm.dismissSetupSheet()
+        let unit = Self.threeUnits[0]
+
+        await vm.translateBlocksDirectly(["B1", "B2", "B3"], for: unit)  // count 3 → miss
+
+        let counts = await prefetcher.counts()
+        #expect(counts.direct == 1, "miss falls through to the provider leg")
+        #expect(vm.translations(for: unit) == ["T:B1", "T:B2", "T:B3"])
+    }
 }

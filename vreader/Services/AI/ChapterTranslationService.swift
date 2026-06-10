@@ -109,12 +109,20 @@ actor ChapterTranslationService {
     /// threw first and the disk cache (inside `translate`) was never reached.
     /// Bug #342: profile-agnostic — the canonical row is shared across provider
     /// profiles, so no profile is needed for a read at all.
+    /// Bug #343 `acceptCountMismatch`: self-healing consumers (the EPUB hosts
+    /// with the divergence fallback) may opt in to receive a fresh row whose
+    /// stored count differs from the live re-derived segmenter count — the
+    /// row may carry the DOM-enumerate contract (written by the divergence
+    /// fallback), which pairs 1:1 at inject time; on a true source change the
+    /// fallback re-translates and replaces the row. Default-off callers keep
+    /// the strict staleness guard.
     func cachedTranslation(
         bookFingerprintKey: String,
         unit: TranslationUnitID,
         sourceText: String,
         targetLanguage: String,
-        granularity: TranslationGranularity = .paragraph
+        granularity: TranslationGranularity = .paragraph,
+        acceptCountMismatch: Bool = false
     ) async -> ChapterTranslationResult? {
         let lookupKey = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: bookFingerprintKey,
@@ -126,8 +134,30 @@ actor ChapterTranslationService {
         case .paragraph: segments = ChapterSegmenter.paragraphs(in: sourceText)
         case .sentence:  segments = ChapterSegmenter.sentences(in: sourceText)
         }
+        guard let cached = await store.translation(forKey: lookupKey) else { return nil }
+        guard cached.sourceParagraphCount == segments.count || acceptCountMismatch else {
+            return nil
+        }
+        return ChapterTranslationResult(segments: cached.translatedSegments, fromCache: true)
+    }
+
+    /// Bug #343: the divergence-fallback restore — serves the canonical row
+    /// only when its STORED count matches the caller's own structure (the DOM
+    /// enumerate's block count), so blocks↔segments pair 1:1 by contract.
+    /// Needs no provider config and no source text.
+    func cachedTranslation(
+        bookFingerprintKey: String,
+        unit: TranslationUnitID,
+        expectedSegmentCount: Int,
+        targetLanguage: String
+    ) async -> ChapterTranslationResult? {
+        let lookupKey = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: bookFingerprintKey,
+            unitStorageKey: unit.storageKey,
+            targetLanguage: targetLanguage,
+            promptVersion: promptVersion)
         guard let cached = await store.translation(forKey: lookupKey),
-              cached.sourceParagraphCount == segments.count else { return nil }
+              cached.sourceParagraphCount == expectedSegmentCount else { return nil }
         return ChapterTranslationResult(segments: cached.translatedSegments, fromCache: true)
     }
 
@@ -278,18 +308,28 @@ actor ChapterTranslationService {
     }
 
     /// Bug #268: translates a PRE-SEGMENTED list of source segments directly,
-    /// bypassing `ChapterSegmenter` AND the disk cache. Used by the bilingual
-    /// EPUB divergence-fallback: when the DOM leaf-enumerate's block count
+    /// bypassing `ChapterSegmenter`. Used by the bilingual EPUB
+    /// divergence-fallback: when the DOM leaf-enumerate's block count
     /// diverges from the plain-text paragraph segmentation (nested `<pre>` /
     /// mixed-content `<blockquote>`), translating the enumerate's OWN block
     /// `text[]` makes blocks↔segments 1:1 BY CONSTRUCTION — eliminating the
     /// whole-chapter source-only fallback. The returned array is always the same
-    /// length as `segments`. No disk cache: the fallback is rare, and the
-    /// plain-text path's cache row is keyed by a different segment count that
-    /// must not be thrashed.
+    /// length as `segments`.
+    ///
+    /// Bug #343: the result IS cached now — the canonical row stores the
+    /// ENUMERATE's count as its contract, so a toggle/reopen restores via
+    /// `cachedTranslation(expectedSegmentCount:)` with zero provider calls.
+    /// (#268 originally skipped the cache to avoid thrashing the plain-text
+    /// path's differently-counted row; post-#342 there is ONE canonical row
+    /// and the divergence fallback is its self-healing writer of last resort.)
+    /// A partially-degraded result (Bug #330) is NOT cached, mirroring
+    /// `translate`.
     func translatePreSegmented(
+        bookFingerprintKey: String,
+        unit: TranslationUnitID,
         segments: [String],
         targetLanguage: String,
+        providerProfileID: UUID,
         config: ResolvedAIProviderConfig,
         style: TranslationStyle
     ) async throws -> [String] {
@@ -329,6 +369,25 @@ actor ChapterTranslationService {
         }
         if !anyChunkSucceeded, let err = lastChunkError {
             throw err
+        }
+
+        // Bug #343: cache the fully-successful result under the canonical key
+        // with the ENUMERATE's count as the stored contract. Mirrors
+        // `translate`: a partial degrade is never cached (Bug #330), and a
+        // store-write failure does not fail the translation (rule 50 §6).
+        if lastChunkError == nil {
+            do {
+                try await store.upsert(ChapterTranslationRecord(
+                    bookFingerprintKey: bookFingerprintKey,
+                    unitStorageKey: unit.storageKey,
+                    targetLanguage: targetLanguage,
+                    providerProfileID: providerProfileID,
+                    promptVersion: promptVersion,
+                    translatedSegments: translated,
+                    sourceParagraphCount: segments.count))
+            } catch {
+                log.error("Pre-segmented cache-write failed (translation still returned): \(String(describing: error), privacy: .public)")
+            }
         }
         return translated
     }

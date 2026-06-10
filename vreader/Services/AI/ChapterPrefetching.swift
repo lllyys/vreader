@@ -48,6 +48,16 @@ protocol ChapterPrefetching: Sendable {
         sourceSegments: [String],
         targetLanguage: String
     ) async throws -> [String]
+
+    /// Bug #343: cache-only restore for the divergence fallback. Returns the
+    /// canonical cached segments when the row's stored contract matches
+    /// `expectedCount` (the DOM enumerate's own block count), else nil. Never
+    /// reaches a provider.
+    func cachedSegmentsDirect(
+        for unit: TranslationUnitID,
+        expectedCount: Int,
+        targetLanguage: String
+    ) async -> [String]?
 }
 
 extension ChapterPrefetching {
@@ -61,5 +71,15 @@ extension ChapterPrefetching {
         targetLanguage: String
     ) async throws -> [String] {
         throw ChapterTranslationError.providerFailed("direct pre-segmented translation not supported")
+    }
+
+    /// Default: no cache-only restore — conformers without the divergence
+    /// fallback (and most test mocks) report a miss.
+    func cachedSegmentsDirect(
+        for unit: TranslationUnitID,
+        expectedCount: Int,
+        targetLanguage: String
+    ) async -> [String]? {
+        nil
     }
 }

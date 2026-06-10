@@ -91,7 +91,8 @@ extension ReadiumEPUBHost {
         vm.attachPrefetcher(
             EPUBReaderContainerView.makePrefetcher(
                 bookFingerprintKey: fingerprint.canonicalKey,
-                textProvider: textProvider
+                textProvider: textProvider,
+                acceptsCountMismatchedRows: true
             )
         )
         bilingualViewModel = vm

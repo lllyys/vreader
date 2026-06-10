@@ -71,6 +71,14 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
     /// path (`ChapterReTranslateViewModel`, WI-15).
     let style: TranslationStyle
 
+    /// Bug #343: when true, the cache-first read also serves a fresh row
+    /// whose stored count differs from the live segmenter count — the row may
+    /// carry the DOM-enumerate contract written by the divergence fallback,
+    /// which pairs 1:1 at inject time. ONLY hosts with the inject-time
+    /// divergence fallback (legacy EPUB + Readium) opt in; formats without a
+    /// self-heal (TXT/MD/PDF/Foliate) keep the strict staleness guard.
+    var acceptsCountMismatchedRows: Bool = false
+
     func translatedSegments(
         for unit: TranslationUnitID,
         targetLanguage: String,
@@ -115,7 +123,8 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
             unit: unit,
             sourceText: sourceText,
             targetLanguage: targetLanguage,
-            granularity: effectiveGranularity
+            granularity: effectiveGranularity,
+            acceptCountMismatch: acceptsCountMismatchedRows
         ) {
             Self.log.debug("prefetch cache HIT (pre-gate) for unit \(String(describing: unit), privacy: .public)")
             return cached.segments
@@ -189,8 +198,11 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         }
         do {
             let out = try await translationService.translatePreSegmented(
+                bookFingerprintKey: bookFingerprintKey,
+                unit: unit,
                 segments: sourceSegments,
                 targetLanguage: targetLanguage,
+                providerProfileID: activeProfile.id,
                 config: config,
                 style: style)
             Self.log.debug("prefetchDirect ok: \(out.count) translated segments")
@@ -199,5 +211,20 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
             Self.log.error("prefetchDirect translatePreSegmented failed: \(String(describing: error), privacy: .private)")
             throw error
         }
+    }
+
+    /// Bug #343: cache-only restore for the divergence fallback — serves the
+    /// canonical row when its stored contract matches the enumerate's own
+    /// block count. Needs no provider config (the #306 pre-gate precedent).
+    func cachedSegmentsDirect(
+        for unit: TranslationUnitID,
+        expectedCount: Int,
+        targetLanguage: String
+    ) async -> [String]? {
+        await translationService.cachedTranslation(
+            bookFingerprintKey: bookFingerprintKey,
+            unit: unit,
+            expectedSegmentCount: expectedCount,
+            targetLanguage: targetLanguage)?.segments
     }
 }

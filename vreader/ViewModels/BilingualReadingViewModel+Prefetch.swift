@@ -185,6 +185,16 @@ extension BilingualReadingViewModel {
         guard isEnabled, let prefetcher, !blockTexts.isEmpty else { return }
         // Already have a translation that pairs 1:1 with these blocks → nothing to do.
         if let existing = translationsByUnit[unit], existing.count == blockTexts.count { return }
+        // Bug #343: cache-only restore FIRST — a previous run's divergence
+        // fallback persisted the canonical row with the enumerate's count as
+        // its contract, so a toggle/reopen restores with zero provider calls.
+        if let cached = await prefetcher.cachedSegmentsDirect(
+            for: unit, expectedCount: blockTexts.count, targetLanguage: targetLanguage) {
+            guard isEnabled else { return }
+            translationsByUnit[unit] = cached
+            postDidChange()
+            return
+        }
         do {
             let translated = try await prefetcher.translatedSegmentsDirect(
                 for: unit, sourceSegments: blockTexts, targetLanguage: targetLanguage)

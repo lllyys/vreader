@@ -414,7 +414,7 @@ struct ChapterTranslationServiceTests {
 
     // MARK: - translatePreSegmented (Bug #268 — block-text-direct translation)
 
-    @Test func translatePreSegmented_translatesGivenSegments1to1_andDoesNotCache() async throws {
+    @Test func translatePreSegmented_translatesGivenSegments1to1() async throws {
         let store = try Self.makeStore()
         let config = Self.makeConfig()
         // Two source segments → one chunk → one 2-element JSON-array response.
@@ -423,16 +423,23 @@ struct ChapterTranslationServiceTests {
         let service = makeService(sender: sender, store: store)
 
         let result = try await service.translatePreSegmented(
+            bookFingerprintKey: "fp", unit: Self.unit(),
             segments: ["Para one.", "Para two."],
-            targetLanguage: "Chinese", config: config, style: .natural)
+            targetLanguage: "Chinese", providerProfileID: Self.profileID,
+            config: config, style: .natural)
         #expect(result.count == 2)            // 1:1 with input, by construction
         #expect(result == ["译一", "译二"])
         #expect(await sender.requestCount == 1)
 
-        // No disk cache — a second identical call re-translates (sender hit again).
+        // The method never READS the cache (the restore lives in
+        // `cachedTranslation(expectedSegmentCount:)`) — an explicit second
+        // call re-translates. (Bug #343 made it WRITE the row; the
+        // caching behavior is pinned in preSegmented_cachesUnderEnumerateContract.)
         _ = try await service.translatePreSegmented(
+            bookFingerprintKey: "fp", unit: Self.unit(),
             segments: ["Para one.", "Para two."],
-            targetLanguage: "Chinese", config: config, style: .natural)
+            targetLanguage: "Chinese", providerProfileID: Self.profileID,
+            config: config, style: .natural)
         #expect(await sender.requestCount == 2)
     }
 
@@ -441,7 +448,9 @@ struct ChapterTranslationServiceTests {
         let sender = MockTranslationSender(responses: [])
         let service = makeService(sender: sender, store: store)
         let result = try await service.translatePreSegmented(
-            segments: [], targetLanguage: "Chinese", config: Self.makeConfig(), style: .natural)
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            segments: [], targetLanguage: "Chinese", providerProfileID: Self.profileID,
+            config: Self.makeConfig(), style: .natural)
         #expect(result.isEmpty)
         #expect(await sender.requestCount == 0)
     }
@@ -458,7 +467,9 @@ struct ChapterTranslationServiceTests {
         ])
         let service = makeService(sender: sender, store: store)
         let result = try await service.translatePreSegmented(
-            segments: ["One.", "Two."], targetLanguage: "Chinese", config: config, style: .natural)
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            segments: ["One.", "Two."], targetLanguage: "Chinese",
+            providerProfileID: Self.profileID, config: config, style: .natural)
         #expect(result.count == 2)   // 1:1 preserved through the per-segment fallback
         #expect(result == ["译一", "译二"])
         #expect(await sender.requestCount == 3)  // 1 whole-chunk attempt + 2 per-segment
@@ -708,5 +719,105 @@ struct ChapterTranslationServiceTests {
             sourceText: "Some paragraph.", targetLanguage: "Chinese")
         #expect(cached?.fromCache == true)
         #expect(cached?.segments == ["缓存译文"])
+    }
+
+    // MARK: - Bug #343: the divergence-fallback path is cached + restorable
+
+    /// Bug #343 mechanism (1): `translatePreSegmented` was cache-FREE, so
+    /// divergence-class chapters re-paid the provider on every toggle/reopen.
+    /// It now writes the canonical row with the ENUMERATE's count as the
+    /// stored contract, and the expected-count read restores it with zero
+    /// provider calls.
+    @Test func preSegmented_cachesUnderEnumerateContract_andRestores() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let sender = MockTranslationSender(responses: [#"["块一","块二","块三"]"#])
+        let service = makeService(sender: sender, store: store)
+
+        let out = try await service.translatePreSegmented(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            segments: ["Block one.", "Block two.", "Block three."],
+            targetLanguage: "Chinese", providerProfileID: Self.profileID,
+            config: config, style: .natural)
+        #expect(out == ["块一", "块二", "块三"])
+        #expect(await sender.requestCount == 1)
+
+        // The canonical row now stores the ENUMERATE contract (count 3).
+        let key = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
+            targetLanguage: "Chinese", promptVersion: "v1")
+        let row = await store.translation(forKey: key)
+        #expect(row?.translatedSegments == ["块一", "块二", "块三"])
+        #expect(row?.sourceParagraphCount == 3)
+
+        // Expected-count restore: hit at the enumerate count, zero new calls.
+        let restored = await service.cachedTranslation(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            expectedSegmentCount: 3, targetLanguage: "Chinese")
+        #expect(restored?.segments == ["块一", "块二", "块三"])
+        #expect(await sender.requestCount == 1)
+
+        // A different expected count (the source changed) misses.
+        let mismatch = await service.cachedTranslation(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            expectedSegmentCount: 4, targetLanguage: "Chinese")
+        #expect(mismatch == nil)
+    }
+
+    /// Bug #330 parity: a partially-degraded pre-segmented result (a chunk
+    /// failed → source-only "") must NOT be cached — otherwise the gap would
+    /// be served forever.
+    @Test func preSegmented_partialDegrade_isNotCached() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        // Two single-segment chunks (tiny budget); the second fails.
+        let sender = MockTranslationSender(responses: [#"["第一"]"#], throwOnRequestIndex: 1)
+        let service = makeService(sender: sender, store: store, maxChars: 10)
+
+        let out = try await service.translatePreSegmented(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            segments: ["First.", "Second."],
+            targetLanguage: "Chinese", providerProfileID: Self.profileID,
+            config: config, style: .natural)
+        #expect(out == ["第一", ""], "degraded chunk left source-only")
+
+        let key = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
+            targetLanguage: "Chinese", promptVersion: "v1")
+        #expect(await store.translation(forKey: key) == nil, "partial result not cached")
+    }
+
+    /// Bug #343 mechanism (2): self-healing consumers (the EPUB hosts with the
+    /// divergence fallback) can opt in to receive a fresh row whose stored
+    /// count differs from the live re-derived segmenter count — inject-time
+    /// pairing validates it, and on a true source change the divergence
+    /// fallback re-translates and replaces the row. Non-opted callers keep the
+    /// strict count guard.
+    @Test func cachedTranslation_acceptCountMismatch_servesForeignContractRow() async throws {
+        let store = try Self.makeStore()
+        // A row stored under the ENUMERATE contract: 3 segments...
+        try await store.upsert(ChapterTranslationRecord(
+            bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
+            targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1",
+            translatedSegments: ["块一", "块二", "块三"], sourceParagraphCount: 3))
+        let sender = MockTranslationSender(responses: [])
+        let service = makeService(sender: sender, store: store)
+        // ...while the plain-text segmenter derives 1 paragraph from this source.
+        let source = "One paragraph that the DOM enumerate splits into three blocks."
+
+        // Strict (default): miss.
+        let strict = await service.cachedTranslation(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: source, targetLanguage: "Chinese")
+        #expect(strict == nil)
+
+        // Opted-in: the foreign-contract row is served (inject self-heals).
+        let accepted = await service.cachedTranslation(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: source, targetLanguage: "Chinese",
+            acceptCountMismatch: true)
+        #expect(accepted?.fromCache == true)
+        #expect(accepted?.segments == ["块一", "块二", "块三"])
+        #expect(await sender.requestCount == 0)
     }
 }

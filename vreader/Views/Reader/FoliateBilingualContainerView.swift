@@ -389,7 +389,8 @@ struct FoliateBilingualContainerView: View {
         vm.attachPrefetcher(
             EPUBReaderContainerView.makePrefetcher(
                 bookFingerprintKey: fingerprintKey,
-                textProvider: textProvider
+                textProvider: textProvider,
+                acceptsCountMismatchedRows: false
             )
         )
         bilingualViewModel = vm
