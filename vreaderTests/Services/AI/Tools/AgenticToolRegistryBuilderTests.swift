@@ -115,4 +115,36 @@ struct AgenticToolRegistryBuilderTests {
         #expect(spy.searchedKeys.contains(otherKey))
         #expect(!spy.searchedKeys.contains(openKey))
     }
+
+    // Feature #97 — HIGH-FIDELITY INTEGRATION: a `list_library` ToolCall dispatched
+    // through the ASSEMBLED registry (the SAME `registry.run(call)` boundary the
+    // AgenticChatDriver invokes per tool-use turn) reaches the real `ListLibraryTool`
+    // over a real `LibrarySearchBackend` and enumerates the library. This proves the
+    // tool is wired into the agentic loop end-to-end (the model-routing step — a
+    // real tool-use LLM choosing list_library — is the only piece a deterministic
+    // mock can't exercise; see the verification-exception evidence file).
+    @Test("list_library runs through the assembled registry and enumerates the library")
+    func listLibraryDispatchesThroughRegistry() async {
+        let backend = SpyLibraryBackend(books: [
+            LibraryBookItem.stub(
+                fingerprintKey: "epub:\(String(repeating: "c", count: 64)):4096",
+                title: "Designing Data-Intensive Applications", author: "Kleppmann", format: "epub"),
+            LibraryBookItem.stub(
+                fingerprintKey: "pdf:\(String(repeating: "d", count: 64)):4096",
+                title: "三体", author: "刘慈欣", format: "pdf"),
+        ])
+        let registry = AgenticToolRegistryBuilder.build(
+            currentBook: nil, currentBookSearch: nil,
+            libraryBackend: backend, contentProvider: StubContent())
+
+        let result = await registry.run(ToolCall(
+            id: "lib-1", name: "list_library", input: .object([:])))
+
+        #expect(!result.isError)
+        #expect(result.toolUseID == "lib-1")   // registry rebinds the provider call id
+        #expect(result.content.contains("Designing Data-Intensive Applications"))
+        #expect(result.content.contains("Kleppmann"))
+        #expect(result.content.contains("三体"))         // CJK through the live boundary
+        #expect(result.content.contains("刘慈欣"))
+    }
 }

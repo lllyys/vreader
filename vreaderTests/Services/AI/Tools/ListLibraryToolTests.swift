@@ -155,6 +155,28 @@ struct ListLibraryToolTests {
         #expect(result.content.contains("刘慈欣"))
     }
 
+    @Test func excludingTheOnlyBookSaysOtherNotNone() async {
+        // Gate-4 Medium: a library with only the open book, excluded, is NOT "no books".
+        let openKey = key("epub", "a")
+        let books = [LibraryBookItem.stub(fingerprintKey: openKey, title: "OnlyOne", format: "epub")]
+        let result = await run(tool(books, openKey: openKey),
+                               .object(["include_current_book": .bool(false)]))
+        #expect(!result.isError)
+        #expect(result.content.lowercased().contains("other"))
+        #expect(!result.content.contains("OnlyOne"))
+    }
+
+    @Test func progressIsClampedAndNonFiniteSafe() async {
+        // Gate-4 Medium: >1 must not render "134%"; +infinity must not crash.
+        let books = [
+            LibraryBookItem.stub(fingerprintKey: key("epub", "g"), title: "Over", format: "epub", progressFraction: 1.34),
+            LibraryBookItem.stub(fingerprintKey: key("epub", "h"), title: "Inf", format: "epub", progressFraction: .infinity),
+        ]
+        let result = await run(tool(books))   // must not trap
+        #expect(!result.content.contains("134%"))
+        #expect(result.content.contains("100%"))   // 1.34 clamps to 100%
+    }
+
     @Test func sortByTitleIsDeterministic() async {
         let books = [
             LibraryBookItem.stub(fingerprintKey: key("epub", "9"), title: "Zebra", format: "epub"),

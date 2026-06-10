@@ -119,8 +119,12 @@ struct ListLibraryTool: AITool {
             : deduped.filter { $0.fingerprintKey != currentBookFingerprintKey }
 
         guard !filtered.isEmpty else {
-            return ToolResult(
-                toolUseID: "", content: "The library has no books.", isError: false)
+            // Gate-4 Medium: distinguish a truly-empty library from one whose only
+            // book is the open one (excluded) — the latter is NOT "no books".
+            let message = deduped.isEmpty
+                ? "The library has no books."
+                : "No other books in the library (only the currently-open book)."
+            return ToolResult(toolUseID: "", content: message, isError: false)
         }
 
         let sorted = sortBooks(filtered, by: sortBy)
@@ -189,8 +193,12 @@ struct ListLibraryTool: AITool {
             text += " — \(ToolResultText.oneLine(author, maxChars: 80))"
         }
         text += " · \(canonicalFormat(book).uppercased())"
-        if let progress = book.progressFraction, progress > 0 {
-            text += " · \(Int((progress * 100).rounded()))%"
+        // Gate-4 Medium: guard against non-finite (`+.infinity` would TRAP in
+        // `Int(_:)`, violating the never-crash AITool contract) and clamp a drifted
+        // `> 1` fraction so it never renders "134%".
+        if let progress = book.progressFraction, progress.isFinite, progress > 0 {
+            let clamped = min(progress, 1)
+            text += " · \(Int((clamped * 100).rounded()))%"
         }
         return text
     }
