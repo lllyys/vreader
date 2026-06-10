@@ -142,6 +142,12 @@ struct FoliateBilingualContainerView: View {
     /// seek into the new reader instance (Codex Gate-4).
     @State var positionRestoreTask: Task<Void, Never>?
 
+    /// Bug #345: session lifecycle for the live AZW3/MOBI path — reading-
+    /// session rows (stats dashboard) + the ticking session-time label the
+    /// bottom chrome shows. Position persistence stays on
+    /// `positionController`; the helper is never handed a locator.
+    @State var sessionLifecycle: ReaderLifecycleHelper?
+
     var body: some View {
         ZStack {
             spikeWithBilingualWiring
@@ -265,6 +271,9 @@ struct FoliateBilingualContainerView: View {
             guard let key = notification.userInfo?["fingerprintKey"] as? String,
                   key == fingerprintKey else { return }
             handleRelocated(notification.userInfo)
+            // Bug #345: tick the session clock on every relocate so the
+            // chrome's session-time label advances with reading.
+            sessionLifecycle?.updateTimeDisplays()
         }
         // Bug #262 / GH #1136: the live AZW3/MOBI Contents source. The spike
         // forwards the parsed `book-ready` TOC here; we convert the tree to
@@ -361,14 +370,24 @@ struct FoliateBilingualContainerView: View {
         #endif
         // Bug #265: build the persistence controller eagerly so a fast
         // close-before-relocate can still flush, and so restore is ready.
-        .task { ensurePositionController() }
+        .task {
+            ensurePositionController()
+            ensureSessionLifecycle()
+        }
         // Bug #265: flush the last position on teardown (close to library /
         // relaunch) in case the debounce window hasn't elapsed, and cancel any
         // in-flight restore task so it can't seek a re-opened reader instance.
         .onDisappear {
             positionRestoreTask?.cancel()
             let controller = positionController
-            Task { await controller?.flush() }
+            // Bug #345: end the reading session after the position flush —
+            // the helper ends the session row, recomputes stats, and posts
+            // `.readerDidClose` (library-refresh parity with other formats).
+            let lifecycle = sessionLifecycle
+            Task {
+                await controller?.flush()
+                await lifecycle?.close(locator: nil)
+            }
         }
     }
 

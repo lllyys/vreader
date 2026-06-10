@@ -80,6 +80,7 @@ final class ReadiumEPUBReaderViewModel {
         self.persistence = nil
         self.deviceId = ""
         self.positionSaveDebounceNs = 2_000_000_000
+        self.lifecycle = nil
     }
 
     /// WI-6 init — wires reading-position save/restore through the injected
@@ -90,14 +91,28 @@ final class ReadiumEPUBReaderViewModel {
         fingerprint: DocumentFingerprint,
         persistence: any VReaderLocatorPersisting,
         deviceId: String,
-        positionSaveDebounceNs: UInt64 = 2_000_000_000
+        positionSaveDebounceNs: UInt64 = 2_000_000_000,
+        sessionLifecycle: ReaderLifecycleHelper? = nil
     ) {
         self.fileURL = fileURL
         self.fingerprint = fingerprint
         self.persistence = persistence
         self.deviceId = deviceId
         self.positionSaveDebounceNs = positionSaveDebounceNs
+        self.lifecycle = sessionLifecycle
     }
+
+    /// Bug #345: the shared session-lifecycle helper (session rows + the
+    /// ticking `sessionTimeDisplay` the bottom chrome shows). Optional — nil
+    /// for the render-only WI-5 init and previews. Position persistence stays
+    /// OWNED BY THIS VM (the helper is never handed a locator to save; its
+    /// `close(locator: nil)` skips its position path) — only the session
+    /// tracking + time display + close-side stats/notify run through it.
+    let lifecycle: ReaderLifecycleHelper?
+
+    /// Formatted current-session reading time for the bottom chrome (Bug
+    /// #345 — parity with TXT/MD/PDF/legacy-EPUB).
+    var sessionTimeDisplay: String? { lifecycle?.sessionTimeDisplay }
 
     /// A throwaway fingerprint for the render-only WI-5 init; never persisted
     /// (the WI-5 init leaves `persistence` nil, so the mapping is never invoked).
@@ -151,6 +166,10 @@ final class ReadiumEPUBReaderViewModel {
                 guard !isClosed else { return }
                 state = .ready(publication)
                 log.info("ReadiumEPUB opened: \(publication.metadata.title ?? "untitled", privacy: .public)")
+                // Bug #345: start the reading session (rows feed the stats
+                // dashboard; the helper's flush ticks `sessionTimeDisplay`).
+                try? lifecycle?.beginSession()
+                await lifecycle?.updateLastOpened()
             }
         }
     }
@@ -206,6 +225,12 @@ final class ReadiumEPUBReaderViewModel {
         }
         // Await a persist the debounce task already started before we cancelled.
         await inFlight?.value
+        // Bug #345: end the reading session AFTER the position flush. Passing
+        // a nil locator skips the helper's own position path (this VM owns
+        // it); the helper still ends the session row, recomputes stats, and
+        // posts `.readerDidClose` (library refresh parity with the other
+        // formats).
+        await lifecycle?.close(locator: nil)
     }
 
     /// Surface an `EPUBNavigatorViewController` init failure (thrown from the
@@ -247,6 +272,10 @@ final class ReadiumEPUBReaderViewModel {
     func save(readiumLocator: ReadiumShared.Locator) {
         guard persistence != nil, !isClosed else { return }
         pendingReadiumLocator = readiumLocator
+        // Bug #345: tick the session clock on every relocate so the chrome's
+        // session-time label advances with reading (position saving stays on
+        // this VM's own debounced path below).
+        lifecycle?.updateTimeDisplays()
 
         saveVersion &+= 1
         let capturedVersion = saveVersion

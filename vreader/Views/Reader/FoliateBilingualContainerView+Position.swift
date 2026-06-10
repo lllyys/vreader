@@ -35,6 +35,32 @@ extension FoliateBilingualContainerView {
         )
     }
 
+    /// Bug #345: lazily builds + starts the session lifecycle (mirrors
+    /// `ensurePositionController`). Begins the session immediately — the
+    /// reader is on screen by the time `.task` runs.
+    func ensureSessionLifecycle() {
+        guard sessionLifecycle == nil,
+              let fingerprint = DocumentFingerprint(canonicalKey: fingerprintKey) else { return }
+        let persistence = PersistenceActor(modelContainer: modelContext.container)
+        let lifecycle = ReaderLifecycleHelper(
+            bookFingerprint: fingerprint,
+            positionService: ReaderPositionService(
+                bookFingerprintKey: fingerprintKey,
+                deviceId: ReaderContainerView.deviceId,
+                persistence: persistence
+            ),
+            sessionTracker: ReadingSessionTracker(
+                clock: SystemClock(),
+                store: SwiftDataSessionStore(modelContainer: modelContext.container),
+                deviceId: ReaderContainerView.deviceId
+            ),
+            positionStore: persistence
+        )
+        try? lifecycle.beginSession()
+        Task { await lifecycle.updateLastOpened() }
+        sessionLifecycle = lifecycle
+    }
+
     /// On the FIRST relocate (post-init; fires for every book), load the saved
     /// position, seek to it, then open the save gate. Gate-open follows the
     /// seek-post with no `await` between them, so the open→start relocate that

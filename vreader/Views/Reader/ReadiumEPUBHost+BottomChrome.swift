@@ -66,7 +66,10 @@ extension ReadiumEPUBHost {
             progress: Binding(get: { readingProgress }, set: { readingProgress = $0 }),
             onSeek: { seekBottomChrome(toFraction: $0) },
             leadingLabel: chromeLeadingLabel,
-            trailingLabel: chromeTrailingLabel
+            // Bug #345: prefer the live session time (ticks via the
+            // lifecycle helper's flush + relocates); fall back to the percent
+            // label until the first tick lands.
+            trailingLabel: viewModel?.sessionTimeDisplay ?? chromeTrailingLabel
         )
     }
 

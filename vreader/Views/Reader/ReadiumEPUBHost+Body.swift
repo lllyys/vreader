@@ -230,11 +230,32 @@ extension ReadiumEPUBHost {
         replacementRules = await MDReplacementRuleFetcher.rules(
             container: modelContainer, bookKey: fingerprint.canonicalKey
         )
+        // Bug #345: session lifecycle for the DEFAULT engine — reading-
+        // session rows (stats dashboard) + the ticking session-time label the
+        // bottom chrome shows (parity with TXT/MD/PDF/legacy-EPUB). Position
+        // persistence stays on the VM's own debounced path; the helper's
+        // position service is constructed for API completeness but never
+        // handed a locator.
+        let sessionLifecycle = ReaderLifecycleHelper(
+            bookFingerprint: fingerprint,
+            positionService: ReaderPositionService(
+                bookFingerprintKey: fingerprint.canonicalKey,
+                deviceId: ReaderContainerView.deviceId,
+                persistence: persistence
+            ),
+            sessionTracker: ReadingSessionTracker(
+                clock: SystemClock(),
+                store: SwiftDataSessionStore(modelContainer: modelContainer),
+                deviceId: ReaderContainerView.deviceId
+            ),
+            positionStore: persistence
+        )
         let vm = ReadiumEPUBReaderViewModel(
             fileURL: fileURL,
             fingerprint: fingerprint,
             persistence: persistence,
-            deviceId: ReaderContainerView.deviceId
+            deviceId: ReaderContainerView.deviceId,
+            sessionLifecycle: sessionLifecycle
         )
         viewModel = vm
         // WI-8: build the highlight coordinator over the host-owned adapter so

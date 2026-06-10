@@ -37,7 +37,9 @@ extension FoliateBilingualContainerView {
             progress: bottomChromeProgressBinding,
             onSeek: { postSeek($0) },
             leadingLabel: chromeLeadingLabel,
-            trailingLabel: chromeTrailingLabel
+            // Bug #345: prefer the live session time; fall back to the
+            // percent label until the first tick lands.
+            trailingLabel: sessionLifecycle?.sessionTimeDisplay ?? chromeTrailingLabel
         )
     }
 
