@@ -42,9 +42,22 @@ process's entries, not a rolling 24-hour window — so "last 24 h" would be
 factually wrong. "this session" is the approved, accurate, single-sourced
 descriptor for both the footer and the export header.
 
+## Device-verification finding (Gate 5, found + fixed before merge)
+
+Acceptance testing on iPhone 17 Pro Sim surfaced a bug the audits couldn't (it's
+a presentation-depth runtime issue): the export trigger embedded a
+`UIActivityViewController` (`ShareActivityView`) in a `.sheet`, which rendered a
+**blank white sheet** from this depth (Settings `.sheet` → `NavigationStack`
+push → `.sheet`). Refactored to the native iOS-17 `ShareLink` with a
+reactively-prepared redacted file URL (off-main on appear + each filter change).
+Re-verified on device: the system share sheet presents correctly with the
+`vreader-log-<date>.txt` (6 KB) payload. Evidence:
+`dev-docs/verification/feature-96-20260610.md`.
+
 ## Verdict
 
 **ship-as-is.** All Critical/High/Medium findings across both rounds fixed and
-pinned by tests (100 tests green across the 7 Diagnostics + Settings suites).
-Remaining design wording resolved by an explicit, documented source-of-truth
-decision rather than reproducing a factually-incorrect mock label.
+pinned by tests (100 tests green across the 7 Diagnostics + Settings suites); the
+device-verification share bug fixed via `ShareLink`. Remaining design wording
+resolved by an explicit, documented source-of-truth decision rather than
+reproducing a factually-incorrect mock label.

@@ -19,9 +19,10 @@ import SwiftUI
 
 struct DiagnosticsLogView: View {
     @State private var viewModel: DiagnosticsLogViewModel
+    /// The redacted export file (`vreader-log-<date>.txt`), prepared off-main
+    /// and regenerated when a filter changes so the shared file always matches
+    /// what's on screen. `nil` until the first prepare completes.
     @State private var exportURL: URL?
-    @State private var isShowingShare = false
-    @State private var exportFailed = false
 
     private let theme: ReaderThemeV2
 
@@ -41,25 +42,24 @@ struct DiagnosticsLogView: View {
             .toolbar { trailingToolbar }
             .task {
                 if !viewModel.hasLoaded { await viewModel.load() }
+                await prepareExport()
             }
-            .sheet(isPresented: $isShowingShare) {
-                if let exportURL {
-                    ShareActivityView(activityItems: [exportURL]).ignoresSafeArea()
-                }
-            }
-            .alert("Export failed", isPresented: $exportFailed) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Could not write the diagnostics log file. Please try again.")
-            }
+            .onChange(of: viewModel.levelFilter) { Task { await prepareExport() } }
+            .onChange(of: viewModel.categoryFilter) { Task { await prepareExport() } }
             .accessibilityIdentifier("diagnosticsLogView")
     }
 
     @ToolbarContentBuilder
     private var trailingToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
-            if viewModel.hasLoaded && !viewModel.isLoading && !viewModel.allEntries.isEmpty {
-                Button(action: presentShare) {
+            // Native `ShareLink` — presents the system share sheet correctly even
+            // from this depth (sheet → NavigationStack push). An embedded
+            // `UIActivityViewController` renders blank from three presentation
+            // levels deep; `ShareLink` does not. Shown once a redacted file is
+            // ready and there's something to share.
+            if viewModel.hasLoaded, !viewModel.isLoading,
+               !viewModel.allEntries.isEmpty, let exportURL {
+                ShareLink(item: exportURL) {
                     Image(systemName: "square.and.arrow.up")
                         .foregroundStyle(Color(theme.accentColor))
                 }
@@ -173,38 +173,28 @@ struct DiagnosticsLogView: View {
         UIPasteboard.general.string = DiagnosticsRedactor.redact(entry.message)
     }
 
-    /// Builds the redacted export, writes it to a temp `.txt` OFF the main
-    /// actor (large logs shouldn't hitch the UI), then hops back to present the
-    /// share sheet. A write failure surfaces a brief alert instead of a dead
-    /// tap.
-    private func presentShare() {
+    /// Builds the redacted, filter-narrowed export and writes it to a temp
+    /// `.txt` OFF the main actor (large logs shouldn't hitch the UI), then
+    /// publishes the URL for `ShareLink`. Regenerated on appear + on each filter
+    /// change so the shared file always matches what's on screen. A write
+    /// failure simply leaves the share affordance hidden (best-effort export).
+    private func prepareExport() async {
         let text = viewModel.exportText()
         let fileName = viewModel.exportFileName(now: Date())
-        Task {
-            let result = await Self.writeExport(text, fileName: fileName)
-            switch result {
-            case .success(let url):
-                exportURL = url
-                isShowingShare = true
-            case .failure:
-                exportFailed = true
-            }
+        if let url = await Self.writeExport(text, fileName: fileName) {
+            exportURL = url
         }
     }
 
     /// Writes the export text to a temp file off-main. `nonisolated` so the
-    /// blocking encode + write run off the `@MainActor`.
+    /// blocking encode + write run off the `@MainActor`. Returns `nil` on
+    /// failure (the share affordance then stays hidden).
     private nonisolated static func writeExport(
         _ text: String, fileName: String
-    ) async -> Result<URL, Error> {
+    ) async -> URL? {
         await Task.detached(priority: .utility) {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-            do {
-                try Data(text.utf8).write(to: url, options: .atomic)
-                return .success(url)
-            } catch {
-                return .failure(error)
-            }
+            return (try? Data(text.utf8).write(to: url, options: .atomic)) != nil ? url : nil
         }.value
     }
 }
