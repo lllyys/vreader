@@ -217,6 +217,18 @@ enum EPUBContinuousScrollJS {
     /// then a backward-extend flash). The first observation of a section only
     /// records its baseline height (the insert-time compensation in
     /// `prependChapterSectionJS` already covered its initial height).
+    ///
+    /// Bug #329 (round 4): the observer also tracks `touchActive`
+    /// (touchstart/end/cancel on the root) and reports it with every signal —
+    /// a JS `scrollTop` compensation issued while a pan gesture is ACTIVE is
+    /// overridden next frame by the scroller's gesture anchor, so the content
+    /// visibly leaps by the removed height and the boundary re-fires (the
+    /// measured chapter-runaway: ~19 chapters/second under a real drag). The
+    /// coordinator defers evictions + backward prepends while `touchActive`;
+    /// the ResizeObserver compensation below queues its deltas during a touch
+    /// and applies them once on touchend (a write at touchend is no longer
+    /// fighting the gesture). touchend also emits one extra report so the
+    /// coordinator promptly runs any deferred work.
     static let continuousScrollObserverJS = """
     (function() {
         var root = document.getElementById('\(scrollRootID)');
@@ -224,6 +236,10 @@ enum EPUBContinuousScrollJS {
         root.__vreaderScrollObserver = true;
         var PREFETCH_PX = \(prefetchPx);
         var ticking = false;
+        var touchActive = false;      // true from touchstart until SETTLE
+        var fingerDown = false;       // true only while a finger is on glass
+        var settleTimer = null;
+        var pendingResizeDelta = 0;
         function report() {
             ticking = false;
             var sections = root.querySelectorAll('[data-vreader-spine-index]');
@@ -253,13 +269,49 @@ enum EPUBContinuousScrollJS {
                     nearBottomBoundary: nearBottomBoundary,
                     pxAbove: pxAbove,
                     pxBelow: pxBelow,
-                    sectionHeights: sectionHeights
+                    sectionHeights: sectionHeights,
+                    touchActive: touchActive
                 });
             } catch (e) {}
         }
         root.addEventListener('scroll', function() {
             if (!ticking) { ticking = true; requestAnimationFrame(report); }
+            if (touchActive && !fingerDown) { armSettle(); }
         }, { passive: true });
+        // Bug #329 round 4: the gesture window extends PAST finger-up — the
+        // deceleration/settle animation also owns scrollTop, so a JS
+        // compensation written during momentum is overridden just like one
+        // written mid-drag (measured: the teleport pairs persisted post-
+        // touchend until this settle window was added). "Settled" = no
+        // scroll events for 160ms after the finger lifted.
+        function settled() {
+            touchActive = false;
+            if (pendingResizeDelta !== 0) {
+                root.scrollTop += pendingResizeDelta;
+                pendingResizeDelta = 0;
+            }
+            // One extra report so the coordinator promptly runs work it
+            // deferred during the gesture (evictions / backward prepends).
+            if (!ticking) { ticking = true; requestAnimationFrame(report); }
+        }
+        function armSettle() {
+            if (settleTimer) { clearTimeout(settleTimer); }
+            settleTimer = setTimeout(function() {
+                settleTimer = null;
+                if (!fingerDown) { settled(); }
+            }, 160);
+        }
+        root.addEventListener('touchstart', function() {
+            fingerDown = true;
+            touchActive = true;
+            if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+        }, { passive: true });
+        function onTouchEnd() {
+            fingerDown = false;
+            armSettle();
+        }
+        root.addEventListener('touchend', onTouchEnd, { passive: true });
+        root.addEventListener('touchcancel', onTouchEnd, { passive: true });
         var lastHeights = new WeakMap();
         var resizeObserver = new ResizeObserver(function(entries) {
             for (var i = 0; i < entries.length; i++) {
@@ -272,7 +324,13 @@ enum EPUBContinuousScrollJS {
                 var delta = newH - oldH;
                 if (delta === 0) { continue; }
                 if ((el.offsetTop + oldH) <= root.scrollTop) {
-                    root.scrollTop += delta;
+                    if (touchActive) {
+                        // Bug #329 round 4: a write now would be overridden by
+                        // the live gesture anchor — queue it for touchend.
+                        pendingResizeDelta += delta;
+                    } else {
+                        root.scrollTop += delta;
+                    }
                 }
             }
         });

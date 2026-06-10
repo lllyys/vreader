@@ -145,7 +145,10 @@ extension EPUBScrollBoundarySignal {
             // handling must survive an older observer or a truncated payload).
             pxAbove: nonNegativeIntValue(dict["pxAbove"]),
             pxBelow: nonNegativeIntValue(dict["pxBelow"]),
-            sectionHeights: sectionHeightsValue(dict["sectionHeights"])
+            sectionHeights: sectionHeightsValue(dict["sectionHeights"]),
+            // Bug #329 (round 4): absent → false (synthetic/legacy signals
+            // carry no gesture state; deferral then never engages).
+            touchActive: boolValue(dict["touchActive"])
         )
     }
 

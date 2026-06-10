@@ -51,12 +51,14 @@ struct EPUBContinuousScrollEvictionGuardTests {
 
     private func signal(
         visible: Int, top: Bool = false, bottom: Bool = false,
-        pxAbove: Int? = nil, pxBelow: Int? = nil, sectionHeights: [Int]? = nil
+        pxAbove: Int? = nil, pxBelow: Int? = nil, sectionHeights: [Int]? = nil,
+        touchActive: Bool = false
     ) -> EPUBScrollBoundarySignal {
         EPUBScrollBoundarySignal(
             visibleSpineIndex: visible, intraFraction: 0.5,
             nearTopBoundary: top, nearBottomBoundary: bottom,
-            pxAbove: pxAbove, pxBelow: pxBelow, sectionHeights: sectionHeights)
+            pxAbove: pxAbove, pxBelow: pxBelow, sectionHeights: sectionHeights,
+            touchActive: touchActive)
     }
 
     // MARK: - Guard unit behavior
@@ -282,6 +284,78 @@ struct EPUBContinuousScrollEvictionGuardTests {
         // caught scrollTop crashing to ~0 at multi-evict moments).
         #expect(js.contains("if (!el.isConnected) { continue; }"))
     }
+
+    // MARK: - Bug #329 round 4: gesture-aware mutation deferral
+
+    /// A forward extend during an ACTIVE touch must append WITHOUT evicting —
+    /// the eviction's scrollTop compensation would be overridden by the live
+    /// gesture anchor (the measured chapter runaway). The window floats above
+    /// maxSpan for the touch's duration.
+    @MainActor
+    @Test func forwardExtendDuringTouch_appendsWithoutEvicting() async {
+        let eval = RecordingEvaluator()
+        let coordinator = makeCoordinator(anchor: 0, spineCount: 20, maxSpan: 3, eval: eval)
+        await growWindowForward(coordinator, to: 2)   // [0,2] at maxSpan
+        let before = coordinator.window
+
+        await coordinator.handleBoundarySignal(signal(
+            visible: 2, bottom: true,
+            pxAbove: 5000, pxBelow: 100, sectionHeights: [3000, 3000, 3000],
+            touchActive: true))
+
+        #expect(coordinator.window.hi == before.hi + 1, "the append itself stays allowed")
+        #expect(coordinator.window.lo == before.lo, "no eviction during an active touch")
+        #expect(coordinator.window.span == before.span + 1, "the window floats above maxSpan")
+        let removed = eval.evaluatedJS.filter { $0.contains(".remove()") }
+        #expect(removed.isEmpty, "no section-remove JS during the touch")
+    }
+
+    /// The touchend report (touchActive false) drains the deferred eviction.
+    @MainActor
+    @Test func touchEndSignal_drainsDeferredEviction() async {
+        let eval = RecordingEvaluator()
+        let coordinator = makeCoordinator(anchor: 0, spineCount: 20, maxSpan: 3, eval: eval)
+        await growWindowForward(coordinator, to: 2)
+        await coordinator.handleBoundarySignal(signal(
+            visible: 2, bottom: true,
+            pxAbove: 5000, pxBelow: 100, sectionHeights: [3000, 3000, 3000],
+            touchActive: true))
+        #expect(coordinator.window.span == 4)
+
+        // Touch ended; ample trailing slack → the backlog drains to maxSpan.
+        await coordinator.handleBoundarySignal(signal(
+            visible: 3, bottom: true,
+            pxAbove: 9000, pxBelow: 100, sectionHeights: [3000, 3000, 3000, 3000],
+            touchActive: false))
+        #expect(coordinator.window.span <= 4, "post-touch signals drain the eviction backlog")
+        let removed = eval.evaluatedJS.filter { $0.contains(".remove()") }
+        #expect(!removed.isEmpty, "the deferred eviction ran after the touch ended")
+    }
+
+    /// A backward (prepend) extend during an active touch is deferred entirely
+    /// — its scrollTop += h compensation would be overridden by the gesture.
+    @MainActor
+    @Test func backwardExtendDuringTouch_isDeferred() async {
+        let eval = RecordingEvaluator()
+        let coordinator = makeCoordinator(anchor: 5, spineCount: 20, maxSpan: 3, eval: eval)
+        await growWindowForward(coordinator, to: 7)   // window [5,7]
+        let before = coordinator.window
+        let evalsBefore = eval.evaluatedJS.count
+
+        await coordinator.handleBoundarySignal(signal(
+            visible: 5, top: true,
+            pxAbove: 100, pxBelow: 5000, sectionHeights: [3000, 3000, 3000],
+            touchActive: true))
+        #expect(coordinator.window == before, "no backward extend during an active touch")
+        #expect(eval.evaluatedJS.count == evalsBefore, "no DOM mutation during the touch")
+
+        // Touch ended → the same boundary now extends backward.
+        await coordinator.handleBoundarySignal(signal(
+            visible: 5, top: true,
+            pxAbove: 100, pxBelow: 5000, sectionHeights: [3000, 3000, 3000],
+            touchActive: false))
+        #expect(coordinator.window.lo == before.lo - 1, "the deferred prepend ran after touchend")
+    }
 }
 
 // MARK: - 1px physics simulation
@@ -469,4 +543,3 @@ struct EPUBContinuousScroll1pxSimulationTests {
         #expect(!result.desync, "the coordinator window and the DOM must never desync")
     }
 }
-

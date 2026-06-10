@@ -57,6 +57,13 @@ struct EPUBScrollBoundarySignal: Equatable, Sendable {
     /// window's `lo` section, last is `hi`. Lets the eviction guard compute how
     /// much trailing content a candidate eviction would leave.
     var sectionHeights: [Int]? = nil
+    /// Bug #329 (round 4): a pan gesture is in progress. A JS `scrollTop`
+    /// compensation issued mid-gesture is overridden by the scroller's gesture
+    /// anchor (the content leaps by the removed height and the boundary
+    /// re-fires — the measured chapter runaway), so while this is true the
+    /// coordinator DEFERS evictions and backward prepends; forward appends
+    /// (no compensation) stay allowed. `false` for synthetic/test signals.
+    var touchActive: Bool = false
 }
 
 @MainActor
@@ -182,6 +189,15 @@ final class EPUBContinuousScrollCoordinator {
             if ignoreNextNearTop { return }
         }
         if signal.nearTopBoundary, !suppressNearTop, window.canExtendBackward {
+            // Bug #329 (round 4): a backward extend PREPENDS above the viewport
+            // — its `scrollTop += h` compensation would be overridden by a live
+            // gesture anchor (the content leaps a section and the boundary
+            // re-fires). Defer it; the observer emits an extra report on
+            // touchend, which re-enters here with `touchActive == false`.
+            if signal.touchActive {
+                Self.log.debug("deferring backward extend during active touch")
+                return
+            }
             await extend(forward: false, geometry: signal)
         }
     }
@@ -464,6 +480,18 @@ final class EPUBContinuousScrollCoordinator {
         var evictedPx = 0
         while committed.span > targetSpan {
             guard gen == generation else { return } // stale → emit nothing, publish nothing
+            // Bug #329 (round 4): NEVER evict while a pan gesture is active —
+            // a forward eviction's `scrollTop -= h` compensation is overridden
+            // by the live gesture anchor, so the content leaps by the removed
+            // height and the boundary re-fires (the measured chapter runaway:
+            // ~19 chapters/second under a real drag; rounds 1–3's synthetic
+            // ticks carried no gesture, which is why they all passed). The
+            // window floats above maxSpan for the touch's duration; the
+            // observer's touchend report re-enters and drains the backlog.
+            if geometry?.touchActive == true {
+                Self.log.debug("deferring eviction during active touch")
+                break
+            }
             // Bug #329 (round 3): defer the trim (and the rest of the catch-up)
             // when it would strand the trailing side below prefetch + margin —
             // the geometric source of the evict→reload oscillation. A later
