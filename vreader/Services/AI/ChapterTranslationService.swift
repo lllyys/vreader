@@ -144,6 +144,12 @@ actor ChapterTranslationService {
         config: ResolvedAIProviderConfig,
         style: TranslationStyle,
         granularity: TranslationGranularity = .paragraph,
+        // Bug #341: when true, the cache READ is skipped — a fresh cached row
+        // must not short-circuit an explicit re-translate into a stale no-op.
+        // The cache WRITE still runs: the upsert replaces the row by lookupKey
+        // in place, which is the atomic swap (the old translation survives
+        // until the new one durably lands; a failure leaves it untouched).
+        bypassCacheRead: Bool = false,
         // Bug #311: optional real progress source. Fired after each chunk
         // completes with `(completedChunks, totalChunks)` so a caller (the
         // re-translate VM) can drive an honest N-of-M progress bar instead of
@@ -171,7 +177,7 @@ actor ChapterTranslationService {
         // changed (content-replacement rule edit, re-import) produces a
         // mismatch, which is treated as STALE: the row is dropped and the
         // chapter re-translated (plan audit-driven addition).
-        if let cached = await store.translation(forKey: lookupKey) {
+        if !bypassCacheRead, let cached = await store.translation(forKey: lookupKey) {
             if cached.sourceParagraphCount == segments.count {
                 return ChapterTranslationResult(
                     segments: cached.translatedSegments, fromCache: true)

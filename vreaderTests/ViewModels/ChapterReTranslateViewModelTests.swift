@@ -267,8 +267,8 @@ struct ChapterReTranslateViewModelTests {
         let store = try Self.makeStore()
         let unit = Self.unit("ch6")
         // Seed the cache for this exact (book, unit, target, profile,
-        // promptVersion). The VM must DELETE this row before triggering the
-        // re-translate.
+        // promptVersion). With a provider OVERRIDE, the VM must delete this
+        // original-key row — AFTER the re-translate succeeds (Bug #341).
         try await Self.seedCache(
             store, unit: unit, profileID: Self.initialProfileID,
             segments: ["旧译文"])
@@ -291,7 +291,8 @@ struct ChapterReTranslateViewModelTests {
         }
         await vm.submit()
 
-        // Cache row deleted for the ORIGINAL profile/key (initialProfileID).
+        // Original-key row (initialProfileID) deleted after the successful
+        // override re-translate — it would otherwise serve a stale hit.
         let cachedKey = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: Self.bookKey,
             unitStorageKey: unit.storageKey,
@@ -500,5 +501,99 @@ struct ChapterReTranslateViewModelTests {
         // seam touching profiles), which the prior test already covered.
         let calls = await resolver.calls
         #expect(calls.first?.profileID == Self.overrideProfileID)
+    }
+
+    // MARK: - Bug #341: atomic swap — never destroy the original on failure
+
+    private static func originalKey(unit: TranslationUnitID) -> String {
+        ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: bookKey,
+            unitStorageKey: unit.storageKey,
+            targetLanguage: "Chinese",
+            providerProfileID: initialProfileID,
+            promptVersion: promptVersion)
+    }
+
+    /// THE BUG: the original cache row was deleted at 0.25 progress, BEFORE the
+    /// translation request — so any provider failure permanently lost it,
+    /// contradicting the sheet's own "Existing translation is kept until the
+    /// new one is ready." A failed re-translate must leave the row untouched.
+    @Test func failureAfterSubmit_keepsOriginalCacheRow() async throws {
+        let store = try Self.makeStore()
+        try await Self.seedCache(
+            store, unit: Self.unit(), profileID: Self.initialProfileID,
+            segments: ["既有译文一", "既有译文二"])
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .failure(
+            ChapterTranslationError.providerFailed("boom")))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        #expect(vm.sheetState == .picker, "failure returns to the picker")
+        let row = await store.translation(forKey: Self.originalKey(unit: Self.unit()))
+        #expect(row != nil, "Bug #341: the original translation must survive a failed re-translate")
+        #expect(row?.translatedSegments == ["既有译文一", "既有译文二"])
+    }
+
+    /// Cancellation mid-translate must equally leave the original row intact.
+    @Test func cancellationDuringTranslate_keepsOriginalCacheRow() async throws {
+        let store = try Self.makeStore()
+        try await Self.seedCache(
+            store, unit: Self.unit(), profileID: Self.initialProfileID,
+            segments: ["既有译文"])
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .failure(CancellationError()))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        let row = await store.translation(forKey: Self.originalKey(unit: Self.unit()))
+        #expect(row != nil, "Bug #341: cancellation must not destroy the original translation")
+    }
+
+    /// The swap is deferred to AFTER success: re-translating under a DIFFERENT
+    /// profile deletes the now-superseded original row only once the new
+    /// translation has landed (the service writes the new row internally).
+    @Test func successWithDifferentProfile_deletesOriginalOnlyAfterSuccess() async throws {
+        let store = try Self.makeStore()
+        try await Self.seedCache(
+            store, unit: Self.unit(), profileID: Self.initialProfileID,
+            segments: ["旧译文"])
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新译文"], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        vm.updateSelection { $0.providerProfileID = Self.overrideProfileID }
+        await vm.submit()
+
+        #expect(vm.sheetState == .complete)
+        let row = await store.translation(forKey: Self.originalKey(unit: Self.unit()))
+        #expect(row == nil, "the superseded original row is removed after the new translation landed")
+    }
+
+    /// Same-key re-translate (selection unchanged): the post-success delete must
+    /// NOT remove the canonical row — the service just overwrote it in place
+    /// (and once #342 unifies the cache key, every re-translate takes this path).
+    @Test func successWithSameProfile_keepsCanonicalRow() async throws {
+        let store = try Self.makeStore()
+        try await Self.seedCache(
+            store, unit: Self.unit(), profileID: Self.initialProfileID,
+            segments: ["旧译文"])
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新译文"], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()   // selection untouched → same key
+
+        #expect(vm.sheetState == .complete)
+        let row = await store.translation(forKey: Self.originalKey(unit: Self.unit()))
+        #expect(row != nil, "same-key swap must not delete the row the service just wrote")
     }
 }

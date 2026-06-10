@@ -8,20 +8,22 @@
 //       provider"
 //
 // Key decisions:
-// - **Cache row is deleted BEFORE the translation request**, by the
-//   originally-cached key (`initialProviderProfileID` + initial promptVersion +
-//   targetLanguage). Otherwise the service's cache-hit short-circuit would
-//   serve the stale row and skip the network call. The new translation lands
-//   under the picker-resolved key (override-profile-aware), so the old key is
-//   orphaned and the delete is the only thing that frees its row.
+// - **Atomic swap (Bug #341): the original cache row survives until the new
+//   translation durably lands.** The runner bypasses the service's cache-hit
+//   short-circuit (`bypassCacheRead`) instead of the old delete-before-request,
+//   and its cache-write replaces the row by lookupKey in place. A provider
+//   failure / cancel / app kill mid-flight leaves the original translation
+//   intact. Only a provider OVERRIDE (picker key != original key) needs an
+//   explicit delete of the orphaned original-key row — and that runs strictly
+//   AFTER success.
 // - **No mutation of `ProviderProfileStore`** — the picker selection lives on
 //   the VM only. The resolver call carries the chosen profile + model; the
 //   global active id is untouched.
 // - **Source text comes through a closure** (`sourceTextProvider`) so a test
 //   can supply a deterministic string without standing up a real
 //   `ChapterTextProviding` actor. The host wires it to the live provider.
-// - **Progress is real N-of-M** (Bug #311). Setup ticks 0% → 0.25 (cache
-//   delete) → 0.5 (provider resolved); the translate phase then advances 0.5 →
+// - **Progress is real N-of-M** (Bug #311). Setup ticks 0% → 0.25 (source
+//   text read) → 0.5 (provider resolved); the translate phase then advances 0.5 →
 //   0.95 driven by `ChapterTranslationService`'s per-chunk `onChunkProgress`
 //   callback (committed-chunk count), and 1.0 is set when the flow finishes
 //   (cache-write + host apply). Previously the translate phase was a faked 0.5
@@ -109,9 +111,9 @@ final class ChapterReTranslateViewModel {
     /// translation uses it.
     private(set) var targetLanguage: String = "Chinese"
 
-    /// Progress for the in-flight re-translate (Bug #311): 0 → 0.25 (cache
-    /// delete) → 0.5 (provider resolved) → 0.5…0.95 (real per-chunk N-of-M from
-    /// the service's `onChunkProgress`) → 1.0 (applied). Monotonic.
+    /// Progress for the in-flight re-translate (Bug #311): 0 → 0.25 (source
+    /// text read) → 0.5 (provider resolved) → 0.5…0.95 (real per-chunk N-of-M
+    /// from the service's `onChunkProgress`) → 1.0 (applied). Monotonic.
     private(set) var progress: Double = 0.0
 
     /// The most recent error message, displayed inline at the top of the
@@ -246,9 +248,12 @@ final class ChapterReTranslateViewModel {
 
     // MARK: - Submit — the re-translate action
 
-    /// Runs the re-translate flow: delete the original cache row → resolve the
-    /// picker's provider config → call the translation runner → on success,
-    /// fire `onTranslationApplied`. Errors surface back to the picker.
+    /// Runs the re-translate flow: read the source text → resolve the picker's
+    /// provider config → call the translation runner (cache-read bypassed; its
+    /// cache-write replaces the row in place) → on success, delete the orphaned
+    /// original-key row if the provider was overridden, then fire
+    /// `onTranslationApplied`. Errors surface back to the picker — the original
+    /// cached translation survives every non-success path (Bug #341).
     func submit() async {
         guard let unit else {
             log.error("submit() called with no unit")
@@ -276,32 +281,16 @@ final class ChapterReTranslateViewModel {
 
     /// The inner submit pipeline. Split out so the Task body is small and the
     /// guard / progression is obvious.
+    ///
+    /// Bug #341: the original cache row is NEVER deleted before the new
+    /// translation durably lands. The runner bypasses the cache READ
+    /// (`bypassCacheRead` in `ChapterTranslationService.translate`) so a fresh
+    /// row can't short-circuit the re-translate, and its cache WRITE replaces
+    /// the row by lookupKey in place — the atomic swap. Only when the picker
+    /// key differs from the original key (provider override) does the original
+    /// row need an explicit delete, and that happens AFTER success (step 5).
     private func runSubmit(unit: TranslationUnitID, generation: Int) async {
-        // 1. Delete the cache row for the ORIGINAL profile so a subsequent
-        //    cache lookup on the original key returns nil. The new translation
-        //    lands under the (potentially overridden) picker key; the original
-        //    row would otherwise stay live and continue to serve a stale hit
-        //    when bilingual mode is on with the original profile.
-        let originalKey = ChapterTranslationRecord.lookupKey(
-            bookFingerprintKey: bookFingerprintKey,
-            unitStorageKey: unit.storageKey,
-            targetLanguage: targetLanguage,
-            providerProfileID: initialProviderProfileID,
-            promptVersion: promptVersion)
-        do {
-            try await store.deleteTranslation(forKey: originalKey)
-        } catch {
-            // Logged-and-swallowed (rule 50 §6) — a delete failure does NOT
-            // block re-translation. If the original row is still live, the
-            // re-translate still writes a fresh row under the new key; only
-            // an inconsistent cache state remains, which the next re-translate
-            // resolves.
-            log.error("delete-before-retranslate failed: \(String(describing: error), privacy: .public)")
-        }
-
-        progress = 0.25
-
-        // 2. Source text for the unit. Three outcomes (Codex Gate-4 round-1
+        // 1. Source text for the unit. Three outcomes (Codex Gate-4 round-1
         //    Critical, thread `019e4399-b8cd`):
         //    - empty string returned → legitimately empty unit, complete.
         //    - CancellationError thrown → cancel path; restore picker.
@@ -327,7 +316,9 @@ final class ChapterReTranslateViewModel {
             return
         }
 
-        // 3. Resolve provider config (the picker's choice).
+        progress = 0.25
+
+        // 2. Resolve provider config (the picker's choice).
         let config: ResolvedAIProviderConfig
         do {
             config = try await resolver.resolveProviderConfig(
@@ -342,8 +333,11 @@ final class ChapterReTranslateViewModel {
 
         progress = 0.5
 
-        // 4. Run the translation. On cancel, the task body unwinds and the
-        //    cancel() path has already returned the sheet to .picker.
+        // 3. Run the translation. The runner bypasses the cache read and its
+        //    cache-write replaces the picker-keyed row in place (Bug #341 —
+        //    atomic swap). On cancel, the task body unwinds and the cancel()
+        //    path has already returned the sheet to .picker; the original
+        //    cached translation is untouched on every non-success path.
         let result: ChapterTranslationResult
         do {
             result = try await runner.translateForRetranslate(
@@ -372,6 +366,36 @@ final class ChapterReTranslateViewModel {
             return
         }
 
+        // 4. Success — the new translation is durably cached under the picker
+        //    key. If the picker overrode the provider, the ORIGINAL key's row
+        //    is now an orphan that would keep serving a stale hit when
+        //    bilingual mode reads with the original profile — delete it ONLY
+        //    now, after success (Bug #341: never before). Same-key
+        //    re-translates need no delete: the runner's upsert already
+        //    replaced the row in place.
+        let originalKey = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: bookFingerprintKey,
+            unitStorageKey: unit.storageKey,
+            targetLanguage: targetLanguage,
+            providerProfileID: initialProviderProfileID,
+            promptVersion: promptVersion)
+        let newKey = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: bookFingerprintKey,
+            unitStorageKey: unit.storageKey,
+            targetLanguage: targetLanguage,
+            providerProfileID: selection.providerProfileID,
+            promptVersion: promptVersion)
+        if originalKey != newKey {
+            do {
+                try await store.deleteTranslation(forKey: originalKey)
+            } catch {
+                // Logged-and-swallowed (rule 50 §6) — the new translation is
+                // already live; a lingering old-profile row only costs disk
+                // and resolves on the next re-translate.
+                log.error("post-retranslate orphan delete failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+
         progress = 1.0
         // 5. Apply translations to the bilingual VM (via host callback).
         onTranslationApplied?(unit, result.segments)
@@ -381,7 +405,7 @@ final class ChapterReTranslateViewModel {
     // MARK: - Progress mapping (Bug #311)
 
     /// Maps real chunk completion into the translate phase's slice of the bar.
-    /// The flow is 0.25 (cache delete) → 0.5 (provider resolved) → [translate]
+    /// The flow is 0.25 (source text read) → 0.5 (provider resolved) → [translate]
     /// → 1.0 (applied); this owns the [translate] slice: a 0.5 baseline at zero
     /// chunks rising toward — but never reaching — 1.0, because the terminal 1.0
     /// is set only when the whole flow finishes (cache-write + host apply), so

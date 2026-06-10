@@ -596,4 +596,65 @@ struct ChapterTranslationServiceTests {
                 providerProfileID: Self.profileID, config: config, style: .natural)
         }
     }
+
+    // MARK: - Bug #341: re-translate is an atomic swap
+
+    /// Bug #341: `translateForRetranslate` must BYPASS the cache READ — a fresh
+    /// (count-matching) cached row must not short-circuit the re-translate into
+    /// a stale no-op. The provider is called and the row is refreshed in place
+    /// (the upsert replaces by lookupKey — the atomic swap).
+    @Test func retranslate_bypassesCacheReadAndRefreshesRowInPlace() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let key = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
+            targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1")
+        try await store.upsert(ChapterTranslationRecord(
+            bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
+            targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1",
+            translatedSegments: ["旧译文"], sourceParagraphCount: 1))
+
+        let sender = MockTranslationSender(responses: [#"["新译文"]"#])
+        let service = makeService(sender: sender, store: store)
+        let result = try await service.translateForRetranslate(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: "Some paragraph.", targetLanguage: "Chinese",
+            providerProfileID: Self.profileID, config: config, style: .natural,
+            granularity: .paragraph, onChunkProgress: nil)
+
+        #expect(result.fromCache == false)
+        #expect(result.segments == ["新译文"])
+        #expect(await sender.requestCount == 1, "the cache read was bypassed — the provider was called")
+        let row = await store.translation(forKey: key)
+        #expect(row?.translatedSegments == ["新译文"], "the row was refreshed in place")
+    }
+
+    /// Bug #341: when the re-translate FAILS, the existing cached row must
+    /// survive untouched — the old translation is destroyed only by a successful
+    /// replacement, never by the attempt.
+    @Test func retranslate_failureLeavesExistingRowIntact() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let key = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
+            targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1")
+        try await store.upsert(ChapterTranslationRecord(
+            bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
+            targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1",
+            translatedSegments: ["旧译文"], sourceParagraphCount: 1))
+
+        let sender = MockTranslationSender(responses: [])
+        await sender.setErrorToThrow(ChapterTranslationError.providerFailed("boom"))
+        let service = makeService(sender: sender, store: store)
+
+        await #expect(throws: ChapterTranslationError.self) {
+            _ = try await service.translateForRetranslate(
+                bookFingerprintKey: "fp", unit: Self.unit(),
+                sourceText: "Some paragraph.", targetLanguage: "Chinese",
+                providerProfileID: Self.profileID, config: config, style: .natural,
+                granularity: .paragraph, onChunkProgress: nil)
+        }
+        let row = await store.translation(forKey: key)
+        #expect(row?.translatedSegments == ["旧译文"], "the old translation survives a failed re-translate")
+    }
 }

@@ -82,6 +82,10 @@ extension ChapterTranslationService: ChapterReTranslating {
             config: config,
             style: style,
             granularity: granularity,
+            // Bug #341: an explicit re-translate must not be short-circuited
+            // by a fresh cache hit; the post-translate upsert replaces the row
+            // in place (atomic swap — failure leaves the old row untouched).
+            bypassCacheRead: true,
             onChunkProgress: onChunkProgress)
     }
 }
