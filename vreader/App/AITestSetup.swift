@@ -36,6 +36,7 @@ enum AITestSetup {
         enableAI: Bool,
         mockAI: Bool = false,
         mockAITranslateDelayMS: Int = 0,
+        mockAIFailTranslate: Bool = false,
         featureFlags: FeatureFlags,
         consentManager: AIConsentManager
     ) {
@@ -46,9 +47,14 @@ enum AITestSetup {
         // Feature #77 Gate-5b: `--mock-ai-translate-delay-ms=<N>` widens the
         // `sendRequest` in-flight window so the bilingual loading shimmer can be
         // snapshotted CU-free before the translation lands.
+        // Bug #341: `--mock-ai-fail-translate` makes every `.translate` request
+        // throw a deterministic provider failure (other actions keep working) so
+        // a CU-free run can prove a failed re-translate keeps the cached row.
         AITestOverride.forceAvailable = enableAI || mockAI
         AITestOverride.mockProvider = mockAI
-            ? MockAIProvider(requestDelayNanos: nanosForDelayMS(mockAITranslateDelayMS))
+            ? MockAIProvider(
+                requestDelayNanos: nanosForDelayMS(mockAITranslateDelayMS),
+                failTranslateRequests: mockAIFailTranslate)
             : nil
         guard enableAI || mockAI else { return }
         featureFlags.setOverride(true, for: .aiAssistant)

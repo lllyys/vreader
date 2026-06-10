@@ -192,6 +192,7 @@ struct VReaderApp: App {
                 enableAI: config.enableAI,
                 mockAI: config.mockAI,
                 mockAITranslateDelayMS: config.mockAITranslateDelayMS,
+                mockAIFailTranslate: config.mockAIFailTranslate,
                 featureFlags: .shared,
                 consentManager: AIConsentManager()
             )
@@ -578,6 +579,11 @@ struct TestLaunchConfig: Sendable {
     /// provider's `sendRequest` in-flight for N ms so the bilingual loading
     /// shimmer is snapshottable CU-free before the translation lands. 0 = instant.
     let mockAITranslateDelayMS: Int
+    /// `--mock-ai-fail-translate` — Bug #341. Make the mock provider throw a
+    /// deterministic provider failure on every `.translate` request (other
+    /// actions keep succeeding) so a CU-free run can prove a FAILED
+    /// re-translate leaves the cached translation intact.
+    let mockAIFailTranslate: Bool
     let enableSync: Bool
     let reduceMotion: Bool
     /// `--tts-test-mode` — feature #45 WI-4e. Swap `AVSpeechSynthesizer`
@@ -664,6 +670,7 @@ struct TestLaunchConfig: Sendable {
             enableAI: args.contains("--enable-ai"),
             mockAI: args.contains("--mock-ai"),
             mockAITranslateDelayMS: mockAITranslateDelayMS,
+            mockAIFailTranslate: args.contains("--mock-ai-fail-translate"),
             enableSync: args.contains("--enable-sync"),
             reduceMotion: args.contains("--reduce-motion"),
             ttsTestMode: args.contains("--tts-test-mode"),
@@ -696,6 +703,7 @@ struct TestLaunchConfig: Sendable {
         enableAI: false,
         mockAI: false,
         mockAITranslateDelayMS: 0,
+        mockAIFailTranslate: false,
         enableSync: false,
         reduceMotion: false,
         ttsTestMode: false,

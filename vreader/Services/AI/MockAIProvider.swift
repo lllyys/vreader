@@ -42,10 +42,20 @@ final class MockAIProvider: AIProvider {
     /// to catch the loading shimmer before the translation lands and clears it.
     private let requestDelayNanos: UInt64
 
+    /// Bug #341 device verification: when true, every `.translate` request
+    /// throws `URLError(.cannotConnectToHost)` — a deterministic provider
+    /// failure (maps to `.providerFailed` in `ChapterTranslationService`) —
+    /// while every other action type keeps succeeding. Set via the
+    /// `--mock-ai-fail-translate` launch flag so a CU-free run can prove a
+    /// FAILED re-translate leaves the cached translation intact.
+    private let failTranslateRequests: Bool
+
     init(chunkDelayNanos: UInt64 = 20_000_000, // 20ms/chunk
-         requestDelayNanos: UInt64 = 0) {
+         requestDelayNanos: UInt64 = 0,
+         failTranslateRequests: Bool = false) {
         self.chunkDelayNanos = chunkDelayNanos
         self.requestDelayNanos = requestDelayNanos
+        self.failTranslateRequests = failTranslateRequests
     }
 
     var providerName: String { "MockAIProvider" }
@@ -53,6 +63,9 @@ final class MockAIProvider: AIProvider {
     func sendRequest(_ request: AIRequest) async throws -> AIResponse {
         if requestDelayNanos > 0 {
             try? await Task.sleep(nanoseconds: requestDelayNanos)
+        }
+        if failTranslateRequests && request.actionType == .translate {
+            throw URLError(.cannotConnectToHost)
         }
         return AIResponse(
             content: Self.reply(for: request),
