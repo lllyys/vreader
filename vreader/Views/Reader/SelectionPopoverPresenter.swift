@@ -165,6 +165,13 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
     /// already consumed, so `clear()` is an idempotent no-op.
     let onDismiss: (() -> Void)?
     @State private var pending: SelectionPopoverRequestPayload?
+    /// Bug #338 (Codex round-1 High): the card's frame in global space, kept
+    /// fresh by the overlay's `onGeometryChange`. The outside-tap dismissal
+    /// fires only for taps OUTSIDE this frame — a simultaneous recognizer on
+    /// the content tree also sees taps that land on the overlay card, and
+    /// dismissing on those would race the card's action handlers (the
+    /// EPUB/Readium token cache is cleared by `onDismiss`).
+    @State private var cardFrame: CGRect = .zero
 
     func body(content: Content) -> some View {
         content
@@ -181,8 +188,9 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
             // re-post `.readerSelectionPopoverRequested` (iOS re-requests the
             // edit menu; Readium re-fires `shouldShowMenuForSelection`), so the
             // card's quote refreshes to the expanded selection for free.
-            .simultaneousGesture(TapGesture().onEnded {
-                if pending != nil { dismiss() }
+            .simultaneousGesture(SpatialTapGesture(coordinateSpace: .global).onEnded { value in
+                guard pending != nil, !cardFrame.contains(value.location) else { return }
+                dismiss()
             })
             .onReceive(
                 NotificationCenter.default.publisher(for: .readerSelectionPopoverRequested)
@@ -234,6 +242,18 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
         )
         .padding(.horizontal, 18)
         .padding(.bottom, 100)
+        .background(
+            // Track the card's global frame for the outside-tap exclusion
+            // (Codex round-1 High). GeometryReader in a background reports
+            // the framed card bounds without affecting layout.
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { cardFrame = proxy.frame(in: .global) }
+                    .onChange(of: proxy.size) { _, _ in
+                        cardFrame = proxy.frame(in: .global)
+                    }
+            }
+        )
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 

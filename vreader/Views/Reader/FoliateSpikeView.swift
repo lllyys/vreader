@@ -386,6 +386,12 @@ private struct FoliateSpikeWebView: UIViewRepresentable {
         let coordinator = context.coordinator
         let safeFlow = FoliateJSEscaper.sanitizeFlow(layoutFlow)
 
+        // Bug #340 (Codex round-1 Medium): live theme change re-tints the
+        // selection handles/caret — mirrors EPUBWebViewBridge.updateUIView.
+        if let accent = themeAccentColor, uiView.tintColor != accent {
+            uiView.tintColor = accent
+        }
+
         // --- Layout-flow branch (bug #189 live-toggle reading mode) ---
         if coordinator.currentLayoutFlow != safeFlow {
             coordinator.currentLayoutFlow = safeFlow
