@@ -276,6 +276,11 @@ struct EPUBContinuousScrollEvictionGuardTests {
         // Only sections ENTIRELY above the viewport (by their PRE-resize bottom —
         // Codex Gate-4 High) shift the reader's content.
         #expect(js.contains("(el.offsetTop + oldH) <= root.scrollTop"))
+        // An EVICTED (disconnected) section must never compensate — its final
+        // zero-size entry reads offsetTop 0 and would double-subtract on top of
+        // removeChapterSectionJS's own compensation (the post-merge 1px sweep
+        // caught scrollTop crashing to ~0 at multi-evict moments).
+        #expect(js.contains("if (!el.isConnected) { continue; }"))
     }
 }
 

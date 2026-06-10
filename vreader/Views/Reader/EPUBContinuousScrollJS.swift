@@ -208,8 +208,13 @@ enum EPUBContinuousScrollJS {
     /// `scrollTop` by the height delta. The "entirely above" gate uses the
     /// PRE-resize bottom (`offsetTop + oldH`) — Codex Gate-4 High: gating on the
     /// post-resize bottom would skip the compensation exactly when a growth
-    /// crosses the viewport top (and over-compensate the symmetric shrink). The
-    /// first observation of a section only
+    /// crosses the viewport top (and over-compensate the symmetric shrink).
+    /// DISCONNECTED targets are skipped — an EVICTED section can fire a final
+    /// zero-size entry whose detached `offsetTop` reads 0, which would pass the
+    /// above-viewport check and subtract its height a SECOND time on top of
+    /// `removeChapterSectionJS`'s own compensation (the post-merge 1px sweep
+    /// caught exactly this: scrollTop crashing to ~0 at multi-evict moments,
+    /// then a backward-extend flash). The first observation of a section only
     /// records its baseline height (the insert-time compensation in
     /// `prependChapterSectionJS` already covered its initial height).
     static let continuousScrollObserverJS = """
@@ -259,6 +264,7 @@ enum EPUBContinuousScrollJS {
         var resizeObserver = new ResizeObserver(function(entries) {
             for (var i = 0; i < entries.length; i++) {
                 var el = entries[i].target;
+                if (!el.isConnected) { continue; }
                 var newH = el.offsetHeight || 0;
                 var oldH = lastHeights.get(el);
                 lastHeights.set(el, newH);
