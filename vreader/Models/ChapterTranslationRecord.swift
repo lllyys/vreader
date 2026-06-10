@@ -9,9 +9,14 @@
 // - `lookupKey(...)` is the single source of truth for the canonical dedupe
 //   key (`@Attribute(.unique)` on the @Model). Both the store and the
 //   translation service build keys through it so they always agree.
-// - The key includes ALL FIVE identity fields — a provider change (edge case
-//   d) or a prompt-version bump produces a different key, so a stale row is
-//   naturally bypassed by a cache miss rather than silently served.
+// - **The key is `book|unit|lang|prompt` — providerProfileID is provenance
+//   METADATA, not identity (Bug #342).** One canonical translation per
+//   (book, unit, language, prompt): re-translate and bilingual reading share
+//   it regardless of which provider produced it, so an override re-translation
+//   survives reopen and a profile re-creation doesn't orphan rows. A
+//   prompt-version bump still produces a different key (stale rows bypassed
+//   by a cache miss). Pre-#342 rows used a 5-field key with the profile UUID
+//   baked in — `ChapterTranslationStore` lazily migrates them.
 //
 // @coordinates-with: ChapterTranslation.swift, ChapterTranslationStore.swift,
 //   TranslationUnitID.swift,
@@ -63,7 +68,6 @@ struct ChapterTranslationRecord: Sendable, Equatable {
             bookFingerprintKey: bookFingerprintKey,
             unitStorageKey: unitStorageKey,
             targetLanguage: targetLanguage,
-            providerProfileID: providerProfileID,
             promptVersion: promptVersion
         )
         self.bookFingerprintKey = bookFingerprintKey
@@ -76,25 +80,26 @@ struct ChapterTranslationRecord: Sendable, Equatable {
         self.createdAt = createdAt
     }
 
-    /// Builds the canonical `lookupKey` from the five identity fields. The
-    /// single source of truth — the store and the translation service both
-    /// route key construction through here so they never diverge.
+    /// Builds the canonical `lookupKey` from the four identity fields
+    /// (Bug #342: the provider profile is provenance metadata, NOT identity —
+    /// one canonical translation per book|unit|lang|prompt, shared by the
+    /// bilingual prefetcher and the re-translate flow). The single source of
+    /// truth — the store and the translation service both route key
+    /// construction through here so they never diverge.
     ///
     /// `|` is the field separator; none of the components legitimately
-    /// contains it (`unitStorageKey` uses `:`, the UUID is hex+`-`,
-    /// language tags and prompt versions are alphanumeric).
+    /// contains it (`unitStorageKey` uses `:`, language tags and prompt
+    /// versions are alphanumeric).
     static func lookupKey(
         bookFingerprintKey: String,
         unitStorageKey: String,
         targetLanguage: String,
-        providerProfileID: UUID,
         promptVersion: String
     ) -> String {
         [
             bookFingerprintKey,
             unitStorageKey,
             targetLanguage,
-            providerProfileID.uuidString,
             promptVersion,
         ].joined(separator: "|")
     }

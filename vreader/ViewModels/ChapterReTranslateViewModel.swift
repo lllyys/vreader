@@ -13,11 +13,10 @@
 //   short-circuit (`bypassCacheRead`) instead of the old delete-before-request,
 //   and its cache-write replaces the row by lookupKey in place. A provider
 //   failure / cancel / app kill mid-flight leaves the original translation
-//   intact. Only a provider OVERRIDE (picker key != original key) needs an
-//   explicit delete of the orphaned original-key row — and that runs strictly
-//   AFTER success, and only once the replacement row is CONFIRMED durably
-//   cached (Bug #330's partial-degradation path returns success without a
-//   cache write; deleting then would re-open the loss bug).
+//   intact. Bug #342 made the key CANONICAL (book|unit|lang|prompt — profile
+//   is provenance metadata, not identity), so the in-place upsert is the
+//   entire swap: no orphaned per-profile row exists to clean up, and an
+//   override re-translation is readable by bilingual mode on reopen.
 // - **No mutation of `ProviderProfileStore`** — the picker selection lives on
 //   the VM only. The resolver call carries the chosen profile + model; the
 //   global active id is untouched.
@@ -100,8 +99,8 @@ final class ChapterReTranslateViewModel {
     /// The picker's current selection. Mutated only via `updateSelection(_:)`.
     private(set) var selection: ReTranslatePickerSelection
 
-    /// The chapter being re-translated — the unit whose cache row will be
-    /// cleared and re-fetched.
+    /// The chapter being re-translated — the unit whose canonical cache row
+    /// will be refreshed in place.
     private(set) var unit: TranslationUnitID?
 
     /// Human-readable title for the picker's context strip (e.g. chapter 6
@@ -136,7 +135,6 @@ final class ChapterReTranslateViewModel {
 
     private let resolver: any RetranslateProviderResolving
     private let runner: any ChapterReTranslating
-    private let store: ChapterTranslationStore
     /// Asynchronous source-text provider. Adapters resolve the unit's text
     /// off the main thread (PDFKit page extraction, EPUB spine read, Foliate
     /// WKWebView message) — wrapping this in `@Sendable async throws` lets
@@ -180,7 +178,6 @@ final class ChapterReTranslateViewModel {
         initialKeepGlossary: Bool = true,
         resolver: any RetranslateProviderResolving,
         runner: any ChapterReTranslating,
-        store: ChapterTranslationStore,
         sourceTextProvider: @escaping @Sendable (TranslationUnitID) async throws -> String
     ) {
         self.bookFingerprintKey = bookFingerprintKey
@@ -188,7 +185,6 @@ final class ChapterReTranslateViewModel {
         self.initialProviderProfileID = initialProviderProfileID
         self.resolver = resolver
         self.runner = runner
-        self.store = store
         self.sourceTextProvider = sourceTextProvider
         self.selection = ReTranslatePickerSelection(
             providerProfileID: initialProviderProfileID,
@@ -252,10 +248,10 @@ final class ChapterReTranslateViewModel {
 
     /// Runs the re-translate flow: read the source text → resolve the picker's
     /// provider config → call the translation runner (cache-read bypassed; its
-    /// cache-write replaces the row in place) → on success, delete the orphaned
-    /// original-key row if the provider was overridden, then fire
-    /// `onTranslationApplied`. Errors surface back to the picker — the original
-    /// cached translation survives every non-success path (Bug #341).
+    /// cache-write replaces the canonical row in place — Bug #341 atomic swap,
+    /// Bug #342 canonical key) → on success, fire `onTranslationApplied`.
+    /// Errors surface back to the picker — the original cached translation
+    /// survives every non-success path.
     func submit() async {
         guard let unit else {
             log.error("submit() called with no unit")
@@ -288,26 +284,18 @@ final class ChapterReTranslateViewModel {
     /// translation durably lands. The runner bypasses the cache READ
     /// (`bypassCacheRead` in `ChapterTranslationService.translate`) so a fresh
     /// row can't short-circuit the re-translate, and its cache WRITE replaces
-    /// the row by lookupKey in place — the atomic swap. Only when the picker
-    /// key differs from the original key (provider override) does the original
-    /// row need an explicit delete, and that happens AFTER success (step 5).
+    /// the row by lookupKey in place — the atomic swap. Bug #342: the key is
+    /// canonical (no profile component), so the upsert is the whole story —
+    /// no per-profile orphan rows exist.
     private func runSubmit(unit: TranslationUnitID, generation: Int) async {
         // 0. Freeze the request parameters (Bug #341, Codex round-1 Medium):
         //    `selection` / `targetLanguage` are @MainActor-mutable while this
         //    pipeline suspends (the picker stays interactive behind the
-        //    progress sheet), so the resolve / translate / orphan-delete below
-        //    must all read ONE immutable snapshot — otherwise a mid-flight
-        //    selection change can translate under one key and delete by
-        //    another.
+        //    progress sheet), so the resolve + translate below must read ONE
+        //    immutable snapshot — a mid-flight selection change must not
+        //    resolve one provider and translate with another.
         let requested = selection
         let requestedLanguage = targetLanguage
-        // Codex round-2 High: the durable-write check below must prove THIS
-        // run refreshed the new-key row — a row left by an EARLIER override
-        // re-translate must not count (its mere existence would green-light
-        // deleting the original after a write-skipped partial degradation).
-        // The store stamps `createdAt` at write time on both insert and
-        // replace, so "createdAt >= submitTime" is that proof.
-        let submitTime = Date()
 
         // 1. Source text for the unit. Three outcomes (Codex Gate-4 round-1
         //    Critical, thread `019e4399-b8cd`):
@@ -385,49 +373,14 @@ final class ChapterReTranslateViewModel {
             return
         }
 
-        // 4. Success — if the picker overrode the provider, the ORIGINAL
-        //    key's row is now an orphan that would keep serving a stale hit
-        //    when bilingual mode reads with the original profile — delete it
-        //    ONLY now, after success (Bug #341: never before), and ONLY after
-        //    confirming the replacement row durably landed (Codex round-1
-        //    Critical: the Bug #330 partial-degradation path returns success
-        //    WITHOUT writing the cache — deleting then would re-open the loss
-        //    bug; the cache-write can also fail-and-swallow inside the
-        //    service). Same-key re-translates need no delete: the runner's
-        //    upsert already replaced the row in place. Keys come from the
-        //    step-0 snapshot, not live `selection`.
-        let originalKey = ChapterTranslationRecord.lookupKey(
-            bookFingerprintKey: bookFingerprintKey,
-            unitStorageKey: unit.storageKey,
-            targetLanguage: requestedLanguage,
-            providerProfileID: initialProviderProfileID,
-            promptVersion: promptVersion)
-        let newKey = ChapterTranslationRecord.lookupKey(
-            bookFingerprintKey: bookFingerprintKey,
-            unitStorageKey: unit.storageKey,
-            targetLanguage: requestedLanguage,
-            providerProfileID: requested.providerProfileID,
-            promptVersion: promptVersion)
-        if originalKey != newKey {
-            let newRow = await store.translation(forKey: newKey)
-            if let newRow, newRow.createdAt >= submitTime {
-                do {
-                    try await store.deleteTranslation(forKey: originalKey)
-                } catch {
-                    // Logged-and-swallowed (rule 50 §6) — the new translation
-                    // is already live; a lingering old-profile row only costs
-                    // disk and resolves on the next re-translate.
-                    log.error("post-retranslate orphan delete failed: \(String(describing: error), privacy: .public)")
-                }
-            } else {
-                // Either no new-key row at all, or only a STALE one from an
-                // earlier run (Codex round-2 High) — this run's result was not
-                // durably cached (Bug #330 partial degradation or a swallowed
-                // write failure). Keep the original row.
-                log.info("re-translate result not durably cached this run; keeping the original row")
-            }
-        }
-
+        // 4. Success. Bug #342: the cache key is canonical (book|unit|lang|
+        //    prompt — no profile component), so the runner's in-place upsert
+        //    IS the entire swap: there is no orphaned original-key row to
+        //    clean up, with or without a provider override. (#341's post-
+        //    success orphan delete + durable-write proof died with the key
+        //    unification; the atomic-swap guarantee — the original row
+        //    survives every non-success path — is carried by the upsert
+        //    replacing the row only after a fully-successful translation.)
         progress = 1.0
         // 5. Apply translations to the bilingual VM (via host callback).
         onTranslationApplied?(unit, result.segments)

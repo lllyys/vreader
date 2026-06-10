@@ -148,7 +148,7 @@ struct ChapterTranslationStoreTests {
         #expect(count == 1)
         let surviving = await store.cachedUnits(
             forBookWithKey: "fpB", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(surviving == ["epubHref:ch1"])
     }
 
@@ -162,11 +162,14 @@ struct ChapterTranslationStoreTests {
         ])
         let units = await store.cachedUnits(
             forBookWithKey: "fpA", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(units == Set(["epubHref:ch1", "epubHref:ch2"]))
     }
 
-    @Test func cachedUnitsExcludesOtherLanguageProviderAndPromptVersion() async throws {
+    @Test func cachedUnitsExcludesOtherLanguageAndPromptVersion_butNotProvider() async throws {
+        // Bug #342: the provider profile is provenance, not identity — a row
+        // written under ANY profile counts as covered. Language and prompt
+        // version still partition coverage.
         let store = try makeStore()
         try await store.upsert([
             record(book: "fpA", unit: "epubHref:ch1", lang: "zh-Hans", provider: Self.profileA, prompt: "v1"),
@@ -176,15 +179,15 @@ struct ChapterTranslationStoreTests {
         ])
         let units = await store.cachedUnits(
             forBookWithKey: "fpA", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
-        #expect(units == ["epubHref:ch1"])
+            promptVersion: "v1")
+        #expect(units == Set(["epubHref:ch1", "epubHref:ch3"]))
     }
 
     @Test func cachedUnitsEmptyWhenNothingCached() async throws {
         let store = try makeStore()
         let units = await store.cachedUnits(
             forBookWithKey: "fpA", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(units.isEmpty)
     }
 
@@ -220,7 +223,7 @@ struct ChapterTranslationStoreTests {
         let store = try makeStore()
         let key = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fpC", unitStorageKey: "epubHref:bad",
-            targetLanguage: "zh-Hans", providerProfileID: Self.profileA, promptVersion: "v1")
+            targetLanguage: "zh-Hans", promptVersion: "v1")
         try await store.debugInsertRaw(
             lookupKey: key, bookFingerprintKey: "fpC", unitStorageKey: "epubHref:bad",
             targetLanguage: "zh-Hans", providerProfileID: Self.profileA, promptVersion: "v1",
@@ -236,7 +239,7 @@ struct ChapterTranslationStoreTests {
         try await store.upsert(record(book: "fpC", unit: "epubHref:good"))
         let badKey = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fpC", unitStorageKey: "epubHref:bad",
-            targetLanguage: "zh-Hans", providerProfileID: Self.profileA, promptVersion: "v1")
+            targetLanguage: "zh-Hans", promptVersion: "v1")
         try await store.debugInsertRaw(
             lookupKey: badKey, bookFingerprintKey: "fpC", unitStorageKey: "epubHref:bad",
             targetLanguage: "zh-Hans", providerProfileID: Self.profileA, promptVersion: "v1",
@@ -248,7 +251,7 @@ struct ChapterTranslationStoreTests {
         // The corrupt unit is NOT counted as covered — global translate must redo it.
         let units = await store.cachedUnits(
             forBookWithKey: "fpC", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(units == ["epubHref:good"])
     }
 
@@ -258,7 +261,7 @@ struct ChapterTranslationStoreTests {
         let store = try makeStore()
         let key = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fpC", unitStorageKey: "epubHref:fix",
-            targetLanguage: "zh-Hans", providerProfileID: Self.profileA, promptVersion: "v1")
+            targetLanguage: "zh-Hans", promptVersion: "v1")
         try await store.debugInsertRaw(
             lookupKey: key, bookFingerprintKey: "fpC", unitStorageKey: "epubHref:fix",
             targetLanguage: "zh-Hans", providerProfileID: Self.profileA, promptVersion: "v1",
@@ -285,11 +288,82 @@ struct ChapterTranslationStoreTests {
         #expect(await unconfigured.debugRowCount() == 0)
         let units = await unconfigured.cachedUnits(
             forBookWithKey: "fp", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(units.isEmpty)
         // upsert / delete must not throw on an unconfigured store.
         try await unconfigured.upsert(record())
         try await unconfigured.deleteTranslation(forKey: "k")
         try await unconfigured.deleteTranslations(forBookWithKey: "fp")
+    }
+
+    // MARK: - Bug #342: legacy 5-field lookupKey migration
+
+    /// Builds a store + its container so a test can plant legacy-format rows
+    /// directly via ModelContext (the public API only writes canonical keys).
+    private func makeStoreAndContainer() throws -> (ChapterTranslationStore, ModelContainer) {
+        let schema = Schema(SchemaV7.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        return (ChapterTranslationStore(modelContainer: container), container)
+    }
+
+    /// Inserts a row with the PRE-#342 5-field key (`book|unit|lang|profileID|prompt`).
+    @MainActor
+    private func insertLegacyRow(
+        _ container: ModelContainer,
+        book: String = "fp1", unit: String = "epubHref:ch1", lang: String = "zh-Hans",
+        profile: UUID, prompt: String = "v1",
+        json: String, count: Int, createdAt: Date
+    ) throws {
+        let context = ModelContext(container)
+        context.insert(ChapterTranslation(
+            lookupKey: [book, unit, lang, profile.uuidString, prompt].joined(separator: "|"),
+            bookFingerprintKey: book, unitStorageKey: unit, targetLanguage: lang,
+            providerProfileID: profile, promptVersion: prompt,
+            translatedJSON: json, sourceParagraphCount: count, createdAt: createdAt))
+        try context.save()
+    }
+
+    /// Bug #342: legacy rows written under per-profile keys must become
+    /// reachable via the canonical `book|unit|lang|prompt` key — deduped to
+    /// the NEWEST row when several profiles cached the same unit.
+    @Test func legacyRows_migrateToCanonicalKey_dedupedToNewest() async throws {
+        let (store, container) = try makeStoreAndContainer()
+        try await insertLegacyRow(
+            container, profile: Self.profileA,
+            json: #"["旧A"]"#, count: 1, createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try await insertLegacyRow(
+            container, profile: Self.profileB,
+            json: #"["新B"]"#, count: 1, createdAt: Date(timeIntervalSince1970: 1_700_000_999))
+
+        let canonicalKey = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp1", unitStorageKey: "epubHref:ch1",
+            targetLanguage: "zh-Hans", promptVersion: "v1")
+        let migrated = await store.translation(forKey: canonicalKey)
+        #expect(migrated != nil, "legacy rows must be reachable via the canonical key")
+        #expect(migrated?.translatedSegments == ["新B"], "dedupe keeps the newest row")
+        #expect(await store.debugRowCount() == 1, "the older per-profile duplicate is removed")
+    }
+
+    /// Migration must be idempotent and must leave already-canonical rows alone.
+    @Test func migration_isIdempotent_andLeavesCanonicalRowsAlone() async throws {
+        let (store, container) = try makeStoreAndContainer()
+        try await insertLegacyRow(
+            container, profile: Self.profileA,
+            json: #"["旧"]"#, count: 1, createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        // A canonical row for a DIFFERENT unit, written through the public API.
+        try await store.upsert(record(unit: "epubHref:ch2", segments: ["canon"]))
+
+        let key1 = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp1", unitStorageKey: "epubHref:ch1",
+            targetLanguage: "zh-Hans", promptVersion: "v1")
+        let key2 = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp1", unitStorageKey: "epubHref:ch2",
+            targetLanguage: "zh-Hans", promptVersion: "v1")
+        #expect(await store.translation(forKey: key1)?.translatedSegments == ["旧"])
+        #expect(await store.translation(forKey: key2)?.translatedSegments == ["canon"])
+        // Run more ops (each re-enters the lazy migration guard) — still 2 rows.
+        #expect(await store.translation(forKey: key1) != nil)
+        #expect(await store.debugRowCount() == 2)
     }
 }

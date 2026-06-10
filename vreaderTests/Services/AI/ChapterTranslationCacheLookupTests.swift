@@ -48,7 +48,7 @@ struct ChapterTranslationCacheLookupTests {
 
         let result = await service.cachedTranslation(
             bookFingerprintKey: book, unit: unit, sourceText: source,
-            targetLanguage: lang, providerProfileID: profile)
+            targetLanguage: lang)
         #expect(result?.fromCache == true)
         #expect(result?.segments == ["一", "二"])
     }
@@ -59,7 +59,7 @@ struct ChapterTranslationCacheLookupTests {
         let service = makeService(store)
         let result = await service.cachedTranslation(
             bookFingerprintKey: book, unit: unit, sourceText: "x",
-            targetLanguage: lang, providerProfileID: profile)
+            targetLanguage: lang)
         #expect(result == nil)
     }
 
@@ -71,19 +71,23 @@ struct ChapterTranslationCacheLookupTests {
         // Live source now has two paragraphs → count mismatch → stale.
         let result = await service.cachedTranslation(
             bookFingerprintKey: book, unit: unit, sourceText: "A.\n\nB.",
-            targetLanguage: lang, providerProfileID: profile)
+            targetLanguage: lang)
         #expect(result == nil)
     }
 
-    @Test("a different provider profile id misses (the key includes the profile)")
-    func differentProfileMisses() async throws {
+    @Test("a row written under ANY profile is served — the key is profile-agnostic (Bug #342)")
+    func differentProfileStillHits() async throws {
+        // Bug #342 INVERTED the old contract ("the key includes the profile"):
+        // one canonical translation per book|unit|lang|prompt, shared by the
+        // bilingual prefetcher and re-translate regardless of provider.
         let store = try makeStore()
         let service = makeService(store)
         let source = "One.\n\nTwo."
-        try await upsertCached(store, source: source, segments: ["一", "二"])
+        try await upsertCached(store, source: source, segments: ["一", "二"], profileID: UUID())
         let result = await service.cachedTranslation(
             bookFingerprintKey: book, unit: unit, sourceText: source,
-            targetLanguage: lang, providerProfileID: UUID())
-        #expect(result == nil)
+            targetLanguage: lang)
+        #expect(result?.fromCache == true)
+        #expect(result?.segments == ["一", "二"])
     }
 }

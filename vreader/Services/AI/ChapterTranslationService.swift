@@ -107,19 +107,19 @@ actor ChapterTranslationService {
     /// provider gate (`resolveProviderConfig`), so a cached chapter still renders
     /// when AI is later disabled / unconfigured / key-less — previously the gate
     /// threw first and the disk cache (inside `translate`) was never reached.
+    /// Bug #342: profile-agnostic — the canonical row is shared across provider
+    /// profiles, so no profile is needed for a read at all.
     func cachedTranslation(
         bookFingerprintKey: String,
         unit: TranslationUnitID,
         sourceText: String,
         targetLanguage: String,
-        providerProfileID: UUID,
         granularity: TranslationGranularity = .paragraph
     ) async -> ChapterTranslationResult? {
         let lookupKey = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: bookFingerprintKey,
             unitStorageKey: unit.storageKey,
             targetLanguage: targetLanguage,
-            providerProfileID: providerProfileID,
             promptVersion: promptVersion)
         let segments: [String]
         switch granularity {
@@ -157,11 +157,12 @@ actor ChapterTranslationService {
         // default — the whole-book coordinator + bilingual paths don't use it.
         onChunkProgress: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> ChapterTranslationResult {
+        // Bug #342: the canonical key has no profile component —
+        // `providerProfileID` is written as row provenance metadata only.
         let lookupKey = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: bookFingerprintKey,
             unitStorageKey: unit.storageKey,
             targetLanguage: targetLanguage,
-            providerProfileID: providerProfileID,
             promptVersion: promptVersion)
 
         // Segment the source per the requested granularity FIRST — the

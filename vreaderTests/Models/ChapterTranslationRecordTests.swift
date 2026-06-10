@@ -19,62 +19,68 @@ struct ChapterTranslationRecordTests {
     @Test func lookupKeyIsDeterministic() {
         let k1 = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "epubHref:ch1",
-            targetLanguage: "zh-Hans", providerProfileID: Self.profileA, promptVersion: "v1")
+            targetLanguage: "zh-Hans", promptVersion: "v1")
         let k2 = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "epubHref:ch1",
-            targetLanguage: "zh-Hans", providerProfileID: Self.profileA, promptVersion: "v1")
+            targetLanguage: "zh-Hans", promptVersion: "v1")
         #expect(k1 == k2)
     }
 
     @Test func lookupKeyChangesWhenBookFingerprintChanges() {
         let base = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp1", unitStorageKey: "u", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         let other = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp2", unitStorageKey: "u", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(base != other)
     }
 
     @Test func lookupKeyChangesWhenUnitStorageKeyChanges() {
         let base = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "epubHref:ch1", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         let other = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "epubHref:ch2", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(base != other)
     }
 
     @Test func lookupKeyChangesWhenTargetLanguageChanges() {
         let base = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "u", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         let other = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "u", targetLanguage: "ja",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(base != other)
     }
 
-    @Test func lookupKeyChangesWhenProviderChanges() {
-        // Pins edge case (d): a provider change must produce a different key so
-        // the old cache row is naturally bypassed as stale.
-        let base = ChapterTranslationRecord.lookupKey(
+    @Test func lookupKeyIsSharedAcrossProviders() {
+        // Bug #342 INVERTED the old edge case (d): the provider profile is
+        // provenance metadata, not identity — records differing only by
+        // profile share ONE canonical key, so re-translate and bilingual
+        // reading serve the same row regardless of which provider produced it.
+        let a = ChapterTranslationRecord(
             bookFingerprintKey: "fp", unitStorageKey: "u", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
-        let other = ChapterTranslationRecord.lookupKey(
+            providerProfileID: Self.profileA, promptVersion: "v1",
+            translatedSegments: ["x"], sourceParagraphCount: 1)
+        let b = ChapterTranslationRecord(
             bookFingerprintKey: "fp", unitStorageKey: "u", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileB, promptVersion: "v1")
-        #expect(base != other)
+            providerProfileID: Self.profileB, promptVersion: "v1",
+            translatedSegments: ["x"], sourceParagraphCount: 1)
+        #expect(a.lookupKey == b.lookupKey)
+        #expect(a.lookupKey.contains(Self.profileA.uuidString) == false,
+                "the profile UUID must not leak into the key")
     }
 
     @Test func lookupKeyChangesWhenPromptVersionChanges() {
         let base = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "u", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         let other = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "u", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v2")
+            promptVersion: "v2")
         #expect(base != other)
     }
 
@@ -96,7 +102,7 @@ struct ChapterTranslationRecordTests {
             translatedSegments: [], sourceParagraphCount: 0)
         let expected = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: "u", targetLanguage: "zh-Hans",
-            providerProfileID: Self.profileA, promptVersion: "v1")
+            promptVersion: "v1")
         #expect(record.lookupKey == expected)
     }
 

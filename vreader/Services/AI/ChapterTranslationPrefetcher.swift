@@ -91,20 +91,6 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         let effectiveGranularity: TranslationGranularity = .paragraph
         Self.log.debug("prefetch start: unit \(String(describing: unit), privacy: .public)")
 
-        // Snapshot the active profile FIRST so the cache `lookupKey`
-        // and the resolved config below come from the same point in
-        // time. If the user changes provider between this snapshot
-        // and the by-ID resolve below, the cache row + the resolved
-        // config both stay on the original profile — no straddle,
-        // no cache-identity poisoning where (config=A, lookupKey=B).
-        // Codex Gate-4 audit finding [4].
-        guard let activeProfile = await ProviderProfileStore.shared
-            .activeProfileSnapshot() else {
-            Self.log.error("prefetch: no active provider profile")
-            throw ChapterTranslationError.providerFailed("no active provider profile")
-        }
-        let providerProfileID = activeProfile.id
-
         // Source text for the unit (needed for the cache count check + the
         // translate). A missing unit throws `ChapterTextProviderError.unknownUnit`
         // — the VM swallows it as a transient failure. Fetched BEFORE the provider
@@ -120,24 +106,31 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         // Bug #306: consult the disk cache BEFORE the provider gate. An
         // already-translated chapter must render even when AI is later disabled /
         // unconfigured / key-less — previously `resolveProviderConfig` threw first
-        // and the cache (inside `translate`) was never reached. Needs no config —
-        // only the lookupKey (profile id + target + unit) the snapshot gives us.
+        // and the cache (inside `translate`) was never reached. Bug #342: the
+        // canonical key is profile-agnostic, so this now runs even before the
+        // active-profile guard — a cached chapter renders with NO profile at all
+        // (and regardless of which profile produced it).
         if let cached = await translationService.cachedTranslation(
             bookFingerprintKey: bookFingerprintKey,
             unit: unit,
             sourceText: sourceText,
             targetLanguage: targetLanguage,
-            providerProfileID: providerProfileID,
             granularity: effectiveGranularity
         ) {
             Self.log.debug("prefetch cache HIT (pre-gate) for unit \(String(describing: unit), privacy: .public)")
             return cached.segments
         }
 
-        // Cache miss → resolve the config by ID for the profile we just
-        // snapshotted. `AIService.resolveProviderConfig(profileID:modelOverride:)`
-        // is the by-named-id seam, so passing the active profile's id gives a
-        // deterministic config-snapshot tied to the same id we cache under.
+        // Cache miss → snapshot the active profile, then resolve its config by
+        // ID, so the row provenance and the resolved config come from the same
+        // point in time (Codex Gate-4 audit finding [4] — no straddle where
+        // config=A but row metadata=B if the user switches mid-flight).
+        guard let activeProfile = await ProviderProfileStore.shared
+            .activeProfileSnapshot() else {
+            Self.log.error("prefetch: no active provider profile")
+            throw ChapterTranslationError.providerFailed("no active provider profile")
+        }
+        let providerProfileID = activeProfile.id
         let config: ResolvedAIProviderConfig
         do {
             config = try await aiService.resolveProviderConfig(

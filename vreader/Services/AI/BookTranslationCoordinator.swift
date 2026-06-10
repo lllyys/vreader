@@ -174,7 +174,6 @@ actor BookTranslationCoordinator {
         let cachedKeys = await store.cachedUnits(
             forBookWithKey: bookFingerprintKey,
             targetLanguage: targetLanguage,
-            providerProfileID: providerProfileID,
             promptVersion: promptVersion)
 
         // Emit a running 0/total snapshot before the first translate so the

@@ -48,6 +48,13 @@ actor ChapterTranslationStore {
     private var modelContainer: ModelContainer?
     private let log = Logger(subsystem: "com.vreader.app", category: "ChapterTranslationStore")
 
+    /// Bug #342: pre-#342 rows carry a 5-field `lookupKey` with the provider
+    /// profile UUID baked in. Each public op lazily normalizes them to the
+    /// canonical 4-field key exactly once per process (re-runs are cheap
+    /// no-ops on an already-migrated store — the 5-field shape no longer
+    /// exists). Per-process, not persisted: a failed save retries next launch.
+    private var didMigrateLegacyKeys = false
+
     /// Production singleton initializer — unconfigured until `configure(_:)`.
     private init() {
         self.modelContainer = nil
@@ -75,6 +82,81 @@ actor ChapterTranslationStore {
     }
     #endif
 
+    // MARK: - Legacy-key migration (Bug #342)
+
+    /// Rewrites pre-#342 5-field keys (`book|unit|lang|profileID|prompt`) to
+    /// the canonical 4-field key (`book|unit|lang|prompt`), deduping to the
+    /// NEWEST row when several profiles cached the same unit, and preferring
+    /// the newer of (legacy keeper, already-canonical row) on a collision.
+    /// Errors are logged-and-swallowed (rule 50 §6) — a failed save leaves the
+    /// legacy rows untouched and the next launch retries.
+    private func migrateLegacyKeysIfNeeded() {
+        guard !didMigrateLegacyKeys, let modelContainer else { return }
+        didMigrateLegacyKeys = true
+        let context = ModelContext(modelContainer)
+        guard let all = try? context.fetch(FetchDescriptor<ChapterTranslation>()) else { return }
+
+        // Legacy = exactly 5 `|`-fields with a UUID in field 3.
+        let legacy = all.filter { model in
+            let parts = model.lookupKey.components(separatedBy: "|")
+            return parts.count == 5 && UUID(uuidString: parts[3]) != nil
+        }
+        guard !legacy.isEmpty else { return }
+
+        func canonicalKey(_ model: ChapterTranslation) -> String {
+            ChapterTranslationRecord.lookupKey(
+                bookFingerprintKey: model.bookFingerprintKey,
+                unitStorageKey: model.unitStorageKey,
+                targetLanguage: model.targetLanguage,
+                promptVersion: model.promptVersion)
+        }
+
+        // Newest legacy row per canonical key wins.
+        var keepers: [String: ChapterTranslation] = [:]
+        for model in legacy {
+            let key = canonicalKey(model)
+            if let current = keepers[key] {
+                if model.createdAt > current.createdAt { keepers[key] = model }
+            } else {
+                keepers[key] = model
+            }
+        }
+        // Delete the superseded legacy duplicates.
+        for model in legacy where keepers[canonicalKey(model)] !== model {
+            context.delete(model)
+        }
+        // Promote each keeper — folding into an already-canonical row if one
+        // exists (possible when a post-#342 write happened before this store
+        // saw the legacy rows, e.g. a fresh translate before the first read).
+        for (key, keeper) in keepers {
+            var descriptor = FetchDescriptor<ChapterTranslation>(
+                predicate: #Predicate { $0.lookupKey == key }
+            )
+            descriptor.fetchLimit = 1
+            if let existing = (try? context.fetch(descriptor))?.first {
+                if keeper.createdAt > existing.createdAt {
+                    existing.bookFingerprintKey = keeper.bookFingerprintKey
+                    existing.unitStorageKey = keeper.unitStorageKey
+                    existing.targetLanguage = keeper.targetLanguage
+                    existing.providerProfileID = keeper.providerProfileID
+                    existing.promptVersion = keeper.promptVersion
+                    existing.translatedJSON = keeper.translatedJSON
+                    existing.sourceParagraphCount = keeper.sourceParagraphCount
+                    existing.createdAt = keeper.createdAt
+                }
+                context.delete(keeper)
+            } else {
+                keeper.lookupKey = key
+            }
+        }
+        do {
+            try context.save()
+            log.info("Migrated \(legacy.count) legacy translation-cache rows to canonical keys (\(keepers.count) kept)")
+        } catch {
+            log.error("Legacy-key migration save failed (will retry next launch): \(String(describing: error), privacy: .public)")
+        }
+    }
+
     // MARK: - Fetch
 
     /// Returns the cached translation for `lookupKey`, or `nil` on a miss.
@@ -84,6 +166,7 @@ actor ChapterTranslationStore {
     /// `upsert` overwrites the bad row.
     func translation(forKey lookupKey: String) async -> ChapterTranslationRecord? {
         guard let modelContainer else { return nil }
+        migrateLegacyKeysIfNeeded()
         let context = ModelContext(modelContainer)
         var descriptor = FetchDescriptor<ChapterTranslation>(
             predicate: #Predicate { $0.lookupKey == lookupKey }
@@ -98,6 +181,7 @@ actor ChapterTranslationStore {
     /// are simply absent from the result.
     func translations(forKeys keys: [String]) async -> [String: ChapterTranslationRecord] {
         guard !keys.isEmpty, let modelContainer else { return [:] }
+        migrateLegacyKeysIfNeeded()
         let context = ModelContext(modelContainer)
         let wanted = Set(keys)
         let descriptor = FetchDescriptor<ChapterTranslation>(
@@ -115,21 +199,21 @@ actor ChapterTranslationStore {
     }
 
     /// Returns the set of `unitStorageKey`s already cached for a book under a
-    /// given language / provider / prompt version — lets global translate
-    /// skip units it has already covered.
+    /// given language / prompt version — lets global translate skip units it
+    /// has already covered. Bug #342: provider-agnostic — the canonical cache
+    /// is shared across profiles, so coverage is too.
     func cachedUnits(
         forBookWithKey bookFingerprintKey: String,
         targetLanguage: String,
-        providerProfileID: UUID,
         promptVersion: String
     ) async -> Set<String> {
         guard let modelContainer else { return [] }
+        migrateLegacyKeysIfNeeded()
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<ChapterTranslation>(
             predicate: #Predicate {
                 $0.bookFingerprintKey == bookFingerprintKey
                     && $0.targetLanguage == targetLanguage
-                    && $0.providerProfileID == providerProfileID
                     && $0.promptVersion == promptVersion
             }
         )
@@ -146,6 +230,7 @@ actor ChapterTranslationStore {
     /// is not yet configured.
     func upsert(_ record: ChapterTranslationRecord) async throws {
         guard let modelContainer else { return }
+        migrateLegacyKeysIfNeeded()
         let context = ModelContext(modelContainer)
         try Self.applyUpsert(record, in: context)
         try context.save()
@@ -154,6 +239,7 @@ actor ChapterTranslationStore {
     /// Batch idempotent upsert — one save for the whole batch.
     func upsert(_ records: [ChapterTranslationRecord]) async throws {
         guard !records.isEmpty, let modelContainer else { return }
+        migrateLegacyKeysIfNeeded()
         let context = ModelContext(modelContainer)
         for record in records {
             try Self.applyUpsert(record, in: context)
@@ -167,6 +253,7 @@ actor ChapterTranslationStore {
     /// A missing key is a silent no-op.
     func deleteTranslation(forKey lookupKey: String) async throws {
         guard let modelContainer else { return }
+        migrateLegacyKeysIfNeeded()
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<ChapterTranslation>(
             predicate: #Predicate { $0.lookupKey == lookupKey }
@@ -180,6 +267,7 @@ actor ChapterTranslationStore {
     /// Removes every translation for a book (book delete — edge case g).
     func deleteTranslations(forBookWithKey bookFingerprintKey: String) async throws {
         guard let modelContainer else { return }
+        migrateLegacyKeysIfNeeded()
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<ChapterTranslation>(
             predicate: #Predicate { $0.bookFingerprintKey == bookFingerprintKey }

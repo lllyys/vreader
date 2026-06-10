@@ -90,7 +90,7 @@ struct ChapterTranslationServiceTests {
         // Seed the cache for this exact lookup key.
         let key = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
-            targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1")
+            targetLanguage: "Chinese", promptVersion: "v1")
         try await store.upsert(ChapterTranslationRecord(
             bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
             targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1",
@@ -608,7 +608,7 @@ struct ChapterTranslationServiceTests {
         let config = Self.makeConfig()
         let key = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
-            targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1")
+            targetLanguage: "Chinese", promptVersion: "v1")
         try await store.upsert(ChapterTranslationRecord(
             bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
             targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1",
@@ -637,7 +637,7 @@ struct ChapterTranslationServiceTests {
         let config = Self.makeConfig()
         let key = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
-            targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1")
+            targetLanguage: "Chinese", promptVersion: "v1")
         try await store.upsert(ChapterTranslationRecord(
             bookFingerprintKey: "fp", unitStorageKey: Self.unit().storageKey,
             targetLanguage: "Chinese", providerProfileID: Self.profileID, promptVersion: "v1",
@@ -656,5 +656,57 @@ struct ChapterTranslationServiceTests {
         }
         let row = await store.translation(forKey: key)
         #expect(row?.translatedSegments == ["旧译文"], "the old translation survives a failed re-translate")
+    }
+
+    // MARK: - Bug #342: ONE canonical translation per book|unit|lang|prompt
+
+    private static let otherProfileID = UUID(uuidString: "DDDDDDDD-0000-0000-0000-000000000002")!
+
+    /// Bug #342: the cache must be shared across provider profiles — a chapter
+    /// translated under profile A is served from cache when read under profile
+    /// B (the user's reopen-after-override-re-translate scenario: bilingual
+    /// reads with the ACTIVE profile, which differs from the picker override
+    /// the row was written under).
+    @Test func cacheIsSharedAcrossProviderProfiles() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let sender = MockTranslationSender(responses: [#"["你好世界"]"#])
+        let service = makeService(sender: sender, store: store)
+
+        // Write under profile A.
+        let first = try await service.translate(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: "Hello world.", targetLanguage: "Chinese",
+            providerProfileID: Self.profileID, config: config, style: .natural)
+        #expect(first.fromCache == false)
+        #expect(await sender.requestCount == 1)
+
+        // Read under profile B — must be a cache HIT with zero extra API calls.
+        let second = try await service.translate(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: "Hello world.", targetLanguage: "Chinese",
+            providerProfileID: Self.otherProfileID, config: config, style: .natural)
+        #expect(second.fromCache == true, "Bug #342: one canonical row per book|unit|lang — profile is provenance, not identity")
+        #expect(second.segments == ["你好世界"])
+        #expect(await sender.requestCount == 1, "no second provider call")
+    }
+
+    /// Bug #342: the provider-config-free cache read (Bug #306 prefetcher gate)
+    /// must equally hit across profiles — and no longer needs a profile at all.
+    @Test func cachedTranslation_isSharedAcrossProviderProfiles() async throws {
+        let store = try Self.makeStore()
+        let config = Self.makeConfig()
+        let sender = MockTranslationSender(responses: [#"["缓存译文"]"#])
+        let service = makeService(sender: sender, store: store)
+        _ = try await service.translate(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: "Some paragraph.", targetLanguage: "Chinese",
+            providerProfileID: Self.profileID, config: config, style: .natural)
+
+        let cached = await service.cachedTranslation(
+            bookFingerprintKey: "fp", unit: Self.unit(),
+            sourceText: "Some paragraph.", targetLanguage: "Chinese")
+        #expect(cached?.fromCache == true)
+        #expect(cached?.segments == ["缓存译文"])
     }
 }

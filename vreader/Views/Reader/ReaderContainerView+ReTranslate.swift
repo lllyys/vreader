@@ -163,7 +163,6 @@ extension ReaderContainerView {
             initialModel: initialModel,
             resolver: aiService,
             runner: translationService,
-            store: ChapterTranslationStore.shared,
             sourceTextProvider: { [provider = translateBookTextProvider] unit in
                 // `ChapterTextProviding` is a `Sendable` value-or-actor
                 // protocol (not class-bound), so it's captured strongly here.
