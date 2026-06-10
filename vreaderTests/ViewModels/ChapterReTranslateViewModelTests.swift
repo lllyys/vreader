@@ -92,15 +92,22 @@ struct ChapterReTranslateViewModelTests {
         /// second submit() and assert the run-generation guard ignores it.
         private let captureCallback: Bool
         private var capturedCallback: (@Sendable (Int, Int) -> Void)?
+        /// Bug #341: runs mid-translate, before the result is returned. Tests
+        /// use it to mimic the real service's internal cache-write (or its
+        /// absence on the Bug #330 partial-degradation path), and to mutate VM
+        /// state mid-flight for the snapshot guard.
+        private let sideEffect: (@Sendable () async throws -> Void)?
 
         init(
             result: Result<ChapterTranslationResult, Error>,
             simulateChunks: Int = 0,
-            captureProgressCallback: Bool = false
+            captureProgressCallback: Bool = false,
+            sideEffect: (@Sendable () async throws -> Void)? = nil
         ) {
             self.result = result
             self.simulateChunks = simulateChunks
             self.captureCallback = captureProgressCallback
+            self.sideEffect = sideEffect
         }
 
         func translateForRetranslate(
@@ -120,6 +127,7 @@ struct ChapterReTranslateViewModelTests {
             if simulateChunks > 0, let cb = onChunkProgress {
                 for i in 1...simulateChunks { cb(i, simulateChunks) }
             }
+            try await sideEffect?()
             return try result.get()
         }
 
@@ -128,6 +136,13 @@ struct ChapterReTranslateViewModelTests {
         func fireCapturedProgress(_ done: Int, _ total: Int) {
             capturedCallback?(done, total)
         }
+    }
+
+    /// A @MainActor reference box (implicitly Sendable) so a @Sendable mock
+    /// side-effect can reach the VM mid-flight — Bug #341 snapshot-guard test.
+    @MainActor
+    final class VMBox {
+        var vm: ChapterReTranslateViewModel?
     }
 
     private static func makeVM(
@@ -274,8 +289,17 @@ struct ChapterReTranslateViewModelTests {
             segments: ["旧译文"])
 
         let resolver = MockProviderResolver(result: .success(Self.makeConfig(model: "override-model")))
-        let runner = MockTranslationRunner(result: .success(
-            ChapterTranslationResult(segments: ["新译文一", "新译文二"], fromCache: false)))
+        // The side effect mimics the real service's internal cache-write of the
+        // new override-key row — the VM's durable-write check requires it
+        // before it will remove the original-key row (Bug #341).
+        let runner = MockTranslationRunner(
+            result: .success(
+                ChapterTranslationResult(segments: ["新译文一", "新译文二"], fromCache: false)),
+            sideEffect: {
+                try await Self.seedCache(
+                    store, unit: unit, profileID: Self.overrideProfileID,
+                    segments: ["新译文一", "新译文二"])
+            })
 
         var translationsApplied: [TranslationUnitID: [String]] = [:]
         let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
@@ -556,15 +580,21 @@ struct ChapterReTranslateViewModelTests {
 
     /// The swap is deferred to AFTER success: re-translating under a DIFFERENT
     /// profile deletes the now-superseded original row only once the new
-    /// translation has landed (the service writes the new row internally).
+    /// translation has landed (the side effect mimics the service's internal
+    /// cache-write of the new-key row).
     @Test func successWithDifferentProfile_deletesOriginalOnlyAfterSuccess() async throws {
         let store = try Self.makeStore()
         try await Self.seedCache(
             store, unit: Self.unit(), profileID: Self.initialProfileID,
             segments: ["旧译文"])
         let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
-        let runner = MockTranslationRunner(result: .success(
-            ChapterTranslationResult(segments: ["新译文"], fromCache: false)))
+        let runner = MockTranslationRunner(
+            result: .success(ChapterTranslationResult(segments: ["新译文"], fromCache: false)),
+            sideEffect: {
+                try await Self.seedCache(
+                    store, unit: Self.unit(), profileID: Self.overrideProfileID,
+                    segments: ["新译文"])
+            })
         let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
 
         vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
@@ -574,6 +604,68 @@ struct ChapterReTranslateViewModelTests {
         #expect(vm.sheetState == .complete)
         let row = await store.translation(forKey: Self.originalKey(unit: Self.unit()))
         #expect(row == nil, "the superseded original row is removed after the new translation landed")
+    }
+
+    /// Codex round-1 Critical: the Bug #330 partial-degradation path returns a
+    /// SUCCESS result but skips the cache write. With a provider override, the
+    /// VM must NOT delete the original-key row then — no replacement row exists
+    /// on disk, so deleting would re-open the loss bug on reopen. (The mock
+    /// returns success WITHOUT a side-effect cache-write — exactly that path.)
+    @Test func partialDegradationWithOverride_keepsOriginalRow() async throws {
+        let store = try Self.makeStore()
+        try await Self.seedCache(
+            store, unit: Self.unit(), profileID: Self.initialProfileID,
+            segments: ["既有译文"])
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["第一段", ""], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        vm.updateSelection { $0.providerProfileID = Self.overrideProfileID }
+        await vm.submit()
+
+        #expect(vm.sheetState == .complete, "the in-session partial result still applies")
+        let row = await store.translation(forKey: Self.originalKey(unit: Self.unit()))
+        #expect(row != nil, "no durable replacement row → the original must survive")
+        #expect(row?.translatedSegments == ["既有译文"])
+    }
+
+    /// Codex round-1 Medium: the orphan delete must use the SUBMIT-time
+    /// snapshot of the selection, not the live (mutable) one. Mid-flight the
+    /// "user" flips the selection back to the initial profile; without the
+    /// snapshot, newKey == originalKey would skip the delete and strand the
+    /// stale original row next to the freshly-written override row.
+    @Test func midFlightSelectionChange_deletesBySubmittedSnapshotKey() async throws {
+        let store = try Self.makeStore()
+        let unit = Self.unit()
+        try await Self.seedCache(
+            store, unit: unit, profileID: Self.initialProfileID,
+            segments: ["旧译文"])
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+
+        // The VM reference is wired after construction; the side effect runs
+        // mid-translate, after submit() snapshotted the selection.
+        let vmBox = VMBox()
+        let runner = MockTranslationRunner(
+            result: .success(ChapterTranslationResult(segments: ["新译文"], fromCache: false)),
+            sideEffect: {
+                try await Self.seedCache(
+                    store, unit: unit, profileID: Self.overrideProfileID,
+                    segments: ["新译文"])
+                await MainActor.run {
+                    vmBox.vm?.updateSelection { $0.providerProfileID = Self.initialProfileID }
+                }
+            })
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+        vmBox.vm = vm
+
+        vm.presentPicker(unit: unit, unitTitle: "ch", targetLanguage: "Chinese")
+        vm.updateSelection { $0.providerProfileID = Self.overrideProfileID }
+        await vm.submit()
+
+        let row = await store.translation(forKey: Self.originalKey(unit: unit))
+        #expect(row == nil, "the delete keys off the submit-time snapshot, not the mid-flight mutation")
     }
 
     /// Same-key re-translate (selection unchanged): the post-success delete must

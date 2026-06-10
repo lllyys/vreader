@@ -15,7 +15,9 @@
 //   failure / cancel / app kill mid-flight leaves the original translation
 //   intact. Only a provider OVERRIDE (picker key != original key) needs an
 //   explicit delete of the orphaned original-key row — and that runs strictly
-//   AFTER success.
+//   AFTER success, and only once the replacement row is CONFIRMED durably
+//   cached (Bug #330's partial-degradation path returns success without a
+//   cache write; deleting then would re-open the loss bug).
 // - **No mutation of `ProviderProfileStore`** — the picker selection lives on
 //   the VM only. The resolver call carries the chosen profile + model; the
 //   global active id is untouched.
@@ -290,6 +292,16 @@ final class ChapterReTranslateViewModel {
     /// key differs from the original key (provider override) does the original
     /// row need an explicit delete, and that happens AFTER success (step 5).
     private func runSubmit(unit: TranslationUnitID, generation: Int) async {
+        // 0. Freeze the request parameters (Bug #341, Codex round-1 Medium):
+        //    `selection` / `targetLanguage` are @MainActor-mutable while this
+        //    pipeline suspends (the picker stays interactive behind the
+        //    progress sheet), so the resolve / translate / orphan-delete below
+        //    must all read ONE immutable snapshot — otherwise a mid-flight
+        //    selection change can translate under one key and delete by
+        //    another.
+        let requested = selection
+        let requestedLanguage = targetLanguage
+
         // 1. Source text for the unit. Three outcomes (Codex Gate-4 round-1
         //    Critical, thread `019e4399-b8cd`):
         //    - empty string returned → legitimately empty unit, complete.
@@ -318,12 +330,12 @@ final class ChapterReTranslateViewModel {
 
         progress = 0.25
 
-        // 2. Resolve provider config (the picker's choice).
+        // 2. Resolve provider config (the picker's choice, snapshotted).
         let config: ResolvedAIProviderConfig
         do {
             config = try await resolver.resolveProviderConfig(
-                profileID: selection.providerProfileID,
-                modelOverride: selection.model)
+                profileID: requested.providerProfileID,
+                modelOverride: requested.model)
         } catch {
             log.error("resolveProviderConfig failed: \(String(describing: error), privacy: .public)")
             lastError = errorMessage(from: error)
@@ -344,10 +356,10 @@ final class ChapterReTranslateViewModel {
                 bookFingerprintKey: bookFingerprintKey,
                 unit: unit,
                 sourceText: sourceText,
-                targetLanguage: targetLanguage,
-                providerProfileID: selection.providerProfileID,
+                targetLanguage: requestedLanguage,
+                providerProfileID: requested.providerProfileID,
                 config: config,
-                style: selection.style,
+                style: requested.style,
                 granularity: .paragraph,
                 // Bug #311: real N-of-M progress. The service fires this from
                 // its actor as each chunk lands; hop to the main actor to update
@@ -366,33 +378,41 @@ final class ChapterReTranslateViewModel {
             return
         }
 
-        // 4. Success — the new translation is durably cached under the picker
-        //    key. If the picker overrode the provider, the ORIGINAL key's row
-        //    is now an orphan that would keep serving a stale hit when
-        //    bilingual mode reads with the original profile — delete it ONLY
-        //    now, after success (Bug #341: never before). Same-key
-        //    re-translates need no delete: the runner's upsert already
-        //    replaced the row in place.
+        // 4. Success — if the picker overrode the provider, the ORIGINAL
+        //    key's row is now an orphan that would keep serving a stale hit
+        //    when bilingual mode reads with the original profile — delete it
+        //    ONLY now, after success (Bug #341: never before), and ONLY after
+        //    confirming the replacement row durably landed (Codex round-1
+        //    Critical: the Bug #330 partial-degradation path returns success
+        //    WITHOUT writing the cache — deleting then would re-open the loss
+        //    bug; the cache-write can also fail-and-swallow inside the
+        //    service). Same-key re-translates need no delete: the runner's
+        //    upsert already replaced the row in place. Keys come from the
+        //    step-0 snapshot, not live `selection`.
         let originalKey = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: bookFingerprintKey,
             unitStorageKey: unit.storageKey,
-            targetLanguage: targetLanguage,
+            targetLanguage: requestedLanguage,
             providerProfileID: initialProviderProfileID,
             promptVersion: promptVersion)
         let newKey = ChapterTranslationRecord.lookupKey(
             bookFingerprintKey: bookFingerprintKey,
             unitStorageKey: unit.storageKey,
-            targetLanguage: targetLanguage,
-            providerProfileID: selection.providerProfileID,
+            targetLanguage: requestedLanguage,
+            providerProfileID: requested.providerProfileID,
             promptVersion: promptVersion)
         if originalKey != newKey {
-            do {
-                try await store.deleteTranslation(forKey: originalKey)
-            } catch {
-                // Logged-and-swallowed (rule 50 §6) — the new translation is
-                // already live; a lingering old-profile row only costs disk
-                // and resolves on the next re-translate.
-                log.error("post-retranslate orphan delete failed: \(String(describing: error), privacy: .public)")
+            if await store.translation(forKey: newKey) != nil {
+                do {
+                    try await store.deleteTranslation(forKey: originalKey)
+                } catch {
+                    // Logged-and-swallowed (rule 50 §6) — the new translation
+                    // is already live; a lingering old-profile row only costs
+                    // disk and resolves on the next re-translate.
+                    log.error("post-retranslate orphan delete failed: \(String(describing: error), privacy: .public)")
+                }
+            } else {
+                log.info("re-translate result not durably cached (partial degradation or write failure); keeping the original row")
             }
         }
 
