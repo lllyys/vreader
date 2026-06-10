@@ -141,10 +141,20 @@ Author verified against the live codebase before/while implementing:
   intersection empty (filtered-empty + Clear filters), `.fault` under the Errors
   chip, expand-collapse on filter change, temp-file write failure (no sheet),
   redaction applied to both export + Copy-entry, deterministic export filename.
-- **Risks accepted**: row identity uses `firstIndex(of:)` (entries are value-equal;
-  a duplicate message+date+level+category collapses to one identity — acceptable
-  for a diagnostics viewer, never a correctness issue).
+- **Risks accepted**: none outstanding — the Gate-4 audit's row-identity and
+  filtered-export findings were fixed (see below), not accepted.
 - The Gate-4 per-PR Codex audit is the binding independent audit for this WI.
+
+### Gate-4 audit (Codex) — findings + resolutions
+
+Round 1 (`/tmp/feat96-wi2-audit.txt`): 2 High + 2 Medium + 1 Low — ALL fixed:
+- **High** — export collapsed `Errors`→`.error`, dropping `.fault` → `DiagnosticsLogStore.exportText(entries:)` overload; the VM exports `filteredEntries`.
+- **High** — `firstIndex(of:)` row-identity collision for value-equal rows → `IdentifiedDiagnosticsEntry{id,entry}` threaded through the grouper; the view expands by `item.id`.
+- **Medium (rule 51)** — separate one-row Support + intact About → single "Support" group (Diagnostics + regrouped About rows) per the #1597 design.
+- **Medium** — filtered footer missing the active-filter suffix → added.
+- **Low** — synchronous main-actor export write + swallowed failure → off-main `writeExport` + `exportFailed` alert.
+
+Round 2 (`/tmp/feat96-wi2-audit-r2.txt`): 3 of 5 confirmed RESOLVED; 2 new Mediums (footer + export-header scope text hardcoded in two places, and the design mock's "last 24 h" vs the real window) — fixed by single-sourcing `DiagnosticsLogStore.captureScopeLabel = "this session"` (used by BOTH the footer and the export header). **Decision: "this session" is the approved scope descriptor**, superseding the #1597 mock's illustrative "last 24 h" — WI-1's Gate-2 Critical correction scoped capture to `OSLogStore(scope: .currentProcessIdentifier)` (current process, not a 24-hour window), so "last 24 h" would be factually wrong. This is the documented source of truth.
 
 ## Prior art / precedent / rejected alternatives
 

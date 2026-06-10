@@ -20,6 +20,15 @@ import Observation
 @MainActor
 @Observable
 final class DiagnosticsLogStore {
+    /// The single source of truth for the human capture-window label, used by
+    /// BOTH the export header and the viewer footer so they never diverge.
+    /// WI-1 reads `OSLogStore(scope: .currentProcessIdentifier)` — the current
+    /// process's entries, NOT a rolling time window — so "this session" is the
+    /// ACCURATE descriptor. It deliberately supersedes the #1597 design mock's
+    /// illustrative "last 24 h", which assumed the time-bounded store WI-1's
+    /// Gate-2 scope correction removed (see the plan's revision history).
+    static let captureScopeLabel = "this session"
+
     /// Entries currently held (oldest→newest), already bounded.
     private(set) var entries: [DiagnosticsLogEntry] = []
     /// True once a load has completed at least once (drives an empty-vs-unloaded
@@ -71,7 +80,7 @@ final class DiagnosticsLogStore {
     /// `{.error, .fault}`) exports exactly what's on screen — the single
     /// `level:` predicate above can't express that set.
     func exportText(entries rows: [DiagnosticsLogEntry]) -> String {
-        var lines = ["vreader diagnostics — \(rows.count) entr\(rows.count == 1 ? "y" : "ies") (current session)"]
+        var lines = ["vreader diagnostics — \(rows.count) entr\(rows.count == 1 ? "y" : "ies") (\(Self.captureScopeLabel))"]
         let fmt = ISO8601DateFormatter()
         for e in rows {
             let cat = e.category.isEmpty ? "" : " (\(e.category))"

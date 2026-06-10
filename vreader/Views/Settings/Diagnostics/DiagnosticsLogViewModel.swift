@@ -118,14 +118,15 @@ final class DiagnosticsLogViewModel {
     }
 
     /// The footer's scope line. Default mirrors the design "N entries · …";
-    /// filtered mirrors "Showing X of N · <active filter>". The scope says
-    /// "this session" (not the design mock's "last 24 h") because WI-1 reads
-    /// `.currentProcessIdentifier` — current-process entries, not a 24-hour
-    /// window — so "this session" is the accurate descriptor for our data.
+    /// filtered mirrors "Showing X of N · <active filter>". The capture-window
+    /// label is single-sourced from `DiagnosticsLogStore.captureScopeLabel`
+    /// (shared with the export header) — "this session", the accurate descriptor
+    /// for the `.currentProcessIdentifier` window, superseding the design mock's
+    /// "last 24 h" per WI-1's Gate-2 scope correction.
     var footerScope: String {
         let total = store.entries.count
         guard isFiltering else {
-            return "\(total) entr\(total == 1 ? "y" : "ies") · this session"
+            return "\(total) entr\(total == 1 ? "y" : "ies") · \(DiagnosticsLogStore.captureScopeLabel)"
         }
         let shown = filteredEntries.count
         let suffix = activeFilterDescriptor.map { " · \($0)" } ?? ""

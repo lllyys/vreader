@@ -81,8 +81,8 @@ struct DiagnosticsLogStoreTests {
         #expect(!text.contains("LEAKEDSECRET123"))
         #expect(!text.contains("LEAKEDPW"))
         #expect(!text.contains("/Users/ll/Library"))
-        // structure: header + one line per entry
-        #expect(text.contains("current session"))
+        // structure: header (single-sourced capture-scope label) + one line per entry
+        #expect(text.contains(DiagnosticsLogStore.captureScopeLabel))
         #expect(text.contains("[INFO]"))
         #expect(text.contains("(AI)"))
     }
