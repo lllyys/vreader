@@ -146,6 +146,14 @@ struct StatsPerBookTable: View {
                 Text(Self.headerLabel(for: field).uppercased())
                     .font(.system(size: 10.5, weight: .semibold))
                     .tracking(0.5)
+                    // Bug #337: pin headers to a single line — the data cells
+                    // already clamp, but the uppercased "NOTES" wrapped to
+                    // "NOTE / S" in its 38pt column. `minimumScaleFactor` shrinks
+                    // rather than truncates if a wider locale / Dynamic Type makes
+                    // a label tight, so the designed single-line header is kept.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(active
                         ? Color(theme.inkColor)
                         : Color(theme.subColor))
