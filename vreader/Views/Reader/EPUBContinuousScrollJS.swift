@@ -237,7 +237,7 @@ enum EPUBContinuousScrollJS {
         var PREFETCH_PX = \(prefetchPx);
         var ticking = false;
         var touchActive = false;      // true from touchstart until SETTLE
-        var fingerDown = false;       // true only while a finger is on glass
+        var fingerCount = 0;          // ALL fingers on glass (multi-touch safe)
         var settleTimer = null;
         var pendingResizeDelta = 0;
         function report() {
@@ -276,7 +276,7 @@ enum EPUBContinuousScrollJS {
         }
         root.addEventListener('scroll', function() {
             if (!ticking) { ticking = true; requestAnimationFrame(report); }
-            if (touchActive && !fingerDown) { armSettle(); }
+            if (touchActive && fingerCount === 0) { armSettle(); }
         }, { passive: true });
         // Bug #329 round 4: the gesture window extends PAST finger-up — the
         // deceleration/settle animation also owns scrollTop, so a JS
@@ -298,17 +298,20 @@ enum EPUBContinuousScrollJS {
             if (settleTimer) { clearTimeout(settleTimer); }
             settleTimer = setTimeout(function() {
                 settleTimer = null;
-                if (!fingerDown) { settled(); }
+                if (fingerCount === 0) { settled(); }
             }, 160);
         }
-        root.addEventListener('touchstart', function() {
-            fingerDown = true;
+        // Multi-touch safe (Codex round-1 High): `event.touches` reflects the
+        // fingers STILL on glass after the event — settle arms only when the
+        // last one lifts (a second finger mid-pinch/drag keeps the window open).
+        root.addEventListener('touchstart', function(e) {
+            fingerCount = (e.touches && e.touches.length) || 1;
             touchActive = true;
             if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
         }, { passive: true });
-        function onTouchEnd() {
-            fingerDown = false;
-            armSettle();
+        function onTouchEnd(e) {
+            fingerCount = (e.touches && e.touches.length) || 0;
+            if (fingerCount === 0) { armSettle(); }
         }
         root.addEventListener('touchend', onTouchEnd, { passive: true });
         root.addEventListener('touchcancel', onTouchEnd, { passive: true });

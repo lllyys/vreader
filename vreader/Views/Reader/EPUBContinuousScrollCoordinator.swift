@@ -77,6 +77,12 @@ final class EPUBContinuousScrollCoordinator {
 
     /// Max materialized span (chapter count) before eviction trims the far side.
     private let maxSpan: Int
+
+    /// Bug #329 round 4: how many sections past `maxSpan` the window may grow
+    /// while a gesture defers evictions, before appends pause too. One pan +
+    /// momentum rarely traverses more than 2–3 sections; the ceiling bounds
+    /// DOM/memory growth for pathological gesture streams.
+    static let touchGrowthCeilingSlack = 3
     /// Materializes a chapter's rewritten body for a spine index (off-main I/O).
     private let chapterBodyProvider: @MainActor (Int) async throws -> EPUBChapterBody
     /// Evaluates section JS against the live `WKWebView`. Async-throwing so a
@@ -178,6 +184,18 @@ final class EPUBContinuousScrollCoordinator {
         // signal's geometry rides along so eviction can never strand the trailing
         // side below the prefetch threshold (the sustained-oscillation source).
         if signal.nearBottomBoundary, !suppressNearBottom, window.canExtendForward {
+            // Bug #329 round 4 (Codex round-1 Medium): hard in-gesture growth
+            // ceiling. Evictions are deferred while a gesture is live, so a
+            // long drag through many short spines would otherwise grow the
+            // stitched DOM without bound. Past maxSpan + the ceiling slack,
+            // stop APPENDING too for the gesture's remainder — the reader
+            // scrolls within already-materialized content (a brief boundary
+            // stall at worst, never a teleport); the settle report drains and
+            // extension resumes.
+            if signal.touchActive, window.span >= maxSpan + Self.touchGrowthCeilingSlack {
+                Self.log.debug("in-gesture growth ceiling reached (span \(self.window.span)); deferring append")
+                return
+            }
             await extend(forward: true, geometry: signal)
             // Bug #329 (Codex hotfix-audit, High): if that forward extend EVICTED
             // it armed `ignoreNextNearTop`. In a DUAL-boundary signal (short window
