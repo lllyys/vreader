@@ -70,4 +70,53 @@ struct ChatMarkdownRendererTests {
     @Test func emptyStringYieldsEmpty() {
         #expect(plain(ChatMarkdownRenderer.attributedString(from: "")).isEmpty)
     }
+
+    // MARK: - Gate-4 Medium: list markers → bullets
+
+    @Test func unorderedListMarkersBecomeBullets() {
+        let out = ChatMarkdownRenderer.attributedString(from: "- first\n- second\n* third\n+ fourth")
+        let text = plain(out)
+        #expect(text.contains("• first"))
+        #expect(text.contains("• second"))
+        #expect(text.contains("• third"))
+        #expect(text.contains("• fourth"))
+        // The literal leading hyphen/asterisk markers are gone.
+        #expect(!text.contains("- first"))
+        #expect(!text.contains("* third"))
+    }
+
+    @Test func indentedListMarkerKeepsIndentAndBullets() {
+        let out = ChatMarkdownRenderer.attributedString(from: "  - nested")
+        #expect(plain(out).contains("• nested"))
+    }
+
+    @Test func nonListHyphenIsNotTouched() {
+        // A hyphen mid-line (not a list marker) stays literal.
+        let out = ChatMarkdownRenderer.attributedString(from: "well-known result is 5 - 3")
+        #expect(plain(out).contains("well-known"))
+        #expect(plain(out).contains("5 - 3"))
+    }
+
+    // MARK: - Gate-4 Medium: unsafe-link sanitization
+
+    @Test func unsafeSchemeLinkIsStrippedButTextKept() {
+        // A custom/deep-link scheme from LLM output must not become a live link.
+        let out = ChatMarkdownRenderer.attributedString(from: "tap [here](vreader-debug://reset) now")
+        #expect(plain(out).contains("here"))
+        let hasLink = out.runs.contains { $0.link != nil }
+        #expect(!hasLink)
+    }
+
+    @Test func httpsLinkIsPreserved() {
+        let out = ChatMarkdownRenderer.attributedString(from: "see [docs](https://example.com)")
+        let preserved = out.runs.contains { $0.link?.scheme == "https" }
+        #expect(preserved)
+    }
+
+    @Test func telAndJavascriptSchemesStripped() {
+        for url in ["tel:+15551234", "javascript:alert(1)"] {
+            let out = ChatMarkdownRenderer.attributedString(from: "x [y](\(url)) z")
+            #expect(!out.runs.contains { $0.link != nil }, "stripped \(url)")
+        }
+    }
 }
