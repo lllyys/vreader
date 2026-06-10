@@ -264,13 +264,17 @@ struct EPUBThemeOverrideCSSV2Tests {
 
     // MARK: - Feature #95 — justify default
 
-    @Test func bodyProseIsJustifiedByDefault() {
+    @Test func bodyProseJustifyIsCJKGated() {
         let css = normalize(ReaderThemeV2.paper.epubOverrideCSS(fontSize: 18))
-        #expect(css.contains("text-align: justify !important"))
-        // Scoped to prose <p>, guarded against intentional alignment. Bug #336
-        // added hyphenation inside the same rule, so assert the selector + each
-        // declaration rather than the exact rule body.
-        #expect(css.contains("p:not([style*=\"text-align\"]):not([align]):not([class*=\"center\"]):not([class*=\"right\"]) { text-align: justify !important; -webkit-hyphens: auto; hyphens: auto; }"))
+        // Bug #336 reopen: the justify rule fires ONLY under a CJK document
+        // language (`:lang()` against the html lang the v3.61.2 injection
+        // sets). Latin documents render natural ragged-right — short
+        // non-final lines (title-page subtitles) can no longer gap.
+        #expect(css.contains("p:not([style*=\"text-align\"]):not([align]):not([class*=\"center\"]):not([class*=\"right\"]):is(:lang(zh), :lang(ja), :lang(ko)) { text-align: justify !important; }"))
+        // Hyphenation stays for EVERY language (it also tidies ragged Latin).
+        #expect(css.contains("p:not([style*=\"text-align\"]):not([align]) { -webkit-hyphens: auto; hyphens: auto; }"))
+        // No unconditional justify remains.
+        #expect(!css.contains("right\"]) { text-align: justify"))
         // The justify selector is p-only — headings keep their own alignment.
         #expect(!css.contains("h1,h2,h3,h4,h5,h6 { text-align: justify"))
     }

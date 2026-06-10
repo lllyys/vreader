@@ -53,9 +53,31 @@ struct ReadiumEPUBPreferencesMappingTests {
         #expect(prefs(theme: vTheme).theme?.rawValue == expectedRaw)
     }
 
-    // Feature #95: body text justified by default (Readium-native textAlign).
-    @Test func textAlignDefaultsToJustify() {
-        #expect(prefs().textAlign == .justify)
+    // Bug #336 reopen: justify is CJK-gated. Latin/default → nil (the
+    // ReadiumCSS natural ragged-right); CJK → flush justify (#95 preserved).
+    @Test func textAlign_isNilForLatinContent() {
+        #expect(prefs().textAlign == nil)
+    }
+
+    @Test func textAlign_justifiesForCJKContent() {
+        let p = ReadiumEPUBReaderViewModel.epubPreferences(
+            theme: .paper, typography: TypographySettings(), layout: .paged,
+            calibratedFontSizePt: 18, isCJKContent: true)
+        #expect(p.textAlign == .justify)
+    }
+
+    // Bug #336: the CJK-language predicate driving the justify gate.
+    @Test(arguments: [
+        ("zh", true), ("zh-Hans", true), ("zh-TW", true), ("ja", true),
+        ("ja-JP", true), ("ko", true), ("KO", true),
+        ("en", false), ("en-US", false), ("fr", false), ("", false),
+    ])
+    func isCJKLanguage_table(_ tag: String, _ expected: Bool) {
+        #expect(ReadiumEPUBReaderViewModel.isCJKLanguage(tag) == expected)
+    }
+
+    @Test func isCJKLanguage_nilIsFalse() {
+        #expect(ReadiumEPUBReaderViewModel.isCJKLanguage(nil) == false)
     }
 
     // Bug #336: justified Latin text without hyphenation stretches inter-word

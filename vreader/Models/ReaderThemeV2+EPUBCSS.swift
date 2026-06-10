@@ -132,8 +132,10 @@ extension ReaderThemeV2 {
           line-height: 1.3 !important; \
           color: \(ink) !important; \
         }\
-        p:not([style*="text-align"]):not([align]):not([class*="center"]):not([class*="right"]) { \
+        p:not([style*="text-align"]):not([align]):not([class*="center"]):not([class*="right"]):is(:lang(zh), :lang(ja), :lang(ko)) { \
           text-align: justify !important; \
+        }\
+        p:not([style*="text-align"]):not([align]) { \
           -webkit-hyphens: auto; \
           hyphens: auto; \
         }\

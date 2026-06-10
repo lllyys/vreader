@@ -100,7 +100,11 @@ extension ReadiumEPUBHost {
                 ),
                 // WI-7: clear the HTML body background so the composited
                 // ThemeBackgroundView shows through (photo/custom-bg path).
-                transparentBackground: shouldRenderTransparentBackground
+                transparentBackground: shouldRenderTransparentBackground,
+                // Bug #336 reopen: flush-justify only for CJK publications.
+                isCJKContent: ReadiumEPUBReaderViewModel.isCJKLanguage(
+                    publication.metadata.languages.first
+                )
             ),
             fingerprintKey: fingerprint.canonicalKey,
             readerToken: readerToken,

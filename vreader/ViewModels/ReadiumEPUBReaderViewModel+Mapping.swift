@@ -104,12 +104,19 @@ extension ReadiumEPUBReaderViewModel {
     /// otherwise paints it `effectiveBackgroundColor` = the theme swatch when the
     /// pref is nil). The text color stays the theme ink for legibility over the
     /// image. Default `false` → the unchanged opaque theme-color path.
+    /// Bug #336 (reopen): `true` when the publication's primary language is
+    /// CJK — only then is body text flush-justified. Latin justification
+    /// stretches inter-word spaces on short non-final lines (hyphenation can't
+    /// absorb a 5-word subtitle), so Latin/`en` renders natural ragged-right —
+    /// the Western norm and the user's repeated ask. Derive via
+    /// `isCJKLanguage(_:)` from the publication metadata.
     nonisolated static func epubPreferences(
         theme: ReaderThemeV2,
         typography: TypographySettings,
         layout: EPUBLayoutPreference,
         calibratedFontSizePt: CGFloat,
-        transparentBackground: Bool = false
+        transparentBackground: Bool = false,
+        isCJKContent: Bool = false
     ) -> EPUBPreferences {
         let bg: ReadiumNavigator.Color? = transparentBackground
             ? nil
@@ -137,13 +144,25 @@ extension ReadiumEPUBReaderViewModel {
             pageMargins: defaultPageMargins,
             publisherStyles: false,
             scroll: layout == .scroll,
-            // Feature #95: justify body text by default (the EPUB analog of #92
-            // TXT). Readium owns its own per-paragraph cascade + blockquote/
-            // figcaption exclusions when justify is on.
-            textAlign: .justify,
+            // Feature #95 + Bug #336 reopen: flush-justify ONLY for CJK
+            // content (no inter-word spaces → no gaps). Latin gets nil = the
+            // ReadiumCSS natural default (ragged-right), which the hyphenation
+            // above still tidies. Headings are exempted separately via the
+            // coordinator's heading-alignment user script (facet 2).
+            textAlign: isCJKContent ? .justify : nil,
             textColor: Color(uiColor: theme.inkColor),
             theme: readiumTheme(for: theme)
         )
+    }
+
+    /// Bug #336: is `tag` (a BCP-47-ish `dc:language` value) a CJK language?
+    /// Drives the justify gate — shared, pure, table-tested. Matches on the
+    /// primary subtag so `zh`, `zh-Hans`, `ja-JP`, `ko` all qualify.
+    nonisolated static func isCJKLanguage(_ tag: String?) -> Bool {
+        guard let tag, !tag.isEmpty else { return false }
+        let primary = tag.lowercased()
+            .split(separator: "-").first.map(String.init) ?? tag.lowercased()
+        return ["zh", "ja", "ko"].contains(primary)
     }
 
     /// Pure decision: should the Readium navigator render with a transparent

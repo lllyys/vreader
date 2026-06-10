@@ -83,6 +83,19 @@ extension ReadiumReaderCoordinator {
             source: Self.selectionStyleApplyJS,
             injectionTime: .atDocumentEnd, forMainFrameOnly: false
         ))
+        // Bug #336 reopen (facet 2): headings must never inherit the user
+        // justify cascade ("Prologue:␣␣I␣␣quit…"). Fixed compile-time CSS, no
+        // interpolation; harmless when justify is off (start is already the
+        // publisherStyles:false default).
+        userContentController.addUserScript(WKUserScript(
+            source: """
+            (function(){var id='vreader-heading-align';if(document.getElementById(id))return;\
+            var el=document.createElement('style');el.id=id;\
+            el.textContent='h1,h2,h3,h4,h5,h6{text-align:initial !important;}';\
+            document.documentElement.appendChild(el);})();
+            """,
+            injectionTime: .atDocumentEnd, forMainFrameOnly: false
+        ))
         // Feature #83: cross-chapter continuous scroll — install the boundary-
         // intent observer + weak message-handler proxy so scroll mode auto-
         // advances across spine boundaries (resolves Bug #309). Self-gating to
