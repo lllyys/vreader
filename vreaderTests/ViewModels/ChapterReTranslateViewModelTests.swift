@@ -631,6 +631,37 @@ struct ChapterReTranslateViewModelTests {
         #expect(row?.translatedSegments == ["既有译文"])
     }
 
+    /// Codex round-2 High: a STALE new-key row left by an EARLIER override
+    /// re-translate must not count as proof that THIS run durably cached its
+    /// replacement. Seed both keys, then partial-degrade (success without a
+    /// cache write): the original must survive — mere existence of the old
+    /// override row green-lit the delete before the createdAt gate.
+    @Test func partialDegradationWithStalePreexistingOverrideRow_keepsOriginalRow() async throws {
+        let store = try Self.makeStore()
+        try await Self.seedCache(
+            store, unit: Self.unit(), profileID: Self.initialProfileID,
+            segments: ["既有译文"])
+        // The stale override-key row from a previous re-translate run —
+        // seeded BEFORE submit, so its createdAt predates submitTime.
+        try await Self.seedCache(
+            store, unit: Self.unit(), profileID: Self.overrideProfileID,
+            segments: ["上次的覆盖译文"])
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        // Success WITHOUT a side-effect cache-write = the Bug #330
+        // partial-degradation path.
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["第一段", ""], fromCache: false)))
+        let vm = Self.makeVM(store: store, resolver: resolver, runner: runner)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        vm.updateSelection { $0.providerProfileID = Self.overrideProfileID }
+        await vm.submit()
+
+        let row = await store.translation(forKey: Self.originalKey(unit: Self.unit()))
+        #expect(row != nil, "a stale pre-existing override row must not green-light deleting the original")
+        #expect(row?.translatedSegments == ["既有译文"])
+    }
+
     /// Codex round-1 Medium: the orphan delete must use the SUBMIT-time
     /// snapshot of the selection, not the live (mutable) one. Mid-flight the
     /// "user" flips the selection back to the initial profile; without the

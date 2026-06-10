@@ -301,6 +301,13 @@ final class ChapterReTranslateViewModel {
         //    another.
         let requested = selection
         let requestedLanguage = targetLanguage
+        // Codex round-2 High: the durable-write check below must prove THIS
+        // run refreshed the new-key row — a row left by an EARLIER override
+        // re-translate must not count (its mere existence would green-light
+        // deleting the original after a write-skipped partial degradation).
+        // The store stamps `createdAt` at write time on both insert and
+        // replace, so "createdAt >= submitTime" is that proof.
+        let submitTime = Date()
 
         // 1. Source text for the unit. Three outcomes (Codex Gate-4 round-1
         //    Critical, thread `019e4399-b8cd`):
@@ -402,7 +409,8 @@ final class ChapterReTranslateViewModel {
             providerProfileID: requested.providerProfileID,
             promptVersion: promptVersion)
         if originalKey != newKey {
-            if await store.translation(forKey: newKey) != nil {
+            let newRow = await store.translation(forKey: newKey)
+            if let newRow, newRow.createdAt >= submitTime {
                 do {
                     try await store.deleteTranslation(forKey: originalKey)
                 } catch {
@@ -412,7 +420,11 @@ final class ChapterReTranslateViewModel {
                     log.error("post-retranslate orphan delete failed: \(String(describing: error), privacy: .public)")
                 }
             } else {
-                log.info("re-translate result not durably cached (partial degradation or write failure); keeping the original row")
+                // Either no new-key row at all, or only a STALE one from an
+                // earlier run (Codex round-2 High) — this run's result was not
+                // durably cached (Bug #330 partial degradation or a swallowed
+                // write failure). Keep the original row.
+                log.info("re-translate result not durably cached this run; keeping the original row")
             }
         }
 
