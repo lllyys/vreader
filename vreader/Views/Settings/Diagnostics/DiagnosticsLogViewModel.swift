@@ -81,9 +81,17 @@ final class DiagnosticsLogViewModel {
         levelFilter != .all || (categoryFilter != nil && !(categoryFilter ?? "").isEmpty)
     }
 
+    /// The filtered entries tagged with a stable identity (their position in
+    /// the filtered list). Identity is position-based, NOT `Equatable`-derived,
+    /// so two value-equal entries expand independently. Stable within the
+    /// current filter selection — changing a filter resets `expandedEntryID`.
+    var identifiedEntries: [IdentifiedDiagnosticsEntry] {
+        filteredEntries.enumerated().map { IdentifiedDiagnosticsEntry(id: $0.offset, entry: $0.element) }
+    }
+
     /// The day-grouped, newest-first sections the list renders.
     func daySections(now: Date, calendar: Calendar = .current) -> [DiagnosticsDaySection] {
-        DiagnosticsDayGrouper.sections(from: filteredEntries, now: now, calendar: calendar)
+        DiagnosticsDayGrouper.sections(from: identifiedEntries, now: now, calendar: calendar)
     }
 
     /// Count of loaded entries matching a level filter (category-independent),
@@ -92,10 +100,11 @@ final class DiagnosticsLogViewModel {
         store.entries.filter { filter.matches($0.level) }.count
     }
 
-    /// The redacted export text, narrowed to the active filter.
+    /// The redacted export text, narrowed to EXACTLY the active filter — built
+    /// from `filteredEntries` so the "Errors" chip's `.fault` rows are included
+    /// (the store's single `level:` predicate can't express that set).
     func exportText() -> String {
-        let level = levelForStore
-        return store.exportText(level: level, category: normalizedCategory)
+        store.exportText(entries: filteredEntries)
     }
 
     /// The export filename — `vreader-log-YYYY-MM-DD.txt` (design payload
@@ -108,33 +117,31 @@ final class DiagnosticsLogViewModel {
         return "vreader-log-\(formatter.string(from: now)).txt"
     }
 
-    /// The footer's scope line (design "487 entries · last 24 h" /
-    /// "Showing 12 of 487").
+    /// The footer's scope line. Default mirrors the design "N entries · …";
+    /// filtered mirrors "Showing X of N · <active filter>". The scope says
+    /// "this session" (not the design mock's "last 24 h") because WI-1 reads
+    /// `.currentProcessIdentifier` — current-process entries, not a 24-hour
+    /// window — so "this session" is the accurate descriptor for our data.
     var footerScope: String {
         let total = store.entries.count
         guard isFiltering else {
             return "\(total) entr\(total == 1 ? "y" : "ies") · this session"
         }
         let shown = filteredEntries.count
-        return "Showing \(shown) of \(total)"
+        let suffix = activeFilterDescriptor.map { " · \($0)" } ?? ""
+        return "Showing \(shown) of \(total)\(suffix)"
     }
 
-    // MARK: - Private
-
-    /// The store-level filter for export — the store takes a single
-    /// `DiagnosticsLevel`. `errors` maps to `.error` (the common case;
-    /// `.fault` is rare and still appears under `All`).
-    private var levelForStore: DiagnosticsLevel? {
-        switch levelFilter {
-        case .all:    return nil
-        case .errors: return .error
-        case .debug:  return .debug
-        case .info:   return .info
+    /// A short human label for the active filter, used in the filtered footer
+    /// scope (design "Showing 12 of 487 · errors" / category context).
+    private var activeFilterDescriptor: String? {
+        let levelPart: String? = levelFilter == .all ? nil : levelFilter.label.lowercased()
+        let categoryPart: String? = (categoryFilter?.isEmpty == false) ? categoryFilter : nil
+        switch (levelPart, categoryPart) {
+        case let (l?, c?): return "\(c) \(l)"
+        case let (l?, nil): return l
+        case let (nil, c?): return c
+        case (nil, nil):   return nil
         }
-    }
-
-    private var normalizedCategory: String? {
-        guard let categoryFilter, !categoryFilter.isEmpty else { return nil }
-        return categoryFilter
     }
 }

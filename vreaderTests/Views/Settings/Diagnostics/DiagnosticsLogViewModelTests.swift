@@ -124,10 +124,34 @@ struct DiagnosticsLogViewModelTests {
         #expect(!text.contains("sk-abcdef0123456789ABCDEF"))  // redacted
     }
 
+    @Test func exportUnderErrorsChipIncludesFault() async {
+        // Codex Gate-4 High: the Errors chip = {.error,.fault}; export must
+        // include the .fault row, not collapse to .error only.
+        let vm = await loadedViewModel(sample)
+        vm.levelFilter = .errors
+        let text = vm.exportText()
+        #expect(text.contains("save failed"))   // the .error row
+        #expect(text.contains("corrupt"))        // the .fault row
+        #expect(!text.contains("paginate"))      // the .debug row excluded
+    }
+
+    @Test func identifiedEntriesAreDistinctForValueEqualRows() async {
+        // Codex Gate-4 High: two value-equal entries must get distinct ids so
+        // they expand independently in the viewer.
+        let dup = entry(.error, "C", "same", at: 5)
+        let vm = await loadedViewModel([dup, dup])
+        let ids = vm.identifiedEntries.map(\.id)
+        #expect(ids == [0, 1])
+        #expect(Set(ids).count == 2)
+    }
+
     @Test func footerScopeReflectsFiltering() async {
         let vm = await loadedViewModel(sample)
         #expect(vm.footerScope.contains("4"))
+        #expect(vm.footerScope.contains("this session"))
         vm.levelFilter = .errors
-        #expect(vm.footerScope == "Showing 2 of 4")
+        #expect(vm.footerScope == "Showing 2 of 4 · errors")
+        vm.categoryFilter = "Persistence"
+        #expect(vm.footerScope == "Showing 2 of 4 · Persistence errors")
     }
 }

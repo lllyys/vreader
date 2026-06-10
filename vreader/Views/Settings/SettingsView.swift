@@ -89,7 +89,7 @@ struct SettingsView: View {
     /// "AI" group to the established feature-#50 `AISettingsSection`
     /// composite.
     var sectionsForTesting: [String] {
-        ["Cloud & Sync", "Reading", "About", "Support"]
+        ["Cloud & Sync", "Reading", "Support"]
     }
 
     /// The `SettingsRowPalette` spec keys for each row this view
@@ -102,9 +102,9 @@ struct SettingsView: View {
             SettingsRowPalette.bookSources.paletteKey,
             SettingsRowPalette.replacementRules.paletteKey,
             SettingsRowPalette.httpTTS.paletteKey,
+            SettingsRowPalette.diagnostics.paletteKey,
             SettingsRowPalette.helpFeedback.paletteKey,
-            SettingsRowPalette.version.paletteKey,
-            SettingsRowPalette.diagnostics.paletteKey
+            SettingsRowPalette.version.paletteKey
         ]
     }
 
@@ -180,7 +180,6 @@ struct SettingsView: View {
                 cloudAndSyncSection
                 aiSection
                 readingSection
-                aboutSection
                 supportSection
             }
             .scrollContentBackground(.hidden)
@@ -294,11 +293,33 @@ struct SettingsView: View {
         .listRowBackground(Color(theme.sheetCardSurfaceColor))
     }
 
-    // MARK: - About (design `SettingsSheet` group 4)
+    // MARK: - Support (design `DiagSupportGroup`, #1597 — feature #96 WI-2)
 
+    /// The Support group at the bottom of the sheet. Per the committed #1597
+    /// design (`design-notes/diagnostics-log-viewer.md`), the former "About"
+    /// group is REGROUPED under "Support" with the new Diagnostics row first —
+    /// so the scripted bug-report ask ("Settings → Diagnostics → tap share") is
+    /// one direct row. The existing Help & Feedback + Version rows are retained
+    /// (the design mock collapsed About to a single version row; this is a
+    /// non-destructive superset). Pinned to `vreader-diagnostics.jsx`
+    /// `DiagSupportGroup`.
     @ViewBuilder
-    private var aboutSection: some View {
+    private var supportSection: some View {
         Section {
+            NavigationLink {
+                DiagnosticsLogView(theme: theme)
+            } label: {
+                SettingsIconRow(
+                    theme: theme,
+                    icon: Image(systemName: SettingsRowPalette.diagnostics.symbolName),
+                    iconBackground: SettingsRowPalette.diagnostics.background.color,
+                    title: "Diagnostics",
+                    detail: "View and export app logs",
+                    showsChevron: false
+                )
+            }
+            .accessibilityIdentifier("settingsDiagnostics")
+
             SettingsIconRow(
                 theme: theme,
                 icon: Image(systemName: SettingsRowPalette.helpFeedback.symbolName),
@@ -318,34 +339,6 @@ struct SettingsView: View {
             )
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settingsVersion")
-        } header: {
-            SettingsSectionHeader(theme: theme, title: "About")
-        }
-        .listRowBackground(Color(theme.sheetCardSurfaceColor))
-    }
-
-    // MARK: - Support (feature #96 WI-2 — Diagnostics entry)
-
-    /// The Support group — its Diagnostics row pushes the in-app log viewer
-    /// (feature #96). Placed at the bottom so the scripted bug-report ask
-    /// ("Settings → Diagnostics → tap share") is one direct row, not buried
-    /// inside About. Pinned to `vreader-diagnostics.jsx` `DiagSupportGroup`.
-    @ViewBuilder
-    private var supportSection: some View {
-        Section {
-            NavigationLink {
-                DiagnosticsLogView(theme: theme)
-            } label: {
-                SettingsIconRow(
-                    theme: theme,
-                    icon: Image(systemName: SettingsRowPalette.diagnostics.symbolName),
-                    iconBackground: SettingsRowPalette.diagnostics.background.color,
-                    title: "Diagnostics",
-                    detail: "View and export app logs",
-                    showsChevron: false
-                )
-            }
-            .accessibilityIdentifier("settingsDiagnostics")
         } header: {
             SettingsSectionHeader(theme: theme, title: "Support")
         }

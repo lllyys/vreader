@@ -63,7 +63,14 @@ final class DiagnosticsLogStore {
     /// `DiagnosticsRedactor` (defense-in-depth over the OSLog `.private` barrier).
     /// `filter` (level/category) narrows the export to match the viewer.
     func exportText(level: DiagnosticsLevel? = nil, category: String? = nil) -> String {
-        let rows = filtered(level: level, category: category)
+        exportText(entries: filtered(level: level, category: category))
+    }
+
+    /// Formats + redacts an explicit entry list. The viewer passes its own
+    /// already-filtered list here so a multi-level filter (the "Errors" chip =
+    /// `{.error, .fault}`) exports exactly what's on screen — the single
+    /// `level:` predicate above can't express that set.
+    func exportText(entries rows: [DiagnosticsLogEntry]) -> String {
         var lines = ["vreader diagnostics — \(rows.count) entr\(rows.count == 1 ? "y" : "ies") (current session)"]
         let fmt = ISO8601DateFormatter()
         for e in rows {

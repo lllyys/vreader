@@ -77,6 +77,15 @@ enum DiagnosticsLevelFilter: String, CaseIterable, Equatable, Sendable {
     }
 }
 
+/// One entry paired with a STABLE identity for the viewer's list. Two
+/// value-equal `DiagnosticsLogEntry`s (same date/level/category/message) must
+/// still expand independently, so identity is a caller-assigned `id` (the
+/// entry's position in the filtered list) — NOT `Equatable`-derived.
+struct IdentifiedDiagnosticsEntry: Identifiable, Equatable, Sendable {
+    let id: Int
+    let entry: DiagnosticsLogEntry
+}
+
 /// One day-bucket of entries for the viewer's grouped list (design
 /// `DiagLogList` day headers). `entries` are newest-first within the day.
 struct DiagnosticsDaySection: Identifiable, Equatable, Sendable {
@@ -87,8 +96,8 @@ struct DiagnosticsDaySection: Identifiable, Equatable, Sendable {
     let relativeWord: String?
     /// The `d MMMM` date label (e.g. "10 June").
     let dateLabel: String
-    /// Entries on this day, newest-first.
-    let entries: [DiagnosticsLogEntry]
+    /// Entries on this day, newest-first, each carrying its stable identity.
+    let entries: [IdentifiedDiagnosticsEntry]
 
     /// The composed header (design "Today · 10 June").
     var header: String {
@@ -98,11 +107,11 @@ struct DiagnosticsDaySection: Identifiable, Equatable, Sendable {
 
 /// Buckets entries into newest-first day sections for the viewer.
 enum DiagnosticsDayGrouper {
-    /// Groups `entries` (any order) into day sections, newest day first and
-    /// newest entry first within each day. `now` decides Today/Yesterday;
-    /// `calendar` is injected for deterministic tests.
+    /// Groups identity-tagged `entries` (any order) into day sections, newest
+    /// day first and newest entry first within each day. `now` decides
+    /// Today/Yesterday; `calendar` is injected for deterministic tests.
     static func sections(
-        from entries: [DiagnosticsLogEntry],
+        from entries: [IdentifiedDiagnosticsEntry],
         now: Date,
         calendar: Calendar = .current
     ) -> [DiagnosticsDaySection] {
@@ -117,15 +126,15 @@ enum DiagnosticsDayGrouper {
         let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart)
 
         // Bucket by start-of-day.
-        var buckets: [Date: [DiagnosticsLogEntry]] = [:]
-        for entry in entries {
-            let dayStart = calendar.startOfDay(for: entry.date)
-            buckets[dayStart, default: []].append(entry)
+        var buckets: [Date: [IdentifiedDiagnosticsEntry]] = [:]
+        for item in entries {
+            let dayStart = calendar.startOfDay(for: item.entry.date)
+            buckets[dayStart, default: []].append(item)
         }
 
         // Newest day first.
         return buckets.keys.sorted(by: >).map { dayStart in
-            let dayEntries = buckets[dayStart]!.sorted { $0.date > $1.date }
+            let dayEntries = buckets[dayStart]!.sorted { $0.entry.date > $1.entry.date }
             let relativeWord: String?
             if dayStart == todayStart {
                 relativeWord = "Today"

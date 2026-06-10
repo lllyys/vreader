@@ -21,6 +21,7 @@ struct DiagnosticsLogView: View {
     @State private var viewModel: DiagnosticsLogViewModel
     @State private var exportURL: URL?
     @State private var isShowingShare = false
+    @State private var exportFailed = false
 
     private let theme: ReaderThemeV2
 
@@ -45,6 +46,11 @@ struct DiagnosticsLogView: View {
                 if let exportURL {
                     ShareActivityView(activityItems: [exportURL]).ignoresSafeArea()
                 }
+            }
+            .alert("Export failed", isPresented: $exportFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Could not write the diagnostics log file. Please try again.")
             }
             .accessibilityIdentifier("diagnosticsLogView")
     }
@@ -89,14 +95,13 @@ struct DiagnosticsLogView: View {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 ForEach(viewModel.daySections(now: Date())) { section in
                     Section {
-                        ForEach(Array(section.entries.enumerated()), id: \.offset) { _, entry in
-                            let rowID = identity(for: entry)
+                        ForEach(section.entries) { item in
                             DiagnosticsLogRow(
                                 theme: theme,
-                                entry: entry,
-                                isExpanded: viewModel.expandedEntryID == rowID,
-                                onTap: { toggle(rowID) },
-                                onCopy: { copy(entry) }
+                                entry: item.entry,
+                                isExpanded: viewModel.expandedEntryID == item.id,
+                                onTap: { toggle(item.id) },
+                                onCopy: { copy(item.entry) }
                             )
                             Divider().overlay(Color(theme.ruleColor))
                         }
@@ -160,11 +165,6 @@ struct DiagnosticsLogView: View {
 
     // MARK: - Actions
 
-    /// A stable row identity = the entry's index in the unfiltered loaded list.
-    private func identity(for entry: DiagnosticsLogEntry) -> Int {
-        viewModel.allEntries.firstIndex(of: entry) ?? -1
-    }
-
     private func toggle(_ id: Int) {
         viewModel.expandedEntryID = viewModel.expandedEntryID == id ? nil : id
     }
@@ -173,18 +173,39 @@ struct DiagnosticsLogView: View {
         UIPasteboard.general.string = DiagnosticsRedactor.redact(entry.message)
     }
 
+    /// Builds the redacted export, writes it to a temp `.txt` OFF the main
+    /// actor (large logs shouldn't hitch the UI), then hops back to present the
+    /// share sheet. A write failure surfaces a brief alert instead of a dead
+    /// tap.
     private func presentShare() {
         let text = viewModel.exportText()
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent(viewModel.exportFileName(now: Date()))
-        do {
-            try text.data(using: .utf8)?.write(to: url, options: .atomic)
-            exportURL = url
-            isShowingShare = true
-        } catch {
-            // A failed temp-file write simply doesn't present the sheet — no
-            // partial/corrupt share. (Diagnostics export is best-effort.)
+        let fileName = viewModel.exportFileName(now: Date())
+        Task {
+            let result = await Self.writeExport(text, fileName: fileName)
+            switch result {
+            case .success(let url):
+                exportURL = url
+                isShowingShare = true
+            case .failure:
+                exportFailed = true
+            }
         }
+    }
+
+    /// Writes the export text to a temp file off-main. `nonisolated` so the
+    /// blocking encode + write run off the `@MainActor`.
+    private nonisolated static func writeExport(
+        _ text: String, fileName: String
+    ) async -> Result<URL, Error> {
+        await Task.detached(priority: .utility) {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+            do {
+                try Data(text.utf8).write(to: url, options: .atomic)
+                return .success(url)
+            } catch {
+                return .failure(error)
+            }
+        }.value
     }
 }
 
