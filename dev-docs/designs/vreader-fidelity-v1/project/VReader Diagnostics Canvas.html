@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VReader — Issue #1597 · Diagnostics log viewer + Settings entry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: #f0eee9;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .hide-scroll::-webkit-scrollbar { display: none; }
+  .hide-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+  button { font-family: inherit; }
+  button:focus { outline: none; }
+</style>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" fill="#1a1815"/>
+    <rect x="36" y="38" width="128" height="124" rx="12" fill="#222020" stroke="#3a3530" stroke-width="1"/>
+    <path d="M50 60h12l6-12 10 24 6-12h12" stroke="#d6885a" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="52" cy="88" r="3" fill="#b13e36"/>
+    <rect x="62" y="85" width="72" height="6" rx="3" fill="#d8d2c5" opacity="0.7"/>
+    <circle cx="52" cy="106" r="3" fill="#7fb2d9"/>
+    <rect x="62" y="103" width="58" height="6" rx="3" fill="#d8d2c5" opacity="0.45"/>
+    <circle cx="52" cy="124" r="3" fill="#8a8a8e"/>
+    <rect x="62" y="121" width="66" height="6" rx="3" fill="#d8d2c5" opacity="0.45"/>
+    <rect x="50" y="140" width="44" height="12" rx="6" fill="#d6885a" opacity="0.85"/>
+    <text x="100" y="184" font-family="Inter, sans-serif" font-size="11" font-weight="600" fill="#d8d2c5" text-anchor="middle" letter-spacing="1.5">#1597 LOGS</text>
+  </svg>
+</template>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Canvas + base tokens + shared primitives -->
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="vreader-themes.jsx"></script>
+<script type="text/babel" src="vreader-icons.jsx"></script>
+<script type="text/babel" src="vreader-panels.jsx"></script>
+
+<!-- New: diagnostics components + this canvas's artboards -->
+<script type="text/babel" src="vreader-diagnostics.jsx"></script>
+<script type="text/babel" src="diagnostics-artboards.jsx"></script>
+
+<script type="text/babel">
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<CanvasRoot1597/>);
+</script>
+</body>
+</html>
