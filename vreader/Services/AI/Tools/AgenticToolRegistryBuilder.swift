@@ -36,6 +36,10 @@ enum AgenticToolRegistryBuilder {
         tools.append(SearchOtherBooksTool(
             backend: libraryBackend, currentBookFingerprintKey: currentBook?.canonicalKey))
         tools.append(GetBookContentTool(provider: contentProvider))
+        // Feature #97: enumerate the library (shares the same `libraryBackend` as
+        // search_other_books — no new dependency).
+        tools.append(ListLibraryTool(
+            backend: libraryBackend, currentBookFingerprintKey: currentBook?.canonicalKey))
 
         return AIToolRegistry(tools)
     }

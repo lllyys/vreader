@@ -62,6 +62,9 @@ struct AIChatAgenticSupportTests {
         let prompt = AIChatHistoryMapper.systemPrompt()
         #expect(prompt.localizedCaseInsensitiveContains("untrusted"))
         #expect(prompt.localizedCaseInsensitiveContains("never"))   // "NEVER as instructions"
+        // Feature #97: the prompt must advertise that the assistant can LIST the
+        // library, so the model discovers `list_library` for enumeration queries.
+        #expect(prompt.localizedCaseInsensitiveContains("list the books"))
         // The system prompt must NOT carry book context (that would grant it system authority).
         #expect(!prompt.contains("Reference material from the book"))
     }

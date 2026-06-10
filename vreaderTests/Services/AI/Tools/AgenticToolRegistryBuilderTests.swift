@@ -66,13 +66,14 @@ struct AgenticToolRegistryBuilderTests {
     private static let fp = DocumentFingerprint(
         contentSHA256: String(repeating: "a", count: 64), fileByteCount: 4096, format: .epub)
 
-    @Test("with an open book + a live search service, the registry offers all three tools")
+    @Test("with an open book + a live search service, the registry offers all four tools")
     func includesCurrentBookTool() {
         let registry = AgenticToolRegistryBuilder.build(
             currentBook: Self.fp, currentBookSearch: StubSearch(),
             libraryBackend: StubLibraryBackend(), contentProvider: StubContent())
+        // Feature #97 added list_library (name-sorted).
         #expect(registry.definitions().map(\.name)
-            == ["get_book_content", "search_current_book", "search_other_books"])
+            == ["get_book_content", "list_library", "search_current_book", "search_other_books"])
     }
 
     @Test("general chat (no open book) omits search_current_book")
@@ -80,7 +81,7 @@ struct AgenticToolRegistryBuilderTests {
         let registry = AgenticToolRegistryBuilder.build(
             currentBook: nil, currentBookSearch: nil,
             libraryBackend: StubLibraryBackend(), contentProvider: StubContent())
-        #expect(registry.definitions().map(\.name) == ["get_book_content", "search_other_books"])
+        #expect(registry.definitions().map(\.name) == ["get_book_content", "list_library", "search_other_books"])
         #expect(!registry.isEmpty)
     }
 
@@ -90,7 +91,7 @@ struct AgenticToolRegistryBuilderTests {
             currentBook: Self.fp, currentBookSearch: nil,
             libraryBackend: StubLibraryBackend(), contentProvider: StubContent())
         #expect(!registry.definitions().map(\.name).contains("search_current_book"))
-        #expect(registry.definitions().map(\.name) == ["get_book_content", "search_other_books"])
+        #expect(registry.definitions().map(\.name) == ["get_book_content", "list_library", "search_other_books"])
     }
 
     @Test("the assembled search_other_books EXCLUDES the open book at runtime (not just the names)")
