@@ -194,6 +194,15 @@ actor BookTranslationCoordinator {
             targetLanguage: targetLanguage,
             style: style,
             providerProfileID: providerProfileID)
+        // Gate-4 (WI-2 round 1): a NEW run supersedes an old interrupted
+        // one — refresh the retained descriptor so failure-retained resume
+        // metadata tracks THIS run's provider/language/style, not the
+        // expired run's (expired-with-A → manual restart with B → failure
+        // must auto-resume B, not A). Runs with no prior descriptor don't
+        // create one — only expiry does.
+        if interruptedJobs.job(forBookWithKey: bookFingerprintKey) != nil {
+            interruptedJobs.save(resumeDescriptor)
+        }
 
         guard let service else {
             log.error("BookTranslationCoordinator: not configured with a service; ignoring start")
@@ -215,7 +224,11 @@ actor BookTranslationCoordinator {
         let total = units.count
         if total == 0 {
             // Per plan: a zero-unit book completes immediately at 0/0
-            // with no error and no API calls.
+            // with no error and no API calls. Gate-4 (WI-2 round 1): this
+            // is a COMPLETION — clear any retained descriptor like the
+            // normal terminal path, or every later provider arrival would
+            // re-resume an already-finished job.
+            interruptedJobs.remove(forBookWithKey: bookFingerprintKey)
             updateProgress(
                 forKey: bookFingerprintKey,
                 phase: .completed, completed: 0, total: 0)

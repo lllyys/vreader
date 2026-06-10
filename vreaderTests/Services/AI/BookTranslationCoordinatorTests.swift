@@ -762,6 +762,97 @@ struct BookTranslationCoordinatorTests {
         try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
     }
 
+    /// Gate-4 (WI-2 round 1, M1): a manual restart with a DIFFERENT provider
+    /// supersedes an expired run's descriptor — when that restart fails, the
+    /// retained resume metadata must point at the user's latest provider
+    /// (B), not the originally-expired one (A).
+    @Test func manualRestart_refreshesRetainedDescriptor_toTheNewRun() async throws {
+        let profileB = UUID(uuidString: "BBBBBBBB-0000-0000-0000-0000000000B2")!
+        let store = try Self.makeStore()
+        // The run FAILS on its second unit (no source text → provider
+        // error → recordFailure, which retains the descriptor).
+        let failingUnits = [Self.unit("ch1"), Self.unit("missing")]
+        let failingProvider = MockChapterTextProvider(units: failingUnits, texts: [
+            failingUnits[0]: "p1."
+        ])
+        let sender = MockTranslationSender(responses: ["[\"a\"]"])
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let defaults = Self.makeDefaults()
+        // The expired run pinned profile A.
+        Self.seedDescriptor(in: defaults, profileID: Self.providerID)
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+
+        // Manual restart with profile B; the run FAILS on the second unit
+        // (missing source text) → recordFailure retains the descriptor.
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey, textProvider: failingProvider,
+            targetLanguage: "English", providerProfileID: profileB,
+            config: Self.makeConfig(), style: .literal)
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+        let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
+        #expect(final.phase == .failed)
+
+        let retained = try #require(Self.descriptor(in: defaults, forKey: Self.bookKey))
+        #expect(retained.providerProfileID == profileB,
+                "the retained descriptor must track the LATEST run's provider")
+        #expect(retained.targetLanguage == "English")
+        #expect(retained.style == .literal)
+    }
+
+    /// Gate-4 (WI-2 round 1, M2): a zero-unit completion clears a retained
+    /// descriptor — otherwise every later provider arrival re-resumes an
+    /// already-finished job.
+    @Test func zeroUnitCompletion_clearsRetainedDescriptor() async throws {
+        let provider = MockChapterTextProvider(units: [], texts: [:])
+        let store = try Self.makeStore()
+        let sender = MockTranslationSender(responses: [])
+        let service = ChapterTranslationService(sender: sender, store: store, promptVersion: "v1")
+        let defaults = Self.makeDefaults()
+        Self.seedDescriptor(in: defaults)
+        let resolver = StubProviderConfigResolver(result: .success(Self.makeConfig()))
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            interruptedJobs: InterruptedTranslationJobStore(defaults: defaults))
+        await coordinator.configure(service: service, resolver: resolver)
+
+        let resumed = await coordinator.resumeInterruptedJob(
+            bookFingerprintKey: Self.bookKey, textProvider: provider)
+
+        #expect(!resumed, "zero units → completed inline, no job task")
+        let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
+        #expect(final.phase == .completed)
+        #expect(Self.descriptor(in: defaults, forKey: Self.bookKey) == nil,
+                "zero-unit completion is a completion — descriptor cleared")
+    }
+
+    /// Gate-4 (WI-2 round 1, L1): ONE mixed-type (non-Data) entry in the
+    /// defaults dictionary must not take down valid siblings on later
+    /// save/remove rewrites.
+    @Test func interruptedJobStore_survivesMixedTypeCorruption_keepsSiblings() throws {
+        let defaults = Self.makeDefaults()
+        let store = InterruptedTranslationJobStore(defaults: defaults)
+        let valid = InterruptedTranslationJob(
+            bookFingerprintKey: "good-book", targetLanguage: "Chinese",
+            style: .natural, providerProfileID: Self.providerID)
+        store.save(valid)
+        // Corrupt the raw dictionary: add a non-Data value next to the
+        // valid entry.
+        var raw = defaults.dictionary(forKey: InterruptedTranslationJobStore.defaultsKey) ?? [:]
+        raw["corrupt-book"] = "not data, a string"
+        defaults.set(raw, forKey: InterruptedTranslationJobStore.defaultsKey)
+
+        #expect(store.job(forBookWithKey: "good-book") == valid,
+                "a corrupt sibling must not hide valid entries")
+        // A write-path rebuild (save of another book) must keep the valid one.
+        store.save(InterruptedTranslationJob(
+            bookFingerprintKey: "other-book", targetLanguage: "Chinese",
+            style: .natural, providerProfileID: Self.providerID))
+        #expect(store.job(forBookWithKey: "good-book") == valid,
+                "save must not rewrite the store from {} when corruption exists")
+    }
+
     /// Undecodable / unknown-version descriptor entries are ignored
     /// (forward compat — the `v` field guards).
     @Test func interruptedJobStore_ignoresUnknownVersions_andGarbage() throws {

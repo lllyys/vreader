@@ -69,6 +69,10 @@ struct InterruptedTranslationJobStore: @unchecked Sendable {
     }
 
     private func rawEntries() -> [String: Data] {
-        defaults.dictionary(forKey: Self.defaultsKey) as? [String: Data] ?? [:]
+        // Per-VALUE tolerance (Gate-4: a whole-dictionary `as? [String: Data]`
+        // cast fails if ONE value has the wrong type, and the next save/remove
+        // would then rewrite the store from `{}`, dropping valid siblings).
+        guard let any = defaults.dictionary(forKey: Self.defaultsKey) else { return [:] }
+        return any.compactMapValues { $0 as? Data }
     }
 }
