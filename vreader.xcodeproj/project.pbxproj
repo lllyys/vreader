@@ -7917,7 +7917,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 950;
+				CURRENT_PROJECT_VERSION = 951;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -7925,7 +7925,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.62.5;
+				MARKETING_VERSION = 3.62.6;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
@@ -8071,7 +8071,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 950;
+				CURRENT_PROJECT_VERSION = 951;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) USE_LIBXML2=1";
 				HEADER_SEARCH_PATHS = "$(inherited) $(SDKROOT)/usr/include/libxml2 $(SRCROOT)/vreader/Services/Libmobi/src";
 				INFOPLIST_FILE = vreader/SupportingFiles/Info.plist;
@@ -8079,7 +8079,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.62.5;
+				MARKETING_VERSION = 3.62.6;
 				OTHER_LDFLAGS = "$(inherited) -lxml2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vreader.app;
 				SDKROOT = iphoneos;
