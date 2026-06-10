@@ -216,6 +216,15 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
                 }
             }
             .animation(.spring(response: 0.32, dampingFraction: 0.86), value: pending != nil)
+            // Codex round-3 Medium: if the reader unmounts while the popover
+            // is visible, the global suppression must not leak into the next
+            // reader session. Unconditional reset — no grace.
+            .onDisappear {
+                if pending != nil {
+                    ReaderTapZoneRouter.selectionPopoverVisible = false
+                    ReaderTapZoneRouter.dismissGraceDeadline = .distantPast
+                }
+            }
     }
 
     @ViewBuilder
@@ -239,8 +248,14 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
                 pending = next
                 // Preserve the old `.sheet(onDismiss:)` contract: fire onDismiss
                 // whenever the popover actually closes (here, the action path
-                // resolved to no follow-up).
-                if next == nil { onDismiss?() }
+                // resolved to no follow-up). Codex round-3 High: the action
+                // path must also drop the tap-grammar suppression — with NO
+                // dismissal grace (the action tap landed ON the card; there is
+                // no in-flight reader tap to swallow).
+                if next == nil {
+                    ReaderTapZoneRouter.selectionPopoverVisible = false
+                    onDismiss?()
+                }
             },
             onClose: { dismiss() }
         )
