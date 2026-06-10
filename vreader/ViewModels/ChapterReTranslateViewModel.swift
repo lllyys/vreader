@@ -45,6 +45,7 @@
 import Foundation
 import OSLog
 import Observation
+import UIKit
 
 // Boundary protocols (`RetranslateProviderResolving`, `ChapterReTranslating`)
 // live in `ChapterReTranslateBoundaries.swift` so this file stays under the
@@ -134,6 +135,10 @@ final class ChapterReTranslateViewModel {
 
     private let resolver: any RetranslateProviderResolving
     private let runner: any ChapterReTranslating
+    /// Feature #98: grace-window seam — submit() wraps the translate pipeline
+    /// in one `BackgroundExecutionToken` so a user who backgrounds the app
+    /// mid-re-translate gets iOS's ~30s extension instead of an instant kill.
+    private let backgroundTasks: any BackgroundTaskRequesting
     /// Asynchronous source-text provider. Adapters resolve the unit's text
     /// off the main thread (PDFKit page extraction, EPUB spine read, Foliate
     /// WKWebView message) — wrapping this in `@Sendable async throws` lets
@@ -176,12 +181,14 @@ final class ChapterReTranslateViewModel {
         initialKeepGlossary: Bool = true,
         resolver: any RetranslateProviderResolving,
         runner: any ChapterReTranslating,
+        backgroundTasks: any BackgroundTaskRequesting = UIApplication.shared,
         sourceTextProvider: @escaping @Sendable (TranslationUnitID) async throws -> String
     ) {
         self.bookFingerprintKey = bookFingerprintKey
         self.initialProviderProfileID = initialProviderProfileID
         self.resolver = resolver
         self.runner = runner
+        self.backgroundTasks = backgroundTasks
         self.sourceTextProvider = sourceTextProvider
         self.selection = ReTranslatePickerSelection(
             providerProfileID: initialProviderProfileID,
@@ -260,6 +267,16 @@ final class ChapterReTranslateViewModel {
         sheetState = .running
         progress = 0.0
         lastError = nil
+
+        // Feature #98: one grace-window token around the whole pipeline. ALL
+        // exits (success, runner failure, source-text failure, cancellation)
+        // flow back through this await, so the single deferred end() pairs
+        // every begin. On expiry nothing special happens — the in-flight
+        // request dies exactly as it does today, the error path restores the
+        // picker, and (post-#341) the cached original survives.
+        let token = BackgroundExecutionToken.acquire(
+            name: "ChapterReTranslate.submit", using: backgroundTasks)
+        defer { token.end() }
 
         // Capture the work into a Task so .cancel() can stop it. The Task is
         // explicitly typed `Task<Void, Never>` — `self?.runSubmit(...)` would

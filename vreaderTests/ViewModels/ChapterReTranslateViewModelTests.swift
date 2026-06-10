@@ -142,7 +142,8 @@ struct ChapterReTranslateViewModelTests {
         bookKey: String = bookKey,
         resolver: MockProviderResolver,
         runner: MockTranslationRunner,
-        sourceText: String = "Source paragraph one.\n\nSource paragraph two."
+        sourceText: String = "Source paragraph one.\n\nSource paragraph two.",
+        backgroundTasks: MockBackgroundTaskRequester? = nil
     ) -> ChapterReTranslateViewModel {
         ChapterReTranslateViewModel(
             bookFingerprintKey: bookKey,
@@ -150,6 +151,7 @@ struct ChapterReTranslateViewModelTests {
             initialModel: "initial-model",
             resolver: resolver,
             runner: runner,
+            backgroundTasks: backgroundTasks ?? MockBackgroundTaskRequester(),
             sourceTextProvider: { _ in sourceText })  // implicit async throws, returns immediately
     }
 
@@ -640,5 +642,75 @@ struct ChapterReTranslateViewModelTests {
         #expect(vm.sheetState == .complete)
         let row = await store.translation(forKey: Self.canonicalKey(unit: Self.unit()))
         #expect(row != nil, "same-key swap must not delete the row the service just wrote")
+    }
+
+    // MARK: - Feature #98 WI-1: background-token grace window
+
+    /// submit() wraps the whole translate pipeline in ONE background token —
+    /// begun before any work, ended exactly once after the flow finishes.
+    @Test func submit_acquiresBackgroundToken_andEndsOnSuccess() async throws {
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["新译文"], fromCache: false)))
+        let requester = MockBackgroundTaskRequester()
+        let vm = Self.makeVM(resolver: resolver, runner: runner, backgroundTasks: requester)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        #expect(vm.sheetState == .complete)
+        #expect(requester.begins.count == 1, "one token per submit")
+        #expect(requester.ends.count == 1, "released on success")
+    }
+
+    @Test func submit_endsBackgroundToken_onRunnerFailure() async throws {
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .failure(
+            ChapterTranslationError.providerFailed("boom")))
+        let requester = MockBackgroundTaskRequester()
+        let vm = Self.makeVM(resolver: resolver, runner: runner, backgroundTasks: requester)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        #expect(vm.sheetState == .picker, "failure returns to the picker")
+        #expect(requester.begins.count == 1)
+        #expect(requester.ends.count == 1, "released on runner failure — a leaked token starves later acquires")
+    }
+
+    @Test func submit_endsBackgroundToken_onSourceTextFailure() async throws {
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .success(
+            ChapterTranslationResult(segments: ["x"], fromCache: false)))
+        let requester = MockBackgroundTaskRequester()
+        let failingUnit = Self.unit()
+        let vm = ChapterReTranslateViewModel(
+            bookFingerprintKey: Self.bookKey,
+            initialProviderProfileID: Self.initialProfileID,
+            initialModel: "initial-model",
+            resolver: resolver,
+            runner: runner,
+            backgroundTasks: requester,
+            sourceTextProvider: { _ in throw ChapterTextProviderError.sourceUnavailable(failingUnit) })
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        #expect(vm.sheetState == .picker)
+        #expect(requester.begins.count == 1)
+        #expect(requester.ends.count == 1, "released on source-text failure")
+    }
+
+    @Test func submit_endsBackgroundToken_onCancellation() async throws {
+        let resolver = MockProviderResolver(result: .success(Self.makeConfig()))
+        let runner = MockTranslationRunner(result: .failure(CancellationError()))
+        let requester = MockBackgroundTaskRequester()
+        let vm = Self.makeVM(resolver: resolver, runner: runner, backgroundTasks: requester)
+
+        vm.presentPicker(unit: Self.unit(), unitTitle: "ch", targetLanguage: "Chinese")
+        await vm.submit()
+
+        #expect(requester.begins.count == 1)
+        #expect(requester.ends.count == 1, "released on cancellation")
     }
 }

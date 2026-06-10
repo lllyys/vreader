@@ -359,11 +359,207 @@ struct BookTranslationCoordinatorTests {
         let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
         #expect(final.phase == .completed)
     }
+
+    // MARK: - Feature #98 WI-1: background token renewal + expiry checkpoint
+
+    /// Each TRANSLATED unit acquires (and releases) its own background token —
+    /// cache-skipped units don't burn begin/end churn. 3 units with 1 cached
+    /// → exactly 2 begin/end pairs.
+    @Test func start_renewsBackgroundTokenPerTranslatedUnit_skippingCached() async throws {
+        let units = [Self.unit("ch1"), Self.unit("ch2"), Self.unit("ch3")]
+        let provider = MockChapterTextProvider(units: units, texts: [
+            units[0]: "p1.", units[1]: "p2.", units[2]: "p3."
+        ])
+        let store = try Self.makeStore()
+        // ch2 already cached → skipped without a token.
+        try await store.upsert(ChapterTranslationRecord(
+            bookFingerprintKey: Self.bookKey,
+            unitStorageKey: units[1].storageKey,
+            targetLanguage: "Chinese",
+            providerProfileID: Self.providerID,
+            promptVersion: "v1",
+            translatedSegments: ["旧"],
+            sourceParagraphCount: 1))
+        let sender = MockTranslationSender(responses: ["[\"a\"]", "[\"c\"]"])
+        let service = ChapterTranslationService(
+            sender: sender, store: store, promptVersion: "v1")
+        let requester = await MockBackgroundTaskRequester()
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            backgroundTasks: requester)
+
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey,
+            textProvider: provider,
+            targetLanguage: "Chinese",
+            providerProfileID: Self.providerID,
+            config: Self.makeConfig(),
+            style: .natural)
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+
+        let begins = await requester.begins
+        let ends = await requester.ends
+        #expect(begins.count == 2, "one token per translated unit; cached unit skipped")
+        #expect(ends.count == 2, "every token released at its unit boundary")
+        let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
+        #expect(final.phase == .completed)
+    }
+
+    /// OS expiry mid-unit (fired through the PRODUCTION expiration-handler
+    /// wiring) stops the job cleanly BETWEEN units: the in-flight unit
+    /// completes and stays cached, no further unit is attempted, and the job
+    /// records the EXISTING `.failed` phase (the status sheet's PAUSED
+    /// rendering) instead of erroring or hanging.
+    @Test func backgroundExpiry_stopsBetweenUnits_keepsCompletedUnitsCached_emitsFailed() async throws {
+        let units = [Self.unit("ch1"), Self.unit("ch2"), Self.unit("ch3")]
+        let provider = GatedTextProvider(
+            units: units,
+            texts: [units[0]: "p1.", units[1]: "p2.", units[2]: "p3."],
+            gatedUnit: units[1])
+        let store = try Self.makeStore()
+        let sender = MockTranslationSender(responses: ["[\"a\"]", "[\"b\"]", "[\"c\"]"])
+        let service = ChapterTranslationService(
+            sender: sender, store: store, promptVersion: "v1")
+        let requester = await MockBackgroundTaskRequester()
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1",
+            backgroundTasks: requester)
+
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey,
+            textProvider: provider,
+            targetLanguage: "Chinese",
+            providerProfileID: Self.providerID,
+            config: Self.makeConfig(),
+            style: .natural)
+
+        // Wait until the job is suspended INSIDE unit 2 (its token — the
+        // 2nd begin — exists), then expire that token via the captured OS
+        // handler and wait for the flag to land on the actor.
+        await provider.waitUntilGateArrived()
+        await requester.fireExpiry(rawIdentifier: 2)
+        while !(await coordinator.isJobExpiredForTesting(forBookWithKey: Self.bookKey)) {
+            await Task.yield()
+        }
+        await provider.release()
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+
+        let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
+        #expect(final.phase == .failed, "expiry reuses the existing .failed phase (PAUSED rendering)")
+        #expect(final.completed == 2, "the in-flight unit finished; nothing after it started")
+        let requestCount = await sender.requestCount
+        #expect(requestCount == 2, "unit 3 must never reach the provider")
+        let cached = await store.cachedUnits(
+            forBookWithKey: Self.bookKey, targetLanguage: "Chinese", promptVersion: "v1")
+        #expect(cached.contains(units[0].storageKey) && cached.contains(units[1].storageKey),
+                "completed units stay cached — they're the resume checkpoint")
+    }
+
+    /// A NEW start after an expiry stop must not insta-expire (the flag is
+    /// per-run, cleared on start) and resumes from cache — only the
+    /// not-yet-cached unit reaches the provider.
+    @Test func start_afterExpiryStop_clearsFlag_andResumesFromCache() async throws {
+        let units = [Self.unit("ch1"), Self.unit("ch2")]
+        let provider = MockChapterTextProvider(units: units, texts: [
+            units[0]: "p1.", units[1]: "p2."
+        ])
+        let store = try Self.makeStore()
+        // ch1 cached (the "completed before expiry" checkpoint).
+        try await store.upsert(ChapterTranslationRecord(
+            bookFingerprintKey: Self.bookKey,
+            unitStorageKey: units[0].storageKey,
+            targetLanguage: "Chinese",
+            providerProfileID: Self.providerID,
+            promptVersion: "v1",
+            translatedSegments: ["一"],
+            sourceParagraphCount: 1))
+        let sender = MockTranslationSender(responses: ["[\"b\"]"])
+        let service = ChapterTranslationService(
+            sender: sender, store: store, promptVersion: "v1")
+        let coordinator = BookTranslationCoordinator(
+            service: service, store: store, promptVersion: "v1")
+        // Simulate the stale flag a prior expired run left behind.
+        await coordinator.handleBackgroundTaskExpiry(forBookWithKey: Self.bookKey)
+
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey,
+            textProvider: provider,
+            targetLanguage: "Chinese",
+            providerProfileID: Self.providerID,
+            config: Self.makeConfig(),
+            style: .natural)
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+
+        let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
+        #expect(final.phase == .completed, "a stale expiry flag must not kill the new run")
+        #expect(final.completed == 2)
+        let requestCount = await sender.requestCount
+        #expect(requestCount == 1, "cached unit skipped — resume, not restart")
+    }
 }
 
 // MARK: - Test doubles
 
 /// Read-only stub of `ChapterTextProviding` for coordinator tests.
+/// Feature #98: a text provider whose `sourceText(for:)` BLOCKS on one
+/// designated unit until the test releases it — lets a test pin the job
+/// mid-unit, fire a deterministic background expiry, then let the unit
+/// finish so the between-units expiry check is exercised without races.
+actor GatedTextProvider: ChapterTextProviding {
+    private let units: [TranslationUnitID]
+    private let texts: [TranslationUnitID: String]
+    private let gatedUnit: TranslationUnitID
+    private var released = false
+    private var gateContinuation: CheckedContinuation<Void, Never>?
+    private var arrived = false
+    private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(
+        units: [TranslationUnitID],
+        texts: [TranslationUnitID: String],
+        gatedUnit: TranslationUnitID
+    ) {
+        self.units = units
+        self.texts = texts
+        self.gatedUnit = gatedUnit
+    }
+
+    func translationUnits() async throws -> [TranslationUnitID] { units }
+
+    func sourceText(for unit: TranslationUnitID) async throws -> String {
+        if unit == gatedUnit && !released {
+            arrived = true
+            for waiter in arrivalWaiters { waiter.resume() }
+            arrivalWaiters.removeAll()
+            await withCheckedContinuation { gateContinuation = $0 }
+        }
+        guard let text = texts[unit] else {
+            throw ChapterTextProviderError.unknownUnit(unit)
+        }
+        return text
+    }
+
+    func unit(containing locator: Locator) async -> TranslationUnitID? { units.first }
+
+    func unit(after unit: TranslationUnitID) async -> TranslationUnitID? {
+        guard let idx = units.firstIndex(of: unit), idx + 1 < units.count else { return nil }
+        return units[idx + 1]
+    }
+
+    /// Suspends until the job is blocked inside the gated unit's sourceText.
+    func waitUntilGateArrived() async {
+        if arrived { return }
+        await withCheckedContinuation { arrivalWaiters.append($0) }
+    }
+
+    /// Releases the gate; the blocked sourceText returns its text.
+    func release() {
+        released = true
+        gateContinuation?.resume()
+        gateContinuation = nil
+    }
+}
+
 struct MockChapterTextProvider: ChapterTextProviding {
     let units: [TranslationUnitID]
     let texts: [TranslationUnitID: String]

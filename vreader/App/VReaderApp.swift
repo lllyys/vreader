@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 @main
 @MainActor
@@ -160,7 +161,11 @@ struct VReaderApp: App {
                     sender: aiService,
                     store: ChapterTranslationStore.shared,
                     promptVersion: "bilingual-v1")
-                await BookTranslationCoordinator.shared.configure(service: service)
+                // Feature #98: the requester lets the job renew a background
+                // grace window per unit so backgrounding doesn't kill it.
+                let backgroundTasks = await MainActor.run { UIApplication.shared }
+                await BookTranslationCoordinator.shared.configure(
+                    service: service, backgroundTasks: backgroundTasks)
             }
 
             // Feature #54 WI-5: one-shot migration retiring the
