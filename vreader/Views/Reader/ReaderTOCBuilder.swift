@@ -18,28 +18,54 @@ enum ReaderTOCFactory {
         category: "TOC"
     )
 
+    /// Bug #313 r2: a TOC build plus the book's full spine href order (EPUB
+    /// only) — the spine order lets `TOCSheet` fall back to the nearest
+    /// PRECEDING entry when the current spine item has no TOC entry (the
+    /// book's own toc page; chapter prose bodies when the nav titles the
+    /// chapter cover pages).
+    struct DetailedResult {
+        let entries: [TOCEntry]
+        let spineHrefs: [String]
+    }
+
     /// Builds table of contents entries for the given book format.
     static func buildTOC(
         format: String,
         fileURL: URL,
         fingerprint: DocumentFingerprint
     ) async -> [TOCEntry] {
+        await buildTOCDetailed(
+            format: format, fileURL: fileURL, fingerprint: fingerprint
+        ).entries
+    }
+
+    /// Bug #313 r2: like `buildTOC`, but also returns the EPUB spine href
+    /// order (empty for every other format).
+    static func buildTOCDetailed(
+        format: String,
+        fileURL: URL,
+        fingerprint: DocumentFingerprint
+    ) async -> DetailedResult {
         switch format {
         case "epub":
             let parser = EPUBParser()
             do {
                 let metadata = try await parser.open(url: fileURL)
                 await parser.close()
-                return TOCBuilder.fromSpineItems(metadata.spineItems, fingerprint: fingerprint)
+                return DetailedResult(
+                    entries: TOCBuilder.fromSpineItems(metadata.spineItems, fingerprint: fingerprint),
+                    spineHrefs: metadata.spineItems.map(\.href)
+                )
             } catch {
                 await parser.close()
-                return []
+                return DetailedResult(entries: [], spineHrefs: [])
             }
 
         case "pdf":
-            return await Task.detached {
+            let entries = await Task.detached {
                 extractPDFOutline(from: fileURL, fingerprint: fingerprint)
             }.value
+            return DetailedResult(entries: entries, spineHrefs: [])
 
         case "txt":
             // Bug #286 / GH #30: derive TOC entries from the reader's full-text
@@ -51,19 +77,25 @@ enum ReaderTOCFactory {
             // UTF-8-only fallback and a SECOND `detectBestRule` over the TOC's own
             // decoded string, so on non-UTF-8 files the offsets diverged from the
             // reader's chapters and TOC taps navigated to the wrong chapter.
-            guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else { return [] }
-            return TXTService.buildTXTTOCEntries(data: data, fingerprint: fingerprint)
+            guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else {
+                return DetailedResult(entries: [], spineHrefs: [])
+            }
+            return DetailedResult(
+                entries: TXTService.buildTXTTOCEntries(data: data, fingerprint: fingerprint),
+                spineHrefs: [])
 
         case "md":
             do {
                 let text = try String(contentsOf: fileURL, encoding: .utf8)
-                return TOCBuilder.forMD(text: text, fingerprint: fingerprint)
+                return DetailedResult(
+                    entries: TOCBuilder.forMD(text: text, fingerprint: fingerprint),
+                    spineHrefs: [])
             } catch {
-                return []
+                return DetailedResult(entries: [], spineHrefs: [])
             }
 
         default:
-            return []
+            return DetailedResult(entries: [], spineHrefs: [])
         }
     }
 

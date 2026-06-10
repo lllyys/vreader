@@ -149,6 +149,9 @@ struct ReaderContainerView: View {
     @State private var isChromeVisible = true
     /// Computed TOC entries for the current book (format-specific).
     @State var tocEntries: [TOCEntry] = []
+    /// Bug #313 r2: EPUB spine href order (empty for other formats) — feeds
+    /// TOCSheet's preceding-entry fallback for entry-less spine items.
+    @State var tocSpineHrefs: [String] = []
     /// Feature #62: true once the eager `ensureTOCReady()` build has
     /// completed. Passed into `TOCSheet` so its Contents tab does not
     /// flash a false "No table of contents" empty state when the

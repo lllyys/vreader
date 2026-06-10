@@ -212,11 +212,15 @@ extension ReaderContainerView {
         }
         guard let fingerprint = DocumentFingerprint(canonicalKey: book.fingerprintKey) else { return }
         Task {
-            tocEntries = await ReaderTOCFactory.buildTOC(
+            let built = await ReaderTOCFactory.buildTOCDetailed(
                 format: book.format.lowercased(),
                 fileURL: resolvedFileURL,
                 fingerprint: fingerprint
             )
+            tocEntries = built.entries
+            // Bug #313 r2: the spine order rides along so the TOC sheet can
+            // resolve entry-less spine items to the preceding entry.
+            tocSpineHrefs = built.spineHrefs
             tocDidLoad = true
             // Feature #86 WI-1: sync the freshly-built TOC to the AI coordinator
             // + refresh, so a late TOC upgrades the chat context to chapter scope.
@@ -448,6 +452,7 @@ extension ReaderContainerView {
                 tocEntries: tocEntries,
                 tocDidLoad: tocDidLoad,
                 currentLocator: currentLocator,
+                spineHrefs: tocSpineHrefs,
                 theme: settingsStore.theme,
                 initialTab: initialTab,
                 onNavigate: { locator in

@@ -91,7 +91,27 @@ extension TOCSheet {
             for (i, entry) in tocEntries.enumerated() {
                 if entry.locator.href == href { best = i }
             }
-            return best
+            if best != nil { return best }
+            // Bug #313 r2: the current spine item has NO TOC entry — common
+            // in real books (the book's own toc page; chapter PROSE bodies
+            // when the nav titles the chapter COVER pages, as in "The Half
+            // Second"). Fall back to the nearest PRECEDING entry in SPINE
+            // order — the same `<=` convention the charOffset (TXT) and page
+            // (PDF) branches already use. Gated on the host supplying the
+            // spine order; a position before the first entry stays nil
+            // ("open at the top, don't guess").
+            if let spineIdx = spineHrefs.firstIndex(of: href) {
+                var fallback: Int?
+                for (i, entry) in tocEntries.enumerated() {
+                    if let entryHref = entry.locator.href,
+                       let entryIdx = spineHrefs.firstIndex(of: entryHref),
+                       entryIdx <= spineIdx {
+                        fallback = i
+                    }
+                }
+                return fallback
+            }
+            return nil
         }
         return nil
     }

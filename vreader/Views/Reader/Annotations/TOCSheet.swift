@@ -42,6 +42,10 @@ struct TOCSheet: View {
     /// false empty state (mirrors `bookmarksDidLoad`).
     let tocDidLoad: Bool
     let currentLocator: Locator?
+    /// Bug #313 r2: the book's full spine href order (EPUB only; empty for
+    /// other formats) — lets the current-chapter match fall back to the
+    /// nearest PRECEDING entry when the current spine item has no TOC entry.
+    let spineHrefs: [String]
     let theme: ReaderThemeV2
     /// Contents-empty CTA — opens the reader search sheet.
     let onOpenSearch: () -> Void
@@ -73,6 +77,7 @@ struct TOCSheet: View {
         tocEntries: [TOCEntry],
         tocDidLoad: Bool = true,
         currentLocator: Locator?,
+        spineHrefs: [String] = [],
         theme: ReaderThemeV2,
         initialTab: TOCSheetTab = .contents,
         onNavigate: @escaping (Locator) -> Void,
@@ -85,6 +90,7 @@ struct TOCSheet: View {
         self.tocEntries = tocEntries
         self.tocDidLoad = tocDidLoad
         self.currentLocator = currentLocator
+        self.spineHrefs = spineHrefs
         self.theme = theme
         self.onNavigate = onNavigate
         self.onOpenSearch = onOpenSearch
