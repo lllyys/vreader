@@ -233,6 +233,26 @@ final class ReadiumEPUBReaderViewModel {
         await lifecycle?.close(locator: nil)
     }
 
+    /// Bug #345 (Codex round-1 High): pause the reading session when the app
+    /// backgrounds — `ReaderLifecycleHelper` only excludes background time when
+    /// told. The VM also flushes its own pending debounced position save (the
+    /// helper is passed nil — position stays VM-owned).
+    func onBackground() async {
+        let pending = pendingReadiumLocator
+        pendingReadiumLocator = nil
+        saveVersion &+= 1
+        saveTask?.cancel()
+        saveTask = nil
+        if let pending { await persist(pending) }
+        await lifecycle?.onBackground(locator: nil)
+    }
+
+    /// Bug #345: resume the session segment when the app re-activates.
+    func onForeground() {
+        guard !isClosed else { return }
+        lifecycle?.onForeground()
+    }
+
     /// Surface an `EPUBNavigatorViewController` init failure (thrown from the
     /// representable's `makeUIViewController`) into the host's render state so
     /// the host swaps in its `.failed` error view instead of leaving an empty

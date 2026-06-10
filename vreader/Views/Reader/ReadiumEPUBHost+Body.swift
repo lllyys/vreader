@@ -75,6 +75,11 @@ extension ReadiumEPUBHost {
             hostViewProvider: { [weak highlightAdapter] in highlightAdapter?.hostView }
         )
         .onDisappear { onHostDisappear() }
+        // Bug #345 (Codex round-1 High): pause/resume the session with the
+        // scene phase so backgrounded time never counts.
+        .onChange(of: scenePhase) { _, newPhase in
+            handleScenePhaseChange(newPhase)
+        }
     }
 
     /// The Readium navigator view + its WI-9a nav observers for `.ready`. Extracted
@@ -312,6 +317,28 @@ extension ReadiumEPUBHost {
     /// pop — releasing file handles deterministically. Registry + navigator
     /// teardown live in `dismantleUIViewController`. `closeAndFlush()` awaits the
     /// final position save in a background task so it survives the dismiss.
+    /// Bug #345 (Codex round-1 High): pause/resume the reading session with
+    /// the scene phase so backgrounded time never counts (mirrors the legacy
+    /// EPUB container's handler, incl. the background-task guard around the
+    /// final flush).
+    func handleScenePhaseChange(_ newPhase: ScenePhase) {
+        guard let viewModel else { return }
+        switch newPhase {
+        case .background, .inactive:
+            let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
+            Task {
+                await viewModel.onBackground()
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                }
+            }
+        case .active:
+            viewModel.onForeground()
+        @unknown default:
+            break
+        }
+    }
+
     func onHostDisappear() {
         guard let viewModel else { return }
         let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)

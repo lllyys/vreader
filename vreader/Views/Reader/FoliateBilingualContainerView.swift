@@ -148,7 +148,24 @@ struct FoliateBilingualContainerView: View {
     /// `positionController`; the helper is never handed a locator.
     @State var sessionLifecycle: ReaderLifecycleHelper?
 
+    /// Bug #345 (Codex round-1 High): drives session pause/resume so
+    /// backgrounded time never counts toward the reading session.
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
+        // Split from `observedCore` so each half type-checks independently —
+        // the single chain blew SwiftUI's inference budget when the #345
+        // lifecycle modifier joined it.
+        observedCore
+            .modifier(FoliateSessionLifecycleModifier(
+                scenePhase: scenePhase,
+                onSetup: { ensurePositionController(); ensureSessionLifecycle() },
+                onTeardown: { handleHostTeardown() },
+                onPhaseChange: { handleScenePhaseChange($0) }
+            ))
+    }
+
+    private var observedCore: some View {
         ZStack {
             spikeWithBilingualWiring
 
@@ -271,9 +288,6 @@ struct FoliateBilingualContainerView: View {
             guard let key = notification.userInfo?["fingerprintKey"] as? String,
                   key == fingerprintKey else { return }
             handleRelocated(notification.userInfo)
-            // Bug #345: tick the session clock on every relocate so the
-            // chrome's session-time label advances with reading.
-            sessionLifecycle?.updateTimeDisplays()
         }
         // Bug #262 / GH #1136: the live AZW3/MOBI Contents source. The spike
         // forwards the parsed `book-ready` TOC here; we convert the tree to
@@ -368,27 +382,6 @@ struct FoliateBilingualContainerView: View {
         #if DEBUG
         .modifier(FoliateDebugSeekFractionObserver(fingerprintKey: fingerprintKey))
         #endif
-        // Bug #265: build the persistence controller eagerly so a fast
-        // close-before-relocate can still flush, and so restore is ready.
-        .task {
-            ensurePositionController()
-            ensureSessionLifecycle()
-        }
-        // Bug #265: flush the last position on teardown (close to library /
-        // relaunch) in case the debounce window hasn't elapsed, and cancel any
-        // in-flight restore task so it can't seek a re-opened reader instance.
-        .onDisappear {
-            positionRestoreTask?.cancel()
-            let controller = positionController
-            // Bug #345: end the reading session after the position flush —
-            // the helper ends the session row, recomputes stats, and posts
-            // `.readerDidClose` (library-refresh parity with other formats).
-            let lifecycle = sessionLifecycle
-            Task {
-                await controller?.flush()
-                await lifecycle?.close(locator: nil)
-            }
-        }
     }
 
     // MARK: - VM lifecycle
@@ -588,6 +581,9 @@ struct FoliateBilingualContainerView: View {
     /// cache only grows by section-load count, which is bounded by
     /// the book length, so this is not a leak hazard.
     private func handleRelocated(_ userInfo: [AnyHashable: Any]?) {
+        // Bug #345: tick the session clock on every relocate so the chrome's
+        // session-time label advances with reading.
+        sessionLifecycle?.updateTimeDisplays()
         // Bug #265: the FIRST relocate is the right restore trigger — it fires
         // for EVERY book (TOC or not) and only AFTER `readerAPI.init({})` has
         // rendered + navigated, so a restore `goTo` actually takes (book-ready
