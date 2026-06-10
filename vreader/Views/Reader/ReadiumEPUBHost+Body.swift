@@ -303,6 +303,13 @@ extension ReadiumEPUBHost {
         await openBilingualParser()
         ensureBilingualViewModel()
         await vm.open()
+        // Codex round-2 Medium: if the open completed while the app was
+        // already backgrounded (user opened a book and immediately switched
+        // away), pause the just-begun session so background time never
+        // counts; the `.active` transition resumes it.
+        if scenePhase != .active {
+            await vm.onBackground()
+        }
         // WI-8: restore stored highlights once the publication is open. The
         // adapter tracks the set even before the navigator attaches, so the
         // decorations submit as soon as `attach(navigator:)` runs in the

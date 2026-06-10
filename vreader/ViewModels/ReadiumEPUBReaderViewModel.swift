@@ -238,12 +238,19 @@ final class ReadiumEPUBReaderViewModel {
     /// told. The VM also flushes its own pending debounced position save (the
     /// helper is passed nil — position stays VM-owned).
     func onBackground() async {
-        let pending = pendingReadiumLocator
-        pendingReadiumLocator = nil
+        // Codex round-2 High: mirror `closeAndFlush()`'s in-flight handling —
+        // the debounce task may have already consumed the pending locator and
+        // be mid-`persist`; cancelling only stops its sleep, so flush any
+        // still-pending locator AND await the in-flight write before letting
+        // the host end its background task.
+        let inFlight = saveTask
         saveVersion &+= 1
         saveTask?.cancel()
         saveTask = nil
+        let pending = pendingReadiumLocator
+        pendingReadiumLocator = nil
         if let pending { await persist(pending) }
+        await inFlight?.value
         await lifecycle?.onBackground(locator: nil)
     }
 
