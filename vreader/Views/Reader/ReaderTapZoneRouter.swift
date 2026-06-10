@@ -56,6 +56,25 @@ import SwiftUI
 /// regions, etc.) have not claimed the tap.
 enum ReaderTapZoneRouter {
 
+    /// Bug #338 (Codex round-2): while the selection popover is up, the
+    /// outside tap that dismisses it must act as a PURE dismissal — it must
+    /// not also page-turn (navigating away from the just-selected text) or
+    /// toggle chrome. The presenter raises this while its card is visible and
+    /// arms a short one-shot grace on dismissal, because the bridges' tap
+    /// reports arrive asynchronously (JS bridge / navigator delegate) AFTER
+    /// the SwiftUI gesture that closed the card.
+    @MainActor static var selectionPopoverVisible = false
+    /// One-shot grace deadline: taps reported before this instant are
+    /// swallowed (the dismissing tap itself). Set by the presenter at
+    /// dismissal; cleared lazily by the first post-deadline dispatch.
+    @MainActor static var dismissGraceDeadline: Date = .distantPast
+
+    /// True when reader tap-grammar should be suppressed (popover up, or
+    /// inside the dismissal grace window).
+    @MainActor static func isSuppressed(now: Date = Date()) -> Bool {
+        selectionPopoverVisible || now < dismissGraceDeadline
+    }
+
     /// Resolves a tap at `x` on a surface of width `totalWidth` to a
     /// `TapAction`, gated by the layout preference.
     ///
@@ -87,12 +106,17 @@ enum ReaderTapZoneRouter {
     ///   configurability allows a user to deliberately mute a zone).
     ///
     /// Same notification contract as the legacy `TapZoneDispatcher.dispatch`.
+    @MainActor
     static func dispatch(
         x: CGFloat,
         totalWidth: CGFloat,
         layout: EPUBLayoutPreference?,
         config: TapZoneConfig = .default
     ) {
+        // Bug #338 (Codex round-2): a tap while the selection popover is up —
+        // or within the one-shot grace after its dismissal — is the popover's
+        // dismissal gesture, not reader navigation. Swallow it.
+        guard !isSuppressed() else { return }
         let resolved = action(
             x: x, totalWidth: totalWidth, layout: layout, config: config
         )

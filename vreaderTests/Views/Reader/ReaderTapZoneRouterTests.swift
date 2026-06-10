@@ -23,6 +23,7 @@ import XCTest
 import Foundation
 @testable import vreader
 
+@MainActor
 final class ReaderTapZoneRouterTests: XCTestCase {
 
     // MARK: - Pure dispatch (no notification side effects)
@@ -251,5 +252,39 @@ final class ReaderTapZoneRouterTests: XCTestCase {
 
         XCTAssertFalse(fired,
             "no notification should fire when all zones map to .none")
+    }
+
+    // MARK: - Bug #338: selection-popover tap suppression
+
+    func test_dispatch_suppressedWhileSelectionPopoverVisible() {
+        ReaderTapZoneRouter.selectionPopoverVisible = true
+        defer {
+            ReaderTapZoneRouter.selectionPopoverVisible = false
+            ReaderTapZoneRouter.dismissGraceDeadline = .distantPast
+        }
+        nonisolated(unsafe) var fired = false
+        let tokens = [Notification.Name.readerNextPage, .readerPreviousPage, .readerContentTapped].map {
+            NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main) { _ in fired = true }
+        }
+        defer { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
+
+        ReaderTapZoneRouter.dispatch(x: 900, totalWidth: 1000, layout: .paged)
+
+        let drain = expectation(description: "drain")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { drain.fulfill() }
+        wait(for: [drain], timeout: 0.5)
+        XCTAssertFalse(fired, "a tap while the selection popover is up must not page-turn or toggle chrome")
+    }
+
+    func test_dispatch_suppressedDuringDismissGrace_thenResumes() {
+        ReaderTapZoneRouter.selectionPopoverVisible = false
+        ReaderTapZoneRouter.dismissGraceDeadline = Date().addingTimeInterval(60)
+        defer { ReaderTapZoneRouter.dismissGraceDeadline = .distantPast }
+        XCTAssertTrue(ReaderTapZoneRouter.isSuppressed(),
+            "inside the one-shot grace, the dismissing tap is swallowed")
+
+        ReaderTapZoneRouter.dismissGraceDeadline = Date().addingTimeInterval(-1)
+        XCTAssertFalse(ReaderTapZoneRouter.isSuppressed(),
+            "past the deadline, tap grammar resumes")
     }
 }

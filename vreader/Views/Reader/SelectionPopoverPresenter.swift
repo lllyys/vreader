@@ -199,6 +199,10 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
                     return
                 }
                 pending = payload
+                // Bug #338 (Codex round-2): while the card is up, the reader's
+                // tap grammar is suppressed so the eventual outside tap is a
+                // PURE dismissal (no page-turn away from the selected text).
+                ReaderTapZoneRouter.selectionPopoverVisible = true
             }
             // Bug #317: present the designed FLOATING inset card — `left`/`right`
             // 18, ~100pt above the bottom, rounded (the card chrome lives in
@@ -261,7 +265,17 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
     /// `onDismiss` callback the EPUB container uses to drop its token-cache entry.
     private func dismiss() {
         pending = nil
+        releaseTapSuppression()
         onDismiss?()
+    }
+
+    /// Drops the popover-visible tap suppression, arming a short one-shot
+    /// grace so the dismissing tap itself — whose bridge-side report arrives
+    /// asynchronously AFTER this gesture — is also swallowed (Codex round-2:
+    /// a side-zone dismiss tap must not page-turn away from the selection).
+    private func releaseTapSuppression() {
+        ReaderTapZoneRouter.selectionPopoverVisible = false
+        ReaderTapZoneRouter.dismissGraceDeadline = Date().addingTimeInterval(0.4)
     }
 }
 
