@@ -21,6 +21,7 @@
 import Foundation
 import OSLog
 import UIKit
+import os
 
 // MARK: - Requester seam
 
@@ -50,6 +51,26 @@ extension UIApplication: BackgroundTaskRequesting {
 
     func endTask(_ identifier: UIBackgroundTaskIdentifier) {
         endBackgroundTask(identifier)
+    }
+}
+
+// MARK: - Expiry latch
+
+/// A one-way latch the main-actor expiration handler SETS synchronously and
+/// a job loop READS synchronously between work units (Gate-4 round-2 Medium:
+/// a fire-and-forget actor hop from the handler can lose the race against
+/// the loop's next check, starting another unit after iOS already expired
+/// the window). Lock-backed, `Sendable`, no suspension on either side.
+final class BackgroundExpiryLatch: Sendable {
+    private let storage = OSAllocatedUnfairLock(initialState: false)
+
+    /// Sets the latch. Idempotent; never resets.
+    func set() {
+        storage.withLock { $0 = true }
+    }
+
+    var isSet: Bool {
+        storage.withLock { $0 }
     }
 }
 

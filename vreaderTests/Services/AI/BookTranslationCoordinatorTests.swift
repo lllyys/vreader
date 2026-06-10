@@ -443,12 +443,10 @@ struct BookTranslationCoordinatorTests {
 
         // Wait until the job is suspended INSIDE unit 2's translate request
         // (its token — the 2nd begin — exists), then expire that token via
-        // the captured OS handler and wait for the flag to land on the actor.
+        // the captured OS handler. The handler sets the run's latch
+        // SYNCHRONOUSLY (Gate-4 round-2), so no settling wait is needed.
         await sender.waitUntilGateArrived()
         await requester.fireExpiry(rawIdentifier: 2)
-        while !(await coordinator.isJobExpiredForTesting(forBookWithKey: Self.bookKey)) {
-            await Task.yield()
-        }
         await sender.release()
         try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
 
@@ -469,32 +467,43 @@ struct BookTranslationCoordinatorTests {
                 "each identifier ends exactly once, in order — no double-end, no leak")
     }
 
-    /// A NEW start after an expiry stop must not insta-expire (the flag is
-    /// per-run, cleared on start) and resumes from cache — only the
-    /// not-yet-cached unit reaches the provider.
-    @Test func start_afterExpiryStop_clearsFlag_andResumesFromCache() async throws {
+    /// A NEW start after a REAL expiry stop must not inherit the expiry (the
+    /// latch is per-run by construction) and resumes from cache — only the
+    /// not-yet-cached unit reaches the provider again.
+    @Test func start_afterExpiryStop_resumesFromCache_withFreshLatch() async throws {
         let units = [Self.unit("ch1"), Self.unit("ch2")]
         let provider = MockChapterTextProvider(units: units, texts: [
             units[0]: "p1.", units[1]: "p2."
         ])
         let store = try Self.makeStore()
-        // ch1 cached (the "completed before expiry" checkpoint).
-        try await store.upsert(ChapterTranslationRecord(
-            bookFingerprintKey: Self.bookKey,
-            unitStorageKey: units[0].storageKey,
-            targetLanguage: "Chinese",
-            providerProfileID: Self.providerID,
-            promptVersion: "v1",
-            translatedSegments: ["一"],
-            sourceParagraphCount: 1))
-        let sender = MockTranslationSender(responses: ["[\"b\"]"])
+        // Gate request #1 (unit 1) so the first run expires mid-unit-1 and
+        // stops BEFORE unit 2 — leaving ch1 cached, ch2 not.
+        let sender = GatedTranslationSender(
+            responses: ["[\"a\"]", "[\"b\"]"], gatedRequestIndex: 1)
         let service = ChapterTranslationService(
             sender: sender, store: store, promptVersion: "v1")
+        let requester = await MockBackgroundTaskRequester()
         let coordinator = BookTranslationCoordinator(
-            service: service, store: store, promptVersion: "v1")
-        // Simulate the stale flag a prior expired run left behind.
-        await coordinator.handleBackgroundTaskExpiry(forBookWithKey: Self.bookKey)
+            service: service, store: store, promptVersion: "v1",
+            backgroundTasks: requester)
 
+        // Run 1: expire during unit 1's request → clean stop at 1/2.
+        await coordinator.start(
+            bookFingerprintKey: Self.bookKey,
+            textProvider: provider,
+            targetLanguage: "Chinese",
+            providerProfileID: Self.providerID,
+            config: Self.makeConfig(),
+            style: .natural)
+        await sender.waitUntilGateArrived()
+        await requester.fireExpiry(rawIdentifier: 1)
+        await sender.release()
+        try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
+        let afterExpiry = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
+        #expect(afterExpiry.phase == .failed)
+        #expect(afterExpiry.completed == 1)
+
+        // Run 2: fresh latch — must complete, re-translating ONLY ch2.
         await coordinator.start(
             bookFingerprintKey: Self.bookKey,
             textProvider: provider,
@@ -505,10 +514,10 @@ struct BookTranslationCoordinatorTests {
         try await coordinator.awaitJobForTesting(bookFingerprintKey: Self.bookKey)
 
         let final = await coordinator.currentProgress(forBookWithKey: Self.bookKey)
-        #expect(final.phase == .completed, "a stale expiry flag must not kill the new run")
+        #expect(final.phase == .completed, "the previous run's expiry must not kill the new run")
         #expect(final.completed == 2)
         let requestCount = await sender.requestCount
-        #expect(requestCount == 1, "cached unit skipped — resume, not restart")
+        #expect(requestCount == 2, "cached unit skipped on resume — 1 request per run, not a restart")
     }
 }
 

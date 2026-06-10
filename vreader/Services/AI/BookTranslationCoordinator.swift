@@ -62,10 +62,6 @@ actor BookTranslationCoordinator {
     /// Feature #98: grace-window seam. Optional — nil (unwired) degrades to
     /// today's behavior: no background token, the job dies on suspension.
     private var backgroundTasks: (any BackgroundTaskRequesting)?
-    /// Feature #98: books whose CURRENT run's background window expired. The
-    /// job loop checks this BETWEEN units (no cancellation racing — the
-    /// in-flight unit completes or fails on its own) and stops cleanly.
-    private var expiredJobKeys: Set<String> = []
     private var runningJobs: [String: Task<Void, Never>] = [:]
     private var snapshots: [String: BookTranslationProgress] = [:]
     private var continuations: [String: [UUID: AsyncStream<BookTranslationProgress>.Continuation]] = [:]
@@ -98,27 +94,18 @@ actor BookTranslationCoordinator {
 
     // MARK: - Feature #98: background expiry
 
-    /// Marks the book's current run as expired. Called (via the token's
-    /// `onExpiry` hop) when iOS expires the background window; also a test
-    /// seam for simulating a stale flag from a dead run.
-    func handleBackgroundTaskExpiry(forBookWithKey key: String) {
-        expiredJobKeys.insert(key)
-    }
-
-    /// Test seam: whether the expiry flag is set for a book.
-    func isJobExpiredForTesting(forBookWithKey key: String) -> Bool {
-        expiredJobKeys.contains(key)
-    }
-
     /// Acquires one background token for a unit's translate, hopping to the
-    /// main actor for the UIKit call. Nil requester → nil token (no-op).
-    private func beginUnitBackgroundToken(forBookWithKey key: String) async -> BackgroundExecutionToken? {
+    /// main actor for the UIKit call. The expiration handler SETS the run's
+    /// latch synchronously (Gate-4 round-2: an actor hop here can lose the
+    /// race against the loop's next between-units check). Nil requester →
+    /// nil token (no-op).
+    private func beginUnitBackgroundToken(expiry: BackgroundExpiryLatch) async -> BackgroundExecutionToken? {
         guard let requester = backgroundTasks else { return nil }
         return await MainActor.run {
             BackgroundExecutionToken.acquire(
                 name: "BookTranslation.unit", using: requester
-            ) { [weak self] in
-                Task { await self?.handleBackgroundTaskExpiry(forBookWithKey: key) }
+            ) {
+                expiry.set()
             }
         }
     }
@@ -186,9 +173,9 @@ actor BookTranslationCoordinator {
         // One job per book — silent no-op if already running.
         if runningJobs[bookFingerprintKey] != nil { return }
 
-        // Feature #98: the expiry flag is per-run — a stale flag from a
-        // previous expired run must not insta-kill this one.
-        expiredJobKeys.remove(bookFingerprintKey)
+        // Feature #98: per-RUN expiry latch — a fresh run can never inherit
+        // a stale expiry from a previous one by construction.
+        let expiry = BackgroundExpiryLatch()
 
         guard let service else {
             log.error("BookTranslationCoordinator: not configured with a service; ignoring start")
@@ -235,8 +222,9 @@ actor BookTranslationCoordinator {
                 // Feature #98: the background window expired — stop cleanly
                 // BETWEEN units. Completed units are already cached (they're
                 // the resume checkpoint); the `.failed` phase is the existing
-                // designed "PAUSED" rendering, no new UI state.
-                if await self?.isJobExpired(forBookWithKey: bookFingerprintKey) == true {
+                // designed "PAUSED" rendering, no new UI state. The latch
+                // read is synchronous — no hop for the expiry to lose.
+                if expiry.isSet {
                     await self?.recordExpiryStop(
                         forBookWithKey: bookFingerprintKey,
                         completed: completed, total: total)
@@ -251,7 +239,7 @@ actor BookTranslationCoordinator {
                 }
                 // Feature #98: renew the grace window per translated unit —
                 // begin/end churn at unit cadence (seconds each) is cheap.
-                let token = await self?.beginUnitBackgroundToken(forBookWithKey: bookFingerprintKey)
+                let token = await self?.beginUnitBackgroundToken(expiry: expiry)
                 do {
                     let sourceText = try await textProvider.sourceText(for: unit)
                     _ = try await service.translate(
@@ -383,18 +371,12 @@ actor BookTranslationCoordinator {
         runningJobs[key] = nil
     }
 
-    /// Feature #98: whether the current run's background window expired.
-    private func isJobExpired(forBookWithKey key: String) -> Bool {
-        expiredJobKeys.contains(key)
-    }
-
     /// Feature #98: clean between-units stop after a background expiry.
     /// Reuses the `.failed` phase — the status sheet already renders it as
     /// the designed "PAUSED" state, and completed units stay cached as the
     /// resume checkpoint.
     private func recordExpiryStop(forBookWithKey key: String, completed: Int, total: Int) {
         log.info("background window expired for \(key, privacy: .public); stopped at \(completed)/\(total) between units")
-        expiredJobKeys.remove(key)
         updateProgress(forKey: key, phase: .failed, completed: completed, total: total)
         runningJobs[key] = nil
     }
