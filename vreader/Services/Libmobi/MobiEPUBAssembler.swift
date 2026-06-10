@@ -49,7 +49,7 @@ enum MobiEPUBAssembler {
     /// - Throws: `MobiEPUBError.noMarkup` if there are no markup parts — an
     ///   empty spine + empty TOC `<ol>` is invalid EPUB3, so reject rather than
     ///   emit a malformed package (Codex Gate-4).
-    static func assemble(parts: [MobiPart], title: String, author: String? = nil) throws -> [EPUBFile] {
+    static func assemble(parts: [MobiPart], title: String, author: String? = nil, language: String? = nil) throws -> [EPUBFile] {
         let markup = parts.filter { $0.section == .markup }
         let flow = parts.filter { $0.section == .flow }
         let resources = parts.filter { $0.section == .resource }
@@ -96,7 +96,7 @@ enum MobiEPUBAssembler {
         // 2. Generated documents.
         let navEntry = ManifestEntry(id: "nav", href: "nav.xhtml",
                                      mediaType: "application/xhtml+xml", properties: "nav")
-        let opf = contentOPF(identifier: identifier, title: title, author: author, coverID: coverID,
+        let opf = contentOPF(identifier: identifier, title: title, author: author, language: language, coverID: coverID,
                              manifest: manifest + [navEntry], spineIDs: spineIDs)
         let nav = navDocument(title: title, markupHrefs: markup.indices.map { "text/part\(pad($0)).xhtml" })
 
@@ -125,7 +125,7 @@ enum MobiEPUBAssembler {
     /// Image extensions eligible to be the cover resource.
     private static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "bmp", "svg"]
 
-    private static func contentOPF(identifier: String, title: String, author: String?, coverID: String?,
+    private static func contentOPF(identifier: String, title: String, author: String?, language: String?, coverID: String?,
                                    manifest: [ManifestEntry], spineIDs: [String]) -> String {
         let items = manifest.map { entry -> String in
             let props = entry.properties.map { " properties=\"\($0)\"" } ?? ""
@@ -141,7 +141,7 @@ enum MobiEPUBAssembler {
           <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
             <dc:identifier id="bookid">\(xmlEscape(identifier))</dc:identifier>
             <dc:title>\(xmlEscape(title))</dc:title>\(creatorLine)
-            <dc:language>und</dc:language>\(coverMetaLine)
+            <dc:language>\(xmlEscape(language?.isEmpty == false ? language! : "und"))</dc:language>\(coverMetaLine)
           </metadata>
           <manifest>
         \(items)

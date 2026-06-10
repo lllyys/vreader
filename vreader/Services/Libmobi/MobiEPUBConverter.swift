@@ -50,7 +50,8 @@ enum MobiEPUBConverter {
         let book = try Libmobi.decodeBook(atPath: mobiPath)
         let title = book.metadata.title ?? fallbackTitle
         let files = try MobiEPUBAssembler.assemble(
-            parts: book.parts, title: title, author: book.metadata.author)
+            parts: book.parts, title: title, author: book.metadata.author,
+            language: book.metadata.language)
         return try package(files: files)
     }
 

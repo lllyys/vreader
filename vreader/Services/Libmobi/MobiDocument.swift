@@ -50,6 +50,11 @@ enum MobiDecodeError: Error, Equatable {
 struct MobiMetadata: Equatable, Sendable {
     let title: String?
     let author: String?
+    /// Bug #336 reopen: the source file's own language tag (libmobi
+    /// `mobi_meta_get_language`, e.g. "zh"/"en"), threaded into the converted
+    /// EPUB's `dc:language` so language-gated rendering (CJK flush-justify)
+    /// works on converted Kindle books. nil → the assembler falls back "und".
+    let language: String?
 }
 
 /// A fully-decoded Kindle book: its reconstructed parts plus its own embedded
@@ -98,7 +103,8 @@ extension Libmobi {
         // Metadata from the source file's own headers — deterministic.
         let metadata = MobiMetadata(
             title: copyMetaString(mobi_meta_get_title(m)),
-            author: copyMetaString(mobi_meta_get_author(m))
+            author: copyMetaString(mobi_meta_get_author(m)),
+            language: copyMetaString(mobi_meta_get_language(m))
         )
 
         guard let rawml = mobi_init_rawml(m) else { throw MobiDecodeError.initFailed }

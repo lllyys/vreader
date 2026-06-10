@@ -135,7 +135,7 @@ extension ReaderThemeV2 {
         p:not([style*="text-align"]):not([align]):not([class*="center"]):not([class*="right"]):is(:lang(zh), :lang(ja), :lang(ko)) { \
           text-align: justify !important; \
         }\
-        p:not([style*="text-align"]):not([align]) { \
+        p:not([style*="text-align"]):not([align]):not([class*="center"]):not([class*="right"]) { \
           -webkit-hyphens: auto; \
           hyphens: auto; \
         }\

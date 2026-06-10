@@ -71,6 +71,8 @@ struct ReadiumEPUBPreferencesMappingTests {
         ("zh", true), ("zh-Hans", true), ("zh-TW", true), ("ja", true),
         ("ja-JP", true), ("ko", true), ("KO", true),
         ("en", false), ("en-US", false), ("fr", false), ("", false),
+        ("und", false),  // libmobi conversions now thread the REAL language;
+                         // a residual "und" (no source language) stays ragged
     ])
     func isCJKLanguage_table(_ tag: String, _ expected: Bool) {
         #expect(ReadiumEPUBReaderViewModel.isCJKLanguage(tag) == expected)
