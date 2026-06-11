@@ -101,6 +101,42 @@ enum ReadingTimeFormatter {
         return "\(hours)h"
     }
 
+    /// Feature #101: the TOTAL-time display for the combined readout and the
+    /// Book details row. Totals at or above 10 hours drop minutes (design:
+    /// "41h", never "41h 23m"); below that, the full "6h 40m" / "12m" form.
+    ///
+    /// Examples:
+    /// - 0       -> "0m"
+    /// - 24000   -> "6h 40m"
+    /// - 35940   -> "9h 59m"
+    /// - 36000   -> "10h"
+    /// - 149400  -> "41h"   (41h30m floors to whole hours)
+    static func totalDisplay(totalSeconds: Int) -> String {
+        let clamped = max(0, totalSeconds)
+        let hours = clamped / 3_600
+        if hours >= 10 { return "\(hours)h" }
+        return formatDuration(totalSeconds: clamped)
+    }
+
+    /// Feature #101: the combined trailing time readout — session first (it is
+    /// what is changing), total second. The first-ever session reads
+    /// "Nm read · first session" (total == session, so repeating the number
+    /// would be noise). Returns nil when no session time has accrued yet —
+    /// the chrome pins the pages readout.
+    ///
+    /// Examples:
+    /// - (720, 24000, false) -> "12m read · 6h 40m total"
+    /// - (240, 240, true)    -> "4m read · first session"
+    /// - (1080, 149400, false) -> "18m read · 41h total"
+    /// - (0, _, _)           -> nil
+    static func combinedReadout(
+        sessionSeconds: Int, liveTotalSeconds: Int, isFirstSession: Bool
+    ) -> String? {
+        guard let session = formatReadingTime(totalSeconds: sessionSeconds) else { return nil }
+        if isFirstSession { return "\(session) \u{B7} first session" }
+        return "\(session) \u{B7} \(totalDisplay(totalSeconds: liveTotalSeconds)) total"
+    }
+
     // MARK: - Speed
 
     /// Formats reading speed into a human-readable string.

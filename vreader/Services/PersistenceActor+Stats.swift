@@ -87,6 +87,28 @@ extension PersistenceActor {
     /// Deduplicates by `bookFingerprintKey` (first-wins), mirroring
     /// `fetchAllLibraryBooks`'s duplicate-row data-integrity guard. Used by the
     /// feature #58 WebDAV backup collector (WI-5).
+    /// Feature #101: the per-book stats fetch — one record, filtered in the
+    /// store (avoids the O(library) all-books scan at reader open).
+    func readingStats(forBookWithKey key: String) async throws -> ReadingStatsRecord? {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<ReadingStats>(
+            predicate: #Predicate { $0.bookFingerprintKey == key }
+        )
+        descriptor.fetchLimit = 1
+        guard let stats = try context.fetch(descriptor).first else { return nil }
+        return ReadingStatsRecord(
+            bookFingerprintKey: stats.bookFingerprintKey,
+            totalReadingSeconds: stats.totalReadingSeconds,
+            sessionCount: stats.sessionCount,
+            lastReadAt: stats.lastReadAt,
+            averagePagesPerHour: stats.averagePagesPerHour,
+            averageWordsPerMinute: stats.averageWordsPerMinute,
+            totalPagesRead: stats.totalPagesRead,
+            totalWordsRead: stats.totalWordsRead,
+            longestSessionSeconds: stats.longestSessionSeconds
+        )
+    }
+
     func fetchAllReadingStats() async throws -> [ReadingStatsRecord] {
         let context = ModelContext(modelContainer)
         let rows = try context.fetch(FetchDescriptor<ReadingStats>())
@@ -224,3 +246,6 @@ extension PersistenceActor {
 }
 
 #endif
+
+// Feature #101: the reader lifecycle's once-at-open stats seam.
+extension PersistenceActor: BookReadingStatsProviding {}

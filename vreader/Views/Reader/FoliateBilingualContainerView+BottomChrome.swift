@@ -37,9 +37,13 @@ extension FoliateBilingualContainerView {
             progress: bottomChromeProgressBinding,
             onSeek: { postSeek($0) },
             leadingLabel: chromeLeadingLabel,
-            // Bug #345: prefer the live session time; fall back to the
-            // percent label until the first tick lands.
-            trailingLabel: sessionLifecycle?.sessionTimeDisplay ?? chromeTrailingLabel
+            // Feature #101: the trailing slot is the pages readout (the
+            // `FoliateBottomChromeLabels` section position); session time
+            // (#345) moved inside the tap-cycled time readout.
+            trailingLabel: chromeTrailingLabel,
+            timeTrailingLabel: sessionLifecycle?.timeReadoutDisplay,
+            bookFingerprintKey: fingerprintKey,
+            perBookBaseURL: ReaderContainerView.perBookSettingsBaseURL
         )
     }
 

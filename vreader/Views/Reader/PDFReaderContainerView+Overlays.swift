@@ -90,8 +90,25 @@ extension PDFReaderContainerView {
                 currentPageIndex: viewModel.currentPageIndex,
                 totalPages: viewModel.totalPages
             ),
-            trailingLabel: viewModel.sessionTimeDisplay ?? ""
+            // Feature #101: the trailing slot is the pages readout — the
+            // design's canonical "N pages left in book"; session time lives
+            // inside the time readout.
+            trailingLabel: pdfPagesLeftReadout,
+            timeTrailingLabel: viewModel.timeReadoutDisplay,
+            bookFingerprintKey: viewModel.bookFingerprintKey,
+            perBookBaseURL: ReaderContainerView.perBookSettingsBaseURL
         )
+    }
+
+    /// Feature #101: "N pages left in book" (singular-aware; "Last page"
+    /// when none remain) — the design's canonical pages readout.
+    private var pdfPagesLeftReadout: String {
+        let left = max(0, viewModel.totalPages - viewModel.currentPageIndex - 1)
+        switch left {
+        case 0: return "Last page"
+        case 1: return "1 page left in book"
+        default: return "\(left) pages left in book"
+        }
     }
 }
 #endif

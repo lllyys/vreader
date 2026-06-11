@@ -34,7 +34,13 @@ extension EPUBReaderContainerView {
             onSeek: { handleProgressSeek($0) },
             discreteSteps: epubDiscreteSteps,
             leadingLabel: epubProgressLabel ?? "",
-            trailingLabel: viewModel.sessionTimeDisplay ?? ""
+            // Feature #101: the trailing slot is the pages readout ("Chapter
+            // N of M" — the legacy-EPUB plan contract); session time lives
+            // inside the time readout.
+            trailingLabel: epubProgressLabel ?? "",
+            timeTrailingLabel: viewModel.timeReadoutDisplay,
+            bookFingerprintKey: viewModel.bookFingerprintKey,
+            perBookBaseURL: ReaderContainerView.perBookSettingsBaseURL
         )
     }
 

@@ -114,6 +114,10 @@ final class ReadiumEPUBReaderViewModel {
     /// #345 — parity with TXT/MD/PDF/legacy-EPUB).
     var sessionTimeDisplay: String? { lifecycle?.sessionTimeDisplay }
 
+    /// Feature #101: combined time readout passthrough ("12m read · 6h 40m
+    /// total"). nil until the book totals attach — the chrome pins pages.
+    var timeReadoutDisplay: String? { lifecycle?.timeReadoutDisplay }
+
     /// A throwaway fingerprint for the render-only WI-5 init; never persisted
     /// (the WI-5 init leaves `persistence` nil, so the mapping is never invoked).
     private static let fingerprintPlaceholder = DocumentFingerprint(

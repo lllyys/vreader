@@ -40,6 +40,10 @@ struct PerBookSettingsOverride: Codable, Sendable, Equatable {
     /// `"sentence"`). `nil` inherits the default.
     var bilingualGranularity: String?
 
+    /// Feature #101: the persisted bottom-chrome metrics readout choice —
+    /// `ReaderMetricsReadout.rawValue` ("pages"/"time"). Absent = pages.
+    var metricsReadout: String?
+
     init(
         fontSize: CGFloat? = nil,
         fontName: String? = nil,
@@ -89,6 +93,21 @@ enum PerBookSettingsStore {
     // MARK: - Write
 
     /// Saves a per-book override. Creates the storage directory if needed.
+    /// Feature #101 (Gate-2 M2): the ONE shared read-modify-write seam —
+    /// loads the book's current override (or an empty one), applies `mutate`,
+    /// and saves. Callers never hand-merge the JSON, so a single-field write
+    /// can't clobber sibling fields.
+    static func update(
+        for fingerprintKey: String,
+        baseURL: URL,
+        _ mutate: (inout PerBookSettingsOverride) -> Void
+    ) throws {
+        var current = settings(for: fingerprintKey, baseURL: baseURL)
+            ?? PerBookSettingsOverride()
+        mutate(&current)
+        try save(current, for: fingerprintKey, baseURL: baseURL)
+    }
+
     static func save(_ settings: PerBookSettingsOverride, for fingerprintKey: String, baseURL: URL) throws {
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(settings)

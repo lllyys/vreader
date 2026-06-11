@@ -54,7 +54,8 @@ extension FoliateBilingualContainerView {
                 store: SwiftDataSessionStore(modelContainer: modelContext.container),
                 deviceId: ReaderContainerView.deviceId
             ),
-            positionStore: persistence
+            positionStore: persistence,
+            statsStore: persistence
         )
         try? lifecycle.beginSession()
         Task { await lifecycle.updateLastOpened() }

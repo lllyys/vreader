@@ -110,7 +110,13 @@ struct MDReaderContainerView: View {
                     // appears when chrome is hidden. Scroll mode keeps the
                     // legacy percentage label (no page concept).
                     leadingLabel: pagedLeadingLabel(),
-                    trailingLabel: viewModel.sessionTimeDisplay ?? ""
+                    // Feature #101: the trailing slot is the pages readout
+                    // ("Page N of M" paged / percent scroll — the plan's MD
+                    // contract); session time lives inside the time readout.
+                    trailingLabel: pagedLeadingLabel(),
+                    timeTrailingLabel: viewModel.timeReadoutDisplay,
+                    bookFingerprintKey: viewModel.bookFingerprintKey,
+                    perBookBaseURL: ReaderContainerView.perBookSettingsBaseURL
                 )
             }
         }

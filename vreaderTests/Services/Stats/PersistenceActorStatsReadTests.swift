@@ -290,3 +290,81 @@ struct PersistenceActorStatsReadTests {
         #expect(row.sessionCount == 6)
     }
 }
+
+// MARK: - readingStats(forBookWithKey:) (feature #101)
+
+@Suite("PersistenceActor per-book stats fetch (feature #101)")
+struct PersistenceActorPerBookStatsTests {
+
+    private func makeContainer() throws -> ModelContainer {
+        let schema = Schema(SchemaV6.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        return try ModelContainer(for: schema, configurations: [config])
+    }
+
+    private func fingerprint(_ seed: String) -> DocumentFingerprint {
+        var hex = ""
+        let bytes = Array(seed.utf8)
+        var i = 0
+        while hex.count < 64 {
+            hex += String(format: "%02x", bytes[i % bytes.count] &+ UInt8(i))
+            i += 1
+        }
+        return DocumentFingerprint(
+            contentSHA256: String(hex.prefix(64)), fileByteCount: 2048, format: .epub
+        )
+    }
+
+    @Test func returnsNilForUnknownBook() async throws {
+        let actor = PersistenceActor(modelContainer: try makeContainer())
+        let record = try await actor.readingStats(forBookWithKey: "epub:none:0")
+        #expect(record == nil)
+    }
+
+    @Test func returnsOnlyTheRequestedBooksRecord() async throws {
+        let container = try makeContainer()
+        let target = fingerprint("target")
+        let other = fingerprint("other")
+        let context = ModelContext(container)
+        context.insert(ReadingStats(
+            bookFingerprint: target, totalReadingSeconds: 24_000, sessionCount: 23,
+            lastReadAt: Date(timeIntervalSince1970: 3_000_000),
+            averagePagesPerHour: nil, averageWordsPerMinute: nil,
+            totalPagesRead: nil, totalWordsRead: nil, longestSessionSeconds: 900
+        ))
+        context.insert(ReadingStats(
+            bookFingerprint: other, totalReadingSeconds: 60, sessionCount: 1,
+            lastReadAt: nil, averagePagesPerHour: nil, averageWordsPerMinute: nil,
+            totalPagesRead: nil, totalWordsRead: nil, longestSessionSeconds: 60
+        ))
+        try context.save()
+
+        let actor = PersistenceActor(modelContainer: container)
+        let record = try #require(
+            try await actor.readingStats(forBookWithKey: target.canonicalKey))
+        #expect(record.bookFingerprintKey == target.canonicalKey)
+        #expect(record.totalReadingSeconds == 24_000)
+        #expect(record.sessionCount == 23)
+        #expect(record.longestSessionSeconds == 900)
+    }
+
+    @Test func zeroSessionRecordReadsAsFirstSessionInput() async throws {
+        // A stats row with sessionCount == 0 is what the lifecycle helper
+        // maps to isFirstSession — pin the projection.
+        let container = try makeContainer()
+        let fp = fingerprint("fresh")
+        let context = ModelContext(container)
+        context.insert(ReadingStats(
+            bookFingerprint: fp, totalReadingSeconds: 0, sessionCount: 0,
+            lastReadAt: nil, averagePagesPerHour: nil, averageWordsPerMinute: nil,
+            totalPagesRead: nil, totalWordsRead: nil, longestSessionSeconds: 0
+        ))
+        try context.save()
+
+        let actor = PersistenceActor(modelContainer: container)
+        let record = try #require(
+            try await actor.readingStats(forBookWithKey: fp.canonicalKey))
+        #expect(record.totalReadingSeconds == 0)
+        #expect(record.sessionCount == 0)
+    }
+}

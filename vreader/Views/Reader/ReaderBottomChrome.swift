@@ -38,8 +38,26 @@ struct ReaderBottomChrome: View {
     /// Leading position label under the scrubber (e.g. "Page 3" or
     /// "45%"). Format-supplied — the design's "Page N" is one instance.
     let leadingLabel: String
-    /// Trailing position label (e.g. "120 pages left" or session time).
+    /// Trailing PAGES readout (e.g. "414 pages left in book",
+    /// "Chapter 8 of 54", a percent) — the default readout. Feature #101:
+    /// session time no longer lives here; it moved inside the time readout.
     let trailingLabel: String
+
+    /// Feature #101: the combined time readout
+    /// ("12m read · 6h 40m total"). nil until session time accrues and the
+    /// book totals attach — the trailing label pins the pages readout and
+    /// the tap is inert.
+    var timeTrailingLabel: String? = nil
+
+    /// Feature #101: the book key + per-book settings base URL for the
+    /// persisted readout choice. nil (previews / non-book surfaces)
+    /// disables persistence — the choice is session-local.
+    var bookFingerprintKey: String? = nil
+    var perBookBaseURL: URL? = nil
+
+    /// Feature #101: the current readout. Seeded from the persisted
+    /// per-book choice on appear; toggled by tapping the trailing label.
+    @State private var metricsReadout: ReaderMetricsReadout = .pages
 
     var body: some View {
         VStack(spacing: 0) {
@@ -84,14 +102,49 @@ struct ReaderBottomChrome: View {
             )
             HStack {
                 Text(leadingLabel)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 8)
-                Text(trailingLabel)
+                // Feature #101: the trailing label is a tap target cycling
+                // page ↔ time readouts (design RTMetricsLine). It never
+                // wraps; the leading label truncates instead.
+                Button {
+                    let next = metricsReadout.toggled(
+                        hasTimeReadout: timeTrailingLabel != nil)
+                    guard next != metricsReadout else { return }
+                    metricsReadout = next
+                    persistReadoutChoice(next)
+                } label: {
+                    Text(metricsReadout.displayLabel(
+                        pages: trailingLabel, time: timeTrailingLabel))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .buttonStyle(MetricsReadoutButtonStyle(theme: theme))
+                .layoutPriority(1)
+                .accessibilityIdentifier("readerMetricsReadout")
             }
             .font(.system(size: 11))
             .monospacedDigit()
             .foregroundStyle(Color(theme.subColor))
+            .onAppear {
+                guard let bookFingerprintKey, let perBookBaseURL else { return }
+                metricsReadout = ReaderMetricsReadout.resolve(
+                    persisted: PerBookSettingsStore.settings(
+                        for: bookFingerprintKey, baseURL: perBookBaseURL
+                    )?.metricsReadout)
+            }
         }
         .padding(.horizontal, 22)
+    }
+
+    /// Feature #101: persists the readout choice per book through the shared
+    /// read-modify-write helper (Gate-2 M2 — never hand-merge the JSON).
+    private func persistReadoutChoice(_ readout: ReaderMetricsReadout) {
+        guard let bookFingerprintKey, let perBookBaseURL else { return }
+        try? PerBookSettingsStore.update(
+            for: bookFingerprintKey, baseURL: perBookBaseURL
+        ) { $0.metricsReadout = readout.rawValue }
     }
 
     // MARK: - Toolbar
@@ -261,5 +314,28 @@ extension View {
             onDisplay: onDisplay,
             onAI: onAI
         ))
+    }
+}
+
+/// Feature #101: the design's pressed state — a subtle rounded fill behind
+/// the trailing label while the finger is down (RTMetricsLine `pressed`).
+private struct MetricsReadoutButtonStyle: ButtonStyle {
+    let theme: ReaderThemeV2
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 7).fill(
+                    configuration.isPressed
+                        ? (theme.isDark
+                            ? Color.white.opacity(0.08)
+                            : Color.black.opacity(0.06))
+                        : Color.clear
+                )
+            )
+            .padding(.horizontal, -6)
+            .padding(.vertical, -1)
     }
 }

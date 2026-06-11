@@ -476,3 +476,14 @@ struct ReaderHighlightEditRequest: Sendable, Equatable {
     /// Monotonic per-session token; a newer request supersedes an older one.
     let token: UUID
 }
+
+// MARK: - Feature #101: live session-time mirror
+
+extension Notification.Name {
+    /// Feature #101: posted by `ReaderLifecycleHelper.updateTimeDisplays()`
+    /// (~once per minute) so `ReaderContainerView` can feed the Book details
+    /// "This session" row without reaching into host-private state.
+    /// Payload: `["fingerprintKey": String, "display": String]`.
+    static let readerSessionTimeDidChange =
+        Notification.Name("vreader.reader.sessionTimeDidChange")
+}

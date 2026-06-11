@@ -477,3 +477,91 @@ struct PerBookSettingsTests {
         return ReaderSettingsStore(defaults: defaults)
     }
 }
+
+// MARK: - metricsReadout + update helper (feature #101)
+
+@Suite("PerBookSettings metricsReadout (feature #101)")
+struct PerBookSettingsMetricsReadoutTests {
+
+    private func makeTempDir() throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PerBookSettingsMetricsTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        return tmp
+    }
+
+    private let key = "epub:1122334455667788990011223344556677889900112233445566778899001122:9000"
+
+    @Test func metricsReadoutRoundTrips() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var override = PerBookSettingsOverride()
+        override.metricsReadout = "time"
+        try PerBookSettingsStore.save(override, for: key, baseURL: dir)
+        let restored = PerBookSettingsStore.settings(for: key, baseURL: dir)
+        #expect(restored?.metricsReadout == "time")
+    }
+
+    @Test func metricsReadoutDefaultsToNil() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try PerBookSettingsStore.save(
+            PerBookSettingsOverride(fontSize: 20), for: key, baseURL: dir)
+        let restored = PerBookSettingsStore.settings(for: key, baseURL: dir)
+        #expect(restored?.metricsReadout == nil)
+    }
+
+    @Test func updateCreatesOverrideWhenAbsent() throws {
+        // No prior file: update loads an empty override, mutates, saves.
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try PerBookSettingsStore.update(for: key, baseURL: dir) {
+            $0.metricsReadout = "time"
+        }
+        let restored = PerBookSettingsStore.settings(for: key, baseURL: dir)
+        #expect(restored?.metricsReadout == "time")
+    }
+
+    @Test func updatePreservesSiblingFields() throws {
+        // The Gate-2 M2 point: a single-field write must not clobber the
+        // book's existing bilingual/typography fields.
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let existing = PerBookSettingsOverride(
+            fontSize: 24, themeName: "sepia",
+            bilingualEnabled: true, bilingualTargetLanguage: "Chinese"
+        )
+        try PerBookSettingsStore.save(existing, for: key, baseURL: dir)
+
+        try PerBookSettingsStore.update(for: key, baseURL: dir) {
+            $0.metricsReadout = "time"
+        }
+
+        let restored = try #require(PerBookSettingsStore.settings(for: key, baseURL: dir))
+        #expect(restored.metricsReadout == "time")
+        #expect(restored.fontSize == 24)
+        #expect(restored.themeName == "sepia")
+        #expect(restored.bilingualEnabled == true)
+        #expect(restored.bilingualTargetLanguage == "Chinese")
+    }
+
+    @Test func updateOverwritesPriorChoice() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try PerBookSettingsStore.update(for: key, baseURL: dir) { $0.metricsReadout = "time" }
+        try PerBookSettingsStore.update(for: key, baseURL: dir) { $0.metricsReadout = "pages" }
+        #expect(PerBookSettingsStore.settings(for: key, baseURL: dir)?.metricsReadout == "pages")
+    }
+
+    @Test func decodingOldFileWithoutMetricsKeySucceeds() throws {
+        // Backward compat: a pre-#101 JSON file (no metricsReadout key)
+        // decodes with the field nil.
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try PerBookSettingsStore.save(
+            PerBookSettingsOverride(fontSize: 18), for: key, baseURL: dir)
+        let restored = PerBookSettingsStore.settings(for: key, baseURL: dir)
+        #expect(restored?.fontSize == 18)
+        #expect(restored?.metricsReadout == nil)
+    }
+}

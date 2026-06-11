@@ -253,7 +253,8 @@ extension ReadiumEPUBHost {
                 store: SwiftDataSessionStore(modelContainer: modelContainer),
                 deviceId: ReaderContainerView.deviceId
             ),
-            positionStore: persistence
+            positionStore: persistence,
+            statsStore: persistence
         )
         let vm = ReadiumEPUBReaderViewModel(
             fileURL: fileURL,

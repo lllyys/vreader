@@ -457,7 +457,13 @@ struct TXTReaderContainerView: View {
                     },
                     leadingLabel: "Chapter \(viewModel.currentChapterIdx + 1)"
                         + " of \(viewModel.totalChapterCount)",
-                    trailingLabel: viewModel.sessionTimeDisplay ?? ""
+                    // Feature #101: the trailing slot is the pages readout
+                    // (chapter-local page in paged mode, scroll percent
+                    // otherwise); session time lives inside the time readout.
+                    trailingLabel: chapterPagesReadout,
+                    timeTrailingLabel: viewModel.timeReadoutDisplay,
+                    bookFingerprintKey: viewModel.bookFingerprintKey,
+                    perBookBaseURL: ReaderContainerView.perBookSettingsBaseURL
                 )
             } else {
                 ReaderBottomChrome(
@@ -482,10 +488,29 @@ struct TXTReaderContainerView: View {
                         }
                     },
                     leadingLabel: ScrollProgressHelper.percentageLabel(chapterScrollFraction),
-                    trailingLabel: viewModel.sessionTimeDisplay ?? ""
+                    // Feature #101: book-level percent as the pages readout
+                    // (the leading shows the TOC-chapter fraction when TOC
+                    // entries exist); session time moved into the time readout.
+                    trailingLabel: ScrollProgressHelper.percentageLabel(
+                        viewModel.totalProgression ?? 0),
+                    timeTrailingLabel: viewModel.timeReadoutDisplay,
+                    bookFingerprintKey: viewModel.bookFingerprintKey,
+                    perBookBaseURL: ReaderContainerView.perBookSettingsBaseURL
                 )
             }
         }
+    }
+
+    /// Feature #101: the chapter-mode pages readout for the trailing chrome
+    /// slot. Paged TXT (bug #284) shows the chapter-local page position;
+    /// scroll-within-chapter shows the in-chapter percent. Falls back to the
+    /// percent across the first-render transition (zero total pages), the
+    /// same guard as MD's `pagedLeadingLabel()`.
+    private var chapterPagesReadout: String {
+        if isPagedMode, let nav = uiState.pageNavigator, nav.totalPages > 0 {
+            return "Page \(uiState.pagedCurrentPage + 1) of \(nav.totalPages)"
+        }
+        return ScrollProgressHelper.percentageLabel(chapterScrollFraction)
     }
 
     // MARK: - On-Appear Open + Wiring

@@ -66,10 +66,13 @@ extension ReadiumEPUBHost {
             progress: Binding(get: { readingProgress }, set: { readingProgress = $0 }),
             onSeek: { seekBottomChrome(toFraction: $0) },
             leadingLabel: chromeLeadingLabel,
-            // Bug #345: prefer the live session time (ticks via the
-            // lifecycle helper's flush + relocates); fall back to the percent
-            // label until the first tick lands.
-            trailingLabel: viewModel?.sessionTimeDisplay ?? chromeTrailingLabel
+            // Feature #101: the trailing slot is the pages readout (Readium's
+            // percent fallback); session time (#345) moved inside the
+            // tap-cycled time readout.
+            trailingLabel: chromeTrailingLabel,
+            timeTrailingLabel: viewModel?.timeReadoutDisplay,
+            bookFingerprintKey: fingerprint.canonicalKey,
+            perBookBaseURL: ReaderContainerView.perBookSettingsBaseURL
         )
     }
 

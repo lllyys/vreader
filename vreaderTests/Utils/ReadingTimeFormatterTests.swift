@@ -337,3 +337,77 @@ struct ReadingTimeFormatterDurationTests {
         #expect(!result.contains("read"))
     }
 }
+
+// MARK: - totalDisplay (feature #101)
+
+@Suite("ReadingTimeFormatter.totalDisplay")
+struct ReadingTimeFormatterTotalDisplayTests {
+
+    @Test(arguments: [
+        (0,       "0m"),       // zero — truthful minimum
+        (59,      "0m"),       // sub-minute floors
+        (60,      "1m"),
+        (24_000,  "6h 40m"),   // the design's "6h 40m total"
+        (35_940,  "9h 59m"),   // last full form below the 10h boundary
+        (35_999,  "9h 59m"),   // one second short of 10h — still full form
+        (36_000,  "10h"),      // exactly 10h — drops minutes
+        (36_060,  "10h"),      // 10h01m — minutes dropped
+        (149_400, "41h"),      // 41h30m — the design's "41h"
+    ])
+    func formatsKnownTotals(_ seconds: Int, _ expected: String) {
+        #expect(ReadingTimeFormatter.totalDisplay(totalSeconds: seconds) == expected)
+    }
+
+    @Test func negativeClampsToZero() {
+        #expect(ReadingTimeFormatter.totalDisplay(totalSeconds: -500) == "0m")
+    }
+}
+
+// MARK: - combinedReadout (feature #101)
+
+@Suite("ReadingTimeFormatter.combinedReadout")
+struct ReadingTimeFormatterCombinedReadoutTests {
+
+    @Test func designCanonicalReadout() {
+        // "12m read · 6h 40m total" — the committed design string.
+        let result = ReadingTimeFormatter.combinedReadout(
+            sessionSeconds: 720, liveTotalSeconds: 24_000, isFirstSession: false)
+        #expect(result == "12m read \u{B7} 6h 40m total")
+    }
+
+    @Test func firstSessionOmitsDuplicateTotal() {
+        // "4m read · first session" — total == session would be noise.
+        let result = ReadingTimeFormatter.combinedReadout(
+            sessionSeconds: 240, liveTotalSeconds: 240, isFirstSession: true)
+        #expect(result == "4m read \u{B7} first session")
+    }
+
+    @Test func longTotalDropsMinutes() {
+        // "18m read · 41h total" — >10h total drops minutes.
+        let result = ReadingTimeFormatter.combinedReadout(
+            sessionSeconds: 1_080, liveTotalSeconds: 149_400, isFirstSession: false)
+        #expect(result == "18m read \u{B7} 41h total")
+    }
+
+    @Test func subMinuteSessionUsesLessThanForm() {
+        let result = ReadingTimeFormatter.combinedReadout(
+            sessionSeconds: 30, liveTotalSeconds: 7_200, isFirstSession: false)
+        #expect(result == "<1m read \u{B7} 2h 0m total")
+    }
+
+    @Test func zeroSessionReturnsNil() {
+        // No session time accrued → nil → the chrome pins the pages readout.
+        #expect(ReadingTimeFormatter.combinedReadout(
+            sessionSeconds: 0, liveTotalSeconds: 24_000, isFirstSession: false) == nil)
+    }
+
+    @Test func negativeSessionReturnsNil() {
+        #expect(ReadingTimeFormatter.combinedReadout(
+            sessionSeconds: -5, liveTotalSeconds: 24_000, isFirstSession: false) == nil)
+    }
+
+    @Test func firstSessionStillNilWithZeroSession() {
+        #expect(ReadingTimeFormatter.combinedReadout(
+            sessionSeconds: 0, liveTotalSeconds: 0, isFirstSession: true) == nil)
+    }
+}

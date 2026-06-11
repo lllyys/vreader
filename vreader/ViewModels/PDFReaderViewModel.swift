@@ -44,6 +44,10 @@ final class PDFReaderViewModel {
     /// Formatted session reading time (e.g., "5m"). Delegated to lifecycle helper.
     var sessionTimeDisplay: String? { lifecycle.sessionTimeDisplay }
 
+    /// Feature #101: combined time readout passthrough ("12m read · 6h 40m
+    /// total"). nil until the book totals attach — the chrome pins pages.
+    var timeReadoutDisplay: String? { lifecycle.timeReadoutDisplay }
+
     /// Number of distinct pages visited in the current session.
     private(set) var distinctPagesVisited: Int = 0
 
@@ -116,7 +120,8 @@ final class PDFReaderViewModel {
             bookFingerprint: bookFingerprint,
             positionService: posService,
             sessionTracker: sessionTracker,
-            positionStore: positionStore
+            positionStore: positionStore,
+            statsStore: positionStore as? PersistenceActor
         )
     }
 

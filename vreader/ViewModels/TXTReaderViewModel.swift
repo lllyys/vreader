@@ -60,6 +60,10 @@ final class TXTReaderViewModel {
     /// Formatted session reading time (e.g., "5m"). Delegated to lifecycle helper.
     var sessionTimeDisplay: String? { lifecycle.sessionTimeDisplay }
 
+    /// Feature #101: combined time readout passthrough ("12m read · 6h 40m
+    /// total"). nil until the book totals attach — the chrome pins pages.
+    var timeReadoutDisplay: String? { lifecycle.timeReadoutDisplay }
+
     // MARK: - Computed State
 
     /// Total progression through the document (0.0 to 1.0). Nil for empty files.
@@ -252,7 +256,8 @@ final class TXTReaderViewModel {
             bookFingerprint: bookFingerprint,
             positionService: posService,
             sessionTracker: sessionTracker,
-            positionStore: positionStore
+            positionStore: positionStore,
+            statsStore: positionStore as? PersistenceActor
         )
     }
 
