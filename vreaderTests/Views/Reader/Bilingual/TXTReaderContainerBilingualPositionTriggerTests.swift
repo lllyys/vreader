@@ -78,7 +78,8 @@ struct TXTReaderContainerBilingualPositionTriggerTests {
             onPositionChanged: { positionChangeFired = true },
             onReTranslateApplied: { _, _ in },
             showSetupSheet: .constant(false),
-            sheetView: { AnyView(EmptyView()) }
+            sheetView: { AnyView(EmptyView()) },
+            onSheetDismiss: {}
         )
         // Fire the callback to confirm the wiring is exposed end-to-end.
         modifier.onPositionChanged()
