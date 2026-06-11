@@ -291,24 +291,3 @@ struct BilingualSetupSheet: View {
         .accessibilityIdentifier("bilingualSetupConfirm")
     }
 }
-
-// MARK: - Granularity labels
-
-extension TranslationGranularity {
-
-    /// Display label for the segmented control — design pins these.
-    var label: String {
-        switch self {
-        case .paragraph: return "Paragraph"
-        case .sentence:  return "Sentence"
-        }
-    }
-
-    /// Smaller-text descriptor under the label.
-    var detail: String {
-        switch self {
-        case .paragraph: return "Translate after each ¶"
-        case .sentence:  return "Translate after each sentence"
-        }
-    }
-}

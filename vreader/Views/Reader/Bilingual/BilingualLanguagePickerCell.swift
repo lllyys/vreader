@@ -77,7 +77,7 @@ struct BilingualLanguagePickerCell: View {
                     .foregroundStyle(.white)
             )
             .overlay(
-                Circle().strokeBorder(Color(theme.chromeColor), lineWidth: 2)
+                Circle().strokeBorder(Color(theme.sheetSurfaceColor), lineWidth: 2)
             )
             .offset(x: 4, y: -4)
     }

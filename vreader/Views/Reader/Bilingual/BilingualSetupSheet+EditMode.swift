@@ -31,9 +31,17 @@ extension BilingualSetupSheet {
     var showsCancelButton: Bool { isEditMode }
 
     /// "Bilingual mode is on · {book title}" — nil in first-enable mode.
+    /// The combined-string testing surface; the view renders the title
+    /// as a separate italic-serif run (design `BSSettingsSheet`).
     var contextStripText: String? {
+        guard let editBookTitle else { return nil }
+        return "Bilingual mode is on \u{B7} \(editBookTitle)"
+    }
+
+    /// The edit frame's book title — nil in first-enable mode.
+    var editBookTitle: String? {
         guard case .edit(let bookTitle) = mode else { return nil }
-        return "Bilingual mode is on \u{B7} \(bookTitle)"
+        return bookTitle
     }
 
     /// The dirty kind for the current draft (edit mode only — `.none`
@@ -109,16 +117,20 @@ extension BilingualSetupSheet {
     }
 
     /// The book-context strip — "Bilingual mode is on · *{title}*".
+    /// Only the TITLE run is italic serif (Gate-4 r1 Medium — the
+    /// design italicises the book title, not the whole line).
     @ViewBuilder
     var editContextStrip: some View {
-        if let text = contextStripText {
+        if let title = editBookTitle {
             HStack(spacing: 8) {
                 Image(systemName: "character.bubble")
                     .font(.system(size: 12))
                     .foregroundStyle(Color(theme.subColor))
-                Text(text)
+                (Text("Bilingual mode is on \u{B7} ")
                     .font(.system(size: 11.5))
-                    .italic()
+                    + Text(title)
+                    .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 11.5)))
+                    .italic())
                     .foregroundStyle(Color(theme.subColor))
                     .lineLimit(1)
                     .truncationMode(.tail)
