@@ -59,11 +59,20 @@ enum EPUBFileLoader {
             let savedLocator = try await positionStore.loadPosition(
                 bookFingerprintKey: bookFingerprintKey
             )
+            // Bug #349: resolve the saved href TOLERANTLY (container- vs
+            // OPF-relative, percent-encoded vs decoded — a Readium-saved
+            // position must restore into the legacy host). The exact-match-
+            // only check this replaces silently fell back to the COVER for
+            // any cross-engine href form, losing the reader's place on a
+            // paged→scroll layout switch. The returned position carries the
+            // SPINE item's canonical href so every downstream exact match
+            // (the chrome's `currentSpineIndex`, the scroll anchor) agrees.
             if let savedLocator,
-               let href = savedLocator.href,
-               metadata.spineItems.contains(where: { $0.href == href }) {
+               let index = EPUBScrollAnchorResolver.matchIndex(
+                   forStoredHref: savedLocator.href,
+                   spineHrefs: metadata.spineItems.map(\.href)) {
                 return EPUBPosition(
-                    href: href,
+                    href: metadata.spineItems[index].href,
                     progression: savedLocator.progression ?? 0,
                     totalProgression: savedLocator.totalProgression ?? 0,
                     cfi: savedLocator.cfi

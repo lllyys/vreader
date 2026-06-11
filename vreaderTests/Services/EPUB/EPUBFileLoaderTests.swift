@@ -255,3 +255,83 @@ struct EPUBFileLoaderTests {
         #expect(result.initialPosition == nil)
     }
 }
+
+// MARK: - Bug #349: cross-engine href restore
+
+@Suite("EPUBFileLoader cross-engine restore (bug #349)")
+struct EPUBFileLoaderCrossEngineRestoreTests {
+
+    private var testFP: DocumentFingerprint {
+        DocumentFingerprint(
+            contentSHA256: String(repeating: "cd", count: 32),
+            fileByteCount: 4096, format: .epub)
+    }
+    private let testURL = URL(fileURLWithPath: "/tmp/b349.epub")
+
+    private func meta(spineHrefs: [String]) -> EPUBMetadata {
+        EPUBMetadata(
+            title: "t", author: nil, language: "zh",
+            readingDirection: .ltr, layout: .reflowable,
+            spineItems: spineHrefs.enumerated().map { i, href in
+                EPUBSpineItem(id: "s\(i)", href: href, title: nil, index: i)
+            })
+    }
+
+    @Test("a Readium container-relative saved href restores to the right chapter")
+    func containerRelativeHrefRestores() async throws {
+        let parser = MockEPUBParser()
+        await parser.setMetadata(meta(spineHrefs: ["cover.xhtml", "ch1.xhtml", "ch2.xhtml"]))
+        let store = MockPositionStore()
+        let saved = try #require(LocatorFactory.epub(
+            fingerprint: testFP, href: "OEBPS/ch2.xhtml",
+            progression: 0.4, totalProgression: 0.8))
+        await store.seed(bookFingerprintKey: testFP.canonicalKey, locator: saved)
+
+        let result = try await EPUBFileLoader.load(
+            url: testURL, parser: parser, positionStore: store,
+            bookFingerprintKey: testFP.canonicalKey)
+
+        // The returned position carries the SPINE's canonical href so every
+        // downstream exact match (chrome spine index, scroll anchor) agrees.
+        #expect(result.initialPosition?.href == "ch2.xhtml")
+        #expect(result.initialPosition?.progression == 0.4)
+    }
+
+    @Test("a percent-encoded CJK saved href restores to the decoded spine item")
+    func percentEncodedCJKHrefRestores() async throws {
+        let parser = MockEPUBParser()
+        await parser.setMetadata(meta(spineHrefs: ["封面.xhtml", "第一章.xhtml", "第二章.xhtml"]))
+        let store = MockPositionStore()
+        // Readium persists URL-form hrefs — percent-encoded CJK filenames.
+        let encoded = "第二章.xhtml".addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed)!
+        let saved = try #require(LocatorFactory.epub(
+            fingerprint: testFP, href: encoded,
+            progression: 0.25, totalProgression: 0.6))
+        await store.seed(bookFingerprintKey: testFP.canonicalKey, locator: saved)
+
+        let result = try await EPUBFileLoader.load(
+            url: testURL, parser: parser, positionStore: store,
+            bookFingerprintKey: testFP.canonicalKey)
+
+        #expect(result.initialPosition?.href == "第二章.xhtml")
+        #expect(result.initialPosition?.progression == 0.25)
+    }
+
+    @Test("a genuinely unknown href still falls back to the first spine item")
+    func unknownHrefStillFallsBack() async throws {
+        let parser = MockEPUBParser()
+        await parser.setMetadata(meta(spineHrefs: ["cover.xhtml", "ch1.xhtml"]))
+        let store = MockPositionStore()
+        let saved = try #require(LocatorFactory.epub(
+            fingerprint: testFP, href: "gone/forever.xhtml",
+            progression: 0.8, totalProgression: 0.9))
+        await store.seed(bookFingerprintKey: testFP.canonicalKey, locator: saved)
+
+        let result = try await EPUBFileLoader.load(
+            url: testURL, parser: parser, positionStore: store,
+            bookFingerprintKey: testFP.canonicalKey)
+
+        #expect(result.initialPosition?.href == "cover.xhtml")
+    }
+}

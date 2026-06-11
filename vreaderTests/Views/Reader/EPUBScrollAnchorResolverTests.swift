@@ -55,3 +55,35 @@ struct EPUBScrollAnchorResolverTests {
             forStoredHref: "OEBPS/text/ch2.xhtml", spineHrefs: nested) == 1)
     }
 }
+
+// MARK: - Bug #349: percent-encoding tolerance + the nil-on-miss variant
+
+@Suite("EPUBScrollAnchorResolver — bug #349 additions")
+struct EPUBScrollAnchorResolverBug349Tests {
+
+    @Test func percentEncodedSavedHrefMatchesDecodedSpine() {
+        let spine = ["封面.xhtml", "第一章.xhtml", "第二章.xhtml"]
+        let encoded = "第二章.xhtml".addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed)!
+        #expect(EPUBScrollAnchorResolver.anchorIndex(
+            forStoredHref: encoded, spineHrefs: spine) == 2)
+    }
+
+    @Test func encodedContainerRelativeMatchesDecodedSpineSuffix() {
+        let spine = ["第一章.xhtml"]
+        let encoded = ("OEBPS/" + "第一章.xhtml").addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed)!
+        #expect(EPUBScrollAnchorResolver.anchorIndex(
+            forStoredHref: encoded, spineHrefs: spine) == 0)
+    }
+
+    @Test func matchIndexDistinguishesMissFromSpineZero() {
+        let spine = ["cover.xhtml", "ch1.xhtml"]
+        #expect(EPUBScrollAnchorResolver.matchIndex(
+            forStoredHref: "cover.xhtml", spineHrefs: spine) == 0)
+        #expect(EPUBScrollAnchorResolver.matchIndex(
+            forStoredHref: "missing.xhtml", spineHrefs: spine) == nil)
+        #expect(EPUBScrollAnchorResolver.matchIndex(
+            forStoredHref: nil, spineHrefs: spine) == nil)
+    }
+}

@@ -7,7 +7,8 @@
 // restart scroll mode at the book top (Gate-2 High). This resolver matches
 // exactly first, then on a path-COMPONENT boundary suffix either direction.
 //
-// @coordinates-with: EPUBReaderContainerView.swift (buildContinuousScrollConfig)
+// @coordinates-with: EPUBReaderContainerView.swift (buildContinuousScrollConfig),
+//   EPUBFileLoader.swift (restorePosition — Bug #349)
 
 import Foundation
 
@@ -21,7 +22,14 @@ enum EPUBScrollAnchorResolver {
     ///     OPF-relative, depending on which engine wrote it).
     ///   - spineHrefs: the legacy parser's spine hrefs, in reading order.
     static func anchorIndex(forStoredHref storedHref: String?, spineHrefs: [String]) -> Int {
-        guard let href = storedHref, !href.isEmpty else { return 0 }
+        matchIndex(forStoredHref: storedHref, spineHrefs: spineHrefs) ?? 0
+    }
+
+    /// Bug #349: the nil-on-miss variant — `EPUBFileLoader.restorePosition`
+    /// needs to DISTINGUISH "no match" (fall back to the first spine item)
+    /// from "matched spine 0", which the 0-default conflates.
+    static func matchIndex(forStoredHref storedHref: String?, spineHrefs: [String]) -> Int? {
+        guard let href = storedHref, !href.isEmpty else { return nil }
         // 1) Exact match (same engine wrote + reads, or already-normalized).
         if let i = spineHrefs.firstIndex(of: href) { return i }
         // 2) Path-component-boundary suffix match either direction, so
@@ -33,6 +41,21 @@ enum EPUBScrollAnchorResolver {
         }) {
             return i
         }
-        return 0
+        // 3) Bug #349: percent-encoding-normalized retry. Readium persists
+        //    URL-form hrefs ("%E7%AC%AC...xhtml" for CJK filenames) while the
+        //    legacy parser's spine hrefs are decoded ("第...xhtml") — the
+        //    exact + suffix passes above miss, and the saved position silently
+        //    fell back to the cover. Decode both sides and re-run both rules.
+        let decoded = href.removingPercentEncoding ?? href
+        let decodedSpine = spineHrefs.map { $0.removingPercentEncoding ?? $0 }
+        if decoded != href || decodedSpine != spineHrefs {
+            if let i = decodedSpine.firstIndex(of: decoded) { return i }
+            if let i = decodedSpine.firstIndex(where: {
+                !$0.isEmpty && (decoded.hasSuffix("/" + $0) || $0.hasSuffix("/" + decoded))
+            }) {
+                return i
+            }
+        }
+        return nil
     }
 }
