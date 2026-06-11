@@ -126,4 +126,48 @@ struct BookDetailsReadingTimeTests {
         #expect(BookDetailsReadingTimeMirror.sessionDisplayUpdate(
             from: ["display": "12m read"], bookFingerprintKey: bookKey) == .ignore)
     }
+
+    // MARK: - Present-time fetcher (Gate-4 r1 Mediums)
+
+    /// Stub store with controllable latency + a marker total per call.
+    private struct DelayedStatsStore: BookReadingTimeStatsFetching {
+        let delayMilliseconds: Int
+        let total: Int
+        func readingStats(forBookWithKey key: String) async throws -> ReadingStatsRecord? {
+            try await Task.sleep(for: .milliseconds(delayMilliseconds))
+            return ReadingStatsRecord(
+                bookFingerprintKey: key, totalReadingSeconds: total,
+                sessionCount: 1, lastReadAt: nil,
+                averagePagesPerHour: nil, averageWordsPerMinute: nil,
+                totalPagesRead: nil, totalWordsRead: nil, longestSessionSeconds: 0
+            )
+        }
+        func firstSessionDate(forBookWithKey key: String) async throws -> Date? { nil }
+    }
+
+    @Test("A superseded fetch's completion is dropped (out-of-order)")
+    func supersededFetchIsDropped() async throws {
+        let fetcher = BookDetailsReadingTimeFetcher()
+        var applied: [Int] = []
+        // Slow fetch (poison total 11_111) superseded by a fast one.
+        fetcher.fetch(from: DelayedStatsStore(delayMilliseconds: 400, total: 11_111),
+                      bookKey: bookKey) { applied.append($0.record?.totalReadingSeconds ?? -1) }
+        fetcher.fetch(from: DelayedStatsStore(delayMilliseconds: 50, total: 24_000),
+                      bookKey: bookKey) { applied.append($0.record?.totalReadingSeconds ?? -1) }
+        try await Task.sleep(for: .milliseconds(700))
+        // Only the latest fetch lands; the slow first one is dropped even
+        // though it completes after.
+        #expect(applied == [24_000])
+    }
+
+    @Test("invalidate() drops an in-flight fetch's completion")
+    func invalidateDropsInFlightFetch() async throws {
+        let fetcher = BookDetailsReadingTimeFetcher()
+        var applied = 0
+        fetcher.fetch(from: DelayedStatsStore(delayMilliseconds: 200, total: 1),
+                      bookKey: bookKey) { _ in applied += 1 }
+        fetcher.invalidate()  // book changed / dismissed before completion
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(applied == 0)
+    }
 }
