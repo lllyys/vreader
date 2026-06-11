@@ -46,7 +46,9 @@ struct ReaderContainerView: View {
     /// Feature #86 WI-4: persistence for the AI Chat sources cache (the
     /// `PersistenceActor`, which conforms to the three annotation-persisting
     /// protocols). Nil in previews / no-store contexts → sources simply stay empty.
-    @Environment(\.persistenceActor) private var persistenceActor
+    // `internal` (not `private`): the feature #101 WI-2b reading-time
+    // mirror in `+Sheets.swift` fetches per-book stats through it.
+    @Environment(\.persistenceActor) var persistenceActor
     @State var settingsStore = ReaderSettingsStore()
     @State var showSettings = false
     /// Feature #61 WI-3: whether the reader Book Details sheet is
@@ -57,6 +59,17 @@ struct ReaderContainerView: View {
     /// extension — same reason as the sibling `showSettings` /
     /// `showShareSheet` flags.
     @State var showBookDetails = false
+    /// Feature #101 WI-2b: the live session display for THIS book,
+    /// mirrored off `.readerSessionTimeDidChange` (~1 post/min from the
+    /// lifecycle helper) so Book details' "This session" row has the
+    /// latest value the moment the sheet opens — the same mirror pattern
+    /// as `.readerBilingualDidChange` → chrome state. nil = no live
+    /// session yet (the row shows "—").
+    @State var currentSessionDisplay: String?
+    /// Feature #101 WI-2b: the Reading time group's persisted inputs
+    /// (per-book stats record + earliest session date), fetched when the
+    /// Book details sheet presents. nil hides the section while in flight.
+    @State var bookDetailsReadingStats: BookReadingTimeStats?
     /// Feature #61 WI-4: set by the Book Details "Export annotations…"
     /// row. The annotations panel and Book Details are sibling sheets
     /// on this view, so the panel is opened from Book Details'
@@ -842,6 +855,11 @@ struct ReaderContainerView: View {
                 .presentationDetents([.height(660), .large])
                 .presentationDragIndicator(.visible)
         }
+        // Feature #101 WI-2b: mirror the live session display + fetch the
+        // Reading time stats when Book details presents. Bundled into one
+        // modifier (ReaderContainerView+Sheets) — this body is near the
+        // type-checker's expression-complexity ceiling.
+        .modifier(bookDetailsReadingTimeMirror)
         // Search setup deferred until search sheet opens (bug #64)
         .onChange(of: showSearch) { _, isShowing in
             if isShowing { ensureSearchReady() }

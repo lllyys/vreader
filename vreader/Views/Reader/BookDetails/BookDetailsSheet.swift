@@ -58,6 +58,14 @@ struct BookDetailsSheet: View {
     var translateBookTextProvider: (any ChapterTextProviding)? = nil
     var translateBookTargetLanguage: String = "Chinese"
 
+    /// Feature #101 WI-2b — the Reading time group's persisted inputs,
+    /// fetched by the host when the sheet presents. `nil` (fetch still in
+    /// flight, or no persistence injected) hides the section.
+    var readingTimeStats: BookReadingTimeStats? = nil
+    /// The live session display mirrored off `.readerSessionTimeDidChange`
+    /// by the host (book-keyed). nil/empty → the row shows "—".
+    var liveSessionDisplay: String? = nil
+
     /// Presents the system share sheet for the book file — driven by
     /// the title-bar Share button, the "Share book…" action row, and
     /// the Location row's reveal mini-action. `internal` so the
@@ -117,6 +125,24 @@ struct BookDetailsSheet: View {
         return rows
     }
 
+    /// Feature #101 WI-2b: the Reading time card's rows, in design order
+    /// (`RTBookDetailsRows`). Empty while the host's stats fetch is in
+    /// flight — the section is omitted rather than flashing zeros.
+    /// Exposed (not `private`) for the composition tests.
+    var readingTimeRows: [BookReadingTimeRow.Model] {
+        guard let readingTimeStats else { return [] }
+        let model = BookReadingTimeModel.build(
+            record: readingTimeStats.record,
+            firstSessionDate: readingTimeStats.firstSessionDate,
+            liveSessionDisplay: liveSessionDisplay
+        )
+        return [
+            .init(label: "Reading time", sub: model.totalSub, value: model.totalValue),
+            .init(label: "This session", sub: nil, value: model.thisSessionValue),
+            .init(label: "Average session", sub: nil, value: model.averageSessionValue),
+        ]
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -125,6 +151,9 @@ struct BookDetailsSheet: View {
                 VStack(spacing: 22) {
                     header
                     section(label: "Metadata") { metadataCard }
+                    if !readingTimeRows.isEmpty {
+                        section(label: "Reading time") { readingTimeCard }
+                    }
                     section(label: "Actions") { actionCard }
                 }
                 .padding(.horizontal, 22)

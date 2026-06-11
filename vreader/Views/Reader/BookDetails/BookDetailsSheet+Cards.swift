@@ -30,6 +30,19 @@ extension BookDetailsSheet {
         }
     }
 
+    /// Feature #101 WI-2b: the Reading time card body — the three
+    /// designed rows (`RTBookDetailsRows`) separated by hairline dividers.
+    @ViewBuilder
+    var readingTimeCard: some View {
+        let rows = readingTimeRows
+        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            BookReadingTimeRow(model: row, theme: theme)
+            if index < rows.count - 1 {
+                rowDivider
+            }
+        }
+    }
+
     /// The Actions card body — rows separated by hairline dividers.
     /// The `.translateBook` row is rendered through `TranslateBookActionRow`
     /// (status-aware icon + sublabel) rather than the generic

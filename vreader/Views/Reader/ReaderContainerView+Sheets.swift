@@ -300,7 +300,33 @@ extension ReaderContainerView {
             // rather than presenting a broken affordance.
             translateBookViewModel: translateBookVM,
             translateBookTextProvider: translateBookTextProvider,
-            translateBookTargetLanguage: "Chinese"
+            translateBookTargetLanguage: "Chinese",
+            // Feature #101 WI-2b — the Reading time group's inputs: the
+            // persisted stats fetched at present-time + the live session
+            // display mirrored off the lifecycle helper's bus post.
+            readingTimeStats: bookDetailsReadingStats,
+            liveSessionDisplay: currentSessionDisplay
+        )
+    }
+
+    /// Feature #101 WI-2b: bundles the Reading time data wiring —
+    /// (a) mirrors `.readerSessionTimeDidChange` (posted ~1/min by the
+    /// lifecycle helper) into `currentSessionDisplay` when the payload is
+    /// keyed to THIS book; (b) fetches the per-book stats record +
+    /// earliest session date when Book details presents. One modifier so
+    /// `ReaderContainerView.body` gains a single chain link (it is near
+    /// the type-checker's expression-complexity ceiling).
+    var bookDetailsReadingTimeMirror: some ViewModifier {
+        BookDetailsReadingTimeMirror(
+            bookFingerprintKey: book.fingerprintKey,
+            persistence: persistenceActor,
+            showBookDetails: showBookDetails,
+            currentSessionDisplay: Binding(
+                get: { currentSessionDisplay },
+                set: { currentSessionDisplay = $0 }),
+            readingStats: Binding(
+                get: { bookDetailsReadingStats },
+                set: { bookDetailsReadingStats = $0 })
         )
     }
 

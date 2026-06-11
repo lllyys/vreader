@@ -18,6 +18,16 @@
 
 import Foundation
 
+/// Feature #101 WI-2b: the host-fetched persisted half of the Reading
+/// time group — the per-book stats record (nil = never read) and the
+/// earliest session start. `ReaderContainerView` fetches it once when
+/// Book details presents; the live session display arrives separately
+/// off the `.readerSessionTimeDidChange` mirror.
+struct BookReadingTimeStats: Equatable, Sendable {
+    let record: ReadingStatsRecord?
+    let firstSessionDate: Date?
+}
+
 /// The derived Reading time group for Book details (feature #101).
 struct BookReadingTimeModel: Equatable, Sendable {
     /// "6h 40m total" / "41h total" / "0m total".
