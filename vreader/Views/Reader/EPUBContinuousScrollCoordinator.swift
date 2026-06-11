@@ -90,10 +90,29 @@ final class EPUBContinuousScrollCoordinator {
     /// reader bottomed out at the stitch edge). Forward appends are
     /// gesture-safe (they never write scrollTop — round 4's own analysis),
     /// and every boundary-driven append represents genuinely consumed
-    /// content, so they continue past the soft ceiling. The hard cap is the
-    /// storm guard the soft ceiling was for: a pathological signal storm
-    /// stops growing here; everything drains at settle.
-    static let touchGrowthHardCapSlack = 12
+    /// content, so they continue past the soft ceiling.
+    ///
+    /// Round 2 (the device-confirmed re-report): the original slack of 12
+    /// (span 15) was reachable by a HUMAN chained-fling session — the
+    /// 2026-06-11 in-page sweep hit it at fling 8 of 25 and the reader sat
+    /// pinned at the stitch edge (below = 0) for 18 straight flings, because
+    /// chains never settle and the deferred backlog never drains. The
+    /// oscillation storm this cap originally guarded CANNOT occur mid-gesture
+    /// (evictions + prepends — the compensation writers — are deferred while
+    /// `touchActive`, so no spurious boundary re-fires exist; only genuine
+    /// travel produces in-gesture nearBottom signals). The cap therefore
+    /// survives only as a far-out DOM/memory bound no human chain reaches
+    /// (span 50 ≈ minutes of unbroken robotic flinging).
+    static let touchGrowthHardCapSlack = 47
+
+    /// Bug #347 round 2 facet 2: the per-extend eviction budget. The settle
+    /// report used to drain the WHOLE deferred backlog in one signal — after
+    /// a long chain that is a dozen+ removes whose compensations land in one
+    /// frame burst (the sweep measured scrollTop 30600 → 1960 with a −262 px
+    /// overshoot — the user-visible "jump" at stall release). Each extend now
+    /// trims at most this many trailing chapters; the backlog converges to
+    /// `maxSpan` across the subsequent reading-pace signals, visually silent.
+    static let maxEvictionsPerExtend = 2
     /// Materializes a chapter's rewritten body for a spine index (off-main I/O).
     private let chapterBodyProvider: @MainActor (Int) async throws -> EPUBChapterBody
     /// Evaluates section JS against the live `WKWebView`. Async-throwing so a
@@ -110,6 +129,16 @@ final class EPUBContinuousScrollCoordinator {
     /// bucket must stay. Default no-op for callers (tests, paged mode) that
     /// don't track per-section state.
     private let onSectionEvicted: (@MainActor (Int) -> Void)?
+
+    /// Bug #347 round 2 (mechanism a — append latency): the single-slot
+    /// forward body pre-materialization. After a forward extend commits, the
+    /// NEXT chapter's body is fetched + rewritten in the background, so the
+    /// boundary-driven append that follows is just one DOM eval instead of a
+    /// provider round-trip — at fling speed the provider latency was the
+    /// other half of the lookahead starvation. Gen-guarded; consumed (and
+    /// cleared) by the next forward extend; invalidated on reset.
+    private var prefetchedBody: EPUBChapterBody?
+    private var prefetchTask: Task<Void, Never>?
 
     /// Bumped on mode-switch / reopen / book-change to discard stale in-flight
     /// `chapterBodyProvider` results.
@@ -164,6 +193,9 @@ final class EPUBContinuousScrollCoordinator {
     func invalidate() {
         generation = UUID()
         isExtending = false
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        prefetchedBody = nil
         ignoreNextNearTop = false      // Bug #329: a reopen carries no pending echo.
         ignoreNextNearBottom = false
     }
@@ -459,11 +491,18 @@ final class EPUBContinuousScrollCoordinator {
         let targetIndex = forward ? window.hi + 1 : window.lo - 1
 
         let body: EPUBChapterBody
-        do {
-            body = try await chapterBodyProvider(targetIndex)
-        } catch {
-            Self.log.error("chapter \(targetIndex) materialize failed: \(String(describing: error), privacy: .public)")
-            return // window unchanged
+        if forward, let cached = prefetchedBody, cached.spineIndex == targetIndex {
+            // Bug #347 round 2: the pre-materialized next chapter — skip the
+            // provider round-trip entirely (the fling-speed starvation half).
+            body = cached
+            prefetchedBody = nil
+        } else {
+            do {
+                body = try await chapterBodyProvider(targetIndex)
+            } catch {
+                Self.log.error("chapter \(targetIndex) materialize failed: \(String(describing: error), privacy: .public)")
+                return // window unchanged
+            }
         }
         // Stale: a mode-switch / reopen happened while we awaited the chapter.
         guard gen == generation else { return }
@@ -512,7 +551,11 @@ final class EPUBContinuousScrollCoordinator {
         // the guard's cumulative arithmetic for the multi-evict catch-up loop.
         var candidatePosition = 0
         var evictedPx = 0
-        while committed.span > targetSpan {
+        // Bug #347 round 2 facet 2: amortize the backlog drain — at most
+        // `maxEvictionsPerExtend` trims per extend, so a post-chain settle
+        // can never burst a dozen compensations into one frame (the jump).
+        while committed.span > targetSpan,
+              candidatePosition < Self.maxEvictionsPerExtend {
             guard gen == generation else { return } // stale → emit nothing, publish nothing
             // Bug #329 (round 4): NEVER evict while a pan gesture is active —
             // a forward eviction's `scrollTop -= h` compensation is overridden
@@ -585,7 +628,45 @@ final class EPUBContinuousScrollCoordinator {
             if forward { ignoreNextNearTop = true } else { ignoreNextNearBottom = true }
         }
         window = committed
+        // Bug #347 round 2: pre-materialize the chapter AFTER the one just
+        // appended, so the next boundary append is provider-free.
+        if forward, window.canExtendForward {
+            schedulePrefetch(of: window.hi + 1)
+        }
     }
+
+    /// Bug #347 round 2: background single-slot pre-materialization of the
+    /// next forward chapter. Gen-guarded; a stale or mismatched result is
+    /// dropped. Re-scheduling for an index already cached/in-flight is a
+    /// no-op so signal bursts don't refetch.
+    private func schedulePrefetch(of index: Int) {
+        guard index >= 0, index < window.spineCount else { return }
+        if prefetchedBody?.spineIndex == index { return }
+        if prefetchInFlightIndex == index { return }
+        prefetchTask?.cancel()
+        prefetchInFlightIndex = index
+        let gen = generation
+        prefetchTask = Task { [weak self] in
+            guard let self else { return }
+            let body = try? await self.chapterBodyProvider(index)
+            guard self.prefetchInFlightIndex == index else { return }
+            self.prefetchInFlightIndex = nil
+            guard let body, gen == self.generation, body.spineIndex == index else { return }
+            self.prefetchedBody = body
+        }
+    }
+
+    /// The spine index the in-flight prefetch targets (nil when idle).
+    private var prefetchInFlightIndex: Int?
+
+    /// Test seam: await the in-flight prefetch (if any) so unit tests can
+    /// assert the cache deterministically.
+    func awaitPrefetchForTesting() async {
+        await prefetchTask?.value
+    }
+
+    /// Test seam: the cached pre-materialized chapter's spine index.
+    var prefetchedSpineIndexForTesting: Int? { prefetchedBody?.spineIndex }
 
     /// The single spine index present in `before` but not `after` for a
     /// one-chapter trim (`after` drops exactly one end of `before`). `nil` if no

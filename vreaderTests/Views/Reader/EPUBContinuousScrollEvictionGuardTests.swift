@@ -335,11 +335,11 @@ struct EPUBContinuousScrollEvictionGuardTests {
         #expect(removed.isEmpty, "still no eviction during the gesture")
     }
 
-    /// Bug #347: the HARD cap remains as the signal-storm guard.
+    /// Bug #347: the HARD cap remains as the far-out memory guard.
     @MainActor
     @Test func pathologicalGesture_hardCapStopsAppends() async {
         let eval = RecordingEvaluator()
-        let coordinator = makeCoordinator(anchor: 0, spineCount: 60, maxSpan: 3, eval: eval)
+        let coordinator = makeCoordinator(anchor: 0, spineCount: 80, maxSpan: 3, eval: eval)
         await growWindowForward(coordinator, to: 2)
         let hard = 3 + EPUBContinuousScrollCoordinator.touchGrowthHardCapSlack
         for step in 0..<(hard + 6) {
@@ -352,6 +352,33 @@ struct EPUBContinuousScrollEvictionGuardTests {
         }
         #expect(coordinator.window.span <= hard,
                 "the hard cap bounds in-gesture growth (storm guard)")
+    }
+
+    /// Bug #347 round 2 (the device-confirmed stall): a HUMAN chained-fling
+    /// session reaches the OLD cap (maxSpan + 12 = 15 sections — the 2026-06-11
+    /// in-page sweep wedged at exactly span 15 for 18 straight flings, scrollTop
+    /// pinned at 30600 with below = 0). Appends must CONTINUE well past that
+    /// span: the in-gesture signal stream has no compensation writes, so the
+    /// oscillation storm the cap guarded cannot occur — only genuine travel
+    /// reaches here. The cap survives only as a far-out memory bound.
+    @MainActor
+    @Test func chainedFlings_appendsContinuePastTheOldCap() async {
+        let eval = RecordingEvaluator()
+        let coordinator = makeCoordinator(anchor: 0, spineCount: 80, maxSpan: 3, eval: eval)
+        await growWindowForward(coordinator, to: 2)
+        let oldCap = 3 + 12
+        for step in 0..<(oldCap + 10) {
+            let visible = 2 + step
+            await coordinator.handleBoundarySignal(signal(
+                visible: visible, bottom: true,
+                pxAbove: 3000 * (visible + 1), pxBelow: 100,
+                sectionHeights: Array(repeating: 3000, count: visible + 1),
+                touchActive: true))
+        }
+        #expect(coordinator.window.span > oldCap + 5,
+                "appends continue past the old span-15 cap — the round-2 stall")
+        #expect(EPUBContinuousScrollCoordinator.touchGrowthHardCapSlack >= 40,
+                "the memory guard sits far beyond any human chain")
     }
 
     /// The touchend report (touchActive false) drains the deferred eviction.
@@ -376,17 +403,18 @@ struct EPUBContinuousScrollEvictionGuardTests {
         #expect(!removed.isEmpty, "the deferred eviction ran after the touch ended")
     }
 
-    /// Bug #347 (Gate-4): after a chained-fling session grows the window all
-    /// the way to the HARD cap, the FIRST settled signal must drain the
-    /// ENTIRE backlog back to maxSpan (given ample trailing slack) — not one
-    /// chapter per signal.
+    /// Bug #347 round 2 facet 2 (the device-confirmed JUMP): the settle drain
+    /// is AMORTIZED — each settled signal trims at most
+    /// `maxEvictionsPerExtend` chapters, so stall-release is visually silent
+    /// (the 2026-06-11 sweep measured the one-shot drain moving scrollTop
+    /// 30600 → 1960 with a −262 px overshoot). The backlog converges to
+    /// maxSpan across the subsequent reading-pace signals.
     @MainActor
-    @Test func settleAfterHardCapGrowth_drainsTheWholeBacklog() async {
+    @Test func settleAfterChainGrowth_drainsAmortized() async {
         let eval = RecordingEvaluator()
         let coordinator = makeCoordinator(anchor: 0, spineCount: 60, maxSpan: 3, eval: eval)
         await growWindowForward(coordinator, to: 2)
-        let hard = 3 + EPUBContinuousScrollCoordinator.touchGrowthHardCapSlack
-        for step in 0..<(hard + 2) {
+        for step in 0..<10 {
             let visible = 2 + step
             await coordinator.handleBoundarySignal(signal(
                 visible: visible, bottom: true,
@@ -395,19 +423,32 @@ struct EPUBContinuousScrollEvictionGuardTests {
                 touchActive: true))
         }
         let grown = coordinator.window.span
-        #expect(grown == hard, "grew exactly to the hard cap")
+        #expect(grown > 3 + EPUBContinuousScrollCoordinator.maxEvictionsPerExtend + 1)
 
-        // First settled near-bottom signal with ample trailing slack.
+        // First settled near-bottom signal: trims at most the per-extend
+        // budget (plus the one fresh append's own trim allowance).
         await coordinator.handleBoundarySignal(signal(
             visible: coordinator.window.hi, bottom: true,
             pxAbove: 3000 * grown, pxBelow: 100,
             sectionHeights: Array(repeating: 3000, count: grown),
             touchActive: false))
+        let afterFirst = coordinator.window.span
+        #expect(grown + 1 - afterFirst <= EPUBContinuousScrollCoordinator.maxEvictionsPerExtend,
+                "one settled signal trims at most the amortization budget")
 
-        #expect(coordinator.window.span == 3,
-                "the whole backlog drains to maxSpan on the first settle — partial drains re-starve the next fling chain")
-        let removed = eval.evaluatedJS.filter { $0.contains(".remove()") }
-        #expect(removed.count >= hard - 3, "every deferred eviction ran")
+        // Subsequent settled signals converge the backlog to maxSpan.
+        var guardCount = 0
+        while coordinator.window.span > 3, guardCount < 30 {
+            guardCount += 1
+            let span = coordinator.window.span
+            await coordinator.handleBoundarySignal(signal(
+                visible: coordinator.window.hi, bottom: true,
+                pxAbove: 3000 * span, pxBelow: 100,
+                sectionHeights: Array(repeating: 3000, count: span),
+                touchActive: false))
+        }
+        #expect(coordinator.window.span <= 4,
+                "the backlog converges across reading-pace signals")
     }
 
     /// A backward (prepend) extend during an active touch is deferred entirely
@@ -619,5 +660,69 @@ struct EPUBContinuousScroll1pxSimulationTests {
         #expect(result.loRegressions == 0, "the window must never reload an evicted leading edge")
         #expect(result.maxSpine >= 6, "the sweep must actually cross ≥5 chapter boundaries")
         #expect(!result.desync, "the coordinator window and the DOM must never desync")
+    }
+}
+
+// MARK: - Bug #347 round 2: forward body pre-materialization
+
+@Suite("Bug #347 r2 — forward prefetch pipeline")
+@MainActor
+struct EPUBContinuousScrollPrefetchTests {
+
+    @MainActor
+    final class CountingProvider {
+        var calls: [Int] = []
+        func body(_ index: Int) -> EPUBChapterBody {
+            calls.append(index)
+            return EPUBChapterBody(
+                spineIndex: index, href: "ch\(index).xhtml",
+                bodyHTML: "<p>c\(index)</p>", scopedStyleHTML: "")
+        }
+    }
+
+    private func signal(visible: Int, bottom: Bool) -> EPUBScrollBoundarySignal {
+        EPUBScrollBoundarySignal(
+            visibleSpineIndex: visible, intraFraction: 0.5,
+            nearTopBoundary: false, nearBottomBoundary: bottom)
+    }
+
+    @Test func forwardExtendPreMaterializesAndConsumesTheNextChapter() async {
+        let provider = CountingProvider()
+        let coordinator = EPUBContinuousScrollCoordinator(
+            initialWindow: EPUBSpineWindow.initial(anchor: 0, spineCount: 20)!,
+            maxSpan: 3,
+            chapterBodyProvider: { provider.body($0) },
+            evaluate: { _ in })
+
+        // Boundary append of chapter 1 → afterwards chapter 2 pre-materializes.
+        await coordinator.handleBoundarySignal(signal(visible: 0, bottom: true))
+        #expect(coordinator.window.hi == 1)
+        await coordinator.awaitPrefetchForTesting()
+        #expect(coordinator.prefetchedSpineIndexForTesting == 2)
+
+        provider.calls = []
+        // The next boundary append (chapter 2) must consume the cache — the
+        // provider is NOT called for 2 again; only the follow-up prefetch (3).
+        await coordinator.handleBoundarySignal(signal(visible: 1, bottom: true))
+        #expect(coordinator.window.hi == 2)
+        await coordinator.awaitPrefetchForTesting()
+        #expect(!provider.calls.contains(2),
+                "the boundary append consumed the pre-materialized body")
+        #expect(coordinator.prefetchedSpineIndexForTesting == 3)
+    }
+
+    @Test func invalidateDiscardsThePrefetchedBody() async {
+        let provider = CountingProvider()
+        let coordinator = EPUBContinuousScrollCoordinator(
+            initialWindow: EPUBSpineWindow.initial(anchor: 0, spineCount: 20)!,
+            maxSpan: 3,
+            chapterBodyProvider: { provider.body($0) },
+            evaluate: { _ in })
+        await coordinator.handleBoundarySignal(signal(visible: 0, bottom: true))
+        await coordinator.awaitPrefetchForTesting()
+        #expect(coordinator.prefetchedSpineIndexForTesting != nil)
+        coordinator.invalidate()
+        #expect(coordinator.prefetchedSpineIndexForTesting == nil,
+                "a mode-switch/reopen discards the stale pre-materialized body")
     }
 }
