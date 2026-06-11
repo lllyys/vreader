@@ -371,9 +371,43 @@ struct EPUBContinuousScrollEvictionGuardTests {
             visible: 3, bottom: true,
             pxAbove: 9000, pxBelow: 100, sectionHeights: [3000, 3000, 3000, 3000],
             touchActive: false))
-        #expect(coordinator.window.span <= 4, "post-touch signals drain the eviction backlog")
+        #expect(coordinator.window.span == 3, "the one-chapter backlog drains exactly to maxSpan")
         let removed = eval.evaluatedJS.filter { $0.contains(".remove()") }
         #expect(!removed.isEmpty, "the deferred eviction ran after the touch ended")
+    }
+
+    /// Bug #347 (Gate-4): after a chained-fling session grows the window all
+    /// the way to the HARD cap, the FIRST settled signal must drain the
+    /// ENTIRE backlog back to maxSpan (given ample trailing slack) — not one
+    /// chapter per signal.
+    @MainActor
+    @Test func settleAfterHardCapGrowth_drainsTheWholeBacklog() async {
+        let eval = RecordingEvaluator()
+        let coordinator = makeCoordinator(anchor: 0, spineCount: 60, maxSpan: 3, eval: eval)
+        await growWindowForward(coordinator, to: 2)
+        let hard = 3 + EPUBContinuousScrollCoordinator.touchGrowthHardCapSlack
+        for step in 0..<(hard + 2) {
+            let visible = 2 + step
+            await coordinator.handleBoundarySignal(signal(
+                visible: visible, bottom: true,
+                pxAbove: 3000 * (visible + 1), pxBelow: 100,
+                sectionHeights: Array(repeating: 3000, count: visible + 1),
+                touchActive: true))
+        }
+        let grown = coordinator.window.span
+        #expect(grown == hard, "grew exactly to the hard cap")
+
+        // First settled near-bottom signal with ample trailing slack.
+        await coordinator.handleBoundarySignal(signal(
+            visible: coordinator.window.hi, bottom: true,
+            pxAbove: 3000 * grown, pxBelow: 100,
+            sectionHeights: Array(repeating: 3000, count: grown),
+            touchActive: false))
+
+        #expect(coordinator.window.span == 3,
+                "the whole backlog drains to maxSpan on the first settle — partial drains re-starve the next fling chain")
+        let removed = eval.evaluatedJS.filter { $0.contains(".remove()") }
+        #expect(removed.count >= hard - 3, "every deferred eviction ran")
     }
 
     /// A backward (prepend) extend during an active touch is deferred entirely
