@@ -279,6 +279,28 @@ extension TXTReaderContainerView {
 
     /// Dismiss the setup sheet without persisting changes and turn
     /// bilingual mode back off — the user opted out of first-enable.
+        /// Feature #99 WI-4 (Gate-4 r1 High): EVERY dismissal path — incl.
+    /// swipe-down, which never reaches Confirm/Cancel — funnels here via
+    /// the sheet's `onDismiss`. Idempotent: confirm/cancel run their
+    /// teardown first (mode already reset, `needsSetupSheet` cleared), so
+    /// this no-ops after them; a swipe-down arrives with the state still
+    /// dirty and gets the matching teardown.
+    func handleBilingualSheetDismiss() {
+        if case .edit = bilingualSetupMode {
+            // Edit swipe-down = Cancel: keep bilingual on, persist
+            // nothing, drop any in-flight cached-languages fetch.
+            bilingualSetupMode = .firstEnable
+            bilingualCachedLanguagesFetcher.invalidate()
+            return
+        }
+        // First-enable swipe-down = the existing Cancel semantics (the
+        // user never committed a configuration): turn bilingual back off.
+        if let vm = bilingualViewModel, vm.needsSetupSheet {
+            vm.dismissSetupSheet()
+            vm.setEnabled(false)
+        }
+    }
+
     func cancelBilingualSetup() {
         // Feature #99 WI-4: edit-frame cancel just dismisses — bilingual
         // stays ON and nothing persists (the first-enable path below
@@ -397,7 +419,8 @@ extension TXTReaderContainerView {
                 bilingualViewModel?.applyReTranslateResult(segments, for: unit)
             },
             showSetupSheet: $showBilingualSetupSheet,
-            sheetView: { AnyView(bilingualSetupSheetView) }
+            sheetView: { AnyView(bilingualSetupSheetView) },
+            onSheetDismiss: { handleBilingualSheetDismiss() }
         )
     }
 
@@ -457,6 +480,9 @@ struct TXTBilingualSurfacesModifier: ViewModifier {
     let onReTranslateApplied: (TranslationUnitID, [String]) -> Void
     @Binding var showSetupSheet: Bool
     let sheetView: () -> AnyView
+    /// Feature #99 WI-4 (Gate-4 r1 High): every dismissal path — incl.
+    /// swipe-down — funnels through the host's mode-aware teardown.
+    let onSheetDismiss: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -479,7 +505,8 @@ struct TXTBilingualSurfacesModifier: ViewModifier {
                 else { return }
                 onReTranslateApplied(unit, segments)
             }
-            .sheet(isPresented: $showSetupSheet) { sheetView() }
+            .sheet(isPresented: $showSetupSheet,
+                   onDismiss: onSheetDismiss) { sheetView() }
     }
 }
 #endif

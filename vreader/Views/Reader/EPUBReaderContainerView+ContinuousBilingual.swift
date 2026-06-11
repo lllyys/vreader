@@ -296,6 +296,9 @@ struct EPUBBilingualSurfacesModifier: ViewModifier {
     let onSectionEvicted: (Int) -> Void
     @Binding var showSetupSheet: Bool
     let sheetView: () -> AnyView
+    /// Feature #99 WI-4 (Gate-4 r1 High): every dismissal path — incl.
+    /// swipe-down — funnels through the host's mode-aware teardown.
+    let onSheetDismiss: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -351,7 +354,8 @@ struct EPUBBilingualSurfacesModifier: ViewModifier {
                 else { return }
                 onReTranslateApplied(unit, segments)
             }
-            .sheet(isPresented: $showSetupSheet) { sheetView() }
+            .sheet(isPresented: $showSetupSheet,
+                   onDismiss: onSheetDismiss) { sheetView() }
     }
 }
 #endif

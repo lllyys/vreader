@@ -356,7 +356,8 @@ struct FoliateBilingualContainerView: View {
         // `fingerprintKey` so a second open reader can't steal the call).
         // Observers live on the coordinator — no extra wiring is needed
         // here in the container.
-        .sheet(isPresented: $showBilingualSetupSheet) {
+        .sheet(isPresented: $showBilingualSetupSheet,
+               onDismiss: { handleBilingualSheetDismiss() }) {
             BilingualSetupSheetContainer(
                 theme: settingsStore?.theme ?? .paper,
                 state: $bilingualSetupState,
@@ -780,6 +781,28 @@ struct FoliateBilingualContainerView: View {
 
     /// Cancel path — dismiss the sheet and turn bilingual back off
     /// without persisting changes.
+        /// Feature #99 WI-4 (Gate-4 r1 High): EVERY dismissal path — incl.
+    /// swipe-down, which never reaches Confirm/Cancel — funnels here via
+    /// the sheet's `onDismiss`. Idempotent: confirm/cancel run their
+    /// teardown first (mode already reset, `needsSetupSheet` cleared), so
+    /// this no-ops after them; a swipe-down arrives with the state still
+    /// dirty and gets the matching teardown.
+    private func handleBilingualSheetDismiss() {
+        if case .edit = bilingualSetupMode {
+            // Edit swipe-down = Cancel: keep bilingual on, persist
+            // nothing, drop any in-flight cached-languages fetch.
+            bilingualSetupMode = .firstEnable
+            bilingualCachedLanguagesFetcher.invalidate()
+            return
+        }
+        // First-enable swipe-down = the existing Cancel semantics (the
+        // user never committed a configuration): turn bilingual back off.
+        if let vm = bilingualViewModel, vm.needsSetupSheet {
+            vm.dismissSetupSheet()
+            vm.setEnabled(false)
+        }
+    }
+
     private func cancelBilingualSetup() {
         // Feature #99 WI-4: edit-frame cancel just dismisses — bilingual
         // stays ON and nothing persists (the first-enable path below

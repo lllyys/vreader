@@ -199,6 +199,28 @@ extension ReadiumEPUBHost {
 
     /// Dismiss the setup sheet without persisting and turn bilingual back off —
     /// the user opted out of first-enable.
+        /// Feature #99 WI-4 (Gate-4 r1 High): EVERY dismissal path — incl.
+    /// swipe-down, which never reaches Confirm/Cancel — funnels here via
+    /// the sheet's `onDismiss`. Idempotent: confirm/cancel run their
+    /// teardown first (mode already reset, `needsSetupSheet` cleared), so
+    /// this no-ops after them; a swipe-down arrives with the state still
+    /// dirty and gets the matching teardown.
+    func handleBilingualSheetDismiss() {
+        if case .edit = bilingualSetupMode {
+            // Edit swipe-down = Cancel: keep bilingual on, persist
+            // nothing, drop any in-flight cached-languages fetch.
+            bilingualSetupMode = .firstEnable
+            bilingualCachedLanguagesFetcher.invalidate()
+            return
+        }
+        // First-enable swipe-down = the existing Cancel semantics (the
+        // user never committed a configuration): turn bilingual back off.
+        if let vm = bilingualViewModel, vm.needsSetupSheet {
+            vm.dismissSetupSheet()
+            vm.setEnabled(false)
+        }
+    }
+
     func cancelBilingualSetup() {
         // Feature #99 WI-4: edit-frame cancel just dismisses — bilingual
         // stays ON and nothing persists (the first-enable path below
@@ -297,7 +319,8 @@ extension ReadiumEPUBHost {
                     await bilingualCommander.setStyle(bilingualStyleCSS())
                 }
             }
-            .sheet(isPresented: $showBilingualSetupSheet) { bilingualSetupSheetView }
+            .sheet(isPresented: $showBilingualSetupSheet,
+                   onDismiss: { handleBilingualSheetDismiss() }) { bilingualSetupSheetView }
             .modifier(debugBilingualObserver)
     }
 
