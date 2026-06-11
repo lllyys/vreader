@@ -154,6 +154,9 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             // Bug #340: accent handles/caret — tintColor inherits down to the
             // lazily-created spread WKWebViews (#324's UITextView sibling).
             if let tint = selectionTintColor { navigator.view.tintColor = tint }
+            // Bug #348: no system scroll indicator on the reading surface —
+            // walk the navigator's spine webviews (private wrapping).
+            ReaderScrollIndicatorPolicy.hideIndicators(in: navigator.view)
             return navigator
         } catch {
             context.coordinator.log.error(
@@ -203,6 +206,10 @@ struct ReadiumNavigatorRepresentable: UIViewControllerRepresentable {
             if let tint = selectionTintColor, navigator.view.tintColor != tint {
                 navigator.view.tintColor = tint
             }
+            // Bug #348: spine webviews mount LAZILY — re-apply the
+            // no-indicator policy each update (idempotent + cheap), the
+            // same posture as the transparency re-apply below.
+            ReaderScrollIndicatorPolicy.hideIndicators(in: navigator.view)
             // The pref re-submit (theme/font/scroll) must run before the
             // container-view re-paint, since `submitPreferences` itself re-paints
             // the navigator view to `effectiveBackgroundColor`.

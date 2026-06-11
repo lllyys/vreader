@@ -66,6 +66,10 @@ struct PDFViewBridge: UIViewRepresentable {
         // Accessibility
         pdfView.accessibilityIdentifier = "pdfView"
 
+        // Bug #348: no system scroll indicator on the reading surface —
+        // PDFView wraps its scroller privately.
+        ReaderScrollIndicatorPolicy.hideIndicators(in: pdfView)
+
         // Bug #198: theme the PDFView gutter so Dark theme produces a
         // visibly dark background around the page, matching Sepia / Light
         // behavior (which previously only flipped the chrome bar).

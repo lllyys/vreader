@@ -319,6 +319,8 @@ struct EPUBWebViewBridge: UIViewRepresentable {
         // but this call site is not (representable-context plumbing is too deep to
         // mock) — deleting this line would silently re-introduce the free pan/zoom.
         Self.applyScrollLock(to: webView.scrollView)
+        // Bug #348: no system scroll indicator on the reading surface.
+        ReaderScrollIndicatorPolicy.hide(on: webView.scrollView)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         // Bug #163 wiring: keep this call. The seam is unit-tested in
         // EPUBWebViewBridgeSafeAreaInsetTests; deleting this line would

@@ -66,7 +66,12 @@ enum EPUBContinuousScrollJS {
             -webkit-overflow-scrolling: touch;
             height: 100vh; width: 100%; max-width: 100%;
             box-sizing: border-box; touch-action: pan-y;
+            /* Bug #348: the stitched window's overlay scrollbar tracks the
+               LOADED WINDOW, not the book (it jumps on every append/evict)
+               — the bottom scrubber is the designed progress affordance. */
+            scrollbar-width: none;
         }
+        #\(scrollRootID)::-webkit-scrollbar { display: none; width: 0; }
         #\(scrollRootID) img, #\(scrollRootID) video, #\(scrollRootID) table, #\(scrollRootID) pre {
             max-width: 100%; height: auto;
         }

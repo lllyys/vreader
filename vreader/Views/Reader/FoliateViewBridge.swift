@@ -121,6 +121,10 @@ struct FoliateViewBridge: UIViewRepresentable {
         #endif
         webView.navigationDelegate = coordinator
         webView.scrollView.isScrollEnabled = false
+        // Bug #348: no system scroll indicator on the reading surface
+        // (the foliate scrolled flow drives an in-page scroller; the
+        // native one stays hidden for both).
+        ReaderScrollIndicatorPolicy.hide(on: webView.scrollView)
         webView.accessibilityIdentifier = "foliateWebView"
 
         // Provide JS evaluator to coordinator

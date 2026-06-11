@@ -96,7 +96,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
         let textView = HighlightableTextView()
         textView.isEditable = false
         textView.isSelectable = true
-        textView.showsVerticalScrollIndicator = true
+        // Bug #348: no system scroll indicator on the reading surface —
+        // the bottom scrubber is the designed progress affordance.
+        textView.showsVerticalScrollIndicator = false
         textView.alwaysBounceVertical = true
         textView.delegate = context.coordinator
         // Bug #179: combine base typographic padding with the SwiftUI

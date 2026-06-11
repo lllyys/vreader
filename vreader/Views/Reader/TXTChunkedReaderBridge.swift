@@ -228,7 +228,8 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 800
         tableView.backgroundColor = config.backgroundColor
-        tableView.showsVerticalScrollIndicator = true
+        // Bug #348: no system scroll indicator on the reading surface.
+        tableView.showsVerticalScrollIndicator = false
         tableView.accessibilityIdentifier = "chunkedTextTableView"
         // Bug #179: lift the first chunk below the Dynamic Island. Setting
         // `contentInset.top` on the UITableView (not the per-cell inset)
