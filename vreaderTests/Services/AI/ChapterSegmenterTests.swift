@@ -156,7 +156,37 @@ struct ChapterSegmenterTests {
         }
     }
 
-    @Test func sentenceRanges_areOrderedAndNonOverlapping() {
+    // MARK: - Bug #344 Gate-4: unified blank-line definition
+
+    /// The translation side (`paragraphs`) and the display side
+    /// (`BilingualParagraphRanges.scan`) must COUNT identically for every
+    /// input — including blank lines made of Unicode whitespace outside
+    /// `[ \\t]` (U+3000 ideographic space, U+00A0 NBSP — common in CJK
+    /// files). Pre-#344 the regex splitter missed those, so the display
+    /// side counted MORE paragraphs and painted source-only.
+    @Test(arguments: [
+        "para one\nstill one\n\npara two",
+        "第一段。\n\u{3000}\n第二段。",
+        "first\n\u{00A0}\nsecond",
+        "one\r\n\r\ntwo\r\nstill two",
+        "single paragraph only",
+        "",
+        "\n\n\n",
+        "lead\n \t \ntrail",
+    ])
+    func paragraphs_countParityWithDisplayScanner(_ text: String) {
+        let paragraphs = ChapterSegmenter.paragraphs(in: text)
+        let ranges = BilingualParagraphRanges.scan(sourceText: text)
+        #expect(paragraphs.count == ranges.count,
+                "translation-side and display-side paragraph counts must agree")
+    }
+
+    @Test func paragraphs_ideographicSpaceBlankLine_splits() {
+        let text = "第一段。\n\u{3000}\n第二段。"
+        #expect(ChapterSegmenter.paragraphs(in: text) == ["第一段。", "第二段。"])
+    }
+
+        @Test func sentenceRanges_areOrderedAndNonOverlapping() {
         let text = "One. Two. Three. 四。五！"
         let ranges = ChapterSegmenter.sentenceRanges(in: text)
         #expect(ranges.count >= 4)

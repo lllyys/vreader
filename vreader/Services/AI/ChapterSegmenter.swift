@@ -24,21 +24,23 @@ enum ChapterSegmenter {
     /// more blank lines; a single line break inside a paragraph is a soft wrap
     /// and does not split. Each paragraph is trimmed; empty ones are dropped.
     static func paragraphs(in chapterText: String) -> [String] {
-        // Normalize line endings, then split on runs of >=2 newlines
-        // (a blank line — possibly with intervening whitespace).
-        let normalized = chapterText
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        let blankLineSplitter = try? NSRegularExpression(pattern: "\\n[ \\t]*\\n+")
-        let pieces: [String]
-        if let blankLineSplitter {
-            pieces = splitOnRegex(normalized, regex: blankLineSplitter)
-        } else {
-            pieces = normalized.components(separatedBy: "\n\n")
+        // Bug #344 (Gate-4 Medium): derive from the SAME range scanner the
+        // TXT/MD display side uses, so the blank-line definition can never
+        // diverge between the two sides of the 1:1 contract. The old regex
+        // split only on `\\n[ \\t]*\\n+`, while the display scanner treats ANY
+        // whitespace-only line (incl. U+3000 / U+00A0 — common in CJK
+        // files) as a separator — that divergence made the display side
+        // count MORE paragraphs than the translation side and paint
+        // source-only. Each scan range contains at least one
+        // non-whitespace character by construction, so trimming never
+        // yields an empty (and no filter is applied — a filter could
+        // re-introduce a count skew against the raw ranges).
+        let ns = chapterText as NSString
+        return BilingualParagraphRanges.scan(sourceText: chapterText).map {
+            ns.substring(with: NSRange(
+                location: $0.lowerBound, length: $0.upperBound - $0.lowerBound))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return pieces
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
     }
 
     /// Splits chapter text into sentences. CJK-aware via
@@ -103,18 +105,4 @@ enum ChapterSegmenter {
         return result
     }
 
-    /// Splits `text` on every match of `regex`, returning the gaps.
-    private static func splitOnRegex(_ text: String, regex: NSRegularExpression) -> [String] {
-        let nsText = text as NSString
-        let fullRange = NSRange(location: 0, length: nsText.length)
-        var pieces: [String] = []
-        var cursor = 0
-        for match in regex.matches(in: text, range: fullRange) {
-            let gap = NSRange(location: cursor, length: match.range.location - cursor)
-            pieces.append(nsText.substring(with: gap))
-            cursor = match.range.location + match.range.length
-        }
-        pieces.append(nsText.substring(from: cursor))
-        return pieces
-    }
 }
