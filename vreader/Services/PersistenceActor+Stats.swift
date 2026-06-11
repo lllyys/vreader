@@ -109,6 +109,20 @@ extension PersistenceActor {
         )
     }
 
+    /// Feature #101 WI-2a: the earliest session start for one book — the
+    /// "since <date>" half of Book details' "N sessions since Mar 2" sub
+    /// line. Filtered + sorted in the store with fetchLimit 1 (avoids the
+    /// O(history) all-sessions scan at sheet-open).
+    func firstSessionDate(forBookWithKey key: String) async throws -> Date? {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<ReadingSession>(
+            predicate: #Predicate { $0.bookFingerprintKey == key },
+            sortBy: [SortDescriptor(\.startedAt, order: .forward)]
+        )
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first?.startedAt
+    }
+
     func fetchAllReadingStats() async throws -> [ReadingStatsRecord] {
         let context = ModelContext(modelContainer)
         let rows = try context.fetch(FetchDescriptor<ReadingStats>())
