@@ -143,4 +143,35 @@ struct BilingualSetupSheetTests {
         #expect(state.languageKey == "Japanese")
         #expect(state.granularity == .sentence)
     }
+    // MARK: - Bug #344 (design #1646 S-C): dimmed Sentence control
+
+    @MainActor private func makeSheet(sentenceAvailable: Bool) -> BilingualSetupSheet {
+        BilingualSetupSheet(
+            theme: .paper,
+            state: .constant(.defaultValue),
+            engineDescriptor: BilingualEngineDescriptor(
+                configured: true, providerName: "Claude", subtitle: "configured"),
+            onConfirm: {},
+            onCancel: {},
+            onOpenSettings: {},
+            sentenceGranularityAvailable: sentenceAvailable
+        )
+    }
+
+    @Test("Sentence is selectable on formats that support it")
+    @MainActor func sentenceSelectable_whenAvailable() {
+        let sheet = makeSheet(sentenceAvailable: true)
+        #expect(sheet.isGranularitySelectable(.sentence))
+        #expect(sheet.isGranularitySelectable(.paragraph))
+        _ = sheet.body
+    }
+
+    @Test("Sentence dims (not selectable) on DOM-enumerate formats; Paragraph stays live")
+    @MainActor func sentenceDimmed_whenUnavailable() {
+        let sheet = makeSheet(sentenceAvailable: false)
+        #expect(!sheet.isGranularitySelectable(.sentence),
+                "the control dims rather than silently forcing .paragraph")
+        #expect(sheet.isGranularitySelectable(.paragraph))
+        _ = sheet.body
+    }
 }

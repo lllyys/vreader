@@ -8,6 +8,24 @@ import Testing
 import Foundation
 @testable import vreader
 
+@Suite("ChapterTranslationPrefetcher granularity gate (Bug #344)")
+struct PrefetcherGranularityGateTests {
+    @Test func sentenceHonored_whenSupported() {
+        #expect(ChapterTranslationPrefetcher.effectiveGranularity(
+            requested: .sentence, supportsSentenceGranularity: true) == .sentence)
+    }
+    @Test func sentenceDegrades_whenUnsupported() {
+        #expect(ChapterTranslationPrefetcher.effectiveGranularity(
+            requested: .sentence, supportsSentenceGranularity: false) == .paragraph)
+    }
+    @Test func paragraphAlwaysParagraph() {
+        #expect(ChapterTranslationPrefetcher.effectiveGranularity(
+            requested: .paragraph, supportsSentenceGranularity: true) == .paragraph)
+        #expect(ChapterTranslationPrefetcher.effectiveGranularity(
+            requested: .paragraph, supportsSentenceGranularity: false) == .paragraph)
+    }
+}
+
 @Suite("ChapterSegmenter")
 struct ChapterSegmenterTests {
 
@@ -108,5 +126,42 @@ struct ChapterSegmenterTests {
         let text = "Real sentence.\n\n\n"
         let result = ChapterSegmenter.sentences(in: text)
         #expect(result.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    }
+    // MARK: - Bug #344: sentenceRanges count-parity contract
+
+    /// `sentenceRanges` and `sentences` MUST agree in count AND content for
+    /// every input — the display interleave and the translation
+    /// segmentation pair 1:1 only because both walk the same enumeration.
+    @Test(arguments: [
+        "First sentence. Second sentence! Third?",
+        "One paragraph here.\n\nAnother paragraph. With two sentences.",
+        "无可奈何花落去。似曾相识燕归来。小园香径独徘徊。",
+        "Mixed CJK 句子。And English follows. 再来一句！",
+        "a sentence fragment with no period",
+        "Sentence one.   ",
+        "Real sentence.\n\n\n",
+        "",
+        "   \n\t  ",
+        "Quote: \u{201C}Stop.\u{201D} He left. 🙂 Emoji sentence.",
+    ])
+    func sentenceRanges_countAndContentParity(_ text: String) {
+        let sentences = ChapterSegmenter.sentences(in: text)
+        let ranges = ChapterSegmenter.sentenceRanges(in: text)
+        #expect(ranges.count == sentences.count, "count parity is the 1:1 inject contract")
+        let ns = text as NSString
+        for (range, sentence) in zip(ranges, sentences) {
+            let extracted = ns.substring(
+                with: NSRange(location: range.lowerBound, length: range.upperBound - range.lowerBound))
+            #expect(extracted == sentence, "trimmed range must extract exactly the trimmed sentence")
+        }
+    }
+
+    @Test func sentenceRanges_areOrderedAndNonOverlapping() {
+        let text = "One. Two. Three. 四。五！"
+        let ranges = ChapterSegmenter.sentenceRanges(in: text)
+        #expect(ranges.count >= 4)
+        for pair in zip(ranges, ranges.dropFirst()) {
+            #expect(pair.0.upperBound <= pair.1.lowerBound)
+        }
     }
 }

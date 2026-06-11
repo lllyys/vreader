@@ -129,6 +129,81 @@ struct BilingualDisplayPipelineTests {
         #expect(result.segmentMap.displayLength == 0)
     }
 
+    // MARK: - Bug #344: sentence granularity
+
+    /// Sentence mode interleaves a translation row after EACH sentence —
+    /// the user-reported "sentence translate mode isnt take effect".
+    @Test("Sentence granularity interleaves one row per sentence")
+    @MainActor func sentenceMode_rowPerSentence() {
+        let source = "First sentence. Second sentence! Third one?"
+        let vm = BilingualReadingViewModel(
+            bookFingerprintKey: "test-key", perBookBaseURL: tempBaseURL())
+        vm.setEnabled(true)
+        vm.setGranularity(.sentence)
+        let unit = TranslationUnitID(kind: .txtChapterIndex, value: "0")
+        // 3 sentence translations — counts pair against sentenceRanges.
+        vm.setTranslations(["第一句。", "第二句！", "第三句？"], for: unit)
+
+        let result = BilingualDisplayPipeline.makeDisplay(
+            chapterSourceText: source,
+            unit: unit,
+            viewModel: vm
+        )
+        let synthetic = result.segmentMap.segments.filter {
+            if case .synthetic = $0 { return true }; return false
+        }
+        #expect(synthetic.count == 3, "one interlinear row per sentence")
+        #expect(result.attributedString.string.contains("第二句！"))
+        // The row lands directly after its sentence, before the next one.
+        let display = result.attributedString.string
+        let firstRow = display.range(of: "第一句。")
+        let secondSentence = display.range(of: "Second sentence!")
+        #expect(firstRow != nil && secondSentence != nil
+                && firstRow!.upperBound <= secondSentence!.lowerBound)
+    }
+
+    /// Paragraph mode is byte-identical to pre-#344 behavior — the
+    /// granularity switch must not disturb the default path.
+    @Test("Paragraph granularity unchanged: one row per paragraph")
+    @MainActor func paragraphMode_rowPerParagraph() {
+        let source = "Para one. Two sentences here.\n\nPara two."
+        let vm = BilingualReadingViewModel(
+            bookFingerprintKey: "test-key", perBookBaseURL: tempBaseURL())
+        vm.setEnabled(true)
+        let unit = TranslationUnitID(kind: .txtChapterIndex, value: "0")
+        vm.setTranslations(["第一段。", "第二段。"], for: unit)
+
+        let result = BilingualDisplayPipeline.makeDisplay(
+            chapterSourceText: source, unit: unit, viewModel: vm)
+        let synthetic = result.segmentMap.segments.filter {
+            if case .synthetic = $0 { return true }; return false
+        }
+        #expect(synthetic.count == 2, "paragraph rows, not sentence rows")
+    }
+
+    /// A count mismatch in sentence mode (e.g. stale paragraph-count cache
+    /// rows after a granularity switch) paints source-only — never a wrong
+    /// pairing (the #266 invariant, now exercised at sentence granularity).
+    @Test("Sentence mode with mismatched counts renders source-only")
+    @MainActor func sentenceMode_countMismatch_sourceOnly() {
+        let source = "First sentence. Second sentence! Third one?"
+        let vm = BilingualReadingViewModel(
+            bookFingerprintKey: "test-key", perBookBaseURL: tempBaseURL())
+        vm.setEnabled(true)
+        vm.setGranularity(.sentence)
+        let unit = TranslationUnitID(kind: .txtChapterIndex, value: "0")
+        // 1 paragraph-shaped translation vs 3 sentences → mismatch.
+        vm.setTranslations(["一整段的翻译。"], for: unit)
+
+        let result = BilingualDisplayPipeline.makeDisplay(
+            chapterSourceText: source, unit: unit, viewModel: vm)
+        let synthetic = result.segmentMap.segments.filter {
+            if case .synthetic = $0 { return true }; return false
+        }
+        #expect(synthetic.isEmpty, "mismatch → source-only, never mispaired")
+        #expect(!result.attributedString.string.contains("一整段的翻译。"))
+    }
+
     // MARK: - helpers
 
     private func tempBaseURL() -> URL {

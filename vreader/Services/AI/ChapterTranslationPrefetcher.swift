@@ -79,6 +79,27 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
     /// self-heal (TXT/MD/PDF/Foliate) keep the strict staleness guard.
     var acceptsCountMismatchedRows: Bool = false
 
+    /// Bug #344: when true, a `.sentence` granularity request is honored —
+    /// the format's renderer can hold the 1:1 inject contract at sentence
+    /// level (TXT/MD: both sides segment through `ChapterSegmenter`, so the
+    /// counts agree by construction). Default false: formats whose render
+    /// side enumerates DOM blocks (legacy EPUB, Readium, Foliate) force
+    /// `.paragraph` — sentence segments would outnumber blocks and the
+    /// inject would mispair. Those formats render the setup sheet's
+    /// Sentence segment in the DESIGNED dimmed state instead of silently
+    /// ignoring the pick (design #1646, S-C fallback).
+    var supportsSentenceGranularity: Bool = false
+
+    /// Bug #344: the granularity actually sent to the service — `.sentence`
+    /// only when BOTH requested and supported; everything else degrades to
+    /// `.paragraph` (the DOM-enumerate formats' safe default).
+    static func effectiveGranularity(
+        requested: TranslationGranularity,
+        supportsSentenceGranularity: Bool
+    ) -> TranslationGranularity {
+        (supportsSentenceGranularity && requested == .sentence) ? .sentence : .paragraph
+    }
+
     func translatedSegments(
         for unit: TranslationUnitID,
         targetLanguage: String,
@@ -87,16 +108,15 @@ struct ChapterTranslationPrefetcher: ChapterPrefetching, Sendable {
         // Codex Gate-4 audit finding [2] — for EPUB, the renderer
         // walks DOM block elements (`<p>` / `<li>` / `<blockquote>`)
         // and injects one translation per block. Sentence granularity
-        // would produce MORE segments than blocks, so the inject
-        // path would map the first sentences as if they were full
-        // paragraphs and drop the rest. Force `.paragraph` regardless
-        // of the VM's granularity setting — the setup sheet's
-        // sentence option becomes meaningful only when a per-format
-        // sentence-aware enumerator lands (currently no format has
-        // one). Until then, EPUB stays paragraph-aligned so the
-        // 1:1 block↔segment contract holds.
-        _ = granularity  // explicitly ignored
-        let effectiveGranularity: TranslationGranularity = .paragraph
+        // would produce MORE segments than blocks, so the inject path
+        // would mispair. Bug #344: formats whose render side segments
+        // through `ChapterSegmenter` (TXT/MD) hold the 1:1 contract at
+        // sentence level by construction and opt in via
+        // `supportsSentenceGranularity`; DOM-enumerating formats keep
+        // forcing `.paragraph` and dim the control instead (#1646 S-C).
+        let effectiveGranularity = Self.effectiveGranularity(
+            requested: granularity,
+            supportsSentenceGranularity: supportsSentenceGranularity)
         Self.log.debug("prefetch start: unit \(String(describing: unit), privacy: .public)")
 
         // Source text for the unit (needed for the cache count check + the

@@ -138,6 +138,12 @@ struct BilingualSetupSheet: View {
     /// route to AI Settings.
     let onOpenSettings: () -> Void
 
+    /// Bug #344 (design #1646 S-C): whether this book's format can honor
+    /// sentence granularity. When false, the Sentence segment renders at
+    /// 45% opacity, ignores taps, and an info footnote explains why —
+    /// the control dims rather than silently forcing `.paragraph`.
+    var sentenceGranularityAvailable: Bool = true
+
     /// Sheet accessibility identifier for XCUITest + verify-cron.
     static let accessibilityIdentifier = "bilingualSetupSheet"
 
@@ -212,7 +218,10 @@ struct BilingualSetupSheet: View {
             BilingualSectionLabel(theme: theme, text: "Granularity")
             HStack(spacing: 0) {
                 ForEach(BilingualSetupSheetState.availableGranularities, id: \.self) { option in
-                    Button(action: { state.granularity = option }) {
+                    Button(action: {
+                        guard isGranularitySelectable(option) else { return }
+                        state.granularity = option
+                    }) {
                         VStack(spacing: 2) {
                             Text(option.label)
                                 .font(.system(size: 13, weight: .semibold))
@@ -225,8 +234,12 @@ struct BilingualSetupSheet: View {
                         .padding(.vertical, 10)
                         .background(granularityCellBackground(selected: state.granularity == option))
                         .contentShape(Rectangle())
+                        // Design #1646 S-C: the unavailable segment dims to
+                        // 45% — visible, not selectable.
+                        .opacity(isGranularitySelectable(option) ? 1.0 : 0.45)
                     }
                     .buttonStyle(.plain)
+                    .disabled(!isGranularitySelectable(option))
                     .accessibilityIdentifier("bilingualGranularity_\(option.rawValue)")
                 }
             }
@@ -238,7 +251,26 @@ struct BilingualSetupSheet: View {
                         : Color.black.opacity(0.05)
                 )
             )
+            if !sentenceGranularityAvailable {
+                // Design #1646 S-C: the info footnote under the control.
+                HStack(alignment: .top, spacing: 7) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(theme.subColor))
+                    Text("Sentence mode isn\u{2019}t available for this book\u{2019}s format yet.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Color(theme.subColor))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("bilingualGranularityUnavailableFootnote")
+            }
         }
+    }
+
+    /// Bug #344: a granularity option is selectable unless it is `.sentence`
+    /// on a format that can't hold the sentence-level inject contract.
+    func isGranularitySelectable(_ option: TranslationGranularity) -> Bool {
+        option != .sentence || sentenceGranularityAvailable
     }
 
     /// Selected-vs-not surface — segmented control style.

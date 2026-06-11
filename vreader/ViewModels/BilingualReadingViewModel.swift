@@ -186,10 +186,14 @@ final class BilingualReadingViewModel {
         postDidChange()
     }
 
-    /// Sets the segmentation granularity and persists it.
+    /// Sets the segmentation granularity and persists it. Bug #344: the
+    /// in-memory unit cache is granularity-shaped (one entry per paragraph
+    /// vs per sentence) — clear it so a stale-count array can never reach
+    /// the renderer mid-switch; the prefetch re-fills at the new shape.
     func setGranularity(_ newGranularity: TranslationGranularity) {
         guard newGranularity != granularity else { return }
         granularity = newGranularity
+        translationsByUnit = [:]
         resetTriggerState()
         persist()
         postDidChange()

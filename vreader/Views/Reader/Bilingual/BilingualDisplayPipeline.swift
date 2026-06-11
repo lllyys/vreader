@@ -75,11 +75,27 @@ enum BilingualDisplayPipeline {
             )
         }
 
-        // On-path: scan paragraphs + interleave translations.
-        let paragraphRanges = BilingualParagraphRanges.scan(sourceText: chapterSourceText)
+        // On-path: scan ranges per the book's granularity + interleave.
+        // Bug #344: sentence mode scans sentence ranges through the SAME
+        // segmenter the translation side uses, so counts pair 1:1 by
+        // construction; the renderer's 1:1-or-nothing guard stays the
+        // fail-safe for residual divergence.
+        let ranges = scanRanges(
+            sourceText: chapterSourceText, granularity: viewModel.granularity)
+        // Bug #344 + the #266 invariant at this layer: the renderer pairs by
+        // index, so a count divergence (e.g. paragraph-shaped translations
+        // surviving a granularity switch) must paint source-only here —
+        // never a wrong pairing.
+        guard ranges.count == translations.count else {
+            return BilingualTextRenderer.render(
+                sourceText: chapterSourceText,
+                sourceParagraphRanges: [],
+                translatedSegments: nil
+            )
+        }
         return BilingualTextRenderer.render(
             sourceText: chapterSourceText,
-            sourceParagraphRanges: paragraphRanges,
+            sourceParagraphRanges: ranges,
             translatedSegments: translations
         )
     }
@@ -108,14 +124,35 @@ enum BilingualDisplayPipeline {
                 segmentMap: BilingualDisplaySegmentMap.identity(sourceLength: sourceLen)
             )
         }
-        let paragraphRanges = BilingualParagraphRanges.scan(
-            sourceText: sourceAttributed.string
-        )
+        let ranges = scanRanges(
+            sourceText: sourceAttributed.string, granularity: viewModel.granularity)
+        // Same 1:1-or-nothing guard as makeDisplay (Bug #344 / #266).
+        guard ranges.count == translations.count else {
+            return BilingualAttributedStringComposer.Result(
+                attributedString: sourceAttributed,
+                segmentMap: BilingualDisplaySegmentMap.identity(sourceLength: sourceLen)
+            )
+        }
         return BilingualAttributedStringComposer.compose(
             sourceAttributed: sourceAttributed,
-            sourceParagraphRanges: paragraphRanges,
+            sourceParagraphRanges: ranges,
             translatedSegments: translations
         )
+    }
+
+    /// Bug #344: the granularity-aware range scanner — paragraph ranges via
+    /// `BilingualParagraphRanges`, sentence ranges via
+    /// `ChapterSegmenter.sentenceRanges` (the count-parity twin of the
+    /// translation side's `sentences(in:)`).
+    static func scanRanges(
+        sourceText: String, granularity: TranslationGranularity
+    ) -> [Range<Int>] {
+        switch granularity {
+        case .paragraph:
+            return BilingualParagraphRanges.scan(sourceText: sourceText)
+        case .sentence:
+            return ChapterSegmenter.sentenceRanges(in: sourceText)
+        }
     }
 }
 #endif

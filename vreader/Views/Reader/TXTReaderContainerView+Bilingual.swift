@@ -69,12 +69,15 @@ extension TXTReaderContainerView {
             store: ChapterTranslationStore.shared,
             promptVersion: bilingualPromptVersion
         )
+        // Bug #344: TXT/MD render through `ChapterSegmenter` on BOTH sides,
+        // so the 1:1 inject contract holds at sentence level by construction.
         return ChapterTranslationPrefetcher(
             bookFingerprintKey: bookFingerprintKey,
             textProvider: textProvider,
             translationService: service,
             aiService: aiService,
-            style: .natural
+            style: .natural,
+            supportsSentenceGranularity: true
         )
     }
 

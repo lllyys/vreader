@@ -33,6 +33,9 @@ struct BilingualSetupSheetContainer: View {
     let engineDescriptor: BilingualEngineDescriptor
     let onConfirm: () -> Void
     let onCancel: () -> Void
+    /// Bug #344 (design #1646): threads the per-format sentence-granularity
+    /// capability into the sheet's dim-or-selectable control state.
+    let sentenceGranularityAvailable: Bool
 
     /// Owns the AI-providers VM + the push/activation transitions. Built once
     /// from the `onConfigured` init param (which fires when a provider becomes
@@ -47,13 +50,15 @@ struct BilingualSetupSheetContainer: View {
         engineDescriptor: BilingualEngineDescriptor,
         onConfirm: @escaping () -> Void,
         onCancel: @escaping () -> Void,
-        onConfigured: @escaping () async -> Void
+        onConfigured: @escaping () async -> Void,
+        sentenceGranularityAvailable: Bool = true
     ) {
         self.theme = theme
         self._state = state
         self.engineDescriptor = engineDescriptor
         self.onConfirm = onConfirm
         self.onCancel = onCancel
+        self.sentenceGranularityAvailable = sentenceGranularityAvailable
         _flow = State(initialValue: ReaderAIProvidersFlow(onConfigured: onConfigured))
     }
 
@@ -66,7 +71,8 @@ struct BilingualSetupSheetContainer: View {
                 engineDescriptor: engineDescriptor,
                 onConfirm: onConfirm,
                 onCancel: onCancel,
-                onOpenSettings: { flow.openProviders() }
+                onOpenSettings: { flow.openProviders() },
+                sentenceGranularityAvailable: sentenceGranularityAvailable
             )
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $flow.showingProviders) {

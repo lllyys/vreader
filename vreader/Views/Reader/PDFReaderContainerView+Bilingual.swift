@@ -294,7 +294,10 @@ extension PDFReaderContainerView {
             // Feature #81: "Set up" / "Change…" pushes the scoped AI Providers
             // list (handled inside the container); on configure it refreshes
             // this strip + pops back.
-            onConfigured: { await bilingualViewModel?.refreshAIConfigured() }
+            onConfigured: { await bilingualViewModel?.refreshAIConfigured() },
+            // Bug #344 (#1646 S-C): the PDF panel renders whole-unit text —
+            // no per-sentence inject surface; the control dims.
+            sentenceGranularityAvailable: false
         )
         // Bug #301: re-resolve live AI readiness each time the sheet
         // appears, so the engine strip is truthful even if AI settings
