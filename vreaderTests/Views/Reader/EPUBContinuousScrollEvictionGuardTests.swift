@@ -711,6 +711,32 @@ struct EPUBContinuousScrollPrefetchTests {
         #expect(coordinator.prefetchedSpineIndexForTesting == 3)
     }
 
+    @Test func invalidateClearsTheInFlightIndexSoTheSameChapterReschedules() async {
+        // r2 audit Medium: invalidate() while a prefetch is IN FLIGHT must
+        // clear the in-flight marker, or the reopened session can never
+        // re-schedule that same next chapter (the latency mitigation lost).
+        let provider = CountingProvider()
+        let coordinator = EPUBContinuousScrollCoordinator(
+            initialWindow: EPUBSpineWindow.initial(anchor: 0, spineCount: 20)!,
+            maxSpan: 3,
+            chapterBodyProvider: { provider.body($0) },
+            evaluate: { _ in })
+        await coordinator.handleBoundarySignal(signal(visible: 0, bottom: true))
+        coordinator.invalidate()   // prefetch for 2 may be in flight
+        // The marker clears IMMEDIATELY — not only when the cancelled task
+        // eventually resumes (a slow provider would otherwise swallow the
+        // same chapter's re-schedule for its whole flight).
+        #expect(coordinator.prefetchInFlightIndexForTesting == nil)
+        await coordinator.awaitPrefetchForTesting()
+        #expect(coordinator.prefetchedSpineIndexForTesting == nil)
+
+        // The rebuilt session extends again — chapter 2's prefetch must
+        // re-schedule (NOT be swallowed by a stale in-flight marker).
+        await coordinator.handleBoundarySignal(signal(visible: 1, bottom: true))
+        await coordinator.awaitPrefetchForTesting()
+        #expect(coordinator.prefetchedSpineIndexForTesting != nil)
+    }
+
     @Test func invalidateDiscardsThePrefetchedBody() async {
         let provider = CountingProvider()
         let coordinator = EPUBContinuousScrollCoordinator(

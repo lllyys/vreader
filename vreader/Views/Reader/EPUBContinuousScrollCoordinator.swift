@@ -196,6 +196,8 @@ final class EPUBContinuousScrollCoordinator {
         prefetchTask?.cancel()
         prefetchTask = nil
         prefetchedBody = nil
+        prefetchInFlightIndex = nil  // r2 audit Medium: a stale in-flight
+        // index would no-op the SAME chapter's re-schedule after a reopen.
         ignoreNextNearTop = false      // Bug #329: a reopen carries no pending echo.
         ignoreNextNearBottom = false
     }
@@ -667,6 +669,10 @@ final class EPUBContinuousScrollCoordinator {
 
     /// Test seam: the cached pre-materialized chapter's spine index.
     var prefetchedSpineIndexForTesting: Int? { prefetchedBody?.spineIndex }
+
+    /// Test seam: the in-flight prefetch's target index (nil when idle) —
+    /// pins that `invalidate()` clears it immediately (r2 audit Medium).
+    var prefetchInFlightIndexForTesting: Int? { prefetchInFlightIndex }
 
     /// The single spine index present in `before` but not `after` for a
     /// one-chapter trim (`after` drops exactly one end of `before`). `nil` if no
