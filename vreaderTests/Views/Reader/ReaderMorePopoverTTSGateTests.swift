@@ -77,7 +77,7 @@ struct ReaderMorePopoverTTSGateTests {
         // gated on `bilingualOn` (default `false`) so it stays out
         // of the default visible set.
         let rows = ReaderMoreMenuRow.visibleRows(for: nil)
-        let expected = ReaderMoreMenuRow.allCases.filter { $0 != .reTranslateChapter }
+        let expected = ReaderMoreMenuRow.allCases.filter { $0 != .reTranslateChapter && $0 != .translationSettings }
         #expect(rows == expected)
     }
 
@@ -90,7 +90,7 @@ struct ReaderMorePopoverTTSGateTests {
         let caps = FormatCapabilities.capabilities(for: .pdf) // no `.tts`
         let rows = ReaderMoreMenuRow.visibleRows(for: caps)
         for row in ReaderMoreMenuRow.allCases
-        where row != .readAloud && row != .reTranslateChapter {
+        where row != .readAloud && row != .reTranslateChapter && row != .translationSettings {
             #expect(
                 rows.contains(row),
                 "Expected \(row) to survive the TTS gate"
@@ -108,13 +108,14 @@ struct ReaderMorePopoverTTSGateTests {
         // minus that row plus whatever the TTS gate filters out.
         let withTTS = ReaderMoreMenuRow.visibleRows(for: [.tts])
         let expectedWithTTS = ReaderMoreMenuRow.allCases.filter {
-            $0 != .reTranslateChapter
+            $0 != .reTranslateChapter && $0 != .translationSettings
         }
         #expect(withTTS == expectedWithTTS)
 
         let withoutTTS = ReaderMoreMenuRow.visibleRows(for: [])
         let expected = ReaderMoreMenuRow.allCases.filter {
             $0 != .readAloud && $0 != .reTranslateChapter
+                && $0 != .translationSettings
         }
         #expect(withoutTTS == expected)
     }
@@ -176,7 +177,7 @@ struct ReaderMorePopoverTTSGateTests {
         // row. Feature #56 WI-8: `.reTranslateChapter` is gated on
         // bilingual state (`.off` by default in `makePopover`) so it
         // stays out of the visible set.
-        let expected = ReaderMoreMenuRow.allCases.filter { $0 != .reTranslateChapter }
+        let expected = ReaderMoreMenuRow.allCases.filter { $0 != .reTranslateChapter && $0 != .translationSettings }
         #expect(makePopover(capabilities: nil).resolvedRows == expected)
     }
 }

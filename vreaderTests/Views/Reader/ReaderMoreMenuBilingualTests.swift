@@ -112,7 +112,10 @@ struct ReaderMoreMenuBilingualTests {
             Issue.record("expected both rows in visible set")
             return
         }
-        #expect(rtIdx == biIdx + 1)
+        // Feature #99: the Translation settings row sits between the
+        // toggle and re-translate rows inside the cluster.
+        #expect(rtIdx == biIdx + 2)
+        #expect(rows.firstIndex(of: .translationSettings) == biIdx + 1)
     }
 
     @Test("visibleRows preserves declared order with bilingualOn=false")

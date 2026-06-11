@@ -49,6 +49,11 @@ struct ReaderTopChrome: View {
     /// configured / transient host state) suppresses the pill even
     /// when `bilingualActive` is `true`.
     let bilingualLanguage: String?
+    /// Feature #99 WI-3: tap handler for the bilingual pill — the
+    /// secondary re-entry to the translation settings. When non-nil
+    /// the chrome wraps the (still presentational) pill in a Button
+    /// with the designed press state; nil keeps today's static pill.
+    let onBilingualPillTap: (() -> Void)?
     let onBack: () -> Void
     let onSearch: () -> Void
     let onBookmark: () -> Void
@@ -66,6 +71,7 @@ struct ReaderTopChrome: View {
         moreActive: Bool,
         bilingualActive: Bool = false,
         bilingualLanguage: String? = nil,
+        onBilingualPillTap: (() -> Void)? = nil,
         onBack: @escaping () -> Void,
         onSearch: @escaping () -> Void,
         onBookmark: @escaping () -> Void,
@@ -77,6 +83,7 @@ struct ReaderTopChrome: View {
         self.moreActive = moreActive
         self.bilingualActive = bilingualActive
         self.bilingualLanguage = bilingualLanguage
+        self.onBilingualPillTap = onBilingualPillTap
         self.onBack = onBack
         self.onSearch = onSearch
         self.onBookmark = onBookmark
@@ -183,10 +190,21 @@ struct ReaderTopChrome: View {
                 bilingualActive: bilingualActive,
                 bilingualLanguage: bilingualLanguage
             ), let resolvedKey = bilingualLanguage {
-                BilingualPill(
+                let pill = BilingualPill(
                     theme: theme,
                     language: BilingualLanguage.findOrDefault(key: resolvedKey).key
                 )
+                // Feature #99: the pill is the secondary re-entry to the
+                // translation settings — a Button with the designed
+                // press state when the host wires a handler; static
+                // (pre-#99 render) when it doesn't.
+                if let onBilingualPillTap {
+                    Button(action: onBilingualPillTap) { pill }
+                        .buttonStyle(BilingualPillButtonStyle(theme: theme))
+                        .accessibilityIdentifier("readerBilingualPillButton")
+                } else {
+                    pill
+                }
             }
         }
     }
@@ -253,5 +271,32 @@ struct ReaderTopChrome: View {
         }
         .accessibilityLabel(label)
         .accessibilityIdentifier(slot.accessibilityIdentifier)
+    }
+}
+
+/// Feature #99: the bilingual pill's press state (design
+/// `BSBilingualPill` pressed) — accent fill at hex-33 alpha (20%) +
+/// a 2pt ring at hex-55 alpha (33%) while the finger is down; the
+/// pill's own hex-1a (10%) background shows through at rest.
+struct BilingualPillButtonStyle: ButtonStyle {
+    let theme: ReaderThemeV2
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                Capsule().fill(
+                    configuration.isPressed
+                        ? Color(theme.accentColor).opacity(0.20)
+                        : Color.clear
+                )
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    configuration.isPressed
+                        ? Color(theme.accentColor).opacity(0.33)
+                        : Color.clear,
+                    lineWidth: 2
+                )
+            )
     }
 }

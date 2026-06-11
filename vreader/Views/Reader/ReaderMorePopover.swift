@@ -63,6 +63,15 @@ struct ReaderMorePopover: View {
     /// `BilingualReadingViewModel.isEnabled` (plus a feature-flag /
     /// AI-provider availability check for `.unavailable`).
     let bilingualState: BilingualRowState
+    /// Feature #99 WI-3: display context for the bilingual cluster's
+    /// settings row sub-line. Presentation-only pass-through — the
+    /// container builds it (Gate-2 H2 seam). nil renders no sub-line.
+    let bilingualContext: ReaderMoreMenuBilingualContext?
+    /// Feature #99 WI-3: the open book's fingerprint key, attached to
+    /// every row-tap notification's userInfo so keyed observers (the
+    /// `.readerMoreTranslationSettings` contract) can filter. nil
+    /// (previews / legacy tests) posts no payload.
+    let bookFingerprintKey: String?
     /// Top inset (points) at which the popover floats — passed from
     /// the host so the popover clears the top chrome. The design's
     /// `top: 92` baseline is for the prototype's fixed-height chrome;
@@ -90,6 +99,8 @@ struct ReaderMorePopover: View {
         autoTurnInterval: Double,
         formatCapabilities: FormatCapabilities?,
         bilingualState: BilingualRowState = .off,
+        bilingualContext: ReaderMoreMenuBilingualContext? = nil,
+        bookFingerprintKey: String? = nil,
         topInset: CGFloat,
         onClose: @escaping () -> Void
     ) {
@@ -98,6 +109,8 @@ struct ReaderMorePopover: View {
         self.autoTurnOn = autoTurnOn
         self.autoTurnInterval = autoTurnInterval
         self.formatCapabilities = formatCapabilities
+        self.bilingualContext = bilingualContext
+        self.bookFingerprintKey = bookFingerprintKey
         self.bilingualState = bilingualState
         self.topInset = topInset
         self.onClose = onClose
@@ -154,7 +167,18 @@ struct ReaderMorePopover: View {
         let dividerAnchor = ReaderMoreMenuRow.dividerAnchor(in: rows)
         return VStack(spacing: 0) {
             ForEach(rows, id: \.self) { row in
-                rowButton(row)
+                // Feature #99: when the settings row is visible, it and
+                // the bilingual toggle render inside ONE accent-tinted
+                // cluster group (design BSMorePopover) — the settings
+                // row is skipped in the flat loop and drawn by the
+                // cluster at the bilingual row's position.
+                if row == .translationSettings {
+                    EmptyView()
+                } else if row == .bilingual, rows.contains(.translationSettings) {
+                    bilingualClusterGroup
+                } else {
+                    rowButton(row)
+                }
                 if let anchor = dividerAnchor, row == anchor {
                     divider
                 }
@@ -205,6 +229,31 @@ struct ReaderMorePopover: View {
             .padding(.vertical, 4)
     }
 
+    // MARK: - Bilingual cluster (feature #99)
+
+    /// The accent-tinted group holding the bilingual toggle row + the
+    /// Translation settings row (design `BSMorePopover`: radius 12,
+    /// accent at ~8%/5% dark/light, inset hairline from x≈54 — the
+    /// icon-chip gutter).
+    private var bilingualClusterGroup: some View {
+        VStack(spacing: 0) {
+            rowButton(.bilingual)
+            Color(theme.ruleColor)
+                .frame(height: 0.5)
+                .padding(.leading, 54)
+                .padding(.trailing, 14)
+            rowButton(.translationSettings)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12).fill(
+                Color(theme.accentColor).opacity(theme.isDark ? 0.08 : 0.05)
+            )
+        )
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .accessibilityIdentifier("readerMoreBilingualCluster")
+    }
+
     // MARK: - Rows
 
     private func rowButton(_ row: ReaderMoreMenuRow) -> some View {
@@ -217,13 +266,18 @@ struct ReaderMorePopover: View {
             ttsPlaying: ttsPlaying,
             autoTurnOn: autoTurnOn,
             autoTurnInterval: autoTurnInterval,
-            bilingualState: bilingualState
+            bilingualState: bilingualState,
+            bilingualContext: bilingualContext
         )
         let muted = isMutedRow(row)
         return Button {
             // Post first, then dismiss — the host's notification
             // observer and the popover teardown are independent.
-            NotificationCenter.default.post(name: row.notification, object: nil)
+            // Feature #99: the book key rides every row post so keyed
+            // observers (`.readerMoreTranslationSettings`) can filter.
+            let userInfo: [String: Any]? = bookFingerprintKey.map { ["fingerprintKey": $0] }
+            NotificationCenter.default.post(
+                name: row.notification, object: nil, userInfo: userInfo)
             onClose()
         } label: {
             HStack(spacing: 12) {

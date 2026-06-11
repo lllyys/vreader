@@ -32,6 +32,12 @@ enum ReaderMoreMenuEffect: Hashable {
     /// Toggle bilingual mode for the active book (feature #56 WI-8).
     /// Hosts route to `BilingualReadingViewModel.setEnabled(...)`.
     case toggleBilingual
+    /// Feature #99: re-open the bilingual setup sheet edit-framed
+    /// ("Translation settings"). Like `.toggleBilingual`, the actual
+    /// presentation lives in the per-format hosts (they observe the
+    /// keyed `.readerMoreTranslationSettings` directly) — the container
+    /// treats this effect as a no-op.
+    case presentTranslationSettings
     /// Open the per-chapter re-translation picker sheet (feature #56
     /// WI-8 — design §#864). Visible only while bilingual mode is on.
     case presentReTranslatePicker
@@ -57,6 +63,7 @@ enum ReaderMoreMenuEffect: Hashable {
         case .readAloud:           self = .toggleReadAloud
         case .autoTurnPages:       self = .toggleAutoPageTurn
         case .bilingual:           self = .toggleBilingual
+        case .translationSettings: self = .presentTranslationSettings
         case .reTranslateChapter:  self = .presentReTranslatePicker
         case .bookDetails:         self = .presentBookDetails
         case .shareBook:           self = .presentShareSheet

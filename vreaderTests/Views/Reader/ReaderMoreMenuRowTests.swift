@@ -31,7 +31,7 @@ struct ReaderMoreMenuRowTests {
         // GH #790) and adds the conditional Re-translate row. The
         // declared enum carries both as cases; `visibleRows` gates
         // Re-translate on bilingual on/off.
-        #expect(ReaderMoreMenuRow.allCases.count == 7)
+        #expect(ReaderMoreMenuRow.allCases.count == 8)
     }
 
     @Test("Row order matches the design bundle (vreader-more.jsx + feature-60-followups §2.3)")
@@ -39,8 +39,11 @@ struct ReaderMoreMenuRowTests {
         // Top → bottom: Read aloud / Auto-turn pages / Bilingual mode /
         // Re-translate chapter (conditional) / (divider) / Book details /
         // Share book / Export annotations.
+        // Feature #99 adds the Translation settings row inside the
+        // bilingual cluster, between the toggle and re-translate rows.
         #expect(ReaderMoreMenuRow.allCases == [
-            .readAloud, .autoTurnPages, .bilingual, .reTranslateChapter,
+            .readAloud, .autoTurnPages, .bilingual, .translationSettings,
+            .reTranslateChapter,
             .bookDetails, .shareBook, .exportAnnotations,
         ])
     }

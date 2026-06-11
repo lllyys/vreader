@@ -217,6 +217,16 @@ struct ReaderContainerView: View {
     /// Mirrored alongside `bilingualActive`; the pill resolves the
     /// glyph from this key via the registry's fallback.
     @State var bilingualLanguage: String?
+    /// Feature #99 WI-3: the granularity mirror (rawValue) — rides the
+    /// extended `.readerBilingualDidChange` payload; feeds the More-menu
+    /// settings sub-line ("Chinese · Paragraph · Claude").
+    @State var bilingualGranularity: String?
+    /// Feature #99 WI-3: the active AI provider's display name, resolved
+    /// from the `ProviderProfileStore` actor each time the More popover
+    /// opens (generation-stamped — a superseded open's completion is
+    /// dropped). nil drops the provider segment from the sub-line.
+    @State var providerDisplayName: String?
+    @State var providerNameFetchGeneration = 0
 
     /// Feature #57: handle to the live `FoliateSpikeView.Coordinator`
     /// for AZW3/MOBI books, populated by the spike's `makeCoordinator()`.
@@ -524,6 +534,11 @@ struct ReaderContainerView: View {
             // explicit fields are forward-looking for richer payloads.
             if let enabled { bilingualActive = enabled }
             if let language { bilingualLanguage = language }
+            // Feature #99 WI-3: the granularity key is additive (older
+            // posts lack it) — only overwrite when present.
+            if let granularity = notification.userInfo?["granularity"] as? String {
+                bilingualGranularity = granularity
+            }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: .readerBookTranslationTextProviderAvailable)) { notification in

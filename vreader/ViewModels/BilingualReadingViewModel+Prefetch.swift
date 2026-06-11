@@ -233,7 +233,11 @@ extension BilingualReadingViewModel {
             userInfo: [
                 "fingerprintKey": bookFingerprintKey,
                 "isEnabled": isEnabled,
-                "targetLanguage": targetLanguage
+                "targetLanguage": targetLanguage,
+                // Feature #99 WI-3: the granularity rides the payload so the
+                // parent chrome mirror can build the More-menu settings
+                // sub-line ("Chinese · Paragraph · Claude").
+                "granularity": granularity.rawValue
             ])
     }
 

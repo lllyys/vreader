@@ -80,6 +80,7 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
     case readAloud
     case autoTurnPages
     case bilingual
+    case translationSettings
     case reTranslateChapter
     case bookDetails
     case shareBook
@@ -114,8 +115,9 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
     /// between-clusters semantic. Returns `nil` only when `rows`
     /// is empty, in which case the popover renders no rows anyway.
     static func dividerAnchor(in rows: [ReaderMoreMenuRow]) -> ReaderMoreMenuRow? {
-        if rows.contains(.reTranslateChapter) { return .reTranslateChapter }
-        if rows.contains(.bilingual)          { return .bilingual }
+        if rows.contains(.reTranslateChapter)    { return .reTranslateChapter }
+        if rows.contains(.translationSettings)   { return .translationSettings }
+        if rows.contains(.bilingual)             { return .bilingual }
         // Defensive: prefer the row immediately preceding the
         // bilingual cluster's declared position, then walk back, then
         // walk forward into the book-action cluster as a last resort.
@@ -134,6 +136,7 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         case .readAloud:           return .readerMoreReadAloud
         case .autoTurnPages:       return .readerMoreToggleAutoTurn
         case .bilingual:           return .readerMoreBilingual
+        case .translationSettings: return .readerMoreTranslationSettings
         case .reTranslateChapter:  return .readerMoreReTranslateChapter
         case .bookDetails:         return .readerMoreBookDetails
         case .shareBook:           return .readerMoreShareBook
@@ -202,7 +205,9 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         case .readAloud:
             guard let caps = capabilities else { return true }
             return caps.contains(.tts)
-        case .reTranslateChapter:
+        case .reTranslateChapter, .translationSettings:
+            // Feature #99: the settings row exists only when bilingual is
+            // on for this book — same rule as the #864 re-translate row.
             return bilingualOn
         case .autoTurnPages, .bilingual, .bookDetails, .shareBook, .exportAnnotations:
             return true
@@ -251,7 +256,8 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
                 // "Settings → Cellular when no SIM" pattern.
                 return .chevron
             }
-        case .readAloud, .reTranslateChapter, .bookDetails, .shareBook, .exportAnnotations:
+        case .readAloud, .translationSettings, .reTranslateChapter,
+             .bookDetails, .shareBook, .exportAnnotations:
             return .chevron
         }
     }
@@ -262,6 +268,7 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         case .readAloud:           return "Read aloud"
         case .autoTurnPages:       return "Auto-turn pages"
         case .bilingual:           return "Bilingual mode"
+        case .translationSettings: return "Translation settings"
         case .reTranslateChapter:  return "Re-translate chapter"
         case .bookDetails:         return "Book details"
         case .shareBook:           return "Share book"
@@ -280,6 +287,7 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         case .readAloud:           return "speaker.wave.2"
         case .autoTurnPages:       return "timer"
         case .bilingual:           return "character.book.closed"
+        case .translationSettings: return "gearshape"
         case .reTranslateChapter:  return "arrow.triangle.2.circlepath"
         case .bookDetails:         return "info.circle"
         case .shareBook:           return "square.and.arrow.up"
@@ -295,6 +303,7 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         case .readAloud:           return "readerMoreReadAloud"
         case .autoTurnPages:       return "readerMoreAutoTurn"
         case .bilingual:           return "readerMoreBilingual"
+        case .translationSettings: return "readerMoreTranslationSettings"
         case .reTranslateChapter:  return "readerMoreReTranslateChapter"
         case .bookDetails:         return "readerMoreBookDetails"
         case .shareBook:           return "readerMoreShareBook"
@@ -322,7 +331,8 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         ttsPlaying: Bool,
         autoTurnOn: Bool,
         autoTurnInterval: Double,
-        bilingualState: BilingualRowState = .off
+        bilingualState: BilingualRowState = .off,
+        bilingualContext: ReaderMoreMenuBilingualContext? = nil
     ) -> String? {
         switch self {
         case .readAloud:
@@ -361,6 +371,10 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
             case .unavailable:
                 return "Configure AI provider first"
             }
+        case .translationSettings:
+            // Feature #99: the status sub-line ("Chinese · Paragraph ·
+            // Claude"); the provider segment drops while unresolved.
+            return bilingualContext?.settingsSubtitle
         case .reTranslateChapter:
             // The idle copy from #864. Running / complete / error
             // sub-states belong to a downstream view model (WI-12),
@@ -398,7 +412,8 @@ enum ReaderMoreMenuRow: String, CaseIterable, Equatable {
         case .bilingual:
             if case .on = bilingualState { return true }
             return false
-        case .reTranslateChapter, .bookDetails, .shareBook, .exportAnnotations:
+        case .translationSettings, .reTranslateChapter, .bookDetails,
+             .shareBook, .exportAnnotations:
             return false
         }
     }

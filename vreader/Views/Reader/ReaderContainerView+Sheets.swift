@@ -351,16 +351,55 @@ extension ReaderContainerView {
             // observer attached on `ReaderContainerView` itself.
             bilingualActive: bilingualActive,
             bilingualLanguage: bilingualLanguage,
+            // Feature #99: the pill is the secondary re-entry to the
+            // translation settings — same keyed notification as the
+            // More-menu row (one channel, host observers filter).
+            onBilingualPillTap: {
+                NotificationCenter.default.post(
+                    name: .readerMoreTranslationSettings, object: nil,
+                    userInfo: ["fingerprintKey": book.fingerprintKey])
+            },
             onBack: { dismiss() },
             onSearch: { showSearch = true },
             onBookmark: {
                 NotificationCenter.default.post(name: .readerBookmarkRequested, object: nil)
             },
             onMore: {
+                let willOpen = !showMorePopover
                 withAnimation(.easeInOut(duration: 0.15)) {
                     showMorePopover.toggle()
                 }
+                // Feature #99: resolve the active provider's display name
+                // for the settings row sub-line each time the popover
+                // OPENS (one actor hop; generation-stamped so a
+                // superseded open's completion is dropped).
+                if willOpen {
+                    providerNameFetchGeneration += 1
+                    let generation = providerNameFetchGeneration
+                    Task {
+                        let name = await ProviderProfileStore.shared.activeProfile()?.name
+                        guard generation == providerNameFetchGeneration else { return }
+                        providerDisplayName = name
+                    }
+                }
             }
+        )
+    }
+
+    /// Feature #99 WI-3: the More-menu bilingual cluster's display
+    /// context — language (registry-resolved), granularity label, and
+    /// the resolved provider name (nil segment while unresolved). nil
+    /// when bilingual is off (the settings row is gated out anyway).
+    var moreMenuBilingualContext: ReaderMoreMenuBilingualContext? {
+        guard bilingualActive else { return nil }
+        let languageKey = bilingualLanguage
+            ?? BilingualReadingViewModel.defaultTargetLanguage
+        let granularity = TranslationGranularity(
+            rawValue: bilingualGranularity ?? "") ?? .paragraph
+        return ReaderMoreMenuBilingualContext(
+            languageDisplay: BilingualLanguage.findOrDefault(key: languageKey).key,
+            granularityDisplay: granularity.label,
+            providerDisplay: providerDisplayName
         )
     }
 
@@ -395,6 +434,10 @@ extension ReaderContainerView {
                 ? .on(targetLanguage: bilingualLanguage
                       ?? BilingualReadingViewModel.defaultTargetLanguage)
                 : .off,
+            // Feature #99: the settings row's display context + the
+            // fingerprint key every row post carries (keyed observers).
+            bilingualContext: moreMenuBilingualContext,
+            bookFingerprintKey: book.fingerprintKey,
             // The design anchors the popover just below the top chrome.
             // Chrome height = the Dynamic-Island inset + the ~52pt
             // button row; add a small gap so the notch tucks under the
@@ -442,6 +485,12 @@ extension ReaderContainerView {
             // availability. This switch is intentionally a no-op so
             // the popover dismisses cleanly while the row's
             // notification reaches the per-format observer.
+            break
+        case .presentTranslationSettings:
+            // Feature #99: the popover posts the keyed
+            // `.readerMoreTranslationSettings`; the edit-framed sheet
+            // presentation lives in the per-format hosts (WI-4). No-op
+            // here for the same reason as `.toggleBilingual`.
             break
         case .presentReTranslatePicker:
             // Feature #56 WI-8: the popover posts
