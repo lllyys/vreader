@@ -55,6 +55,19 @@ struct BilingualSettingsEditModelTests {
         #expect(dirty == .granularityOnly)
     }
 
+    @Test func stalePersistedCurrentKeyDoesNotFakeDirty() {
+        // Gate-4 r1 Medium: a persisted language key no longer in the
+        // registry canonicalises to the registry default — an untouched
+        // sheet (whose draft normalises the same way) must stay .none.
+        let registryDefault = BilingualLanguage.all[0].key
+        let dirty = BilingualSettingsEditModel.dirtyKind(
+            currentLanguage: "Klingon-Removed",
+            currentGranularity: .paragraph,
+            draft: draft(registryDefault, .paragraph),
+            cachedLanguages: [])
+        #expect(dirty == .none)
+    }
+
     @Test func currentLanguageCacheStateIsIrrelevantWhenUnchanged() {
         // The selected language equalling the current one is .none even when
         // the cache has no rows for it yet (nothing to apply).

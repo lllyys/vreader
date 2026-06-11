@@ -47,16 +47,22 @@ enum BilingualSettingsEditModel {
     /// Resolves the dirty kind. Language change dominates; the cache set
     /// (from `ChapterTranslationStore.cachedLanguages`) decides whether a
     /// changed language is a paid re-translate or an instant switch.
+    /// Both language keys are canonicalised through the registry
+    /// (Gate-4 r1 Medium): a stale persisted `currentLanguage` no longer
+    /// in `BilingualLanguage.all` resolves the same way the sheet's
+    /// `normalised()` draft does, so an untouched sheet stays `.none`.
     static func dirtyKind(
         currentLanguage: String,
         currentGranularity: TranslationGranularity,
         draft: BilingualSetupSheetState,
         cachedLanguages: Set<String>
     ) -> DirtyKind {
-        let languageChanged = draft.languageKey != currentLanguage
+        let canonicalCurrent = BilingualLanguage.findOrDefault(key: currentLanguage).key
+        let canonicalDraft = BilingualLanguage.findOrDefault(key: draft.languageKey).key
+        let languageChanged = canonicalDraft != canonicalCurrent
         let granularityChanged = draft.granularity != currentGranularity
         if languageChanged {
-            if cachedLanguages.contains(draft.languageKey) && !granularityChanged {
+            if cachedLanguages.contains(canonicalDraft) && !granularityChanged {
                 return .cachedLanguage
             }
             return .newLanguage
