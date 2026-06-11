@@ -655,6 +655,9 @@ struct FoliateBilingualContainerView: View {
             guard let provider = vm.textProvider,
                   let unit = await provider.unit(containing: locator),
                   let segments = vm.translations(for: unit) else { return }
+            // Feature #100: heading echo rows track the live target script.
+            bilingualOrchestrator.targetIsCJK =
+                BilingualLanguage.findOrDefault(key: vm.targetLanguage).script == .cjk
             if let js = bilingualOrchestrator.buildInjectJS(
                 translatedSegments: segments,
                 sectionIndex: scopedIndex
@@ -698,6 +701,9 @@ struct FoliateBilingualContainerView: View {
                   let unit = await provider.unit(containing: locator) else { return }
             guard currentSectionIndex == scopedIndex else { return }
             if inFlightUnits.contains(unit) {
+                // Feature #100: sync the script flag before the build.
+                bilingualOrchestrator.targetIsCJK =
+                    BilingualLanguage.findOrDefault(key: vm.targetLanguage).script == .cjk
                 if let js = bilingualOrchestrator.buildLoadingJS(sectionIndex: scopedIndex) {
                     evalBilingualJS(js)
                 }

@@ -170,7 +170,8 @@ enum FoliateBilingualJS {
     /// inject markup.
     static func bilingualInjectJS(
         translationsByBid: [String: String],
-        targetSectionIndex: Int? = nil
+        targetSectionIndex: Int? = nil,
+        targetIsCJK: Bool = false
     ) -> String {
         var entries: [String] = []
         // Stable order: sort keys so the emitted JS is deterministic
@@ -226,7 +227,9 @@ enum FoliateBilingualJS {
                         // section-scoped inject. `null` falls back
                         // to "every loaded section" — used by the
                         // clear path / older bundles.
-                        targetSectionIndex: \(sectionArg)
+                        targetSectionIndex: \(sectionArg),
+                        // Feature #100: gates the heading rows' CJK tracking.
+                        targetIsCJK: \(targetIsCJK ? "true" : "false")
                     });
                 }
             } catch (e) {}
@@ -278,7 +281,8 @@ enum FoliateBilingualJS {
     /// literal; the host applies a defensive `CSS.escape` for the selector.
     static func bilingualInjectLoadingJS(
         loadingBids: [String],
-        targetSectionIndex: Int? = nil
+        targetSectionIndex: Int? = nil,
+        targetIsCJK: Bool = false
     ) -> String {
         let bidArray = loadingBids.sorted()
             .map { "'\(FoliateJSEscaper.escapeForJSString($0))'" }
@@ -307,7 +311,8 @@ enum FoliateBilingualJS {
                         loadingClassName: LOADING_CLS,
                         shimmerBarClassName: BAR_CLS,
                         styleCssText: 'user-select: none; -webkit-user-select: none;',
-                        targetSectionIndex: \(sectionArg)
+                        targetSectionIndex: \(sectionArg),
+                        targetIsCJK: \(targetIsCJK ? "true" : "false")
                     });
                 }
             } catch (e) {}

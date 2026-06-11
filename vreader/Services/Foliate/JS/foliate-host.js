@@ -31,7 +31,9 @@ function serializeRect(rect) {
 // `BILINGUAL_BLOCK_TAGS` element that is NOT already a decoration sibling and
 // does NOT contain another block (Bug #268 leaf rule), and whose
 // whitespace-normalized text is non-empty.
-const BILINGUAL_BLOCK_TAGS = { p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1 }
+// Feature #100: headings (h1..h6) are translatable blocks — the design's
+// centered echo row (BSHeadingPair) translates chapter titles too.
+const BILINGUAL_BLOCK_TAGS = { p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1 }
 const BILINGUAL_BLOCK_SELECTOR = Object.keys(BILINGUAL_BLOCK_TAGS).join(',')
 
 function bilingualNormalizeBlockText(el) {
@@ -606,6 +608,14 @@ window.readerAPI = {
             const STYLE = opts?.styleCssText ||
                 'user-select: none; -webkit-user-select: none;'
             const targetSectionIndex = opts?.targetSectionIndex
+            // Feature #100: heading echo rows — the modifier classes the
+            // shared theme CSS styles (centered, border-less; CJK tracking).
+            const TARGET_CJK = !!opts?.targetIsCJK
+            const isHeading = (el) =>
+                !!(el && /^h[1-6]$/.test((el.localName || '').toLowerCase()))
+            const headingClasses = (el) => isHeading(el)
+                ? ' vreader-bilingual--heading' + (TARGET_CJK ? ' vreader-bilingual--cjk' : '')
+                : ''
 
             const contents = view.renderer?.getContents?.()
             if (!Array.isArray(contents) || contents.length === 0) return
@@ -641,11 +651,17 @@ window.readerAPI = {
                         // place (no flicker / re-insert) — the shimmer bars
                         // are wiped by the textContent assignment below.
                         next.classList.remove('vreader-bilingual-loading')
+                        // Feature #100: keep the heading modifiers when a
+                        // shimmer is replaced in place by the translation.
+                        if (isHeading(block)) {
+                            next.classList.add('vreader-bilingual--heading')
+                            if (TARGET_CJK) next.classList.add('vreader-bilingual--cjk')
+                        }
                         next.textContent = translations[bid]
                         continue
                     }
                     const div = doc.createElement('div')
-                    div.className = CLS
+                    div.className = CLS + headingClasses(block)
                     div.setAttribute(DECO, '')
                     div.style.cssText = STYLE
                     div.textContent = translations[bid]
@@ -713,7 +729,13 @@ window.readerAPI = {
             const STYLE = opts?.styleCssText ||
                 'user-select: none; -webkit-user-select: none;'
             const targetSectionIndex = opts?.targetSectionIndex
+            const TARGET_CJK = !!opts?.targetIsCJK
+            const isHeading = (el) =>
+                !!(el && /^h[1-6]$/.test((el.localName || '').toLowerCase()))
+            // Feature #100: heading slots show ONE centered bar (the design's
+            // 72px bar); paragraph slots keep the two-bar shape.
             const WIDTHS = ['92%', '54%']
+            const HEADING_WIDTHS = ['72px']
 
             const contents = view.renderer?.getContents?.()
             if (!Array.isArray(contents) || contents.length === 0) return
@@ -742,14 +764,19 @@ window.readerAPI = {
                         && next.classList.contains(CLS)) {
                         continue // already decorated — don't downgrade / duplicate
                     }
+                    const heading = isHeading(block)
                     const div = doc.createElement('div')
                     div.className = CLS + ' ' + LOADING_CLS
+                        + (heading
+                            ? ' vreader-bilingual--heading' + (TARGET_CJK ? ' vreader-bilingual--cjk' : '')
+                            : '')
                     div.setAttribute(DECO, '')
                     div.style.cssText = STYLE
-                    for (let w = 0; w < WIDTHS.length; w++) {
+                    const widths = heading ? HEADING_WIDTHS : WIDTHS
+                    for (let w = 0; w < widths.length; w++) {
                         const bar = doc.createElement('div')
                         bar.className = BAR_CLS
-                        bar.style.width = WIDTHS[w]
+                        bar.style.width = widths[w]
                         div.appendChild(bar)
                     }
                     if (block.parentNode) {

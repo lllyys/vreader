@@ -26,6 +26,7 @@
 //   dev-docs/plans/20260519-feature-56-bilingual-reading.md (WI-11)
 
 import Testing
+import Foundation
 @testable import vreader
 
 @Suite("Feature #56 WI-11 — FoliateBilingualJS")
@@ -238,5 +239,33 @@ struct FoliateBilingualJSTests {
     func clearLoadingScopesToSection() {
         let js = FoliateBilingualJS.bilingualClearLoadingJS(targetSectionIndex: 2)
         #expect(js.contains("readerAPI.bilingualClearLoading(2)"))
+    }
+    // MARK: - Feature #100: heading echo rows (Foliate mirror)
+
+    @Test("inject + loading builders thread targetIsCJK into the host opts")
+    func buildersThreadCJKFlag() {
+        let inject = FoliateBilingualJS.bilingualInjectJS(
+            translationsByBid: ["b1": "第一章"], targetIsCJK: true)
+        #expect(inject.contains("targetIsCJK: true"))
+        let loading = FoliateBilingualJS.bilingualInjectLoadingJS(
+            loadingBids: ["b1"], targetIsCJK: true)
+        #expect(loading.contains("targetIsCJK: true"))
+        // Default false (Latin / unset).
+        #expect(FoliateBilingualJS.bilingualInjectJS(translationsByBid: ["b1": "x"])
+            .contains("targetIsCJK: false"))
+    }
+
+    @Test("the bundled foliate-host.js enumerates h1–h6 and emits the heading modifiers")
+    func hostSourceCarriesHeadingSupport() throws {
+        let url = try #require(Bundle.main.url(
+            forResource: "foliate-host", withExtension: "js"),
+            "the host bundle must ship in the app resources")
+        let src = try String(contentsOf: url, encoding: .utf8)
+        #expect(src.contains("h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1"),
+                "BILINGUAL_BLOCK_TAGS includes headings (design #1650)")
+        #expect(src.contains("vreader-bilingual--heading"))
+        #expect(src.contains("vreader-bilingual--cjk"))
+        #expect(src.contains("HEADING_WIDTHS = ['72px']"),
+                "heading slots get the single centered bar")
     }
 }

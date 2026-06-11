@@ -65,6 +65,11 @@ final class FoliateBilingualOrchestrator {
     /// and `buildInjectJS`.
     init() {}
 
+    /// Feature #100: whether the book's bilingual TARGET language is CJK —
+    /// set by the host alongside enumerate/inject wiring; gates the heading
+    /// echo rows' wide-tracking modifier in the built inject/loading JS.
+    var targetIsCJK: Bool = false
+
     /// Flattened view of every section's enumerated blocks. Used by
     /// the orchestrator tests + the bulk inject paths that don't
     /// scope by section.
@@ -173,7 +178,8 @@ final class FoliateBilingualOrchestrator {
         guard !map.isEmpty else { return nil }
         return FoliateBilingualJS.bilingualInjectJS(
             translationsByBid: map,
-            targetSectionIndex: sectionIndex
+            targetSectionIndex: sectionIndex,
+            targetIsCJK: targetIsCJK
         )
     }
 
@@ -198,7 +204,8 @@ final class FoliateBilingualOrchestrator {
         guard !scoped.isEmpty else { return nil }
         return FoliateBilingualJS.bilingualInjectLoadingJS(
             loadingBids: scoped.map(\.bid),
-            targetSectionIndex: sectionIndex
+            targetSectionIndex: sectionIndex,
+            targetIsCJK: targetIsCJK
         )
     }
 

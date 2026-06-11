@@ -273,4 +273,20 @@ struct FoliateBilingualOrchestratorTests {
         let js = orchestrator.clearLoadingJS(sectionIndex: 4)
         #expect(js.contains("readerAPI.bilingualClearLoading(4)"))
     }
+
+    // MARK: - Feature #100: the CJK flag flows into the builders
+
+    @Test("targetIsCJK flows into buildLoadingJS and buildInjectJS")
+    func cjkFlagFlowsIntoBuilders() {
+        let orchestrator = FoliateBilingualOrchestrator()
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "Chapter One")
+        ])
+        orchestrator.targetIsCJK = true
+        #expect(orchestrator.buildLoadingJS()?.contains("targetIsCJK: true") == true)
+        #expect(orchestrator.buildInjectJS(translatedSegments: ["第一章"])?
+            .contains("targetIsCJK: true") == true)
+        orchestrator.targetIsCJK = false
+        #expect(orchestrator.buildLoadingJS()?.contains("targetIsCJK: false") == true)
+    }
 }
