@@ -148,6 +148,19 @@ extension EPUBReaderContainerView {
             name: .readerBookTranslationTextProviderAvailable,
             object: textProvider,
             userInfo: ["fingerprintKey": viewModel.bookFingerprintKey])
+        // Bug #346: in continuous mode the INITIAL window's sections can
+        // materialize BEFORE this VM exists (engine swap: the paged→scroll
+        // switch swaps hosts and the fresh bridge bootstraps while the parse
+        // → spineCount → ensureViewModel chain is still settling). Their
+        // `.readerBilingualSectionMaterialized` posts hit the
+        // `bilingualViewModel == nil` guard and were lost — the stitched DOM
+        // stayed unstamped (source-only) until the NEXT section materialized.
+        // Catch up now: enumerate every currently-materialized window
+        // section. Idempotent — the enumerate stamps once, and sections that
+        // already enumerated no-op.
+        if vm.isEnabled {
+            enableBilingualContinuousAllSections()
+        }
     }
 
     /// Feature #71 WI-7 (Gate-4 round-3 MEDIUM 1): route a parsed
