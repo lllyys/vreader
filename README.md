@@ -102,7 +102,7 @@ What sets VReader apart from a conventional e-reader:
 - **TTS auto-scroll** — Text view follows speech position in real-time (TXT/MD)
 - **Simp/Trad Chinese** — Toggle conversion via ICU (live re-apply without reloading)
 - **Content replacement** — Regex rules for text cleanup (live re-apply via source text storage)
-- **Reading time tracking** — Per-book session stats and speed calculations
+- **Reading time tracking** — Per-book session stats and speed calculations; the reader's bottom-chrome metrics label tap-cycles page ↔ time readouts ("12m read · 6h 40m total", choice persisted per book) and Book details carries the always-on Reading time rows (total · this session · average)
 
 ### Sync & Backup
 
