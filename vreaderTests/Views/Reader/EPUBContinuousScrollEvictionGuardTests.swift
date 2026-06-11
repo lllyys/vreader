@@ -310,6 +310,50 @@ struct EPUBContinuousScrollEvictionGuardTests {
         #expect(removed.isEmpty, "no section-remove JS during the touch")
     }
 
+    /// Bug #347: chained flings never settle, so the gesture window stays
+    /// open across many chapters — forward appends must CONTINUE past the
+    /// old soft ceiling (they are gesture-safe) or the reader bottoms out
+    /// at the stitch edge with lookahead starved.
+    @MainActor
+    @Test func chainedGesture_appendsContinuePastSoftCeiling() async {
+        let eval = RecordingEvaluator()
+        let coordinator = makeCoordinator(anchor: 0, spineCount: 40, maxSpan: 3, eval: eval)
+        await growWindowForward(coordinator, to: 2)   // [0,2] at maxSpan
+        // Drive far past the OLD ceiling (maxSpan + 3): every signal is a
+        // genuine near-bottom edge report inside one unbroken gesture.
+        for step in 0..<8 {
+            let visible = 2 + step
+            await coordinator.handleBoundarySignal(signal(
+                visible: visible, bottom: true,
+                pxAbove: 3000 * (visible + 1), pxBelow: 100,
+                sectionHeights: Array(repeating: 3000, count: visible + 1),
+                touchActive: true))
+        }
+        #expect(coordinator.window.span > 3 + EPUBContinuousScrollCoordinator.touchGrowthCeilingSlack,
+                "edge-driven appends continue past the soft ceiling (the #347 starvation)")
+        let removed = eval.evaluatedJS.filter { $0.contains(".remove()") }
+        #expect(removed.isEmpty, "still no eviction during the gesture")
+    }
+
+    /// Bug #347: the HARD cap remains as the signal-storm guard.
+    @MainActor
+    @Test func pathologicalGesture_hardCapStopsAppends() async {
+        let eval = RecordingEvaluator()
+        let coordinator = makeCoordinator(anchor: 0, spineCount: 60, maxSpan: 3, eval: eval)
+        await growWindowForward(coordinator, to: 2)
+        let hard = 3 + EPUBContinuousScrollCoordinator.touchGrowthHardCapSlack
+        for step in 0..<(hard + 6) {
+            let visible = 2 + step
+            await coordinator.handleBoundarySignal(signal(
+                visible: visible, bottom: true,
+                pxAbove: 3000 * (visible + 1), pxBelow: 100,
+                sectionHeights: Array(repeating: 3000, count: visible + 1),
+                touchActive: true))
+        }
+        #expect(coordinator.window.span <= hard,
+                "the hard cap bounds in-gesture growth (storm guard)")
+    }
+
     /// The touchend report (touchActive false) drains the deferred eviction.
     @MainActor
     @Test func touchEndSignal_drainsDeferredEviction() async {

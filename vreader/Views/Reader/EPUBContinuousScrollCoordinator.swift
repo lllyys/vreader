@@ -83,6 +83,17 @@ final class EPUBContinuousScrollCoordinator {
     /// momentum rarely traverses more than 2–3 sections; the ceiling bounds
     /// DOM/memory growth for pathological gesture streams.
     static let touchGrowthCeilingSlack = 3
+
+    /// Bug #347: the HARD in-gesture cap. The soft ceiling above no longer
+    /// blocks appends (it starved the lookahead under chained flings — the
+    /// gesture window never settles, deferred evictions never drain, and the
+    /// reader bottomed out at the stitch edge). Forward appends are
+    /// gesture-safe (they never write scrollTop — round 4's own analysis),
+    /// and every boundary-driven append represents genuinely consumed
+    /// content, so they continue past the soft ceiling. The hard cap is the
+    /// storm guard the soft ceiling was for: a pathological signal storm
+    /// stops growing here; everything drains at settle.
+    static let touchGrowthHardCapSlack = 12
     /// Materializes a chapter's rewritten body for a spine index (off-main I/O).
     private let chapterBodyProvider: @MainActor (Int) async throws -> EPUBChapterBody
     /// Evaluates section JS against the live `WKWebView`. Async-throwing so a
@@ -184,17 +195,22 @@ final class EPUBContinuousScrollCoordinator {
         // signal's geometry rides along so eviction can never strand the trailing
         // side below the prefetch threshold (the sustained-oscillation source).
         if signal.nearBottomBoundary, !suppressNearBottom, window.canExtendForward {
-            // Bug #329 round 4 (Codex round-1 Medium): hard in-gesture growth
-            // ceiling. Evictions are deferred while a gesture is live, so a
-            // long drag through many short spines would otherwise grow the
-            // stitched DOM without bound. Past maxSpan + the ceiling slack,
-            // stop APPENDING too for the gesture's remainder — the reader
-            // scrolls within already-materialized content (a brief boundary
-            // stall at worst, never a teleport); the settle report drains and
-            // extension resumes.
-            if signal.touchActive, window.span >= maxSpan + Self.touchGrowthCeilingSlack {
-                Self.log.debug("in-gesture growth ceiling reached (span \(self.window.span)); deferring append")
+            // Bug #329 round 4 → Bug #347: the original soft ceiling
+            // (maxSpan + touchGrowthCeilingSlack) starved forward appends
+            // under chained flings — touchActive never cleared (settle needs
+            // 160ms of quiescence), deferred evictions never drained, and
+            // once the ceiling hit, the reader scrolled to the stitch edge.
+            // Forward appends never write scrollTop (gesture-safe), and a
+            // near-bottom boundary signal means the user genuinely consumed
+            // the lookahead — so appends now continue past the soft ceiling
+            // and only the HARD cap (storm guard) defers them. The settle
+            // report still drains the whole eviction backlog.
+            if signal.touchActive, window.span >= maxSpan + Self.touchGrowthHardCapSlack {
+                Self.log.debug("in-gesture HARD growth cap reached (span \(self.window.span)); deferring append")
                 return
+            }
+            if signal.touchActive, window.span >= maxSpan + Self.touchGrowthCeilingSlack {
+                Self.log.debug("in-gesture span \(self.window.span) past the soft ceiling; edge-driven append continues (Bug #347)")
             }
             await extend(forward: true, geometry: signal)
             // Bug #329 (Codex hotfix-audit, High): if that forward extend EVICTED
