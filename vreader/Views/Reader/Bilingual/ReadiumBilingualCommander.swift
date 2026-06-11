@@ -130,9 +130,10 @@ final class ReadiumBilingualCommander {
     /// Injects the `data-vreader-bid` → translation map as interlinear
     /// decoration siblings on the live spine. No-op when unbound. Every value is
     /// escaped through `FoliateJSEscaper` by the adapter's inject builder.
-    func inject(_ pairs: [String: String]) async {
+    func inject(_ pairs: [String: String], targetIsCJK: Bool = false) async {
         guard let evaluator, !pairs.isEmpty else { return }
-        _ = await evaluator(ReadiumBilingualEvalAdapter.injectJS(pairs: pairs))
+        _ = await evaluator(ReadiumBilingualEvalAdapter.injectJS(
+            pairs: pairs, targetIsCJK: targetIsCJK))
     }
 
     /// Bug #304: ensure the interlinear `.vreader-bilingual` `<style>` is present
@@ -156,10 +157,13 @@ final class ReadiumBilingualCommander {
     /// downgraded). No-op when unbound or `bids` is empty. The combined bilingual
     /// `<style>` (block + loading rules) must already be on the spine via
     /// `setStyle` for the shimmer to render.
-    func injectLoading(_ bids: [String], spineIndex: Int? = nil) async {
+    func injectLoading(
+        _ bids: [String], spineIndex: Int? = nil, targetIsCJK: Bool = false
+    ) async {
         guard let evaluator, !bids.isEmpty else { return }
         _ = await evaluator(
-            ReadiumBilingualEvalAdapter.loadingJS(bids: bids, spineIndex: spineIndex))
+            ReadiumBilingualEvalAdapter.loadingJS(
+                bids: bids, spineIndex: spineIndex, targetIsCJK: targetIsCJK))
     }
 
     /// Feature #77: removes ONLY the loading-shimmer decoration nodes (a failed /

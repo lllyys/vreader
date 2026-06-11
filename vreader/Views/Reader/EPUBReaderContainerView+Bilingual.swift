@@ -234,6 +234,9 @@ extension EPUBReaderContainerView {
                 await vm.translateBlocksDirectly(blocks.map(\.text), for: unit)
                 return
             }
+            // Feature #100: heading echo rows track the live target script.
+            bilingualOrchestrator.targetIsCJK =
+                BilingualLanguage.findOrDefault(key: vm.targetLanguage).script == .cjk
             if let js = bilingualOrchestrator.buildInjectJS(
                 translatedSegments: segments
             ) {

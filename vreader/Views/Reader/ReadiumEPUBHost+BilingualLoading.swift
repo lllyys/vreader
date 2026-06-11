@@ -60,7 +60,8 @@ extension ReadiumEPUBHost {
                 // Fetching: ensure the combined block + shimmer `<style>` is on the
                 // spine, then shimmer the still-untranslated blocks.
                 await bilingualCommander.setStyle(bilingualStyleCSS())
-                await bilingualCommander.injectLoading(bids)
+                await bilingualCommander.injectLoading(
+                    bids, targetIsCJK: bilingualTargetIsCJK)
             } else if vm.translations(for: unit) == nil {
                 // Left the in-flight set WITHOUT a cached translation (failed /
                 // cancelled) → remove the leftover shimmer. A landed translation is

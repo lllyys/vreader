@@ -257,6 +257,21 @@ extension ReaderThemeV2 {
           border-left: 2px solid \(accent) !important; \
           user-select: none !important; \
           -webkit-user-select: none !important; \
+        } \
+        .vreader-bilingual--heading[data-vreader-decoration] { \
+          text-align: center !important; \
+          border-left: none !important; \
+          padding: 0 !important; \
+          margin: 6px 0 0 0 !important; \
+          font-size: 0.95rem !important; \
+          font-family: Georgia, 'Source Serif 4', 'Songti SC', serif !important; \
+        } \
+        .vreader-bilingual--heading.vreader-bilingual--cjk[data-vreader-decoration] { \
+          letter-spacing: 0.32em !important; \
+        } \
+        .vreader-bilingual--heading.vreader-bilingual-loading[data-vreader-decoration] .vreader-shimmer-bar { \
+          margin-left: auto !important; \
+          margin-right: auto !important; \
         }
         """
     }

@@ -110,6 +110,8 @@ extension EPUBReaderContainerView {
         // whose translation is still in flight would show NOTHING — paint its
         // shimmer now. Idempotent (the loading-inject skips already-decorated
         // blocks); a landed translation has `translations != nil` so it is skipped.
+        bilingualOrchestrator.targetIsCJK =
+            BilingualLanguage.findOrDefault(key: vm.targetLanguage).script == .cjk
         if vm.translations(for: unit) == nil, vm.inFlightUnits.contains(unit),
            let js = bilingualOrchestrator.buildLoadingJS(forSection: spineIndex) {
             evaluateBilingualLive(js)
@@ -145,6 +147,8 @@ extension EPUBReaderContainerView {
             Task { await vm.translateBlocksDirectly(blocks.map(\.text), for: unit) }
             return
         }
+        bilingualOrchestrator.targetIsCJK =
+            BilingualLanguage.findOrDefault(key: vm.targetLanguage).script == .cjk
         guard let js = bilingualOrchestrator.buildInjectJS(
             translatedSegments: segments, forSection: spineIndex
         ) else { return }
@@ -184,6 +188,8 @@ extension EPUBReaderContainerView {
             translationsBySection[spineIndex] = segments
         }
         guard !translationsBySection.isEmpty else { return }
+        bilingualOrchestrator.targetIsCJK =
+            BilingualLanguage.findOrDefault(key: vm.targetLanguage).script == .cjk
         if let js = bilingualOrchestrator.buildInjectJS(
             translationsBySection: translationsBySection
         ) {

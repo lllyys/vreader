@@ -73,6 +73,11 @@ final class EPUBBilingualOrchestrator {
     /// and `buildInjectJS`.
     init() {}
 
+    /// Feature #100: whether the book's bilingual TARGET language is CJK —
+    /// set by the host alongside enumerate/inject wiring; gates the heading
+    /// echo rows' wide-tracking modifier in the built inject/loading JS.
+    var targetIsCJK: Bool = false
+
     /// Flattened view of every section's enumerated blocks, sorted by
     /// section key (ascending = render order). The paged path keeps
     /// reading this exactly as before — its single chapter buckets
@@ -185,7 +190,8 @@ final class EPUBBilingualOrchestrator {
         guard !map.isEmpty else { return nil }
         return EPUBBilingualJS.bilingualInjectJS(
             translationsByBid: map,
-            spineIndex: sectionIndex
+            spineIndex: sectionIndex,
+            targetIsCJK: targetIsCJK
         )
     }
 
@@ -205,7 +211,8 @@ final class EPUBBilingualOrchestrator {
         guard !scoped.isEmpty else { return nil }
         return EPUBBilingualJS.bilingualInjectLoadingJS(
             loadingBids: scoped.map(\.bid),
-            spineIndex: sectionIndex
+            spineIndex: sectionIndex,
+            targetIsCJK: targetIsCJK
         )
     }
 
@@ -263,6 +270,7 @@ final class EPUBBilingualOrchestrator {
         guard !combined.isEmpty else { return nil }
         // bids are already globally unique (section-namespaced), so the global
         // bid-keyed inject resolves each block in its own section.
-        return EPUBBilingualJS.bilingualInjectJS(translationsByBid: combined)
+        return EPUBBilingualJS.bilingualInjectJS(
+            translationsByBid: combined, targetIsCJK: targetIsCJK)
     }
 }

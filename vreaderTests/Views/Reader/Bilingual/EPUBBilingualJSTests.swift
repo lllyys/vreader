@@ -200,4 +200,47 @@ struct EPUBBilingualJSTests {
             "clear JS must enumerate ALL bilingual nodes (querySelectorAll / getElementsByClassName) — a single-node query would leave duplicates if the DOM ever got into a multi-injected state."
         )
     }
+    // MARK: - Feature #100: heading echo rows
+
+    @Test("BOTH enumerate literals include h1–h6 (paged/global + continuous section-scoped)")
+    func enumerateIncludesHeadings_bothLiterals() {
+        for js in [EPUBBilingualJS.bilingualEnumerateJS(),
+                   EPUBBilingualJS.bilingualEnumerateJS(spineIndex: 3)] {
+            #expect(js.contains("h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1"),
+                    "headings are translatable blocks (design #1650 BSHeadingPair)")
+        }
+    }
+
+    @Test("inject JS marks heading rows; CJK modifier only when flagged")
+    func injectEmitsHeadingModifiers() {
+        let cjk = EPUBBilingualJS.bilingualInjectJS(
+            translationsByBid: ["b1": "第一章"], targetIsCJK: true)
+        #expect(cjk.contains("vreader-bilingual--heading"))
+        #expect(cjk.contains("/^H[1-6]$/i"))
+        #expect(cjk.contains("var TARGET_CJK = true"))
+        #expect(cjk.contains("vreader-bilingual--cjk"))
+
+        let latin = EPUBBilingualJS.bilingualInjectJS(
+            translationsByBid: ["b1": "Chapitre Un"], targetIsCJK: false)
+        #expect(latin.contains("var TARGET_CJK = false"),
+                "Latin targets carry no tracking modifier at runtime")
+    }
+
+    @Test("the in-place replace path keeps the heading modifiers")
+    func replacePathKeepsHeadingClasses() {
+        let js = EPUBBilingualJS.bilingualInjectJS(
+            translationsByBid: ["b1": "第一章"], targetIsCJK: true)
+        // The shimmer→translation replace must re-assert the classes (a
+        // shimmer injected before the flag changed could lack them).
+        #expect(js.contains("existing.classList.add('vreader-bilingual--heading')"))
+    }
+
+    @Test("loading JS: heading slots get ONE centered 72px bar + the modifiers")
+    func loadingEmitsHeadingVariant() {
+        let js = EPUBBilingualJS.bilingualInjectLoadingJS(
+            loadingBids: ["b1"], targetIsCJK: true)
+        #expect(js.contains("['72px']"), "one bar for heading slots (design)")
+        #expect(js.contains("['92%', '54%']"), "paragraph slots keep two bars")
+        #expect(js.contains("vreader-bilingual--heading"))
+    }
 }

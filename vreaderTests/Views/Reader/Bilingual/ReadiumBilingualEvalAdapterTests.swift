@@ -161,4 +161,25 @@ struct ReadiumBilingualEvalAdapterTests {
         #expect(js.contains("data-vreader-decoration"))
         #expect(js.contains("removeChild"))
     }
+    // MARK: - Feature #100: headings on the Readium engine
+
+    @Test("Readium's OWN enumerate literal includes h1–h6")
+    func readiumEnumerateIncludesHeadings() {
+        let js = ReadiumBilingualEvalAdapter.enumerateJS()
+        #expect(js.contains("h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1"),
+                "Gate-2 High: Readium has its own BLOCK_TAGS — it must match")
+    }
+
+    @Test("targetIsCJK rides the adapter into the shared builders")
+    func adapterThreadsCJKFlag() {
+        let inject = ReadiumBilingualEvalAdapter.injectJS(
+            pairs: ["b1": "第一章"], targetIsCJK: true)
+        #expect(inject.contains("var TARGET_CJK = true"))
+        let loading = ReadiumBilingualEvalAdapter.loadingJS(
+            bids: ["b1"], targetIsCJK: true)
+        #expect(loading.contains("var TARGET_CJK = true"))
+        // Default stays false (Latin / unset).
+        #expect(ReadiumBilingualEvalAdapter.injectJS(pairs: ["b1": "x"])
+            .contains("var TARGET_CJK = false"))
+    }
 }

@@ -56,6 +56,13 @@ extension ReadiumEPUBHost {
     /// `EPUBChapterTextProvider` can supply per-spine source text for
     /// translation, and captures the OPF-relative spine hrefs for seam-#3
     /// normalization. Non-fatal on failure — bilingual just stays unavailable.
+    /// Feature #100: whether the book's bilingual TARGET language is CJK —
+    /// gates the heading echo rows' wide-tracking modifier (design #1650).
+    var bilingualTargetIsCJK: Bool {
+        guard let key = bilingualViewModel?.targetLanguage else { return false }
+        return BilingualLanguage.findOrDefault(key: key).script == .cjk
+    }
+
     func openBilingualParser() async {
         guard bilingualParser == nil else { return }
         let parser = EPUBParser()

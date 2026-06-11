@@ -85,6 +85,15 @@ enum EPUBBilingualJS {
     /// Feature #77: the shimmer-bar element class inside a loading decoration.
     static let shimmerBarClassName = "vreader-shimmer-bar"
 
+    /// Feature #100: modifier class on a decoration row whose SOURCE block is
+    /// a heading (h1–h6) — the theme CSS renders it with the designed
+    /// centered echo treatment instead of the paragraph row's left border.
+    static let headingClassName = "vreader-bilingual--heading"
+
+    /// Feature #100: modifier class added alongside `headingClassName` when
+    /// the book's TARGET language is CJK — gates the design's wide tracking.
+    static let cjkClassName = "vreader-bilingual--cjk"
+
     /// The WKScriptMessageHandler name the enumerate payload posts
     /// to. Wired up in `EPUBWebViewBridge.makeUIView`.
     static let enumerateMessageHandlerName = "bilingualEnumerate"
@@ -161,18 +170,18 @@ enum EPUBBilingualJS {
             // are walked one <li> at a time so each item carries its
             // own translation.
             //
-            // Codex Gate-4 audit finding [5]: headings (h1..h6) are
-            // intentionally EXCLUDED so chapter / section titles are
-            // not interlinearly translated. Chapter titles are short,
-            // often stylized (drop-cap follows them via feature #68),
-            // and translating them mid-render produces a jarring
-            // double-title effect; the design bundle's interlinear
-            // mock shows source paragraphs only. Excluding them also
-            // keeps the enumerate/segment counts aligned (headings
-            // would inflate enumerate but not be matched by paragraph
-            // segmentation downstream).
+            // Feature #100: headings (h1..h6) are INCLUDED — the
+            // Bilingual Suite design (#1650, BSHeadingPair) commits a
+            // centered echo row under each chapter/section title. One
+            // heading = one block = one segment, so the enumerate/
+            // segment counts stay aligned (#268/#343: both pipelines
+            // translate the enumerate's OWN block texts). The inject
+            // marks heading rows with a modifier class so the theme
+            // CSS styles them with HEADING vocabulary, not the
+            // paragraph row's left-border treatment.
             var BLOCK_TAGS = {
-                p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1
+                p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1,
+                h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1
             };
             // Bug #266: the CSS selector for "any block tag", used to detect a
             // NON-leaf block (a block element that contains another block).
@@ -247,18 +256,18 @@ enum EPUBBilingualJS {
             // are walked one <li> at a time so each item carries its
             // own translation.
             //
-            // Codex Gate-4 audit finding [5]: headings (h1..h6) are
-            // intentionally EXCLUDED so chapter / section titles are
-            // not interlinearly translated. Chapter titles are short,
-            // often stylized (drop-cap follows them via feature #68),
-            // and translating them mid-render produces a jarring
-            // double-title effect; the design bundle's interlinear
-            // mock shows source paragraphs only. Excluding them also
-            // keeps the enumerate/segment counts aligned (headings
-            // would inflate enumerate but not be matched by paragraph
-            // segmentation downstream).
+            // Feature #100: headings (h1..h6) are INCLUDED — the
+            // Bilingual Suite design (#1650, BSHeadingPair) commits a
+            // centered echo row under each chapter/section title. One
+            // heading = one block = one segment, so the enumerate/
+            // segment counts stay aligned (#268/#343: both pipelines
+            // translate the enumerate's OWN block texts). The inject
+            // marks heading rows with a modifier class so the theme
+            // CSS styles them with HEADING vocabulary, not the
+            // paragraph row's left-border treatment.
             var BLOCK_TAGS = {
-                p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1
+                p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1,
+                h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1
             };
             // Bug #266: the CSS selector for "any block tag", used to detect a
             // NON-leaf block (a block element that contains another block).
@@ -363,12 +372,16 @@ enum EPUBBilingualJS {
     /// map (built by `EPUBBilingualOrchestrator.buildInjectJS(...:
     /// forSection:)`) only ever touches that section's blocks. The
     /// `nil` and any-value paths produce byte-identical output.
+    /// Feature #100: `targetIsCJK` gates the wide-tracking modifier on
+    /// heading echo rows (the design's 5px tracking applies to CJK targets
+    /// only). Threaded from the orchestrator / Readium commander.
     static func bilingualInjectJS(
         translationsByBid: [String: String],
-        spineIndex: Int? = nil
+        spineIndex: Int? = nil,
+        targetIsCJK: Bool = false
     ) -> String {
         _ = spineIndex // intentionally unused — see doc comment.
-        return makeInjectJS(translationsByBid: translationsByBid)
+        return makeInjectJS(translationsByBid: translationsByBid, targetIsCJK: targetIsCJK)
     }
 
     /// Bug #304: idempotent JS that ensures a `<style id="vreader-bilingual-style">`
@@ -396,7 +409,9 @@ enum EPUBBilingualJS {
         """
     }
 
-    private static func makeInjectJS(translationsByBid: [String: String]) -> String {
+    private static func makeInjectJS(
+        translationsByBid: [String: String], targetIsCJK: Bool = false
+    ) -> String {
         var entries: [String] = []
         // Stable order: sort keys so the emitted JS is deterministic
         // and tests can compare full strings without flakes from
@@ -424,9 +439,21 @@ enum EPUBBilingualJS {
                 } catch (e) { return null; }
             }
 
-            function makeBlock(text) {
+            // Feature #100: a row under a HEADING source block carries the
+            // heading modifier (+ the CJK tracking modifier when the target
+            // language is CJK) so the theme CSS applies the centered echo
+            // treatment instead of the paragraph left-border vocabulary.
+            var TARGET_CJK = \(targetIsCJK ? "true" : "false");
+            function isHeading(el) {
+                return !!(el && /^H[1-6]$/i.test(el.tagName || ''));
+            }
+            function headingClasses(el) {
+                if (!isHeading(el)) { return ''; }
+                return ' \(headingClassName)' + (TARGET_CJK ? ' \(cjkClassName)' : '');
+            }
+            function makeBlock(text, sourceBlock) {
                 var div = document.createElement('div');
-                div.className = '\(blockClassName)';
+                div.className = '\(blockClassName)' + headingClasses(sourceBlock);
                 div.setAttribute('\(decorationAttribute)', '');
                 // Apply via cssText so the literal CSS property name
                 // (`user-select`) is emitted into the document, not
@@ -458,10 +485,16 @@ enum EPUBBilingualJS {
                     // children; also drop the loading class so the landed
                     // translation styles as a normal interlinear row.
                     existing.classList.remove('\(loadingClassName)');
+                    // Feature #100: keep the heading modifiers when a shimmer
+                    // is replaced in place by the landed translation.
+                    if (isHeading(block)) {
+                        existing.classList.add('\(headingClassName)');
+                        if (TARGET_CJK) { existing.classList.add('\(cjkClassName)'); }
+                    }
                     existing.textContent = translations[bid];
                     continue;
                 }
-                var node = makeBlock(translations[bid]);
+                var node = makeBlock(translations[bid], block);
                 if (block.parentNode) {
                     block.parentNode.insertBefore(node, block.nextSibling);
                 }
@@ -478,7 +511,12 @@ enum EPUBBilingualJS {
     /// or an existing loading node) is left untouched, so loading never downgrades a
     /// translation. The later `bilingualInjectJS` REPLACES a loading node in place
     /// (clearing the loading class + the shimmer children).
-    static func bilingualInjectLoadingJS(loadingBids: [String], spineIndex: Int? = nil) -> String {
+    /// Feature #100: `targetIsCJK` mirrors `bilingualInjectJS` — a heading's
+    /// pending row renders ONE centered shimmer bar with the heading
+    /// modifiers, per the design's loading vocabulary.
+    static func bilingualInjectLoadingJS(
+        loadingBids: [String], spineIndex: Int? = nil, targetIsCJK: Bool = false
+    ) -> String {
         _ = spineIndex // attribute-keyed walk; section scoping is the caller's via the bid set.
         let bidArray = loadingBids.sorted()
             .map { "'\(FoliateJSEscaper.escapeForJSString($0))'" }
@@ -491,12 +529,22 @@ enum EPUBBilingualJS {
                 try { return document.querySelector('[\(blockIDAttribute)="' + __vreaderBidEsc(bid) + '"]'); }
                 catch (e) { return null; }
             }
-            function makeLoading() {
+            var TARGET_CJK = \(targetIsCJK ? "true" : "false");
+            function isHeading(el) {
+                return !!(el && /^H[1-6]$/i.test(el.tagName || ''));
+            }
+            function makeLoading(sourceBlock) {
+                var heading = isHeading(sourceBlock);
                 var div = document.createElement('div');
-                div.className = '\(blockClassName) \(loadingClassName)';
+                div.className = '\(blockClassName) \(loadingClassName)'
+                    + (heading
+                        ? ' \(headingClassName)' + (TARGET_CJK ? ' \(cjkClassName)' : '')
+                        : '');
                 div.setAttribute('\(decorationAttribute)', '');
                 div.style.cssText = 'user-select: none; -webkit-user-select: none;';
-                var widths = ['92%', '54%'];
+                // Feature #100: a heading slot shows ONE centered bar (the
+                // design's 72px bar); paragraph slots keep the two-bar shape.
+                var widths = heading ? ['72px'] : ['92%', '54%'];
                 for (var i = 0; i < widths.length; i++) {
                     var bar = document.createElement('div');
                     bar.className = '\(shimmerBarClassName)';
@@ -516,7 +564,7 @@ enum EPUBBilingualJS {
                     && existing.classList.contains('\(blockClassName)')) {
                     continue; // already decorated (translation or loading) — don't downgrade
                 }
-                var node = makeLoading();
+                var node = makeLoading(block);
                 if (block.parentNode) {
                     block.parentNode.insertBefore(node, block.nextSibling);
                 }

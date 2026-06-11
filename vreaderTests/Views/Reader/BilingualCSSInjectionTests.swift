@@ -20,6 +20,35 @@ struct BilingualCSSInjectionTests {
         #expect(css.contains("border-left"))
     }
 
+    // MARK: - Feature #100: heading echo row rules (design BSHeadingPair)
+
+    @Test("heading rows: centered, border-less, rem-sized, serif")
+    func headingRule() {
+        let css = ReaderThemeV2.paper.bilingualBlockCSSRule()
+        #expect(css.contains(".vreader-bilingual--heading[data-vreader-decoration]"))
+        #expect(css.contains("text-align: center !important"))
+        #expect(css.contains("border-left: none !important"))
+        #expect(css.contains("font-size: 0.95rem !important"))
+    }
+
+    @Test("CJK tracking applies ONLY under the --cjk modifier")
+    func cjkTrackingGated() {
+        let css = ReaderThemeV2.paper.bilingualBlockCSSRule()
+        #expect(css.contains(".vreader-bilingual--heading.vreader-bilingual--cjk[data-vreader-decoration]"))
+        #expect(css.contains("letter-spacing: 0.32em !important"))
+        // The tracking must not leak into the base heading rule: it appears
+        // exactly once, inside the --cjk-scoped rule.
+        #expect(css.components(separatedBy: "letter-spacing").count == 2)
+    }
+
+    @Test("heading loading bar centers itself")
+    func headingLoadingCentered() {
+        let css = ReaderThemeV2.paper.bilingualBlockCSSRule()
+        #expect(css.contains(".vreader-bilingual--heading.vreader-bilingual-loading[data-vreader-decoration] .vreader-shimmer-bar"))
+        #expect(css.contains("margin-left: auto !important"))
+        #expect(css.contains("margin-right: auto !important"))
+    }
+
     @Test("bilingualStyleJS produces an idempotent <style> injection carrying the rule")
     func styleJS() {
         let js = EPUBBilingualJS.bilingualStyleJS(css: ReaderThemeV2.paper.bilingualBlockCSSRule())

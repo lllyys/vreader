@@ -238,7 +238,8 @@ extension ReadiumEPUBHost {
         await bilingualCommander.setStyle(bilingualStyleCSS())
         // The pipeline build above is synchronous, so the unit re-check is the
         // inject-path's final generation gate (no await intervenes before here).
-        await bilingualCommander.inject(pairs)
+        // Feature #100: CJK targets get the heading rows' wide tracking.
+        await bilingualCommander.inject(pairs, targetIsCJK: bilingualTargetIsCJK)
     }
 
     /// WI-12: `epubLayout` change handler. A paged↔scroll switch re-renders the

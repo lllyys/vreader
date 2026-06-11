@@ -85,11 +85,12 @@ enum ReadiumBilingualEvalAdapter {
             // Tags we treat as translatable blocks. Inline content
             // (span, em, strong) is left to its parent block; lists
             // are walked one <li> at a time so each item carries its
-            // own translation. Headings (h1..h6) are intentionally
-            // EXCLUDED (same as the legacy EPUB enumerate) so chapter
-            // titles are not interlinearly translated.
+            // own translation. Feature #100: headings (h1..h6) are
+            // INCLUDED (same as the legacy EPUB enumerate) — the
+            // design's centered echo row translates chapter titles.
             var BLOCK_TAGS = {
-                p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1
+                p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1,
+                h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1
             };
             // Bug #266: the CSS selector for "any block tag", used to detect a
             // NON-leaf block (a block element that contains another block).
@@ -152,8 +153,9 @@ enum ReadiumBilingualEvalAdapter {
     /// self-contained IIFE against `document` (no message channel), so it runs
     /// as-is via `navigator.evaluateJavaScript`. Every value is escaped through
     /// `FoliateJSEscaper.escapeForJSString` by that builder.
-    static func injectJS(pairs: [String: String]) -> String {
-        EPUBBilingualJS.bilingualInjectJS(translationsByBid: pairs)
+    static func injectJS(pairs: [String: String], targetIsCJK: Bool = false) -> String {
+        EPUBBilingualJS.bilingualInjectJS(
+            translationsByBid: pairs, targetIsCJK: targetIsCJK)
     }
 
     /// Bug #304: JS that ensures the interlinear `.vreader-bilingual` `<style>`
@@ -181,8 +183,11 @@ enum ReadiumBilingualEvalAdapter {
     /// engine-agnostic `EPUBBilingualJS.bilingualInjectLoadingJS`, which routes
     /// each bid through `FoliateJSEscaper` (JS-literal) + a defensive `CSS.escape`
     /// (selector). Runs as-is through `navigator.evaluateJavaScript`.
-    static func loadingJS(bids: [String], spineIndex: Int? = nil) -> String {
-        EPUBBilingualJS.bilingualInjectLoadingJS(loadingBids: bids, spineIndex: spineIndex)
+    static func loadingJS(
+        bids: [String], spineIndex: Int? = nil, targetIsCJK: Bool = false
+    ) -> String {
+        EPUBBilingualJS.bilingualInjectLoadingJS(
+            loadingBids: bids, spineIndex: spineIndex, targetIsCJK: targetIsCJK)
     }
 
     /// Feature #77: JS that removes ONLY the in-flight loading-shimmer decoration
