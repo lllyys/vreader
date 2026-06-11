@@ -51,9 +51,11 @@ new_content() {
             echo "$INPUT" | jq -r '.tool_input.content // ""'
             ;;
         Edit)
-            HOOK_INPUT="$INPUT" HOOK_FILE="$FILE_PATH" python3 -c '
+            # INPUT goes via stdin, not env/argv — env vars count against
+            # ARG_MAX (E2BIG: "Argument list too long" once bugs.md grew >1MB).
+            printf '%s' "$INPUT" | HOOK_FILE="$FILE_PATH" python3 -c '
 import json, os, sys
-data = json.loads(os.environ["HOOK_INPUT"])
+data = json.load(sys.stdin)
 old = data["tool_input"].get("old_string", "")
 new = data["tool_input"].get("new_string", "")
 try:
@@ -69,9 +71,10 @@ else:
 '
             ;;
         MultiEdit)
-            HOOK_INPUT="$INPUT" HOOK_FILE="$FILE_PATH" python3 -c '
+            # stdin, not env — see the Edit branch (ARG_MAX / E2BIG).
+            printf '%s' "$INPUT" | HOOK_FILE="$FILE_PATH" python3 -c '
 import json, os, sys
-data = json.loads(os.environ["HOOK_INPUT"])
+data = json.load(sys.stdin)
 edits = data["tool_input"].get("edits", [])
 try:
     with open(os.environ["HOOK_FILE"]) as f:
@@ -98,8 +101,16 @@ NEW="$(new_content)"
 # status/notes than OLD. For each such row, require `GH: #N` (or the
 # kind-appropriate Mirror escape) in the Notes column.
 MISSING_FILE="$(mktemp)"
-trap 'rm -f "$MISSING_FILE"' EXIT
-KIND="$KIND" NEW_CONTENT="$NEW" OLD_CONTENT="$OLD" python3 - >"$MISSING_FILE" <<'PYEOF'
+OLD_FILE="$(mktemp)"
+NEW_FILE="$(mktemp)"
+trap 'rm -f "$MISSING_FILE" "$OLD_FILE" "$NEW_FILE"' EXIT
+# Contents go via temp FILES, paths via env — passing the full tracker
+# text as env vars exceeded ARG_MAX once docs/bugs.md grew past ~1MB
+# ("python3: Argument list too long", E2BIG; env + argv share the limit).
+# printf is a bash builtin: no exec, no ARG_MAX exposure.
+printf '%s' "$OLD" > "$OLD_FILE"
+printf '%s' "$NEW" > "$NEW_FILE"
+KIND="$KIND" NEW_PATH="$NEW_FILE" OLD_PATH="$OLD_FILE" python3 - >"$MISSING_FILE" <<'PYEOF'
 import os, re, sys
 
 KIND = os.environ["KIND"]
@@ -147,8 +158,10 @@ def has_gh_or_exempt(notes):
         return True
     return False
 
-new_rows = parse_rows(os.environ["NEW_CONTENT"])
-old_rows = parse_rows(os.environ["OLD_CONTENT"])
+with open(os.environ["NEW_PATH"]) as f:
+    new_rows = parse_rows(f.read())
+with open(os.environ["OLD_PATH"]) as f:
+    old_rows = parse_rows(f.read())
 
 missing = []
 for rid, (status, notes) in new_rows.items():
