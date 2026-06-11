@@ -221,17 +221,15 @@ struct EPUBWebViewBridgeSafeAreaInsetTests {
     }
 
     @MainActor
-    @Test("applySafeAreaTopInset matches scrollIndicatorInsets to keep scrollbar in safe area")
-    func applyAlsoUpdatesScrollIndicatorInsets() {
+    @Test("applySafeAreaTopInset no longer maintains indicator insets (bug #348)")
+    func applyDoesNotTouchScrollIndicatorInsets() {
+        // Bug #348: the reading surface hides the system scroll indicator
+        // entirely, so the old "keep the scrollbar inside the safe area"
+        // maintenance is dead — the seam must not write indicator insets.
         let scrollView = UIScrollView()
-
         EPUBWebViewBridge.applySafeAreaTopInset(to: scrollView, top: 59)
-
-        // The scrollbar indicator should also start below the safe area
-        // — otherwise it's clipped behind the Dynamic Island just like the
-        // content was. iOS 13+ uses verticalScrollIndicatorInsets;
-        // setting `scrollIndicatorInsets` covers both.
-        #expect(scrollView.verticalScrollIndicatorInsets.top == 59)
+        #expect(scrollView.verticalScrollIndicatorInsets.top == 0)
+        #expect(scrollView.contentInset.top == 59)
     }
 }
 

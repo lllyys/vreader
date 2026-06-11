@@ -43,12 +43,10 @@ extension EPUBWebViewBridge {
     static func applySafeAreaTopInset(to scrollView: UIScrollView, top: CGFloat) {
         let clamped = max(top, 0)
         scrollView.contentInset.top = clamped
-        // The scroll indicator also needs to start below the safe area;
-        // otherwise the scrollbar is clipped behind the Dynamic Island
-        // identical to how the content was. `verticalScrollIndicatorInsets`
-        // is the modern API; on iOS 13+ writes here also reflect into
-        // legacy `scrollIndicatorInsets`.
-        scrollView.verticalScrollIndicatorInsets.top = clamped
+        // Bug #348: the indicator-inset maintenance that used to live here
+        // is gone — the reading surface hides the system scroll indicator
+        // entirely (`ReaderScrollIndicatorPolicy`), so there is no
+        // scrollbar left to keep inside the safe area.
     }
 
     // MARK: - Initial Content Offset (bug #163 reopen)
