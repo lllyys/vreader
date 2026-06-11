@@ -371,14 +371,18 @@ extension ReaderContainerView {
                 }
                 // Feature #99: resolve the active provider's display name
                 // for the settings row sub-line each time the popover
-                // OPENS (one actor hop; generation-stamped so a
-                // superseded open's completion is dropped).
+                // OPENS. Generation-stamped + dismiss-guarded (Gate-4 r1
+                // Medium): the stale name is cleared BEFORE the fetch so
+                // a provider switch never flashes old copy, and a late
+                // completion after close/supersede is dropped.
+                providerNameFetchGeneration += 1
                 if willOpen {
-                    providerNameFetchGeneration += 1
+                    providerDisplayName = nil
                     let generation = providerNameFetchGeneration
                     Task {
                         let name = await ProviderProfileStore.shared.activeProfile()?.name
-                        guard generation == providerNameFetchGeneration else { return }
+                        guard generation == providerNameFetchGeneration,
+                              showMorePopover else { return }
                         providerDisplayName = name
                     }
                 }

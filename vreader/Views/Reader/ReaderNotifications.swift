@@ -127,6 +127,11 @@ extension Notification.Name {
     /// re-translate row (design §#864); the host presents
     /// `ReTranslatePickerSheet`. The re-translate row is only visible
     /// when bilingual mode is on for the book.
+    ///
+    /// Feature #99: since the popover gained `bookFingerprintKey`, EVERY
+    /// More-menu row post carries `userInfo: ["fingerprintKey": String]`
+    /// when the key is available. Legacy observers ignore the payload;
+    /// only `.readerMoreTranslationSettings` REQUIRES key filtering.
     static let readerMoreReadAloud = Notification.Name("vreader.readerMoreReadAloud")
     static let readerMoreToggleAutoTurn = Notification.Name("vreader.readerMoreToggleAutoTurn")
     static let readerMoreBilingual = Notification.Name("vreader.readerMoreBilingual")

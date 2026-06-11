@@ -76,6 +76,7 @@ struct ReaderMoreMenuActionObservers: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreReadAloud), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreToggleAutoTurn), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreBilingual), perform: dispatch)
+            .onReceive(NotificationCenter.default.publisher(for: .readerMoreTranslationSettings), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreReTranslateChapter), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreBookDetails), perform: dispatch)
             .onReceive(NotificationCenter.default.publisher(for: .readerMoreShareBook), perform: dispatch)

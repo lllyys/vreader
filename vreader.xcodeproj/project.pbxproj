@@ -896,6 +896,7 @@
 		83920E15721D7860684628BE /* ReaderLifecycleHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = D363190FCDF47ED48A1D7BC1 /* ReaderLifecycleHelper.swift */; };
 		83DAEE23928C668DA378F086 /* EPUBProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FA15EA6877E3CA9421E1B59 /* EPUBProgressTests.swift */; };
 		8455056E0D9CF1EF9E85C214 /* AIChatViewModelSummariesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2E47EEE8A9675D14E97D48 /* AIChatViewModelSummariesTests.swift */; };
+		846AA33EFD4CA50356CC03AA /* BilingualPillButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD8AFB0681353D0A6B181D44 /* BilingualPillButtonStyle.swift */; };
 		84A03EDA45DB68CE01456609 /* SwiftDataSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B682E216B5A24055B696F0 /* SwiftDataSessionStore.swift */; };
 		84FDAB02CDE741029EE927A8 /* FoliateHighlightJSBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75EC9C3C222236A27183F13 /* FoliateHighlightJSBridge.swift */; };
 		857DC0847676329528295DEE /* ChapterTranslationChunkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A1B327713437D80D690ED9B /* ChapterTranslationChunkerTests.swift */; };
@@ -920,6 +921,7 @@
 		87A2CA804F42A82380742109 /* TXTChunkedReaderBridgeRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A99A934AA5136EF8FF48D41 /* TXTChunkedReaderBridgeRestoreTests.swift */; };
 		87A61AC432B6116973B7D291 /* LocatorIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0069CA3A00998B13DE06E424 /* LocatorIntegrationTests.swift */; };
 		87C3D7093F686FD9DF2E1EEA /* ChatCitationRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320EA026FDDCD3BED91BCBE7 /* ChatCitationRow.swift */; };
+		87E8691189ACD61D482485A5 /* ReaderMorePopover+Rows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5374653B3A09A8D27411 /* ReaderMorePopover+Rows.swift */; };
 		87ECBC5C79A780F1A681A02C /* ReaderMorePopoverTTSGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11ECCB50D770FE1E8F0B29 /* ReaderMorePopoverTTSGateTests.swift */; };
 		881677EB4D38D3439473606D /* ContentReplacementRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5AB21F49D361F1160920C0 /* ContentReplacementRule.swift */; };
 		88472C0C4B06190CA46E917F /* BookImporterEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 163C2BBCB1C2FEFB9713C4CF /* BookImporterEnvironment.swift */; };
@@ -2572,6 +2574,7 @@
 		8404837D8FC686DDDB62EEC3 /* AccentColorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccentColorTests.swift; sourceTree = "<group>"; };
 		847DD24E5292D6B493E29C15 /* BilingualPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualPairing.swift; sourceTree = "<group>"; };
 		84BAC2CBFB7F533857E6A65B /* search_no_results.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = search_no_results.html; sourceTree = "<group>"; };
+		84DC5374653B3A09A8D27411 /* ReaderMorePopover+Rows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReaderMorePopover+Rows.swift"; sourceTree = "<group>"; };
 		84E4ABD8F17B04EA35F23724 /* legado_multiple_sources.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = legado_multiple_sources.json; sourceTree = "<group>"; };
 		8500C7EDCB2A51F928910E7F /* SettingsHeaderViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsHeaderViewModel.swift; sourceTree = "<group>"; };
 		851277A5872045D4D935CE2B /* DictionaryLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryLookup.swift; sourceTree = "<group>"; };
@@ -3353,6 +3356,7 @@
 		FD1989CF2F582B5C821059BA /* FoliateScrollModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoliateScrollModelTests.swift; sourceTree = "<group>"; };
 		FD27A5C682FAD0ED96FD755A /* MobiEPUBAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobiEPUBAssemblerTests.swift; sourceTree = "<group>"; };
 		FD477B685E3E8163D52949DC /* ChatSourcesMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSourcesMenu.swift; sourceTree = "<group>"; };
+		FD8AFB0681353D0A6B181D44 /* BilingualPillButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilingualPillButtonStyle.swift; sourceTree = "<group>"; };
 		FDB526ADB0E1190463E08AE9 /* ChatRetrievalCluster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRetrievalCluster.swift; sourceTree = "<group>"; };
 		FDEB28B2CAB1481C73FBE351 /* TestSeederMDMultiPagePaginationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSeederMDMultiPagePaginationTests.swift; sourceTree = "<group>"; };
 		FDF40785A923791B0241CF75 /* GlobalAccessibilityAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalAccessibilityAuditTests.swift; sourceTree = "<group>"; };
@@ -4377,6 +4381,7 @@
 				24B6FF7CD976BEA8E7BBA282 /* BilingualOffsetRouter.swift */,
 				847DD24E5292D6B493E29C15 /* BilingualPairing.swift */,
 				1987220FE3E8931D9F8185F2 /* BilingualPill.swift */,
+				FD8AFB0681353D0A6B181D44 /* BilingualPillButtonStyle.swift */,
 				118DB22E96D619680C295BE8 /* BilingualSettingsEditModel.swift */,
 				4493553E18BBEB66EA8D32BF /* BilingualSetupSheet.swift */,
 				A8E451D278E6E62CBB3AC574 /* BilingualSetupSheet+EditMode.swift */,
@@ -4759,6 +4764,7 @@
 				54053616902DCBE161CD524D /* ReaderMoreMenuEffect.swift */,
 				2168679A3F58BF907CD746E0 /* ReaderMoreMenuRow.swift */,
 				83BA71E474E9C05E3689CF88 /* ReaderMorePopover.swift */,
+				84DC5374653B3A09A8D27411 /* ReaderMorePopover+Rows.swift */,
 				12841E371391B5AD20122A37 /* ReaderMorePopoverParts.swift */,
 				82BC782199D1750DA66D1BCC /* ReaderNotificationHandlers.swift */,
 				A579625590B25F81679F1EA0 /* ReaderNotificationModifier.swift */,
@@ -7115,6 +7121,7 @@
 				91D52B99600B1B1D0D569E49 /* BilingualPairing.swift in Sources */,
 				269A2D02557877E9147BE848 /* BilingualParagraphRanges.swift in Sources */,
 				C700F76144EB680AF90FE37C /* BilingualPill.swift in Sources */,
+				846AA33EFD4CA50356CC03AA /* BilingualPillButtonStyle.swift in Sources */,
 				2B0B44B591B5F61E1AC6DB83 /* BilingualReadingViewModel+Prefetch.swift in Sources */,
 				32A02A2EECC7FFE73EEFC242 /* BilingualReadingViewModel.swift in Sources */,
 				8A34787973BCC059B72DC032 /* BilingualSettingsEditModel.swift in Sources */,
@@ -7569,6 +7576,7 @@
 				A2BACC0903DA9174E9DFB9F4 /* ReaderMoreMenuBilingualContext.swift in Sources */,
 				CD604CA6A9578362FE74ED86 /* ReaderMoreMenuEffect.swift in Sources */,
 				77B74C8406A03676DD48F636 /* ReaderMoreMenuRow.swift in Sources */,
+				87E8691189ACD61D482485A5 /* ReaderMorePopover+Rows.swift in Sources */,
 				61303A8643869C6334AFB873 /* ReaderMorePopover.swift in Sources */,
 				3F690915D18151E5F28EFC40 /* ReaderMorePopoverParts.swift in Sources */,
 				B69C0AB6A9AECC0E9A1A8692 /* ReaderNotificationHandlers.swift in Sources */,
