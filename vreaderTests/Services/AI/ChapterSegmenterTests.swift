@@ -186,6 +186,13 @@ struct ChapterSegmenterTests {
         #expect(ChapterSegmenter.paragraphs(in: text) == ["第一段。", "第二段。"])
     }
 
+    @Test func paragraphs_softWrapLineEndings_normalizeToLF() {
+        // Gate-4 round 2: the pre-#344 contract — CRLF/CR soft wraps inside
+        // a paragraph normalize to \n in the returned text.
+        #expect(ChapterSegmenter.paragraphs(in: "a\r\nb") == ["a\nb"])
+        #expect(ChapterSegmenter.paragraphs(in: "a\rb\r\n\r\nc") == ["a\nb", "c"])
+    }
+
         @Test func sentenceRanges_areOrderedAndNonOverlapping() {
         let text = "One. Two. Three. 四。五！"
         let ranges = ChapterSegmenter.sentenceRanges(in: text)

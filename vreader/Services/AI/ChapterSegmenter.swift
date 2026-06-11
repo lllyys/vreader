@@ -39,6 +39,11 @@ enum ChapterSegmenter {
         return BilingualParagraphRanges.scan(sourceText: chapterText).map {
             ns.substring(with: NSRange(
                 location: $0.lowerBound, length: $0.upperBound - $0.lowerBound))
+                // Preserve the pre-#344 contract: soft-wrap line endings
+                // inside a paragraph normalize to \n (Gate-4 round 2 —
+                // translation prompts + cached rows carried \n, never \r\n).
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
