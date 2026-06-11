@@ -280,6 +280,11 @@ extension EPUBReaderContainerView {
             guard let locator = viewModel.makeCurrentLocator(),
                   let unit = await vm.textProvider?.unit(containing: locator) else { return }
             if inFlightUnits.contains(unit) {
+                // Feature #100 (Gate-4): heading shimmer rows track the
+                // live target script — sync before the build, same as the
+                // inject path.
+                bilingualOrchestrator.targetIsCJK =
+                    BilingualLanguage.findOrDefault(key: vm.targetLanguage).script == .cjk
                 if let js = bilingualOrchestrator.buildLoadingJS() {
                     pendingHighlightJS = js
                 }

@@ -45,6 +45,24 @@ struct EPUBBilingualOrchestratorTests {
         #expect(js == nil)
     }
 
+    // MARK: - Feature #100 (Gate-4 Low): the CJK flag flows into the builders
+
+    @Test("targetIsCJK flows into buildLoadingJS and buildInjectJS")
+    func cjkFlagFlowsIntoBuilders() {
+        let orchestrator = EPUBBilingualOrchestrator()
+        orchestrator.updateBlocks([
+            BilingualBlock(bid: "b1", text: "Chapter One")
+        ])
+        orchestrator.targetIsCJK = true
+        #expect(orchestrator.buildLoadingJS()?.contains("var TARGET_CJK = true") == true,
+                "the heading shimmer variant needs the live flag BEFORE any inject runs")
+        #expect(orchestrator.buildInjectJS(translatedSegments: ["第一章"])?
+            .contains("var TARGET_CJK = true") == true)
+
+        orchestrator.targetIsCJK = false
+        #expect(orchestrator.buildLoadingJS()?.contains("var TARGET_CJK = false") == true)
+    }
+
     @Test("buildInjectJS returns nil when no translations are cached")
     func buildInjectJSNoTranslations() {
         let orchestrator = EPUBBilingualOrchestrator()

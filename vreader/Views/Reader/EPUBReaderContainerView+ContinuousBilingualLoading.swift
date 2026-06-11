@@ -51,6 +51,9 @@ extension EPUBReaderContainerView {
                 guard spineIndex >= 0,
                       let unit = bilingualUnit(forSection: spineIndex) else { continue }
                 if inFlightUnits.contains(unit) {
+                    // Feature #100 (Gate-4): sync the script flag before the build.
+                    bilingualOrchestrator.targetIsCJK =
+                        BilingualLanguage.findOrDefault(key: vm.targetLanguage).script == .cjk
                     if let js = bilingualOrchestrator.buildLoadingJS(forSection: spineIndex) {
                         evaluateBilingualLive(js)
                     }
