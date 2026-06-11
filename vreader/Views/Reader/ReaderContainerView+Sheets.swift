@@ -451,6 +451,13 @@ extension ReaderContainerView {
             // `.toggleBilingual`.
             break
         case .presentBookDetails:
+            // Feature #101 WI-2b (Gate-4 r2): clear the previous present's
+            // Reading time rows BEFORE the flip so the sheet's first render
+            // is built from nil-cleared state — `.onChange(of:
+            // showBookDetails)` fires after the flip and is not guaranteed
+            // to precede that first render. The mirror's onChange then
+            // starts the fresh fetch.
+            bookDetailsReadingStats = nil
             showBookDetails = true
         case .presentShareSheet:
             showShareSheet = true
