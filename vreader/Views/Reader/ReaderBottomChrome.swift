@@ -120,22 +120,36 @@ struct ReaderBottomChrome: View {
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 }
-                .buttonStyle(MetricsReadoutButtonStyle(theme: theme))
+                // Gate-4 r1 Medium: with no time readout the tap is inert —
+                // suppress the pressed flash too, not just the cycle.
+                .buttonStyle(MetricsReadoutButtonStyle(
+                    theme: theme, showsPressedFill: timeTrailingLabel != nil))
                 .layoutPriority(1)
                 .accessibilityIdentifier("readerMetricsReadout")
             }
             .font(.system(size: 11))
             .monospacedDigit()
             .foregroundStyle(Color(theme.subColor))
-            .onAppear {
-                guard let bookFingerprintKey, let perBookBaseURL else { return }
-                metricsReadout = ReaderMetricsReadout.resolve(
-                    persisted: PerBookSettingsStore.settings(
-                        for: bookFingerprintKey, baseURL: perBookBaseURL
-                    )?.metricsReadout)
-            }
+            .onAppear { resolvePersistedReadout() }
+            // Gate-4 r1 Medium: the chrome instance can be reused for a
+            // different book (host swap under the same container) — re-resolve
+            // the persisted choice when the book identity changes.
+            .onChange(of: bookFingerprintKey) { resolvePersistedReadout() }
         }
         .padding(.horizontal, 22)
+    }
+
+    /// Feature #101: seeds `metricsReadout` from the book's persisted choice
+    /// (pages when absent / unknown / non-book surface).
+    private func resolvePersistedReadout() {
+        guard let bookFingerprintKey, let perBookBaseURL else {
+            metricsReadout = .pages
+            return
+        }
+        metricsReadout = ReaderMetricsReadout.resolve(
+            persisted: PerBookSettingsStore.settings(
+                for: bookFingerprintKey, baseURL: perBookBaseURL
+            )?.metricsReadout)
     }
 
     /// Feature #101: persists the readout choice per book through the shared
@@ -268,59 +282,16 @@ private struct ReaderScrubber: View {
     }
 }
 
-// MARK: - Toolbar action observers
-
-/// Feature #60 WI-6b: bundles the four bottom-chrome toolbar
-/// notification observers into a single modifier. `ReaderContainerView`
-/// applies it as one `.modifier(...)` rather than four chained
-/// `.onReceive`s — its `body` is already near the Swift type-checker's
-/// expression-complexity ceiling, and four more chain links tipped it
-/// over ("unable to type-check in reasonable time").
-struct ReaderToolbarActionObservers: ViewModifier {
-    let onContents: () -> Void
-    let onNotes: () -> Void
-    let onDisplay: () -> Void
-    let onAI: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .onReceive(NotificationCenter.default.publisher(for: .readerOpenContents)) { _ in
-                onContents()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .readerOpenNotes)) { _ in
-                onNotes()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .readerOpenDisplay)) { _ in
-                onDisplay()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .readerOpenAI)) { _ in
-                onAI()
-            }
-    }
-}
-
-extension View {
-    /// Attaches the four bottom-chrome toolbar observers (Feature #60
-    /// WI-6b). See `ReaderToolbarActionObservers`.
-    func readerToolbarActionObservers(
-        onContents: @escaping () -> Void,
-        onNotes: @escaping () -> Void,
-        onDisplay: @escaping () -> Void,
-        onAI: @escaping () -> Void
-    ) -> some View {
-        modifier(ReaderToolbarActionObservers(
-            onContents: onContents,
-            onNotes: onNotes,
-            onDisplay: onDisplay,
-            onAI: onAI
-        ))
-    }
-}
+// (Feature #60 WI-6b `ReaderToolbarActionObservers` moved to its own file
+// for the ~300-line budget — see ReaderToolbarActionObservers.swift.)
 
 /// Feature #101: the design's pressed state — a subtle rounded fill behind
 /// the trailing label while the finger is down (RTMetricsLine `pressed`).
+/// `showsPressedFill` is false while the tap is inert (no time readout) so
+/// the pinned-pages state gives no pressed flash (Gate-4 r1 Medium).
 private struct MetricsReadoutButtonStyle: ButtonStyle {
     let theme: ReaderThemeV2
+    let showsPressedFill: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -328,7 +299,7 @@ private struct MetricsReadoutButtonStyle: ButtonStyle {
             .padding(.vertical, 1)
             .background(
                 RoundedRectangle(cornerRadius: 7).fill(
-                    configuration.isPressed
+                    configuration.isPressed && showsPressedFill
                         ? (theme.isDark
                             ? Color.white.opacity(0.08)
                             : Color.black.opacity(0.06))

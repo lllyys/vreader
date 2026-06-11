@@ -31,6 +31,23 @@ private struct StubStatsProvider: BookReadingStatsProviding {
     }
 }
 
+/// Gate-4 r1 High regression: a SLOW provider whose first call returns a
+/// poison total — if a cancelled/stale first fetch still attaches, the
+/// readout shows 3h 5m instead of the second call's 6h 40m.
+private actor SlowCountingStatsProvider: BookReadingStatsProviding {
+    private var calls = 0
+    func readingStats(forBookWithKey key: String) async throws -> ReadingStatsRecord? {
+        calls += 1
+        let call = calls
+        try await Task.sleep(for: .milliseconds(300))
+        return statsRecord(
+            key: key,
+            totalSeconds: call == 1 ? 11_111 : 24_000,  // poison vs real
+            sessionCount: 5
+        )
+    }
+}
+
 private func makeFingerprint() -> DocumentFingerprint {
     DocumentFingerprint(
         contentSHA256: String(repeating: "ab", count: 32),
@@ -154,6 +171,23 @@ struct ReaderLifecycleHelperTimeReadoutTests {
         await helper.close(locator: nil)
         #expect(helper.timeReadoutDisplay == nil)
         #expect(helper.sessionTimeDisplay == nil)
+    }
+
+    @Test func staleFetchFromClosedSessionDoesNotPoisonReopen() async throws {
+        // Gate-4 r1 High: begin → close (before the slow fetch lands) →
+        // begin again. The first (cancelled/stale-generation) fetch's
+        // poison total must be dropped; the second session attaches the
+        // real total.
+        let helper = makeHelper(statsStore: SlowCountingStatsProvider())
+        try helper.beginSession()
+        await helper.close(locator: nil)   // first fetch still in flight
+        try helper.beginSession()           // refetches (totals were reset)
+        try await Task.sleep(for: .milliseconds(1_500))
+        helper.updateTimeDisplays()
+        let readout = try #require(helper.timeReadoutDisplay)
+        // 24_000s = "6h 40m"; the poison 11_111s would read "3h 5m".
+        #expect(readout == "<1m read \u{B7} 6h 40m total")
+        await helper.close(locator: nil)
     }
 
     @Test func updateTimeDisplaysPostsSessionTimeNotification() async throws {

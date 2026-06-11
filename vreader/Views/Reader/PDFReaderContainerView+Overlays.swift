@@ -100,15 +100,12 @@ extension PDFReaderContainerView {
         )
     }
 
-    /// Feature #101: "N pages left in book" (singular-aware; "Last page"
-    /// when none remain) — the design's canonical pages readout.
+    /// Feature #101: "N pages left in book" — the design's canonical pages
+    /// readout. The string form stays uniform for every count (Gate-4 r1
+    /// Medium: no "Last page" substitution); only singular grammar varies.
     private var pdfPagesLeftReadout: String {
         let left = max(0, viewModel.totalPages - viewModel.currentPageIndex - 1)
-        switch left {
-        case 0: return "Last page"
-        case 1: return "1 page left in book"
-        default: return "\(left) pages left in book"
-        }
+        return left == 1 ? "1 page left in book" : "\(left) pages left in book"
     }
 }
 #endif

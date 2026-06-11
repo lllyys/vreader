@@ -62,6 +62,12 @@ final class ReaderLifecycleHelper {
     /// `PersistenceActor`; tests inject a stub). nil = totals never attach
     /// (the time readout stays nil — pages pinned).
     @ObservationIgnored private let statsStore: (any BookReadingStatsProviding)?
+    /// Feature #101 (Gate-4 r1 High): the in-flight stats fetch + a session
+    /// generation stamp. A slow fetch must not outlive `close()` or land on
+    /// a LATER session's state — the task is cancelled on close and its
+    /// result is dropped unless the generation still matches.
+    @ObservationIgnored private var statsFetchTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionGeneration = 0
     /// Date when the current active segment started (reset on background/resume).
     private var segmentStartDate: Date?
     /// Accumulated active reading seconds (excluding paused time).
@@ -90,13 +96,20 @@ final class ReaderLifecycleHelper {
     /// Throws if session tracking fails (caller should handle rollback).
     func beginSession() throws {
         try sessionTracker.startSessionIfNeeded(bookFingerprint: bookFingerprint)
-        // Feature #101: query the book totals ONCE at session start. The
-        // fetch races nothing — until it lands, `timeReadoutDisplay` stays
-        // nil and the chrome pins the pages readout.
+        // Feature #101: query the book totals ONCE at session start. Until
+        // it lands, `timeReadoutDisplay` stays nil and the chrome pins the
+        // pages readout. The generation stamp drops a slow fetch that lands
+        // after close() or after a subsequent session began (Gate-4 r1 High).
+        sessionGeneration += 1
+        let generation = sessionGeneration
         if totalSecondsAtOpen == nil, let statsStore {
-            Task { [weak self, bookFingerprintKey] in
+            statsFetchTask?.cancel()
+            statsFetchTask = Task { [weak self, bookFingerprintKey] in
                 let record = try? await statsStore.readingStats(forBookWithKey: bookFingerprintKey)
-                self?.attachBookTotals(
+                guard let self, !Task.isCancelled, self.sessionGeneration == generation else {
+                    return
+                }
+                self.attachBookTotals(
                     totalSecondsAtOpen: record?.totalReadingSeconds ?? 0,
                     isFirstSession: (record?.sessionCount ?? 0) == 0
                 )
@@ -123,6 +136,12 @@ final class ReaderLifecycleHelper {
     ///   Pass nil if no content was loaded (skips position save).
     func close(locator: Locator?) async {
         cancelFlush()
+        // Feature #101 (Gate-4 r1 High): a still-running stats fetch must not
+        // re-attach totals after the reset below — cancel it and invalidate
+        // its generation so a non-cancellable in-flight await drops its result.
+        statsFetchTask?.cancel()
+        statsFetchTask = nil
+        sessionGeneration += 1
 
         if let locator {
             await positionService.saveNow(locator: locator)
