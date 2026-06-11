@@ -33,6 +33,11 @@ struct BilingualLanguagePickerCell: View {
     /// Tap handler — host stores the new selection.
     let onTap: () -> Void
 
+    /// Feature #99 (edit frame): the green "translated before" tick
+    /// badge at the cell's top-right (design `BSLangTile` `cached`).
+    /// Default off — first-enable renders unchanged.
+    var showsCachedBadge: Bool = false
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 8) {
@@ -48,10 +53,33 @@ struct BilingualLanguagePickerCell: View {
             .padding(.vertical, 10)
             .background(cellBackground)
             .contentShape(Rectangle())
+            .overlay(alignment: .topTrailing) {
+                if showsCachedBadge { cachedBadge }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(Self.cellAccessibilityIdentifier(for: language.key))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityValue(showsCachedBadge ? "translated before" : "")
+    }
+
+    /// The 15pt green tick disc with a 2pt surface ring (design
+    /// `BSLangTile` `cached` badge).
+    private var cachedBadge: some View {
+        Circle()
+            .fill(theme.isDark
+                ? Color(red: 0.247, green: 0.416, blue: 0.345)
+                : Color(red: 0.227, green: 0.416, blue: 0.353))
+            .frame(width: 15, height: 15)
+            .overlay(
+                Image(systemName: "checkmark")
+                    .font(.system(size: 7, weight: .heavy))
+                    .foregroundStyle(.white)
+            )
+            .overlay(
+                Circle().strokeBorder(Color(theme.chromeColor), lineWidth: 2)
+            )
+            .offset(x: 4, y: -4)
     }
 
     /// Per-cell glyph chip — accent-filled when selected, dimmed when

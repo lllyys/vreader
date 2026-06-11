@@ -36,6 +36,12 @@ struct BilingualSetupSheetContainer: View {
     /// Bug #344 (design #1646): threads the per-format sentence-granularity
     /// capability into the sheet's dim-or-selectable control state.
     let sentenceGranularityAvailable: Bool
+    /// Feature #99: the sheet frame + edit-frame inputs (pass-through —
+    /// the `.firstEnable` defaults keep pre-#99 hosts unchanged).
+    let mode: BilingualSetupSheetMode
+    let cachedLanguages: Set<String>
+    let currentLanguageKey: String?
+    let currentGranularity: TranslationGranularity?
 
     /// Owns the AI-providers VM + the push/activation transitions. Built once
     /// from the `onConfigured` init param (which fires when a provider becomes
@@ -51,7 +57,11 @@ struct BilingualSetupSheetContainer: View {
         onConfirm: @escaping () -> Void,
         onCancel: @escaping () -> Void,
         onConfigured: @escaping () async -> Void,
-        sentenceGranularityAvailable: Bool = true
+        sentenceGranularityAvailable: Bool = true,
+        mode: BilingualSetupSheetMode = .firstEnable,
+        cachedLanguages: Set<String> = [],
+        currentLanguageKey: String? = nil,
+        currentGranularity: TranslationGranularity? = nil
     ) {
         self.theme = theme
         self._state = state
@@ -59,6 +69,10 @@ struct BilingualSetupSheetContainer: View {
         self.onConfirm = onConfirm
         self.onCancel = onCancel
         self.sentenceGranularityAvailable = sentenceGranularityAvailable
+        self.mode = mode
+        self.cachedLanguages = cachedLanguages
+        self.currentLanguageKey = currentLanguageKey
+        self.currentGranularity = currentGranularity
         _flow = State(initialValue: ReaderAIProvidersFlow(onConfigured: onConfigured))
     }
 
@@ -72,7 +86,11 @@ struct BilingualSetupSheetContainer: View {
                 onConfirm: onConfirm,
                 onCancel: onCancel,
                 onOpenSettings: { flow.openProviders() },
-                sentenceGranularityAvailable: sentenceGranularityAvailable
+                sentenceGranularityAvailable: sentenceGranularityAvailable,
+                mode: mode,
+                cachedLanguages: cachedLanguages,
+                currentLanguageKey: currentLanguageKey,
+                currentGranularity: currentGranularity
             )
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $flow.showingProviders) {

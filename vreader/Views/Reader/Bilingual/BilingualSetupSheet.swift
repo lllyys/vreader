@@ -26,89 +26,21 @@
 
 import SwiftUI
 
-/// Shared state for the bilingual setup sheet — held by the host
-/// (the per-format reader container, WI-10..13) and bound to the
-/// view model on confirm. A pure value type so the sheet can stay
-/// stateless and testable.
-struct BilingualSetupSheetState: Equatable, Sendable {
-
-    /// One of `BilingualLanguage.all`'s `key` values.
-    var languageKey: String
-
-    /// Segmentation granularity — paragraph (default) or sentence.
-    var granularity: TranslationGranularity
-
-    /// Default state per design §2.2 — Chinese + paragraph.
-    static let defaultValue = BilingualSetupSheetState(
-        languageKey: "Chinese",
-        granularity: .paragraph
-    )
-
-    /// Languages the picker offers. Pinned to `BilingualLanguage.all`
-    /// so any registry edit flows through to the sheet automatically.
-    static var availableLanguages: [BilingualLanguage] { BilingualLanguage.all }
-
-    /// Granularity options in design order (paragraph then sentence).
-    static let availableGranularities: [TranslationGranularity] = [.paragraph, .sentence]
-
-    /// Returns a copy with the language key canonicalised through the
-    /// registry (`BilingualLanguage.findOrDefault`). A persisted key
-    /// that's no longer in `BilingualLanguage.all` is rewritten to
-    /// the registry's first entry — same fallback the pill uses, so
-    /// the picker always paints a selection.
-    func normalised() -> BilingualSetupSheetState {
-        let resolvedKey = BilingualLanguage.findOrDefault(key: languageKey).key
-        return BilingualSetupSheetState(
-            languageKey: resolvedKey,
-            granularity: granularity
-        )
-    }
-}
-
-/// AI provider descriptor the host passes into the setup sheet. The
-/// sheet renders the descriptor's display surface verbatim; the host
-/// resolves the provider name + subtitle from `ProviderProfileStore`.
-struct BilingualEngineDescriptor: Equatable, Sendable {
-
-    /// Whether an AI provider profile is configured. Drives the
-    /// engine strip's visual + the engine button label.
-    let configured: Bool
-
-    /// Provider display name (e.g. `"Claude"`). Optional — `nil`
-    /// degrades to a generic "AI provider configured" title.
-    let providerName: String?
-
-    /// Subtitle shown under the title. Optional — `nil` degrades to
-    /// the design's generic copy.
-    let subtitle: String?
-
-    /// Display title — provider name when configured + supplied,
-    /// otherwise a generic title.
-    var displayTitle: String {
-        if configured {
-            if let name = providerName, !name.isEmpty {
-                return name
-            }
-            return "AI provider configured"
-        }
-        return "No AI provider configured"
-    }
-
-    /// Display subtitle — host-supplied when configured + supplied,
-    /// otherwise the design's generic copy.
-    var displaySubtitle: String {
-        if let subtitle, !subtitle.isEmpty {
-            return subtitle
-        }
-        if configured {
-            return "Translations cached per paragraph, one page ahead."
-        }
-        return "Bilingual mode needs an AI provider to translate."
-    }
+/// Which frame the setup sheet renders (feature #99).
+enum BilingualSetupSheetMode: Equatable, Sendable {
+    /// The original first-enable frame — "Bilingual mode" title,
+    /// preview section, constant CTA. The default; pre-#99 callers
+    /// render byte-identical.
+    case firstEnable
+    /// The edit frame (design §#1640 `BSSettingsSheet`) — "Translation
+    /// settings" title, leading Cancel, book-context strip, cached
+    /// badges, cost strips, dirty-driven CTA.
+    case edit(bookTitle: String)
 }
 
 /// First-enable bilingual setup half-sheet — target language,
-/// granularity, AI provider chip.
+/// granularity, AI provider chip. Feature #99 adds the edit frame
+/// (`BilingualSetupSheetMode.edit`) for post-setup re-entry.
 struct BilingualSetupSheet: View {
 
     /// Visual-identity-v2 theme tokens for the active book.
@@ -144,6 +76,20 @@ struct BilingualSetupSheet: View {
     /// the control dims rather than silently forcing `.paragraph`.
     var sentenceGranularityAvailable: Bool = true
 
+    /// Feature #99: which frame to render. Defaults to the original
+    /// first-enable frame — existing callers are unchanged.
+    var mode: BilingualSetupSheetMode = .firstEnable
+
+    /// Feature #99 (edit frame): languages with ≥1 cached row for this
+    /// book (`ChapterTranslationStore.cachedLanguages`) — drives the
+    /// tick badges, the caption, and the cached-vs-new dirty kind.
+    var cachedLanguages: Set<String> = []
+
+    /// Feature #99 (edit frame): the book's CURRENT persisted language /
+    /// granularity — the dirty baseline. nil in first-enable mode.
+    var currentLanguageKey: String? = nil
+    var currentGranularity: TranslationGranularity? = nil
+
     /// Sheet accessibility identifier for XCUITest + verify-cron.
     static let accessibilityIdentifier = "bilingualSetupSheet"
 
@@ -161,12 +107,19 @@ struct BilingualSetupSheet: View {
     var body: some View {
         ReaderSheetChrome(
             theme: theme,
-            title: "Bilingual mode",
+            title: displayTitle,
             onClose: onCancel,
+            leading: { cancelButton },
             content: {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        previewSection
+                        // Feature #99: the edit frame swaps the preview
+                        // for the book-context strip (design BSSettingsSheet).
+                        if isEditMode {
+                            editContextStrip
+                        } else {
+                            previewSection
+                        }
                         languageSection
                         granularitySection
                         engineSection
@@ -204,9 +157,20 @@ struct BilingualSetupSheet: View {
                         theme: theme,
                         language: lang,
                         isSelected: lang.key == state.languageKey,
-                        onTap: { state.languageKey = lang.key }
+                        onTap: { state.languageKey = lang.key },
+                        showsCachedBadge: showsCachedBadge(forLanguageKey: lang.key)
                     )
                 }
+            }
+            // Feature #99 (edit frame): the cached caption + the
+            // language-slot cost strip live tight under the grid.
+            if showsCachedCaption {
+                editCachedCaption
+            }
+            if let kind = languageStripKind {
+                BilingualCostStrip(
+                    theme: theme, kind: kind,
+                    languageDisplay: draftLanguageDisplay)
             }
         }
     }
@@ -264,6 +228,12 @@ struct BilingualSetupSheet: View {
                 }
                 .accessibilityIdentifier("bilingualGranularityUnavailableFootnote")
             }
+            // Feature #99 (edit frame): the granularity-slot cost strip.
+            if let kind = granularityStripKind {
+                BilingualCostStrip(
+                    theme: theme, kind: kind,
+                    languageDisplay: draftLanguageDisplay)
+            }
         }
     }
 
@@ -291,17 +261,28 @@ struct BilingualSetupSheet: View {
     // MARK: - CTA
 
     var cta: some View {
+        // Feature #99: the edit frame's CTA is dirty-driven — quiet
+        // "Done" when nothing changed, accent otherwise; first-enable
+        // keeps the constant accent CTA.
         Button(action: onConfirm) {
-            Text(Self.primaryCTALabel)
+            Text(resolvedCTALabel)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.white)
+                .foregroundStyle(ctaUsesAccentFill ? Color.white : Color(theme.inkColor))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(
-                    RoundedRectangle(cornerRadius: 14).fill(Color(theme.accentColor))
+                    RoundedRectangle(cornerRadius: 14).fill(
+                        ctaUsesAccentFill
+                            ? Color(theme.accentColor)
+                            : (theme.isDark
+                                ? Color.white.opacity(0.08)
+                                : Color.black.opacity(0.06))
+                    )
                 )
                 .shadow(
-                    color: Color(theme.accentColor).opacity(0.33),
+                    color: ctaUsesAccentFill
+                        ? Color(theme.accentColor).opacity(0.33)
+                        : Color.clear,
                     radius: 6, x: 0, y: 4
                 )
         }
