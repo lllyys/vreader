@@ -46,8 +46,11 @@ struct BookReadingTimeModel: Equatable, Sendable {
 
         let average: String
         if sessionCount > 0 {
-            let avgSeconds = Int((Double(totalSeconds) / Double(sessionCount)).rounded())
-            average = ReadingTimeFormatter.formatDuration(totalSeconds: avgSeconds)
+            // Round at the MINUTE level (the plan's "rounds to minutes") —
+            // rounding seconds then flooring would render 90-119s as "1m"
+            // (Gate-4 Medium).
+            let avgMinutes = Int((Double(totalSeconds) / Double(sessionCount) / 60).rounded())
+            average = ReadingTimeFormatter.formatDuration(totalSeconds: avgMinutes * 60)
         } else {
             average = emDash
         }

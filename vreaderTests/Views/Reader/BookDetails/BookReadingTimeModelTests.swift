@@ -155,16 +155,23 @@ struct BookReadingTimeModelTests {
         #expect(model.totalValue == "41h total")
     }
 
-    @Test func averageRoundsToNearestMinute() {
-        // 3 sessions, 280s total → 93.3s avg → rounds to 1m31s? No —
-        // average rounds to MINUTES: 93s → "1m" (floor via formatDuration
-        // after rounding seconds). 3 × 95s = 285 → 95s avg → "1m".
+    @Test(arguments: [
+        (89, "1m"),    // 1.48 min rounds down
+        (90, "2m"),    // 1.5 min rounds up (Gate-4 Medium boundary)
+        (95, "2m"),
+        (119, "2m"),
+        (120, "2m"),
+        (149, "2m"),
+        (150, "3m"),   // 2.5 min rounds up
+    ])
+    func averageRoundsAtTheMinuteLevel(_ avgSeconds: Int, _ expected: String) {
+        // One session so total == the average being formatted.
         let model = BookReadingTimeModel.build(
-            record: record(total: 285, sessions: 3),
+            record: record(total: avgSeconds, sessions: 1),
             firstSessionDate: march2, liveSessionDisplay: nil,
             now: june11, calendar: utcCalendar
         )
-        #expect(model.averageSessionValue == "1m")
+        #expect(model.averageSessionValue == expected)
     }
 
     @Test func averageOverAnHourUsesHourForm() {
