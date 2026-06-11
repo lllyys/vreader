@@ -228,6 +228,24 @@ actor ChapterTranslationStore {
         return Set(models.filter { Self.record(from: $0) != nil }.map(\.unitStorageKey))
     }
 
+    /// Feature #99 WI-1: the distinct target languages with at least one
+    /// parseable cached row for a book — drives the edit-framed settings
+    /// sheet's green tick badges + the cached-vs-new-language dirty kind.
+    /// Corrupt rows do not count (same rule as `cachedUnits` — a row that
+    /// can't decode must not claim coverage). promptVersion / granularity
+    /// are NOT filtered: the badge means "was translated before", which is
+    /// all the cached-language strip copy commits to.
+    func cachedLanguages(forBookWithKey bookFingerprintKey: String) async -> Set<String> {
+        guard let modelContainer else { return [] }
+        migrateLegacyKeysIfNeeded()
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<ChapterTranslation>(
+            predicate: #Predicate { $0.bookFingerprintKey == bookFingerprintKey }
+        )
+        guard let models = try? context.fetch(descriptor) else { return [] }
+        return Set(models.filter { Self.record(from: $0) != nil }.map(\.targetLanguage))
+    }
+
     // MARK: - Upsert
 
     /// Idempotently inserts or updates one translation. Fetches the existing

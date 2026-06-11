@@ -394,3 +394,61 @@ struct ChapterTranslationStoreTests {
         #expect(await store.debugRowCount() == 2)
     }
 }
+
+// MARK: - cachedLanguages (feature #99 WI-1)
+
+@Suite("ChapterTranslationStore.cachedLanguages (feature #99)")
+struct ChapterTranslationStoreCachedLanguagesTests {
+
+    private static let profile = UUID(uuidString: "AAAAAAAA-0000-0000-0000-000000000009")!
+
+    private func makeStore() throws -> ChapterTranslationStore {
+        let schema = Schema(SchemaV7.models)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        return ChapterTranslationStore(modelContainer: container)
+    }
+
+    private func record(
+        book: String, unit: String, lang: String
+    ) -> ChapterTranslationRecord {
+        ChapterTranslationRecord(
+            bookFingerprintKey: book, unitStorageKey: unit, targetLanguage: lang,
+            providerProfileID: Self.profile, promptVersion: "v1",
+            translatedSegments: ["x"], sourceParagraphCount: 1)
+    }
+
+    @Test func emptyStoreYieldsNoLanguages() async throws {
+        let store = try makeStore()
+        #expect(await store.cachedLanguages(forBookWithKey: "fp1") == [])
+    }
+
+    @Test func distinctLanguagesForTheBook() async throws {
+        let store = try makeStore()
+        try await store.upsert(record(book: "fp1", unit: "u1", lang: "Chinese"))
+        try await store.upsert(record(book: "fp1", unit: "u2", lang: "Chinese"))
+        try await store.upsert(record(book: "fp1", unit: "u1", lang: "French"))
+        #expect(await store.cachedLanguages(forBookWithKey: "fp1") == ["Chinese", "French"])
+    }
+
+    @Test func otherBooksRowsAreExcluded() async throws {
+        let store = try makeStore()
+        try await store.upsert(record(book: "fp1", unit: "u1", lang: "Chinese"))
+        try await store.upsert(record(book: "fp2", unit: "u1", lang: "Japanese"))
+        #expect(await store.cachedLanguages(forBookWithKey: "fp1") == ["Chinese"])
+    }
+
+    @Test func corruptRowsDoNotCountAsCached() async throws {
+        let store = try makeStore()
+        let badKey = ChapterTranslationRecord.lookupKey(
+            bookFingerprintKey: "fp1", unitStorageKey: "u9",
+            targetLanguage: "Korean", promptVersion: "v1")
+        try await store.debugInsertRaw(
+            lookupKey: badKey, bookFingerprintKey: "fp1", unitStorageKey: "u9",
+            targetLanguage: "Korean", providerProfileID: Self.profile, promptVersion: "v1",
+            translatedJSON: "<<garbage>>", sourceParagraphCount: 1)
+        try await store.upsert(record(book: "fp1", unit: "u1", lang: "Chinese"))
+        // Korean's only row is corrupt → no badge for Korean.
+        #expect(await store.cachedLanguages(forBookWithKey: "fp1") == ["Chinese"])
+    }
+}
