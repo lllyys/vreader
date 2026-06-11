@@ -87,3 +87,33 @@ struct EPUBScrollAnchorResolverBug349Tests {
             forStoredHref: nil, spineHrefs: spine) == nil)
     }
 }
+
+// MARK: - Bug #349 audit r1: fragments + decoded-ambiguity fallback
+
+@Suite("EPUBScrollAnchorResolver — fragments + ambiguity (bug #349 r1)")
+struct EPUBScrollAnchorResolverFragmentTests {
+
+    @Test func fragmentBearingSavedHrefMatches() {
+        let spine = ["cover.xhtml", "ch1.xhtml"]
+        #expect(EPUBScrollAnchorResolver.matchIndex(
+            forStoredHref: "ch1.xhtml#p12", spineHrefs: spine) == 1)
+        #expect(EPUBScrollAnchorResolver.matchIndex(
+            forStoredHref: "OEBPS/ch1.xhtml#frag", spineHrefs: spine) == 1)
+    }
+
+    @Test func encodedCJKWithFragmentMatches() {
+        let spine = ["第一章.xhtml"]
+        let encoded = "第一章.xhtml".addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed)! + "#loc"
+        #expect(EPUBScrollAnchorResolver.matchIndex(
+            forStoredHref: encoded, spineHrefs: spine) == 0)
+    }
+
+    @Test func decodedCollisionFallsBackInsteadOfGuessing() {
+        // Two legal-but-distinct manifest entries collapse to the same
+        // decoded string — the resolver must NOT pick one arbitrarily.
+        let spine = ["a%2Fb.xhtml", "a/b.xhtml"]
+        #expect(EPUBScrollAnchorResolver.matchIndex(
+            forStoredHref: "a%2fb.xhtml", spineHrefs: spine) == nil)
+    }
+}
