@@ -5051,15 +5051,6 @@ ${doc.querySelector("parsererror").innerText}`);
           const range = this.#windowRange(this.#index, this.sections.length, this.#K);
           if (!range) return;
           let [lo, hi] = range;
-          // Bug #325: a section SHORTER than the viewport can never become the
-          // current #index via scroll-offset resolution (the max scroll offset
-          // stays below its start), so #index can't advance past it and the
-          // section AFTER it never mounts — the scroll dead-ends at the short
-          // divider. While the bottom-of-window section is mounted and measures
-          // shorter than the viewport, extend the window one section further so
-          // the content past the divider is pre-mounted. No #index change (so
-          // relocate + #265 restore are unchanged); never fires for tall
-          // sections, so #73/#76 windowing is byte-for-byte unchanged.
           while (hi + 1 < this.sections.length && this.#mountedSectionHeight(hi) < this.size) {
             hi += 1;
           }
@@ -5075,6 +5066,10 @@ ${doc.querySelector("parsererror").innerText}`);
           }
           this.#evictOutsideWindow(lo, hi);
         }
+        // Bug #325: live axis-extent of the mounted section at absolute index `i`
+        // (the anchor `#view` or a neighbour in `#scrolledViews`), or Infinity when
+        // not yet mounted — so the window-extension check treats an unmeasured
+        // section as "tall" (don't pre-extend until it has actually measured short).
         #mountedSectionHeight(i3) {
           const v3 = i3 === this.#index ? this.#view : this.#scrolledViews.find((x3) => (x3.wi73Index ?? this.#index) === i3);
           return v3?.element ? this.#elementAxisSize(v3.element) : Infinity;
@@ -7018,10 +7013,10 @@ ${doc.querySelector("parsererror").innerText}`);
     if (!rect) return null;
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
   }
-  const BILINGUAL_BLOCK_TAGS = { p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1 };
-  const BILINGUAL_BLOCK_SELECTOR = Object.keys(BILINGUAL_BLOCK_TAGS).join(",");
+  var BILINGUAL_BLOCK_TAGS = { p: 1, li: 1, blockquote: 1, pre: 1, dd: 1, dt: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1 };
+  var BILINGUAL_BLOCK_SELECTOR = Object.keys(BILINGUAL_BLOCK_TAGS).join(",");
   function bilingualNormalizeBlockText(el) {
-    return ((el && el.textContent) || "").replace(/\s+/g, " ").trim();
+    return (el && el.textContent || "").replace(/\s+/g, " ").trim();
   }
   function bilingualLeafBlockElements(doc) {
     if (!doc) return [];
@@ -7029,8 +7024,8 @@ ${doc.querySelector("parsererror").innerText}`);
     if (!root || !root.getElementsByTagName) return [];
     const all = root.getElementsByTagName("*");
     const out = [];
-    for (let i = 0; i < all.length; i++) {
-      const el = all[i];
+    for (let i3 = 0; i3 < all.length; i3++) {
+      const el = all[i3];
       const tag = (el.localName || "").toLowerCase();
       if (!BILINGUAL_BLOCK_TAGS[tag]) continue;
       if (el.hasAttribute && el.hasAttribute("data-vreader-decoration")) continue;
@@ -7477,6 +7472,9 @@ ${doc.querySelector("parsererror").innerText}`);
         const CLS = opts?.blockClassName || "vreader-bilingual";
         const STYLE = opts?.styleCssText || "user-select: none; -webkit-user-select: none;";
         const targetSectionIndex = opts?.targetSectionIndex;
+        const TARGET_CJK = !!opts?.targetIsCJK;
+        const isHeading = (el) => !!(el && /^h[1-6]$/.test((el.localName || "").toLowerCase()));
+        const headingClasses = (el) => isHeading(el) ? " vreader-bilingual--heading" + (TARGET_CJK ? " vreader-bilingual--cjk" : "") : "";
         const contents = view.renderer?.getContents?.();
         if (!Array.isArray(contents) || contents.length === 0) return;
         const esc = typeof CSS !== "undefined" && CSS.escape ? CSS.escape : (s3) => String(s3).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
@@ -7498,11 +7496,18 @@ ${doc.querySelector("parsererror").innerText}`);
             const next = block.nextElementSibling;
             if (next && next.hasAttribute && next.hasAttribute(DECO) && next.classList && next.classList.contains(CLS)) {
               next.classList.remove("vreader-bilingual-loading");
+              if (isHeading(block)) {
+                next.classList.add("vreader-bilingual--heading");
+                next.classList.toggle("vreader-bilingual--cjk", TARGET_CJK);
+              } else {
+                next.classList.remove("vreader-bilingual--heading");
+                next.classList.remove("vreader-bilingual--cjk");
+              }
               next.textContent = translations[bid];
               continue;
             }
             const div = doc.createElement("div");
-            div.className = CLS;
+            div.className = CLS + headingClasses(block);
             div.setAttribute(DECO, "");
             div.style.cssText = STYLE;
             div.textContent = translations[bid];
@@ -7564,7 +7569,10 @@ ${doc.querySelector("parsererror").innerText}`);
         const BAR_CLS = opts?.shimmerBarClassName || "vreader-shimmer-bar";
         const STYLE = opts?.styleCssText || "user-select: none; -webkit-user-select: none;";
         const targetSectionIndex = opts?.targetSectionIndex;
+        const TARGET_CJK = !!opts?.targetIsCJK;
+        const isHeading = (el) => !!(el && /^h[1-6]$/.test((el.localName || "").toLowerCase()));
         const WIDTHS = ["92%", "54%"];
+        const HEADING_WIDTHS = ["72px"];
         const contents = view.renderer?.getContents?.();
         if (!Array.isArray(contents) || contents.length === 0) return;
         const esc = typeof CSS !== "undefined" && CSS.escape ? CSS.escape : (s3) => String(s3).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
@@ -7584,14 +7592,16 @@ ${doc.querySelector("parsererror").innerText}`);
             if (next && next.hasAttribute && next.hasAttribute(DECO) && next.classList && next.classList.contains(CLS)) {
               continue;
             }
+            const heading = isHeading(block);
             const div = doc.createElement("div");
-            div.className = CLS + " " + LOADING_CLS;
+            div.className = CLS + " " + LOADING_CLS + (heading ? " vreader-bilingual--heading" + (TARGET_CJK ? " vreader-bilingual--cjk" : "") : "");
             div.setAttribute(DECO, "");
             div.style.cssText = STYLE;
-            for (let w2 = 0; w2 < WIDTHS.length; w2++) {
+            const widths = heading ? HEADING_WIDTHS : WIDTHS;
+            for (let w2 = 0; w2 < widths.length; w2++) {
               const bar = doc.createElement("div");
               bar.className = BAR_CLS;
-              bar.style.width = WIDTHS[w2];
+              bar.style.width = widths[w2];
               div.appendChild(bar);
             }
             if (block.parentNode) {

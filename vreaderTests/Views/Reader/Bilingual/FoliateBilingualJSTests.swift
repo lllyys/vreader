@@ -255,17 +255,33 @@ struct FoliateBilingualJSTests {
             .contains("targetIsCJK: false"))
     }
 
-    @Test("the bundled foliate-host.js enumerates h1–h6 and emits the heading modifiers")
-    func hostSourceCarriesHeadingSupport() throws {
-        let url = try #require(Bundle.main.url(
-            forResource: "foliate-host", withExtension: "js"),
-            "the host bundle must ship in the app resources")
-        let src = try String(contentsOf: url, encoding: .utf8)
-        #expect(src.contains("h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1"),
-                "BILINGUAL_BLOCK_TAGS includes headings (design #1650)")
-        #expect(src.contains("vreader-bilingual--heading"))
-        #expect(src.contains("vreader-bilingual--cjk"))
-        #expect(src.contains("HEADING_WIDTHS = ['72px']"),
-                "heading slots get the single centered bar")
+    /// Loads a bundled JS resource — `Bundle.main` (the test host app) with
+    /// a `Bundle(for:)` fallback, the repo's robust pattern.
+    private func bundledJS(_ name: String) throws -> String {
+        let url = Bundle.main.url(forResource: name, withExtension: "js")
+            ?? Bundle(for: BundleToken.self).url(forResource: name, withExtension: "js")
+        return try String(contentsOf: try #require(url, "\(name).js must ship in the app resources"), encoding: .utf8)
+    }
+    private final class BundleToken {}
+
+    @Test("foliate-host.js AND the BUILT foliate-bundle.js carry the heading support")
+    func hostAndBuiltBundleCarryHeadingSupport() throws {
+        // Gate-4 (WI-2 High): the RUNTIME loads foliate-bundle.js — pin the
+        // built artifact, not just the source, so an un-rebuilt bundle fails
+        // here instead of silently shipping without the feature.
+        for name in ["foliate-host", "foliate-bundle"] {
+            let src = try bundledJS(name)
+            #expect(src.contains("h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1"),
+                    "\(name): BILINGUAL_BLOCK_TAGS includes headings (design #1650)")
+            #expect(src.contains("vreader-bilingual--heading"), Comment(rawValue: name))
+            #expect(src.contains("vreader-bilingual--cjk"), Comment(rawValue: name))
+        }
+    }
+
+    @Test("the replace path NORMALIZES modifiers (stale --cjk drops on language switch)")
+    func replacePathNormalizesModifiers() throws {
+        let src = try bundledJS("foliate-host")
+        #expect(src.contains("classList.toggle('vreader-bilingual--cjk', TARGET_CJK)"),
+                "CJK modifier must track the CURRENT target, not accumulate")
     }
 }

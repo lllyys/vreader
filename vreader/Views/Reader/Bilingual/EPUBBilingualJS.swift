@@ -485,11 +485,15 @@ enum EPUBBilingualJS {
                     // children; also drop the loading class so the landed
                     // translation styles as a normal interlinear row.
                     existing.classList.remove('\(loadingClassName)');
-                    // Feature #100: keep the heading modifiers when a shimmer
-                    // is replaced in place by the landed translation.
+                    // Feature #100: NORMALIZE the heading modifiers on the
+                    // in-place replace — a language switch (CJK -> Latin)
+                    // reuses the node, so stale modifiers must drop too.
                     if (isHeading(block)) {
                         existing.classList.add('\(headingClassName)');
-                        if (TARGET_CJK) { existing.classList.add('\(cjkClassName)'); }
+                        existing.classList.toggle('\(cjkClassName)', TARGET_CJK);
+                    } else {
+                        existing.classList.remove('\(headingClassName)');
+                        existing.classList.remove('\(cjkClassName)');
                     }
                     existing.textContent = translations[bid];
                     continue;

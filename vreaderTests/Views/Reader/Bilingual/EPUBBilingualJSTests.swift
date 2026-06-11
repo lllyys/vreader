@@ -230,9 +230,10 @@ struct EPUBBilingualJSTests {
     func replacePathKeepsHeadingClasses() {
         let js = EPUBBilingualJS.bilingualInjectJS(
             translationsByBid: ["b1": "第一章"], targetIsCJK: true)
-        // The shimmer→translation replace must re-assert the classes (a
-        // shimmer injected before the flag changed could lack them).
+        // The shimmer→translation replace must NORMALIZE the classes (a
+        // language switch reuses the node — stale modifiers must drop).
         #expect(js.contains("existing.classList.add('vreader-bilingual--heading')"))
+        #expect(js.contains("existing.classList.toggle('vreader-bilingual--cjk', TARGET_CJK)"))
     }
 
     @Test("loading JS: heading slots get ONE centered 72px bar + the modifiers")

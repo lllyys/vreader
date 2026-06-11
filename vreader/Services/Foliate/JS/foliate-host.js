@@ -651,11 +651,15 @@ window.readerAPI = {
                         // place (no flicker / re-insert) — the shimmer bars
                         // are wiped by the textContent assignment below.
                         next.classList.remove('vreader-bilingual-loading')
-                        // Feature #100: keep the heading modifiers when a
-                        // shimmer is replaced in place by the translation.
+                        // Feature #100: NORMALIZE the heading modifiers on the
+                        // in-place replace — a language switch (CJK -> Latin)
+                        // reuses the node, so stale modifiers must drop too.
                         if (isHeading(block)) {
                             next.classList.add('vreader-bilingual--heading')
-                            if (TARGET_CJK) next.classList.add('vreader-bilingual--cjk')
+                            next.classList.toggle('vreader-bilingual--cjk', TARGET_CJK)
+                        } else {
+                            next.classList.remove('vreader-bilingual--heading')
+                            next.classList.remove('vreader-bilingual--cjk')
                         }
                         next.textContent = translations[bid]
                         continue
