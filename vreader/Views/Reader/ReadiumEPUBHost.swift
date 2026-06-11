@@ -144,6 +144,13 @@ struct ReadiumEPUBHost: View {
         languageKey: BilingualReadingViewModel.defaultTargetLanguage,
         granularity: .paragraph
     )
+    /// Feature #99 WI-4: the setup sheet's frame (first-enable vs
+    /// edit) + the edit frame's cached-language inputs + the
+    /// generation-stamped fetch (a superseded presentation's completion
+    /// is dropped).
+    @State var bilingualSetupMode: BilingualSetupSheetMode = .firstEnable
+    @State var bilingualCachedLanguages: Set<String> = []
+    @State var bilingualCachedLanguagesFetcher = BilingualCachedLanguagesFetcher()
     /// Chapter-change dedupe + pure decision logic. A reference type so the
     /// `onLocationChange` closure mutates the live instance, not a stale snapshot.
     @State var bilingualChapterTracker = ReadiumBilingualChapterTracker()

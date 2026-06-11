@@ -98,6 +98,13 @@ struct TXTReaderContainerView: View {
     @State var bilingualViewModel: BilingualReadingViewModel?
     @State var showBilingualSetupSheet: Bool = false
     @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+    /// Feature #99 WI-4: the setup sheet's frame (first-enable vs
+    /// edit) + the edit frame's cached-language inputs + the
+    /// generation-stamped fetch (a superseded presentation's completion
+    /// is dropped).
+    @State var bilingualSetupMode: BilingualSetupSheetMode = .firstEnable
+    @State var bilingualCachedLanguages: Set<String> = []
+    @State var bilingualCachedLanguagesFetcher = BilingualCachedLanguagesFetcher()
 
     /// Feature #56 WI-12b: the current chapter's bilingual display segment
     /// map. Identity when bilingual is off (the rendered string IS the
@@ -353,6 +360,11 @@ struct TXTReaderContainerView: View {
         )
         // Feature #56 WI-12: bilingual reading surfaces (separate extension).
         .modifier(bilingualSurfacesModifier)
+        // Feature #99 WI-4: keyed re-entry — present the edit-framed
+        // translation-settings sheet.
+        .bilingualTranslationSettingsObserver(
+            bookFingerprintKey: viewModel.bookFingerprintKey
+        ) { handleTranslationSettingsRequest(bookTitle: $0) }
         // Bug #237 — DebugBridge highlight-driver observer (DEBUG-only).
         .modifier(debugBridgeHighlightObserverModifier)
     }

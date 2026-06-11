@@ -35,6 +35,7 @@ extension BilingualSetupSheet {
     /// as a separate italic-serif run (design `BSSettingsSheet`).
     var contextStripText: String? {
         guard let editBookTitle else { return nil }
+        guard !editBookTitle.isEmpty else { return "Bilingual mode is on" }
         return "Bilingual mode is on \u{B7} \(editBookTitle)"
     }
 
@@ -126,7 +127,8 @@ extension BilingualSetupSheet {
                 Image(systemName: "character.bubble")
                     .font(.system(size: 12))
                     .foregroundStyle(Color(theme.subColor))
-                (Text("Bilingual mode is on \u{B7} ")
+                (Text(title.isEmpty
+                        ? "Bilingual mode is on" : "Bilingual mode is on \u{B7} ")
                     .font(.system(size: 11.5))
                     + Text(title)
                     .font(Font(ReaderTypography.body(for: .sourceSerif4, size: 11.5)))

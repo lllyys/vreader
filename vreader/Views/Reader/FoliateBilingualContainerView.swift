@@ -108,6 +108,13 @@ struct FoliateBilingualContainerView: View {
     @State private var bilingualOrchestrator = FoliateBilingualOrchestrator()
     @State private var showBilingualSetupSheet: Bool = false
     @State private var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+    /// Feature #99 WI-4: the setup sheet's frame (first-enable vs
+    /// edit) + the edit frame's cached-language inputs + the
+    /// generation-stamped fetch (a superseded presentation's completion
+    /// is dropped).
+    @State var bilingualSetupMode: BilingualSetupSheetMode = .firstEnable
+    @State var bilingualCachedLanguages: Set<String> = []
+    @State var bilingualCachedLanguagesFetcher = BilingualCachedLanguagesFetcher()
 
     /// The active locator's section href — captured from the Foliate
     /// relocate notification. Used to resolve the current unit for
@@ -214,6 +221,10 @@ struct FoliateBilingualContainerView: View {
         .onReceive(
             NotificationCenter.default.publisher(for: .readerMoreBilingual)
         ) { _ in handleMoreBilingualToggle() }
+        // Feature #99 WI-4: keyed re-entry — the edit-framed sheet.
+        .bilingualTranslationSettingsObserver(
+            bookFingerprintKey: fingerprintKey
+        ) { handleTranslationSettingsRequest(bookTitle: $0) }
         .onReceive(
             NotificationCenter.default.publisher(for: .readerBilingualDidChange)
         ) { notification in
@@ -362,8 +373,12 @@ struct FoliateBilingualContainerView: View {
                 onConfigured: { await bilingualViewModel?.refreshAIConfigured() },
                 // Bug #344 (#1646 S-C): Foliate injects per DOM block —
                 // sentence mode can't hold the 1:1 contract; the control dims.
-                sentenceGranularityAvailable: false
-            )
+                sentenceGranularityAvailable: false,
+            mode: bilingualSetupMode,
+            cachedLanguages: bilingualCachedLanguages,
+            currentLanguageKey: bilingualViewModel?.targetLanguage,
+            currentGranularity: bilingualViewModel?.granularity
+        )
             // Bug #301: re-resolve live AI readiness each time the sheet
             // appears, so the engine strip is truthful even if AI settings
             // changed after the reader VM was first built (audit-Medium).
@@ -717,8 +732,42 @@ struct FoliateBilingualContainerView: View {
     /// Confirm path for the first-enable setup sheet. Commits the
     /// chosen language + granularity to the VM and runs the first
     /// enumerate against the user's choice.
+        /// Feature #99 WI-4: keyed `.readerMoreTranslationSettings` → present
+    /// the edit-framed settings sheet prefilled with the book's current
+    /// language/granularity; the cached-language badges land async
+    /// (generation-stamped — a dismissed presentation's result is dropped).
+    private func handleTranslationSettingsRequest(bookTitle: String) {
+        ensureBilingualViewModel()
+        guard let vm = bilingualViewModel, vm.isEnabled else { return }
+        bilingualSetupState = BilingualSettingsEditRouter.prefillState(vm: vm)
+        bilingualSetupMode = .edit(bookTitle: bookTitle)
+        bilingualCachedLanguages = []
+        showBilingualSetupSheet = true
+        bilingualCachedLanguagesFetcher.fetch(bookFingerprintKey: fingerprintKey) {
+            bilingualCachedLanguages = $0
+        }
+    }
+
     private func confirmBilingualSetup() {
         guard let vm = bilingualViewModel else { return }
+        // Feature #99 WI-4: the edit frame routes through the shared
+        // router (dirty BEFORE apply; banner only for a new language);
+        // it never touches needsSetupSheet/setEnabled.
+        if case .edit = bilingualSetupMode {
+            let dirty = BilingualSettingsEditRouter.confirmEdit(
+                vm: vm, draft: bilingualSetupState,
+                cachedLanguages: bilingualCachedLanguages)
+            showBilingualSetupSheet = false
+            bilingualSetupMode = .firstEnable
+            bilingualCachedLanguagesFetcher.invalidate()
+            if dirty != .none {
+                evalBilingualJS(
+                    bilingualOrchestrator.enumerateJS(
+                        sectionIndex: currentSectionIndex)
+                )
+            }
+            return
+        }
         vm.setTargetLanguage(bilingualSetupState.languageKey)
         vm.setGranularity(bilingualSetupState.granularity)
         vm.dismissSetupSheet()
@@ -732,6 +781,15 @@ struct FoliateBilingualContainerView: View {
     /// Cancel path — dismiss the sheet and turn bilingual back off
     /// without persisting changes.
     private func cancelBilingualSetup() {
+        // Feature #99 WI-4: edit-frame cancel just dismisses — bilingual
+        // stays ON and nothing persists (the first-enable path below
+        // disables, which would be wrong for an edit).
+        if case .edit = bilingualSetupMode {
+            showBilingualSetupSheet = false
+            bilingualSetupMode = .firstEnable
+            bilingualCachedLanguagesFetcher.invalidate()
+            return
+        }
         guard let vm = bilingualViewModel else { return }
         vm.dismissSetupSheet()
         vm.setEnabled(false)

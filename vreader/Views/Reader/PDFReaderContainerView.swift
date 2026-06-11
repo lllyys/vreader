@@ -91,6 +91,13 @@ struct PDFReaderContainerView: View {
     @State var bilingualViewModel: BilingualReadingViewModel?
     @State var showBilingualSetupSheet: Bool = false
     @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+    /// Feature #99 WI-4: the setup sheet's frame (first-enable vs
+    /// edit) + the edit frame's cached-language inputs + the
+    /// generation-stamped fetch (a superseded presentation's completion
+    /// is dropped).
+    @State var bilingualSetupMode: BilingualSetupSheetMode = .firstEnable
+    @State var bilingualCachedLanguages: Set<String> = []
+    @State var bilingualCachedLanguagesFetcher = BilingualCachedLanguagesFetcher()
     /// Per-session collapsed presentation of the panel — false means
     /// the body is visible. Resets on book re-open (not persisted).
     @State var bilingualPanelCollapsed: Bool = false
@@ -340,6 +347,11 @@ struct PDFReaderContainerView: View {
         // toggle observer, retry / open-AI-tab observers, setup-sheet
         // presentation. See `PDFReaderContainerView+Bilingual.swift`.
         .modifier(bilingualSurfacesModifier)
+        // Feature #99 WI-4: keyed re-entry — present the edit-framed
+        // translation-settings sheet.
+        .bilingualTranslationSettingsObserver(
+            bookFingerprintKey: viewModel.bookFingerprintKey
+        ) { handleTranslationSettingsRequest(bookTitle: $0) }
         // Feature #17: DEBUG-only `pdf-highlight` verification-harness observer.
         // Release builds get an `EmptyModifier` stub (see
         // `PDFReaderContainerView+DebugBridgePDFHighlight.swift`).

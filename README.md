@@ -108,6 +108,7 @@ What sets VReader apart from a conventional e-reader:
 
 - **WebDAV backup** — Archive to any WebDAV server (Nutstore compatible) — books, annotations, reading positions, reading history, and **AI conversation history** all round-trip and restore on a fresh device. For a self-hosted Mac setup with iCloud Drive sync, see [`lllyys/vreader-webdav-host`](https://github.com/lllyys/vreader-webdav-host). Tailscale-fronted servers work over plain HTTP; if the Test Connection returns `502` while `localhost` succeeds, your Mac's system HTTP proxy is intercepting Tailscale traffic — add `*.ts.net` and `100.64.0.0/10` to its bypass list.
 - **Per-book settings** — Font, theme, spacing overrides per book (JSON-persisted)
+- **Translation settings re-entry** — change the bilingual target language or granularity any time via the More menu's "Translation settings" row or tapping the EN↔中 pill; the edit-framed sheet shows cached-language badges (switching back is instant) and re-translate cost strips
 - **Theme backgrounds** — Custom background images via PhotosPicker with per-theme opacity
 - **Diagnostics** — Settings → Support → Diagnostics shows the current session's app log (errors + key events) with level and category chip filters; a share button exports the log as a `.txt` for bug reports. Capture is always on (OSLog, subsystem `com.vreader.app`); secrets, tokens, and file paths are scrubbed before anything leaves the app (feature #96)
 

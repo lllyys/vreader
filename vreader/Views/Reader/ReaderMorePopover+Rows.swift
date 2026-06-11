@@ -58,7 +58,11 @@ extension ReaderMorePopover {
             // observer and the popover teardown are independent.
             // Feature #99: the book key rides every row post so keyed
             // observers (`.readerMoreTranslationSettings`) can filter.
-            let userInfo: [String: Any]? = bookFingerprintKey.map { ["fingerprintKey": $0] }
+            let userInfo: [String: Any]? = bookFingerprintKey.map { key in
+                var info: [String: Any] = ["fingerprintKey": key]
+                if let bookTitle { info["bookTitle"] = bookTitle }
+                return info
+            }
             NotificationCenter.default.post(
                 name: row.notification, object: nil, userInfo: userInfo)
             onClose()

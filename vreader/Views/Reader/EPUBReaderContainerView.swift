@@ -127,6 +127,13 @@ struct EPUBReaderContainerView: View {
     /// Mutable bilingual setup-sheet state (target language + granularity)
     /// — bound to the sheet's pickers. Confirm commits to the VM.
     @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+    /// Feature #99 WI-4: the setup sheet's frame (first-enable vs
+    /// edit) + the edit frame's cached-language inputs + the
+    /// generation-stamped fetch (a superseded presentation's completion
+    /// is dropped).
+    @State var bilingualSetupMode: BilingualSetupSheetMode = .firstEnable
+    @State var bilingualCachedLanguages: Set<String> = []
+    @State var bilingualCachedLanguagesFetcher = BilingualCachedLanguagesFetcher()
 
     /// Whether paged layout is active.
     private var isPaged: Bool {
@@ -472,6 +479,11 @@ struct EPUBReaderContainerView: View {
         // dedicated `ViewModifier` to keep this body under the
         // compiler's type-inference budget.
         .modifier(bilingualSurfacesModifier)
+        // Feature #99 WI-4: keyed re-entry — present the edit-framed
+        // translation-settings sheet.
+        .bilingualTranslationSettingsObserver(
+            bookFingerprintKey: viewModel.bookFingerprintKey
+        ) { handleTranslationSettingsRequest(bookTitle: $0) }
         #if DEBUG
         // Feature #77 — DebugBridge bilingual-driver observer (enable/disable/
         // status CU-free, bypassing the setup sheet + the idb-unreliable menu).

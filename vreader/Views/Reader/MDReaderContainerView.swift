@@ -57,6 +57,13 @@ struct MDReaderContainerView: View {
     @State var bilingualViewModel: BilingualReadingViewModel?
     @State var showBilingualSetupSheet: Bool = false
     @State var bilingualSetupState: BilingualSetupSheetState = .defaultValue
+    /// Feature #99 WI-4: the setup sheet's frame (first-enable vs
+    /// edit) + the edit frame's cached-language inputs + the
+    /// generation-stamped fetch (a superseded presentation's completion
+    /// is dropped).
+    @State var bilingualSetupMode: BilingualSetupSheetMode = .firstEnable
+    @State var bilingualCachedLanguages: Set<String> = []
+    @State var bilingualCachedLanguagesFetcher = BilingualCachedLanguagesFetcher()
 
     /// Whether paged mode is active.
     private var isPagedMode: Bool {
@@ -153,6 +160,11 @@ struct MDReaderContainerView: View {
         // separate extension to keep this file under the file-size
         // budget (rule 50 §9).
         .modifier(bilingualSurfacesModifier)
+        // Feature #99 WI-4: keyed re-entry — present the edit-framed
+        // translation-settings sheet.
+        .bilingualTranslationSettingsObserver(
+            bookFingerprintKey: viewModel.bookFingerprintKey
+        ) { handleTranslationSettingsRequest(bookTitle: $0) }
         // Bug #237 — DebugBridge highlight-driver observer. DEBUG-only;
         // attached inside the MD host so the helper can build MD-shaped
         // Locators via LocatorFactory.mdRange and re-paint atomically via

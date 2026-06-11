@@ -357,7 +357,10 @@ extension ReaderContainerView {
             onBilingualPillTap: {
                 NotificationCenter.default.post(
                     name: .readerMoreTranslationSettings, object: nil,
-                    userInfo: ["fingerprintKey": book.fingerprintKey])
+                    userInfo: [
+                        "fingerprintKey": book.fingerprintKey,
+                        "bookTitle": book.title,
+                    ])
             },
             onBack: { dismiss() },
             onSearch: { showSearch = true },
@@ -442,6 +445,7 @@ extension ReaderContainerView {
             // fingerprint key every row post carries (keyed observers).
             bilingualContext: moreMenuBilingualContext,
             bookFingerprintKey: book.fingerprintKey,
+            bookTitle: book.title,
             // The design anchors the popover just below the top chrome.
             // Chrome height = the Dynamic-Island inset + the ~52pt
             // button row; add a small gap so the notch tucks under the

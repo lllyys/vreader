@@ -72,6 +72,10 @@ struct ReaderMorePopover: View {
     /// `.readerMoreTranslationSettings` contract) can filter. nil
     /// (previews / legacy tests) posts no payload.
     let bookFingerprintKey: String?
+    /// Feature #99 WI-4: the open book's title — rides the
+    /// `.readerMoreTranslationSettings` payload so the edit sheet's
+    /// context strip can name the book without a host-side lookup.
+    let bookTitle: String?
     /// Top inset (points) at which the popover floats — passed from
     /// the host so the popover clears the top chrome. The design's
     /// `top: 92` baseline is for the prototype's fixed-height chrome;
@@ -101,6 +105,7 @@ struct ReaderMorePopover: View {
         bilingualState: BilingualRowState = .off,
         bilingualContext: ReaderMoreMenuBilingualContext? = nil,
         bookFingerprintKey: String? = nil,
+        bookTitle: String? = nil,
         topInset: CGFloat,
         onClose: @escaping () -> Void
     ) {
@@ -111,6 +116,7 @@ struct ReaderMorePopover: View {
         self.formatCapabilities = formatCapabilities
         self.bilingualContext = bilingualContext
         self.bookFingerprintKey = bookFingerprintKey
+        self.bookTitle = bookTitle
         self.bilingualState = bilingualState
         self.topInset = topInset
         self.onClose = onClose

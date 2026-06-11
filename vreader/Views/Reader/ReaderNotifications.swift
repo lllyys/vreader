@@ -143,6 +143,12 @@ extension Notification.Name {
     /// filters on the key (stricter than the payload-free
     /// `.readerMoreBilingual` so the contract never needs a retrofit).
     static let readerMoreTranslationSettings = Notification.Name("vreader.readerMoreTranslationSettings")
+
+    /// Feature #99 WI-4: a host's edit-confirm applied a NEW target
+    /// language — `ReaderContainerView` shows the transient
+    /// `BilingualRetranslateBanner`. Payload: `["fingerprintKey": String,
+    /// "language": String, "previousLanguage": String]`.
+    static let readerBilingualRetranslateStarted = Notification.Name("vreader.readerBilingualRetranslateStarted")
     static let readerMoreReTranslateChapter = Notification.Name("vreader.readerMoreReTranslateChapter")
     /// Feature #56 WI-14 (declared in WI-8 per plan): posted by
     /// `BookTranslationCoordinator` whenever a global-book-translation

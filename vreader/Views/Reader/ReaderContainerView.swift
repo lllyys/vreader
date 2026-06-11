@@ -875,6 +875,11 @@ struct ReaderContainerView: View {
         // modifier (ReaderContainerView+Sheets) — this body is near the
         // type-checker's expression-complexity ceiling.
         .modifier(bookDetailsReadingTimeMirror)
+        // Feature #99 WI-4: the re-translate confirmation banner (one
+        // self-contained chain link — observer + overlay + auto-dismiss).
+        .modifier(BilingualRetranslateBannerHost(
+            theme: settingsStore.theme,
+            bookFingerprintKey: book.fingerprintKey))
         // Search setup deferred until search sheet opens (bug #64)
         .onChange(of: showSearch) { _, isShowing in
             if isShowing { ensureSearchReady() }

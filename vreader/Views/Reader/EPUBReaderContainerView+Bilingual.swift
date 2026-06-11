@@ -392,8 +392,43 @@ extension EPUBReaderContainerView {
     /// first-enable's enumerate runs — `handleMoreBilingualToggle`
     /// defers it to confirm so the prefetch always uses the user's
     /// committed language, not the persisted default.
+        /// Feature #99 WI-4: keyed `.readerMoreTranslationSettings` → present
+    /// the edit-framed settings sheet prefilled with the book's current
+    /// language/granularity; the cached-language badges land async
+    /// (generation-stamped — a dismissed presentation's result is dropped).
+    func handleTranslationSettingsRequest(bookTitle: String) {
+        ensureBilingualViewModel()
+        guard let vm = bilingualViewModel, vm.isEnabled else { return }
+        bilingualSetupState = BilingualSettingsEditRouter.prefillState(vm: vm)
+        bilingualSetupMode = .edit(bookTitle: bookTitle)
+        bilingualCachedLanguages = []
+        showBilingualSetupSheet = true
+        bilingualCachedLanguagesFetcher.fetch(bookFingerprintKey: viewModel.bookFingerprintKey) {
+            bilingualCachedLanguages = $0
+        }
+    }
+
     func confirmBilingualSetup() {
         guard let vm = bilingualViewModel else { return }
+        // Feature #99 WI-4: the edit frame routes through the shared
+        // router (dirty BEFORE apply; banner only for a new language);
+        // it never touches needsSetupSheet/setEnabled.
+        if case .edit = bilingualSetupMode {
+            let dirty = BilingualSettingsEditRouter.confirmEdit(
+                vm: vm, draft: bilingualSetupState,
+                cachedLanguages: bilingualCachedLanguages)
+            showBilingualSetupSheet = false
+            bilingualSetupMode = .firstEnable
+            bilingualCachedLanguagesFetcher.invalidate()
+            if dirty != .none {
+                if isBilingualContinuousMode {
+                    enableBilingualContinuousAllSections()
+                } else {
+                    pendingHighlightJS = bilingualOrchestrator.enumerateJS()
+                }
+            }
+            return
+        }
         vm.setTargetLanguage(bilingualSetupState.languageKey)
         vm.setGranularity(bilingualSetupState.granularity)
         vm.dismissSetupSheet()
@@ -418,6 +453,15 @@ extension EPUBReaderContainerView {
     /// Dismiss the setup sheet without persisting changes and turn
     /// bilingual mode back off — the user opted out of first-enable.
     func cancelBilingualSetup() {
+        // Feature #99 WI-4: edit-frame cancel just dismisses — bilingual
+        // stays ON and nothing persists (the first-enable path below
+        // disables, which would be wrong for an edit).
+        if case .edit = bilingualSetupMode {
+            showBilingualSetupSheet = false
+            bilingualSetupMode = .firstEnable
+            bilingualCachedLanguagesFetcher.invalidate()
+            return
+        }
         guard let vm = bilingualViewModel else { return }
         vm.dismissSetupSheet()
         vm.setEnabled(false)
@@ -517,7 +561,11 @@ extension EPUBReaderContainerView {
             // Bug #344 (#1646 S-C): the legacy EPUB renderer enumerates DOM
             // blocks — sentence segments would outnumber blocks, so the
             // control dims instead of silently forcing .paragraph.
-            sentenceGranularityAvailable: false
+            sentenceGranularityAvailable: false,
+            mode: bilingualSetupMode,
+            cachedLanguages: bilingualCachedLanguages,
+            currentLanguageKey: bilingualViewModel?.targetLanguage,
+            currentGranularity: bilingualViewModel?.granularity
         )
         // Bug #301: re-resolve live AI readiness each time the sheet
         // appears, so the engine strip is truthful even if AI settings
