@@ -84,8 +84,19 @@ extension TXTBridgeShared {
                 guard let projected = projectSyntheticStartSelection(
                     displayRange: range, map: bilingualSegmentMap
                 ) else { return }
+                // Codex round 2 (Medium): the posted offsets are the
+                // PROJECTED source span, so the text must be too —
+                // posting the translation-row's display text with
+                // source offsets would leak mismatched quotes into
+                // highlight/note/define/translate flows.
+                let projectedText = displayText(
+                    forSourceRange: projected.location
+                        ..< (projected.location + projected.length),
+                    map: bilingualSegmentMap,
+                    displayText: nsText
+                )
                 postInfo(
-                    name, selectedText: selectedText,
+                    name, selectedText: projectedText,
                     sourceRange: projected, chunkOffset: chunkOffset,
                     requestToken: requestToken
                 )
@@ -184,6 +195,32 @@ extension TXTBridgeShared {
         }
         guard let parent = precedingSource else { return nil }
         return NSRange(location: parent.lowerBound, length: parent.count)
+    }
+
+    /// Codex round 2 (Medium): extracts the text a SOURCE range refers
+    /// to from the display string. `.source` segments render the source
+    /// text verbatim (1:1 UTF-16 within a segment), so each overlap maps
+    /// linearly back to a display slice; synthetic runs between source
+    /// segments are skipped (they're not part of the source span).
+    @MainActor
+    private static func displayText(
+        forSourceRange src: Range<Int>,
+        map: BilingualDisplaySegmentMap,
+        displayText: NSString
+    ) -> String {
+        var out = ""
+        for segment in map.segments {
+            if case let .source(sourceRange, displayRange) = segment {
+                let lo = max(src.lowerBound, sourceRange.lowerBound)
+                let hi = min(src.upperBound, sourceRange.upperBound)
+                guard lo < hi else { continue }
+                let dLo = displayRange.lowerBound + (lo - sourceRange.lowerBound)
+                let len = hi - lo
+                guard dLo >= 0, dLo + len <= displayText.length else { continue }
+                out += displayText.substring(with: NSRange(location: dLo, length: len))
+            }
+        }
+        return out
     }
 
     /// Feature #56 WI-12b: helper for the selection-end-at-synthetic

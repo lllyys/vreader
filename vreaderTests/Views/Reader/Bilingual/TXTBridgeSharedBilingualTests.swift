@@ -144,6 +144,9 @@ extension TXTBridgeSharedBilingualTests {
         // segment's full range 0..<3) — the silent drop was bug #350.
         XCTAssertEqual(captured?.startUTF16, 0)
         XCTAssertEqual(captured?.endUTF16, 3)
+        // Codex round 2 (Medium): the text must match the PROJECTED
+        // source span, not the translation row the press landed on.
+        XCTAssertEqual(captured?.selectedText, "AAA")
     }
 
     func test_bug350_selectionSpanningOutOfTranslationRow_startsAtFollowingSource() async {
@@ -166,6 +169,9 @@ extension TXTBridgeSharedBilingualTests {
         await fulfillment(of: [exp], timeout: 1.0)
         XCTAssertEqual(captured?.startUTF16, 3)
         XCTAssertEqual(captured?.endUTF16, 5)
+        // Codex round 2 (Medium): source span 3..<5 renders at display
+        // 6..<8 — the first two chars of para B.
+        XCTAssertEqual(captured?.selectedText, "BB")
     }
 
     func test_bug350_syntheticWithNoPrecedingSource_stillDrops() async {

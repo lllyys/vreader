@@ -349,7 +349,12 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         }
 
         // Sync chunks and offsets if they changed (e.g., parent rebuilt chunks)
+        // Codex #350 round 2 (Low): count alone misses a same-count chunk
+        // rebuild; the start-offset array is cheap to compare and shifts
+        // whenever chunk text lengths change, so it catches those swaps
+        // (and runs the cancel + cache invalidation they need).
         let chunksChanged = context.coordinator.chunks.count != chunks.count
+            || context.coordinator.chunkStartOffsets != chunkStartOffsets
         if chunksChanged {
             context.coordinator.chunks = chunks
             context.coordinator.chunkStartOffsets = chunkStartOffsets
