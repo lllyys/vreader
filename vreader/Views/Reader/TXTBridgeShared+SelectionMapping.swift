@@ -63,74 +63,74 @@ extension TXTBridgeShared {
         let nsText = text as NSString
         guard range.location <= nsText.length,
               range.length <= nsText.length - range.location else { return }
-        let selectedText = nsText.substring(with: range)
         // Feature #56 WI-12b: route the display-domain range back to
         // source-domain when bilingual is on. Identity-map fast path
         // returns the input verbatim.
-        let sourceRange: NSRange
         if bilingualSegmentMap.sourceLength == bilingualSegmentMap.displayLength {
             // Identity (off-mode) — no routing.
-            sourceRange = range
-        } else {
-            // Bilingual on — map display range back to source range.
-            let startSource = bilingualSegmentMap.sourceOffset(
-                forDisplayOffset: range.location
+            postInfo(
+                name, selectedText: nsText.substring(with: range),
+                sourceRange: range, chunkOffset: chunkOffset,
+                requestToken: requestToken
             )
-            guard let start = startSource else {
-                // Bug #350: start inside a synthetic (translation) run —
-                // project to the source domain instead of silently
-                // dropping. Drops only when no preceding source segment
-                // exists to anchor to.
-                guard let projected = projectSyntheticStartSelection(
-                    displayRange: range, map: bilingualSegmentMap
-                ) else { return }
-                // Codex round 2 (Medium): the posted offsets are the
-                // PROJECTED source span, so the text must be too —
-                // posting the translation-row's display text with
-                // source offsets would leak mismatched quotes into
-                // highlight/note/define/translate flows.
-                let projectedText = displayText(
-                    forSourceRange: projected.location
-                        ..< (projected.location + projected.length),
-                    map: bilingualSegmentMap,
-                    displayText: nsText
-                )
-                postInfo(
-                    name, selectedText: projectedText,
-                    sourceRange: projected, chunkOffset: chunkOffset,
-                    requestToken: requestToken
-                )
-                return
-            }
-            // The exclusive selection end at `range.location +
-            // range.length` may legitimately land at a synthetic-block
-            // start (the end-of-selection is the position AFTER the
-            // last selected character). `sourceOffset(forDisplayOffset:)`
-            // returns nil there; map it via the segment-union range
-            // projection to handle boundary semantics correctly.
-            let endSource: Int
-            if range.length == 0 {
-                endSource = start
-            } else {
-                let endDisplay = range.location + range.length
-                if let e = bilingualSegmentMap.sourceOffset(forDisplayOffset: endDisplay) {
-                    endSource = e
-                } else {
-                    // End fell into synthetic — find the segment
-                    // containing `endDisplay - 1`, take its source
-                    // upperBound.
-                    let endProj = projectToSourceEnd(
-                        displayOffset: endDisplay - 1, map: bilingualSegmentMap
-                    )
-                    endSource = max(start, endProj)
-                }
-            }
-            sourceRange = NSRange(location: start, length: max(0, endSource - start))
+            return
         }
+        // Bilingual on — map display range back to source range, then
+        // rebuild the text from that FINAL source span. Codex rounds 2+3
+        // (Medium): offsets and text must describe the same span on EVERY
+        // bilingual path — a selection that starts in or spans across a
+        // synthetic translation row must never post translation text with
+        // source offsets (it would leak mismatched quotes into the
+        // highlight/note/define/translate flows).
+        guard let sourceRange = mapDisplayToSource(
+            range: range, map: bilingualSegmentMap
+        ) else { return }
+        let sourceText = displayText(
+            forSourceRange: sourceRange.location
+                ..< (sourceRange.location + sourceRange.length),
+            map: bilingualSegmentMap,
+            displayText: nsText
+        )
         postInfo(
-            name, selectedText: selectedText, sourceRange: sourceRange,
+            name, selectedText: sourceText, sourceRange: sourceRange,
             chunkOffset: chunkOffset, requestToken: requestToken
         )
+    }
+
+    /// Maps a display-domain selection to its source-domain span.
+    /// Returns `nil` only when there is nothing to anchor to (a selection
+    /// inside a synthetic run with no preceding source segment).
+    @MainActor
+    private static func mapDisplayToSource(
+        range: NSRange, map: BilingualDisplaySegmentMap
+    ) -> NSRange? {
+        guard let start = map.sourceOffset(forDisplayOffset: range.location) else {
+            // Bug #350: start inside a synthetic (translation) run —
+            // project to the source domain instead of silently dropping.
+            return projectSyntheticStartSelection(displayRange: range, map: map)
+        }
+        // The exclusive selection end at `range.location + range.length`
+        // may legitimately land at a synthetic-block start (the
+        // end-of-selection is the position AFTER the last selected
+        // character). `sourceOffset(forDisplayOffset:)` returns nil
+        // there; project it to the last source segment's upperBound.
+        let endSource: Int
+        if range.length == 0 {
+            endSource = start
+        } else {
+            let endDisplay = range.location + range.length
+            if let e = map.sourceOffset(forDisplayOffset: endDisplay) {
+                endSource = e
+            } else {
+                // End fell into synthetic — find the segment containing
+                // `endDisplay - 1`, take its source upperBound.
+                let endProj = projectToSourceEnd(
+                    displayOffset: endDisplay - 1, map: map
+                )
+                endSource = max(start, endProj)
+            }
+        }
+        return NSRange(location: start, length: max(0, endSource - start))
     }
 
     /// Shared notification tail — builds the `TextSelectionInfo` from a

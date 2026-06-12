@@ -174,6 +174,33 @@ extension TXTBridgeSharedBilingualTests {
         XCTAssertEqual(captured?.selectedText, "BB")
     }
 
+    func test_bug350_sourceStartSpanningIntoTranslationRow_postsSourceTextOnly() async {
+        // Codex round 3 (Medium): a selection STARTING in source text that
+        // extends into a synthetic row must post the SOURCE span's text —
+        // not the display substring with translation content inside.
+        let tv = UITextView()
+        tv.text = "AAA[T]BBB"
+        let exp = expectation(description: "posted")
+        nonisolated(unsafe) var captured: TextSelectionInfo?
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerHighlightRequested, object: nil, queue: .main
+        ) { n in captured = n.object as? TextSelectionInfo; exp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        // Display 1..<5: starts at source char 1, ends inside the
+        // translation row.
+        TXTBridgeShared.postSelectionNotification(
+            .readerHighlightRequested, from: tv,
+            range: NSRange(location: 1, length: 4),
+            bilingualSegmentMap: makeInterlinearMap()
+        )
+        await fulfillment(of: [exp], timeout: 1.0)
+        XCTAssertEqual(captured?.startUTF16, 1)
+        XCTAssertEqual(captured?.endUTF16, 3)
+        XCTAssertEqual(captured?.selectedText, "AA",
+                       "Display substring would be 'AA[T' — synthetic content must be excluded.")
+    }
+
     func test_bug350_syntheticWithNoPrecedingSource_stillDrops() async {
         let tv = UITextView()
         tv.text = "[T]AAA"
