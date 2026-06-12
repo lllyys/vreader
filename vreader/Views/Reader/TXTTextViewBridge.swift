@@ -229,6 +229,10 @@ struct TXTTextViewBridge: UIViewRepresentable {
             context.coordinator.lastConfig = config
             context.coordinator.lastAppliedText = text
             context.coordinator.lastAppliedAttrText = attributedText
+            // Bug #350 (Codex round 1, Medium): content swap invalidates any
+            // pending fallback card post and its dedup state — ranges from
+            // the old content must not suppress or fire against the new.
+            context.coordinator.selectionCardFallback.cancel()
         }
         if persistedChanged {
             context.coordinator.persistedHighlights = persistedHighlights
@@ -370,6 +374,9 @@ struct TXTTextViewBridge: UIViewRepresentable {
         // (and its CADisplayLink) when the reader tears down, so nothing animates
         // against a detached view.
         coordinator.cancelLandingBloom()
+        // Bug #350 (Codex round 1, Medium): drop any pending fallback card
+        // post + dedup state so nothing fires against a detached view.
+        coordinator.selectionCardFallback.cancel()
     }
 
     // MARK: - Static seams (testable)

@@ -187,5 +187,34 @@ struct TXTChunkedReaderBridgeEditMenuTests {
                 "Negative tag falls back to offset 0 (no negative-index crash).")
         #expect(received?.endUTF16 == 5)
     }
+
+    @Test("Bug #350 (Codex round 1, High): same LOCAL range in two different chunks posts BOTH — fallback dedup keys on the document-global range")
+    func sameLocalRangeInTwoChunksDoesNotAlias() {
+        // The shared SelectionCardFallback serves every chunk cell. If its
+        // dedup keyed on the chunk-LOCAL NSRange, selecting local (0,5) in
+        // chunk 0 and then local (0,5) in chunk 1 — two DISTINCT document
+        // selections — would suppress the second card.
+        let coordinator = TXTChunkedReaderBridge.Coordinator(delegate: nil)
+        coordinator.chunkStartOffsets = [0, 100]
+        let range = NSRange(location: 0, length: 5)
+
+        nonisolated(unsafe) var starts: [Int] = []
+        let observer = NotificationCenter.default.addObserver(
+            forName: .readerSelectionPopoverRequested, object: nil, queue: nil
+        ) { note in
+            if let s = SelectionPopoverRequest.payload(from: note)?.selection.startUTF16 {
+                starts.append(s)
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        let tv0 = makeTextView(text: "Hello World", chunkIndex: 0)
+        _ = coordinator.textView(tv0, editMenuForTextIn: range, suggestedActions: [])
+        let tv1 = makeTextView(text: "Apple Grape", chunkIndex: 1)
+        _ = coordinator.textView(tv1, editMenuForTextIn: range, suggestedActions: [])
+
+        #expect(starts == [0, 100],
+                "Both chunk selections must post with their global offsets — local-range dedup aliasing would drop the second.")
+    }
 }
 #endif
