@@ -3588,6 +3588,7 @@
 				DB61B11E07DDB3EC558692C1 /* Helpers */,
 				B507E0BD7D08A4E11203ACB1 /* Integration */,
 				0B012D36F10FD0A92C516160 /* Models */,
+				5AD82895D4C8E34E5B1C9FF7 /* Reader */,
 				C89089F8D64EB38CF661EAB4 /* Services */,
 				3EC42569191D945E8426907A /* Utils */,
 				9B93CFA1683A5C606C3627E1 /* Verification */,
@@ -4250,6 +4251,13 @@
 				D978E90148FFF976EA612EB4 /* TypefacePillToggle.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		5AD82895D4C8E34E5B1C9FF7 /* Reader */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Reader;
 			sourceTree = "<group>";
 		};
 		5CF05FDFCFCF1A5110783282 /* Locator */ = {

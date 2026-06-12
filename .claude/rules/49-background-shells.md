@@ -80,6 +80,30 @@ until [ -f "$TASK_DONE" ]; do sleep 5; done
 | Polling on `ps aux \| grep <toolname>` | Same class-vs-instance problem as `pgrep -f` | Use exact PID via `kill -0` |
 | Long-running shell from session A polled into session B's runtime | Crosses session boundaries; cron iterations get conflated | Each cron fire is a fresh session — don't persist waiters across them |
 
+## Detached side-channel captures (`&` + redirect)
+
+A raw `cmd > file 2>&1 &` inside a foreground Bash call dodges the
+`run_in_background` rules above but creates the SAME ghost: a process the
+harness doesn't track, no completion channel, lingering until someone
+remembers the pid. Origin incident: 2026-06-11, a `xcrun simctl spawn
+<udid> log stream … &` started as a repro side-capture produced 2 lines
+of output and lingered ~3 hours until an end-of-session sweep killed it.
+
+Hard rules:
+
+1. **Prefer retrospective collection over live streaming.** `log show
+   --predicate … --last 10m` after the repro collects the same events
+   with zero lingering process. Reach for `log stream` / `tail -f` only
+   when the data is genuinely unavailable after the fact.
+2. **Never detach an unbounded capture.** If a live capture is required,
+   bound it to the repro window: `timeout 300 xcrun simctl spawn <udid>
+   log stream … > /tmp/x.txt 2>&1 &`. The bound is the completion
+   channel.
+3. **Kill in the same task that consumes the capture** — record the
+   exact pid and `kill` it right after reading the output file, not at
+   session end. A capture nobody has killed by the time its consumer
+   finished reading is already a leak.
+
 ## Cron-specific implications
 
 vreader's cron prompts (`.claude/cron-prompts/{verify,bugfix,watchdog}.md`) fire as fresh agent sessions. A background shell from a prior session can outlive that session's logical end (until the OS reaps it) and still appear in the operator's UI. To avoid this:
