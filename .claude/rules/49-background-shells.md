@@ -116,3 +116,21 @@ vreader's cron prompts (`.claude/cron-prompts/{verify,bugfix,watchdog}.md`) fire
 ## Quick check before ending an iteration
 
 Run mentally: "Did I launch any `run_in_background` shells in this iteration that aren't either (a) finished with a `<task-notification>` already received, or (b) explicitly intended to outlive the iteration?" If neither, the iteration's clean. If it's (b), document why in the cron log line so future operators don't assume it's a leak.
+
+## Sweeping pre-existing ghosts (`scripts/sweep-ghosts.sh`)
+
+The rules above prevent NEW ghosts but don't reap old ones — a `tail -f`
+from a mid-May session survived 31 days unnoticed (found 2026-06-13)
+because nothing periodically sweeps. For that:
+
+```bash
+scripts/sweep-ghosts.sh           # report ghosts: stale tail -f / log stream /
+                                  # codex / xcodebuild at ~0% CPU past 2h
+scripts/sweep-ghosts.sh --kill    # reap them
+THRESHOLD_MIN=30 scripts/sweep-ghosts.sh   # tighter age threshold
+```
+
+It never flags `SWBBuildService` (Xcode's resident build daemon — alive
+and idle between builds by design) or `idb_companion` (persistent sim
+bridge). Run it whenever "is the shell hung?" comes up, and at the start
+of cron sweep iterations.
