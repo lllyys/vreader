@@ -45,9 +45,15 @@ enum TXTBridgeShared {
     /// translation runs); the helper maps it back to source-domain
     /// via `BilingualOffsetRouter.displayNSRange` so the posted
     /// `TextSelectionInfo` carries source offsets even when the user
-    /// selects across or after a synthetic block. A selection whose
-    /// start falls inside a synthetic run is dropped (no notification
-    /// posted). Identity map = byte-identical pass-through.
+    /// selects across or after a synthetic block. Identity map =
+    /// byte-identical pass-through.
+    ///
+    /// Bug #350: a selection whose start falls inside a synthetic
+    /// (translation-row) run is PROJECTED, not dropped — entirely
+    /// inside one row anchors to the parent (nearest preceding) source
+    /// paragraph's full range; spanning out of the row starts at the
+    /// following source segment. Only a synthetic run with no
+    /// preceding source paragraph (nothing to anchor) still drops.
     @MainActor
     static func postSelectionNotification(
         _ name: Notification.Name,
@@ -76,12 +82,24 @@ enum TXTBridgeShared {
             sourceRange = range
         } else {
             // Bilingual on — map display range back to source range.
-            // A selection start inside a synthetic run resolves to nil
-            // and the notification is dropped.
             let startSource = bilingualSegmentMap.sourceOffset(
                 forDisplayOffset: range.location
             )
-            guard let start = startSource else { return }
+            guard let start = startSource else {
+                // Bug #350: start inside a synthetic (translation) run —
+                // project to the source domain instead of silently
+                // dropping. Drops only when no preceding source segment
+                // exists to anchor to.
+                guard let projected = projectSyntheticStartSelection(
+                    displayRange: range, map: bilingualSegmentMap
+                ) else { return }
+                postInfo(
+                    name, selectedText: selectedText,
+                    sourceRange: projected, chunkOffset: chunkOffset,
+                    requestToken: requestToken
+                )
+                return
+            }
             // The exclusive selection end at `range.location +
             // range.length` may legitimately land at a synthetic-block
             // start (the end-of-selection is the position AFTER the
@@ -96,15 +114,9 @@ enum TXTBridgeShared {
                 if let e = bilingualSegmentMap.sourceOffset(forDisplayOffset: endDisplay) {
                     endSource = e
                 } else {
-                    // End fell into synthetic — use segment-union to
-                    // project the selected display range back to source.
-                    let projected = BilingualOffsetRouter.displayRange(
-                        forSourceRange: 0..<bilingualSegmentMap.sourceLength,
-                        map: bilingualSegmentMap
-                    )
-                    _ = projected
-                    // Easier: find the segment containing `endDisplay - 1`,
-                    // take its source upperBound.
+                    // End fell into synthetic — find the segment
+                    // containing `endDisplay - 1`, take its source
+                    // upperBound.
                     let endProj = projectToSourceEnd(
                         displayOffset: endDisplay - 1, map: bilingualSegmentMap
                     )
@@ -113,6 +125,22 @@ enum TXTBridgeShared {
             }
             sourceRange = NSRange(location: start, length: max(0, endSource - start))
         }
+        postInfo(
+            name, selectedText: selectedText, sourceRange: sourceRange,
+            chunkOffset: chunkOffset, requestToken: requestToken
+        )
+    }
+
+    /// Shared notification tail — builds the `TextSelectionInfo` from a
+    /// source-domain range and posts on the right wire format.
+    @MainActor
+    private static func postInfo(
+        _ name: Notification.Name,
+        selectedText: String,
+        sourceRange: NSRange,
+        chunkOffset: Int,
+        requestToken: UUID?
+    ) {
         let info = TextSelectionInfo(
             selectedText: selectedText,
             startUTF16: chunkOffset + sourceRange.location,
@@ -123,6 +151,48 @@ enum TXTBridgeShared {
         } else {
             NotificationCenter.default.post(name: name, object: info)
         }
+    }
+
+    /// Bug #350: projects a selection that STARTS inside a synthetic
+    /// (translation-row) run back to the source domain.
+    ///
+    /// - Selection spanning OUT of the row into following source text →
+    ///   starts at the following source segment's `sourceRange.lowerBound`,
+    ///   ends via the shared end-projection.
+    /// - Selection entirely inside one row → anchors to the parent
+    ///   (nearest preceding) source paragraph's FULL range, so the card
+    ///   raises with the paragraph the translation belongs to.
+    /// - No preceding source segment (synthetic-first edge) → `nil`
+    ///   (caller drops — nothing to anchor to).
+    @MainActor
+    private static func projectSyntheticStartSelection(
+        displayRange: NSRange, map: BilingualDisplaySegmentMap
+    ) -> NSRange? {
+        let endDisplay = displayRange.location + displayRange.length
+        var precedingSource: Range<Int>?
+        var followingSource: (source: Range<Int>, display: Range<Int>)?
+        for segment in map.segments {
+            if case let .source(sourceRange, segDisplay) = segment {
+                if segDisplay.upperBound <= displayRange.location {
+                    precedingSource = sourceRange
+                } else if segDisplay.lowerBound >= displayRange.location,
+                          followingSource == nil {
+                    followingSource = (sourceRange, segDisplay)
+                }
+            }
+        }
+        if let following = followingSource,
+           following.display.lowerBound < endDisplay {
+            // Spans out of the translation row into real source text.
+            let start = following.source.lowerBound
+            let end = max(
+                start,
+                projectToSourceEnd(displayOffset: endDisplay - 1, map: map)
+            )
+            return NSRange(location: start, length: end - start)
+        }
+        guard let parent = precedingSource else { return nil }
+        return NSRange(location: parent.lowerBound, length: parent.count)
     }
 
     /// Feature #56 WI-12b: helper for the selection-end-at-synthetic

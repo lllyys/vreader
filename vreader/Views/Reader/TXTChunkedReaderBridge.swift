@@ -515,6 +515,8 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
         /// highlight hit-tester. Feeds the `.readerHighlightTapped` post.
         var persistedHighlightLookup: [PersistedHighlightLookupEntry] = []
         weak var delegate: TXTTextViewBridgeDelegate?
+        /// Bug #350: the debounced selection-finalized card fallback.
+        let selectionCardFallback = SelectionCardFallback()
 
         /// LRU cache for attributed strings keyed by chunk index.
         var attrStringCache: [Int: NSAttributedString] = [:]
@@ -1099,7 +1101,13 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             // Suppress during text replacement to prevent crash (bug #47 v11)
             if let htv = textView as? HighlightableTextView, htv.isReplacingText { return }
             let nsRange = textView.selectedRange
-            guard nsRange.length > 0 else { return }
+            guard nsRange.length > 0 else {
+                // Bug #350: a collapsed selection clears the fallback's
+                // pending post + dedup state (re-selecting the same word
+                // later must post again).
+                selectionCardFallback.selectionChanged(range: nsRange) { _ in }
+                return
+            }
             let chunkIndex = textView.tag
             // Codex Gate 4 round 1 (Low) sibling of the editMenuForTextIn
             // fix: clamp negative tags too. Pre-WI-7c3 this was only
@@ -1112,6 +1120,24 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             let globalStart = chunkOffset + nsRange.location
             let globalEnd = globalStart + nsRange.length
             delegate?.selectionDidChange(utf16Range: UTF16Range(startUTF16: globalStart, endUTF16: globalEnd))
+            // Bug #350: the card no longer depends EXCLUSIVELY on UIKit
+            // requesting an edit menu — a finalized non-empty selection
+            // posts via the debounced fallback (deduped against the
+            // editMenuForTextIn fast path; same chunk-offset translation).
+            selectionCardFallback.selectionChanged(range: nsRange) { [weak self, weak textView] armed in
+                guard let self, let textView,
+                      textView.selectedRange == armed else { return }
+                let idx = textView.tag
+                let offset = (idx >= 0 && idx < self.chunkStartOffsets.count)
+                    ? self.chunkStartOffsets[idx]
+                    : 0
+                TXTBridgeShared.postSelectionNotification(
+                    .readerSelectionPopoverRequested,
+                    from: textView,
+                    range: armed,
+                    chunkOffset: offset
+                )
+            }
         }
 
         // Edit Menu (Bug #48)
@@ -1140,7 +1166,9 @@ struct TXTChunkedReaderBridge: UIViewRepresentable {
             // `cellForRowAt`). Out-of-range tags fall back to
             // offset 0 — defensive but should never fire in
             // production.
-            if range.length > 0 {
+            // Bug #350: dedup against the debounced selection fallback.
+            if range.length > 0, selectionCardFallback.shouldMenuPathPost(range: range) {
+                selectionCardFallback.recordMenuPathPost(range: range)
                 let chunkIndex = textView.tag
                 // Codex Gate 4 round 1 (Low): clamp on both ends.
                 // `textView.tag` is `Int` and could in principle be

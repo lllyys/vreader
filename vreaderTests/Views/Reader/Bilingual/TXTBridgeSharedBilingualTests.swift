@@ -73,29 +73,10 @@ final class TXTBridgeSharedBilingualTests: XCTestCase {
         XCTAssertEqual(captured?.endUTF16, 6)
     }
 
-    func test_nonIdentity_selectionStartInSynthetic_dropped() async {
-        let tv = UITextView()
-        tv.text = "AAA[T]BBB"
-        let segments: [BilingualDisplaySegmentMap.Segment] = [
-            .source(sourceRange: 0..<3, displayRange: 0..<3),
-            .synthetic(displayRange: 3..<6),
-            .source(sourceRange: 3..<6, displayRange: 6..<9)
-        ]
-        let map = BilingualDisplaySegmentMap(sourceLength: 6, segments: segments)
-        let exp = expectation(description: "no notification posted")
-        exp.isInverted = true
-        let token = NotificationCenter.default.addObserver(
-            forName: .readerHighlightRequested, object: nil, queue: .main
-        ) { _ in exp.fulfill() }
-        defer { NotificationCenter.default.removeObserver(token) }
-        TXTBridgeShared.postSelectionNotification(
-            .readerHighlightRequested,
-            from: tv,
-            range: NSRange(location: 4, length: 1),  // starts in synthetic
-            bilingualSegmentMap: map
-        )
-        await fulfillment(of: [exp], timeout: 0.3)
-    }
+    // (The former test_nonIdentity_selectionStartInSynthetic_dropped pinned
+    // the WI-12b silent-drop contract; bug #350 overturned it — the same
+    // input now anchors to the parent paragraph. See the Bug #350 extension
+    // below: test_bug350_selectionInsideTranslationRow_anchorsToParentParagraph.)
 
     func test_nonIdentity_selectionEndAtSyntheticBoundary_preservesEnd() async {
         let tv = UITextView()
@@ -124,5 +105,89 @@ final class TXTBridgeSharedBilingualTests: XCTestCase {
         await fulfillment(of: [exp], timeout: 1.0)
         XCTAssertEqual(captured?.startUTF16, 0)
         XCTAssertEqual(captured?.endUTF16, 3)
+    }
+}
+
+// MARK: - Bug #350: a selection STARTING in a synthetic run must still
+// raise the card (projected to the source), not silently drop.
+
+extension TXTBridgeSharedBilingualTests {
+
+    /// Layout: source para A (display 0..<3), its translation row
+    /// (3..<6), source para B (6..<9).
+    private func makeInterlinearMap() -> BilingualDisplaySegmentMap {
+        BilingualDisplaySegmentMap(sourceLength: 6, segments: [
+            .source(sourceRange: 0..<3, displayRange: 0..<3),
+            .synthetic(displayRange: 3..<6),
+            .source(sourceRange: 3..<6, displayRange: 6..<9),
+        ])
+    }
+
+    func test_bug350_selectionInsideTranslationRow_anchorsToParentParagraph() async {
+        let tv = UITextView()
+        tv.text = "AAA[T]BBB"
+        let exp = expectation(description: "posted")
+        nonisolated(unsafe) var captured: TextSelectionInfo?
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerHighlightRequested, object: nil, queue: .main
+        ) { n in captured = n.object as? TextSelectionInfo; exp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        // Long-press selected a word INSIDE the translation row (4..<5).
+        TXTBridgeShared.postSelectionNotification(
+            .readerHighlightRequested, from: tv,
+            range: NSRange(location: 4, length: 1),
+            bilingualSegmentMap: makeInterlinearMap()
+        )
+        await fulfillment(of: [exp], timeout: 1.0)
+        // Anchored to the PARENT source paragraph (the preceding source
+        // segment's full range 0..<3) — the silent drop was bug #350.
+        XCTAssertEqual(captured?.startUTF16, 0)
+        XCTAssertEqual(captured?.endUTF16, 3)
+    }
+
+    func test_bug350_selectionSpanningOutOfTranslationRow_startsAtFollowingSource() async {
+        let tv = UITextView()
+        tv.text = "AAA[T]BBB"
+        let exp = expectation(description: "posted")
+        nonisolated(unsafe) var captured: TextSelectionInfo?
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerHighlightRequested, object: nil, queue: .main
+        ) { n in captured = n.object as? TextSelectionInfo; exp.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        // Starts in the translation row (display 4), ends inside para B
+        // (display 4..<8 → covers B's first two source chars 3..<5).
+        TXTBridgeShared.postSelectionNotification(
+            .readerHighlightRequested, from: tv,
+            range: NSRange(location: 4, length: 4),
+            bilingualSegmentMap: makeInterlinearMap()
+        )
+        await fulfillment(of: [exp], timeout: 1.0)
+        XCTAssertEqual(captured?.startUTF16, 3)
+        XCTAssertEqual(captured?.endUTF16, 5)
+    }
+
+    func test_bug350_syntheticWithNoPrecedingSource_stillDrops() async {
+        let tv = UITextView()
+        tv.text = "[T]AAA"
+        // Synthetic FIRST (no parent paragraph before it).
+        let map = BilingualDisplaySegmentMap(sourceLength: 3, segments: [
+            .synthetic(displayRange: 0..<3),
+            .source(sourceRange: 0..<3, displayRange: 3..<6),
+        ])
+        nonisolated(unsafe) var posted = false
+        let token = NotificationCenter.default.addObserver(
+            forName: .readerHighlightRequested, object: nil, queue: .main
+        ) { _ in posted = true }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        TXTBridgeShared.postSelectionNotification(
+            .readerHighlightRequested, from: tv,
+            range: NSRange(location: 0, length: 2),
+            bilingualSegmentMap: map
+        )
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(posted, "no parent source paragraph exists — nothing to anchor")
     }
 }

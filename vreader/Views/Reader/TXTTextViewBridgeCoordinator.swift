@@ -10,6 +10,8 @@ import UIKit
 extension TXTTextViewBridge {
     final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         weak var delegate: TXTTextViewBridgeDelegate?
+        /// Bug #350: the debounced selection-finalized card fallback.
+        let selectionCardFallback = SelectionCardFallback()
         var lastConfig: TXTViewConfig
         var lastAppliedAttrText: NSAttributedString?
         var lastAppliedText: String?
@@ -416,7 +418,10 @@ extension TXTTextViewBridge {
             // the object is a typed SelectionPopoverRequestPayload
             // (tokenless for TXT); the presenter parses it via
             // SelectionPopoverRequest.payload(from:).
-            if range.length > 0 {
+            // Bug #350: dedup against the debounced selection fallback —
+            // whichever path fires first posts; the other skips.
+            if range.length > 0, selectionCardFallback.shouldMenuPathPost(range: range) {
+                selectionCardFallback.recordMenuPathPost(range: range)
                 TXTBridgeShared.postSelectionNotification(
                     .readerSelectionPopoverRequested,
                     from: textView,
@@ -436,6 +441,20 @@ extension TXTTextViewBridge {
                 text: textView.text ?? ""
             ) {
                 delegate?.selectionDidChange(utf16Range: utf16Range)
+            }
+            // Bug #350: the card no longer depends EXCLUSIVELY on UIKit
+            // requesting an edit menu — a finalized non-empty selection
+            // posts the card via the debounced fallback (deduped against
+            // the editMenuForTextIn fast path below).
+            selectionCardFallback.selectionChanged(range: nsRange) { [weak self, weak textView] armed in
+                guard let self, let textView,
+                      textView.selectedRange == armed else { return }
+                TXTBridgeShared.postSelectionNotification(
+                    .readerSelectionPopoverRequested,
+                    from: textView,
+                    range: armed,
+                    bilingualSegmentMap: self.bilingualSegmentMap
+                )
             }
         }
 
