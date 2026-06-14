@@ -88,6 +88,16 @@ extension ReadiumEPUBHost {
     /// persisted-on book this fires on the FIRST locator (lastEnumeratedHref is
     /// nil → the href differs → it enumerates).
     func handleBilingualLocationChange(_ readiumLocator: ReadiumShared.Locator) {
+        // Bug #352: record the restore-landing spine on the FIRST relocate
+        // after open (synchronously, before the async enumerate/inject) so the
+        // post-inject re-assert only fires for that spine's inject.
+        let relocateHref = currentVReaderLocator(from: readiumLocator)?.href
+        bilingualRestoreReassertGate.recordLanding(href: relocateHref)
+        // Codex round-4 Medium: leaving the restore chapter before its first
+        // inject disarms the gate (the restore moment is gone), so a later
+        // return can't consume a stale gate. Pre-consume → no task scheduled
+        // yet; the post-consume case is covered by the fire-time href re-check.
+        bilingualRestoreReassertGate.noteRelocate(href: relocateHref)
         guard let vm = bilingualViewModel, vm.isEnabled else { return }
         guard ReadiumBilingualChapterTracker.isBilingualSupported(
             forLayout: settingsStore.epubLayout
@@ -240,6 +250,55 @@ extension ReadiumEPUBHost {
         // inject-path's final generation gate (no await intervenes before here).
         // Feature #100: CJK targets get the heading rows' wide tracking.
         await bilingualCommander.inject(pairs, targetIsCJK: bilingualTargetIsCJK)
+        // Bug #352: this inject grew the spine content under the just-restored
+        // page, so the held page now shows EARLIER content (a deep position
+        // reopens at the chapter start). Re-assert the saved position ONCE —
+        // the restore-landing spine's first inject — so Readium re-resolves the
+        // fraction-based progression against the now-injected DOM.
+        if let injectHref = locator.href,
+           bilingualRestoreReassertGate.consume(injectHref: injectHref) {
+            reassertRestorePosition(landingHref: injectHref)
+        }
+    }
+
+    /// Bug #352: re-navigate to the saved restore target after the first
+    /// bilingual inject. Prefers the same-engine `restoredLocator` (the
+    /// `initialLocation` the navigator opened at); falls back to the
+    /// cross-engine converted target stashed in the first `onLocationChange`.
+    private func reassertRestorePosition(landingHref: String) {
+        guard let target = restoredLocator ?? crossEngineRestoreReadiumTarget else { return }
+        // Bug #352: the inject's WKWebView reflow is asynchronous — navigating
+        // immediately resolves the saved progression against the PRE-reflow
+        // content height and lands ~1 page short (device-measured). Let the
+        // layout settle, then re-resolve against the final injected height so
+        // the restore lands exactly. 0.25s is below perceptible-on-open but
+        // comfortably past the reflow; the navigate is idempotent (a re-render
+        // at the same progression).
+        AppLogger.epub.info(
+            "bug#352 re-assert restore after bilingual inject (progression=\(target.locations.progression ?? -1, privacy: .public))"
+        )
+        // Codex round-3 Medium: hold the delayed navigate as a cancellable
+        // task so teardown / disable / layout-change / a user relocate inside
+        // the settle window cancels it; and re-check at fire time that the host
+        // is still on the restore-landing spine (the user didn't change
+        // chapters), so a stale re-assert never yanks them back.
+        bilingualRestoreReassertTask?.cancel()
+        bilingualRestoreReassertTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            guard currentVReaderLocator(from: lastKnownReadiumLocator)?.href == landingHref else { return }
+            navCommander.navigate(to: target)
+        }
+    }
+
+    /// Bug #352 (Codex round-3 Medium): the single teardown for the restore
+    /// re-assert — disarm the gate AND cancel any in-flight delayed navigate.
+    /// Every "bilingual is going away / repositioning itself" path calls this so
+    /// a pending re-assert can never fire stale.
+    func cancelBilingualRestoreReassert() {
+        bilingualRestoreReassertGate.disarm()
+        bilingualRestoreReassertTask?.cancel()
+        bilingualRestoreReassertTask = nil
     }
 
     /// WI-12: `epubLayout` change handler. A paged↔scroll switch re-renders the
@@ -251,6 +310,10 @@ extension ReadiumEPUBHost {
     /// translation reappears in the re-rendered layout.
     func handleEPUBLayoutChange() {
         guard let vm = bilingualViewModel else { return }
+        // Bug #352: a layout change re-renders + re-positions the spine
+        // itself, so a still-pending restore re-assert must not fire on the
+        // re-layout's re-inject and snap the user back (Codex round-1/3 Medium).
+        cancelBilingualRestoreReassert()
         switch ReadiumBilingualChapterTracker.layoutChangeAction(
             newLayout: settingsStore.epubLayout, isEnabled: vm.isEnabled
         ) {

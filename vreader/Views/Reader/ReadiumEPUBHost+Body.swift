@@ -141,6 +141,10 @@ extension ReadiumEPUBHost {
                         fromVReader: pending,
                         spineHrefs: publication.readingOrder.map(\.href)
                     ) {
+                        // Bug #352: remember the converted target so the
+                        // post-inject re-assert can re-apply it (the inject
+                        // shifts this position too).
+                        crossEngineRestoreReadiumTarget = target
                         navCommander.navigate(to: target)
                         return
                     }
@@ -296,6 +300,14 @@ extension ReadiumEPUBHost {
             pendingCrossEngineRestore = try? await persistence.loadPosition(
                 bookFingerprintKey: fingerprint.canonicalKey)
         }
+        // Bug #352: arm the post-inject position re-assert whenever a restore
+        // target exists. Only the bilingual inject path consumes it, so this
+        // is a no-op when bilingual is off; when on, it corrects the backward
+        // drift the inject otherwise causes (inject grows content under the
+        // just-restored page → the held page shows earlier content).
+        if restoredLocator != nil || pendingCrossEngineRestore != nil {
+            bilingualRestoreReassertGate.arm()
+        }
         // WI-11b Gate-4 round-3 HIGH-1 (persisted-on open race): build the
         // bilingual parser + VM BEFORE `vm.open()` flips `state = .ready` and
         // mounts the navigator, so the navigator's initial `locationDidChange`
@@ -348,6 +360,10 @@ extension ReadiumEPUBHost {
     }
 
     func onHostDisappear() {
+        // Bug #352: drop any pending restore re-assert on teardown — disarm
+        // AND cancel the delayed navigate so it can't fire against a
+        // re-mounted host (Codex round-1/3 Medium).
+        cancelBilingualRestoreReassert()
         guard let viewModel else { return }
         let bgTaskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
         Task {

@@ -132,6 +132,10 @@ extension ReadiumEPUBHost {
         let nextEnabled = !vm.isEnabled
         vm.setEnabled(nextEnabled)
         if !nextEnabled {
+            // Bug #352: disabling cancels any pending restore re-assert — no
+            // inject will follow to consume it, and a later re-enable starts a
+            // fresh restore cycle (Codex round-1/3 Medium).
+            cancelBilingualRestoreReassert()
             bilingualChapterTracker.reset()
             Task { await bilingualCommander.clear() }
             return
@@ -216,6 +220,9 @@ extension ReadiumEPUBHost {
         // First-enable swipe-down = the existing Cancel semantics (the
         // user never committed a configuration): turn bilingual back off.
         if let vm = bilingualViewModel, vm.needsSetupSheet {
+            // Bug #352: opting out of first-enable also disables bilingual,
+            // so cancel a still-armed restore re-assert (Codex round-2/3 Medium).
+            cancelBilingualRestoreReassert()
             vm.dismissSetupSheet()
             vm.setEnabled(false)
         }
@@ -232,6 +239,9 @@ extension ReadiumEPUBHost {
             return
         }
         guard let vm = bilingualViewModel else { return }
+        // Bug #352: first-enable cancel disables bilingual — cancel a
+        // still-pending restore re-assert (Codex round-2/3 Medium).
+        cancelBilingualRestoreReassert()
         vm.dismissSetupSheet()
         vm.setEnabled(false)
         showBilingualSetupSheet = false
@@ -258,6 +268,7 @@ extension ReadiumEPUBHost {
 
     func handleDebugBilingualDisable() {
         guard let vm = bilingualViewModel else { return }
+        cancelBilingualRestoreReassert()  // Bug #352 (Codex round-1/3 Medium)
         vm.setEnabled(false)
         bilingualChapterTracker.reset()
         Task { await bilingualCommander.clear() }

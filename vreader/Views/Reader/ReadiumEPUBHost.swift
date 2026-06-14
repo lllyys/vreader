@@ -170,6 +170,27 @@ struct ReadiumEPUBHost: View {
     /// normal same-engine envelope restore.
     @State var pendingCrossEngineRestore: Locator?
 
+    /// Bug #352: the saved position to re-assert AFTER the first bilingual
+    /// inject. With bilingual ON, the navigator restores against the
+    /// source-only spine, then the inject grows content under the page so
+    /// the held page drifts backward (a deep position reopens at the
+    /// chapter start). The gate (armed at open when a restore target
+    /// exists) fires once on the restore-landing spine's first inject;
+    /// `reassertRestorePosition` re-navigates so Readium re-resolves the
+    /// fraction-based progression against the injected DOM.
+    @State var bilingualRestoreReassertGate = BilingualRestoreReassertGate()
+
+    /// Bug #352: the cross-engine restore's converted Readium target,
+    /// stashed when the one-shot cross-engine restore navigates, so the
+    /// post-inject re-assert can re-apply it (the same-engine path
+    /// re-asserts `restoredLocator` directly).
+    @State var crossEngineRestoreReadiumTarget: ReadiumShared.Locator?
+
+    /// Bug #352 (Codex round-3 Medium): the delayed (reflow-settle) re-assert
+    /// navigate, held so it can be cancelled if the user navigates away or the
+    /// host tears down inside the settle window. See `cancelBilingualRestoreReassert`.
+    @State var bilingualRestoreReassertTask: Task<Void, Never>?
+
     /// WI-7 photo/custom-background compositing: tracks whether a decorative
     /// background image is stored for the current theme. Reloaded on appear and
     /// whenever the theme / custom-background toggle / revision changes (mirrors
