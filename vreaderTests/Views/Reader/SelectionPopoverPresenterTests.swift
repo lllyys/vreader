@@ -304,4 +304,56 @@ struct SelectionPopoverDismissPolicyTests {
         #expect(next == nil)
     }
 }
+
+// MARK: - Outside-tap grace (Bug #351)
+
+@Suite("Bug #351 — SelectionPopoverOutsideTapPolicy")
+@MainActor
+struct SelectionPopoverOutsideTapPolicyTests {
+
+    // Bug #351: the #338 outside-tap dismissal (a simultaneous
+    // SpatialTapGesture) fires on the selection's OWN terminal
+    // finger-up — which lands on the text, outside the bottom card —
+    // so a quick release dismisses the card the instant it appears.
+    // The grace window ignores any outside tap that arrives within
+    // `presentGrace` of the card being presented (that tap is the
+    // selection's release, not a deliberate dismiss). A lingering
+    // touch isn't a tap so it never reaches this path; a genuine
+    // later dismiss tap lands after the grace.
+
+    private let t0 = Date(timeIntervalSinceReferenceDate: 10_000)
+
+    @Test("An outside tap WITHIN the grace window does NOT dismiss (the selection's own release)")
+    func tapWithinGraceIsIgnored() {
+        let tap = t0.addingTimeInterval(0.05)  // instant release
+        #expect(SelectionPopoverOutsideTapPolicy.shouldDismiss(
+            presentedAt: t0, tapTime: tap) == false)
+    }
+
+    @Test("An outside tap AFTER the grace window dismisses (a deliberate dismiss)")
+    func tapAfterGraceDismisses() {
+        let tap = t0.addingTimeInterval(1.0)
+        #expect(SelectionPopoverOutsideTapPolicy.shouldDismiss(
+            presentedAt: t0, tapTime: tap) == true)
+    }
+
+    @Test("A tap exactly at the grace boundary dismisses (>= grace)")
+    func tapAtBoundaryDismisses() {
+        let tap = t0.addingTimeInterval(SelectionPopoverOutsideTapPolicy.presentGrace)
+        #expect(SelectionPopoverOutsideTapPolicy.shouldDismiss(
+            presentedAt: t0, tapTime: tap) == true)
+    }
+
+    @Test("A nil present-time falls back to dismissing (no grace to apply)")
+    func nilPresentTimeDismisses() {
+        #expect(SelectionPopoverOutsideTapPolicy.shouldDismiss(
+            presentedAt: nil, tapTime: t0) == true)
+    }
+
+    @Test("The grace is long enough to cover an instant release but short enough to stay responsive")
+    func graceMagnitudeIsReasonable() {
+        #expect(SelectionPopoverOutsideTapPolicy.presentGrace >= 0.25)
+        #expect(SelectionPopoverOutsideTapPolicy.presentGrace <= 0.5)
+    }
+}
 #endif

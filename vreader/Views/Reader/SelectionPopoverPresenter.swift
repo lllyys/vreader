@@ -141,6 +141,45 @@ enum SelectionPopoverDismissPolicy {
     }
 }
 
+// MARK: - Outside-tap grace (Bug #351)
+
+/// Pure-logic helper deciding whether an outside tap should dismiss the
+/// card. Extracted so the grace contract is unit-testable without the
+/// SwiftUI gesture lifecycle.
+///
+/// Bug #351: the #338 outside-tap dismissal is a simultaneous
+/// `SpatialTapGesture` that fires on tap-up. The finger-up that COMPLETES
+/// a word selection lands on the text — outside the bottom-anchored card —
+/// so a quick release is recognised as an outside tap and dismisses the
+/// card the instant it appears. (A lingering touch exceeds the tap
+/// recogniser's threshold, never fires `onEnded`, and so the card
+/// survives — which is the user-observed "only stays if the finger
+/// lingers".) The grace window ignores any outside tap arriving within
+/// `presentGrace` of the card being presented: that tap is the
+/// selection's own release, not a deliberate dismissal. A genuine later
+/// dismiss tap lands after the grace and still closes the card.
+@MainActor
+enum SelectionPopoverOutsideTapPolicy {
+
+    /// How long after the card is presented an outside tap is treated as
+    /// the selection's own release rather than a dismissal. Long enough
+    /// to cover an instant finger-up after selection; short enough that a
+    /// deliberate dismiss tap feels responsive.
+    static let presentGrace: TimeInterval = 0.35
+
+    /// Whether an outside tap at `tapTime` should dismiss a card
+    /// presented at `presentedAt`. `false` within the grace window; a
+    /// `nil` present-time falls back to dismissing (no grace to apply).
+    static func shouldDismiss(
+        presentedAt: Date?,
+        tapTime: Date,
+        grace: TimeInterval = presentGrace
+    ) -> Bool {
+        guard let presentedAt else { return true }
+        return tapTime.timeIntervalSince(presentedAt) >= grace
+    }
+}
+
 // MARK: - SwiftUI presenter modifier
 
 /// Observes `.readerSelectionPopoverRequested`, stashes the latest
@@ -172,6 +211,11 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
     /// dismissing on those would race the card's action handlers (the
     /// EPUB/Readium token cache is cleared by `onDismiss`).
     @State private var cardFrame: CGRect = .zero
+    /// Bug #351: when the card was presented, so the outside-tap
+    /// dismissal can ignore the selection's own terminal finger-up (which
+    /// lands on the text within milliseconds of the card appearing). See
+    /// `SelectionPopoverOutsideTapPolicy`.
+    @State private var presentedAt: Date?
 
     func body(content: Content) -> some View {
         content
@@ -190,6 +234,13 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
             // card's quote refreshes to the expanded selection for free.
             .simultaneousGesture(SpatialTapGesture(coordinateSpace: .global).onEnded { value in
                 guard pending != nil, !cardFrame.contains(value.location) else { return }
+                // Bug #351: ignore the selection's own terminal finger-up
+                // (lands on the text within ms of the card appearing) —
+                // only a tap after the present-grace is a deliberate
+                // dismissal.
+                guard SelectionPopoverOutsideTapPolicy.shouldDismiss(
+                    presentedAt: presentedAt, tapTime: Date()
+                ) else { return }
                 dismiss()
             })
             .onReceive(
@@ -199,6 +250,11 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
                     return
                 }
                 pending = payload
+                // Bug #351: stamp the present time so the outside-tap
+                // dismissal can grace-ignore the selection's own release.
+                // A handle-drag re-post refreshes this, so the drag's
+                // terminal up is graced too.
+                presentedAt = Date()
                 // Bug #338 (Codex round-2): while the card is up, the reader's
                 // tap grammar is suppressed so the eventual outside tap is a
                 // PURE dismissal (no page-turn away from the selected text).
@@ -280,6 +336,7 @@ private struct SelectionPopoverPresenterModifier: ViewModifier {
     /// `onDismiss` callback the EPUB container uses to drop its token-cache entry.
     private func dismiss() {
         pending = nil
+        presentedAt = nil
         releaseTapSuppression()
         onDismiss?()
     }
