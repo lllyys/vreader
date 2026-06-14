@@ -37,14 +37,28 @@ KILL=0
 
 # pid | etime | %cpu | command  for the ghost classes, older than the
 # threshold and idle (<1% CPU). etime formats: MM:SS, HH:MM:SS, DD-HH:MM:SS.
+#
+# Classes flagged (all excluding the sweeper's own ps/ugrep pipeline and the
+# resident SWBBuildService/idb_companion daemons):
+#   - tail -f / log stream / codex / xcodebuild (test|build) — excludes bare
+#     grep/awk so the sweeper's diagnostic greps don't self-match.
+#   - waiter loop `until/while … do sleep N; done` — the rule-49 anti-pattern
+#     (a run_in_background shell polling a task-output file). These DO contain
+#     grep -q/-c markers, so the grep exclusion must not apply to them.
+#     Origin: a `do sleep 25` waiter looped 3d18h before the 2026-06-15 sweep.
 ghosts=$(ps -Ao pid=,etime=,pcpu=,command= | awk -v thr="$THRESHOLD_MIN" '
     {
         cmd = ""
         for (i = 4; i <= NF; i++) cmd = cmd (i > 4 ? " " : "") $i
     }
-    cmd !~ /(awk|grep|sweep-ghosts|idb_companion|SWBBuildService)/ &&
-    (cmd ~ /tail -f/ || cmd ~ /log stream/ ||
-     cmd ~ /(^|\/)codex( |$)/ || cmd ~ /xcodebuild (test|build)/) {
+    cmd ~ /(ps -Ao|ugrep|sweep-ghosts|idb_companion|SWBBuildService)/ { next }
+    {
+        otherClass = (cmd !~ /( grep | awk )/) && \
+            (cmd ~ /tail -f/ || cmd ~ /log stream/ || \
+             cmd ~ /(^|\/)codex( |$)/ || cmd ~ /xcodebuild (test|build)/)
+        waiterClass = (cmd ~ /(until|while) .*do sleep [0-9]/)
+    }
+    otherClass || waiterClass {
         days = 0; hms = $2
         if (split($2, d, "-") == 2) { days = d[1]; hms = d[2] }
         n = split(hms, t, ":")

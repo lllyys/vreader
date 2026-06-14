@@ -125,7 +125,7 @@ because nothing periodically sweeps. For that:
 
 ```bash
 scripts/sweep-ghosts.sh           # report ghosts: stale tail -f / log stream /
-                                  # codex / xcodebuild at ~0% CPU past 2h
+                                  # codex / xcodebuild / waiter-loops at ~0% CPU past 2h
 scripts/sweep-ghosts.sh --kill    # reap them
 THRESHOLD_MIN=30 scripts/sweep-ghosts.sh   # tighter age threshold
 ```
@@ -134,3 +134,34 @@ It never flags `SWBBuildService` (Xcode's resident build daemon — alive
 and idle between builds by design) or `idb_companion` (persistent sim
 bridge). Run it whenever "is the shell hung?" comes up, and at the start
 of cron sweep iterations.
+
+### Waiter-loop class (the recurring "hung shell" — 2026-06-15)
+
+The most common ghost in practice is NOT a wedged tool — it's a
+`run_in_background` **waiter loop** polling a task-output file:
+
+```bash
+# ANTI-PATTERN — do NOT do this:
+until grep -qE "BUILD SUCCEEDED|error:" .../tasks/<id>.output; do sleep 5; done
+```
+
+These come from launching a build/test with `run_in_background: true` and
+THEN launching a SECOND background shell to poll its output. They are the
+exact anti-pattern this whole rule bans (one async job = one owner = one
+completion channel), and they're insidious because:
+
+- They survive long past the task they watch (a `do sleep 25` waiter was
+  found looping **3d18h** on 2026-06-15, from a session 3 days earlier
+  whose `RUN-TESTS RESULT` count-≥3 condition never fired).
+- They're invisible to `pgrep -x xcodebuild`/`-x codex` (they're `zsh`/
+  `sleep`), to the harness task list (they detach), AND they slipped past
+  the FIRST version of `sweep-ghosts.sh` (which only watched tool names).
+- Multiple of them are what makes the operator's UI show a persistent
+  "running" indicator and ask "is the shell hung again?".
+
+**The fix is behavioral, not tooling: never launch a waiter loop.** When a
+`run_in_background` task finishes it emits a `<task-notification>`; act on
+that in the next turn. Do not add an `until grep…; do sleep` shell on top.
+`sweep-ghosts.sh` now ALSO detects + reaps the waiter-loop class
+(`(until|while) … do sleep N`) as a backstop, but the loop should never be
+created in the first place.
