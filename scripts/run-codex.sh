@@ -24,8 +24,14 @@
 set -uo pipefail
 
 TIMEOUT_SECS="${CODEX_TIMEOUT_SECS:-300}"
-MODEL="gpt-5.4"
-EFFORT="medium"
+# Model + reasoning effort: by DEFAULT inherit the global ~/.codex/config.toml
+# (currently model = gpt-5.5, model_reasoning_effort = medium). Left empty on
+# purpose so this wrapper auto-tracks codex model migrations instead of pinning a
+# stale name — the old hardcoded "gpt-5.4" default went stale (config migration
+# notice: gpt-5.2-codex → gpt-5.3-codex → gpt-5.4 → gpt-5.5). Override per-call
+# with -m / -e (e.g. -m gpt-5.5 -e high for a deeper audit).
+MODEL=""
+EFFORT=""
 OUT=""
 
 while getopts "m:e:o:" opt; do
@@ -47,9 +53,15 @@ fi
 
 OUT="${OUT:-$(mktemp -t run-codex.XXXXXX)}"
 
+# Build codex args: pass -m / -c ONLY when explicitly overridden, so the default
+# inherits the global ~/.codex/config.toml model + reasoning effort.
+CODEX_ARGS=(exec --sandbox read-only)
+[ -n "$MODEL" ]  && CODEX_ARGS+=(-m "$MODEL")
+[ -n "$EFFORT" ] && CODEX_ARGS+=(-c "model_reasoning_effort=$EFFORT")
+CODEX_ARGS+=("$PROMPT")
+
 # Launch Codex with stdin CLOSED (the load-bearing fix) and output to $OUT.
-codex exec --sandbox read-only -m "$MODEL" -c "model_reasoning_effort=$EFFORT" "$PROMPT" \
-  < /dev/null > "$OUT" 2>&1 &
+codex "${CODEX_ARGS[@]}" < /dev/null > "$OUT" 2>&1 &
 pid=$!
 
 # Watchdog tied to THIS exact pid (rule 49 — identity, not likeness). If Codex
