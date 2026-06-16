@@ -47,7 +47,8 @@ it as enforceable golden vectors in `contracts/`.
      (**canonical**), `totalProgression` (**canonical**, derived),
      `cfi` (**platform-local** — CFI dialect may not round-trip
      Swift↔Kotlin Readium → **lossy fallback** to progression+quote),
-     `page` (format-local), `charOffsetUTF16` (**canonical**),
+     `page` (**platform-local** — PDF-format-specific page index, not a
+     cross-engine cross-platform anchor), `charOffsetUTF16` (**canonical**),
      `charRangeStartUTF16`/`EndUTF16` (**canonical** — selection range),
      `textQuote`, `textContextBefore`/`After` (**canonical** — the
      quote-anchor resume), plus the canonical-JSON rules.
@@ -58,7 +59,8 @@ it as enforceable golden vectors in `contracts/`.
      `readiumLocatorJSON` (**platform-local** — Readium's own CFI-bearing
      JSON; lossy fallback to `legacyLocator`'s progression+quote),
      `legacyLocator` (the `Locator` above — its field classifications
-     apply), `schemaVersion` (the migration hook).
+     apply), `schemaVersion` (**canonical** — a persisted contract field
+     both platforms must serialize consistently; also the migration hook).
    - The translation cache key (`ChapterTranslationRecord.lookupKey`).
    - The backup contract (see below) — concrete files, not "blob/manifest".
 2. **A Kindle-conversion determinism harness**: build libmobi on the host
@@ -230,3 +232,8 @@ a tooling prerequisite (and a Spike-B-shared environment concern).
   `VReaderLocator.fingerprintKey`, `VReaderLocator.originalFormat` (the
   round-1 fix had omitted them), and tightened AC1 to require conformance
   against the FULL serialized shapes. #103 + #105 were CLEAN at round 2.
+- v4 (2026-06-16) — Gate-2 round 3 (Codex `019ed120`) applied: taxonomy
+  consistency — `page` reclassified `format-local` → **platform-local**;
+  `schemaVersion` explicitly classified **canonical**. Every persisted
+  field now uses exactly the canonical / platform-local / lossy-fallback
+  taxonomy AC1 requires.
