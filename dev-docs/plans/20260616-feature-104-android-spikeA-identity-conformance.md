@@ -40,18 +40,25 @@ it as enforceable golden vectors in `contracts/`.
    **canonical-cross-platform vs platform-local vs lossy-fallback**:
    - `DocumentFingerprint` — `format:contentSHA256:fileByteCount`
      (`canonicalKey`); **canonical**.
-   - `Locator` (`vreader/Models/Locator.swift`) — the full envelope:
-     `href`, `progression`, `totalProgression`, `page`, `charOffsetUTF16`,
-     `charRangeStartUTF16`/`EndUTF16`, `textQuote`, `textContextBefore`/
-     `After`, plus its canonical-JSON rules. Mark `href` + `progression` +
-     `charOffsetUTF16` + the text-quote anchors **canonical** (the
-     cross-device resume contract); `page` is format-local.
-   - `VReaderLocator` (`vreader/Models/VReaderLocator.swift`) — `engine`,
-     `readiumLocatorJSON`, `legacyLocator`, `schemaVersion`. Mark
-     `readiumLocatorJSON`/CFI **platform-local** (CFI dialect may not
-     round-trip Swift↔Kotlin Readium) with a **lossy fallback** to
-     progression + text-quote resume; `schemaVersion` is the migration
-     hook.
+   - `Locator` (`vreader/Models/Locator.swift`) — the full envelope, EVERY
+     persisted field (Codex Gate-2 round-2 Medium — the inventory must be
+     exhaustive): `bookFingerprint` (**canonical** — the book identity the
+     locator belongs to), `href` (**canonical**), `progression`
+     (**canonical**), `totalProgression` (**canonical**, derived),
+     `cfi` (**platform-local** — CFI dialect may not round-trip
+     Swift↔Kotlin Readium → **lossy fallback** to progression+quote),
+     `page` (format-local), `charOffsetUTF16` (**canonical**),
+     `charRangeStartUTF16`/`EndUTF16` (**canonical** — selection range),
+     `textQuote`, `textContextBefore`/`After` (**canonical** — the
+     quote-anchor resume), plus the canonical-JSON rules.
+   - `VReaderLocator` (`vreader/Models/VReaderLocator.swift`) — EVERY
+     persisted field: `fingerprintKey` (**canonical** — book identity
+     key), `originalFormat` (**canonical** — part of the fingerprint),
+     `engine` (**platform-local** — which renderer produced it),
+     `readiumLocatorJSON` (**platform-local** — Readium's own CFI-bearing
+     JSON; lossy fallback to `legacyLocator`'s progression+quote),
+     `legacyLocator` (the `Locator` above — its field classifications
+     apply), `schemaVersion` (the migration hook).
    - The translation cache key (`ChapterTranslationRecord.lookupKey`).
    - The backup contract (see below) — concrete files, not "blob/manifest".
 2. **A Kindle-conversion determinism harness**: build libmobi on the host
@@ -191,7 +198,11 @@ a tooling prerequisite (and a Spike-B-shared environment concern).
 
 1. `contracts/` holds canonical specs for fingerprint / locator /
    cache-key / backup-format, distilled from and consistent with the Swift
-   reference (Swift conformance test green).
+   reference, with **every persisted `Locator` and `VReaderLocator` field
+   inventoried and classified** (canonical / platform-local /
+   lossy-fallback). The Swift conformance test asserts the FULL serialized
+   shapes (not a reduced subset), so a vector can't go green while ignoring
+   stored fields.
 2. The libmobi determinism + Readium round-trip harnesses run on the
    shared corpus and produce a written **canonical-identity decision** in
    the spec (exact-match, normalization, or platform-local + mapping).
@@ -214,3 +225,8 @@ a tooling prerequisite (and a Spike-B-shared environment concern).
   `library-manifest.json` schema 1); **Medium** — vectors pin
   converter/libmobi/Readium versions so a deliberate version bump isn't
   mistaken for nondeterminism.
+- v3 (2026-06-16) — Gate-2 round 2 (Codex `019ed11c`) applied: completed
+  the field inventory — added `Locator.bookFingerprint`, `Locator.cfi`,
+  `VReaderLocator.fingerprintKey`, `VReaderLocator.originalFormat` (the
+  round-1 fix had omitted them), and tightened AC1 to require conformance
+  against the FULL serialized shapes. #103 + #105 were CLEAN at round 2.
