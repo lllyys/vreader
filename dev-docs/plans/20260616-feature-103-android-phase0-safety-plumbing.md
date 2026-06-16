@@ -52,10 +52,31 @@ viability — these are NOT Phase 0):
 ### WI-1 — Path-scope the gate-routing hooks
 
 - `/.claude/hooks/check_codex_audit_artifact.sh` — the "is this PR code?"
-  predicate currently matches `^vreader/` + `^vreaderTests/`. Add an
-  `android/**` (and `*.kt`, `*.kts`, `*.gradle`, `*.gradle.kts`) code
-  predicate so an Android code PR REQUIRES an audit artifact. The audit
-  artifact path/contract stays the same (`.claude/codex-audits/<branch>-audit.md`).
+  predicate is the `SWIFT_TOUCHED` check at line ~97, currently
+  `grep -qE '^(vreader/|vreaderTests/)'`. **Codex Gate-2 Critical + High**:
+  classify as code **by ROOT, not just extension** (a `contracts/`-only
+  PR, an `AndroidManifest.xml`, `gradle.properties`, `buildSrc/`, or a
+  wrapper file would otherwise still bypass Gate 4). Rename the variable to
+  `CODE_TOUCHED` and match this full set as audit-requiring:
+  - **iOS (unchanged)**: `^vreader/`, `^vreaderTests/`
+  - **Android/Kotlin (new)**: `^android/`, `^spikes/` (the throwaway
+    harness root — see the layout decision below), nested + root Gradle
+    (`(^|/)(build|settings)\.gradle(\.kts)?$`, `^gradle\.properties$`,
+    `^gradlew`, `^gradle/`, `^buildSrc/`), `\.kt$`, `\.kts$`,
+    `AndroidManifest\.xml$`, `(^|/)res/`
+  - **Shared cross-platform code surface (new — the Critical fix)**:
+    `^contracts/` — the identity spec + conformance code + golden vectors
+    + harnesses are load-bearing and MUST be audited; Spike A (#104) lands
+    them, and without this a `contracts/`-only PR bypasses the gate.
+  Audit artifact path/contract unchanged
+  (`.claude/codex-audits/<branch>-audit.md`).
+- **Layout decision (resolves Spike B's "path TBD")**: spikes' throwaway
+  Kotlin/Android harness code lives under a top-level **`spikes/`** root —
+  NOT `android/`, which stays RESERVED for the Phase-2 real app shell (the
+  ADR defers the app shell until the spikes prove viability). `contracts/`
+  holds the spec + conformance modules + Spike-A libmobi/Readium
+  harnesses. Phase 0's gate routing covers all three roots
+  (`android/`, `spikes/`, `contracts/`).
 - `/.claude/hooks/check_gh_issue_mirror.sh` — confirm it keys on
   `docs/{features,bugs}.md` row edits (platform-agnostic); no change
   expected, but add a regression note/test that an `android/` PR touching
@@ -75,13 +96,18 @@ viability — these are NOT Phase 0):
   `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION`; Android gets
   `android/version.properties` or Gradle `versionName`/`versionCode` —
   *path reserved, file created in Phase 2, not now*), a "which platform
-  did this PR touch → bump that platform's file" rule, and a tag policy:
-  `ios/vX.Y.Z` vs `android/vX.Y.Z` (or an explicitly unified product
-  version — the ADR leaves this open; the plan must PICK one and state
-  it). The existing iOS history uses plain `v3.66.x`; the policy must
-  define how the existing plain tags coexist with the new namespaced ones
-  (proposal: keep plain `vX.Y.Z` as the iOS tag until Android ships, then
-  cut over — OR alias). **This decision is the WI's core deliverable.**
+  did this PR touch → bump that platform's file" rule, and a tag policy.
+  **DECISION (Codex Gate-2 Medium — the plan picks one now): iOS keeps
+  plain `vX.Y.Z` UNCHANGED (no retag of the 100+ existing `v3.66.x`
+  tags); Android uses prefixed `android/vX.Y.Z`.** Rationale: retagging a
+  long iOS history is pointless churn, and the namespace asymmetry (iOS
+  plain, Android prefixed) deliberately mirrors the directory asymmetry
+  (iOS at root, Android in a subdir) the ADR already chose as "the right
+  pragmatic call." Coexistence rule: a plain `vX.Y.Z` = iOS by
+  definition; any `android/`-prefixed tag = Android; no plain tag is ever
+  cut for an Android-only release. (Rejected: a unified product version —
+  it re-couples two independently-shippable cadences, the ADR's "biggest
+  miss".)
 - Close-gate comment: the GH "shipped in vX.Y.Z" comment template
   (referenced in AGENTS.md + `/fix-issue` skill) gets platform-namespaced
   wording for Android (`shipped in android/vX.Y.Z`). Phase 0 documents the
@@ -138,14 +164,21 @@ under one audit if small.
 
 ## Test catalogue
 
-- **WI-1 hook test** (the only one with executable behavior): a shell
-  test (mirroring the existing hook-test pattern under
-  `.claude/hooks/` or a `bats`/shell harness) asserting:
-  - an `android/app/src/Foo.kt`-only diff → hook DEMANDS an audit artifact
-    (exit non-zero without one);
-  - a `docs/`-only diff → hook does NOT demand one (unchanged);
-  - a mixed `vreader/` + `android/` diff → demands one;
-  - a `*.gradle.kts`-only diff → demands one.
+- **WI-1 hook test** (the only one with executable behavior). Codex
+  Gate-2 Low: no hook-test harness exists today, so WI-1 CREATES one at
+  `.claude/hooks/__tests__/check_codex_audit_artifact.test.sh` (a
+  self-contained shell test that stubs a git diff and runs the hook's
+  classification). It asserts the `CODE_TOUCHED` predicate:
+  - `android/app/src/Foo.kt`-only diff → DEMANDS an audit artifact (exit
+    non-zero without one);
+  - `contracts/identity/fingerprint.md`-only diff → DEMANDS one (the
+    Critical fix — shared code surface);
+  - `spikes/android-reader-bench/build.gradle.kts`-only → DEMANDS one;
+  - `gradle.properties` / `buildSrc/Foo.kt` / `AndroidManifest.xml`-only →
+    DEMANDS one (the High fix — roots, not just extensions);
+  - a `docs/`-only diff → does NOT demand one (unchanged — the negative
+    test guarding against over-gating iOS docs PRs);
+  - a mixed `vreader/` + `android/` diff → demands one.
 - WI-2/3/4 are docs/policy (rule 10 exemption — no runtime behavior);
   verification is a careful read + the WI-1 hook test proving the gate
   actually fires. The "Manual Audit Evidence" path is acceptable for the
@@ -172,9 +205,12 @@ under one audit if small.
 
 ## Acceptance criteria
 
-1. An `android/**` or `*.kt`/`*.gradle*` code PR cannot merge without a
-   `.claude/codex-audits/<branch>-audit.md` artifact (hook test proves
-   it); a `docs/`-only PR still can.
+1. A PR touching any code root — `android/**`, `spikes/**`,
+   **`contracts/**`** (the Critical fix), Gradle/`buildSrc/`/manifest/`res`
+   (the High fix), or `*.kt`/`*.kts` — cannot merge without a
+   `.claude/codex-audits/<branch>-audit.md` artifact (the new
+   `.claude/hooks/__tests__/…test.sh` proves it); a `docs/`-only PR still
+   can.
 2. Rule 40 documents per-platform version files + the `ios/` vs `android/`
    (or unified) tag policy with an explicit decision and the
    existing-plain-tag coexistence rule.
@@ -186,5 +222,10 @@ under one audit if small.
 
 ## Revision history
 
-- v1 (2026-06-16) — initial Gate-1 draft from ADR-0001 Phase 0. Awaiting
-  Gate-2 independent audit.
+- v1 (2026-06-16) — initial Gate-1 draft from ADR-0001 Phase 0.
+- v2 (2026-06-16) — Gate-2 round 1 (Codex `019ed111`) applied: **Critical**
+  — gate `contracts/**` as a code surface (was bypassable); **High** —
+  classify by ROOT not just extension (Gradle/`buildSrc`/manifest/`res` +
+  the `spikes/` harness root); **Medium** — picked the tag policy (iOS
+  plain, Android `android/`-prefixed); **Low** — named the hook-test
+  harness to create (`.claude/hooks/__tests__/…test.sh`).

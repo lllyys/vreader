@@ -33,10 +33,27 @@ it as enforceable golden vectors in `contracts/`.
 
 **In scope:**
 
-1. **A `contracts/` canonical spec** for: `DocumentFingerprint`
-   (format:sha256:byteCount), `Locator` (href + progression + CFI +
-   charOffset), the translation cache key, and the backup blob/manifest
-   format — distilled from the existing Swift sources as the reference.
+1. **A `contracts/` canonical spec for the ACTUAL persisted identity
+   envelope** (Codex Gate-2 Critical — the reduced `href+progression+CFI+
+   charOffset` model can go green while breaking saved-position
+   back-compat). The spec models the real shapes and marks each field
+   **canonical-cross-platform vs platform-local vs lossy-fallback**:
+   - `DocumentFingerprint` — `format:contentSHA256:fileByteCount`
+     (`canonicalKey`); **canonical**.
+   - `Locator` (`vreader/Models/Locator.swift`) — the full envelope:
+     `href`, `progression`, `totalProgression`, `page`, `charOffsetUTF16`,
+     `charRangeStartUTF16`/`EndUTF16`, `textQuote`, `textContextBefore`/
+     `After`, plus its canonical-JSON rules. Mark `href` + `progression` +
+     `charOffsetUTF16` + the text-quote anchors **canonical** (the
+     cross-device resume contract); `page` is format-local.
+   - `VReaderLocator` (`vreader/Models/VReaderLocator.swift`) — `engine`,
+     `readiumLocatorJSON`, `legacyLocator`, `schemaVersion`. Mark
+     `readiumLocatorJSON`/CFI **platform-local** (CFI dialect may not
+     round-trip Swift↔Kotlin Readium) with a **lossy fallback** to
+     progression + text-quote resume; `schemaVersion` is the migration
+     hook.
+   - The translation cache key (`ChapterTranslationRecord.lookupKey`).
+   - The backup contract (see below) — concrete files, not "blob/manifest".
 2. **A Kindle-conversion determinism harness**: build libmobi on the host
    (and on Android NDK/arm) and convert a shared MOBI/AZW3 corpus to EPUB
    on both, comparing the resulting fingerprints.
@@ -68,11 +85,26 @@ it as enforceable golden vectors in `contracts/`.
 - `contracts/identity/fingerprint.md` + `…/locator.md` +
   `…/cache-key.md` + `…/backup-format.md` — canonical specs distilled from
   the Swift reference: `vreader/Models/DocumentFingerprint.swift`,
-  `vreader/Models/VReaderLocator.swift` + `Locator.swift`,
-  `vreader/Models/ChapterTranslationRecord.swift` (`lookupKey`), and the
-  WebDAV backup manifest/blob format.
+  `vreader/Models/VReaderLocator.swift` + `Locator.swift` (the FULL field
+  set above), `vreader/Models/ChapterTranslationRecord.swift` (`lookupKey`).
+- **Backup contract (Codex Gate-2 Medium — name the surfaces, not "blob/
+  manifest"):** `contracts/identity/backup-format.md` owns the versioned
+  backup DTOs in `vreader/Services/Backup/BackupSectionDTOs.swift` (global
+  backup schema **3**) and the separate `library-manifest.json` (schema
+  **1**). The spec records both schema versions, the section DTO shapes,
+  and which fields are identity-bearing (fingerprint keys, locator
+  envelopes) vs device-local. Cross-ref the materializing-restore feature
+  (#46) blob layout.
 - `contracts/vectors/*.json` — golden vectors: input descriptor →
-  expected fingerprint / locator serialization.
+  expected fingerprint / locator serialization. **Codex Gate-2 Medium —
+  pin tool versions:** every vector records the producing
+  `MobiEPUBConverter.version`, the libmobi version, and the Readium
+  version, because a deliberate converter version bump (which has changed
+  produced EPUB bytes before) would otherwise be indistinguishable from
+  cross-platform nondeterminism. Rule: a vector mismatch is a determinism
+  FAILURE only when the tool versions match; a tool-version bump updates
+  the versioned baseline (a `contracts/` breaking-vs-additive level event),
+  not a determinism failure.
 - `contracts/conformance/swift/` — a tiny SwiftPM test target (NOT in the
   Xcode app) that loads the vectors and asserts the Swift implementations
   match.
@@ -171,5 +203,14 @@ a tooling prerequisite (and a Spike-B-shared environment concern).
 
 ## Revision history
 
-- v1 (2026-06-16) — initial Gate-1 draft from ADR-0001 Spike A. Awaiting
-  Gate-2 independent audit.
+- v1 (2026-06-16) — initial Gate-1 draft from ADR-0001 Spike A.
+- v2 (2026-06-16) — Gate-2 round 1 (Codex `019ed111`) applied: **Critical**
+  — model the FULL persisted identity envelope (`Locator`'s
+  totalProgression/page/UTF-16 ranges/quote-context + `VReaderLocator`'s
+  engine/readiumLocatorJSON/legacyLocator/schemaVersion), marking each
+  field canonical / platform-local / lossy-fallback (the reduced spec
+  could go green while breaking back-compat); **Medium** — named the
+  concrete backup surfaces (`BackupSectionDTOs.swift` global schema 3 +
+  `library-manifest.json` schema 1); **Medium** — vectors pin
+  converter/libmobi/Readium versions so a deliberate version bump isn't
+  mistaken for nondeterminism.

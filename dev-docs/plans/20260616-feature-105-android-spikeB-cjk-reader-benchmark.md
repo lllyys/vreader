@@ -7,8 +7,12 @@
 > eviction, CFI / selection restore) on Android's more-variable System
 > WebView, **before** committing to the WebView-engine plan.
 >
-> **Independent of Spike A** (different risk; can run in parallel once the
-> toolchain exists). **Instrumentation/benchmark-driven, NOT
+> **Depends on #103 (Phase 0); independent of #104 (Spike A) once #103
+> lands** (Codex Gate-2 High — ADR-0001 requires Phase 0 before ANY
+> Android PR, and this spike's harness is Android/Kotlin code under
+> `spikes/`, which Phase 0's gate routing + write-owner rules must cover
+> first). Different risk from Spike A, so it can run in parallel with #104
+> once #103 is merged. **Instrumentation/benchmark-driven, NOT
 > UI-automation-dependent** — the cron's ability to drive an Android
 > emulator/device is UNVERIFIED and the iOS verification stack (rule 47,
 > `cron-prompts/verify.md`, `tdd-guardian`) does not transfer.
@@ -37,8 +41,14 @@ verification lane** (the iOS one doesn't transfer).
 
 1. A throwaway/harness Android module (instrumentation test or minimal
    benchmark host — NOT the product app) loading Readium-Kotlin 3.3.0.
-2. A real 1000+-spine CJK EPUB (e.g., the 道诡异仙 / 1042-chapter book
-   already used in iOS verification) as the benchmark corpus.
+2. **Two corpora (Codex Gate-2 Medium — one real book is weak for exact
+   anchor assertions):** the real 1000+-spine CJK EPUB (道诡异仙 / 1042
+   chapters) for the perf/memory/stability legs, PLUS a **tiny synthetic
+   CJK EPUB with controlled char offsets** (3-5 short chapters, known
+   exact offsets) for the deterministic anchor/selection-restore probes —
+   the "controlled tiny structure a real book can't give cheaply"
+   exception in the real-books-first rule. Mirrors the iOS `mini-cjk`
+   fixture intent.
 3. **Instrumented metrics**: scroll smoothness (frame timing / jank),
    memory + eviction behavior over a long sweep, renderer stability
    (crashes / blank frames), CFI + selection anchor restore correctness.
@@ -60,11 +70,15 @@ verification lane** (the iOS one doesn't transfer).
 
 ## Surface area (file-by-file, concrete)
 
-- `contracts/harness/android-reader-bench/` (or a clearly-throwaway
-  `spikes/android-reader/` — path TBD with Phase 0's write-owner rule) —
-  a minimal Gradle module: Readium-Kotlin dependency, an
-  instrumentation/macrobenchmark test that opens the corpus, scrolls a
-  long sweep, and records metrics.
+- **`spikes/android-reader-bench/`** (Codex Gate-2 Medium — root PICKED,
+  no longer "TBD"; this is the throwaway-harness root Phase 0 #103 chose,
+  keeping `android/` reserved for the Phase-2 app shell). Concrete files:
+  `spikes/android-reader-bench/build.gradle.kts` (Readium-Kotlin 3.3.0 +
+  androidx.benchmark/macrobenchmark deps), `…/src/androidTest/.../ReaderScrollBenchmark.kt`
+  (opens the corpus, drives a long programmatic scroll sweep, records
+  `FrameTimingMetric` + memory), `…/src/androidTest/.../AnchorRestoreTest.kt`
+  (the controlled anchor/selection probes on the synthetic fixture below),
+  and a `settings.gradle.kts` registering the module.
 - `dev-docs/verification/spike-b-android-reader-<date>.md` — the metric
   baselines + viability verdict (mirrors the iOS evidence-file shape).
 - `docs/decisions/` — if the verdict changes the engine strategy, a short
@@ -117,8 +131,26 @@ This spike's "tests" ARE the instrumentation:
   the saved position (the Android analogue of #349/#352); selection
   round-trip.
 
-Pass/fail thresholds are *defined in WI-1* against the iOS baseline as the
-reference, then measured.
+**Pass/fail rubric (Codex Gate-2 Medium — defined in the PLAN now, not
+deferred to WI-1 after seeing results):**
+
+- **Scroll smoothness**: ≤5% of frames over the 16.6ms budget (60fps) AND
+  p90 frame time ≤ the iOS baseline × 1.5 over a sustained ≥200-chapter
+  sweep. Below that → PASS; worse → engine-decision triggers.
+- **Memory**: bounded — no monotonic native+heap growth across the sweep
+  (eviction working), and zero OOM kills. Monotonic growth or an OOM →
+  FAIL.
+- **Renderer stability**: zero WebView crashes and zero blank/missing
+  frames over the sweep. Any → FAIL.
+- **Anchor/selection restore**: on the synthetic controlled-offset
+  fixture, reopen lands within the SAME paragraph as saved (the iOS #352
+  bar is exact; sub-paragraph drift is the acceptable Android v1 window),
+  and a selection round-trips to the same char range. Larger drift → a
+  recorded engine-hardening obligation.
+
+These are measured against the iOS baseline captured in the same run where
+feasible; a FAIL on memory/renderer is engine-blocking, a scroll/anchor
+miss is a hardening obligation (not necessarily a strategy reopen).
 
 ## Risks + mitigations
 
@@ -156,5 +188,12 @@ reference, then measured.
 
 ## Revision history
 
-- v1 (2026-06-16) — initial Gate-1 draft from ADR-0001 Spike B. Awaiting
-  Gate-2 independent audit.
+- v1 (2026-06-16) — initial Gate-1 draft from ADR-0001 Spike B.
+- v2 (2026-06-16) — Gate-2 round 1 (Codex `019ed111`) applied: **High** —
+  corrected the dependency (depends on #103; independent of #104 once #103
+  lands); **Medium** — picked the harness root (`spikes/android-reader-bench/`)
+  + named the module files; **Medium** — moved the pass/fail rubric
+  (jank/memory/renderer/anchor thresholds) into the plan instead of
+  deferring to WI-1; **Medium** — added a tiny synthetic controlled-offset
+  CJK fixture for deterministic anchor/selection probes (keeping the real
+  1042-chapter book for perf/memory).
