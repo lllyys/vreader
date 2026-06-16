@@ -11,12 +11,17 @@ shippable apps sharing identity/library/backup contracts, NOT a
 cross-platform rewrite. **Source of truth for the Android strategy:
 `docs/decisions/0001-android-port-strategy.md`.**
 
-- **Path ownership** (authoritative classifier: `.claude/hooks/lib/code-paths.sh`):
-  iOS code = `vreader/`, `vreaderTests/`, `*.xcodeproj`, `project.yml`;
-  Android code = `android/`, `spikes/`, `buildSrc/`, root Gradle, `*.kt[s]`;
-  shared = `docs/`, `contracts/`, `dev-docs/designs/`, `.claude/`, this file.
-  Write isolation is binding — see `.claude/rules/48-parallel-execution.md`
-  ("Cross-platform write isolation").
+- **Path ownership** — iOS code = `vreader/`, `vreaderTests/`,
+  `*.xcodeproj`, `project.yml`; Android code = `android/`, `spikes/`,
+  `buildSrc/`, `gradle/`, root Gradle files, `gradlew*`, `gradle.properties`,
+  `*.kt[s]`, `AndroidManifest.xml`, any `res/` tree; shared = `docs/`,
+  `contracts/`, `dev-docs/`, `.claude/`, this file. (The audit gate's
+  code-vs-docs classifier `.claude/hooks/lib/code-paths.sh` decides which
+  PRs need a Codex audit — it covers the Android/Kotlin/`contracts/` code
+  paths but is a boolean gate, not a full ownership taxonomy; `project.yml`
+  / `*.xcodeproj` are owned-by-iOS here but ride along with `vreader/`
+  changes.) Write isolation is binding — see
+  `.claude/rules/48-parallel-execution.md` ("Cross-platform write isolation").
 - **Tests**: iOS via `scripts/run-tests.sh` (xcodebuild). Android via
   Gradle (`./gradlew test` / `connectedAndroidTest`) — *the Android module
   lands in Phase 2 (#106); not wired yet.*

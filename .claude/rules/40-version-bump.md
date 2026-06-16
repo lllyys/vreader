@@ -104,8 +104,9 @@ same code-path classification the audit gate uses,
 | PR touches | Bump |
 |---|---|
 | iOS code (`vreader/`, `vreaderTests/`) | `project.yml` `MARKETING_VERSION` + `CURRENT_PROJECT_VERSION` (the existing iOS flow above) |
-| Android code (`android/`, Gradle, Kotlin) | `android/version.properties` (`versionName` + `versionCode`) — *created in Phase 2; until then no Android app exists to bump* |
-| Shared only (`docs/`, `contracts/`, `.claude/`, design) | bump the iOS version (iOS is the default release vehicle while Android is pre-foundation); a shared change that is part of an Android-code PR bumps Android |
+| Android **app** code (`android/`, once the Phase-2 shell exists) | `android/version.properties` (`versionName` + `versionCode`) |
+| Android **spike/harness** code pre-Phase-2 (`spikes/`, contracts harnesses) | bump the **iOS** `project.yml` version — these are throwaway, non-shippable harnesses and there is no Android app to version yet; the iOS version keeps the repo's single shippable version monotonic |
+| Shared only (`docs/`, `contracts/`, `.claude/`, design) | bump the iOS version (iOS is the default release vehicle while Android is pre-foundation); a shared change that is part of an Android-app PR bumps Android |
 | Both platforms' code in one PR | avoid — split per the write-isolation rule (rule 48). If genuinely unavoidable, bump both files. |
 
 ### Tag namespace (DECIDED — feature #103 plan, Gate-2 clean)
@@ -131,4 +132,7 @@ The GH "shipped in vX.Y.Z" closure comment (AGENTS.md close gate +
 
 > **Status**: this policy is documented; `android/version.properties` and
 > the Android bump mechanics land with the Phase-2 app shell (feature
-> #106). Until then every PR is iOS or shared → the existing iOS flow.
+> #106). Until then there is no Android *app* to version — iOS, shared,
+> AND pre-Phase-2 Android spike/harness PRs (`spikes/`) all bump the iOS
+> `project.yml` version via the existing iOS flow; Android tags
+> (`android/vX.Y.Z`) begin only when the Phase-2 shell ships.

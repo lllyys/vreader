@@ -41,16 +41,20 @@ recurring across the platform split:
 - **Android/Kotlin agents MUST NOT touch iOS code** — never `vreader/`,
   `vreaderTests/`, `*.xcodeproj`, `project.yml`.
 - **iOS/Swift agents MUST NOT touch Android code** — never `android/`,
-  `spikes/`, `buildSrc/`, root Gradle files, `*.kt`/`*.kts`.
-- **Shared surfaces get a single writer per change**: `docs/*`,
-  `contracts/*`, `dev-docs/designs/*`, `.claude/*`, `AGENTS.md`, release
-  config. The existing "one writer per area" rule applies; the platform
-  split just makes the boundary explicit. A `contracts/`-touching change
-  is the canonical multi-platform-impacting edit — give it one owner and
-  the versioned contract merge gate (ADR-0001), not two parallel writers.
+  `spikes/`, `buildSrc/`, `gradle/`, root Gradle files, `gradlew*`,
+  `gradle.properties`, `*.kt`/`*.kts`, `AndroidManifest.xml`, or any
+  Android `res/` tree (the full set the audit classifier gates).
+- **Shared surfaces get a single writer per change**: `docs/*` (incl.
+  `dev-docs/*` — plans, designs, verification evidence), `contracts/*`,
+  `.claude/*`, `AGENTS.md`, root shared docs (`README.md`, `CLAUDE.md`),
+  release config. The existing "one writer per area" rule applies; the
+  platform split just makes the boundary explicit. A `contracts/`-touching
+  change is the canonical multi-platform-impacting edit — give it one owner
+  and the versioned contract merge gate (ADR-0001), not two parallel writers.
 - The audit gate's code-path classifier (`.claude/hooks/lib/code-paths.sh`)
-  is the authoritative definition of "iOS code" vs "Android code" vs
-  "shared" for routing these write sets.
+  decides which PRs need a Codex audit (code vs docs/meta); it's the
+  reference for the Android/Kotlin/`contracts/` paths above, but it is a
+  boolean gate, not a full ownership taxonomy.
 
 ## Strong defaults (negotiable with cause)
 

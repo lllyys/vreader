@@ -90,7 +90,12 @@ release-namespacing + a real contracts conformance lane.*
   touched paths; Android-specific entrypoints), not enlarged.
 - **Tag namespace is the biggest miss.** A single `vX.Y.Z` tag space (current tags
   are plain `v3.66.x`) does not survive two independently-shippable native apps.
-  Need explicit `ios/` vs `android/` tags, or an explicitly unified product version.
+  **DECIDED (feature #103 Phase 0, Gate-2 clean): iOS keeps plain `vX.Y.Z`
+  UNCHANGED (no retag of the existing `v3.66.x` history); Android uses
+  `android/vX.Y.Z`.** The asymmetry mirrors the directory asymmetry (iOS at
+  root, Android in a subdir). Rejected: a unified product version
+  (re-couples the two cadences). Authoritative version/tag rule:
+  `.claude/rules/40-version-bump.md` ("Multi-platform").
 - **Release coupling is broader than the version bump** — commands, skills, audits,
   and merge/close rituals all assume iOS release semantics today.
 - **A single platform-tagged tracker will degrade at high PR volume** — single-status
@@ -160,9 +165,11 @@ The automation is iOS-shaped and will silently **mis-gate** Android PRs until fi
   audit gate) as if it were docs-only**. Fix gate routing *before* the cron is
   allowed to open any Android PR.
 - **Per-platform version/tag policy.** `40-version-bump.md` is hard-wired to
-  `project.yml` → pbxproj + plain `vX.Y.Z`. Add `ios/vX` vs `android/vY` tags,
-  per-platform version files, and a "which platform did this PR touch → bump that"
-  rule. Also platform-namespace the GH close-gate "shipped in vX.Y.Z" comment.
+  `project.yml` → pbxproj + plain `vX.Y.Z`. **DONE (feature #103 WI-2)**:
+  iOS stays plain `vX.Y.Z`, Android uses `android/vX.Y.Z`, per-platform
+  version files, a "which platform did this PR touch → bump that" rule (the
+  classifier routes it), and a platform-namespaced GH close-gate comment.
+  See `40-version-bump.md` "Multi-platform".
 - **Write-prefix isolation (rule 48).** Kotlin agents must never touch `vreader/`;
   Swift agents never `android/`; shared files (`docs/*`, `contracts/`, release
   config) get a single owner — prevents the pbxproj-contamination class that has
