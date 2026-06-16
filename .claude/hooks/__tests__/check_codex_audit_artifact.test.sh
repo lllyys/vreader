@@ -59,6 +59,27 @@ assert_code docs "docs only"               "docs/features.md" "docs/bugs.md"
 assert_code docs "dev-docs plan only"      "dev-docs/plans/foo.md"
 assert_code docs "rule + hook only"        ".claude/rules/40-version-bump.md" ".claude/hooks/foo.sh"
 assert_code docs "README only"             "README.md"
+# Codex Gate-4 Medium — docs/-prefixed paths that LOOK code-y must stay docs
+assert_code docs "docs/ path ending .kt"   "docs/snippets/example.kt"
+assert_code docs "docs/ with res/ segment" "docs/res/notes.md"
+assert_code docs "docs/ build.gradle"      "docs/sample/build.gradle"
+assert_code docs "docs/ AndroidManifest"   "docs/sample/AndroidManifest.xml"
+# ...but contracts/ (a CODE root) is NOT excluded even for .md
+assert_code code "contracts/ README.md"    "contracts/README.md"
+
+# Codex Gate-4 High — pipefail/SIGPIPE: a code path FIRST followed by a
+# huge docs list must still classify as code under `set -o pipefail`
+# (grep -q would early-exit and SIGPIPE the producer → fail-open).
+pipefail_check() {
+    local out
+    out="$(set -o pipefail; { printf 'vreader/A.swift\n'; for i in $(seq 1 20000); do printf 'docs/file-%05d.md\n' "$i"; done; } | { code_paths_touched && echo CODE || echo DOCS; })"
+    if [[ "$out" == "CODE" ]]; then
+        echo "ok   — pipefail: code-first + 20k docs still CODE"
+    else
+        echo "FAIL — pipefail: code-first + 20k docs classified $out (fail-open!)"; fails=$((fails+1))
+    fi
+}
+pipefail_check
 
 if [[ "$fails" -gt 0 ]]; then
     echo "RESULT: FAILED ($fails)"; exit 1

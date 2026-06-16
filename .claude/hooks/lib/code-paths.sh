@@ -23,8 +23,39 @@
 # Sourced by `.claude/hooks/check_codex_audit_artifact.sh` and by
 # `.claude/hooks/__tests__/check_codex_audit_artifact.test.sh`.
 
+# Reads paths on stdin (one per line), returns 0 iff any is a code path.
+# Implemented as a read-all-stdin `case` classifier (NOT `grep -q`): under
+# `set -o pipefail`, `grep -q` exits on the FIRST match and the upstream
+# `printf` gets SIGPIPE, flipping a real code list back to a nonzero
+# (fail-OPEN) exit (Codex Gate-4 High). This loop consumes ALL input, so
+# the result is pipefail-safe. It also applies DOCS/META exclusions FIRST,
+# so a `docs/`-prefixed path that happens to end in `.kt` or contain
+# `res/` is NOT over-gated as code (Codex Gate-4 Medium).
 # shellcheck disable=SC2120
 code_paths_touched() {
-    grep -qE \
-'^(vreader/|vreaderTests/|android/|spikes/|contracts/|buildSrc/|gradle/)|(^|/)(build|settings)\.gradle(\.kts)?$|^gradle\.properties$|^gradlew|\.kts?$|(^|/)AndroidManifest\.xml$|(^|/)res/'
+    local path found=1
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        # Docs/meta roots + root-level meta files — never audit-required,
+        # regardless of any code-looking suffix. (contracts/README.md is
+        # NOT excluded here — it's under the contracts/ CODE root below.)
+        case "$path" in
+            docs/*|dev-docs/*|.claude/rules/*|.claude/hooks/*|.claude/skills/*|.claude/cron-prompts/*) continue ;;
+            README*|LICENSE*|AGENTS.md|CLAUDE.md|*.gitignore) continue ;;
+        esac
+        case "$path" in
+            # Code roots (iOS + Android/Kotlin + shared contracts/)
+            vreader/*|vreaderTests/*|android/*|spikes/*|contracts/*|buildSrc/*|gradle/*) found=0; break ;;
+            # Kotlin sources anywhere
+            *.kt|*.kts) found=0; break ;;
+            # Gradle build files anywhere
+            build.gradle|build.gradle.kts|settings.gradle|settings.gradle.kts) found=0; break ;;
+            */build.gradle|*/build.gradle.kts|*/settings.gradle|*/settings.gradle.kts) found=0; break ;;
+            gradle.properties|gradlew|gradlew.*) found=0; break ;;
+            # Android manifest + resources anywhere
+            AndroidManifest.xml|*/AndroidManifest.xml) found=0; break ;;
+            res/*|*/res/*) found=0; break ;;
+        esac
+    done
+    return "$found"
 }

@@ -102,19 +102,18 @@ git fetch origin main --quiet 2>/dev/null || true
 DIFF_BASE="origin/main"
 git rev-parse --verify --quiet origin/main >/dev/null 2>&1 || DIFF_BASE="main"
 # shellcheck source=.claude/hooks/lib/code-paths.sh
-# Source the shared classifier; if it's ever missing (older checkout),
-# fall back to an inline copy of the SAME broadened predicate so the gate
-# never fails OPEN (a missing lib must NOT let a code PR through).
 # shellcheck disable=SC1091
 source "$REPO_ROOT/.claude/hooks/lib/code-paths.sh" 2>/dev/null || true
-if ! declare -F code_paths_touched >/dev/null 2>&1; then
-    code_paths_touched() {
-        grep -qE \
-'^(vreader/|vreaderTests/|android/|spikes/|contracts/|buildSrc/|gradle/)|(^|/)(build|settings)\.gradle(\.kts)?$|^gradle\.properties$|^gradlew|\.kts?$|(^|/)AndroidManifest\.xml$|(^|/)res/'
-    }
-fi
 if CHANGED="$(git diff "${DIFF_BASE}...HEAD" --name-only 2>/dev/null)"; then
-    if printf '%s\n' "$CHANGED" | code_paths_touched; then
+    if declare -F code_paths_touched >/dev/null 2>&1; then
+        if printf '%s\n' "$CHANGED" | code_paths_touched; then
+            CODE_TOUCHED="yes"
+        fi
+    else
+        # Classifier lib missing/unloadable (corrupt/partial checkout) —
+        # fail CLOSED: require an audit rather than risk letting a code PR
+        # bypass the gate. Duplicating the classifier inline would only
+        # risk drift; refusing to skip is the safe default.
         CODE_TOUCHED="yes"
     fi
 fi
@@ -131,12 +130,13 @@ if [[ ! -f "$AUDIT_FILE" ]]; then
     cat >&2 <<EOF
 [codex-audit-merge-gate] BLOCKED.
 
-Branch \`$BRANCH\` touches Swift files but has no Codex audit log at:
+Branch \`$BRANCH\` touches code paths (iOS Swift, Android/Kotlin, or the
+shared contracts/ surface) but has no Codex audit log at:
 
   $AUDIT_FILE
 
 Per .claude/rules/47-feature-workflow.md Gate 4 and the /fix-issue
-skill's Phase 4, every PR that ships Swift code must run through a
+skill's Phase 4, every PR that ships code must run through a
 Codex audit loop before merge. Two ways to proceed:
 
   1. Run the audit. The cheap path:
