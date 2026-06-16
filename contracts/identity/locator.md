@@ -16,10 +16,10 @@ path used when a platform-local anchor doesn't round-trip).
 |---|---|---|---|
 | `bookFingerprint` | `DocumentFingerprint` | **canonical** | the book this position belongs to (see `fingerprint.md`). |
 | `href` | String? | **canonical** | spine/resource href (EPUB). Compared **fragment-insensitively + percent-encoding-normalized** (cf. iOS bug #349 `EPUBScrollAnchorResolver`). |
-| `progression` | Double? | **canonical** | 0…1 within the spine item. The primary cross-device resume anchor. Must be finite. |
-| `totalProgression` | Double? | **canonical** (derived) | 0…1 within the whole book. Must be finite. |
+| `progression` | Double? | **canonical** | within-spine-item position (conventionally 0…1). The primary cross-device resume anchor. The only enforced invariant is **finite** (see invariants below). |
+| `totalProgression` | Double? | **canonical** (derived) | within-whole-book position (conventionally 0…1). Enforced invariant: **finite**. |
 | `cfi` | String? | **platform-local → lossy-fallback** | EPUB CFI. CFI dialects may NOT round-trip Swift-Readium ↔ Kotlin-Readium; do not rely on cross-platform CFI equality — fall back to `progression` + the text-quote anchors. |
-| `page` | Int? | **platform-local** | PDF page index; format-specific, ≥ 0. |
+| `page` | Int? | **canonical** | PDF page index — the page tree is defined by the document, so page N is page N on any renderer (PDFKit ↔ PdfiumAndroid). ≥ 0. |
 | `charOffsetUTF16` | Int? | **canonical** | UTF-16 char offset (TXT/MD). ≥ 0. |
 | `charRangeStartUTF16` | Int? | **canonical** | selection range start (UTF-16). ≥ 0. |
 | `charRangeEndUTF16` | Int? | **canonical** | selection range end (UTF-16). ≥ start. |
@@ -27,10 +27,13 @@ path used when a platform-local anchor doesn't round-trip).
 | `textContextBefore` | String? | **canonical** | text immediately before the quote (disambiguates repeats). |
 | `textContextAfter` | String? | **canonical** | text immediately after the quote. |
 
-Validation invariants (from `Locator`): non-negative `page` /
-`charOffset*`; `charRangeStart ≤ charRangeEnd`; finite `progression` /
-`totalProgression`. Serialization uses a canonical JSON form (stable key
-ordering) so the hash/round-trip is deterministic.
+Validation invariants — EXACTLY what `Locator.validate()` enforces (do not
+strengthen): `page` / `charOffsetUTF16` / `charRangeStartUTF16` /
+`charRangeEndUTF16` non-negative; `charRangeStartUTF16` and
+`charRangeEndUTF16` must appear **together or neither** (paired), with
+`start ≤ end`; `progression` / `totalProgression` must be **finite** (NOT
+required to be within 0…1). Serialization uses a canonical JSON form
+(stable key ordering) so the hash/round-trip is deterministic.
 
 ## `VReaderLocator` (the persisted envelope)
 
@@ -38,7 +41,7 @@ ordering) so the hash/round-trip is deterministic.
 |---|---|---|---|
 | `fingerprintKey` | String | **canonical** | the book identity key (= `DocumentFingerprint.canonicalKey`). |
 | `originalFormat` | `BookFormat` | **canonical** | part of the fingerprint identity. |
-| `engine` | `ReaderLocatorEngine` | **platform-local** | which renderer produced the position (readium / legacy / foliate). |
+| `engine` | `ReaderLocatorEngine` | **platform-local** | which renderer produced the position. Exactly two persisted cases: `epubWKWebView` (the legacy bespoke EPUB engine — locator in `legacyLocator`) and `readium` (locator in `readiumLocatorJSON`). |
 | `readiumLocatorJSON` | String? | **platform-local → lossy-fallback** | Readium's own CFI-bearing JSON. Platform-specific; the cross-platform fallback is `legacyLocator`'s progression + text-quote. |
 | `legacyLocator` | `Locator?` | **canonical** | the platform-neutral resume envelope (the `Locator` above; its per-field classes apply within it). |
 | `schemaVersion` | Int | **canonical** | the migration hook — both platforms serialize it consistently. |

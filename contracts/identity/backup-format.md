@@ -16,14 +16,20 @@ restorer can branch per-section without special-casing the whole archive.
 | Section file | Envelope | Identity-bearing fields |
 |---|---|---|
 | annotations | `BackupAnnotationsEnvelope` | book `fingerprintKey`, highlight/note locators (`Locator` envelope) |
-| positions | `BackupPositionsEnvelope` | book `fingerprintKey`, `VReaderLocator` per book |
+| positions | `BackupPositionsEnvelope` → `positions: [BackupPosition]` | each `BackupPosition` = `{ bookFingerprintKey, locatorJSON, updatedAt, lastOpenedAt? }`, where **`locatorJSON` is JSON for a plain `Locator`** (NOT `VReaderLocator`) — restore decodes `Locator.self`. |
 | settings | `BackupSettingsEnvelope` | device-local prefs (not identity) |
 | collections | `BackupCollectionsEnvelope` | collection membership by `fingerprintKey` |
 | book-sources | `BackupBookSourcesEnvelope` | OPDS/source config |
 | per-book-settings | `BackupPerBookSettingsEnvelope` | per-book config keyed by `fingerprintKey` (incl. bilingual config) |
 | replacement-rules | `BackupReplacementRulesEnvelope` | content-replacement rules |
-| reading-history | (schema v2 addition) | `ReadingSession` + `ReadingStats` rows keyed by `fingerprintKey` |
+| **`reading-history.json`** | `BackupReadingHistoryEnvelope` (**schema-v2 addition**, feature #58) | `ReadingSession` + `ReadingStats` rows keyed by `fingerprintKey` |
+| **`ai-conversations.json`** | `BackupAIConversationsEnvelope` / `BackupChatSession` (**schema-v3 addition**, feature #89) | AI chat sessions (book-scoped where applicable) |
 | **`library-manifest.json`** | `BackupLibraryManifestEnvelope` (**schema 1**, separate from the global 3) | the library index — book `fingerprintKey` → blob path; the materializing-restore map |
+
+**Pre-v3 sections are byte-identical across v1/v2/v3** — only the integer
+`schemaVersion` differs — so a v3 restorer accepting v1/v2 archives is
+sound (the v2 addition is `reading-history`, the v3 addition is
+`ai-conversations`; everything else is unchanged).
 
 ## Identity rules
 
