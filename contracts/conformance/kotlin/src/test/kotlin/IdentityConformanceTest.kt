@@ -29,20 +29,33 @@ class IdentityConformanceTest {
                 o["fileByteCount"]!!.jsonPrimitive.long,
             )
             assertEquals(o["expectedCanonicalKey"]!!.jsonPrimitive.content, got)
+            // Round-trip parity with Swift: parse the key back to the triple.
+            val parsed = Identity.parseCanonicalKey(got)
+            assertEquals(o["format"]!!.jsonPrimitive.content, parsed?.format?.name)
+            assertEquals(o["contentSHA256"]!!.jsonPrimitive.content, parsed?.contentSHA256)
+            assertEquals(o["fileByteCount"]!!.jsonPrimitive.long, parsed?.fileByteCount)
             n++
         }
         assertTrue(n > 0, "no fingerprint vectors loaded")
         for (v in data["invalid"]!!.jsonArray) {
             val o = v.jsonObject
+            val fmt = o["format"]!!.jsonPrimitive.content
+            val sha = o["contentSHA256"]!!.jsonPrimitive.content
+            val bytes = o["fileByteCount"]!!.jsonPrimitive.long
             assertNull(
-                Identity.validatedCanonicalKey(
-                    o["format"]!!.jsonPrimitive.content,
-                    o["contentSHA256"]!!.jsonPrimitive.content,
-                    o["fileByteCount"]!!.jsonPrimitive.long,
-                ),
-                "invalid vector should be rejected: ${o["_why"]?.jsonPrimitive?.content}",
+                Identity.validatedCanonicalKey(fmt, sha, bytes),
+                "invalid vector should be rejected by validatedCanonicalKey: ${o["_why"]?.jsonPrimitive?.content}",
+            )
+            assertNull(
+                Identity.parseCanonicalKey("$fmt:$sha:$bytes"),
+                "invalid vector should not parse: ${o["_why"]?.jsonPrimitive?.content}",
             )
         }
+        // Malformed keys reject (mirrors Swift parse failures).
+        assertNull(Identity.parseCanonicalKey("epub:tooShort:1"))
+        assertNull(Identity.parseCanonicalKey("notaformat:${"a".repeat(64)}:1"))
+        assertNull(Identity.parseCanonicalKey("epub:${"a".repeat(64)}:notANumber"))
+        assertNull(Identity.parseCanonicalKey("missing:parts"))
     }
 
     @Test fun cacheKeyVectors() {

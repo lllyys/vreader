@@ -18,9 +18,14 @@ export JAVA_HOME
 run_kotlin() {
     echo "== Kotlin conformance (contracts/conformance/kotlin) =="
     if [[ ! -x "$JAVA_HOME/bin/java" ]]; then
-        echo "SKIP kotlin — no JDK 17 at $JAVA_HOME (install: brew install openjdk@17)"; return 0
+        # Codex Gate-4 High: a missing JDK is a HARD FAIL, not a silent skip —
+        # the lane guarantees BOTH platforms green; skipping Kotlin while
+        # printing PASS would be a fail-open.
+        echo "FAIL kotlin — no JDK 17 at $JAVA_HOME (install: brew install openjdk@17)"; rc=1; return
     fi
-    ( cd "$ROOT/contracts/conformance/kotlin" && gradle test --console=plain --no-daemon ) || rc=1
+    # Checked-in wrapper (host-independent, pinned Gradle), not a bare PATH
+    # `gradle` (Codex Gate-4 Medium).
+    ( cd "$ROOT/contracts/conformance/kotlin" && ./gradlew test --console=plain --no-daemon ) || rc=1
 }
 run_swift() {
     echo "== Swift conformance (vreaderTests/IdentityConformanceTests) =="
