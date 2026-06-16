@@ -71,12 +71,17 @@ assert_code code "contracts/ README.md"    "contracts/README.md"
 # huge docs list must still classify as code under `set -o pipefail`
 # (grep -q would early-exit and SIGPIPE the producer → fail-open).
 pipefail_check() {
-    local out
-    out="$(set -o pipefail; { printf 'vreader/A.swift\n'; for i in $(seq 1 20000); do printf 'docs/file-%05d.md\n' "$i"; done; } | { code_paths_touched && echo CODE || echo DOCS; })"
-    if [[ "$out" == "CODE" ]]; then
-        echo "ok   — pipefail: code-first + 20k docs still CODE"
+    # Assert the actual PIPELINE EXIT STATUS (not captured output) under
+    # `set -o pipefail` — the producer must not SIGPIPE (Codex round-2:
+    # the output looked right while the pipeline still exited 141).
+    set -o pipefail
+    { printf 'vreader/A.swift\n'; for i in $(seq 1 20000); do printf 'docs/file-%05d.md\n' "$i"; done; } | code_paths_touched
+    local status=$?
+    set +o pipefail
+    if [[ "$status" -eq 0 ]]; then
+        echo "ok   — pipefail: code-first + 20k docs → pipeline exit 0 (CODE, no SIGPIPE)"
     else
-        echo "FAIL — pipefail: code-first + 20k docs classified $out (fail-open!)"; fails=$((fails+1))
+        echo "FAIL — pipefail: pipeline exit $status (SIGPIPE/fail-open!)"; fails=$((fails+1))
     fi
 }
 pipefail_check

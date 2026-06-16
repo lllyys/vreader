@@ -34,6 +34,11 @@
 # shellcheck disable=SC2120
 code_paths_touched() {
     local path found=1
+    # IMPORTANT: this loop reads stdin to EOF and NEVER `break`s early
+    # (Codex Gate-4 round 2 High). An early break leaves the producer's
+    # remaining writes unconsumed → SIGPIPE → a nonzero pipeline exit under
+    # `set -o pipefail` even though code was found (fail-OPEN). Reading all
+    # input makes the pipeline's exit status the classifier's own return.
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         # Docs/meta roots + root-level meta files — never audit-required,
@@ -41,20 +46,20 @@ code_paths_touched() {
         # NOT excluded here — it's under the contracts/ CODE root below.)
         case "$path" in
             docs/*|dev-docs/*|.claude/rules/*|.claude/hooks/*|.claude/skills/*|.claude/cron-prompts/*) continue ;;
-            README*|LICENSE*|AGENTS.md|CLAUDE.md|*.gitignore) continue ;;
+            README*|LICENSE*|AGENTS.md|CLAUDE.md) continue ;;
         esac
         case "$path" in
             # Code roots (iOS + Android/Kotlin + shared contracts/)
-            vreader/*|vreaderTests/*|android/*|spikes/*|contracts/*|buildSrc/*|gradle/*) found=0; break ;;
+            vreader/*|vreaderTests/*|android/*|spikes/*|contracts/*|buildSrc/*|gradle/*) found=0 ;;
             # Kotlin sources anywhere
-            *.kt|*.kts) found=0; break ;;
+            *.kt|*.kts) found=0 ;;
             # Gradle build files anywhere
-            build.gradle|build.gradle.kts|settings.gradle|settings.gradle.kts) found=0; break ;;
-            */build.gradle|*/build.gradle.kts|*/settings.gradle|*/settings.gradle.kts) found=0; break ;;
-            gradle.properties|gradlew|gradlew.*) found=0; break ;;
+            build.gradle|build.gradle.kts|settings.gradle|settings.gradle.kts) found=0 ;;
+            */build.gradle|*/build.gradle.kts|*/settings.gradle|*/settings.gradle.kts) found=0 ;;
+            gradle.properties|gradlew|gradlew.*) found=0 ;;
             # Android manifest + resources anywhere
-            AndroidManifest.xml|*/AndroidManifest.xml) found=0; break ;;
-            res/*|*/res/*) found=0; break ;;
+            AndroidManifest.xml|*/AndroidManifest.xml) found=0 ;;
+            res/*|*/res/*) found=0 ;;
         esac
     done
     return "$found"
