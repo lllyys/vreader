@@ -1,0 +1,68 @@
+# Contract: `Locator` + `VReaderLocator` — reading position
+
+**level: breaking-sensitive** (saved positions + cross-engine/cross-device
+resume depend on this envelope).
+
+Reference: `vreader/Models/Locator.swift`, `vreader/Models/VReaderLocator.swift`.
+
+Each field is classified **canonical** (must agree cross-platform for
+cross-device resume), **platform-local** (may legitimately differ — not
+relied on across platforms), or **lossy-fallback** (the degraded resume
+path used when a platform-local anchor doesn't round-trip).
+
+## `Locator` (the engine-neutral position)
+
+| Field | Type | Class | Notes |
+|---|---|---|---|
+| `bookFingerprint` | `DocumentFingerprint` | **canonical** | the book this position belongs to (see `fingerprint.md`). |
+| `href` | String? | **canonical** | spine/resource href (EPUB). Compared **fragment-insensitively + percent-encoding-normalized** (cf. iOS bug #349 `EPUBScrollAnchorResolver`). |
+| `progression` | Double? | **canonical** | 0…1 within the spine item. The primary cross-device resume anchor. Must be finite. |
+| `totalProgression` | Double? | **canonical** (derived) | 0…1 within the whole book. Must be finite. |
+| `cfi` | String? | **platform-local → lossy-fallback** | EPUB CFI. CFI dialects may NOT round-trip Swift-Readium ↔ Kotlin-Readium; do not rely on cross-platform CFI equality — fall back to `progression` + the text-quote anchors. |
+| `page` | Int? | **platform-local** | PDF page index; format-specific, ≥ 0. |
+| `charOffsetUTF16` | Int? | **canonical** | UTF-16 char offset (TXT/MD). ≥ 0. |
+| `charRangeStartUTF16` | Int? | **canonical** | selection range start (UTF-16). ≥ 0. |
+| `charRangeEndUTF16` | Int? | **canonical** | selection range end (UTF-16). ≥ start. |
+| `textQuote` | String? | **canonical** | the quoted text at the position — the engine-independent anchor. |
+| `textContextBefore` | String? | **canonical** | text immediately before the quote (disambiguates repeats). |
+| `textContextAfter` | String? | **canonical** | text immediately after the quote. |
+
+Validation invariants (from `Locator`): non-negative `page` /
+`charOffset*`; `charRangeStart ≤ charRangeEnd`; finite `progression` /
+`totalProgression`. Serialization uses a canonical JSON form (stable key
+ordering) so the hash/round-trip is deterministic.
+
+## `VReaderLocator` (the persisted envelope)
+
+| Field | Type | Class | Notes |
+|---|---|---|---|
+| `fingerprintKey` | String | **canonical** | the book identity key (= `DocumentFingerprint.canonicalKey`). |
+| `originalFormat` | `BookFormat` | **canonical** | part of the fingerprint identity. |
+| `engine` | `ReaderLocatorEngine` | **platform-local** | which renderer produced the position (readium / legacy / foliate). |
+| `readiumLocatorJSON` | String? | **platform-local → lossy-fallback** | Readium's own CFI-bearing JSON. Platform-specific; the cross-platform fallback is `legacyLocator`'s progression + text-quote. |
+| `legacyLocator` | `Locator?` | **canonical** | the platform-neutral resume envelope (the `Locator` above; its per-field classes apply within it). |
+| `schemaVersion` | Int | **canonical** | the migration hook — both platforms serialize it consistently. |
+
+## Cross-platform resume rule (the decision Spike A confirms)
+
+1. Resolve the book by `fingerprintKey` (canonical).
+2. Try the precise anchor (`charOffset`/`charRange` for text; `href` +
+   `progression` for EPUB; `page` for PDF) — all canonical.
+3. If the platform that saved used a CFI/`readiumLocatorJSON` the current
+   platform can't resolve, **fall back** to `progression` +
+   `textQuote`/context (the lossy path) rather than losing the position.
+
+This is the **canonical-identity model**: a position is cross-device-
+restorable to at least progression+quote precision on any platform, exact
+when the precise anchor round-trips. Spike A's Readium round-trip harness
+(WI-4, toolchain-gated) tests how often the exact anchor survives; this
+spec already commits the fallback so a non-round-trip is degraded, never
+lost.
+
+## Golden vectors / conformance
+
+`contracts/vectors/locator-*.json`: full serialized `Locator` /
+`VReaderLocator` shapes (every field) → expected canonical JSON + parse
+round-trip. Swift conformance (WI-2) asserts the iOS impl serializes /
+parses the FULL shapes (not a reduced subset) so a vector can't go green
+while ignoring stored fields.
