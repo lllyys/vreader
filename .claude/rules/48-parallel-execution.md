@@ -30,6 +30,28 @@ If the answer isn't clearly positive, don't parallelize.
 2. **Hard dependency blocks downstream Gate 3**: if feature B depends on feature A, you cannot start B's TDD until A is `DONE`. Dependency graph in the tracker is the source of truth.
 3. **One writer per file/area at a time**: two agents can work the same feature if their write sets are disjoint and explicit. Two agents writing the same file is a merge conflict you will lose.
 
+## Cross-platform write isolation (Android port — feature #103 Phase 0)
+
+The repo now hosts two native apps (iOS at the root, Android under
+`android/`). Their *code* is disjoint, but the automation, trackers,
+contracts, designs, and release config are **shared, contended** surfaces.
+To prevent the `project.pbxproj`-contamination class (PR #1029) from
+recurring across the platform split:
+
+- **Android/Kotlin agents MUST NOT touch iOS code** — never `vreader/`,
+  `vreaderTests/`, `*.xcodeproj`, `project.yml`.
+- **iOS/Swift agents MUST NOT touch Android code** — never `android/`,
+  `spikes/`, `buildSrc/`, root Gradle files, `*.kt`/`*.kts`.
+- **Shared surfaces get a single writer per change**: `docs/*`,
+  `contracts/*`, `dev-docs/designs/*`, `.claude/*`, `AGENTS.md`, release
+  config. The existing "one writer per area" rule applies; the platform
+  split just makes the boundary explicit. A `contracts/`-touching change
+  is the canonical multi-platform-impacting edit — give it one owner and
+  the versioned contract merge gate (ADR-0001), not two parallel writers.
+- The audit gate's code-path classifier (`.claude/hooks/lib/code-paths.sh`)
+  is the authoritative definition of "iOS code" vs "Android code" vs
+  "shared" for routing these write sets.
+
 ## Strong defaults (negotiable with cause)
 
 - Shared-file edits (status flips, version bumps, doc-sync) require **one owner** or a **final integration pass**. They batch at PR merge time, not in parallel.
