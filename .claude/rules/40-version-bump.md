@@ -97,9 +97,11 @@ repo root, Android under `android/`). A single `vX.Y.Z` tag space and one
 
 ### Which platform does a PR bump?
 
-**Bump the version file of the platform whose code the PR touched** (the
-same code-path classification the audit gate uses,
-`.claude/hooks/lib/code-paths.sh`):
+**Bump the version file of the platform whose code the PR touched.** This
+routing table is owned here (rule 40). Its iOS / Android / shared path
+sets are kept aligned with `.claude/hooks/lib/code-paths.sh`, but that
+file is only the audit gate's boolean code-vs-docs predicate — it does NOT
+itself decide platform/version ownership; this table does:
 
 | PR touches | Bump |
 |---|---|

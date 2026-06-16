@@ -167,9 +167,11 @@ The automation is iOS-shaped and will silently **mis-gate** Android PRs until fi
 - **Per-platform version/tag policy.** `40-version-bump.md` is hard-wired to
   `project.yml` → pbxproj + plain `vX.Y.Z`. **DONE (feature #103 WI-2)**:
   iOS stays plain `vX.Y.Z`, Android uses `android/vX.Y.Z`, per-platform
-  version files, a "which platform did this PR touch → bump that" rule (the
-  classifier routes it), and a platform-namespaced GH close-gate comment.
-  See `40-version-bump.md` "Multi-platform".
+  version files, a "which platform did this PR touch → bump that" rule
+  (rule 40 owns that routing table; its Android/Kotlin/`contracts/` path
+  list is kept aligned with `code-paths.sh`, which remains only the
+  audit-required code-vs-docs predicate), and a platform-namespaced GH
+  close-gate comment. See `40-version-bump.md` "Multi-platform".
 - **Write-prefix isolation (rule 48).** Kotlin agents must never touch `vreader/`;
   Swift agents never `android/`; shared files (`docs/*`, `contracts/`, release
   config) get a single owner — prevents the pbxproj-contamination class that has
