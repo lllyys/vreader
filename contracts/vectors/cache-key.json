@@ -1,0 +1,7 @@
+{
+  "_comment": "Golden vectors for ChapterTranslationRecord.lookupKey = book|unit|lang|prompt. providerProfileID is NOT in the key (provenance only, bug #342).",
+  "vectors": [
+    { "bookFingerprintKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024", "unitStorageKey": "ch1", "targetLanguage": "zh", "promptVersion": "v3", "expectedLookupKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024|ch1|zh|v3" },
+    { "bookFingerprintKey": "txt:0000000000000000000000000000000000000000000000000000000000000000:42", "unitStorageKey": "para-17", "targetLanguage": "ja", "promptVersion": "v1", "expectedLookupKey": "txt:0000000000000000000000000000000000000000000000000000000000000000:42|para-17|ja|v1" }
+  ]
+}
