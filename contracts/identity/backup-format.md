@@ -37,9 +37,14 @@ sound (the v2 addition is `reading-history`, the v3 addition is
   book identity). A backup written on iOS references books by the same
   fingerprint Kotlin computes — which is exactly why `fingerprint.md` +
   the libmobi determinism spike (WI-3) gate this whole contract.
-- Locators inside annotations/positions are the `Locator`/`VReaderLocator`
-  envelope (`locator.md`) — restore uses the canonical fields + the lossy
-  fallback, so a position saved by one platform's engine restores on the
+- Locators inside annotations/positions are serialized as **plain
+  `Locator` JSON** (the `locatorJSON` String field), NOT the
+  `VReaderLocator` envelope — the backup wire format encodes a `Locator`
+  and restore decodes `Locator.self`. (`VReaderLocator` is the live
+  persisted reading-position envelope elsewhere, not part of the backup
+  section schema.) Restore uses the `Locator`'s canonical fields + the
+  lossy fallback (`locator.md`), so a position saved by one platform's
+  engine restores on the
   other at least to progression+quote precision.
 - `library-manifest.json` (schema 1) is the materializing-restore index:
   `fingerprintKey → blob path`. Blob bytes are the original (converted)
