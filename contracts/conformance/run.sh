@@ -20,19 +20,22 @@ rm -rf "$ROOT/contracts/conformance/.out"
 export JAVA_HOME
 
 run_kotlin() {
-    echo "== Kotlin conformance (contracts/conformance/kotlin) =="
+    # Feature #106 WI-2: the Kotlin conformance now runs against the SHARED
+    # `:identity` module in the Android build (android/identity) — the same code
+    # `:app` consumes — NOT a standalone reference. Proves app code, not a copy.
+    echo "== Kotlin conformance (android :identity:test, the shared module) =="
     if [[ ! -x "$JAVA_HOME/bin/java" ]]; then
         # Codex Gate-4 High: a missing JDK is a HARD FAIL, not a silent skip —
         # the lane guarantees BOTH platforms green; skipping Kotlin while
         # printing PASS would be a fail-open.
         echo "FAIL kotlin — no JDK 17 at $JAVA_HOME (install: brew install openjdk@17)"; rc=1; return
     fi
-    # `cleanTest test`: FORCE the test to re-run. Gradle marks `test` UP-TO-DATE
-    # when inputs are unchanged and SKIPS execution — which means the suite never
-    # writes its conformance/.out/*.txt and the cross-diff then fails on missing
-    # Kotlin output (bug #355 — caught by the .out-cleared cross-diff itself).
+    # `:identity:cleanTest :identity:test`: FORCE the test to re-run (Gradle marks
+    # `test` UP-TO-DATE on unchanged inputs and SKIPS it — then the suite never
+    # writes conformance/.out/*.txt and the cross-diff fails on missing Kotlin
+    # output, bug #355). The :identity build sets `vreader.vectors.dir` itself.
     # Checked-in wrapper (host-independent, pinned Gradle), not a bare PATH `gradle`.
-    ( cd "$ROOT/contracts/conformance/kotlin" && ./gradlew cleanTest test --console=plain --no-daemon ) || rc=1
+    ( cd "$ROOT/android" && ./gradlew :identity:cleanTest :identity:test --console=plain --no-daemon ) || rc=1
 }
 run_swift() {
     echo "== Swift conformance (vreaderTests/IdentityConformanceTests) =="

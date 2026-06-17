@@ -10,3 +10,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "vreader-android"
 include(":app")
+include(":identity")   // feature #106 WI-2 — shared pure-Kotlin identity module

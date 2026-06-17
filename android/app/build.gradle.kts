@@ -64,6 +64,10 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
 
+    // feature #106 WI-2 — the shared identity/locator contracts (proves the
+    // conformance lane tests the SAME code the app uses). WI-3 keys Room on it.
+    implementation(project(":identity"))
+
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     testImplementation("junit:junit:4.13.2")

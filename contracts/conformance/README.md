@@ -25,10 +25,13 @@ iPhone 17 Pro simulator.
   app types ARE the reference; this asserts they match the vectors. Reads
   `contracts/vectors/` via `#filePath` (single source of truth, no bundled
   copy).
-- **Kotlin** (`contracts/conformance/kotlin/`) — a pure Kotlin/JVM Gradle
-  module with the Kotlin reference impl (`Identity.kt`) + a test asserting
-  the SAME vectors. The future Android app's identity code must keep this
-  green (or change the vectors via the versioned contract merge gate).
+- **Kotlin** (`android/identity/`, the shared `:identity` module — feature #106
+  WI-2) — a pure Kotlin/JVM module holding the identity/locator impl (`Identity.kt`)
+  that the Android **app** also depends on, so the conformance test proves the
+  SAME code the app runs (not a standalone reference). `run.sh kotlin` drives
+  `android/gradlew :identity:cleanTest :identity:test` (the build injects
+  `vreader.vectors.dir` → `contracts/vectors`). The app's identity code must keep
+  this green (or change the vectors via the versioned contract merge gate).
 
 ## Coverage (WI-2 seed)
 

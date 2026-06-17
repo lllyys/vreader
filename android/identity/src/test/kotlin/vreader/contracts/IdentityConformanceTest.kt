@@ -15,7 +15,13 @@ import kotlin.test.assertTrue
  * cross-platform identity contract holds.
  */
 class IdentityConformanceTest {
-    private val vectorsDir = File(System.getProperty("vreader.vectors.dir") ?: "../../vectors")
+    // The `:identity:test` Gradle task always injects this (the shared golden
+    // vectors at contracts/vectors). Require it rather than a relative fallback —
+    // after the WI-2 module move a stale relative path would mis-read + mis-emit.
+    private val vectorsDir = File(
+        System.getProperty("vreader.vectors.dir")
+            ?: error("vreader.vectors.dir not set — run via `contracts/conformance/run.sh kotlin` (the :identity:test task injects it), not directly"),
+    )
     private fun load(name: String) =
         Json.parseToJsonElement(File(vectorsDir, name).readText()).jsonObject
 

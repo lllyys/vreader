@@ -11,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import vreader.contracts.Identity
 import java.io.File
 import java.util.Properties
 
@@ -39,5 +40,13 @@ class VersionWiringTest {
     fun applicationIdIsTheVreaderNamespace() {
         assertEquals("com.vreader.app", BuildConfig.APPLICATION_ID)
         assertTrue(BuildConfig.VERSION_CODE >= 1)
+    }
+
+    @Test
+    fun appLinksTheSharedIdentityModule() {
+        // Proves :app depends on :identity (WI-2) — the same module the
+        // conformance lane tests, so cross-platform identity is the app's code.
+        val key = Identity.canonicalKey("epub", "a".repeat(64), 1024)
+        assertEquals("epub:${"a".repeat(64)}:1024", key)
     }
 }

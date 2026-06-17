@@ -8,4 +8,8 @@ plugins {
     id("com.android.application") version "8.13.2" apply false
     id("org.jetbrains.kotlin.android") version "2.3.20" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.3.20" apply false
+    // feature #106 WI-2 — the pure-Kotlin/JVM `:identity` module (same Kotlin
+    // version as the app, per the Gate-2 toolchain pin).
+    id("org.jetbrains.kotlin.jvm") version "2.3.20" apply false
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.3.20" apply false
 }

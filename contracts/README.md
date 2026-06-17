@@ -46,7 +46,7 @@ contracts/
 ├── vectors/                  # golden vectors (legally clean — derived only)
 ├── conformance/
 │   ├── swift/                # Swift suite asserts the iOS impl == vectors
-│   └── kotlin/               # Kotlin suite asserts the Android impl == vectors (toolchain-gated)
+│   └── run.sh                # drives both: Swift + the shared android/:identity module (#106 WI-2)
 └── harness/                  # libmobi-determinism + Readium round-trip drivers (toolchain-gated)
 ```
 
@@ -91,7 +91,8 @@ vectors check in. A `contracts/` PR adding raw book bytes is a defect.
   CFI lossy-fallback.
 - **Dual-platform conformance lane**: GREEN — `contracts/conformance/run.sh`
   runs the Swift suite (`vreaderTests/IdentityConformanceTests`) + the
-  Kotlin suite (`contracts/conformance/kotlin`) against the shared
+  shared Android `:identity` module (`android/gradlew :identity:test` — feature
+  #106 WI-2; the same module the app depends on) against the shared
   `contracts/vectors/` (fingerprint + cache-key + locator). Toolchain
   (JDK 17 / Kotlin / Android SDK+NDK) installed.
 - **Follow-up**: the iOS source-bytes BookImporter implementation +
