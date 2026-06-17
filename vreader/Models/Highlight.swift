@@ -60,6 +60,14 @@ final class Highlight {
         profileKey = "\(newLocator.bookFingerprint.canonicalKey):\(newLocator.canonicalHash)"
     }
 
+    /// Feature #109 migration helper: repair the stored locator (null non-finite
+    /// fields) and recompute the derived `profileKey` under the current (NFC)
+    /// canonicalization. No-op for finite + NFC/ASCII rows.
+    func recomputeKey() {
+        locator = locator.repairedForCanonicalization()
+        profileKey = "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)"
+    }
+
     /// Updates the anchor for precise range restoration.
     /// Encodes the anchor to JSON bytes for safe SwiftData storage.
     func updateAnchor(_ newAnchor: AnnotationAnchor?) {

@@ -43,6 +43,14 @@ final class ReadingPosition {
         locatorHash = newLocator.canonicalHash
     }
 
+    /// Feature #109 migration helper: repair the stored locator (null non-finite
+    /// fields) and recompute the derived `locatorHash` under the current (NFC)
+    /// canonicalization. No-op for finite + NFC/ASCII rows.
+    func recomputeKey() {
+        locator = locator.repairedForCanonicalization()
+        locatorHash = locator.canonicalHash
+    }
+
     // MARK: - Relationship
 
     var book: Book?

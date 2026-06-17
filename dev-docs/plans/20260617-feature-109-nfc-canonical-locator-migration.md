@@ -252,3 +252,20 @@ collision, which exists today regardless of WI-1).
   field → recompute, never dropping the row; covered by a disk-backed case + a
   backup-restore case. **Low** — "restored" → "promoted" (the NFD vector is
   promoted Kotlin-only → shared, not restored).
+- v4 (2026-06-17) — **Gate-3 implementation pivot: SchemaV10 migration stage →
+  launch backfill.** During WI-1 the disk test (strengthened per the Gate-4 audit
+  to seed a persisted non-finite locator) proved the planned `MigrationStage.custom`
+  NEVER FIRES: SchemaV10 is model-set-identical to V9, and SwiftData keys migration
+  on entity-shape hashes — it cannot distinguish two schema-identical versions, so
+  the custom stage is skipped and the non-finite repair never ran. This is a
+  fundamental SwiftData limitation for pure (no-shape-change) data transforms, not a
+  patchable bug. **Resolution**: drop `SchemaV10` + `V9toV10Migration`; keep V9 as
+  the head schema with empty stages. The recompute ships as
+  `LocatorKeyBackfillMigration` — a synchronous, UserDefaults-gated (`…locatorKeyNFC.v1`),
+  idempotent one-shot launch backfill invoked from `VReaderApp.init()` before any
+  store consumer is constructed (mirrors the `ReadingModeMigration` precedent's
+  race-free synchronous-launch rationale). Same paged/repair/keep-both semantics;
+  now in-memory + (via the same code path) disk verifiable, and the non-finite
+  repair + flag-gating + idempotency are all directly asserted. Gate-4 audit's other
+  findings also applied: bounded paged recompute (memory), strengthened test that
+  proves a genuine stored-value change, architecture-doc sync.

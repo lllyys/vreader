@@ -1198,6 +1198,7 @@
 		B1EF7FB8170BAD9BFA1B5636 /* EPUBTextExtractorBilingualTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3595767B5C24F2D437C634BF /* EPUBTextExtractorBilingualTests.swift */; };
 		B227E3B75BE0BFAE923628BD /* HighlightsSheet+Delete.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92A21498B4BB8CCB388677F3 /* HighlightsSheet+Delete.swift */; };
 		B272D2C56AF8559115BBD8E3 /* AIContextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42CFB0E94DE1D37E0FD2741B /* AIContextExtractor.swift */; };
+		B292B0EF1AFED7A55AC23723 /* LocatorKeyBackfillMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF84B0F8A8B98B767BFC1689 /* LocatorKeyBackfillMigration.swift */; };
 		B3395550D16A4B05AB62ADB2 /* PDFViewBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17E7FD8CD67F19A2213DB6F5 /* PDFViewBridge.swift */; };
 		B3E77B47634165E42FA68E11 /* TXTServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7540DF541EE961F4442A67 /* TXTServiceTests.swift */; };
 		B401D6506E193DB12661B33E /* UnifiedEPUBLoadResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3131E83F93590395D14009 /* UnifiedEPUBLoadResult.swift */; };
@@ -1503,6 +1504,7 @@
 		E05A4A7DA74E241520EB2F0E /* TXTBridgeShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A43C03327815457BD7B01409 /* TXTBridgeShared.swift */; };
 		E0699A5EBCDBBBD2D56304DE /* ReadiumBilingualCommander.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680CAEF6D5FC66EDF8844280 /* ReadiumBilingualCommander.swift */; };
 		E0722D3E90824BE3E72AFE5E /* MDReaderContainerView+Bilingual.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ACEA5D5CF4C1C95B41B1496 /* MDReaderContainerView+Bilingual.swift */; };
+		E08758624681B56DCFB941F6 /* LocatorKeyBackfillMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022D32C3A3DCCCB2CB7118D0 /* LocatorKeyBackfillMigrationTests.swift */; };
 		E08A7E4EAF4C3831B03E8B72 /* ChapterTextProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59C9E78D6768871560C6C7CB /* ChapterTextProviderTests.swift */; };
 		E0C10040191ABF803B889B49 /* SearchCurrentBookToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4612140BE197E8A0EA480CC /* SearchCurrentBookToolTests.swift */; };
 		E0C8C2C6FACA13D36DDA8290 /* DiagnosticsLogViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 279BCF1EA8AF943DDC252C5D /* DiagnosticsLogViewModel.swift */; };
@@ -1726,6 +1728,7 @@
 		01DD3EDBBD948811D620B337 /* ChatCitation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatCitation.swift; sourceTree = "<group>"; };
 		01E72DDEAD6225A21E973A51 /* SyncTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTypes.swift; sourceTree = "<group>"; };
 		02275826847D45CA3746D53D /* CollectionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectionSidebar.swift; sourceTree = "<group>"; };
+		022D32C3A3DCCCB2CB7118D0 /* LocatorKeyBackfillMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorKeyBackfillMigrationTests.swift; sourceTree = "<group>"; };
 		02568BCB9C0024CD13E6B213 /* Libmobi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Libmobi.swift; sourceTree = "<group>"; };
 		02C8F2C0DD4DC5CDA2601383 /* ChatContextBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatContextBar.swift; sourceTree = "<group>"; };
 		02DE298149C25261E2ECADA1 /* ReaderThemeCSSTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderThemeCSSTests.swift; sourceTree = "<group>"; };
@@ -2866,6 +2869,7 @@
 		AF495D7A9D6F8F137DD42CE0 /* SyncConflictResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncConflictResolverTests.swift; sourceTree = "<group>"; };
 		AF4E488AD7274100802E64AD /* HighlightedSnippet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightedSnippet.swift; sourceTree = "<group>"; };
 		AF6115E02E50244AAC5EAEC8 /* ReaderPositionHandoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderPositionHandoffTests.swift; sourceTree = "<group>"; };
+		AF84B0F8A8B98B767BFC1689 /* LocatorKeyBackfillMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorKeyBackfillMigration.swift; sourceTree = "<group>"; };
 		AF9DD06845B8C048797E1065 /* Feature86WholeBookChatVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feature86WholeBookChatVerificationTests.swift; sourceTree = "<group>"; };
 		AFFFEDEA99460D1154D19EE5 /* NSUKVSBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSUKVSBridge.swift; sourceTree = "<group>"; };
 		B011230154D950EDFE2EA274 /* SettingsView+StatsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+StatsSheet.swift"; sourceTree = "<group>"; };
@@ -4373,6 +4377,7 @@
 		62043F4A2E7370252FDB1685 /* Migration */ = {
 			isa = PBXGroup;
 			children = (
+				AF84B0F8A8B98B767BFC1689 /* LocatorKeyBackfillMigration.swift */,
 				9C5A2D5CFE8B719D4C8F3580 /* SchemaV1.swift */,
 				F379B3EEC02DC574C73F4323 /* SchemaV2.swift */,
 				470BBE13ED7BCDD6E60D3400 /* SchemaV3.swift */,
@@ -5144,6 +5149,7 @@
 			isa = PBXGroup;
 			children = (
 				AEE844A76B8AFC7B1DC2E840 /* HighlightAnchorStorageTests.swift */,
+				022D32C3A3DCCCB2CB7118D0 /* LocatorKeyBackfillMigrationTests.swift */,
 				D1E644FA2FFCEBC9F45E1E6E /* SchemaV8MigrationTests.swift */,
 				58F854810AB4ACA10CBBF0FF /* SchemaV9MigrationTests.swift */,
 				939BC09F1D771D2E22301ED3 /* V1toV2MigrationTests.swift */,
@@ -6724,6 +6730,7 @@
 				345A4B6E5A4A3A6F96F6B85D /* LocatorFactoryTXTChapterTests.swift in Sources */,
 				2FA04FC59FECB40C45FAD4D8 /* LocatorFactoryTests.swift in Sources */,
 				87A61AC432B6116973B7D291 /* LocatorIntegrationTests.swift in Sources */,
+				E08758624681B56DCFB941F6 /* LocatorKeyBackfillMigrationTests.swift in Sources */,
 				5FE7F04D448C49D466F641FB /* LocatorNormalizerTests.swift in Sources */,
 				DD273808CA81E259EAC3F7C5 /* LocatorRestorerTests.swift in Sources */,
 				F5A31837AE39AA372B31F1B5 /* LocatorTests.swift in Sources */,
@@ -7496,6 +7503,7 @@
 				08D91BCFF4A0D7FBB2F88751 /* ListLibraryTool.swift in Sources */,
 				6E5022EE67C6ACC27F614E77 /* Locator.swift in Sources */,
 				09122777AF5FD739850888CA /* LocatorFactory.swift in Sources */,
+				B292B0EF1AFED7A55AC23723 /* LocatorKeyBackfillMigration.swift in Sources */,
 				E648A7D0DA601378CD08D521 /* LocatorNormalizer.swift in Sources */,
 				9FCA583CDA52A7FB584260FA /* LocatorRestorer.swift in Sources */,
 				86AB97CD6CC05A3EEADE5F00 /* MDAttributedStringRenderer.swift in Sources */,

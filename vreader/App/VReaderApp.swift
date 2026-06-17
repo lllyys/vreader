@@ -99,6 +99,7 @@ struct VReaderApp: App {
             // safer test-isolation default) rather than silently picking
             // up disk-backed cross-method state.
             let modelConfig: ModelConfiguration
+            let isInMemoryStore: Bool
             if config.isUITesting {
                 let needsDiskBackedStore = config.seedPositionTest
                     || config.seedWarAndPeace
@@ -112,11 +113,14 @@ struct VReaderApp: App {
                 modelConfig = needsDiskBackedStore
                     ? ModelConfiguration()
                     : ModelConfiguration(isStoredInMemoryOnly: true)
+                isInMemoryStore = !needsDiskBackedStore
             } else {
                 modelConfig = ModelConfiguration()
+                isInMemoryStore = false
             }
             #else
             let modelConfig = ModelConfiguration()
+            let isInMemoryStore = false
             #endif
 
             // Bug #186 / GH #633: build the container via the factory,
@@ -132,6 +136,23 @@ struct VReaderApp: App {
             )
             self.modelContainer = container
             self.initError = nil
+
+            // Feature #109: one-shot launch backfill that recomputes the
+            // persisted derived locator keys under NFC canonicalization
+            // (bug #356) and repairs preexisting non-finite locators.
+            // Synchronous + UserDefaults-gated + run here BEFORE the
+            // PersistenceActor / DebugBridge / UI are constructed, so a fresh
+            // ModelContext owns the store race-free (same rationale as
+            // ReadingModeMigration below). It is NOT a SwiftData migration
+            // stage — the transform changes no entity shape, so a custom stage
+            // would never fire. Idempotent; no-op once the gate flag is set.
+            // SKIP for in-memory stores (UI tests): the gate flag lives in the
+            // shared standard defaults, and an ephemeral in-memory launch would
+            // set it without touching the real on-disk library, starving a
+            // later real backfill.
+            if !isInMemoryStore {
+                LocatorKeyBackfillMigration.run(container: container, defaults: .standard)
+            }
 
             // Feature #56 WI-2: wire the bilingual-reading translation cache
             // (`ChapterTranslationStore.shared`) to the app's own

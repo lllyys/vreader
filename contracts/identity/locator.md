@@ -43,12 +43,16 @@ the cross-platform hash diverges:
   `precomposedStringWithCanonicalMapping`; Kotlin
   `Normalizer.normalize(_, NFC)`). iOS hands back NFD on some text paths, so
   without NFC a decomposed vs precomposed form of the same text would hash
-  differently within iOS AND across platforms. **Impl status (bug #356):** the
-  Kotlin reference (`CanonicalLocator`) normalizes; iOS `Locator.canonicalJSON`
-  does NOT yet — applying it changes the persisted `canonicalHash` (18
-  profileKey/locatorHash sites), so it needs a recompute migration + non-finite
-  persistence guarding, **tracked as feature #109**. Contract-ahead-of-impl until
-  #109 ships; the shared NFD vector is therefore Kotlin-only for now.
+  differently within iOS AND across platforms. **Impl status (feature #109):**
+  BOTH platforms now apply NFC — the Kotlin reference (`CanonicalLocator`) and
+  iOS (`Locator.canonicalJSON` via `precomposedStringWithCanonicalMapping`).
+  iOS re-derives the 18 persisted profileKey/locatorHash sites via a one-shot,
+  flag-gated launch backfill (`LocatorKeyBackfillMigration`) — NOT a SwiftData
+  migration stage, because the transform changes no entity shape and a custom
+  stage between schema-identical versions never fires. The same backfill repairs
+  preexisting non-finite locators. The shared NFD vector in
+  `contracts/vectors/locator.json` is exercised by both platforms' conformance
+  suites.
 - **Non-finite is REJECTED, not omitted.** A non-finite `progression` /
   `totalProgression` is invalid — `Locator.validate()` returns
   `.nonFiniteProgression` and the Kotlin canonical reference throws. The

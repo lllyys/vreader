@@ -113,25 +113,24 @@ struct Locator: Codable, Hashable, Sendable {
         pairs.append(("bookFingerprint.fileByteCount", "\(bookFingerprint.fileByteCount)"))
         pairs.append(("bookFingerprint.format", jsonQuoted(bookFingerprint.format.rawValue)))
 
-        // NOTE (bug #356): the canonical CONTRACT (contracts/identity/locator.md)
-        // requires NFC-normalizing string fields before escaping so NFD/NFC forms
-        // hash identically cross-platform. iOS does NOT apply it yet — doing so
-        // changes the persisted canonicalHash (18 profileKey/locatorHash sites),
-        // so it needs a recompute migration + non-finite persistence guarding,
-        // tracked as feature #109. The Kotlin reference (CanonicalLocator) already
-        // normalizes; this iOS side is the contract-ahead-of-impl gap.
-        if let cfi { pairs.append(("cfi", jsonQuoted(cfi))) }
+        // String fields are Unicode-NFC-normalized before escaping (feature #109 /
+        // bug #356): a decomposed (NFD) vs precomposed (NFC) form of the same text
+        // yields the SAME canonical JSON / hash — iOS hands back NFD on some text
+        // paths, and cross-platform identity (the Kotlin `CanonicalLocator`
+        // reference) must agree. The V9→V10 recompute migration rewrites existing
+        // derived keys under this canonicalization.
+        if let cfi { pairs.append(("cfi", jsonQuoted(nfc(cfi)))) }
         if let charOffsetUTF16 { pairs.append(("charOffsetUTF16", "\(charOffsetUTF16)")) }
         if let charRangeEndUTF16 { pairs.append(("charRangeEndUTF16", "\(charRangeEndUTF16)")) }
         if let charRangeStartUTF16 { pairs.append(("charRangeStartUTF16", "\(charRangeStartUTF16)")) }
-        if let href { pairs.append(("href", jsonQuoted(href))) }
+        if let href { pairs.append(("href", jsonQuoted(nfc(href)))) }
         if let page { pairs.append(("page", "\(page)")) }
         if let progression, progression.isFinite {
             pairs.append(("progression", roundedString(progression)))
         }
-        if let textContextAfter { pairs.append(("textContextAfter", jsonQuoted(normalizeLineEndings(textContextAfter)))) }
-        if let textContextBefore { pairs.append(("textContextBefore", jsonQuoted(normalizeLineEndings(textContextBefore)))) }
-        if let textQuote { pairs.append(("textQuote", jsonQuoted(normalizeLineEndings(textQuote)))) }
+        if let textContextAfter { pairs.append(("textContextAfter", jsonQuoted(normalizeLineEndings(nfc(textContextAfter))))) }
+        if let textContextBefore { pairs.append(("textContextBefore", jsonQuoted(normalizeLineEndings(nfc(textContextBefore))))) }
+        if let textQuote { pairs.append(("textQuote", jsonQuoted(normalizeLineEndings(nfc(textQuote))))) }
         if let totalProgression, totalProgression.isFinite {
             pairs.append(("totalProgression", roundedString(totalProgression)))
         }
@@ -177,5 +176,38 @@ struct Locator: Codable, Hashable, Sendable {
     private func normalizeLineEndings(_ s: String) -> String {
         s.replacingOccurrences(of: "\r\n", with: "\n")
          .replacingOccurrences(of: "\r", with: "\n")
+    }
+
+    /// Unicode NFC — matches Kotlin `Normalizer.normalize(_, NFC)` (feature #109 /
+    /// bug #356). Stabilizes the canonical hash across NFD/NFC input + cross-platform.
+    private func nfc(_ s: String) -> String {
+        s.precomposedStringWithCanonicalMapping
+    }
+
+    // MARK: - Migration repair
+
+    /// Returns a copy with any non-finite `progression`/`totalProgression` nulled,
+    /// so a preexisting INVALID locator (persisted via a pre-#109 `?? Locator(...)`
+    /// path) becomes valid for canonicalization. No-op when already finite. Used by
+    /// the V9→V10 recompute migration + backup restore so an invalid row is repaired
+    /// (never dropped — keep-both policy) rather than colliding with a valid one.
+    func repairedForCanonicalization() -> Locator {
+        let progNonFinite = progression.map { !$0.isFinite } ?? false
+        let totalNonFinite = totalProgression.map { !$0.isFinite } ?? false
+        guard progNonFinite || totalNonFinite else { return self }
+        return Locator(
+            bookFingerprint: bookFingerprint,
+            href: href,
+            progression: (progression?.isFinite == true) ? progression : nil,
+            totalProgression: (totalProgression?.isFinite == true) ? totalProgression : nil,
+            cfi: cfi,
+            page: page,
+            charOffsetUTF16: charOffsetUTF16,
+            charRangeStartUTF16: charRangeStartUTF16,
+            charRangeEndUTF16: charRangeEndUTF16,
+            textQuote: textQuote,
+            textContextBefore: textContextBefore,
+            textContextAfter: textContextAfter
+        )
     }
 }

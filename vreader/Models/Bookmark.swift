@@ -24,6 +24,13 @@ final class Bookmark {
         profileKey = "\(newLocator.bookFingerprint.canonicalKey):\(newLocator.canonicalHash)"
     }
 
+    /// Feature #109 migration helper: repair the stored locator + recompute the
+    /// derived `profileKey` under the current (NFC) canonicalization.
+    func recomputeKey() {
+        locator = locator.repairedForCanonicalization()
+        profileKey = "\(locator.bookFingerprint.canonicalKey):\(locator.canonicalHash)"
+    }
+
     // MARK: - Relationship
 
     var book: Book?

@@ -81,6 +81,12 @@ enum VReaderMigrationPlan: SchemaMigrationPlan {
     }
 
     static var stages: [MigrationStage] {
+        // No explicit stages — every shipped schema change to date is additive
+        // (lightweight). Feature #109's NFC locator-key recompute is NOT a
+        // migration stage: it changes no entity shape, so SwiftData's
+        // hash-based matcher cannot distinguish a would-be V-next from V9 and a
+        // custom stage never fires. It runs instead as a one-shot launch
+        // backfill — see `LocatorKeyBackfillMigration`.
         []
     }
 }

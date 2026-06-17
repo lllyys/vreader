@@ -192,4 +192,39 @@ struct LocatorCanonicalHashTests {
         let decoded = try JSONDecoder().decode(Locator.self, from: data)
         #expect(decoded == loc)
     }
+
+    // MARK: - NFC normalization (feature #109 / bug #356)
+
+    private func loc(_ quote: String, href: String? = nil) -> Locator {
+        Locator(
+            bookFingerprint: Self.epubFP, href: href, progression: 0.5, totalProgression: 0.5,
+            cfi: nil, page: nil, charOffsetUTF16: nil, charRangeStartUTF16: nil,
+            charRangeEndUTF16: nil, textQuote: quote, textContextBefore: nil, textContextAfter: nil
+        )
+    }
+
+    /// NFD ("cafe" + U+0301) and its precomposed NFC twin ("café") must hash
+    /// identically after canonicalization — across both textQuote and href.
+    @Test func nfdAndNfcTwinsHashIdentically() {
+        #expect(loc("cafe\u{0301}").canonicalHash == loc("caf\u{00e9}").canonicalHash)
+        #expect(loc("q", href: "a\u{0301}.html").canonicalHash == loc("q", href: "\u{00e1}.html").canonicalHash)
+    }
+
+    /// Canonical singletons fold: U+212B ANGSTROM SIGN → U+00C5 under NFC.
+    @Test func nfcFoldsCanonicalSingletons() {
+        #expect(loc("\u{212B}").canonicalHash == loc("\u{00C5}").canonicalHash)
+    }
+
+    /// NFC (not NFKC) — compatibility chars are NOT over-normalized:
+    /// U+FB01 (ﬁ ligature) must stay distinct from "fi".
+    @Test func nfcDoesNotOverNormalizeCompatibilityChars() {
+        #expect(loc("\u{FB01}").canonicalHash != loc("fi").canonicalHash)
+    }
+
+    /// ASCII content is untouched by NFC — text survives verbatim in the JSON.
+    @Test func asciiHashUnchangedByNfc() {
+        let ascii = loc("plain ascii text", href: "OEBPS/ch1.xhtml")
+        #expect(ascii.canonicalJSON().contains("plain ascii text"))
+        #expect(ascii.canonicalJSON().contains("OEBPS/ch1.xhtml"))
+    }
 }

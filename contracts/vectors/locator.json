@@ -41,6 +41,15 @@
       "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"bookFingerprint.fileByteCount\":7,\"bookFingerprint.format\":\"md\",\"charRangeEndUTF16\":20,\"charRangeStartUTF16\":10,\"href\":\"d.md\",\"textContextBefore\":\"p\\nq\\nr\",\"textQuote\":\"a\\\"b\\\\c\"}"
     },
     {
+      "_why": "NFC normalization (feature #109/bug #356): href input NFD 'a\\u0301.html' + textQuote NFD 'cafe\\u0301' (base + U+0301) MUST canonicalize to the NFC precomposed form on BOTH Swift and Kotlin. iOS now NFC-normalizes (V9->V10 migration re-keys existing rows).",
+      "contentSHA256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "fileByteCount": 3,
+      "format": "epub",
+      "href": "á.html",
+      "textQuote": "café",
+      "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"bookFingerprint.fileByteCount\":3,\"bookFingerprint.format\":\"epub\",\"href\":\"á.html\",\"textQuote\":\"café\"}"
+    },
+    {
       "_why": "Numeric boundaries: progression 0.0 / totalProgression 1.0 / large charOffset (Int max) — float '%.6f' edges + large int formatting must agree.",
       "contentSHA256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "fileByteCount": 9,
