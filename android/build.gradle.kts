@@ -12,4 +12,7 @@ plugins {
     // version as the app, per the Gate-2 toolchain pin).
     id("org.jetbrains.kotlin.jvm") version "2.3.20" apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "2.3.20" apply false
+    // feature #106 WI-3 — Room codegen via KSP. KSP 2.3.9 is the build matched to
+    // Kotlin 2.3.20 (its stdlib dep is 2.3.20); the new standalone KSP versioning.
+    id("com.google.devtools.ksp") version "2.3.9" apply false
 }

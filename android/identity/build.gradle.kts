@@ -12,7 +12,10 @@ plugins {
 }
 
 dependencies {
-    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // feature #106 WI-3 — the VReaderLocator/Locator envelope value types
+    // (`@Serializable`) live in main now, so serialization-json is an
+    // `implementation` dep, not test-only.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation(kotlin("test"))
 }
 

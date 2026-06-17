@@ -9,6 +9,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")   // feature #106 WI-3 — Room codegen
 }
 
 // Read via Gradle's provider API so `version.properties` is a TRACKED input
@@ -50,6 +51,12 @@ android {
     }
 }
 
+// feature #106 WI-3 — Room exports the current schema JSON here so schema-versioned
+// migrations have a checked-in baseline (the migration round-trip test guards it).
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -68,10 +75,23 @@ dependencies {
     // conformance lane tests the SAME code the app uses). WI-3 keys Room on it.
     implementation(project(":identity"))
 
+    // feature #106 WI-3 — Room persistence (the PersistenceActor analog). room-ktx
+    // brings the suspend/Flow DAO support; the compiler runs through KSP.
+    val room = "2.8.4"
+    implementation("androidx.room:room-runtime:$room")
+    implementation("androidx.room:room-ktx:$room")
+    ksp("androidx.room:room-compiler:$room")
+    // The repository JSON-encodes the VReaderLocator envelope into one column. The
+    // @Serializable types are compiled in :identity (which has the serialization
+    // plugin); :app only needs the runtime library to call Json.encode/decode.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.13")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
