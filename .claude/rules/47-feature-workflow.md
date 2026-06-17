@@ -88,6 +88,11 @@ For each PR before it merges:
 
 Record slice verification in the PR description (what was run, what was observed). Record final acceptance verification in a structured evidence file at `dev-docs/verification/feature-<id>-<YYYYMMDD>.md` per the schema in `dev-docs/verification/SCHEMA.md`. The PreToolUse hook `.claude/hooks/check_terminal_status_evidence.sh` blocks any tracker edit that flips a row to `VERIFIED` (features) or `FIXED` (bugs) without a matching evidence file.
 
+**Android tier (feature #107)** — the platform-router (`code_paths_platform`) picks the lane:
+- **iOS WIs**: iPhone 17 Pro Simulator + `vreader-debug://` harness, as above.
+- **Android WIs** (`android-app` / `android-spike`): verify on a booted **Android emulator** (AVD, android-35+) via `scripts/run-android-verify.sh` (the emulator analog of driving the simulator — rule 49/52/53). The CU-free instrumentation lane is the Spike-B `am instrument` pattern (#104/#105 precedent); the evidence file's `device_or_simulator` records the AVD (e.g. "Pixel 7 API 35 emulator"). Until #106's app shell exists, the only Android target is the `spikes/` harness, so Android-app Gate-5 is itself blocked on #106; pre-#106 Android work is spike/tooling (no device-verify, like a foundational WI).
+- **Shared WIs** route to the iOS lane (rule 40 — shared is iOS while Android is pre-foundation).
+
 **Acceptance bar per PR**: every behavioral slice in the PR has been verified end-to-end at the level appropriate to its WI tier. Final WI requires full acceptance pass + evidence file.
 
 **"Tooling unavailable" is NOT an acceptable deferral reason** unless a specific tool is named and confirmed missing (e.g., `xcrun simctl` returns "command not found", a real device is required and none is connected, the rclone WebDAV server is down). "I'll do it next session" is not a tool-unavailability claim — it's a discipline lapse. The Stop hook (`.claude/hooks/check_unfinished_verification.sh`) surfaces unverified `DONE` rows at session end so the gap doesn't quietly carry over.

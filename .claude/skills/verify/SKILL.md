@@ -45,10 +45,32 @@ a merged feature into an accepted one.
 Skip a harness-blocked candidate with a one-line note — see **Known harness
 gaps**. If every candidate in both modes is blocked, that is `no_work_in_scope`.
 
+## Android Mode (feature #107)
+
+The modes + pick-order above are **iOS** (XCUITest + DebugBridge + simulator).
+When the target row/issue is **Android** (`platform:android` label, or the
+changed paths classify `android-app`/`android-spike` via
+`code_paths_platform`), verify on a booted **Android emulator** instead:
+
+- Run the CU-free instrumentation lane through **`scripts/run-android-verify.sh`**
+  (rule 49/52/53 — watchdog, never a bare `./gradlew`). The Spike-B `am
+  instrument` pattern (#104/#105) is the accessibility-XCUITest analog: it drives
+  a deterministic in-process sweep and pulls metrics, no UI automation.
+- Evidence file `device_or_simulator` records the AVD (e.g. "Pixel 7 API 35
+  emulator"), `os_version` the Android API level.
+- **Until #106's app shell exists, the only Android target is the `spikes/`
+  harness** — so an Android-*app* feature's Gate-5 is itself blocked on #106.
+  Mark such a candidate harness-blocked (see Known harness gaps) rather than
+  forcing it. Pre-#106 Android work is tooling/spike (no device-verify).
+
+The rest of this skill (real-books-first, evidence schema, terminal actions) is
+platform-neutral; only the harness + commands differ.
+
 ## The CU-free method
 
 Computer-use is unavailable in cron contexts. Verify through the XCUITest
-harness, which synthesizes its own gestures via the accessibility API.
+harness (iOS) or the `am instrument` emulator lane (Android — see Android Mode),
+which synthesize their own gestures via the accessibility API.
 
 **Real books first (binding).** When the verification needs a book, import a
 real book from `test-books/books/` via the `sim-transfer` skill and verify

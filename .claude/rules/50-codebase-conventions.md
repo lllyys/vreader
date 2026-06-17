@@ -180,3 +180,41 @@ final class DebugFoo { ... }
 ```
 
 Don't `#if DEBUG` individual lines inside otherwise-production code unless a single line genuinely needs it.
+
+## 12. Android / Kotlin + Compose conventions (feature #107)
+
+Sections 1–11 above are the **iOS/Swift** conventions. The Android app (`android/`,
+landing in #106) is a second native app — these are its analogs, so a Kotlin PR
+reads like the Swift one. Source of truth for the port strategy:
+`docs/decisions/0001-android-port-strategy.md`.
+
+1. **Concurrency** — Kotlin coroutines + structured concurrency are the
+   actor/`@MainActor` analog. Repos/use-cases run on an injected
+   `CoroutineDispatcher` (never hardcode `Dispatchers.IO`); UI state is updated on
+   `Dispatchers.Main`. Expose `StateFlow`/`SharedFlow`, collect with
+   `repeatOnLifecycle`. No `GlobalScope`; scope to `viewModelScope` /
+   lifecycle.
+2. **Persistence** — **Room** is the SwiftData analog. DAOs are the CRUD seam
+   (the `PersistenceActor+Foo` analog); return value-type DTOs / domain models
+   from the repository, not `@Entity` rows, across boundaries. Schema-versioned
+   `Migration`s mirror `VReaderMigrationPlan`; an additive column is a lightweight
+   `Migration`, a data transform is a custom one (cf. feature #108/#109 lessons).
+3. **Reader** — EPUB via **Readium-Kotlin** (decided viable by Spike B #105),
+   Kindle/native via the legacy-compat path; one Compose host per format, the
+   `ReaderContainerView` dispatcher analog.
+4. **UI** — **Jetpack Compose**, unidirectional data flow: a ViewModel owns
+   `StateFlow<UiState>`, the composable is a pure function of state + emits events.
+   Hoist state; `@Composable` previews for designed surfaces only (rule 51 still
+   binds — UI from claude.ai/design, no self-invented Compose screens).
+5. **DI** — constructor injection at boundaries (interfaces, so tests mock the
+   boundary — the `LibraryPersisting` analog). Hilt/Koin module wiring at the app
+   edge, not in domain code.
+6. **Errors** — sealed `Result`/domain error types with a `userMessage`, the Swift
+   `enum … : Error { var userMessage }` analog; never swallow silently.
+7. **Logging** — the platform `Logger`/Timber, namespaced like the OSLog
+   categories; no bare `println` in production.
+8. **Files** — package-by-feature under `android/app/src/main/java/...`, mirror the
+   `vreader/Services/<Name>/` layout; keep files focused (~300 lines).
+
+Cross-platform identity/locator/backup/schema stay **contract-bound**
+(`contracts/`); only those surfaces require strict iOS↔Android parity (ADR-0001).

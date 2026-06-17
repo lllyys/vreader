@@ -205,6 +205,34 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
 
 The TDD Guardian config at `.claude/tdd-guardian/config.json` invokes the same `xcodebuild test` flow.
 
+## Android / Kotlin TDD (feature #107 — the workflow can drive Android)
+
+The RED→GREEN→REFACTOR discipline is platform-neutral; only the framework + run
+command differ. **Android tests run through `scripts/run-android-tests.sh`** (the
+Android `run-tests.sh` — watchdog-wrapped, rule 49/52/53), NEVER a bare
+`./gradlew test` (a wedged Gradle daemon ghosts like `xcodebuild` does — rule 52
+Cause D).
+
+| Layer | Framework | Pattern |
+| --- | --- | --- |
+| Pure Kotlin / domain / mappers | **JUnit5** (`@Test`, `assertEquals`) or **Kotest** | the Swift-Testing analog — value types, parameterized (`@ParameterizedTest`), no Android deps |
+| Repos / Room / coroutines | JUnit5 + `runTest` + an **in-memory Room** db (`Room.inMemoryDatabaseBuilder`) | the `PersistenceActor` analog: in-memory store per test, `kotlinx-coroutines-test` `StandardTestDispatcher`, no real I/O |
+| ViewModels / state | JUnit5 + `runTest` + a fake repo (interface boundary) | assert observable `StateFlow`/`State`, not internals; `Turbine` for flow assertions |
+| Compose UI | **`createComposeRule()`** (Robolectric for JVM, or instrumented) | test behavior (clicks, semantics, state) — not pixels; the SwiftUI-view analog |
+| Reader / WebView bridges | unit-test the message parser / JS-escaping / locator math | not the WKWebView/Android-WebView interaction itself |
+
+```bash
+# Until #106's app shell exists, the only real Android target is the spike
+# harness; once it lands, point the runner at the app's Gradle task:
+scripts/run-android-tests.sh                                  # spike-harness smoke
+ANDROID_CMD="./gradlew :app:testDebugUnitTest" scripts/run-android-tests.sh
+ANDROID_CMD="./gradlew :app:test --tests '*MapperTest'" scripts/run-android-tests.sh
+```
+
+Edge cases are not optional on Android either — empty/null, max values, CJK/RTL,
+config changes (rotation / process death → `SavedStateHandle`), coroutine
+cancellation, and Room migration round-trips (the SwiftData-migration analog).
+
 ## File Placement
 
 - Tests go next to the production code, mirroring the source tree:
