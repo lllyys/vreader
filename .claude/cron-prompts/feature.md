@@ -2,6 +2,8 @@ First, log the fire: run `mkdir -p .claude/cron-logs && echo "$(date -Iseconds) 
 
 Select a feature to implement from GitHub issues or local tasks, and use /feature-workflow to implement the feature.
 
+SKIP-ANDROID-UNTIL-READY (feature #107): until the Android app shell (#106) lands, an `android-app`-platform feature cannot reach Gate-5 (no app to verify). Do NOT auto-start `#106` or other `android-app` features from this cron — they are the deferred Android-port epic, user-steered. `#107` (the dev-loop tooling, `.claude/*`+`scripts/`) and any iOS / `shared` / `contracts/` / `spikes/` feature ARE in scope. `/feature-workflow` handles the per-gate lane routing.
+
 SCOPE: feature implementation only. Per `.claude/rules/47-feature-workflow.md`, `/feature-workflow` is the binding 6-gate sequence (Plan → Independent plan audit → TDD → Implementation audit → Device/integration verification → Merge); never skip a gate.
 
 PICK ORDER (highest priority first):

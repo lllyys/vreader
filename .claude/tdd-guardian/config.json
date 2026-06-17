@@ -1,6 +1,7 @@
 {
   "enabled": true,
-  "testCommand": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild build-for-testing -project vreader.xcodeproj -scheme vreader -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -quiet && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test-without-building -project vreader.xcodeproj -scheme vreader -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:vreaderTests -disable-concurrent-testing",
+  "testCommand": "bash scripts/tdd-guardian-test.sh",
+  "_testCommand_note": "Feature #107 PR-D: routed through a platform-aware wrapper so a Kotlin change no longer false-greens against the frozen iOS xcodebuild command. scripts/tdd-guardian-test.sh classifies changed files via code_paths_platform and runs the iOS xcodebuild lane (ios/shared — unchanged), the Android spike/Gradle lane (android-spike/android-app once #106 wires the app), or fails loudly (exit 2) for an android-app change with no app yet.",
   "coverageCommand": "",
   "coverageSummaryPath": "",
   "mutationCommand": "",

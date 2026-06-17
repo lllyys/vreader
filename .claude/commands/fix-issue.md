@@ -53,6 +53,24 @@ Three PreToolUse hooks gate this pipeline:
 
 Plan around them; do not bypass.
 
+## Platform routing (feature #107 — binding for every phase below)
+
+vreader is two native apps (iOS at root, Android under `android/`). Determine the
+issue's platform from its changed files and **substitute the lane in every
+phase** — the phases below are written iOS-first; the Android substitutions are:
+
+| Phase | iOS (default) | Android (`android-app` / `android-spike`) |
+|---|---|---|
+| Classify | `printf '%s\n' <changed> \| code_paths_platform` (`.claude/hooks/lib/code-paths.sh`) → `ios`/`android-app`/`android-spike`/`shared` |
+| Test gate (Phase 5) | `scripts/run-tests.sh` (xcodebuild) | `scripts/run-android-tests.sh` |
+| Pre-FIXED / Gate-5 verify | iPhone 17 Pro Sim + `vreader-debug://` | `scripts/run-android-verify.sh` (emulator) |
+| Version bump (Phase 7) | `project.yml` (`vX.Y.Z`) | **stays iOS** until #106 — rule 40: spike/shared PRs bump `project.yml`; an Android `android/version.properties` + `android/vX.Y.Z` tag lane begins only with #106 |
+| Evidence `device_or_simulator` | "iPhone 17 Pro Simulator" | the AVD (e.g. "Pixel 7 API 35 emulator") |
+
+**`shared`-only and pre-#106 spike work route to the iOS lane** (rule 40). An
+`android-app` issue whose Gate-5 needs the app shell is **blocked on #106** — mark
+it `verification-blocked` rather than forcing it.
+
 ## Pre-flight Checks
 
 1. **Parse arguments** — extract issue numbers (e.g. `#123`, `123`, `#123 #456`).

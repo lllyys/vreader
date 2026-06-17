@@ -2,6 +2,8 @@ First, log the fire: run `mkdir -p .claude/cron-logs && echo "$(date -Iseconds) 
 
 Pick one open GitHub issue labeled `bug` from this repo (use `gh issue list --label bug --state open --json number,labels,title`). Prefer severity:high, then severity:medium, then others. Skip issues whose body or comments indicate they are blocked (waiting on fixture, multi-iteration scope, harness gap) — leave a one-line skip note in the issue and pick the next. Then run /fix-issue #N on the chosen issue.
 
+SKIP-ANDROID-UNTIL-READY (feature #107): until the Android app shell (#106) lands, an `android-app`-platform bug (label `platform:android`, or whose fix touches `android/`/`*.kt`/Gradle) cannot be tested/verified end-to-end. Skip such an issue with a one-line note (`blocked on #106 app shell`) and pick the next. iOS, `shared`, `contracts/`, and `spikes/`/tooling bugs ARE in scope and route to their normal lanes (`/fix-issue` handles the routing).
+
 SCOPE GUARDRAIL — only fix bugs from the authoritative trackers:
 - Acceptable scope sources:
   - `docs/bugs.md` rows (the authoritative tracker — entries triaged in)

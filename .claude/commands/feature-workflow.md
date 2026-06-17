@@ -45,6 +45,24 @@ running a fix through this skill skips the bug-tracker workflow.
 
 Plan around them; do not bypass.
 
+## Platform routing (feature #107 — binding for every gate below)
+
+vreader is two native apps (iOS at root, Android under `android/`). Classify the
+feature's changed files with `code_paths_platform`
+(`.claude/hooks/lib/code-paths.sh`) → `ios`/`android-app`/`android-spike`/`shared`,
+and **substitute the lane in every gate** (the gates are written iOS-first):
+
+- **Gate 3 test gate**: iOS → `scripts/run-tests.sh`; Android →
+  `scripts/run-android-tests.sh` (never bare `./gradlew` — rule 52 Cause D).
+- **Gate 5 verify**: iOS → iPhone 17 Pro Sim + `vreader-debug://`; Android →
+  `scripts/run-android-verify.sh` (emulator; rule 47 Android tier). Evidence
+  `device_or_simulator` = the AVD.
+- **Version bump**: stays iOS (`project.yml`) for `shared`/spike PRs until #106;
+  Android `android/version.properties` + `android/vX.Y.Z` tags begin with #106
+  (rule 40).
+- **`shared`-only and pre-#106 spike work → iOS lane.** An `android-app` feature
+  whose Gate-5 needs the app shell is **blocked on #106**.
+
 ## Pre-flight Checks
 
 1. **Resolve target**: parse `$ARGUMENTS` to a feature row in
