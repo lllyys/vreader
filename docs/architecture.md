@@ -9,7 +9,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 ```
 ┌──────────────────────────────────────────────────────┐
 │                    VReaderApp                         │
-│  SwiftData SchemaV9 · PersistenceActor · BookImporter│
+│  SwiftData SchemaV10 · PersistenceActor · BookImporter│
 └─────────────────────┬────────────────────────────────┘
                       │
           ┌───────────┴───────────┐
@@ -34,7 +34,7 @@ VReader is an iOS e-book reader built with SwiftUI + SwiftData. It supports TXT,
 
 ### 1. App Layer (`vreader/App/`)
 
-- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV9), migration plan (V1→V2→V3→V4→V5→V6→V7→V8→V9, all lightweight). Also runs the feature #109 one-shot `LocatorKeyBackfillMigration` synchronously at launch (flag-gated; recomputes derived locator keys under NFC canonicalization + repairs non-finite locators — a launch backfill, NOT a migration stage, since the transform changes no entity shape). Plus test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature. Adopts `@UIApplicationDelegateAdaptor(VReaderAppDelegate.self)` for background-URLSession completion-handler delivery (feature #47).
+- `VReaderApp.swift` — SwiftData `ModelContainer` init (SchemaV10), migration plan (V1→…→V9→V10, all lightweight; V9→V10 adds the additive `Book.sourceCanonicalKey: String?` for feature #108's converted-Kindle cross-platform identity). Also runs the feature #109 one-shot `LocatorKeyBackfillMigration` synchronously at launch (flag-gated; recomputes derived locator keys under NFC canonicalization + repairs non-finite locators — a launch backfill, NOT a migration stage, since the transform changes no entity shape). Plus test seeding, error handling. Injects the live `PersistenceActor` into the SwiftUI environment via `\.persistenceActor` so settings sub-screens can construct backup providers without rewriting every parent's signature. Adopts `@UIApplicationDelegateAdaptor(VReaderAppDelegate.self)` for background-URLSession completion-handler delivery (feature #47).
 - `VReaderAppDelegate.swift` — `UIApplicationDelegate` adapter that captures `application(_:handleEventsForBackgroundURLSession:completionHandler:)` into a MainActor-isolated static dictionary keyed by URLSession identifier. The lazy-download coordinator retrieves and invokes the handler from `LazyDownloadDelegate.urlSessionDidFinishEvents` so iOS releases the app's background-launch grace period.
 
 ### 2. Library Layer (`vreader/Views/LibraryView.swift`, `vreader/ViewModels/LibraryViewModel.swift`)
@@ -235,9 +235,9 @@ Bridge-internal coordinators (`EPUBWebViewBridgeCoordinator`, `FoliateViewCoordi
 
 ### 6. Data Layer (`vreader/Models/`)
 
-SwiftData SchemaV9 entities (feature #109's NFC locator-key recompute runs as the launch-time `LocatorKeyBackfillMigration`, not a schema migration — see the App Layer note above):
+SwiftData SchemaV10 entities (V9→V10 adds the additive optional `Book.sourceCanonicalKey: String?` — feature #108's converted-Kindle cross-platform identity, carried in the backup manifest; feature #109's NFC locator-key recompute runs as the launch-time `LocatorKeyBackfillMigration`, not a schema migration — see the App Layer note above):
 
-- `Book` (fingerprintKey unique; gains `originalExtension: String?` in SchemaV5 for backup blob extension preservation; gains `fileState: String` and `blobPath: String?` in SchemaV6 for feature #47's lazy-load row state) → `ReadingPosition` (gains `vreaderLocatorData: Data?` in SchemaV8 — feature #42's engine-agnostic `VReaderLocator` envelope, stored as raw JSON `Data?` mirroring `Highlight.anchorData`; additive/optional → lightweight migration, no stage), `Highlight`, `Bookmark`, `AnnotationNote`, `BookCollection`, `ChatSession` (SchemaV9 cascade child)
+- `Book` (fingerprintKey unique; gains `originalExtension: String?` in SchemaV5 for backup blob extension preservation; gains `fileState: String` and `blobPath: String?` in SchemaV6 for feature #47's lazy-load row state; gains `sourceCanonicalKey: String?` in SchemaV10 — feature #108's converted-Kindle source-bytes cross-platform identity, while the converted-EPUB `fingerprintKey` stays the local primary) → `ReadingPosition` (gains `vreaderLocatorData: Data?` in SchemaV8 — feature #42's engine-agnostic `VReaderLocator` envelope, stored as raw JSON `Data?` mirroring `Highlight.anchorData`; additive/optional → lightweight migration, no stage), `Highlight`, `Bookmark`, `AnnotationNote`, `BookCollection`, `ChatSession` (SchemaV9 cascade child)
 - `ReadingSession`, `ReadingStats`
 - `BookSource`, `ContentReplacementRule` (added in SchemaV4)
 - `ChapterTranslation` (added in SchemaV7 — feature #56 bilingual-reading persistent translation cache; independent entity, no `@Relationship` to `Book`; `lookupKey: String` is the `@Attribute(.unique)` dedupe key joined from `bookFingerprintKey` + `unitStorageKey` + `targetLanguage` + `promptVersion` — Bug #342 dropped `providerProfileID` from the key (now provenance metadata only; one canonical translation shared by bilingual reading + re-translate), with a lazy in-store migration for pre-#342 rows)

@@ -226,3 +226,15 @@ backups restore with nil. No data re-key, no forced re-conversion.
 
   **Tests planned**: per the Test catalogue above. No findings require a plan
   change; proceeding to Gate-3.
+- v3 (2026-06-18) — **Gate-3/Gate-4: WI-2 and WI-3 merged into one PR.** WI-1
+  (`Book.sourceCanonicalKey` + SchemaV10) shipped v3.66.37 (PR #1729). The WI-2
+  Gate-4 Codex audit (real, 3 rounds) found WI-2 must NOT ship without WI-3 (a
+  backup taken between them silently loses the field), so WI-3 (backup-manifest
+  carry + restore re-attach) was folded into the WI-2 PR — making it the final WI.
+  **5 findings resolved** (audit log
+  `.claude/codex-audits/feat-feature-108-wi2-importer-sourcekey-audit.md`): M1
+  dedupe-backfill of pre-#108 nil rows (new `setSourceCanonicalKey` persistence
+  API); M2 full backup-path threading (projection/entry/collector/
+  makeRemoteOnlyRecord/remote-only-insert/materialize-re-attach); M3 source hash
+  offloaded to `Task.detached`; M4 source hash computed before conversion; M5
+  Phase-1 selective-restore existing-row backfill. Round 3 CLEAN.
