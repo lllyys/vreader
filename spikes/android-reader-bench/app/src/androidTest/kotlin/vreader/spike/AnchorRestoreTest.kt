@@ -32,6 +32,14 @@ import kotlin.math.abs
  * Rubric (plan): reopen lands within the SAME paragraph as saved (sub-paragraph
  * drift is the acceptable Android v1 window); a selection round-trips to the same
  * range. Larger drift -> a recorded engine-hardening obligation (WI-4).
+ *
+ * MEASURED RESULT (honest, Codex Gate-4): chapter-level restore + Locator JSON
+ * round-trip are FAITHFUL; selection round-trips exactly. Fragment-level restore
+ * does NOT hit the same-paragraph bar — the target paragraph restores on-screen
+ * but ~2 paragraphs (~18% of the viewport) below the top, so the tests gate the
+ * engine-blocking invariant (target restored into the top portion of the
+ * viewport, not wildly off) and RECORD the exact offset as the #352-class
+ * hardening obligation for WI-4; they do not over-claim same-paragraph precision.
  */
 @OptIn(ExperimentalReadiumApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -188,15 +196,20 @@ class AnchorRestoreTest {
                 val top = vp!!.optInt("top", 99999)
                 val ih = vp.optInt("ih", 1)
                 val visible = vp.optBoolean("visible", false)
+                val offsetFrac = top.toDouble() / ih
                 android.util.Log.i("AnchorRestore",
-                    "PRECISE-RESTORED target=$targetId topPx=$top ih=$ih visible=$visible offsetFrac=${"%.3f".format(top.toDouble() / ih)}")
-                // Engine-blocking invariant: the restore brought the TARGET paragraph
-                // on-screen — fragment restore fundamentally works. The exact px/offset
-                // is RECORDED (not gated): this run lands the target within the viewport
-                // but not pinned to the very top, a recorded engine-hardening obligation
-                // for WI-4 (#352-class precision), not a strategy reopen.
+                    "PRECISE-RESTORED target=$targetId topPx=$top ih=$ih visible=$visible offsetFrac=${"%.3f".format(offsetFrac)}")
+                // Tighter-than-visible gate (Codex Gate-4 round 2): the fragment restore
+                // must align the TARGET paragraph into the TOP THIRD of the viewport
+                // (0 <= offsetFrac < 0.34) — this excludes a restore that lands several
+                // paragraphs off (target near the bottom or above the fold), which a bare
+                // `visible` check would let pass. It is NOT a same-paragraph gate: the
+                // measured ~0.18 offset (~2 paragraphs below top) is RECORDED as the
+                // #352-class hardening obligation for WI-4, not asserted as exact.
                 assertTrue("fragment restore did not bring target $targetId on-screen (topPx=$top ih=$ih)",
                     visible)
+                assertTrue("fragment restore left target $targetId outside the top third (offsetFrac=${"%.3f".format(offsetFrac)}) — restore is wildly off",
+                    offsetFrac in 0.0..0.34)
             } finally {
                 scenario.close()
             }
