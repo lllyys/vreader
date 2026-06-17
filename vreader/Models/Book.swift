@@ -54,6 +54,16 @@ final class Book {
     /// the canonical extension. New imports always populate this from the source URL.
     var originalExtension: String?
 
+    /// Cross-platform CANONICAL identity for converted-Kindle books (SchemaV10,
+    /// feature #108): `azw3:{sha256_of_source}:{source_byte_count}` — the SHA-256
+    /// of the ORIGINAL `.azw3`/`.mobi`/`.prc` bytes (per
+    /// `contracts/identity/DECISION.md`). The converted-EPUB `fingerprintKey` is
+    /// the platform-local primary key (drives rendering + the blob-identity
+    /// invariant); this is the platform-neutral identity for cross-device/Android
+    /// dedup. Nil for native (non-converted) imports AND for books imported before
+    /// #108 (their source bytes were discarded → un-re-keyable, grandfathered).
+    var sourceCanonicalKey: String?
+
     // MARK: - File State (SchemaV6, feature #47)
 
     /// Raw value of BookFileState. Defaults to "local" so existing rows upgraded
@@ -120,7 +130,8 @@ final class Book {
         addedAt: Date = Date(),
         isFavorite: Bool = false,
         tags: [String] = [],
-        originalExtension: String? = nil
+        originalExtension: String? = nil,
+        sourceCanonicalKey: String? = nil
     ) {
         self.fingerprintKey = fingerprint.canonicalKey
         self.fingerprint = fingerprint
@@ -136,6 +147,7 @@ final class Book {
         self.isFavorite = isFavorite
         self.tags = tags
         self.originalExtension = originalExtension
+        self.sourceCanonicalKey = sourceCanonicalKey
         self.bookmarks = []
         self.highlights = []
         self.annotations = []

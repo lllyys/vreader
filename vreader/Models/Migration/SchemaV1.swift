@@ -77,16 +77,18 @@ enum SchemaV1: VersionedSchema {
 /// infers the column addition automatically.
 enum VReaderMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self]
     }
 
     static var stages: [MigrationStage] {
-        // No explicit stages — every shipped schema change to date is additive
-        // (lightweight). Feature #109's NFC locator-key recompute is NOT a
-        // migration stage: it changes no entity shape, so SwiftData's
-        // hash-based matcher cannot distinguish a would-be V-next from V9 and a
-        // custom stage never fires. It runs instead as a one-shot launch
-        // backfill — see `LocatorKeyBackfillMigration`.
+        // No explicit stages — every shipped schema change is additive
+        // (lightweight). V9→V10 (feature #108) adds the optional
+        // `Book.sourceCanonicalKey` column — a genuine entity-shape change, so
+        // SwiftData's lightweight migration fires automatically (no custom
+        // stage). Feature #109's NFC locator-key recompute is, by contrast, NOT
+        // a migration stage: it changes no entity shape, so a custom stage could
+        // never fire — it runs as a one-shot launch backfill
+        // (`LocatorKeyBackfillMigration`).
         []
     }
 }

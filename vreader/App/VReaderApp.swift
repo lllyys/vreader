@@ -82,7 +82,7 @@ struct VReaderApp: App {
         #endif
 
         do {
-            let schema = Schema(SchemaV9.models)
+            let schema = Schema(SchemaV10.models)
 
             #if DEBUG
             // Use in-memory store for UI testing to ensure clean state

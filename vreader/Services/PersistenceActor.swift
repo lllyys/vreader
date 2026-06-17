@@ -64,6 +64,10 @@ struct BookRecord: Sendable, Equatable {
     /// Original file extension at import time (e.g. "mobi" for AZW3-canonical books).
     /// Optional for legacy callers; set on new imports from the source URL.
     let originalExtension: String?
+    /// Cross-platform canonical identity for converted-Kindle books (feature #108):
+    /// `azw3:{sha256_of_source}:{source_byte_count}`. Nil for native imports and
+    /// pre-#108 books. Set by `BookImporter` when convert-on-import runs (WI-2).
+    let sourceCanonicalKey: String?
     /// When the book was last opened. Read-only mirror of Book.lastOpenedAt;
     /// set by reader open flows, not by insertBook.
     let lastOpenedAt: Date?
@@ -87,6 +91,7 @@ struct BookRecord: Sendable, Equatable {
         detectedEncoding: String?,
         addedAt: Date,
         originalExtension: String? = nil,
+        sourceCanonicalKey: String? = nil,
         lastOpenedAt: Date? = nil,
         fileState: BookFileState = .local,
         blobPath: String? = nil
@@ -100,6 +105,7 @@ struct BookRecord: Sendable, Equatable {
         self.detectedEncoding = detectedEncoding
         self.addedAt = addedAt
         self.originalExtension = originalExtension
+        self.sourceCanonicalKey = sourceCanonicalKey
         self.lastOpenedAt = lastOpenedAt
         self.fileState = fileState
         self.blobPath = blobPath
@@ -159,7 +165,8 @@ actor PersistenceActor: BookPersisting {
             coverImagePath: record.coverImagePath,
             provenance: record.provenance,
             addedAt: record.addedAt,
-            originalExtension: record.originalExtension
+            originalExtension: record.originalExtension,
+            sourceCanonicalKey: record.sourceCanonicalKey
         )
         book.detectedEncoding = record.detectedEncoding
         // Feature #47 WI-2: write fileState/blobPath if the record overrides
@@ -241,6 +248,7 @@ actor PersistenceActor: BookPersisting {
             detectedEncoding: book.detectedEncoding,
             addedAt: book.addedAt,
             originalExtension: book.originalExtension,
+            sourceCanonicalKey: book.sourceCanonicalKey,
             lastOpenedAt: book.lastOpenedAt,
             fileState: BookFileState(rawValue: book.fileState) ?? .local,
             blobPath: book.blobPath
