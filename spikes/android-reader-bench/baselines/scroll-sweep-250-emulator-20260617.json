@@ -2,75 +2,232 @@
   "corpusBytes": 19381838,
   "spineCount": 1042,
   "chaptersTraversed": 250,
-  "frameCount": 17951,
-  "jankFrames": 310,
-  "jankPercent": 1.7269232911815497,
+  "scrollAdvances": 1000,
+  "scrollModeVerified": true,
+  "firstProgression": 0,
+  "lastProgression": 0.2288926094235829,
+  "progressionDelta": 0.2288926094235829,
+  "frameCount": 14166,
+  "jankFrames": 25,
+  "jankPercent": 0.17647889312438234,
   "frameMsP50": 16.666666,
   "frameMsP90": 16.666666,
-  "frameMsP99": 33.333332,
-  "frameMsMax": 66.666664,
-  "pssFirstKb": 167226,
-  "pssLastKb": 193373,
-  "pssMaxKb": 193373,
-  "pssGrowthKb": 26147,
-  "readerCrashes": 0,
-  "blankFrames": 0,
-  "wallClockMs": 305292,
+  "frameMsP99": 16.666666,
+  "frameMsMax": 83.33333,
+  "totalPssFirstKb": 298933,
+  "totalPssLastKb": 952536,
+  "totalPssMaxKb": 1045804,
+  "totalPssGrowthKb": 653603,
+  "rendererPssMaxKb": 853091,
+  "wallClockMs": 307550,
   "mem": [
     {
       "chapter": 0,
-      "pssKb": 167226,
-      "nativeHeapKb": 24693
+      "hostPssKb": 170205,
+      "rendererPssKb": 128728,
+      "totalPssKb": 298933,
+      "nativeHeapKb": 25417,
+      "processCount": 3
     },
     {
-      "chapter": 25,
-      "pssKb": 180970,
-      "nativeHeapKb": 24763
+      "chapter": 10,
+      "hostPssKb": 177395,
+      "rendererPssKb": 303464,
+      "totalPssKb": 480859,
+      "nativeHeapKb": 24767,
+      "processCount": 3
+    },
+    {
+      "chapter": 20,
+      "hostPssKb": 175764,
+      "rendererPssKb": 506459,
+      "totalPssKb": 682223,
+      "nativeHeapKb": 25570,
+      "processCount": 3
+    },
+    {
+      "chapter": 30,
+      "hostPssKb": 178978,
+      "rendererPssKb": 567902,
+      "totalPssKb": 746880,
+      "nativeHeapKb": 24829,
+      "processCount": 3
+    },
+    {
+      "chapter": 40,
+      "hostPssKb": 214404,
+      "rendererPssKb": 620731,
+      "totalPssKb": 835135,
+      "nativeHeapKb": 24879,
+      "processCount": 3
     },
     {
       "chapter": 50,
-      "pssKb": 176442,
-      "nativeHeapKb": 24810
+      "hostPssKb": 192298,
+      "rendererPssKb": 643449,
+      "totalPssKb": 835747,
+      "nativeHeapKb": 24884,
+      "processCount": 3
     },
     {
-      "chapter": 75,
-      "pssKb": 192037,
-      "nativeHeapKb": 24866
+      "chapter": 60,
+      "hostPssKb": 173494,
+      "rendererPssKb": 701805,
+      "totalPssKb": 875299,
+      "nativeHeapKb": 25625,
+      "processCount": 3
+    },
+    {
+      "chapter": 70,
+      "hostPssKb": 165454,
+      "rendererPssKb": 726953,
+      "totalPssKb": 892407,
+      "nativeHeapKb": 24959,
+      "processCount": 3
+    },
+    {
+      "chapter": 80,
+      "hostPssKb": 168190,
+      "rendererPssKb": 756969,
+      "totalPssKb": 925159,
+      "nativeHeapKb": 24964,
+      "processCount": 3
+    },
+    {
+      "chapter": 90,
+      "hostPssKb": 169154,
+      "rendererPssKb": 790185,
+      "totalPssKb": 959339,
+      "nativeHeapKb": 24986,
+      "processCount": 3
     },
     {
       "chapter": 100,
-      "pssKb": 191131,
-      "nativeHeapKb": 24878
+      "hostPssKb": 192780,
+      "rendererPssKb": 820339,
+      "totalPssKb": 1013119,
+      "nativeHeapKb": 24898,
+      "processCount": 3
     },
     {
-      "chapter": 125,
-      "pssKb": 177010,
-      "nativeHeapKb": 24953
+      "chapter": 110,
+      "hostPssKb": 184750,
+      "rendererPssKb": 774521,
+      "totalPssKb": 959271,
+      "nativeHeapKb": 24908,
+      "processCount": 3
+    },
+    {
+      "chapter": 120,
+      "hostPssKb": 165894,
+      "rendererPssKb": 805385,
+      "totalPssKb": 971279,
+      "nativeHeapKb": 24979,
+      "processCount": 3
+    },
+    {
+      "chapter": 130,
+      "hostPssKb": 174074,
+      "rendererPssKb": 821513,
+      "totalPssKb": 995587,
+      "nativeHeapKb": 25010,
+      "processCount": 3
+    },
+    {
+      "chapter": 140,
+      "hostPssKb": 173014,
+      "rendererPssKb": 849217,
+      "totalPssKb": 1022231,
+      "nativeHeapKb": 25019,
+      "processCount": 3
     },
     {
       "chapter": 150,
-      "pssKb": 179662,
-      "nativeHeapKb": 24884
+      "hostPssKb": 182834,
+      "rendererPssKb": 770631,
+      "totalPssKb": 953465,
+      "nativeHeapKb": 25643,
+      "processCount": 3
     },
     {
-      "chapter": 175,
-      "pssKb": 185700,
-      "nativeHeapKb": 24982
+      "chapter": 160,
+      "hostPssKb": 196176,
+      "rendererPssKb": 800793,
+      "totalPssKb": 996969,
+      "nativeHeapKb": 24968,
+      "processCount": 3
+    },
+    {
+      "chapter": 170,
+      "hostPssKb": 190820,
+      "rendererPssKb": 829557,
+      "totalPssKb": 1020377,
+      "nativeHeapKb": 24962,
+      "processCount": 3
+    },
+    {
+      "chapter": 180,
+      "hostPssKb": 180572,
+      "rendererPssKb": 763113,
+      "totalPssKb": 943685,
+      "nativeHeapKb": 25726,
+      "processCount": 3
+    },
+    {
+      "chapter": 190,
+      "hostPssKb": 189030,
+      "rendererPssKb": 809547,
+      "totalPssKb": 998577,
+      "nativeHeapKb": 25733,
+      "processCount": 3
     },
     {
       "chapter": 200,
-      "pssKb": 184538,
-      "nativeHeapKb": 24901
+      "hostPssKb": 196342,
+      "rendererPssKb": 828471,
+      "totalPssKb": 1024813,
+      "nativeHeapKb": 24955,
+      "processCount": 3
     },
     {
-      "chapter": 225,
-      "pssKb": 179497,
-      "nativeHeapKb": 24970
+      "chapter": 210,
+      "hostPssKb": 192713,
+      "rendererPssKb": 853091,
+      "totalPssKb": 1045804,
+      "nativeHeapKb": 25709,
+      "processCount": 3
+    },
+    {
+      "chapter": 220,
+      "hostPssKb": 191401,
+      "rendererPssKb": 764075,
+      "totalPssKb": 955476,
+      "nativeHeapKb": 24958,
+      "processCount": 3
+    },
+    {
+      "chapter": 230,
+      "hostPssKb": 181373,
+      "rendererPssKb": 789999,
+      "totalPssKb": 971372,
+      "nativeHeapKb": 24942,
+      "processCount": 3
+    },
+    {
+      "chapter": 240,
+      "hostPssKb": 185851,
+      "rendererPssKb": 840985,
+      "totalPssKb": 1026836,
+      "nativeHeapKb": 24955,
+      "processCount": 3
     },
     {
       "chapter": 250,
-      "pssKb": 193373,
-      "nativeHeapKb": 24928
+      "hostPssKb": 196471,
+      "rendererPssKb": 756065,
+      "totalPssKb": 952536,
+      "nativeHeapKb": 24960,
+      "processCount": 3
     }
   ]
 }

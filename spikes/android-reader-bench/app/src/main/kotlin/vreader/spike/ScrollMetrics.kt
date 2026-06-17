@@ -1,25 +1,33 @@
 package vreader.spike
 
-import android.app.ActivityManager
+import android.app.Instrumentation
 import android.content.Context
 import android.os.Debug
+import android.os.ParcelFileDescriptor
 import android.view.Choreographer
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Spike B (#105) WI-2 — in-process frame-timing + memory samplers. This is the
- * "macrobenchmark FrameTimingMetric or equivalent" the plan allows: the spike is
- * instrumentation-first / NOT UI-automation-driven (ADR-0001 R2), so we sample
- * Choreographer frame intervals on the main thread and process memory via
- * ActivityManager rather than driving a real device swipe under macrobenchmark.
+ * Spike B (#105) WI-2 — in-process frame-timing + (renderer-aware) memory
+ * samplers. This is the "macrobenchmark FrameTimingMetric or equivalent" the
+ * plan allows: the spike is instrumentation-first / NOT UI-automation-driven
+ * (ADR-0001 R2), so we sample Choreographer frame intervals and process memory
+ * directly rather than driving a real device swipe under macrobenchmark.
  */
 
-/** Records inter-frame intervals on the main thread between start() and stop(). */
+/**
+ * Records inter-frame intervals on the main thread, but ONLY while `active`
+ * (set around the animated-scroll windows). A Choreographer callback ticks every
+ * vsync whenever posted, so counting every interval — including the idle settle
+ * periods — would dilute the jank ratio with perfectly-on-budget idle frames
+ * (Codex Gate-4 High). Gating on `active` measures jank during actual scroll work.
+ */
 class FrameSampler : Choreographer.FrameCallback {
-    private val frameNanos = ArrayList<Long>(4096)
+    private val frameNanos = ArrayList<Long>(8192)
     private var lastNanos = 0L
     private var running = false
+    @Volatile private var active = false
 
     /** Call on the main thread. */
     fun start() {
@@ -31,41 +39,109 @@ class FrameSampler : Choreographer.FrameCallback {
     /** Call on the main thread. */
     fun stop() {
         running = false
+        active = false
         Choreographer.getInstance().removeFrameCallback(this)
     }
 
+    /** Begin/end counting frames; resets the delta baseline so the gap isn't counted. */
+    fun setActive(value: Boolean) {
+        active = value
+        lastNanos = 0L
+    }
+
     override fun doFrame(frameTimeNanos: Long) {
-        if (lastNanos != 0L) frameNanos.add(frameTimeNanos - lastNanos)
+        if (active && lastNanos != 0L) frameNanos.add(frameTimeNanos - lastNanos)
         lastNanos = frameTimeNanos
         if (running) Choreographer.getInstance().postFrameCallback(this)
     }
 
-    /** Inter-frame deltas in milliseconds (one per rendered frame after the first). */
+    /** Inter-frame deltas (ms) recorded during active scroll windows only. */
     fun intervalsMs(): List<Double> = frameNanos.map { it / 1_000_000.0 }
 }
 
-/** Total PSS (KB) for this process — the memory-trajectory signal. */
-fun samplePssKb(context: Context): Int {
-    val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-    val info = am.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid()))
-    return info.firstOrNull()?.totalPss ?: 0
+/**
+ * Renderer-aware memory probe. WebView Chromium renders in a separate sandboxed
+ * child process (named `<pkg>:sandboxed_process…`) — host-process PSS alone would
+ * NOT measure the renderer eviction that IS ADR-0001 Risk-2 (Codex Gate-4 High).
+ * Uses the instrumentation's UiAutomation shell (shell uid) to `dumpsys meminfo`
+ * every process whose name starts with our package: the main process plus its
+ * WebView renderer child. Reports host / renderer / total PSS separately.
+ */
+class MemoryProbe(private val instr: Instrumentation, ctx: Context) {
+    private val pkg = ctx.packageName
+
+    private fun shell(cmd: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(instr.uiAutomation.executeShellCommand(cmd))
+            .use { it.readBytes().decodeToString() }
+
+    private val totalPssRe = Regex("TOTAL PSS:\\s+(\\d+)")
+    private val totalRowRe = Regex("(?m)^\\s*TOTAL\\s+(\\d+)")
+
+    private fun pssKb(pid: Int): Int {
+        val out = shell("dumpsys meminfo --local $pid")
+        return totalPssRe.find(out)?.groupValues?.get(1)?.toIntOrNull()
+            ?: totalRowRe.find(out)?.groupValues?.get(1)?.toIntOrNull()
+            ?: 0
+    }
+
+    /**
+     * (processName, pid) for our host process plus the Chromium WebView renderer.
+     * The WebView renderer is a SHARED sandboxed process under the webview
+     * package's uid (`com.google.android.webview:sandboxed_process…`), NOT our
+     * package's uid — so a `startsWith(pkg)` filter misses it (Codex Gate-4 High).
+     * On this harness the benchmark app is the sole active WebView client, so that
+     * renderer's memory reflects our 250-chapter content; WI-4 records the caveat.
+     */
+    private fun appPids(): List<Pair<String, Int>> =
+        shell("ps -A -o PID -o NAME").lineSequence().mapNotNull { line ->
+            val parts = line.trim().split(Regex("\\s+"))
+            val name = parts.getOrNull(1) ?: return@mapNotNull null
+            if (parts.size >= 2 && (name == pkg || name.contains("sandboxed_process"))) {
+                parts[0].toIntOrNull()?.let { name to it }
+            } else null
+        }.toList()
+
+    fun sample(chapterIndex: Int): MemSample {
+        var host = 0
+        var renderer = 0
+        var procs = 0
+        for ((name, pid) in appPids()) {
+            val pss = pssKb(pid)
+            if (name == pkg) host += pss else renderer += pss
+            procs++
+        }
+        return MemSample(
+            chapterIndex = chapterIndex,
+            hostPssKb = host,
+            rendererPssKb = renderer,
+            totalPssKb = host + renderer,
+            nativeHeapKb = (Debug.getNativeHeapAllocatedSize() / 1024),
+            processCount = procs,
+        )
+    }
 }
 
-/** Native heap allocated bytes — cheap, sampled alongside PSS. */
-fun sampleNativeHeapBytes(): Long = Debug.getNativeHeapAllocatedSize()
-
 /** One sample of the memory trajectory at a sweep checkpoint. */
-data class MemSample(val chapterIndex: Int, val pssKb: Int, val nativeHeapKb: Long)
+data class MemSample(
+    val chapterIndex: Int,
+    val hostPssKb: Int,
+    val rendererPssKb: Int,
+    val totalPssKb: Int,
+    val nativeHeapKb: Long,
+    val processCount: Int,
+)
 
 /** Final benchmark result, serialized to JSON and pulled off-device. */
 data class BenchResult(
     val corpusBytes: Long,
     val spineCount: Int,
     val chaptersTraversed: Int,
+    val scrollAdvances: Int,
+    val scrollModeVerified: Boolean,
+    val firstProgression: Double,
+    val lastProgression: Double,
     val frameIntervalsMs: List<Double>,
     val mem: List<MemSample>,
-    val readerCrashes: Int,
-    val blankFrames: Int,
     val wallClockMs: Long,
 ) {
     private fun percentile(sorted: List<Double>, p: Double): Double {
@@ -82,16 +158,24 @@ data class BenchResult(
             mem.forEach {
                 put(JSONObject().apply {
                     put("chapter", it.chapterIndex)
-                    put("pssKb", it.pssKb)
+                    put("hostPssKb", it.hostPssKb)
+                    put("rendererPssKb", it.rendererPssKb)
+                    put("totalPssKb", it.totalPssKb)
                     put("nativeHeapKb", it.nativeHeapKb)
+                    put("processCount", it.processCount)
                 })
             }
         }
-        val pssVals = mem.map { it.pssKb }
+        val totals = mem.map { it.totalPssKb }
         return JSONObject().apply {
             put("corpusBytes", corpusBytes)
             put("spineCount", spineCount)
             put("chaptersTraversed", chaptersTraversed)
+            put("scrollAdvances", scrollAdvances)
+            put("scrollModeVerified", scrollModeVerified)
+            put("firstProgression", firstProgression)
+            put("lastProgression", lastProgression)
+            put("progressionDelta", lastProgression - firstProgression)
             put("frameCount", frameIntervalsMs.size)
             put("jankFrames", jank)
             put("jankPercent", if (frameIntervalsMs.isEmpty()) 0.0 else jank * 100.0 / frameIntervalsMs.size)
@@ -99,12 +183,11 @@ data class BenchResult(
             put("frameMsP90", percentile(sorted, 0.90))
             put("frameMsP99", percentile(sorted, 0.99))
             put("frameMsMax", sorted.lastOrNull() ?: 0.0)
-            put("pssFirstKb", pssVals.firstOrNull() ?: 0)
-            put("pssLastKb", pssVals.lastOrNull() ?: 0)
-            put("pssMaxKb", pssVals.maxOrNull() ?: 0)
-            put("pssGrowthKb", (pssVals.lastOrNull() ?: 0) - (pssVals.firstOrNull() ?: 0))
-            put("readerCrashes", readerCrashes)
-            put("blankFrames", blankFrames)
+            put("totalPssFirstKb", totals.firstOrNull() ?: 0)
+            put("totalPssLastKb", totals.lastOrNull() ?: 0)
+            put("totalPssMaxKb", totals.maxOrNull() ?: 0)
+            put("totalPssGrowthKb", (totals.lastOrNull() ?: 0) - (totals.firstOrNull() ?: 0))
+            put("rendererPssMaxKb", mem.maxOfOrNull { it.rendererPssKb } ?: 0)
             put("wallClockMs", wallClockMs)
             put("mem", memArr)
         }

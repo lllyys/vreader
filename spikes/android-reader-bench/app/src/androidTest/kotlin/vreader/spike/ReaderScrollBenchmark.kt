@@ -17,18 +17,17 @@ import org.readium.r2.shared.publication.Publication
 /**
  * Spike B (#105) WI-2 — instrumented scroll-sweep over the real 1042-chapter CJK
  * corpus (道诡异仙). Opens via Readium-Kotlin 3.3.0, hosts the EPUB navigator in
- * SCROLL mode in-process (no UI automation — ADR-0001 R2), and drives a
- * deterministic chapter-by-chapter sweep with animated intra-chapter scrolls so
- * the Choreographer frame sampler sees real scroll frames. Records frame timing
- * (jank %, p90/p99), memory trajectory (PSS / native heap — the eviction signal),
- * and chapter coverage; writes metrics.json for the host wrapper to pull.
+ * SCROLL mode in-process (no UI automation — ADR-0001 R2), drives a deterministic
+ * 250-chapter sweep with animated intra-chapter scrolls, and records frame timing
+ * (active-window only), renderer-aware memory trajectory (the eviction signal),
+ * and real forward-progress. Writes metrics.json for the host wrapper to pull.
  *
- * Hard asserts here are only the engine-BLOCKING invariants (opened, traversed,
- * frames rendered, didn't OOM). The scroll-smoothness / eviction-shape verdict
- * vs the iOS baseline is judged in WI-4 from the JSON — emulator frame timing is
- * variable, so gating the test on a 5%-jank threshold would flake for reasons
- * unrelated to Readium. The plan: memory/renderer FAIL is blocking; a scroll
- * miss is a hardening obligation.
+ * Hard asserts are the engine-BLOCKING invariants AND the validity guards the
+ * Gate-4 audit demanded: scroll mode actually took effect (not paginated
+ * fallback), real forward progress through the book (not just chapter jumps), and
+ * bounded TOTAL (host+renderer) PSS. The scroll-smoothness verdict vs the iOS
+ * baseline is judged in WI-4 from the JSON — emulator frame timing is variable,
+ * so gating on a 5%-jank threshold would flake for reasons unrelated to Readium.
  */
 @OptIn(ExperimentalReadiumApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -52,6 +51,14 @@ class ReaderScrollBenchmark {
         assertTrue("corpus missing at ${corpus.absolutePath} (push it first)", corpus.exists())
 
         val publication: Publication = runBlocking { ReaderOpener.open(ctx, corpus) }
+        try {
+            runSweep(publication, corpus)
+        } finally {
+            publication.close()
+        }
+    }
+
+    private fun runSweep(publication: Publication, corpus: java.io.File) {
         val spine = publication.readingOrder
         assertTrue("expected the 1000+-spine CJK corpus, got ${spine.size}", spine.size > 1000)
 
@@ -72,53 +79,85 @@ class ReaderScrollBenchmark {
             initialState = Lifecycle.State.RESUMED,
         )
 
-        lateinit var navigator: EpubNavigatorFragment
-        scenario.onFragment { navigator = it }
-        settle(1500) // first-resource render
+        try {
+            lateinit var navigator: EpubNavigatorFragment
+            scenario.onFragment { navigator = it }
+            settle(1500) // first-resource render
 
-        val sampler = FrameSampler()
-        val mem = ArrayList<MemSample>()
-        val started = System.currentTimeMillis()
-        mainSync { sampler.start() }
+            // Critical validity guard (Codex Gate-4): prove SCROLL mode actually
+            // took effect, not a paginated fallback. Readium's resolved
+            // `settings.scroll` is the authoritative signal (the applied
+            // EpubSettings after EpubPreferences(scroll=true)); combined with the
+            // progression-delta assert below it proves scroll mode + real movement.
+            val scrollModeVerified = navigator.settings.value.scroll
 
-        var traversed = 0
-        for (i in 0 until targetChapters) {
-            val locator = publication.locatorFromLink(spine[i]) ?: continue
-            var moved = false
-            mainSync { moved = navigator.go(locator, animated = false) }
-            if (moved) traversed++
-            settle(150) // chapter layout + resource load
-            repeat(scrollsPerChapter) {
-                mainSync { navigator.goForward(animated = true) } // smooth scroll → real frames
-                settle(220)
+            val sampler = FrameSampler()
+            val probe = MemoryProbe(instr, ctx)
+            val mem = ArrayList<MemSample>()
+            val started = System.currentTimeMillis()
+            mainSync { sampler.start() }
+
+            var traversed = 0
+            var scrollAdvances = 0
+            var firstProgression = -1.0
+            for (i in 0 until targetChapters) {
+                val locator = publication.locatorFromLink(spine[i]) ?: continue
+                var moved = false
+                mainSync { moved = navigator.go(locator, animated = false) } // jump (not sampled)
+                if (moved) traversed++
+                settle(150)
+                if (firstProgression < 0) {
+                    firstProgression = navigatorProgression(navigator)
+                }
+                repeat(scrollsPerChapter) {
+                    mainSync { sampler.setActive(true) }
+                    var adv = false
+                    mainSync { adv = navigator.goForward(animated = true) } // smooth scroll
+                    if (adv) scrollAdvances++
+                    settle(220) // real scroll frames captured here
+                    mainSync { sampler.setActive(false) }
+                }
+                if (i % 10 == 0) mem.add(probe.sample(i))
             }
-            if (i % 25 == 0) {
-                mem.add(MemSample(i, samplePssKb(ctx), sampleNativeHeapBytes() / 1024))
-            }
+            mem.add(probe.sample(targetChapters))
+            mainSync { sampler.stop() }
+            val lastProgression = navigatorProgression(navigator)
+
+            val result = BenchResult(
+                corpusBytes = corpus.length(),
+                spineCount = spine.size,
+                chaptersTraversed = traversed,
+                scrollAdvances = scrollAdvances,
+                scrollModeVerified = scrollModeVerified,
+                firstProgression = firstProgression.coerceAtLeast(0.0),
+                lastProgression = lastProgression,
+                frameIntervalsMs = sampler.intervalsMs(),
+                mem = mem,
+                wallClockMs = System.currentTimeMillis() - started,
+            )
+            val json = result.toJson()
+            java.io.File(ctx.getExternalFilesDir(null), "metrics.json").writeText(json.toString(2))
+            android.util.Log.i("ReaderBench", "METRICS $json")
+
+            // Engine-blocking invariants + Gate-4 validity guards.
+            assertTrue("scroll mode did not take effect (paginated fallback?)", scrollModeVerified)
+            assertTrue("traversed only $traversed chapters (<200)", traversed >= 200)
+            assertTrue("no scroll advances accepted by navigator", scrollAdvances > 0)
+            assertTrue("no real forward progress: $firstProgression -> $lastProgression",
+                lastProgression > firstProgression)
+            assertTrue("no frames rendered during active scroll", result.frameIntervalsMs.isNotEmpty())
+            assertTrue("memory not sampled", mem.size >= 5)
+            val totalLast = mem.last().totalPssKb
+            val rendererMax = mem.maxOfOrNull { it.rendererPssKb } ?: 0
+            assertTrue("WebView renderer memory never captured (host-only = unsound de-risk)",
+                rendererMax > 0)
+            assertTrue("total PSS ballooned to ${totalLast}KB (OOM risk)", totalLast in 1..2_500_000)
+        } finally {
+            scenario.close()
         }
-        mem.add(MemSample(targetChapters, samplePssKb(ctx), sampleNativeHeapBytes() / 1024))
-        mainSync { sampler.stop() }
-
-        val result = BenchResult(
-            corpusBytes = corpus.length(),
-            spineCount = spine.size,
-            chaptersTraversed = traversed,
-            frameIntervalsMs = sampler.intervalsMs(),
-            mem = mem,
-            readerCrashes = 0,   // host wrapper computes from logcat
-            blankFrames = 0,
-            wallClockMs = System.currentTimeMillis() - started,
-        )
-        val json = result.toJson()
-        java.io.File(ctx.getExternalFilesDir(null), "metrics.json")
-            .writeText(json.toString(2))
-        android.util.Log.i("ReaderBench", "METRICS ${json}")
-
-        // Engine-blocking invariants only (see class doc).
-        assertTrue("traversed only $traversed chapters (<200)", traversed >= 200)
-        assertTrue("no frames rendered during sweep", result.frameIntervalsMs.isNotEmpty())
-        assertTrue("memory not sampled", mem.size >= 5)
-        val pssLast = mem.last().pssKb
-        assertTrue("PSS ballooned to ${pssLast}KB (OOM risk)", pssLast in 1..1_500_000)
     }
+
+    /** Whole-publication progression (0..1), or 0 if unavailable. */
+    private fun navigatorProgression(nav: EpubNavigatorFragment): Double =
+        nav.currentLocator.value.locations.totalProgression ?: 0.0
 }
