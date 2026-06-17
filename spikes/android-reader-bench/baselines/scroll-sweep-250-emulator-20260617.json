@@ -1,0 +1,76 @@
+{
+  "corpusBytes": 19381838,
+  "spineCount": 1042,
+  "chaptersTraversed": 250,
+  "frameCount": 17951,
+  "jankFrames": 310,
+  "jankPercent": 1.7269232911815497,
+  "frameMsP50": 16.666666,
+  "frameMsP90": 16.666666,
+  "frameMsP99": 33.333332,
+  "frameMsMax": 66.666664,
+  "pssFirstKb": 167226,
+  "pssLastKb": 193373,
+  "pssMaxKb": 193373,
+  "pssGrowthKb": 26147,
+  "readerCrashes": 0,
+  "blankFrames": 0,
+  "wallClockMs": 305292,
+  "mem": [
+    {
+      "chapter": 0,
+      "pssKb": 167226,
+      "nativeHeapKb": 24693
+    },
+    {
+      "chapter": 25,
+      "pssKb": 180970,
+      "nativeHeapKb": 24763
+    },
+    {
+      "chapter": 50,
+      "pssKb": 176442,
+      "nativeHeapKb": 24810
+    },
+    {
+      "chapter": 75,
+      "pssKb": 192037,
+      "nativeHeapKb": 24866
+    },
+    {
+      "chapter": 100,
+      "pssKb": 191131,
+      "nativeHeapKb": 24878
+    },
+    {
+      "chapter": 125,
+      "pssKb": 177010,
+      "nativeHeapKb": 24953
+    },
+    {
+      "chapter": 150,
+      "pssKb": 179662,
+      "nativeHeapKb": 24884
+    },
+    {
+      "chapter": 175,
+      "pssKb": 185700,
+      "nativeHeapKb": 24982
+    },
+    {
+      "chapter": 200,
+      "pssKb": 184538,
+      "nativeHeapKb": 24901
+    },
+    {
+      "chapter": 225,
+      "pssKb": 179497,
+      "nativeHeapKb": 24970
+    },
+    {
+      "chapter": 250,
+      "pssKb": 193373,
+      "nativeHeapKb": 24928
+    }
+  ]
+}
