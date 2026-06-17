@@ -139,6 +139,7 @@ class IdentityConformanceTest {
     @Test fun cacheKeyVectors() {
         val data = load("cache-key.json")
         var n = 0
+        val emitted = StringBuilder()
         for (v in data["vectors"]!!.jsonArray) {
             val o = v.jsonObject
             val got = Identity.lookupKey(
@@ -148,8 +149,11 @@ class IdentityConformanceTest {
                 o["promptVersion"]!!.jsonPrimitive.content,
             )
             assertEquals(o["expectedLookupKey"]!!.jsonPrimitive.content, got)
+            emitted.appendLine(got)
             n++
         }
         assertTrue(n > 0, "no cache-key vectors loaded")
+        val outDir = File(vectorsDir.parentFile, "conformance/.out").apply { mkdirs() }
+        File(outDir, "kotlin-cachekey.txt").writeText(emitted.toString())
     }
 }

@@ -27,9 +27,12 @@ run_kotlin() {
         # printing PASS would be a fail-open.
         echo "FAIL kotlin — no JDK 17 at $JAVA_HOME (install: brew install openjdk@17)"; rc=1; return
     fi
-    # Checked-in wrapper (host-independent, pinned Gradle), not a bare PATH
-    # `gradle` (Codex Gate-4 Medium).
-    ( cd "$ROOT/contracts/conformance/kotlin" && ./gradlew test --console=plain --no-daemon ) || rc=1
+    # `cleanTest test`: FORCE the test to re-run. Gradle marks `test` UP-TO-DATE
+    # when inputs are unchanged and SKIPS execution — which means the suite never
+    # writes its conformance/.out/*.txt and the cross-diff then fails on missing
+    # Kotlin output (bug #355 — caught by the .out-cleared cross-diff itself).
+    # Checked-in wrapper (host-independent, pinned Gradle), not a bare PATH `gradle`.
+    ( cd "$ROOT/contracts/conformance/kotlin" && ./gradlew cleanTest test --console=plain --no-daemon ) || rc=1
 }
 run_swift() {
     echo "== Swift conformance (vreaderTests/IdentityConformanceTests) =="
@@ -39,19 +42,20 @@ run_swift() {
 # Bug #355: byte-diff the two platforms' ACTUAL canonical Locator output (each
 # suite writes conformance/.out/<platform>-locator.txt). Both-vs-the-shared-vector
 # is transitive, but this is the DIRECT Swift-vs-Kotlin check the bug asks for.
-cross_diff() {
-    local sw="$ROOT/contracts/conformance/.out/swift-locator.txt"
-    local kt="$ROOT/contracts/conformance/.out/kotlin-locator.txt"
+cross_diff_one() { # <name> <basename>
+    local sw="$ROOT/contracts/conformance/.out/swift-$2.txt"
+    local kt="$ROOT/contracts/conformance/.out/kotlin-$2.txt"
     if [[ ! -f "$sw" || ! -f "$kt" ]]; then
-        echo "FAIL cross-diff — missing platform output ($([[ -f "$sw" ]] && echo swift✓ || echo swift✗) $([[ -f "$kt" ]] && echo kotlin✓ || echo kotlin✗))"
+        echo "FAIL cross-diff ($1) — missing platform output ($([[ -f "$sw" ]] && echo swift✓ || echo swift✗) $([[ -f "$kt" ]] && echo kotlin✓ || echo kotlin✗))"
         rc=1; return
     fi
-    if diff -u "$kt" "$sw" >/tmp/conformance-crossdiff.txt; then
-        echo "== cross-diff: Swift == Kotlin canonical Locator output (byte-identical) =="
+    if diff -u "$kt" "$sw" >"/tmp/conformance-crossdiff-$2.txt"; then
+        echo "== cross-diff ($1): Swift == Kotlin output (byte-identical) =="
     else
-        echo "FAIL cross-diff — Swift and Kotlin canonical output DIFFER:"; cat /tmp/conformance-crossdiff.txt; rc=1
+        echo "FAIL cross-diff ($1) — Swift and Kotlin output DIFFER:"; cat "/tmp/conformance-crossdiff-$2.txt"; rc=1
     fi
 }
+cross_diff() { cross_diff_one "Locator" "locator"; cross_diff_one "cache-key" "cachekey"; }
 
 case "$WHICH" in
     kotlin) run_kotlin ;;

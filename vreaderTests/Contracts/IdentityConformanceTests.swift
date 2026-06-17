@@ -137,6 +137,7 @@ struct IdentityConformanceTests {
         let json = try Self.loadJSON("cache-key.json")
         let vectors = try #require(json["vectors"] as? [[String: Any]])
         #expect(!vectors.isEmpty)
+        var emitted = ""
         for v in vectors {
             let key = ChapterTranslationRecord.lookupKey(
                 bookFingerprintKey: v["bookFingerprintKey"] as! String,
@@ -145,7 +146,14 @@ struct IdentityConformanceTests {
                 promptVersion: v["promptVersion"] as! String
             )
             #expect(key == v["expectedLookupKey"] as! String)
+            emitted += key + "\n"
         }
+        // Emit for the run.sh cross-diff (bug #355) — fail loud on write error.
+        let outDir = Self.vectorsDir().deletingLastPathComponent()
+            .appendingPathComponent("conformance/.out")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        try emitted.write(to: outDir.appendingPathComponent("swift-cachekey.txt"),
+                          atomically: true, encoding: .utf8)
     }
 }
 #endif
