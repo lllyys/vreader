@@ -148,8 +148,14 @@ class ReaderScrollBenchmark {
             assertTrue("memory not sampled", mem.size >= 5)
             val totalLast = mem.last().totalPssKb
             val rendererMax = mem.maxOfOrNull { it.rendererPssKb } ?: 0
+            val maxProcs = mem.maxOfOrNull { it.processCount } ?: 0
             assertTrue("WebView renderer memory never captured (host-only = unsound de-risk)",
                 rendererMax > 0)
+            // Attribution invariant (Codex Gate-4 round-3): exactly host + 1 of OUR
+            // renderers. >2 means a foreign WebView sandbox spawned mid-sweep and
+            // contaminated rendererPssKb — fail the run rather than report it as valid.
+            assertTrue("attributed $maxProcs procs (>2): a foreign WebView sandbox contaminated the run",
+                maxProcs <= 2)
             assertTrue("total PSS ballooned to ${totalLast}KB (OOM risk)", totalLast in 1..2_500_000)
         } finally {
             scenario.close()
