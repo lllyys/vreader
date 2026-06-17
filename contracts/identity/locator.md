@@ -58,7 +58,11 @@ the cross-platform hash diverges:
   `.nonFiniteProgression` and the Kotlin canonical reference throws. The
   canonical form is defined ONLY for validated locators; never silently omit a
   non-finite value (that would let an invalid locator canonicalize identically
-  to a valid missing-progression one).
+  to a valid missing-progression one). iOS additionally **repairs** at every
+  persistence boundary (feature #109 WI-2): each PersistenceActor write +
+  backup-restore decode runs `Locator.repairedForCanonicalization()` (nulls the
+  non-finite field) so an invalid input is stored as a valid locator rather than
+  re-introducing the collision.
 - **Float format** is POSIX/US-locale `%.6f`; **line endings** `\r\n`/`\r` → `\n`.
 
 ## `VReaderLocator` (the persisted envelope)
