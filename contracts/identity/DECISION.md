@@ -38,12 +38,29 @@ harness becomes required **only if** a future decision adopts the converted-EPUB
 hash as the cross-platform identity (it didn't); that is recorded as the follow-up
 below.
 
+## Implementation status (the contract is decided; iOS code is in transition)
+
+This file is the CONTRACT (the decided target). The iOS implementation does NOT
+yet match it: `BookImporter` (`kindleConvertOnImport`) currently fingerprints the
+**converted EPUB** and stores that as `fingerprintKey`. Closing that gap is the
+**source-bytes implementation** — tracked as a follow-up FEATURE, not done here —
+because it is migration-sensitive and interacts with the **blob-identity
+invariant** (backup/materializer verify `fingerprint == stored blob bytes`):
+source-bytes canonical identity implies either storing the **source** `.azw3` as
+the backup blob (re-fingerprinting it yields the source key), or a
+source-hash→converted-blob mapping. Existing converted-EPUB-keyed books need a
+grandfather/migration. Until that feature ships, iOS's converted-EPUB
+`fingerprintKey` is the *platform-local* key and there is no Android client to
+diverge from yet, so the gap is latent, not live.
+
 ## Follow-ups (for Phase 2/3, not blockers)
 
-1. **Source→converted mapping seam.** When Android imports a `.azw3`, persist the
-   source-bytes fingerprint as the canonical/backup identity and keep the
-   platform-local converted-EPUB fingerprint (if any) as a local detail. The
-   library/backup contracts key on the source hash.
+1. **Source-bytes implementation (the #354 obligation).** Make `BookImporter`
+   compute + persist the source-bytes canonical fingerprint for `.azw3`/`.mobi`/
+   `.prc`; reconcile the blob-identity invariant (store the source blob, or map
+   source-hash→converted-blob); grandfather/migrate existing converted-EPUB-keyed
+   books. Android imports compute the source-bytes key natively. The library/
+   backup contracts key on the source hash.
 2. **If** converted-EPUB cross-platform identity is ever wanted: port
    `MobiEPUBAssembler` + `ZIPWriter` to Kotlin byte-for-byte and stand up the
    Android-NDK libmobi determinism harness on a shared MOBI corpus.

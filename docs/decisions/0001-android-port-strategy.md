@@ -113,11 +113,15 @@ release-namespacing + a real contracts conformance lane.*
 
 ## Top risks to de-risk *before* any parity promise
 
-1. **Deterministic cross-platform identity.** `DocumentFingerprint` of a Kindle
-   book = hash of the **converted EPUB**, and there is no guarantee Swift vs Kotlin
-   Readium emit byte-identical Locators for the same position. → Prove Kindle
-   conversion + Readium locator round-trips on a **shared corpus** before promising
-   library/backup interop. This is the gate.
+1. **Deterministic cross-platform identity.** *(Pre-spike risk; RESOLVED by Spike
+   A #104 — see `contracts/identity/DECISION.md`.)* The original worry: iOS's
+   `DocumentFingerprint` of a Kindle book = hash of the **converted EPUB**, which
+   would couple two platforms' converter pipelines; plus no guarantee Swift vs
+   Kotlin Readium emit byte-identical Locators. **Decided:** converted-Kindle
+   canonical identity = the **SOURCE file bytes** (converter-independent;
+   converted-EPUB fingerprint is iOS-platform-local), and the engine-neutral
+   `Locator.canonicalJSON` round-trips byte-identically Swift↔Kotlin. The shared-
+   corpus conformance lane (`contracts/conformance/`) is the standing gate.
 2. **Android WebView reader hardening.** Spike on real 1000+-spine CJK books and
    measure scroll smoothness, memory/eviction, renderer stability, CFI/selection
    restore — *before* committing to the WebView-engine plan.

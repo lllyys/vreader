@@ -1,5 +1,8 @@
 # Feature #42 Phase 2 WI-4 — Kindle convert-on-import (BookImporter integration)
 
+> **⚠️ SUPERSEDED (cross-platform identity only) — bug #354 / `contracts/identity/DECISION.md` (2026-06-17).**
+> This plan's "identity = the converted EPUB's own fingerprint" decision (below, incl. the §"Decision #1" audit row) is correct for iOS LOCAL storage but is NO LONGER the canonical CROSS-PLATFORM identity. The canonical converted-Kindle identity is the **SOURCE-file bytes**; the converted-EPUB fingerprint is now classified iOS-platform-local. The BookImporter implementation + migration to compute/persist the source-bytes canonical key is tracked as the #354 follow-up. The rest of this plan (the conversion pipeline, render-format wiring) is unaffected.
+
 Gate-1 design for wiring the now-complete MOBI→EPUB converter (WI-1a..2c:
 `Libmobi.decodeParts` → `MobiEPUBAssembler.assemble` → `MobiEPUBConverter`)
 into the import flow. High-blast-radius (core import path), so this design is
@@ -59,6 +62,7 @@ own blob bytes). Everything else follows and simplifies.
    `fingerprintKey` is then the **converted EPUB's own** `DocumentFingerprint`
    (`epub:{sha256-of-the-epub}:{epub-byteCount}`) — it describes the stored blob,
    so backup upload / manifest / restore re-verification all round-trip
+   *(**SUPERSEDED for cross-platform identity by bug #354 / `contracts/identity/DECISION.md`**: the CANONICAL cross-platform identity for converted-Kindle books is the SOURCE-file bytes; this converted-EPUB `fingerprintKey` is now classified iOS-platform-local. The implementation change is tracked separately — see the #354 follow-up.)*
    correctly (the round-2 invariant that fingerprint == blob is preserved). Dedup
    works: same source → same EPUB → same key.
 2. **No render-format split, no identity schema migration.** *(Resolves round-2
