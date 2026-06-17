@@ -68,48 +68,46 @@ class AnchorRestoreTest {
         return scenario to nav
     }
 
+    /**
+     * Chapter-level locator restore + Locator JSON round-trip fidelity — the
+     * position-restore path backup/restore relies on. HONEST SCOPE (Codex Gate-4):
+     * Readium's scroll-mode `currentLocator.progression` is resource-coarse (stays
+     * ~0 within a resource), so this leg verifies CHAPTER (href) + progression +
+     * JSON-round-trip fidelity, NOT sub-chapter precision. Paragraph-level precision
+     * is measured separately in paragraphPreciseRestore via a fragment locator.
+     */
     @Test
-    fun anchorRestoreAndJsonRoundTrip() {
+    fun chapterRestoreAndJsonRoundTrip() {
         val pub = openFixture()
         try {
             val spine = pub.readingOrder
             assertEquals("mini-cjk should have 4 chapters", 4, spine.size)
             val (scenario, nav) = launchNavigator(pub)
             try {
-                // Scroll DEEP into chapter 3, capturing the DEEPEST position still
-                // within chapter 3 (a non-trivial within-chapter anchor, prog>0) —
-                // stop before goForward carries us into chapter 4.
-                mainSync { nav.go(pub.locatorFromLink(spine[2])!!, animated = false) }
-                settle(500)
-                val ch3 = nav.currentLocator.value.href.toString()
-                var saved = nav.currentLocator.value
-                for (i in 0 until 6) {
-                    mainSync { nav.goForward(animated = false) }
-                    settle(300)
-                    val cur = nav.currentLocator.value
-                    if (cur.href.toString() != ch3) break // left chapter 3
-                    if (progression(cur) > progression(saved)) saved = cur
-                }
-                android.util.Log.i("AnchorRestore", "SAVED href=${saved.href} prog=${progression(saved)} total=${saved.locations.totalProgression}")
+                assertTrue("scroll mode did not take effect (paginated fallback?)",
+                    nav.settings.value.scroll)
 
-                // Navigate AWAY to chapter 1 start.
+                mainSync { nav.go(pub.locatorFromLink(spine[2])!!, animated = false) }
+                settle(600)
+                val saved = nav.currentLocator.value
+                android.util.Log.i("AnchorRestore", "SAVED href=${saved.href} prog=${progression(saved)} total=${saved.locations.totalProgression}")
+                assertEquals("did not land in chapter 3", "OEBPS/chapter3.xhtml", saved.href.toString())
+
+                // Navigate AWAY to chapter 1.
                 mainSync { nav.go(pub.locatorFromLink(spine[0])!!, animated = false) }
                 settle(500)
-                val away = nav.currentLocator.value
-                assertNotEquals("navigate-away did not change chapter", saved.href, away.href)
+                assertNotEquals("navigate-away did not change chapter", saved.href, nav.currentLocator.value.href)
 
-                // RESTORE via the saved locator (the #349/#352 analogue).
+                // RESTORE via the saved locator (the #349/#352 chapter-restore analogue).
                 mainSync { nav.go(saved, animated = false) }
                 settle(600)
                 val restored = nav.currentLocator.value
-                val drift = abs(progression(restored) - progression(saved))
-                android.util.Log.i("AnchorRestore", "RESTORED href=${restored.href} prog=${progression(restored)} drift=$drift")
+                android.util.Log.i("AnchorRestore", "RESTORED href=${restored.href} prog=${progression(restored)}")
                 assertEquals("restore landed in the wrong chapter", saved.href.toString(), restored.href.toString())
-                // 24 paragraphs/chapter -> ~0.042 progression each; <0.06 = within ~1 paragraph.
-                assertTrue("anchor drift $drift exceeds one-paragraph window (saved=${progression(saved)} restored=${progression(restored)})",
-                    drift < 0.06)
+                assertEquals("progression not preserved on restore",
+                    progression(saved), progression(restored), 1e-6)
 
-                // Locator JSON round-trip — the save->JSON->restore path backup/restore relies on.
+                // Locator JSON round-trip — the save->JSON->restore path backup relies on.
                 val json = saved.toJSON().toString()
                 val parsed = Locator.fromJSON(JSONObject(json))
                 assertTrue("Locator.fromJSON returned null for $json", parsed != null)
@@ -119,15 +117,13 @@ class AnchorRestoreTest {
                 assertEquals("totalProgression lost in JSON round-trip",
                     saved.locations.totalProgression, parsed.locations.totalProgression)
 
-                // Navigate to the DESERIALIZED locator -> same paragraph as saved.
+                // Navigate to the DESERIALIZED locator -> same chapter as saved.
                 mainSync { nav.go(parsed, animated = false) }
                 settle(600)
                 val afterJson = nav.currentLocator.value
-                val jsonDrift = abs(progression(afterJson) - progression(saved))
-                android.util.Log.i("AnchorRestore", "AFTER-JSON href=${afterJson.href} prog=${progression(afterJson)} drift=$jsonDrift")
+                android.util.Log.i("AnchorRestore", "AFTER-JSON href=${afterJson.href} prog=${progression(afterJson)}")
                 assertEquals("JSON-restored locator landed in wrong chapter",
                     saved.href.toString(), afterJson.href.toString())
-                assertTrue("JSON-restore anchor drift $jsonDrift exceeds one-paragraph window", jsonDrift < 0.06)
             } finally {
                 scenario.close()
             }
@@ -136,22 +132,27 @@ class AnchorRestoreTest {
         }
     }
 
-    /** JS: id of the <p> whose top is nearest the viewport top (0 = at the top). */
-    private fun topParagraphId(nav: EpubNavigatorFragment): String? =
-        runBlocking(Dispatchers.Main) {
+    /** JS: the target paragraph's own viewport placement after restore — top px from
+     *  the viewport top, plus whether it's on-screen. This measures where the RESTORE
+     *  TARGET landed (Codex Gate-4 fix), not a nearest-top-paragraph proxy. */
+    private fun targetViewport(nav: EpubNavigatorFragment, id: String): JSONObject? {
+        val raw = runBlocking(Dispatchers.Main) {
             nav.evaluateJavascript(
-                "(function(){var ps=document.querySelectorAll('p[id]');var best=null,bt=1e9;" +
-                    "for(var i=0;i<ps.length;i++){var t=Math.abs(ps[i].getBoundingClientRect().top);" +
-                    "if(t<bt){bt=t;best=ps[i].id;}}return best;})()"
+                "(function(){var el=document.getElementById('$id');if(!el)return 'null';" +
+                    "var r=el.getBoundingClientRect();var ih=window.innerHeight;" +
+                    "return JSON.stringify({top:Math.round(r.top),ih:ih," +
+                    "visible:(r.top<ih&&r.bottom>0)});})()"
             )
-        }?.trim()?.trim('"')
+        }?.trim()?.trim('"')?.replace("\\\"", "\"") ?: return null
+        return runCatching { JSONObject(raw) }.getOrNull()
+    }
 
     /**
      * Paragraph-precise restore (the real #352 bar): save a PARAGRAPH-precise
      * locator derived from a text selection on a deep paragraph, navigate away,
-     * restore, and confirm the navigator lands back on that exact paragraph.
-     * Resource-progression restore (above) is faithful but coarse; this proves
-     * Readium-Kotlin restores to the fragment level a saved highlight/CFI needs.
+     * restore, and measure where the TARGET PARAGRAPH itself landed in the viewport.
+     * Chapter restore (above) is faithful but coarse; this is the fragment-level
+     * probe a saved highlight/CFI needs.
      */
     @Test
     fun paragraphPreciseRestore() {
@@ -174,26 +175,28 @@ class AnchorRestoreTest {
                 settle(400)
                 val saved = runBlocking(Dispatchers.Main) { nav.currentSelection() }?.locator
                 assertTrue("no selection locator for $targetId", saved != null)
-                android.util.Log.i("AnchorRestore", "PRECISE-SAVED text=${saved!!.text.highlight?.take(12)} prog=${progression(saved)}")
+                android.util.Log.i("AnchorRestore", "PRECISE-SAVED text=${saved!!.text.highlight?.take(12)}")
 
                 // Navigate AWAY, then restore via the paragraph-precise locator.
                 mainSync { nav.go(pub.locatorFromLink(spine[0])!!, animated = false) }
                 settle(500)
                 mainSync { nav.go(saved, animated = false) }
                 settle(700)
-                val top = topParagraphId(nav)
-                val topIdx = top?.substringAfter("p")?.toIntOrNull()
-                val paraDrift = if (topIdx != null) abs(topIdx - 18) else 999
+                // Measure the TARGET paragraph's own viewport placement (sound signal).
+                val vp = targetViewport(nav, targetId)
+                assertTrue("could not measure target $targetId viewport", vp != null)
+                val top = vp!!.optInt("top", 99999)
+                val ih = vp.optInt("ih", 1)
+                val visible = vp.optBoolean("visible", false)
                 android.util.Log.i("AnchorRestore",
-                    "PRECISE-RESTORED topParagraph=$top (target=$targetId) paragraphDrift=$paraDrift")
-                // Engine-blocking invariant: restore lands in the RIGHT chapter and a
-                // coarse window — proves fragment-restore fundamentally works. The
-                // EXACT same-paragraph bar is recorded, not gated: this run measured a
-                // ~2-paragraph drift on CJK, which the plan classifies as a recorded
-                // engine-hardening obligation (WI-4), not a strategy reopen.
-                assertTrue("restored paragraph $top is not in chapter 3", top?.startsWith("c3") == true)
-                assertTrue("paragraph restore drift $paraDrift too large (>5) — restore broken",
-                    paraDrift <= 5)
+                    "PRECISE-RESTORED target=$targetId topPx=$top ih=$ih visible=$visible offsetFrac=${"%.3f".format(top.toDouble() / ih)}")
+                // Engine-blocking invariant: the restore brought the TARGET paragraph
+                // on-screen — fragment restore fundamentally works. The exact px/offset
+                // is RECORDED (not gated): this run lands the target within the viewport
+                // but not pinned to the very top, a recorded engine-hardening obligation
+                // for WI-4 (#352-class precision), not a strategy reopen.
+                assertTrue("fragment restore did not bring target $targetId on-screen (topPx=$top ih=$ih)",
+                    visible)
             } finally {
                 scenario.close()
             }
@@ -226,15 +229,16 @@ class AnchorRestoreTest {
                 val highlight = selection?.locator?.text?.highlight
                 android.util.Log.i("AnchorRestore", "SELECTION jsRead=${read?.take(12)} currentSelection=${highlight?.take(12)}")
 
-                // The reliable, CU-free assertion: the navigator's WebView content DOM
-                // is reachable and the known paragraph round-trips through JS. Whether
-                // Readium surfaces a *programmatically* injected selection via
-                // currentSelection() is recorded (informational) for WI-4, since
-                // Readium's selection observer is built around user gestures.
+                // DOM is reachable (sanity), THEN the load-bearing claim: Readium
+                // surfaces the selection via currentSelection() with the exact
+                // paragraph text (Codex Gate-4 — was unasserted before).
                 assertTrue("could not reach the navigator content DOM (read=$read)",
                     read != null && read != "NOELEM")
-                assertTrue("selected paragraph text mismatch (read=$read)",
-                    read!!.contains(expected))
+                assertTrue("DOM read mismatch (read=$read)", read!!.contains(expected))
+                assertTrue("currentSelection() did not surface the selection (got null)",
+                    highlight != null)
+                assertTrue("currentSelection highlight '$highlight' missing expected '$expected'",
+                    highlight!!.contains(expected))
             } finally {
                 scenario.close()
             }

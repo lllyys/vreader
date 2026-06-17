@@ -96,18 +96,25 @@ NAV = f"""<?xml version="1.0" encoding="UTF-8"?>
 </html>
 """
 
+FIXED_DATE = (1980, 1, 1, 0, 0, 0)  # deterministic: no local wall-clock in the binary
+
+def _zi(name, stored=False):
+    info = zipfile.ZipInfo(name, date_time=FIXED_DATE)
+    info.compress_type = zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED
+    return info
+
 def main():
     if os.path.exists(OUT):
         os.remove(OUT)
-    with zipfile.ZipFile(OUT, "w", zipfile.ZIP_DEFLATED) as z:
+    # Fixed entry order + fixed timestamps -> byte-identical on regeneration.
+    with zipfile.ZipFile(OUT, "w") as z:
         # mimetype MUST be first and STORED (uncompressed) per EPUB OCF.
-        z.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
-                   compress_type=zipfile.ZIP_STORED)
-        z.writestr("META-INF/container.xml", CONTAINER)
-        z.writestr("OEBPS/content.opf", OPF)
-        z.writestr("OEBPS/nav.xhtml", NAV)
+        z.writestr(_zi("mimetype", stored=True), "application/epub+zip")
+        z.writestr(_zi("META-INF/container.xml"), CONTAINER)
+        z.writestr(_zi("OEBPS/content.opf"), OPF)
+        z.writestr(_zi("OEBPS/nav.xhtml"), NAV)
         for c in range(1, 5):
-            z.writestr(f"OEBPS/chapter{c}.xhtml", chapter_xhtml(c, CHAPTERS[c - 1]))
+            z.writestr(_zi(f"OEBPS/chapter{c}.xhtml"), chapter_xhtml(c, CHAPTERS[c - 1]))
     print(f"wrote {OUT} ({os.path.getsize(OUT)} bytes), 4 chapters x {PARAS_PER_CHAPTER} paragraphs")
 
 if __name__ == "__main__":
