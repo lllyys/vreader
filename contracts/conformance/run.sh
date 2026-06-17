@@ -32,10 +32,27 @@ run_swift() {
     ( cd "$ROOT" && scripts/run-tests.sh vreaderTests/IdentityConformanceTests ) || rc=1
 }
 
+# Bug #355: byte-diff the two platforms' ACTUAL canonical Locator output (each
+# suite writes conformance/.out/<platform>-locator.txt). Both-vs-the-shared-vector
+# is transitive, but this is the DIRECT Swift-vs-Kotlin check the bug asks for.
+cross_diff() {
+    local sw="$ROOT/contracts/conformance/.out/swift-locator.txt"
+    local kt="$ROOT/contracts/conformance/.out/kotlin-locator.txt"
+    if [[ ! -f "$sw" || ! -f "$kt" ]]; then
+        echo "FAIL cross-diff — missing platform output ($([[ -f "$sw" ]] && echo swift✓ || echo swift✗) $([[ -f "$kt" ]] && echo kotlin✓ || echo kotlin✗))"
+        rc=1; return
+    fi
+    if diff -u "$kt" "$sw" >/tmp/conformance-crossdiff.txt; then
+        echo "== cross-diff: Swift == Kotlin canonical Locator output (byte-identical) =="
+    else
+        echo "FAIL cross-diff — Swift and Kotlin canonical output DIFFER:"; cat /tmp/conformance-crossdiff.txt; rc=1
+    fi
+}
+
 case "$WHICH" in
     kotlin) run_kotlin ;;
     swift)  run_swift ;;
-    both)   run_kotlin; run_swift ;;
+    both)   run_kotlin; run_swift; [[ "$rc" -eq 0 ]] && cross_diff ;;
     *) echo "usage: run.sh [both|kotlin|swift]"; exit 2 ;;
 esac
 [[ "$rc" -eq 0 ]] && echo "CONFORMANCE RESULT: PASS" || echo "CONFORMANCE RESULT: FAIL"

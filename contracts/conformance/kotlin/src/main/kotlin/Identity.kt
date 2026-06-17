@@ -84,25 +84,36 @@ object CanonicalLocator {
         textQuote: String? = null,
         totalProgression: Double? = null,
     ): String {
+        // Non-finite progression is INVALID (Swift Locator.validate() rejects it).
+        // REJECT rather than silently omit, so an invalid locator can't canonicalize
+        // identically to a valid missing-progression one (bug #356).
+        require(progression == null || progression.isFinite()) { "non-finite progression is invalid" }
+        require(totalProgression == null || totalProgression.isFinite()) { "non-finite totalProgression is invalid" }
         val pairs = ArrayList<Pair<String, String>>()
         pairs.add("bookFingerprint.contentSHA256" to jsonQuoted(contentSHA256))
         pairs.add("bookFingerprint.fileByteCount" to fileByteCount.toString())
         pairs.add("bookFingerprint.format" to jsonQuoted(format))
-        if (cfi != null) pairs.add("cfi" to jsonQuoted(cfi))
+        // String fields NFC-normalized before escaping (bug #356) — must match Swift
+        // `precomposedStringWithCanonicalMapping` so NFD/NFC inputs hash identically.
+        if (cfi != null) pairs.add("cfi" to jsonQuoted(nfc(cfi)))
         if (charOffsetUTF16 != null) pairs.add("charOffsetUTF16" to charOffsetUTF16.toString())
         if (charRangeEndUTF16 != null) pairs.add("charRangeEndUTF16" to charRangeEndUTF16.toString())
         if (charRangeStartUTF16 != null) pairs.add("charRangeStartUTF16" to charRangeStartUTF16.toString())
-        if (href != null) pairs.add("href" to jsonQuoted(href))
+        if (href != null) pairs.add("href" to jsonQuoted(nfc(href)))
         if (page != null) pairs.add("page" to page.toString())
-        if (progression != null && progression.isFinite()) pairs.add("progression" to rounded(progression))
-        if (textContextAfter != null) pairs.add("textContextAfter" to jsonQuoted(normalizeLineEndings(textContextAfter)))
-        if (textContextBefore != null) pairs.add("textContextBefore" to jsonQuoted(normalizeLineEndings(textContextBefore)))
-        if (textQuote != null) pairs.add("textQuote" to jsonQuoted(normalizeLineEndings(textQuote)))
-        if (totalProgression != null && totalProgression.isFinite()) pairs.add("totalProgression" to rounded(totalProgression))
+        if (progression != null) pairs.add("progression" to rounded(progression))
+        if (textContextAfter != null) pairs.add("textContextAfter" to jsonQuoted(normalizeLineEndings(nfc(textContextAfter))))
+        if (textContextBefore != null) pairs.add("textContextBefore" to jsonQuoted(normalizeLineEndings(nfc(textContextBefore))))
+        if (textQuote != null) pairs.add("textQuote" to jsonQuoted(normalizeLineEndings(nfc(textQuote))))
+        if (totalProgression != null) pairs.add("totalProgression" to rounded(totalProgression))
 
         pairs.sortBy { it.first }
         return pairs.joinToString(",", prefix = "{", postfix = "}") { "\"${it.first}\":${it.second}" }
     }
+
+    /** Unicode NFC — matches Swift `precomposedStringWithCanonicalMapping` (bug #356). */
+    private fun nfc(s: String): String =
+        java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC)
 
     /** RFC-8259 escaping (matches Swift jsonQuoted): quote, backslash, \n \r \t, control -> \uXXXX. */
     private fun jsonQuoted(s: String): String {

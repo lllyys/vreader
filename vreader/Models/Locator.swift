@@ -113,18 +113,22 @@ struct Locator: Codable, Hashable, Sendable {
         pairs.append(("bookFingerprint.fileByteCount", "\(bookFingerprint.fileByteCount)"))
         pairs.append(("bookFingerprint.format", jsonQuoted(bookFingerprint.format.rawValue)))
 
-        if let cfi { pairs.append(("cfi", jsonQuoted(cfi))) }
+        // String fields are Unicode-NFC-normalized before escaping so a
+        // decomposed (NFD) vs precomposed (NFC) form of the same text yields the
+        // SAME canonical JSON / hash — iOS hands back NFD on some text paths, and
+        // cross-platform identity (Kotlin) must agree (bug #356).
+        if let cfi { pairs.append(("cfi", jsonQuoted(nfc(cfi)))) }
         if let charOffsetUTF16 { pairs.append(("charOffsetUTF16", "\(charOffsetUTF16)")) }
         if let charRangeEndUTF16 { pairs.append(("charRangeEndUTF16", "\(charRangeEndUTF16)")) }
         if let charRangeStartUTF16 { pairs.append(("charRangeStartUTF16", "\(charRangeStartUTF16)")) }
-        if let href { pairs.append(("href", jsonQuoted(href))) }
+        if let href { pairs.append(("href", jsonQuoted(nfc(href)))) }
         if let page { pairs.append(("page", "\(page)")) }
         if let progression, progression.isFinite {
             pairs.append(("progression", roundedString(progression)))
         }
-        if let textContextAfter { pairs.append(("textContextAfter", jsonQuoted(normalizeLineEndings(textContextAfter)))) }
-        if let textContextBefore { pairs.append(("textContextBefore", jsonQuoted(normalizeLineEndings(textContextBefore)))) }
-        if let textQuote { pairs.append(("textQuote", jsonQuoted(normalizeLineEndings(textQuote)))) }
+        if let textContextAfter { pairs.append(("textContextAfter", jsonQuoted(normalizeLineEndings(nfc(textContextAfter))))) }
+        if let textContextBefore { pairs.append(("textContextBefore", jsonQuoted(normalizeLineEndings(nfc(textContextBefore))))) }
+        if let textQuote { pairs.append(("textQuote", jsonQuoted(normalizeLineEndings(nfc(textQuote))))) }
         if let totalProgression, totalProgression.isFinite {
             pairs.append(("totalProgression", roundedString(totalProgression)))
         }
@@ -170,5 +174,11 @@ struct Locator: Codable, Hashable, Sendable {
     private func normalizeLineEndings(_ s: String) -> String {
         s.replacingOccurrences(of: "\r\n", with: "\n")
          .replacingOccurrences(of: "\r", with: "\n")
+    }
+
+    /// Unicode NFC (canonical composition) — stabilizes the canonical hash across
+    /// NFD/NFC input and across platforms (Kotlin `Normalizer.NFC`). Bug #356.
+    private func nfc(_ s: String) -> String {
+        s.precomposedStringWithCanonicalMapping
     }
 }

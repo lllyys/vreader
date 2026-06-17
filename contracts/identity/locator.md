@@ -35,6 +35,23 @@ strengthen): `page` / `charOffsetUTF16` / `charRangeStartUTF16` /
 required to be within 0…1). Serialization uses a canonical JSON form
 (stable key ordering) so the hash/round-trip is deterministic.
 
+Canonical-string + numeric rules (bug #356) — both platforms MUST apply, or
+the cross-platform hash diverges:
+
+- **NFC normalization.** Every string field (`href`, `cfi`, `textQuote`,
+  `textContext*`) is Unicode-**NFC**-normalized before escaping (Swift
+  `precomposedStringWithCanonicalMapping`; Kotlin
+  `Normalizer.normalize(_, NFC)`). iOS hands back NFD on some text paths, so
+  without NFC a decomposed vs precomposed form of the same text would hash
+  differently within iOS AND across platforms.
+- **Non-finite is REJECTED, not omitted.** A non-finite `progression` /
+  `totalProgression` is invalid — `Locator.validate()` returns
+  `.nonFiniteProgression` and the Kotlin canonical reference throws. The
+  canonical form is defined ONLY for validated locators; never silently omit a
+  non-finite value (that would let an invalid locator canonicalize identically
+  to a valid missing-progression one).
+- **Float format** is POSIX/US-locale `%.6f`; **line endings** `\r\n`/`\r` → `\n`.
+
 ## `VReaderLocator` (the persisted envelope)
 
 | Field | Type | Class | Notes |

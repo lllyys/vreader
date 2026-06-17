@@ -69,6 +69,7 @@ struct IdentityConformanceTests {
         let json = try Self.loadJSON("locator.json")
         let vectors = try #require(json["vectors"] as? [[String: Any]])
         #expect(!vectors.isEmpty)
+        var emitted = ""
         for v in vectors {
             let format = try #require(BookFormat(rawValue: v["format"] as! String))
             let fp = DocumentFingerprint(
@@ -91,22 +92,41 @@ struct IdentityConformanceTests {
                 textContextAfter: v["textContextAfter"] as? String
             )
             #expect(loc.canonicalJSON() == v["expectedCanonicalJSON"] as! String)
+            emitted += loc.canonicalJSON() + "\n"
         }
+        // Emit this platform's ACTUAL canonical output so run.sh can byte-diff it
+        // against the Kotlin output (bug #355). Written to the repo via #filePath.
+        let outDir = Self.vectorsDir().deletingLastPathComponent()
+            .appendingPathComponent("conformance/.out")
+        try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        try? emitted.write(to: outDir.appendingPathComponent("swift-locator.txt"),
+                           atomically: true, encoding: .utf8)
     }
 
-    @Test("Locator.canonicalJSON omits non-finite progression (NaN/Inf — cannot be JSON vectors)")
-    func locatorOmitsNonFinite() {
+    @Test("Locator.validate() REJECTS non-finite progression (the canonical guard — bug #356)")
+    func locatorRejectsNonFinite() {
+        // Bug #356: a non-finite locator must NOT silently canonicalize to the same
+        // form as a valid missing-progression one. The Swift guard is validate()
+        // (the canonical hash is a non-throwing computed property used at 18
+        // persisted-key sites, so a precondition crash there is riskier than
+        // relying on validate() — the Kotlin reference additionally rejects at
+        // canonicalJson). Assert validate() catches non-finite at the boundary.
         let fp = DocumentFingerprint(
             contentSHA256: String(repeating: "a", count: 64), fileByteCount: 1, format: .epub
         )
         for p in [Double.nan, Double.infinity, -Double.infinity] {
-            let loc = Locator(
-                bookFingerprint: fp, href: nil, progression: p, totalProgression: p,
+            let progLoc = Locator(
+                bookFingerprint: fp, href: nil, progression: p, totalProgression: nil,
                 cfi: nil, page: nil, charOffsetUTF16: nil, charRangeStartUTF16: nil,
                 charRangeEndUTF16: nil, textQuote: nil, textContextBefore: nil, textContextAfter: nil
             )
-            // "progression" is a substring of "totalProgression"; its absence covers both.
-            #expect(!loc.canonicalJSON().contains("progression"))
+            #expect(progLoc.validate() == .nonFiniteProgression)
+            let totalLoc = Locator(
+                bookFingerprint: fp, href: nil, progression: nil, totalProgression: p,
+                cfi: nil, page: nil, charOffsetUTF16: nil, charRangeStartUTF16: nil,
+                charRangeEndUTF16: nil, textQuote: nil, textContextBefore: nil, textContextAfter: nil
+            )
+            #expect(totalLoc.validate() == .nonFiniteProgression)
         }
     }
 

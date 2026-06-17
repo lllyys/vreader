@@ -1,5 +1,5 @@
 {
-  "_comment": "Golden vectors for the CANONICAL Locator serialization (Locator.canonicalJSON in vreader/Models/Locator.swift) — vreader's engine-neutral cross-device-resume contract. Sorted keys, nil omission, bookFingerprint inlined with prefix, floats '%.6f' (POSIX), \\r\\n/\\r normalized to \\n, RFC-8259 escaping. Both the Swift conformance test (the reference) and the Kotlin reference impl must produce the EXACT expectedCanonicalJSON string -> identical canonicalHash -> cross-platform position identity. cfi is intentionally absent from the canonical-resume vectors (classified platform-local->lossy-fallback in identity/locator.md; CFI dialects do not round-trip Swift-Readium <-> Kotlin-Readium).",
+  "_comment": "Golden vectors for the CANONICAL Locator serialization (Locator.canonicalJSON in vreader/Models/Locator.swift) — vreader's engine-neutral cross-device-resume contract. Sorted keys, nil omission, bookFingerprint inlined with prefix, floats '%.6f' (POSIX), NFC normalization of string fields, \\r\\n/\\r normalized to \\n, RFC-8259 escaping. Both the Swift conformance test (the reference) and the Kotlin reference impl must produce the EXACT expectedCanonicalJSON string -> identical canonicalHash -> cross-platform position identity. cfi is intentionally absent from the canonical-resume vectors (classified platform-local->lossy-fallback in identity/locator.md).",
   "vectors": [
     {
       "_why": "EPUB position — href + progression + totalProgression are the canonical cross-device resume anchors.",
@@ -12,7 +12,7 @@
       "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"bookFingerprint.fileByteCount\":1024,\"bookFingerprint.format\":\"epub\",\"href\":\"OEBPS/ch1.xhtml\",\"progression\":0.500000,\"totalProgression\":0.250000}"
     },
     {
-      "_why": "TXT position — UTF-16 char offset + text quote anchor (CJK).",
+      "_why": "TXT position — UTF-16 char offset + text quote anchor (CJK; precomposed, NFC-stable).",
       "contentSHA256": "0000000000000000000000000000000000000000000000000000000000000000",
       "fileByteCount": 42,
       "format": "txt",
@@ -29,7 +29,7 @@
       "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"bookFingerprint.fileByteCount\":2048,\"bookFingerprint.format\":\"pdf\",\"page\":42}"
     },
     {
-      "_why": "Canonicalization-rule coverage (Codex Gate-4): exercises RFC-8259 escaping (quote/backslash), CR-LF + bare-CR normalization to LF, and a PAIRED char range (charRangeEnd sorts before charRangeStart). textQuote input 'a\"b\\c' -> escaped 'a\\\"b\\\\c'; textContextBefore input 'p\\r\\nq\\rr' (CRLF + bare CR) -> normalized 'p\\nq\\nr'.",
+      "_why": "Canonicalization-rule coverage (Codex Gate-4): RFC-8259 escaping (quote/backslash), CR-LF + bare-CR normalization to LF, PAIRED char range (charRangeEnd sorts before charRangeStart). textQuote input 'a\"b\\c' -> 'a\\\"b\\\\c'; textContextBefore 'p\\r\\nq\\rr' -> 'p\\nq\\nr'.",
       "contentSHA256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "fileByteCount": 7,
       "format": "md",
@@ -39,6 +39,32 @@
       "textContextBefore": "p\r\nq\rr",
       "textQuote": "a\"b\\c",
       "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"bookFingerprint.fileByteCount\":7,\"bookFingerprint.format\":\"md\",\"charRangeEndUTF16\":20,\"charRangeStartUTF16\":10,\"href\":\"d.md\",\"textContextBefore\":\"p\\nq\\nr\",\"textQuote\":\"a\\\"b\\\\c\"}"
+    },
+    {
+      "_why": "NFC normalization (bug #356): href input is NFD 'a\\u0301.html' and textQuote input is NFD 'cafe\\u0301' (base letter + U+0301 combining acute). Both MUST canonicalize to the NFC precomposed form (U+00E1.html / caf U+00E9) on BOTH platforms. If either impl skips NFC, its output keeps the decomposed form and this vector fails.",
+      "contentSHA256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "fileByteCount": 3,
+      "format": "epub",
+      "href": "á.html",
+      "textQuote": "café",
+      "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"bookFingerprint.fileByteCount\":3,\"bookFingerprint.format\":\"epub\",\"href\":\"á.html\",\"textQuote\":\"café\"}"
+    },
+    {
+      "_why": "Numeric boundaries: progression 0.0 / totalProgression 1.0 / large charOffset (Int max) — float '%.6f' edges + large int formatting must agree.",
+      "contentSHA256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "fileByteCount": 9,
+      "format": "txt",
+      "charOffsetUTF16": 2147483647,
+      "progression": 0.0,
+      "totalProgression": 1.0,
+      "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"bookFingerprint.fileByteCount\":9,\"bookFingerprint.format\":\"txt\",\"charOffsetUTF16\":2147483647,\"progression\":0.000000,\"totalProgression\":1.000000}"
+    },
+    {
+      "_why": "Empty/minimal: only the bookFingerprint triple, no optional fields — the all-nil baseline.",
+      "contentSHA256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "fileByteCount": 0,
+      "format": "epub",
+      "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\",\"bookFingerprint.fileByteCount\":0,\"bookFingerprint.format\":\"epub\"}"
     }
   ]
 }
