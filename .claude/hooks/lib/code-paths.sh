@@ -64,3 +64,64 @@ code_paths_touched() {
     done
     return "$found"
 }
+
+# Feature #107 WI-1 (PR-A) — path→PLATFORM classifier for workflow routing.
+#
+# Reads a newline-separated changed-path list on stdin and emits ONE platform
+# token on stdout — the routing lane resolved by precedence:
+#
+#     android-app  >  android-spike  >  ios  >  shared
+#
+# This is DISTINCT from `code_paths_touched` (a boolean Gate-4 audit gate, per
+# AGENTS.md "a boolean gate, not a full ownership taxonomy"). Routing is PURELY
+# PATH-BASED — no tracker metadata field (Gate-2 r3 resolution): write-isolation
+# (rule 48) guarantees an Android-app PR's path set already contains `android/`/
+# `*.kt`/Gradle files (→ `android-app`); a shared-only PR returns `shared`, which
+# consumers route to the iOS lane (rule 40: "shared → iOS while Android is
+# pre-foundation"). `scripts/` is `shared` (iOS bump/gate, correct per rule 40).
+#
+# Ownership matches the full AGENTS / rule-40 set:
+#   android-app  : android/ buildSrc/ gradle/ *.kt[s] build.gradle[.kts]
+#                  settings.gradle[.kts] gradle.properties gradlew* res/
+#                  AndroidManifest.xml
+#   android-spike: spikes/
+#   ios          : vreader/ vreaderTests/ *.xcodeproj project.yml
+#   shared       : everything else (docs/ contracts/ .claude/ scripts/ root docs)
+#
+# Sourced by `.claude/skills/{fix-issue,feature-workflow}` + commands + crons
+# (PR-D) and by `.claude/hooks/__tests__/code_paths_platform.test.sh`.
+# shellcheck disable=SC2120
+code_paths_platform() {
+    local path has_app=1 has_spike=1 has_ios=1
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        # ROOT-FIRST ordering (Codex Gate-4): classify by ROOT before any generic
+        # suffix/name match, so a `spikes/Foo.kt` is `android-spike` (not
+        # `android-app` via its `.kt` suffix) and a `docs/example.kt` /
+        # `scripts/build.gradle` is `shared` (not mis-shaped as code by suffix).
+        case "$path" in
+            # Shared / docs / meta roots FIRST — never a platform, any suffix.
+            docs/*|dev-docs/*|.claude/*|scripts/*|contracts/*) continue ;;
+            README*|LICENSE*|AGENTS.md|CLAUDE.md) continue ;;
+            # Spike root — exclusive, before the generic Android suffix matches.
+            spikes/*) has_spike=0 ;;
+            # iOS roots.
+            vreader/*|vreaderTests/*|project.yml) has_ios=0 ;;
+            *.xcodeproj|*.xcodeproj/*) has_ios=0 ;;
+            # Android-app roots.
+            android/*|buildSrc/*|gradle/*) has_app=0 ;;
+            # Rootless Android-shaped files (only reached when no root above hit).
+            *.kt|*.kts) has_app=0 ;;
+            build.gradle|build.gradle.kts|settings.gradle|settings.gradle.kts) has_app=0 ;;
+            */build.gradle|*/build.gradle.kts|*/settings.gradle|*/settings.gradle.kts) has_app=0 ;;
+            gradle.properties|gradlew|gradlew.*) has_app=0 ;;
+            AndroidManifest.xml|*/AndroidManifest.xml) has_app=0 ;;
+            res/*|*/res/*) has_app=0 ;;
+            # else → shared (rootless non-code / unknown)
+        esac
+    done
+    if [ "$has_app" -eq 0 ]; then echo "android-app"
+    elif [ "$has_spike" -eq 0 ]; then echo "android-spike"
+    elif [ "$has_ios" -eq 0 ]; then echo "ios"
+    else echo "shared"; fi
+}

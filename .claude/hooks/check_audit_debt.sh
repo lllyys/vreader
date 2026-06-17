@@ -2,8 +2,9 @@
 # Stop hook — surfaces "merged without Codex audit log" debt.
 #
 # Scans the last 5 merges on `main` (the typical session window) and
-# warns if any merged a feature/fix branch that touched Swift code
-# without a matching `.claude/codex-audits/<branch>-audit.md` file.
+# warns if any merged a feature/fix branch that touched CODE (iOS Swift OR
+# Android/Kotlin/contracts — via the shared `code-paths.sh` classifier,
+# feature #107) without a matching `.claude/codex-audits/<branch>-audit.md`.
 # Catches the "ran the workflow but skipped Gate 4" pattern at session
 # end so the next session can backfill the audit if appropriate.
 #
@@ -18,6 +19,17 @@ set -euo pipefail
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 cd "$PROJECT_DIR"
 if ! git rev-parse --git-dir >/dev/null 2>&1; then exit 0; fi
+
+# Feature #107 WI-1: classify "touched code" via the shared classifier (the
+# Stop-time twin of #103's PreToolUse fix), so an `android/` / `*.kt` /
+# `contracts/` PR accrues audit debt too — not just `vreader/`. Before this,
+# the inline `^(vreader/|vreaderTests/)` regex false-greened every Android PR.
+# Resolve the real repo root (PROJECT_DIR can be a subdir via the line-19 pwd
+# fallback) and TOLERATE a load failure — this hook's contract is "exit 0
+# always" (informational), so a missing/corrupt lib must not fail the Stop hook.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PROJECT_DIR")"
+# shellcheck source=lib/code-paths.sh
+source "$REPO_ROOT/.claude/hooks/lib/code-paths.sh" 2>/dev/null || exit 0
 
 # Find recent squash-merges on main. The default `gh pr merge --squash`
 # leaves "(#N)" in the commit subject. Walk the last few commits and
@@ -43,12 +55,13 @@ while IFS=$'\t' read -r sha subject; do
         main|master|dependabot/*) continue ;;
     esac
 
-    # Did the PR touch Swift code? Use the parent commit's tree to
+    # Did the PR touch CODE (iOS Swift OR Android/Kotlin/contracts, via the
+    # shared classifier — feature #107)? Use the parent commit's tree to
     # diff the squashed commit against. If the merge was a squash, the
     # commit's parent is the previous main HEAD.
     PARENT="$(git rev-parse "$sha^" 2>/dev/null || true)"
     if [[ -z "$PARENT" ]]; then continue; fi
-    if ! git diff "$PARENT".."$sha" --name-only 2>/dev/null | grep -qE '^(vreader/|vreaderTests/)'; then
+    if ! git diff "$PARENT".."$sha" --name-only 2>/dev/null | code_paths_touched; then
         continue
     fi
 
