@@ -34,13 +34,26 @@ WATCHDOG: keep every session-only cron alive past the 7-day auto-expire AND swee
    - **ETIME 10 minutes – 1 hour**: log as `suspicious` in `.claude/cron-logs/watchdog.log` (PID, command, age). Do NOT kill — the operator may be running a long test on purpose.
    - **ETIME > 1 hour**: log as `ghost` AND kill with `kill <pid>` (TERM, not KILL-9). If still alive after 5 s, escalate to `kill -9 <pid>`. Print every kill action to stdout so it surfaces in cron telemetry.
 
-7. Also scan for stale `xcodebuild test` or `xcrun simctl` processes that have been running > 30 min — these can also become orphaned across sessions:
+7. Also scan for stale iOS **and Android** tool ghosts (> 30 min). Prefer the
+   maintained sweeper, which already classifies every ghost class (iOS + Android)
+   and excludes the resident daemons (SWBBuildService / Gradle daemon / booted
+   emulator / idb_companion):
 
    ```bash
-   ps -eo pid,etime,command | grep -E "xcodebuild test|xcrun simctl" | grep -v grep
+   scripts/sweep-ghosts.sh           # report; --kill to reap; THRESHOLD_MIN to tune
+   ```
+
+   If running the raw `ps` instead, cover both platforms (rule 52 Cause D adds the
+   Android classes — wedged `am instrument`, orphaned `gradle` build, detached
+   `adb … logcat`):
+
+   ```bash
+   ps -eo pid,etime,command | grep -E "xcodebuild test|xcrun simctl|am instrument|adb .*logcat|org.gradle.launcher.daemon" | grep -v grep
    ```
 
    Same decision matrix as step 6 (skip < 10 min, suspicious 10–60 min, ghost > 1h).
+   Do NOT kill a healthy idle Gradle daemon or a booted emulator (resident by
+   design — `sweep-ghosts.sh` already excludes them).
 
 ## Part 3 — Outcome
 

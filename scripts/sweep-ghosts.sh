@@ -12,10 +12,14 @@
 #   - `codex` / `codex exec`      rule 53 — stdin-wedge (origin: 4h20m ghost,
 #                                  2026-06-01)
 #   - `xcodebuild test|build`     rule 52 — sim contention / wedged daemon
+#   - `am instrument`             rule 52 Cause D — wedged Android instrumentation
+#   - `adb … logcat`              rule 49 — detached logcat side-channel capture
 #                                  (recurring; watchdogged by run-tests.sh)
 #
 # NOT flagged: SWBBuildService (Xcode's resident build daemon — alive and
-# idle between builds by design), idb_companion (persistent sim bridge),
+# idle between builds by design), the Gradle daemon + a booted Android
+# emulator (resident-by-design, rule 52 Cause D), idb_companion (persistent
+# sim bridge),
 # and anything younger than the threshold or actually using CPU.
 #
 # Usage:
@@ -51,11 +55,16 @@ ghosts=$(ps -Ao pid=,etime=,pcpu=,command= | awk -v thr="$THRESHOLD_MIN" '
         cmd = ""
         for (i = 4; i <= NF; i++) cmd = cmd (i > 4 ? " " : "") $i
     }
-    cmd ~ /(ps -Ao|ugrep|sweep-ghosts|idb_companion|SWBBuildService)/ { next }
+    # Resident-by-design daemons are NEVER ghosts: Xcode SWBBuildService, the sim
+    # bridge idb_companion, the Gradle daemon (alive + idle between builds — rule
+    # 52 Cause D), and a booted Android emulator (qemu/emulator — like a booted
+    # simulator). The sweep ps/ugrep pipeline is excluded too.
+    cmd ~ /(ps -Ao|ugrep|sweep-ghosts|idb_companion|SWBBuildService|GradleDaemon|org\.gradle\.launcher\.daemon|qemu-system|emulator64|\/emulator )/ { next }
     {
         otherClass = (cmd !~ /( grep | awk )/) && \
             (cmd ~ /tail -f/ || cmd ~ /log stream/ || \
-             cmd ~ /(^|\/)codex( |$)/ || cmd ~ /xcodebuild (test|build)/)
+             cmd ~ /(^|\/)codex( |$)/ || cmd ~ /xcodebuild (test|build)/ || \
+             cmd ~ /am instrument/ || cmd ~ /adb .*logcat/)
         waiterClass = (cmd ~ /(until|while) .*do sleep [0-9]/)
     }
     otherClass || waiterClass {

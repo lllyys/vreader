@@ -61,6 +61,31 @@ scripts/run-tests.sh vreaderTests/DebugCommandTests
 TIMEOUT_SECS=2400 scripts/run-tests.sh vreaderTests
 ```
 
+### Cause D — Android: wedged Gradle daemon / emulator contention (feature #107)
+
+The Android lane has the same ghost-class shapes as iOS, with Android tools:
+
+- **Gradle daemon = the SWBBuildService analog.** A `kill -9` of a hung `gradle`
+  orphans the resident Gradle daemon in a wedged state, hanging the NEXT build.
+  `scripts/run-android-tests.sh`'s watchdog kills the daemon
+  (`org.gradle.launcher.daemon` / `GradleDaemon`) on timeout, same as the iOS
+  runner clears `SWBBuildService`. A *healthy idle* Gradle daemon (and a booted
+  emulator) is resident-by-design — `scripts/sweep-ghosts.sh` excludes both, and
+  flags only a wedged `am instrument` or a detached `adb … logcat` capture.
+- **Emulator contention = simulator contention.** Driving the SAME emulator
+  (`adb` / `am instrument` / screenshots) while an instrumentation run is in
+  flight wedges it. Serialize, or use a second emulator (AVD).
+- **Always run the Android gate through `scripts/run-android-tests.sh`** (the
+  Android `run-tests.sh`): hard wall-clock timeout, exact-pid wait (rule 49),
+  kills the process tree + Gradle daemon on timeout, prints one
+  `RUN-ANDROID-TESTS RESULT:` line. The verify lane is `scripts/run-android-verify.sh`.
+  Until #106's app shell exists, these drive the `spikes/` harness.
+
+```bash
+scripts/run-android-tests.sh                 # spike-harness smoke (needs a booted emulator)
+ANDROID_CMD="./gradlew :app:testDebugUnitTest" scripts/run-android-tests.sh   # post-#106
+```
+
 ## Hard rules
 
 1. **Never drive a simulator while `xcodebuild test` runs against it.** Tests and
