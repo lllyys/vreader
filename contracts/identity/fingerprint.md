@@ -15,7 +15,7 @@ canonicalKey = "{format}:{contentSHA256}:{fileByteCount}"
 
 | Component | Type | Rule |
 |---|---|---|
-| `format` | enum raw string (`BookFormat.rawValue`) | the document format — `epub`, `pdf`, `txt`, `md`, `azw3`, … For a **converted Kindle** book (`.azw3`/`.mobi`/`.prc`) the canonical cross-platform identity uses the **SOURCE format** (`azw3`/`mobi`/`prc`) and the **SOURCE file bytes** — NOT the converted EPUB (decided in `DECISION.md`; see the Kindle note below). |
+| `format` | enum raw string (`BookFormat.rawValue`) | the document format — `epub`, `pdf`, `txt`, `md`, `azw3`. For a **converted Kindle** book the format component is **`azw3`** (the single `BookFormat` value covering the `.azw3`/`.azw`/`.mobi`/`.prc` extensions — there is NO `mobi`/`prc` raw value; the extension is not part of `canonicalKey`), and `contentSHA256`/`fileByteCount` are of the **SOURCE file bytes** — NOT the converted EPUB (decided in `DECISION.md`; see the Kindle note below). |
 | `contentSHA256` | 64 lowercase hex chars | SHA-256 of the file's bytes — the SOURCE file for converted-Kindle formats. Validated: exactly 64 chars, all hex, all lowercase. |
 | `fileByteCount` | Int64 ≥ 0 | byte length of the file (the SOURCE file for converted-Kindle formats). |
 
@@ -59,9 +59,10 @@ source-bytes key natively (no converter port needed for identity).
 
 `contracts/vectors/fingerprint-*.json`: `{ bytesSHA256, byteCount, format,
 expectedCanonicalKey }` + round-trip (`canonicalKey → parse → equals`).
-For converted-Kindle vectors, also record the producing libmobi /
-`MobiEPUBConverter.version` so a converter bump is distinguishable from
-nondeterminism.
+Converted-Kindle canonical vectors are **converter-independent** (the
+identity is the SOURCE bytes), so they need NOT record any libmobi /
+`MobiEPUBConverter.version` — those only matter for the iOS-local
+converted-EPUB artifact, not canonical identity.
 
 ## Conformance
 

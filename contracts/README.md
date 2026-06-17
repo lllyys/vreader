@@ -16,11 +16,15 @@ across devices" (content-hash dedup + WebDAV materializing restore) holds.
 
 ## Why this exists (the gate)
 
-A Kindle book's `DocumentFingerprint` is the hash of the **converted
-EPUB**, and there is no a-priori guarantee that (1) libmobi conversion is
-byte-deterministic across an iOS build and an Android NDK build, or (2)
-Swift-Readium and Kotlin-Readium emit round-trippable `Locator`s. Until
-both are proven on a shared corpus, library/backup interop is a hope.
+The original risk was that a Kindle book's identity might depend on the
+**converted EPUB** — which would couple two platforms' converter
+pipelines. That risk is retired: the canonical cross-platform identity for
+`.azw3`/`.mobi`/`.prc` is the **SOURCE file bytes** (decided in
+`identity/DECISION.md`; iOS's converted-EPUB fingerprint is a
+platform-local detail), so identity is converter-independent. The
+remaining contract is that Swift-Readium and Kotlin-Readium emit
+round-trippable `Locator`s. Until proven on a shared corpus,
+library/backup interop is a hope.
 `contracts/` turns that hope into an enforceable, versioned conformance
 lane.
 
