@@ -199,6 +199,23 @@ library/CLI harnesses first — an empty `android/` directory is low-value).
   UI-automation-dependent. Standing up a *minimally-automatable* Android
   verification lane is itself a Spike-B output.
 
+  > **Amendment — Spike B verdict (2026-06-17, feature #105 VERIFIED).** Measured
+  > on the android-35 arm64 emulator over the real 1042-chapter 道诡异仙 CJK book
+  > (evidence: `dev-docs/verification/feature-105-20260617.md`).
+  > **Outcome: Readium-Kotlin 3.3.0 scroll mode is VIABLE as the Android v1
+  > reader engine — the WebView-engine plan is CONFIRMED, the engine strategy is
+  > NOT reopened.** Scroll holds 60fps (0.23% jank); renderer memory is bounded
+  > (eviction works — ramps to ~1.1GB high-water then recedes to a 580–870MB
+  > oscillation, no OOM); zero renderer crashes; chapter-level position restore +
+  > Locator JSON round-trip + text selection all round-trip faithfully. The cron
+  > **can** drive an Android emulator end-to-end (`am instrument`), resolving the
+  > UNVERIFIED above; the minimally-automatable lane is
+  > `spikes/android-reader-bench/run-bench.sh`. Two **recorded Phase-3 hardening
+  > obligations** (not blockers): (1) renderer ~1.1GB high-water → validate on a
+  > 3–4GB device + consider a tighter resource-cache budget; (2) fragment-level
+  > restore is ~2-paragraph-approximate on CJK (chapter/JSON/selection are exact)
+  > → position re-hardening for exact same-paragraph CJK restore.
+
 ### Phase 2 — Android **foundation bar** (not "EPUB parity")
 
 Reach a foundation bar, then switch to steady state: import/open/resume one EPUB
