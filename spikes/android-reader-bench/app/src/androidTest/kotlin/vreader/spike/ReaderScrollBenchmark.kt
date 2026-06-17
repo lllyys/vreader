@@ -65,6 +65,11 @@ class ReaderScrollBenchmark {
         val targetChapters = arg("chapters", 250).coerceAtMost(spine.size)
         val scrollsPerChapter = arg("scrollsPerChapter", 4)
 
+        // Snapshot pre-existing WebView renderers BEFORE launch so sample() can
+        // attribute only our session's newly-spawned renderer (Gate-4 round-2).
+        val probe = MemoryProbe(instr, ctx)
+        probe.snapshotBaseline()
+
         val factory = EpubNavigatorFactory(publication)
         val scenario = launchFragmentInContainer<EpubNavigatorFragment>(
             factory = factory.createFragmentFactory(
@@ -92,7 +97,6 @@ class ReaderScrollBenchmark {
             val scrollModeVerified = navigator.settings.value.scroll
 
             val sampler = FrameSampler()
-            val probe = MemoryProbe(instr, ctx)
             val mem = ArrayList<MemSample>()
             val started = System.currentTimeMillis()
             mainSync { sampler.start() }
@@ -110,12 +114,7 @@ class ReaderScrollBenchmark {
                     firstProgression = navigatorProgression(navigator)
                 }
                 repeat(scrollsPerChapter) {
-                    mainSync { sampler.setActive(true) }
-                    var adv = false
-                    mainSync { adv = navigator.goForward(animated = true) } // smooth scroll
-                    if (adv) scrollAdvances++
-                    settle(220) // real scroll frames captured here
-                    mainSync { sampler.setActive(false) }
+                    if (scrollOnce(navigator, sampler)) scrollAdvances++
                 }
                 if (i % 10 == 0) mem.add(probe.sample(i))
             }
@@ -145,7 +144,7 @@ class ReaderScrollBenchmark {
             assertTrue("no scroll advances accepted by navigator", scrollAdvances > 0)
             assertTrue("no real forward progress: $firstProgression -> $lastProgression",
                 lastProgression > firstProgression)
-            assertTrue("no frames rendered during active scroll", result.frameIntervalsMs.isNotEmpty())
+            assertTrue("no scroll-motion frames recorded", result.frameIntervalsMs.isNotEmpty())
             assertTrue("memory not sampled", mem.size >= 5)
             val totalLast = mem.last().totalPssKb
             val rendererMax = mem.maxOfOrNull { it.rendererPssKb } ?: 0
@@ -160,4 +159,31 @@ class ReaderScrollBenchmark {
     /** Whole-publication progression (0..1), or 0 if unavailable. */
     private fun navigatorProgression(nav: EpubNavigatorFragment): Double =
         nav.currentLocator.value.locations.totalProgression ?: 0.0
+
+    /**
+     * One animated scroll with the frame sample-window bounded by Readium locator
+     * stabilization (Gate-4 round-2 fix): open the window, advance, then keep
+     * sampling until progression has moved AND held steady for two reads (the
+     * animation finished) — or a hard cap. No fixed settle timer, so fast scrolls
+     * don't fold in idle vsync and slow scrolls aren't clipped. Returns whether the
+     * navigator accepted the advance.
+     */
+    private fun scrollOnce(nav: EpubNavigatorFragment, sampler: FrameSampler): Boolean {
+        mainSync { sampler.setActive(true) }
+        var adv = false
+        val before = navigatorProgression(nav)
+        mainSync { adv = nav.goForward(animated = true) }
+        var last = before
+        var moved = false
+        var stable = 0
+        var waited = 0
+        while (waited < 1200 && stable < 2) {
+            Thread.sleep(32)
+            waited += 32
+            val p = navigatorProgression(nav)
+            if (p != last) { moved = true; stable = 0; last = p } else if (moved) stable++
+        }
+        mainSync { sampler.setActive(false) }
+        return adv
+    }
 }

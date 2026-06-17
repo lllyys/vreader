@@ -5,229 +5,229 @@
   "scrollAdvances": 1000,
   "scrollModeVerified": true,
   "firstProgression": 0,
-  "lastProgression": 0.2288926094235829,
-  "progressionDelta": 0.2288926094235829,
-  "frameCount": 14166,
-  "jankFrames": 25,
-  "jankPercent": 0.17647889312438234,
+  "lastProgression": 0.23941640755800048,
+  "progressionDelta": 0.23941640755800048,
+  "frameCount": 28498,
+  "jankFrames": 65,
+  "jankPercent": 0.2280861814864201,
   "frameMsP50": 16.666666,
   "frameMsP90": 16.666666,
   "frameMsP99": 16.666666,
-  "frameMsMax": 83.33333,
-  "totalPssFirstKb": 298933,
-  "totalPssLastKb": 952536,
-  "totalPssMaxKb": 1045804,
-  "totalPssGrowthKb": 653603,
-  "rendererPssMaxKb": 853091,
-  "wallClockMs": 307550,
+  "frameMsMax": 49.999998,
+  "totalPssFirstKb": 293642,
+  "totalPssLastKb": 884749,
+  "totalPssMaxKb": 1287196,
+  "totalPssGrowthKb": 591107,
+  "rendererPssMaxKb": 1103928,
+  "wallClockMs": 545777,
   "mem": [
     {
       "chapter": 0,
-      "hostPssKb": 170205,
-      "rendererPssKb": 128728,
-      "totalPssKb": 298933,
-      "nativeHeapKb": 25417,
-      "processCount": 3
+      "hostPssKb": 166049,
+      "rendererPssKb": 127593,
+      "totalPssKb": 293642,
+      "nativeHeapKb": 24999,
+      "processCount": 2
     },
     {
       "chapter": 10,
-      "hostPssKb": 177395,
-      "rendererPssKb": 303464,
-      "totalPssKb": 480859,
-      "nativeHeapKb": 24767,
-      "processCount": 3
+      "hostPssKb": 179451,
+      "rendererPssKb": 338076,
+      "totalPssKb": 517527,
+      "nativeHeapKb": 25759,
+      "processCount": 2
     },
     {
       "chapter": 20,
-      "hostPssKb": 175764,
-      "rendererPssKb": 506459,
-      "totalPssKb": 682223,
-      "nativeHeapKb": 25570,
-      "processCount": 3
+      "hostPssKb": 170889,
+      "rendererPssKb": 753779,
+      "totalPssKb": 924668,
+      "nativeHeapKb": 25778,
+      "processCount": 2
     },
     {
       "chapter": 30,
-      "hostPssKb": 178978,
-      "rendererPssKb": 567902,
-      "totalPssKb": 746880,
-      "nativeHeapKb": 24829,
-      "processCount": 3
+      "hostPssKb": 171777,
+      "rendererPssKb": 809755,
+      "totalPssKb": 981532,
+      "nativeHeapKb": 25797,
+      "processCount": 2
     },
     {
       "chapter": 40,
-      "hostPssKb": 214404,
-      "rendererPssKb": 620731,
-      "totalPssKb": 835135,
-      "nativeHeapKb": 24879,
-      "processCount": 3
+      "hostPssKb": 180621,
+      "rendererPssKb": 915236,
+      "totalPssKb": 1095857,
+      "nativeHeapKb": 25096,
+      "processCount": 2
     },
     {
       "chapter": 50,
-      "hostPssKb": 192298,
-      "rendererPssKb": 643449,
-      "totalPssKb": 835747,
-      "nativeHeapKb": 24884,
-      "processCount": 3
+      "hostPssKb": 173939,
+      "rendererPssKb": 963618,
+      "totalPssKb": 1137557,
+      "nativeHeapKb": 25846,
+      "processCount": 2
     },
     {
       "chapter": 60,
-      "hostPssKb": 173494,
-      "rendererPssKb": 701805,
-      "totalPssKb": 875299,
-      "nativeHeapKb": 25625,
-      "processCount": 3
+      "hostPssKb": 178216,
+      "rendererPssKb": 968294,
+      "totalPssKb": 1146510,
+      "nativeHeapKb": 25876,
+      "processCount": 2
     },
     {
       "chapter": 70,
-      "hostPssKb": 165454,
-      "rendererPssKb": 726953,
-      "totalPssKb": 892407,
-      "nativeHeapKb": 24959,
-      "processCount": 3
+      "hostPssKb": 180206,
+      "rendererPssKb": 1014058,
+      "totalPssKb": 1194264,
+      "nativeHeapKb": 25893,
+      "processCount": 2
     },
     {
       "chapter": 80,
-      "hostPssKb": 168190,
-      "rendererPssKb": 756969,
-      "totalPssKb": 925159,
-      "nativeHeapKb": 24964,
-      "processCount": 3
+      "hostPssKb": 178522,
+      "rendererPssKb": 1023882,
+      "totalPssKb": 1202404,
+      "nativeHeapKb": 25192,
+      "processCount": 2
     },
     {
       "chapter": 90,
-      "hostPssKb": 169154,
-      "rendererPssKb": 790185,
-      "totalPssKb": 959339,
-      "nativeHeapKb": 24986,
-      "processCount": 3
+      "hostPssKb": 177839,
+      "rendererPssKb": 1078256,
+      "totalPssKb": 1256095,
+      "nativeHeapKb": 25902,
+      "processCount": 2
     },
     {
       "chapter": 100,
-      "hostPssKb": 192780,
-      "rendererPssKb": 820339,
-      "totalPssKb": 1013119,
-      "nativeHeapKb": 24898,
-      "processCount": 3
+      "hostPssKb": 175626,
+      "rendererPssKb": 1103339,
+      "totalPssKb": 1278965,
+      "nativeHeapKb": 25983,
+      "processCount": 2
     },
     {
       "chapter": 110,
-      "hostPssKb": 184750,
-      "rendererPssKb": 774521,
-      "totalPssKb": 959271,
-      "nativeHeapKb": 24908,
-      "processCount": 3
+      "hostPssKb": 178094,
+      "rendererPssKb": 1056269,
+      "totalPssKb": 1234363,
+      "nativeHeapKb": 25955,
+      "processCount": 2
     },
     {
       "chapter": 120,
-      "hostPssKb": 165894,
-      "rendererPssKb": 805385,
-      "totalPssKb": 971279,
-      "nativeHeapKb": 24979,
-      "processCount": 3
+      "hostPssKb": 175678,
+      "rendererPssKb": 1086650,
+      "totalPssKb": 1262328,
+      "nativeHeapKb": 25959,
+      "processCount": 2
     },
     {
       "chapter": 130,
-      "hostPssKb": 174074,
-      "rendererPssKb": 821513,
-      "totalPssKb": 995587,
-      "nativeHeapKb": 25010,
-      "processCount": 3
+      "hostPssKb": 183268,
+      "rendererPssKb": 1103928,
+      "totalPssKb": 1287196,
+      "nativeHeapKb": 25911,
+      "processCount": 2
     },
     {
       "chapter": 140,
-      "hostPssKb": 173014,
-      "rendererPssKb": 849217,
-      "totalPssKb": 1022231,
-      "nativeHeapKb": 25019,
-      "processCount": 3
+      "hostPssKb": 182737,
+      "rendererPssKb": 876974,
+      "totalPssKb": 1059711,
+      "nativeHeapKb": 25174,
+      "processCount": 2
     },
     {
       "chapter": 150,
-      "hostPssKb": 182834,
-      "rendererPssKb": 770631,
-      "totalPssKb": 953465,
-      "nativeHeapKb": 25643,
-      "processCount": 3
+      "hostPssKb": 178511,
+      "rendererPssKb": 875784,
+      "totalPssKb": 1054295,
+      "nativeHeapKb": 25532,
+      "processCount": 2
     },
     {
       "chapter": 160,
-      "hostPssKb": 196176,
-      "rendererPssKb": 800793,
-      "totalPssKb": 996969,
-      "nativeHeapKb": 24968,
-      "processCount": 3
+      "hostPssKb": 178615,
+      "rendererPssKb": 681904,
+      "totalPssKb": 860519,
+      "nativeHeapKb": 26050,
+      "processCount": 2
     },
     {
       "chapter": 170,
-      "hostPssKb": 190820,
-      "rendererPssKb": 829557,
-      "totalPssKb": 1020377,
-      "nativeHeapKb": 24962,
-      "processCount": 3
+      "hostPssKb": 189007,
+      "rendererPssKb": 874280,
+      "totalPssKb": 1063287,
+      "nativeHeapKb": 26038,
+      "processCount": 2
     },
     {
       "chapter": 180,
-      "hostPssKb": 180572,
-      "rendererPssKb": 763113,
-      "totalPssKb": 943685,
-      "nativeHeapKb": 25726,
-      "processCount": 3
+      "hostPssKb": 189277,
+      "rendererPssKb": 844222,
+      "totalPssKb": 1033499,
+      "nativeHeapKb": 25993,
+      "processCount": 2
     },
     {
       "chapter": 190,
-      "hostPssKb": 189030,
-      "rendererPssKb": 809547,
-      "totalPssKb": 998577,
-      "nativeHeapKb": 25733,
-      "processCount": 3
+      "hostPssKb": 191379,
+      "rendererPssKb": 891548,
+      "totalPssKb": 1082927,
+      "nativeHeapKb": 25287,
+      "processCount": 2
     },
     {
       "chapter": 200,
-      "hostPssKb": 196342,
-      "rendererPssKb": 828471,
-      "totalPssKb": 1024813,
-      "nativeHeapKb": 24955,
-      "processCount": 3
+      "hostPssKb": 188803,
+      "rendererPssKb": 785656,
+      "totalPssKb": 974459,
+      "nativeHeapKb": 26021,
+      "processCount": 2
     },
     {
       "chapter": 210,
-      "hostPssKb": 192713,
-      "rendererPssKb": 853091,
-      "totalPssKb": 1045804,
-      "nativeHeapKb": 25709,
-      "processCount": 3
+      "hostPssKb": 186580,
+      "rendererPssKb": 686510,
+      "totalPssKb": 873090,
+      "nativeHeapKb": 26044,
+      "processCount": 2
     },
     {
       "chapter": 220,
-      "hostPssKb": 191401,
-      "rendererPssKb": 764075,
-      "totalPssKb": 955476,
-      "nativeHeapKb": 24958,
-      "processCount": 3
+      "hostPssKb": 179778,
+      "rendererPssKb": 766196,
+      "totalPssKb": 945974,
+      "nativeHeapKb": 25966,
+      "processCount": 2
     },
     {
       "chapter": 230,
-      "hostPssKb": 181373,
-      "rendererPssKb": 789999,
-      "totalPssKb": 971372,
-      "nativeHeapKb": 24942,
-      "processCount": 3
+      "hostPssKb": 180533,
+      "rendererPssKb": 795852,
+      "totalPssKb": 976385,
+      "nativeHeapKb": 25985,
+      "processCount": 2
     },
     {
       "chapter": 240,
-      "hostPssKb": 185851,
-      "rendererPssKb": 840985,
-      "totalPssKb": 1026836,
-      "nativeHeapKb": 24955,
-      "processCount": 3
+      "hostPssKb": 189139,
+      "rendererPssKb": 592866,
+      "totalPssKb": 782005,
+      "nativeHeapKb": 25271,
+      "processCount": 2
     },
     {
       "chapter": 250,
-      "hostPssKb": 196471,
-      "rendererPssKb": 756065,
-      "totalPssKb": 952536,
-      "nativeHeapKb": 24960,
-      "processCount": 3
+      "hostPssKb": 186196,
+      "rendererPssKb": 698553,
+      "totalPssKb": 884749,
+      "nativeHeapKb": 26035,
+      "processCount": 2
     }
   ]
 }

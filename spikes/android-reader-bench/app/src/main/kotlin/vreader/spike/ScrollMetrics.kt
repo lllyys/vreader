@@ -17,11 +17,14 @@ import org.json.JSONObject
  */
 
 /**
- * Records inter-frame intervals on the main thread, but ONLY while `active`
- * (set around the animated-scroll windows). A Choreographer callback ticks every
- * vsync whenever posted, so counting every interval — including the idle settle
- * periods — would dilute the jank ratio with perfectly-on-budget idle frames
- * (Codex Gate-4 High). Gating on `active` measures jank during actual scroll work.
+ * Records inter-frame intervals on the main thread while `active`. The active
+ * window is NOT a fixed timer (Codex Gate-4 round-2 High): the caller opens it at
+ * scroll start and closes it on a real completion signal — Readium locator
+ * stabilization (see ReaderScrollBenchmark.scrollOnce). Readium's currentLocator
+ * progression updates at scroll completion, not per-frame, so per-frame motion
+ * gating records nothing; bounding the window by "progression moved then held
+ * steady" is the auditor's suggested locator-stabilization signal and keeps the
+ * sample to the real scroll animation rather than an arbitrary settle pad.
  */
 class FrameSampler : Choreographer.FrameCallback {
     private val frameNanos = ArrayList<Long>(8192)
@@ -43,7 +46,8 @@ class FrameSampler : Choreographer.FrameCallback {
         Choreographer.getInstance().removeFrameCallback(this)
     }
 
-    /** Begin/end counting frames; resets the delta baseline so the gap isn't counted. */
+    /** Open/close the sample window; resets the delta baseline so the gap between
+     *  windows is never charged as a frame interval. */
     fun setActive(value: Boolean) {
         active = value
         lastNanos = 0L
@@ -55,7 +59,7 @@ class FrameSampler : Choreographer.FrameCallback {
         if (running) Choreographer.getInstance().postFrameCallback(this)
     }
 
-    /** Inter-frame deltas (ms) recorded during active scroll windows only. */
+    /** Inter-frame deltas (ms) recorded during the bounded scroll windows. */
     fun intervalsMs(): List<Double> = frameNanos.map { it / 1_000_000.0 }
 }
 
@@ -69,6 +73,17 @@ class FrameSampler : Choreographer.FrameCallback {
  */
 class MemoryProbe(private val instr: Instrumentation, ctx: Context) {
     private val pkg = ctx.packageName
+
+    /**
+     * Sandboxed-renderer PIDs already alive BEFORE our navigator launched. WebView
+     * renders in a shared sandboxed process under the webview package's uid
+     * (`…:sandboxed_process…`), so a name match alone would sum every Chromium
+     * sandbox on the device — not only ours (Codex Gate-4 round-2 High). We snapshot
+     * the pre-launch set and attribute ONLY newly-spawned renderers to our session;
+     * `sample()` reports `processCount` so the test can FAIL the run if no renderer
+     * was uniquely attributable rather than silently reporting host-only memory.
+     */
+    private var baselineSandbox: Set<Int> = emptySet()
 
     private fun shell(cmd: String): String =
         ParcelFileDescriptor.AutoCloseInputStream(instr.uiAutomation.executeShellCommand(cmd))
@@ -84,30 +99,33 @@ class MemoryProbe(private val instr: Instrumentation, ctx: Context) {
             ?: 0
     }
 
-    /**
-     * (processName, pid) for our host process plus the Chromium WebView renderer.
-     * The WebView renderer is a SHARED sandboxed process under the webview
-     * package's uid (`com.google.android.webview:sandboxed_process…`), NOT our
-     * package's uid — so a `startsWith(pkg)` filter misses it (Codex Gate-4 High).
-     * On this harness the benchmark app is the sole active WebView client, so that
-     * renderer's memory reflects our 250-chapter content; WI-4 records the caveat.
-     */
-    private fun appPids(): List<Pair<String, Int>> =
+    /** (processName, pid) for every running process. */
+    private fun allPids(): List<Pair<String, Int>> =
         shell("ps -A -o PID -o NAME").lineSequence().mapNotNull { line ->
             val parts = line.trim().split(Regex("\\s+"))
             val name = parts.getOrNull(1) ?: return@mapNotNull null
-            if (parts.size >= 2 && (name == pkg || name.contains("sandboxed_process"))) {
-                parts[0].toIntOrNull()?.let { name to it }
-            } else null
+            if (parts.size >= 2) parts[0].toIntOrNull()?.let { name to it } else null
         }.toList()
+
+    private fun sandboxPids(): Set<Int> =
+        allPids().filter { it.first.contains("sandboxed_process") }.map { it.second }.toSet()
+
+    /** Call BEFORE launching the navigator, to record pre-existing renderers. */
+    fun snapshotBaseline() {
+        baselineSandbox = sandboxPids()
+    }
 
     fun sample(chapterIndex: Int): MemSample {
         var host = 0
         var renderer = 0
         var procs = 0
-        for ((name, pid) in appPids()) {
+        for ((name, pid) in allPids()) {
+            val isHost = name == pkg
+            // renderer = sandboxed process spawned AFTER our launch (our session's).
+            val isOurRenderer = name.contains("sandboxed_process") && pid !in baselineSandbox
+            if (!isHost && !isOurRenderer) continue
             val pss = pssKb(pid)
-            if (name == pkg) host += pss else renderer += pss
+            if (isHost) host += pss else renderer += pss
             procs++
         }
         return MemSample(
