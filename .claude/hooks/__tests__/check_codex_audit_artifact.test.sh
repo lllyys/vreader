@@ -86,6 +86,34 @@ pipefail_check() {
 }
 pipefail_check
 
+# Bug #353 — the hook itself must FAIL CLOSED on a `gh pr merge` from main
+# (was a fail-open `exit 0`). Hermetic: a temp git repo on `main`, invoke the
+# hook with a PreToolUse payload, assert the exit code.
+HOOK="$HERE/../check_codex_audit_artifact.sh"
+run_hook() { # <cwd> <command> -> prints exit code
+    local cwd="$1" cmd="$2" payload
+    payload="$(CMD="$cmd" CWD="$cwd" python3 -c 'import json,os; print(json.dumps({"tool_name":"Bash","tool_input":{"command":os.environ["CMD"]},"cwd":os.environ["CWD"]}))')"
+    printf '%s' "$payload" | bash "$HOOK" >/dev/null 2>&1; echo $?
+}
+assert_exit() { # <expected> <desc> <cwd> <command>
+    local exp="$1" desc="$2" cwd="$3" cmd="$4" got
+    got="$(run_hook "$cwd" "$cmd")"
+    if [[ "$got" == "$exp" ]]; then echo "ok   — $desc (exit $got)";
+    else echo "FAIL — $desc: expected exit $exp, got $got"; fails=$((fails+1)); fi
+}
+if command -v jq >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    TMPREPO="$(mktemp -d)"
+    ( cd "$TMPREPO" && git init -q && git symbolic-ref HEAD refs/heads/main \
+        && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init ) 2>/dev/null
+    # main + `gh pr merge` with NO resolvable PR number → fail CLOSED (exit 2).
+    assert_exit 2 "main-branch gh pr merge, no PR number → fail closed" "$TMPREPO" "gh pr merge --squash"
+    # A non-merge gh command must pass through untouched (exit 0).
+    assert_exit 0 "non-merge command passes through"                    "$TMPREPO" "gh pr view 5"
+    rm -rf "$TMPREPO"
+else
+    echo "skip — hook-invocation tests (jq/python3 unavailable)"
+fi
+
 if [[ "$fails" -gt 0 ]]; then
     echo "RESULT: FAILED ($fails)"; exit 1
 fi

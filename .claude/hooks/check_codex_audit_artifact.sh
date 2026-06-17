@@ -71,10 +71,28 @@ if ! BRANCH="$(git branch --show-current 2>/dev/null)" || [[ -z "$BRANCH" ]]; th
     exit 0
 fi
 
-# main / master never gets merged via `gh pr merge` from itself
-# (you'd be merging some OTHER PR). Skip the check.
+# main / master: `gh pr merge #N` CAN be run from main (it merges PR #N's
+# feature branch, not main itself). Blanket-skipping here is a fail-OPEN —
+# a code PR merged that way would bypass Gate 4 (bug #353). Instead resolve
+# the PR's head branch + changed files from the command via `gh` and enforce
+# against THOSE; fail CLOSED if the PR can't be resolved.
+PR_FILES_OVERRIDE=""
 case "$BRANCH" in
-    main|master) exit 0 ;;
+    main|master)
+        # `|| true`: grep exits 1 on no match, which would trip `set -e` before
+        # the fail-closed `exit 2` below.
+        PR_NUM="$(printf '%s' "$COMMAND" | grep -oE 'gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+#?[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+        if [[ -z "$PR_NUM" ]] || ! command -v gh >/dev/null 2>&1; then
+            echo "BLOCKED: 'gh pr merge' from $BRANCH without a resolvable PR number (or gh unavailable) — cannot verify the Codex Gate-4 audit. Merge from the PR's feature branch, or pass the PR number explicitly." >&2
+            exit 2
+        fi
+        BRANCH="$(gh pr view "$PR_NUM" --json headRefName -q .headRefName 2>/dev/null || true)"
+        PR_FILES_OVERRIDE="$(gh pr view "$PR_NUM" --json files -q '.files[].path' 2>/dev/null || true)"
+        if [[ -z "$BRANCH" || -z "$PR_FILES_OVERRIDE" ]]; then
+            echo "BLOCKED: could not resolve PR #$PR_NUM head branch / changed files via gh — failing CLOSED on the Codex Gate-4 audit (a code PR must not merge from main without verification)." >&2
+            exit 2
+        fi
+        ;;
 esac
 
 # Detect docs/meta-only PRs that don't need a code audit.
@@ -98,24 +116,34 @@ esac
 # bypass this gate as docs-only. Contract pinned by
 # `.claude/hooks/__tests__/check_codex_audit_artifact.test.sh`.
 CODE_TOUCHED="no"
-git fetch origin main --quiet 2>/dev/null || true
-DIFF_BASE="origin/main"
-git rev-parse --verify --quiet origin/main >/dev/null 2>&1 || DIFF_BASE="main"
 # shellcheck source=.claude/hooks/lib/code-paths.sh
 # shellcheck disable=SC1091
 source "$REPO_ROOT/.claude/hooks/lib/code-paths.sh" 2>/dev/null || true
-if CHANGED="$(git diff "${DIFF_BASE}...HEAD" --name-only 2>/dev/null)"; then
-    if declare -F code_paths_touched >/dev/null 2>&1; then
-        if printf '%s\n' "$CHANGED" | code_paths_touched; then
-            CODE_TOUCHED="yes"
-        fi
-    else
-        # Classifier lib missing/unloadable (corrupt/partial checkout) —
-        # fail CLOSED: require an audit rather than risk letting a code PR
-        # bypass the gate. Duplicating the classifier inline would only
-        # risk drift; refusing to skip is the safe default.
+DIFF_OK="yes"
+if [[ -n "$PR_FILES_OVERRIDE" ]]; then
+    # main-branch merge: classify the PR's actual changed files (from gh).
+    CHANGED="$PR_FILES_OVERRIDE"
+else
+    git fetch origin main --quiet 2>/dev/null || true
+    DIFF_BASE="origin/main"
+    git rev-parse --verify --quiet origin/main >/dev/null 2>&1 || DIFF_BASE="main"
+    CHANGED="$(git diff "${DIFF_BASE}...HEAD" --name-only 2>/dev/null)" || DIFF_OK="no"
+fi
+if [[ "$DIFF_OK" == "no" ]]; then
+    # The diff itself failed (offline mid-op, corrupt ref, etc.) — fail CLOSED
+    # (bug #353 defect 2): require an audit rather than let a code PR through on
+    # an unknown changeset, consistent with the missing-classifier branch below.
+    CODE_TOUCHED="yes"
+elif declare -F code_paths_touched >/dev/null 2>&1; then
+    if printf '%s\n' "$CHANGED" | code_paths_touched; then
         CODE_TOUCHED="yes"
     fi
+else
+    # Classifier lib missing/unloadable (corrupt/partial checkout) —
+    # fail CLOSED: require an audit rather than risk letting a code PR
+    # bypass the gate. Duplicating the classifier inline would only
+    # risk drift; refusing to skip is the safe default.
+    CODE_TOUCHED="yes"
 fi
 if [[ "$CODE_TOUCHED" == "no" ]]; then
     # Docs / hooks / config / rules only — audit not required.
