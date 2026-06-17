@@ -88,6 +88,19 @@ class IdentityConformanceTest {
         assertTrue(n > 0, "no locator vectors loaded")
     }
 
+    @Test fun canonicalLocatorOmitsNonFinite() {
+        // NaN/Inf can't be JSON vectors (Codex Gate-4) — assert in code that the
+        // finite gate omits them, mirroring Swift `if let p, p.isFinite`.
+        for (p in listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
+            val js = CanonicalLocator.canonicalJson(
+                contentSHA256 = "a".repeat(64), fileByteCount = 1, format = "epub",
+                progression = p, totalProgression = p,
+            )
+            // "progression" is a substring of "totalProgression", so its absence covers both.
+            assertTrue(!js.contains("progression"), "non-finite progression must be omitted: $js")
+        }
+    }
+
     @Test fun cacheKeyVectors() {
         val data = load("cache-key.json")
         var n = 0

@@ -27,6 +27,18 @@
       "format": "pdf",
       "page": 42,
       "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"bookFingerprint.fileByteCount\":2048,\"bookFingerprint.format\":\"pdf\",\"page\":42}"
+    },
+    {
+      "_why": "Canonicalization-rule coverage (Codex Gate-4): exercises RFC-8259 escaping (quote/backslash), CR-LF + bare-CR normalization to LF, and a PAIRED char range (charRangeEnd sorts before charRangeStart). textQuote input 'a\"b\\c' -> escaped 'a\\\"b\\\\c'; textContextBefore input 'p\\r\\nq\\rr' (CRLF + bare CR) -> normalized 'p\\nq\\nr'.",
+      "contentSHA256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "fileByteCount": 7,
+      "format": "md",
+      "href": "d.md",
+      "charRangeStartUTF16": 10,
+      "charRangeEndUTF16": 20,
+      "textContextBefore": "p\r\nq\rr",
+      "textQuote": "a\"b\\c",
+      "expectedCanonicalJSON": "{\"bookFingerprint.contentSHA256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"bookFingerprint.fileByteCount\":7,\"bookFingerprint.format\":\"md\",\"charRangeEndUTF16\":20,\"charRangeStartUTF16\":10,\"href\":\"d.md\",\"textContextBefore\":\"p\\nq\\nr\",\"textQuote\":\"a\\\"b\\\\c\"}"
     }
   ]
 }

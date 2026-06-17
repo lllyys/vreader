@@ -94,6 +94,22 @@ struct IdentityConformanceTests {
         }
     }
 
+    @Test("Locator.canonicalJSON omits non-finite progression (NaN/Inf — cannot be JSON vectors)")
+    func locatorOmitsNonFinite() {
+        let fp = DocumentFingerprint(
+            contentSHA256: String(repeating: "a", count: 64), fileByteCount: 1, format: .epub
+        )
+        for p in [Double.nan, Double.infinity, -Double.infinity] {
+            let loc = Locator(
+                bookFingerprint: fp, href: nil, progression: p, totalProgression: p,
+                cfi: nil, page: nil, charOffsetUTF16: nil, charRangeStartUTF16: nil,
+                charRangeEndUTF16: nil, textQuote: nil, textContextBefore: nil, textContextAfter: nil
+            )
+            // "progression" is a substring of "totalProgression"; its absence covers both.
+            #expect(!loc.canonicalJSON().contains("progression"))
+        }
+    }
+
     @Test("ChapterTranslationRecord.lookupKey matches the golden vectors")
     func cacheKeyVectors() throws {
         let json = try Self.loadJSON("cache-key.json")
