@@ -133,9 +133,17 @@ extension PersistenceActor {
                 var descriptor = FetchDescriptor<Book>(predicate: predicate)
                 descriptor.fetchLimit = 1
                 let existing = try context.fetch(descriptor)
-                if !existing.isEmpty {
+                if let existingBook = existing.first {
                     // Row already exists locally (any state). Don't
                     // downgrade — and don't claim we inserted it.
+                    // #108: but DO backfill the converted-Kindle source identity
+                    // if this pre-#108 row has none and the manifest carries it
+                    // (the remaining silent-loss path for unselected entries that
+                    // match an existing row).
+                    if existingBook.sourceCanonicalKey == nil, let key = record.sourceCanonicalKey {
+                        existingBook.sourceCanonicalKey = key
+                        try context.save()
+                    }
                     continue
                 }
                 let book = Book(
@@ -145,7 +153,11 @@ extension PersistenceActor {
                     coverImagePath: record.coverImagePath,
                     provenance: record.provenance,
                     addedAt: record.addedAt,
-                    originalExtension: record.originalExtension
+                    originalExtension: record.originalExtension,
+                    // #108: thread the converted-Kindle source key through the
+                    // remote-only insert path too, so it isn't silently dropped
+                    // once WI-3's backup manifest starts carrying it.
+                    sourceCanonicalKey: record.sourceCanonicalKey
                 )
                 book.detectedEncoding = record.detectedEncoding
                 book.lastOpenedAt = record.lastOpenedAt

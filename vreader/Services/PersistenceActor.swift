@@ -48,6 +48,14 @@ protocol BookPersisting: Sendable {
     /// validation. `author` is set when non-nil; an existing author is
     /// left untouched when `author` is nil.
     func updateBookTitle(fingerprintKey: String, title: String, author: String?) async throws
+
+    /// Feature #108: backfills the converted-Kindle cross-platform identity on an
+    /// existing row. Used by the importer when a pre-#108 converted book (whose
+    /// `sourceCanonicalKey` is nil because its source bytes were unavailable at
+    /// first import) is re-imported from the real `.azw3` — the source key is now
+    /// computable, so persist it. No-op semantics are the caller's concern (only
+    /// call when the existing value is nil and a new non-nil key was computed).
+    func setSourceCanonicalKey(_ key: String, forBookWithKey fingerprintKey: String) async throws
 }
 
 /// Lightweight value type representing a book for cross-boundary transfer.
@@ -201,6 +209,18 @@ actor PersistenceActor: BookPersisting {
             throw ImportError.bookNotFound(key)
         }
         book.provenance = provenance
+        try context.save()
+    }
+
+    func setSourceCanonicalKey(_ key: String, forBookWithKey fingerprintKey: String) async throws {
+        let context = ModelContext(modelContainer)
+        let predicate = #Predicate<Book> { $0.fingerprintKey == fingerprintKey }
+        var descriptor = FetchDescriptor<Book>(predicate: predicate)
+        descriptor.fetchLimit = 1
+        guard let book = try context.fetch(descriptor).first else {
+            throw ImportError.bookNotFound(fingerprintKey)
+        }
+        book.sourceCanonicalKey = key
         try context.save()
     }
 

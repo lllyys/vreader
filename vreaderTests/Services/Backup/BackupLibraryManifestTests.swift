@@ -42,6 +42,37 @@ struct BackupLibraryManifestTests {
         )
     }
 
+    // MARK: - Feature #108: sourceCanonicalKey carry + back-compat
+
+    @Test func entryCarriesSourceCanonicalKeyAcrossRoundTrip() throws {
+        let srcKey = "azw3:\(String(repeating: "b", count: 64)):4096"
+        var entry = sampleEntry()
+        entry.sourceCanonicalKey = srcKey
+        let envelope = BackupLibraryManifestEnvelope(schemaVersion: 1, books: [entry])
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(envelope)
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(BackupLibraryManifestEnvelope.self, from: data)
+        #expect(decoded.books.first?.sourceCanonicalKey == srcKey)
+    }
+
+    @Test func olderManifestWithoutSourceKeyDecodesNil() throws {
+        // A pre-#108 manifest entry has NO sourceCanonicalKey field.
+        let json = """
+        {"schemaVersion":1,"books":[{
+          "fingerprintKey":"epub:\(String(repeating: "a", count: 64)):1024",
+          "format":"epub","sha256":"\(String(repeating: "a", count: 64))",
+          "byteCount":1024,"originalExtension":"epub","title":"Old","author":null,
+          "addedAt":"2023-11-14T22:13:20Z","lastOpenedAt":null,
+          "blobPath":"VReader/books/epub/\(String(repeating: "a", count: 64))_1024.epub"
+        }]}
+        """
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(BackupLibraryManifestEnvelope.self, from: Data(json.utf8))
+        #expect(decoded.books.count == 1)
+        #expect(decoded.books.first?.sourceCanonicalKey == nil)   // back-compat
+    }
+
     // MARK: - Round-trip
 
     @Test func emptyEnvelope_roundTrips() throws {

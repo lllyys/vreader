@@ -38,6 +38,11 @@ struct BackupBookProjection: Sendable, Equatable {
     /// Server-side blob path when known (feature #47). Nil for `.local` rows
     /// that have never been uploaded; populated for `.remoteOnly` rows.
     let blobPath: String?
+    /// Feature #108: converted-Kindle cross-platform canonical identity
+    /// (`azw3:{sha256_of_source}:{bytes}`). Nil for native / non-Kindle / pre-#108
+    /// books. Carried in the manifest so cross-device + Android restore can dedup
+    /// on the source identity.
+    var sourceCanonicalKey: String? = nil
 }
 
 extension PersistenceActor {
@@ -70,7 +75,8 @@ extension PersistenceActor {
                 addedAt: book.addedAt,
                 lastOpenedAt: book.lastOpenedAt,
                 fileState: BookFileState(rawValue: book.fileState) ?? .local,
-                blobPath: book.blobPath
+                blobPath: book.blobPath,
+                sourceCanonicalKey: book.sourceCanonicalKey
             )
         }
     }

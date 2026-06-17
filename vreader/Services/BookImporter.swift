@@ -39,6 +39,9 @@ struct ImportResult: Sendable, Equatable {
     let provenance: ImportProvenance
     let detectedEncoding: String?
     let isDuplicate: Bool
+    /// Feature #108: converted-Kindle cross-platform canonical identity
+    /// (`azw3:{sha256_of_source}:{bytes}`), or nil for native / non-Kindle imports.
+    var sourceCanonicalKey: String? = nil
 }
 
 /// Orchestrates the book import pipeline.
@@ -156,6 +159,12 @@ final class BookImporter: BookImporting, Sendable {
         var workingFormat = format
         var convertedTempURL: URL? = nil
         var kindleOriginExtension: String? = nil
+        // Feature #108: the cross-platform CANONICAL identity for a converted
+        // Kindle book = SHA-256 of the SOURCE `.azw3`/`.mobi`/`.prc` bytes (not
+        // the converted EPUB). Computed below ONLY when conversion actually runs;
+        // nil for native imports (whose `fingerprintKey` already IS the source
+        // key) and non-Kindle imports.
+        var sourceCanonicalKey: String? = nil
         defer {
             // The converted EPUB is a temp file; it's copied into the sandbox by
             // Step 8, so clean up the temp on every exit path.
@@ -165,6 +174,21 @@ final class BookImporter: BookImporting, Sendable {
             do {
                 let tempDir = FileManager.default.temporaryDirectory
                 let sourcePath = fileURL.path
+                let sourceURL = fileURL
+                // Feature #108: hash the SOURCE bytes BEFORE conversion (so a
+                // later source-read failure aborts before the expensive convert)
+                // and OFF-main (ContentHasher does synchronous full-file I/O —
+                // decision #6, never block the @MainActor importer entry). Format
+                // `.azw3`: all Kindle exts normalize to it, matching what Android
+                // computes from the same source file.
+                let sourceHash = try await Task.detached(priority: .userInitiated) {
+                    try await ContentHasher.hash(fileAt: sourceURL)
+                }.value
+                let computedSourceKey = DocumentFingerprint.validated(
+                    contentSHA256: sourceHash.sha256Hex,
+                    fileByteCount: sourceHash.byteCount,
+                    format: .azw3
+                )?.canonicalKey
                 // Off-main: libmobi decode + EPUB packaging is CPU-bound (design
                 // decision #6 — never block the @MainActor importer entry).
                 let converted = try await Task.detached(priority: .userInitiated) {
@@ -174,6 +198,7 @@ final class BookImporter: BookImporting, Sendable {
                 kindleOriginExtension = fileURL.pathExtension.lowercased()
                 workingURL = converted
                 workingFormat = .epub
+                sourceCanonicalKey = computedSourceKey
                 Self.log.info("Kindle convert-on-import: converted source to EPUB")
             } catch let error as MobiDecodeError {
                 // SEMANTIC failure (DRM/corrupt/no-markup) → import the original
@@ -233,6 +258,15 @@ final class BookImporter: BookImporting, Sendable {
             )
             try await persistence.replaceProvenance(provenance, toBookWithKey: fingerprintKey)
 
+            // #108: a pre-#108 converted book has `sourceCanonicalKey == nil`
+            // (source bytes were unavailable at first import). Re-importing the
+            // real `.azw3` makes the source key computable — backfill it.
+            var resolvedSourceKey = existing.sourceCanonicalKey
+            if existing.sourceCanonicalKey == nil, let computed = sourceCanonicalKey {
+                try await persistence.setSourceCanonicalKey(computed, forBookWithKey: fingerprintKey)
+                resolvedSourceKey = computed
+            }
+
             // Bug #247: when restore supplies a manifest title override,
             // update the existing row's title so a dedupe-hit on restore
             // surfaces the manifest title (the source of truth) instead
@@ -275,7 +309,10 @@ final class BookImporter: BookImporting, Sendable {
                 fingerprint: existing.fingerprint,
                 provenance: provenance,
                 detectedEncoding: existing.detectedEncoding,
-                isDuplicate: true
+                isDuplicate: true,
+                // #108: preserve the first import's source key, or the just-
+                // backfilled key if the existing row was a pre-#108 nil.
+                sourceCanonicalKey: resolvedSourceKey
             )
         }
 
@@ -355,7 +392,8 @@ final class BookImporter: BookImporting, Sendable {
             provenance: provenance,
             detectedEncoding: detectedEncoding,
             addedAt: Date(),
-            originalExtension: originalExt
+            originalExtension: originalExt,
+            sourceCanonicalKey: sourceCanonicalKey
         )
 
         let persisted: BookRecord
@@ -399,7 +437,8 @@ final class BookImporter: BookImporting, Sendable {
             fingerprint: persisted.fingerprint,
             provenance: provenance,
             detectedEncoding: detectedEncoding,
-            isDuplicate: false
+            isDuplicate: false,
+            sourceCanonicalKey: persisted.sourceCanonicalKey
         )
     }
 

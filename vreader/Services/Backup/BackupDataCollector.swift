@@ -222,7 +222,8 @@ final class BackupDataCollector: BackupDataCollecting, @unchecked Sendable {
                     format: format,
                     sha256: projection.sha256,
                     byteCount: projection.byteCount
-                )
+                ),
+                sourceCanonicalKey: projection.sourceCanonicalKey
             )
         }
         let envelope = BackupLibraryManifestEnvelope(schemaVersion: 1, books: entries)

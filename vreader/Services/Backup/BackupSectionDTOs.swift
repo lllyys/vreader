@@ -276,6 +276,13 @@ struct BackupLibraryEntry: Codable, Sendable, Equatable {
     /// `"VReader/books/azw3/<sha256>_<byteCount>.azw3"`. Always agrees with
     /// `BlobPath.make(format:sha256:byteCount:)`.
     let blobPath: String
+
+    /// Feature #108: converted-Kindle cross-platform canonical identity
+    /// (`azw3:{sha256_of_source}:{bytes}`). Nil for native / non-Kindle / pre-#108
+    /// books. Optional + defaulted so it is back-compatible — an older manifest
+    /// (no key) decodes to nil and a newer reader tolerates its absence; no
+    /// `kBackupCurrentSchemaVersion` bump needed.
+    var sourceCanonicalKey: String? = nil
 }
 
 // MARK: - Reading History (feature #58 WI-5)

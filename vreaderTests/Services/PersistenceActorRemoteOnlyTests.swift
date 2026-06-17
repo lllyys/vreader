@@ -14,7 +14,8 @@ struct PersistenceActorRemoteOnlyTests {
         sha: String,
         title: String = "Remote Book",
         fileState: BookFileState = .remoteOnly,
-        blobPath: String? = "VReader/books/epub/\(String(repeating: "a", count: 64))_1024.epub"
+        blobPath: String? = "VReader/books/epub/\(String(repeating: "a", count: 64))_1024.epub",
+        sourceCanonicalKey: String? = nil
     ) -> BookRecord {
         let fp = DocumentFingerprint(
             contentSHA256: sha,
@@ -35,9 +36,33 @@ struct PersistenceActorRemoteOnlyTests {
             detectedEncoding: nil,
             addedAt: Date(),
             originalExtension: "epub",
+            sourceCanonicalKey: sourceCanonicalKey,
             fileState: fileState,
             blobPath: blobPath
         )
+    }
+
+    // MARK: - Feature #108: preplant backfills sourceCanonicalKey on existing rows
+
+    @Test func preplantBackfillsSourceCanonicalKeyOnExistingNilRow() async throws {
+        let persistence = try CollectionTestHelper.makePersistence()
+        let sha = String(repeating: "a", count: 64)
+        // A pre-#108 existing local row: no source key.
+        let existing = makeRecord(sha: sha, fileState: .local, blobPath: nil, sourceCanonicalKey: nil)
+        _ = try await persistence.insertBook(existing)
+        #expect(try await persistence.findBook(byFingerprintKey: existing.fingerprintKey)?.sourceCanonicalKey == nil)
+
+        // Selective restore preplants the SAME key as remote-only, carrying the
+        // manifest's source identity. The existing row is skipped for insert but
+        // its nil source key must be backfilled.
+        let srcKey = "azw3:\(String(repeating: "b", count: 64)):4096"
+        let incoming = makeRecord(sha: sha, fileState: .remoteOnly, sourceCanonicalKey: srcKey)
+        _ = try await persistence.insertRemoteOnlyBookRecords([incoming])
+
+        let after = try await persistence.findBook(byFingerprintKey: existing.fingerprintKey)
+        #expect(after?.sourceCanonicalKey == srcKey)
+        // The row stays local (not downgraded to remote-only).
+        #expect(after?.fileState == .local)
     }
 
     // MARK: - fingerprintKeys(withFileState:)

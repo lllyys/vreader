@@ -118,6 +118,99 @@ struct BookImporterTests {
         #expect(again.provenance.converterVersion == MobiEPUBConverter.version)
     }
 
+    // MARK: - Feature #108: converted-Kindle source-bytes canonical identity
+
+    @Test("flag ON + AZW3 → sourceCanonicalKey = source bytes; fingerprintKey stays EPUB")
+    func convertOnImportPersistsSourceCanonicalKey() async throws {
+        guard let azw3 = try copyRealAzw3ToTemp() else { return }  // CI / no fixture
+        defer { try? FileManager.default.removeItem(at: azw3) }
+        // The canonical cross-platform key = SHA-256 of the SOURCE bytes, format azw3.
+        let srcHash = try await ContentHasher.hash(fileAt: azw3)
+        let expectedSourceKey = "azw3:\(srcHash.sha256Hex):\(srcHash.byteCount)"
+
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .kindleConvertOnImport)
+        let (importer, mock, sandbox) = try await makeImporter(featureFlags: flags)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let result = try await importer.importFile(at: azw3, source: .filesApp)
+        // Local primary identity stays the converted EPUB (drives rendering + blob).
+        #expect(result.fingerprint.format == .epub)
+        #expect(result.fingerprintKey.hasPrefix("epub:"))
+        // Cross-platform canonical identity is the SOURCE bytes.
+        #expect(result.sourceCanonicalKey == expectedSourceKey)
+        // And it is PERSISTED on the row.
+        let stored = await mock.book(forKey: result.fingerprintKey)
+        #expect(stored?.sourceCanonicalKey == expectedSourceKey)
+    }
+
+    @Test("flag OFF (native AZW3) → sourceCanonicalKey nil (fingerprintKey already IS source)")
+    func nativeKindleImportLeavesSourceCanonicalKeyNil() async throws {
+        guard let azw3 = try copyRealAzw3ToTemp() else { return }
+        defer { try? FileManager.default.removeItem(at: azw3) }
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(false, for: .kindleConvertOnImport)
+        let (importer, mock, sandbox) = try await makeImporter(featureFlags: flags)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let result = try await importer.importFile(at: azw3, source: .filesApp)
+        #expect(result.fingerprint.format == .azw3)
+        #expect(result.sourceCanonicalKey == nil)
+        let stored = await mock.book(forKey: result.fingerprintKey)
+        #expect(stored?.sourceCanonicalKey == nil)
+    }
+
+    @Test("non-Kindle import → sourceCanonicalKey nil")
+    func nonKindleImportLeavesSourceCanonicalKeyNil() async throws {
+        let txt = try makeTempTxtFile()
+        defer { try? FileManager.default.removeItem(at: txt) }
+        let (importer, _, sandbox) = try await makeImporter()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+        let result = try await importer.importFile(at: txt, source: .filesApp)
+        #expect(result.sourceCanonicalKey == nil)
+    }
+
+    @Test("re-importing a pre-#108 converted book (nil source key) backfills it")
+    func dedupeBackfillsNilSourceCanonicalKey() async throws {
+        guard let azw3 = try copyRealAzw3ToTemp() else { return }
+        defer { try? FileManager.default.removeItem(at: azw3) }
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .kindleConvertOnImport)
+        let (importer, mock, sandbox) = try await makeImporter(featureFlags: flags)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let first = try await importer.importFile(at: azw3, source: .filesApp)
+        let sourceKey = try #require(first.sourceCanonicalKey)
+        // Simulate a pre-#108 grandfathered row: nil source key on disk.
+        await mock.seedSourceCanonicalKey(nil, forKey: first.fingerprintKey)
+        #expect(await mock.book(forKey: first.fingerprintKey)?.sourceCanonicalKey == nil)
+
+        // Re-import the real AZW3 → dedupe hit → backfill the now-computable key.
+        let again = try await importer.importFile(at: azw3, source: .shareSheet)
+        #expect(again.isDuplicate)
+        #expect(again.sourceCanonicalKey == sourceKey)
+        #expect(await mock.book(forKey: first.fingerprintKey)?.sourceCanonicalKey == sourceKey)
+        #expect(await mock.setSourceCanonicalKeyCallCount == 1)
+    }
+
+    @Test("converted-Kindle dedupe re-import preserves sourceCanonicalKey")
+    func convertedDedupePreservesSourceCanonicalKey() async throws {
+        guard let azw3 = try copyRealAzw3ToTemp() else { return }
+        defer { try? FileManager.default.removeItem(at: azw3) }
+        let flags = FeatureFlags(environment: .prod)
+        flags.setOverride(true, for: .kindleConvertOnImport)
+        let (importer, mock, sandbox) = try await makeImporter(featureFlags: flags)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        let first = try await importer.importFile(at: azw3, source: .filesApp)
+        let again = try await importer.importFile(at: azw3, source: .shareSheet)
+        #expect(again.isDuplicate)
+        #expect(again.sourceCanonicalKey == first.sourceCanonicalKey)
+        #expect(again.sourceCanonicalKey != nil)
+        let stored = await mock.book(forKey: again.fingerprintKey)
+        #expect(stored?.sourceCanonicalKey == first.sourceCanonicalKey)
+    }
+
     @Test("flag ON + non-Kindle (txt) → untouched, no conversion")
     func convertOnImportIgnoresNonKindle() async throws {
         let txt = try makeTempTxtFile(content: "plain text body for import")

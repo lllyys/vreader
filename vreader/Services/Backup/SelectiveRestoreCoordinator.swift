@@ -155,6 +155,22 @@ struct SelectiveRestoreCoordinator: Sendable {
             }
         }
 
+        // Phase 2.5 (#108) — re-attach the converted-Kindle source identity on
+        // materialized rows. A selected entry is imported from its EPUB blob, so
+        // BookImporter re-derives a nil `sourceCanonicalKey` (no conversion ran);
+        // the manifest carries the canonical source key, so apply it. Remote-only
+        // (unselected) rows already carry it via `makeRemoteOnlyRecord`.
+        // Best-effort: a re-attach failure must not abort the whole restore.
+        for result in materializeResults where result.isSuccess {
+            if let sourceKey = result.entry.sourceCanonicalKey {
+                do {
+                    try await persistence.setSourceCanonicalKey(sourceKey, forBookWithKey: result.entry.fingerprintKey)
+                } catch {
+                    log.error("source-key re-attach failed for \(result.entry.fingerprintKey, privacy: .public): \(String(describing: error), privacy: .public)")
+                }
+            }
+        }
+
         // Phase 3 — metadata restore. Sections present get applied;
         // missing sections are no-op'd. Reading positions land on the
         // entries we just inserted (local + remoteOnly) by fingerprintKey.
@@ -226,6 +242,7 @@ struct SelectiveRestoreCoordinator: Sendable {
             detectedEncoding: nil,
             addedAt: entry.addedAt,
             originalExtension: entry.originalExtension,
+            sourceCanonicalKey: entry.sourceCanonicalKey,   // #108: carry the cross-platform identity
             lastOpenedAt: entry.lastOpenedAt,
             fileState: .remoteOnly,
             blobPath: entry.blobPath

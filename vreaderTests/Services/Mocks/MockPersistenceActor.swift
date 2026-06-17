@@ -58,6 +58,7 @@ actor MockPersistenceActor: BookPersisting {
             detectedEncoding: book.detectedEncoding,
             addedAt: book.addedAt,
             originalExtension: book.originalExtension,
+            sourceCanonicalKey: book.sourceCanonicalKey,
             lastOpenedAt: book.lastOpenedAt,
             fileState: book.fileState,
             blobPath: book.blobPath
@@ -94,6 +95,7 @@ actor MockPersistenceActor: BookPersisting {
             detectedEncoding: book.detectedEncoding,
             addedAt: book.addedAt,
             originalExtension: book.originalExtension,
+            sourceCanonicalKey: book.sourceCanonicalKey,
             lastOpenedAt: book.lastOpenedAt,
             fileState: book.fileState,
             blobPath: book.blobPath
@@ -101,7 +103,54 @@ actor MockPersistenceActor: BookPersisting {
         books[key] = book
     }
 
+    /// Count of setSourceCanonicalKey calls (feature #108 dedupe backfill).
+    private(set) var setSourceCanonicalKeyCallCount = 0
+
+    func setSourceCanonicalKey(_ key: String, forBookWithKey fingerprintKey: String) async throws {
+        setSourceCanonicalKeyCallCount += 1
+        guard var book = books[fingerprintKey] else {
+            throw ImportError.bookNotFound(fingerprintKey)
+        }
+        book = BookRecord(
+            fingerprintKey: book.fingerprintKey,
+            title: book.title,
+            author: book.author,
+            coverImagePath: book.coverImagePath,
+            fingerprint: book.fingerprint,
+            provenance: book.provenance,
+            detectedEncoding: book.detectedEncoding,
+            addedAt: book.addedAt,
+            originalExtension: book.originalExtension,
+            sourceCanonicalKey: key,
+            lastOpenedAt: book.lastOpenedAt,
+            fileState: book.fileState,
+            blobPath: book.blobPath
+        )
+        books[fingerprintKey] = book
+    }
+
     // MARK: - Test Helpers
+
+    /// Test seam (feature #108): force a stored row's `sourceCanonicalKey` to an
+    /// arbitrary value (incl. nil), to simulate a pre-#108 grandfathered row.
+    func seedSourceCanonicalKey(_ value: String?, forKey key: String) {
+        guard let book = books[key] else { return }
+        books[key] = BookRecord(
+            fingerprintKey: book.fingerprintKey,
+            title: book.title,
+            author: book.author,
+            coverImagePath: book.coverImagePath,
+            fingerprint: book.fingerprint,
+            provenance: book.provenance,
+            detectedEncoding: book.detectedEncoding,
+            addedAt: book.addedAt,
+            originalExtension: book.originalExtension,
+            sourceCanonicalKey: value,
+            lastOpenedAt: book.lastOpenedAt,
+            fileState: book.fileState,
+            blobPath: book.blobPath
+        )
+    }
 
     /// Returns the stored book for the given key, if any.
     func book(forKey key: String) -> BookRecord? {
