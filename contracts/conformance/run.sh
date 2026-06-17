@@ -11,6 +11,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WHICH="${1:-both}"
 rc=0
 
+# Clear stale cross-diff output FIRST (bug #355 Gate-4): otherwise a suite that
+# fails to (re)emit its file leaves an old one that could false-pass the byte-diff.
+rm -rf "$ROOT/contracts/conformance/.out"
+
 # JDK 17 is the Android-standard JDK (rule 40 / ADR). Resolve the brew path.
 : "${JAVA_HOME:=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home}"
 export JAVA_HOME

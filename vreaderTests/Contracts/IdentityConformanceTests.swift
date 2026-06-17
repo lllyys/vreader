@@ -96,11 +96,13 @@ struct IdentityConformanceTests {
         }
         // Emit this platform's ACTUAL canonical output so run.sh can byte-diff it
         // against the Kotlin output (bug #355). Written to the repo via #filePath.
+        // FAIL LOUD on a write error (bug #355 Gate-4) — a swallowed write could
+        // leave a stale file that false-passes the cross-diff.
         let outDir = Self.vectorsDir().deletingLastPathComponent()
             .appendingPathComponent("conformance/.out")
-        try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
-        try? emitted.write(to: outDir.appendingPathComponent("swift-locator.txt"),
-                           atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        try emitted.write(to: outDir.appendingPathComponent("swift-locator.txt"),
+                          atomically: true, encoding: .utf8)
     }
 
     @Test("Locator.validate() REJECTS non-finite progression (the canonical guard — bug #356)")

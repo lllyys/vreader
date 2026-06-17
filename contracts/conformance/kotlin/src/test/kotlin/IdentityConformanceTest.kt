@@ -96,6 +96,25 @@ class IdentityConformanceTest {
         File(outDir, "kotlin-locator.txt").writeText(emitted.toString())
     }
 
+    @Test fun canonicalLocatorNormalizesNFC() {
+        // The canonical reference NFC-normalizes string fields (bug #356): NFD
+        // input (base letter + U+0301 combining acute) must produce the NFC
+        // precomposed form. Kotlin-only: iOS Locator.swift's matching NFC change
+        // is migration-sensitive and tracked as feature #109, so the cross-platform
+        // NFD vector isn't in the shared set yet (contract target: locator.md).
+        val fromNfd = CanonicalLocator.canonicalJson(
+            contentSHA256 = "d".repeat(64), fileByteCount = 3, format = "epub",
+            href = "a\u0301.html", textQuote = "cafe\u0301",   // NFD: base + U+0301
+        )
+        val fromNfc = CanonicalLocator.canonicalJson(
+            contentSHA256 = "d".repeat(64), fileByteCount = 3, format = "epub",
+            href = "\u00e1.html", textQuote = "caf\u00e9",      // NFC: precomposed
+        )
+        assertEquals(fromNfc, fromNfd, "NFD input must canonicalize to the NFC form")
+        assertTrue(fromNfd.contains("\u00e1") && fromNfd.contains("\u00e9"), "precomposed")
+        assertTrue(!fromNfd.contains("\u0301"), "no combining mark in output")
+    }
+
     @Test fun canonicalLocatorRejectsNonFinite() {
         // NaN/Inf can't be JSON vectors (bug #356) — assert the reference REJECTS
         // non-finite (require -> IllegalArgumentException) rather than silently
