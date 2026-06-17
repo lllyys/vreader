@@ -36,6 +36,9 @@ extension PersistenceActor: ReadingPositionPersisting {
         guard locator.bookFingerprint.canonicalKey == bookFingerprintKey else {
             throw PersistenceError.recordNotFound("Locator fingerprint does not match book key")
         }
+        // #109 WI-2 / #356: repair a non-finite (invalid) locator at the boundary
+        // so the stored locator + locatorHash are always valid.
+        let locator = locator.repairedForCanonicalization()
 
         let context = ModelContext(modelContainer)
         let key = bookFingerprintKey
@@ -97,6 +100,9 @@ extension PersistenceActor: ReadingPositionPersisting {
                 "VReaderLocator/legacy fingerprint does not match book key"
             )
         }
+        // #109 WI-2 / #356: repair a non-finite (invalid) legacy locator so the
+        // stored fallback locator + locatorHash are always valid.
+        let legacyLocator = legacyLocator.repairedForCanonicalization()
 
         let envelopeData = try JSONEncoder().encode(vreaderLocator)
 

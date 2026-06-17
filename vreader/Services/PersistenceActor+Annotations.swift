@@ -17,6 +17,9 @@ extension PersistenceActor: AnnotationPersisting {
         guard locator.bookFingerprint.canonicalKey == key else {
             throw PersistenceError.recordNotFound("Locator fingerprint does not match book key")
         }
+        // #109 WI-2 / #356: repair a non-finite (invalid) locator at the boundary
+        // so the stored locator + profileKey are always valid.
+        let locator = locator.repairedForCanonicalization()
 
         let context = ModelContext(modelContainer)
         let predicate = #Predicate<Book> { $0.fingerprintKey == key }

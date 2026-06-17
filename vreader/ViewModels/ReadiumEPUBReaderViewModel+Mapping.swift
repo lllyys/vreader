@@ -225,6 +225,9 @@ extension ReadiumEPUBReaderViewModel {
         originalFormat: BookFormat
     ) -> VReaderLocator? {
         guard let json = try? readiumLocator.jsonString() else { return nil }
+        // #109 WI-2: Readium can hand back a non-finite progression on some
+        // resources — repair the legacy fallback so the persisted envelope's
+        // lossy leg is always a valid locator.
         let legacy = Locator(
             bookFingerprint: fingerprint,
             href: readiumLocator.href.string,
@@ -233,7 +236,7 @@ extension ReadiumEPUBReaderViewModel {
             cfi: nil, page: nil,
             charOffsetUTF16: nil, charRangeStartUTF16: nil, charRangeEndUTF16: nil,
             textQuote: nil, textContextBefore: nil, textContextAfter: nil
-        )
+        ).repairedForCanonicalization()
         return VReaderLocator(
             fingerprintKey: fingerprintKey,
             originalFormat: originalFormat,

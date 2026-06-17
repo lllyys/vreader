@@ -454,6 +454,9 @@ extension PersistenceActor {
               let locator = try? decoder.decode(Locator.self, from: data),
               locator.bookFingerprint.canonicalKey == expectedKey
         else { return nil }
-        return locator
+        // #109 WI-2 / #356: a backup authored by a pre-fix build may carry a
+        // non-finite (invalid) locator — repair it on the way in so restore never
+        // re-introduces an invalid row.
+        return locator.repairedForCanonicalization()
     }
 }

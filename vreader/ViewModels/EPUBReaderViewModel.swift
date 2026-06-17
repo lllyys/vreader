@@ -220,7 +220,10 @@ final class EPUBReaderViewModel {
             textQuote: nil,
             textContextBefore: nil,
             textContextAfter: nil
-        )
+        ).repairedForCanonicalization()   // #109 WI-2: the validated factory
+        // returns nil only on a non-finite progression; repair (not recreate as
+        // invalid) so an out-of-range value never reaches persistence as a
+        // colliding key. The persistence boundary repairs again as backstop.
     }
 
     // MARK: - Private: Navigation Helpers

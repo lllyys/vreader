@@ -37,6 +37,11 @@ extension PersistenceActor: HighlightPersisting {
         guard locator.bookFingerprint.canonicalKey == key else {
             throw PersistenceError.recordNotFound("Locator fingerprint does not match book key")
         }
+        // #109 WI-2 / #356: never persist a non-finite (invalid) locator — it
+        // canonicalizes the same as a valid missing-progression one and would
+        // collide on the derived key. Repair (null non-finite fields) at the
+        // boundary so the stored locator + profileKey are always valid.
+        let locator = locator.repairedForCanonicalization()
 
         let context = ModelContext(modelContainer)
         let predicate = #Predicate<Book> { $0.fingerprintKey == key }

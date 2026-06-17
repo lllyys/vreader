@@ -799,7 +799,8 @@ final class TXTReaderViewModel {
             charOffsetUTF16: currentOffsetUTF16,
             charRangeStartUTF16: nil, charRangeEndUTF16: nil,
             textQuote: nil, textContextBefore: nil, textContextAfter: nil
-        )
+        ).repairedForCanonicalization()   // #109 WI-2: repair (not recreate as
+        // invalid) on a non-finite progression; persistence repairs again.
     }
 
     // MARK: - Private: State Reset
