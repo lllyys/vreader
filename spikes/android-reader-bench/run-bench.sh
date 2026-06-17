@@ -32,11 +32,25 @@ echo "== build + install (app + androidTest) =="
 adb install -r "$HERE/app/build/outputs/apk/debug/app-debug.apk" >/dev/null || exit 1
 adb install -r "$HERE/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk" >/dev/null || exit 1
 
-echo "== push corpus =="
+echo "== push corpus + mini-cjk anchor fixture =="
 adb shell mkdir -p "$DEVDIR" >/dev/null 2>&1
 adb push "$CORPUS" "$DEVDIR/corpus.epub" >/dev/null || { echo "FAIL: push corpus"; exit 1; }
+[[ -f "$HERE/fixtures/mini-cjk.epub" ]] && adb push "$HERE/fixtures/mini-cjk.epub" "$DEVDIR/mini-cjk.epub" >/dev/null
 adb shell rm -f "$DEVDIR/metrics.json"
 adb logcat -c
+
+# SUITE=anchor runs the WI-3 CFI/selection anchor-restore probes instead of the
+# WI-2 scroll benchmark. Default = scroll.
+if [[ "${SUITE:-scroll}" == "anchor" ]]; then
+    echo "== run anchor-restore probes (WI-3) =="
+    adb shell am instrument -w -e class "$PKG.AnchorRestoreTest" "$RUNNER" 2>&1 | tee /tmp/spikeB-instrument.log
+    adb logcat -d -s AnchorRestore 2>/dev/null | tail -8
+    if grep -q "OK (3 tests)" /tmp/spikeB-instrument.log; then
+        echo "BENCH RESULT: PASS (anchor)"; exit 0
+    else
+        echo "BENCH RESULT: FAIL (anchor)"; exit 1
+    fi
+fi
 
 echo "== run sweep: $CHAPTERS chapters x $SCROLLS scrolls =="
 adb shell am instrument -w -e chapters "$CHAPTERS" -e scrollsPerChapter "$SCROLLS" \

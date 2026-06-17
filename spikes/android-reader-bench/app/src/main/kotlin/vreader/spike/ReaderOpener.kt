@@ -44,4 +44,8 @@ object ReaderOpener {
     /** The corpus path the harness shell pushes to (app external files dir). */
     fun corpusFile(context: Context): File =
         File(context.getExternalFilesDir(null), "corpus.epub")
+
+    /** A named fixture the harness shell pushes to the app external files dir. */
+    fun fixtureFile(context: Context, name: String): File =
+        File(context.getExternalFilesDir(null), name)
 }
