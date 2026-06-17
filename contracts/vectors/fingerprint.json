@@ -3,7 +3,7 @@
   "vectors": [
     { "format": "epub", "contentSHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fileByteCount": 1024, "expectedCanonicalKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024" },
     { "format": "pdf", "contentSHA256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "fileByteCount": 0, "expectedCanonicalKey": "pdf:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:0" },
-    { "format": "azw3", "contentSHA256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "fileByteCount": 18000000, "expectedCanonicalKey": "azw3:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff:18000000" },
+    { "_why": "converted-Kindle canonical identity = SOURCE bytes (bug #354 / DECISION.md): format is the SOURCE format azw3 (the BookFormat value covering azw/mobi/prc), hash+count are of the ORIGINAL .azw3/.mobi/.prc file — NOT the converted EPUB. Same source file -> same key on any platform, no converter-pipeline parity needed.", "format": "azw3", "contentSHA256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "fileByteCount": 18000000, "expectedCanonicalKey": "azw3:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff:18000000" },
     { "format": "txt", "contentSHA256": "0000000000000000000000000000000000000000000000000000000000000000", "fileByteCount": 42, "expectedCanonicalKey": "txt:0000000000000000000000000000000000000000000000000000000000000000:42" }
   ],
   "invalid": [
