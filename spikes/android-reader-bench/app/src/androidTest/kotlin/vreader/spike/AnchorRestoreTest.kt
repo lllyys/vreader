@@ -209,7 +209,7 @@ class AnchorRestoreTest {
                 assertTrue("fragment restore did not bring target $targetId on-screen (topPx=$top ih=$ih)",
                     visible)
                 assertTrue("fragment restore left target $targetId outside the top third (offsetFrac=${"%.3f".format(offsetFrac)}) — restore is wildly off",
-                    offsetFrac in 0.0..0.34)
+                    offsetFrac >= 0.0 && offsetFrac < 0.34)
             } finally {
                 scenario.close()
             }
