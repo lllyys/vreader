@@ -1,0 +1,73 @@
+// vreader Android app module — feature #106 WI-1.
+// Reads versionName/versionCode from `android/version.properties` (rule 40 — the
+// Android version source of truth). Compose UI; core-library desugaring is
+// mandatory (Readium 3.3.0, consumed from WI-5, links against it). Unit tests run
+// on the JVM via Robolectric, driven by `scripts/run-android-tests.sh`.
+import java.util.Properties
+
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Read via Gradle's provider API so `version.properties` is a TRACKED input
+// (configuration-cache-safe — Codex Gate-4: raw file I/O can stale under the
+// config cache).
+val versionPropsText = providers.fileContents(
+    rootProject.layout.projectDirectory.file("version.properties")
+).asText.get()
+val versionProps = Properties().apply { load(versionPropsText.reader()) }
+
+android {
+    namespace = "com.vreader.app"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "com.vreader.app"
+        minSdk = 26              // >= Readium 3.3.0's floor of 23
+        targetSdk = 36
+        versionCode = versionProps.getProperty("versionCode").toInt()
+        versionName = versionProps.getProperty("versionName")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true   // exposes VERSION_NAME/VERSION_CODE for the smoke test
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true   // Robolectric needs resources
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
+    implementation(composeBom)
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.activity:activity-compose:1.9.2")
+    implementation("androidx.core:core-ktx:1.13.1")
+
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+}

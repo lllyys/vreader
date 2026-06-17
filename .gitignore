@@ -64,3 +64,10 @@ CLAUDE.local.md
 # (the .claude one is an absolute, cc-suite-version-pinned path; never commit).
 .claude/skills/cc-suite
 .agents/
+
+# Android (feature #106) — build artifacts + local SDK config (the gradle
+# wrapper jar IS committed; build/ is already ignored above).
+android/.gradle/
+android/local.properties
+android/app/build/
+.gradle/
