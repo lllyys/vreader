@@ -6,6 +6,26 @@ You must be safe and non-destructive by default. Do not auto-install dependencie
 
 ---
 
+## 0.0 vreader (THIS repo) — binding overrides
+
+This is the vreader dual-platform repo (iOS Swift at root, Android Kotlin under
+`android/`). The generic stack-detection below still applies, but for THIS repo:
+
+- **Never run a bare `xcodebuild test` or `./gradlew test`** (rule 52: a wedged
+  build ghosts at 0% CPU for hours). Use the watchdog wrappers:
+  - iOS: **`scripts/run-tests.sh [vreaderTests/Suite]`** (the only sanctioned iOS
+    unit-test gate; prefer targeted `-only-testing` suites — see rule 52 Cause C).
+  - Android: **`scripts/run-android-tests.sh`** (rule 49/52/53; drives the
+    `spikes/` harness until #106's app shell exists). Verify lane:
+    `scripts/run-android-verify.sh`.
+- **Never drive the simulator/emulator while a test run is in flight** against the
+  same UDID/AVD (rule 52 — contention wedges the runner).
+- Classify which lane a change needs with `code_paths_platform`
+  (`.claude/hooks/lib/code-paths.sh`): `ios`/`shared` → the iOS gate, `android-*`
+  → the Android gate.
+
+---
+
 ## 0. Preflight
 
 Before running anything, print:
@@ -137,9 +157,9 @@ Run discovered lint, format check, and typecheck commands. Examples by stack (on
 | Python           | `pytest -x -q` or `python -m unittest discover -s tests -q`                      |
 | Go               | `go test -count=1 ./...`                                                         |
 | Swift (SPM)      | `swift test`                                                                     |
-| Xcode            | `xcodebuild test ... -only-testing:<UnitTestTarget> -quiet`                      |
+| Xcode (vreader)  | **`scripts/run-tests.sh vreaderTests/<Suite>`** — NOT bare `xcodebuild test` (rule 52) |
 | Ruby             | `bundle exec rspec --fail-fast` or `bundle exec rake test`                       |
-| Gradle           | `./gradlew test`                                                                 |
+| Gradle (vreader) | **`scripts/run-android-tests.sh`** — NOT bare `./gradlew test` (rule 52 Cause D) |
 | Maven            | `mvn test -q`                                                                    |
 | Elixir           | `mix test`                                                                       |
 | PHP              | `vendor/bin/phpunit`                                                             |

@@ -12,6 +12,8 @@ An iOS reader for EPUB, AZW3/MOBI (Kindle), PDF, TXT, and Markdown — built ent
 
 VReader is a modern reading app designed for iPhone and iPad, built entirely by AI coding agents (Claude Code + Codex CLI) with human direction on requirements and testing. It supports EPUB, AZW3/MOBI (Kindle), PDF, TXT, and Markdown with annotations, full-text search, AI assistant, TTS, book source scraping, and WebDAV backup.
 
+> **Android port (in progress).** Per [ADR-0001](docs/decisions/0001-android-port-strategy.md), vreader is becoming **two independently-shippable native apps** — the iOS app (Swift, repo root) and a native Android app (Kotlin + Jetpack Compose, under `android/`) — that share identity / library / backup contracts (`contracts/`), not a cross-platform rewrite. Foundation phases (#103 path-scoped automation, #104/#105 identity + reader spikes — verified, #107 dev-loop tooling) are landing; the Android app shell is #106. The dev workflow (`scripts/run-android-tests.sh`, the platform classifier, `/fix-issue`/`/feature-workflow` routing) is Android-aware.
+
 ## Screens
 
 VReader's v2 visual identity — a reading-focused design system with a Source Serif / Inter type pairing, an oxblood accent, and five page themes (Paper, Sepia, Dark, OLED, Photo).

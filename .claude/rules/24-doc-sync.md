@@ -21,6 +21,7 @@ Update in the same PR whenever the code change touches any of:
 | New top-level directory under `vreader/` or `Services/` | File Organization tree                                            |
 | New design pattern shared across features               | Key Design Patterns section                                       |
 | Performance optimization with cross-cutting impact      | Performance Optimizations table                                   |
+| New Android `@Entity` / Room schema, Compose host, repo, DI module, or `contracts/` change (feature #107/#106) | `docs/architecture.md` Android section (once #106 adds it) + the `contracts/` doc if a shared spec changed; an iOS↔Android parity-affecting change updates `docs/parity/` |
 | Existing stated fact becomes wrong                      | Fix it. Stale-but-passing doc text is worse than no doc text      |
 
 You don't need to update for: pure bug fixes, edits inside a single existing

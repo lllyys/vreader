@@ -2,7 +2,6 @@
 name: implementer
 description: Implements scoped changes with tests and minimal diffs.
 tools: Read, Edit, Bash
-skills: tiptap-dev, tauri-app-dev
 ---
 
 You implement one Work Item at a time:

@@ -4,7 +4,11 @@ When modifying code in files that have AI-maintenance documentation comments, ke
 
 ## What Counts as a Documented File
 
-Files with a `Purpose:` line in their header block, or Rust files with `//!` module docs.
+Files with a `Purpose:` line in their header block (Swift + Kotlin), or Rust
+files with `//!` module docs. The same maintenance applies to Android/Kotlin
+sources (feature #107): keep the `// Purpose:` header / KDoc (`/** … */`) in sync
+with the code, and update `@coordinates-with` references when a Kotlin file is
+renamed or its collaborators change.
 
 ## When to Update Comments
 

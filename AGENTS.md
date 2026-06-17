@@ -31,6 +31,27 @@ cross-platform rewrite. **Source of truth for the Android strategy:
 - The Android port runs through the same 6-gate feature workflow; Phase 0
   (#103) path-scopes the automation so an `android/` PR is gated, not
   bypassed.
+- **Android dev-loop tooling (feature #107) — operational addendum.** The
+  workflow can now *drive* Android, not just classify it:
+  - **Platform routing**: `code_paths_platform` (`.claude/hooks/lib/code-paths.sh`)
+    classifies a change's paths → `ios` / `android-app` / `android-spike` /
+    `shared` (precedence `android-app > android-spike > ios > shared`; pure
+    path-based, no metadata). `/fix-issue` + `/feature-workflow` substitute the
+    Android lane in every test/verify phase.
+  - **Test / verify**: Android runs through **`scripts/run-android-tests.sh`** /
+    **`scripts/run-android-verify.sh`** (rule 49/52/53 watchdogs — never a bare
+    `./gradlew`; rule 52 "Cause D" covers the Gradle-daemon/emulator ghost
+    classes, swept by `scripts/sweep-ghosts.sh`). The TDD Guardian routes through
+    `scripts/tdd-guardian-test.sh` so a Kotlin change can't false-green on the iOS
+    command. `check_audit_debt.sh` now classifies `android/`/`*.kt`/`contracts/`
+    as code at Stop time too.
+  - **SKIP-Android-until-ready**: the app shell is **#106**. Until it lands the
+    only Android target is the `spikes/` harness, so an `android-app` change can't
+    reach Gate-5 — the crons skip auto-starting it and the verify skill marks it
+    harness-blocked. iOS / `shared` / `contracts/` / `spikes/` work is unaffected.
+  - **Version bump** stays iOS (`project.yml`) for `shared`/spike PRs (rule 40);
+    the Android `android/version.properties` + `android/vX.Y.Z` lane begins with
+    #106.
 
 - You are an AI assistant working on the project.
 - **Read `docs/architecture.md` before making any code changes. Update it when adding new layers, patterns, services, or changing how components communicate.**
