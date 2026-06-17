@@ -9,10 +9,15 @@ across devices" (content-hash dedup + WebDAV materializing restore) holds.
 
 > Decomposed from feature #102 (Android port) per
 > `docs/decisions/0001-android-port-strategy.md`. This directory is
-> **Spike A** (feature #104) — the interop gate (ADR Risk 1). The Swift
-> app is the **reference implementation**; these specs are distilled FROM
-> it, and the Swift conformance suite ASSERTS the app matches the spec (if
-> it doesn't, the spec is wrong, not the app).
+> **Spike A** (feature #104) — the interop gate (ADR Risk 1). These
+> identity specs (`identity/*.md` + `DECISION.md`) are the **authoritative
+> cross-platform contract** — the decided target. They are distilled from
+> the Swift reference where the app already matches, and the Swift
+> conformance suite asserts that match; where a deliberate decision moves
+> the contract AHEAD of the current app (e.g. source-bytes converted-Kindle
+> identity vs iOS's current converted-EPUB fingerprint), the gap is
+> explicitly acknowledged in `DECISION.md` and tracked as a follow-up
+> feature (#108), not a spec error.
 
 ## Why this exists (the gate)
 
@@ -78,10 +83,17 @@ Kindle/copyrighted source bytes. Source corpus files (the gitignored
 `test-books/` MOBI/AZW3 set) stay out of `contracts/`; only the derived
 vectors check in. A `contracts/` PR adding raw book bytes is a defect.
 
-## Status (2026-06-17)
+## Status (2026-06-17) — Spike A (#104) VERIFIED
 
-- **WI-1 (this)**: the canonical specs (`identity/*.md`) — DONE.
-- **WI-2**: golden vectors + the Swift conformance suite — Swift-only, next.
-- **WI-3/4/5 + the harnesses**: libmobi NDK determinism, Readium round-trip,
-  Kotlin conformance — **toolchain-gated** (no Android SDK/NDK/JDK/Kotlin
-  on the build host yet; standing it up is a prerequisite the plan flags).
+- **Canonical specs** (`identity/*.md` + `DECISION.md`): DONE — the
+  canonical-identity DECISION is source-bytes (converted-Kindle) +
+  exact-match (native fingerprint / cache-key / `Locator.canonicalJSON`) +
+  CFI lossy-fallback.
+- **Dual-platform conformance lane**: GREEN — `contracts/conformance/run.sh`
+  runs the Swift suite (`vreaderTests/IdentityConformanceTests`) + the
+  Kotlin suite (`contracts/conformance/kotlin`) against the shared
+  `contracts/vectors/` (fingerprint + cache-key + locator). Toolchain
+  (JDK 17 / Kotlin / Android SDK+NDK) installed.
+- **Follow-up**: the iOS source-bytes BookImporter implementation +
+  migration is tracked as **feature #108** (the contract is ahead of the
+  app there by decision; see `DECISION.md` → Implementation status).
