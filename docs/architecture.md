@@ -508,3 +508,70 @@ runs on its own cadence via the verify cron. Auto-discovery from the
 default scheme would slow every dev unit-test run by minutes for no
 incremental signal.
 
+
+## Android App (`android/` — feature #106 foundation bar)
+
+vreader's Android app is a **second, independently-shippable native app**
+(Kotlin + Jetpack Compose), NOT a cross-platform rewrite (ADR-0001). It
+shares the identity / locator / cache-key / backup **contracts**
+(`contracts/`) with iOS so a book is identified, a position located, and a
+translation keyed identically on both platforms. Build topology is a
+self-contained Gradle project under `android/` (the iOS app uses
+xcodegen/`project.yml` at the repo root; the two builds never overlap).
+
+> **Foundation-bar status.** The non-UI **plumbing** of #106 has shipped
+> (`android/v0.1.0`–`v0.1.4`): the Gradle app shell, the shared `:identity`
+> module, Room persistence, EPUB import, and the resume bridge. The
+> **user-visible surfaces** — the Library list (#1744) and the EPUB reader
+> host (#1745) — are design-gated under rule 51 (UI from `claude.ai/design`
+> only) and resume once their design bundles land; the Readium publication
+> opener (WI-5) rides with the reader host (its verification is inseparable
+> from the navigator).
+
+### Modules
+
+| Module | Kind | Purpose |
+| --- | --- | --- |
+| `:app` | Android application | Compose UI shell + the Room data layer + reader plumbing. `com.vreader.app`. |
+| `:identity` | pure Kotlin/JVM (no Android deps) | The shared canonical contracts — `Identity` (fingerprint canonical key), `CanonicalLocator` (engine-neutral canonical JSON), `DocumentFingerprint` (streaming SHA-256 + format detection), and the `Locator` / `VReaderLocator` / `ReaderLocatorEngine` value types. **Both `:app` AND the `contracts/conformance` lane depend on this one module**, so the golden-vector conformance test proves the SAME code the app runs. |
+
+### Data layer (`com.vreader.app.data`) — the iOS `PersistenceActor` analog
+
+- **Room** is the SwiftData analog. `VReaderDatabase` (`@Database` v2,
+  `exportSchema`, schema-versioned `MIGRATION_1_2` scaffold) with
+  `BookEntity` + `ReadingPositionEntity`. The reading position stores the
+  **whole serialized `VReaderLocator` envelope** in one `vreaderLocatorJSON`
+  column (not flattened columns), so the envelope evolves independently of
+  the Room schema.
+- DAOs use `@Upsert` (insert-or-UPDATE — never `REPLACE`, which would
+  delete-then-insert and fire the `reading_positions` `ON DELETE CASCADE`,
+  wiping a saved position on re-import).
+- `LibraryRepository` returns value-type DTOs (`Book`, `VReaderLocator`),
+  never Room entities, across the boundary (the rule-50 §2 analog).
+- `BookImporter` copies a SAF byte stream into app-private storage and
+  fingerprints the **LOCAL artifact** (exact-match, converter-independent
+  identity), keeping the source URI only as metadata; atomic promote
+  (`Files.move` ATOMIC_MOVE/REPLACE_EXISTING) on an injected IO dispatcher.
+
+### Reader plumbing (`com.vreader.app.reader`)
+
+- `ReadiumLocatorBridge` maps Readium's documented Locator JSON ↔ the
+  `VReaderLocator` envelope (no Readium dependency — consumes the JSON shape
+  only): keeps the verbatim JSON for precise restore AND derives a canonical
+  fallback `Locator`.
+- `ResumeResolver` encodes the cross-platform resume rule
+  (`contracts/identity/locator.md`): precise-first / canonical-fallback,
+  with `ResumeTarget.Precise` carrying the canonical fallback so the host can
+  degrade if the Readium anchor won't reapply.
+
+### Build / test / version
+
+- Toolchain (Spike-B-verified, pinned): Readium-Kotlin 3.3.0, AGP 8.13.2,
+  Kotlin 2.3.20, Gradle 8.14.4, JDK 17, compileSdk/targetSdk 36, minSdk 26,
+  mandatory core-library desugaring; Room 2.8.4 + KSP 2.3.9.
+- Unit tests run on the JVM via Robolectric through
+  **`scripts/run-android-tests.sh`** (`ANDROID_CMD="cd android && ./gradlew
+  :app:testDebugUnitTest"`); the emulator verify lane is
+  `scripts/run-android-verify.sh` (rule 49/52/53 watchdogs).
+- Version lives in `android/version.properties` (`versionName`/`versionCode`);
+  releases tag `android/vX.Y.Z` (iOS keeps plain `vX.Y.Z` — rule 40).
