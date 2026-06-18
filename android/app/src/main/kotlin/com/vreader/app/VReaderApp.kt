@@ -9,6 +9,9 @@ import android.content.Context
 import com.vreader.app.data.BookImporter
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.io.File
 
 /** Process-wide singletons, lazily built. */
@@ -22,6 +25,11 @@ class AppContainer(context: Context) {
     val importer: BookImporter by lazy {
         BookImporter(File(appContext.filesDir, "books"), repository)
     }
+
+    /** Process-lifetime scope for fire-and-forget writes that must outlive a screen
+     *  (e.g. the reader's onStop position flush — it must finish even as the activity
+     *  is being torn down). */
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }
 
 class VReaderApp : Application() {

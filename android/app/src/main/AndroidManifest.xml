@@ -12,5 +12,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- feature #106 WI-9 — Readium reader host; AppCompat theme (the navigator
+             fragment requires an AppCompat/Material host theme). -->
+        <activity
+            android:name=".reader.ReaderActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
     </application>
 </manifest>

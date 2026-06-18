@@ -22,6 +22,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.vreader.app.library.LibraryEvent
 import com.vreader.app.library.LibraryScreen
 import com.vreader.app.library.LibraryViewModel
+import com.vreader.app.reader.ReaderActivity
 import com.vreader.app.ui.theme.VReaderTheme
 import androidx.compose.runtime.LaunchedEffect
 
@@ -52,7 +53,9 @@ class MainActivity : ComponentActivity() {
 
                 LibraryScreen(
                     state = state,
-                    onOpenBook = { /* reader host — design-blocked surface #1745 */ },
+                    onOpenBook = { book ->
+                        startActivity(ReaderActivity.intent(this@MainActivity, book.id))
+                    },
                     // EPUBs are exposed by SAF providers under varied MIME types
                     // (epub+zip, octet-stream, generic); accept broadly and let
                     // BookImporter reject non-EPUBs by extension with a clear toast.

@@ -95,12 +95,16 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // feature #106 WI-5 — Readium-Kotlin 3.3.0 EPUB OPEN path (shared + streamer
-    // only; the navigator/rendering is the design-blocked reader host #1745). Pin
-    // exactly the Spike-B-verified set.
+    // feature #106 WI-5/WI-9 — Readium-Kotlin 3.3.0 EPUB open + render. shared +
+    // streamer open the publication (WI-5); navigator renders it in the reader host
+    // (WI-9). Pinned to the Spike-B-verified set; the navigator needs appcompat +
+    // fragment (its EpubNavigatorFragment is an AppCompat-themed Fragment).
     val readium = "3.3.0"
     implementation("org.readium.kotlin-toolkit:readium-shared:$readium")
     implementation("org.readium.kotlin-toolkit:readium-streamer:$readium")
+    implementation("org.readium.kotlin-toolkit:readium-navigator:$readium")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
