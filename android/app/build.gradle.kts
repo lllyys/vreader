@@ -9,7 +9,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.devtools.ksp")   // feature #106 WI-3 — Room codegen
+    id("com.google.devtools.ksp")                        // feature #106 WI-3 — Room codegen
+    id("org.jetbrains.kotlin.plugin.serialization")      // feature #106 WI-6 — @Serializable in :app (ReadiumLocatorDto)
 }
 
 // Read via Gradle's provider API so `version.properties` is a TRACKED input
