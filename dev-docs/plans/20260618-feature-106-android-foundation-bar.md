@@ -47,7 +47,7 @@ oversized WIs** (was 5, now 7) so each is one focused PR.
 | WI-2 | **Shared identity/locator module + conformance (Gate-2 High-1 + r2-Medium)**: extract `DocumentFingerprint` + `Locator`/`canonicalJSON`/`canonicalHash` **+ the `VReaderLocator` envelope** into a `:identity` module. **Build topology (binding)**: `:identity` is a **pure Kotlin/JVM** module — NO `:app`/Android/Readium deps — so it compiles in both the Android app build AND a plain-JVM context. **Rewire `contracts/conformance/kotlin` to consume `:identity` from the root/composite Gradle build (not its own standalone JVM build), pin it to the SAME Kotlin/JDK toolchain as `:app`, and DELETE the now-duplicate reference impl** under `contracts/conformance/kotlin` — otherwise the lane false-greens on non-app code again. Extend the shared vectors to cover the persisted envelope shape (`readiumLocatorJSON` + engine + canonical fallback Locator), not just canonical Locator JSON. Unit + conformance tests, both against `:identity`. | behavioral | Medium |
 | WI-3 | **Room persistence**: `BookEntity` + `ReadingPositionEntity` (storing the `VReaderLocator` envelope, NOT a bare Locator — Gate-2 Critical) + DAOs (the `PersistenceActor` analog) + repository returning DTOs; schema-versioned `Migration` scaffold. In-memory-Room tests + a migration round-trip test. | behavioral (persistence) | Medium |
 | WI-4 | **EPUB import → app-private storage (Gate-2 High-2)**: SAF `OpenDocument` → **copy the bytes into app-private storage immediately** → fingerprint the LOCAL artifact (exact-match) → store `BookEntity` + keep the source URI as separate metadata. ~~Compose Library list.~~ **Test: import → process restart → reopen from app-private storage** (cold-start identity holds). | behavioral | Medium |
-| WI-5 | **EPUB reader host + open**: Readium `EPUBNavigatorFragment` (scroll mode, per Spike B) in a Compose host; open the stored publication from app-private storage. ~~Instrumented open test on the emulator.~~ Plumbing only: the **publication opener** (Readium Streamer opens the stored EPUB → `Publication`) + a JVM open/metadata test. | behavioral | Medium |
+| WI-5 | **EPUB open (plumbing — DONE) + reader host (⛔ #1745)**: the **publication opener** `BookOpener` (Readium 3.3.0 `shared`+`streamer`, AssetRetriever→PublicationOpener → `Publication` + `readMetadata`) shipped `android/v0.1.6`, **emulator-verified** (`connectedDebugAndroidTest`: opens a stored EPUB, reads title + reading-order). The Readium `EPUBNavigatorFragment` Compose host that RENDERS it is design-blocked **#1745**. | behavioral | Medium |
 | WI-6 | **Resume + process-death (Gate-2 Critical + Medium)**: on `locationDidChange` save the `VReaderLocator` envelope (Readium `Locator` JSON + canonical fallback) → Room. Restore **precise-first / canonical-fallback-second**. Acceptance bar = the **Spike-B-proven window** (resource/progression precision; scroll-mode `currentLocator` is ~2-paragraph-coarse on CJK, NOT within-chapter exact — do not over-claim). Plumbing: the **Readium-`Locator` ↔ `VReaderLocator` bridge** + Room save/restore + unit tests; the `locationDidChange` wiring + config-change/process-death recovery ride with the reader-host design. | behavioral | Large |
 
 ### Design-blocked surfaces (rule 51 — user-directed 2026-06-18)
@@ -59,9 +59,10 @@ plumbing** of WI-4/5/6 ships now. Blocked slices:
 - **Android Library list + import affordance** — `BLOCKED: needs-design (#1744)`.
   WI-4 ships the import/fingerprint/storage engine + identity test; the list
   rendering + SAF-launch button wait for the design.
-- **Android reader host chrome** — `BLOCKED: needs-design (#1745)`. WI-5/6 ship
-  the publication opener + locator bridge + Room save/restore + unit tests; the
-  reader screen + `locationDidChange`/process-death wiring wait for the design.
+- **Android reader host chrome** — `BLOCKED: needs-design (#1745)`. WI-5's
+  publication opener (`BookOpener`, emulator-verified) + WI-6's locator bridge +
+  Room save/restore shipped; only the reader *screen* that renders the
+  `Publication` + the `locationDidChange`/process-death wiring wait for the design.
 
 The Android visual-identity system was already Phase 3 (out of this bar's scope);
 this just makes the foundation-bar UI surfaces explicitly design-gated too.

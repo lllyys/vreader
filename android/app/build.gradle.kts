@@ -61,6 +61,9 @@ ksp {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        // feature #106 WI-5 — Readium's open/parser API is gated behind
+        // @ExperimentalReadiumApi; the single user (BookOpener) opts in at file
+        // scope, so no module-wide flag (keeps future experimental use explicit).
     }
 }
 
@@ -88,6 +91,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // feature #106 WI-5 — Readium-Kotlin 3.3.0 EPUB OPEN path (shared + streamer
+    // only; the navigator/rendering is the design-blocked reader host #1745). Pin
+    // exactly the Spike-B-verified set.
+    val readium = "3.3.0"
+    implementation("org.readium.kotlin-toolkit:readium-shared:$readium")
+    implementation("org.readium.kotlin-toolkit:readium-streamer:$readium")
+
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     testImplementation("junit:junit:4.13.2")
@@ -95,4 +105,11 @@ dependencies {
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("androidx.test.ext:junit:1.2.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+
+    // feature #106 WI-5 — instrumented EPUB-open test on the emulator (the open
+    // path needs the real Android Readium runtime, not Robolectric).
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
