@@ -1,41 +1,68 @@
-// Purpose: feature #106 WI-1 — the vreader Android app's entry Activity.
-// A minimal Compose shell with the empty "Library" screen; WI-3/WI-4 fill the
-// library list + reader. Kept deliberately tiny so the app-shell PR is the
-// foundational slice (no persistence/reader/import yet).
+// Purpose: feature #106 — the vreader Android app's entry Activity. Hosts the
+// Library screen (WI-8, the committed vreader-fidelity-v1 design) wired to the
+// shipped plumbing: the LibraryViewModel (Room-backed StateFlow) + the SAF
+// OpenDocument picker → BookImporter. Opening a book is the reader host (#1745),
+// resumed against vreader-reader.jsx.
 //
-// @coordinates-with: AndroidManifest.xml (the launcher activity),
-//   dev-docs/plans/20260618-feature-106-android-foundation-bar.md (WI-1)
+// @coordinates-with: AndroidManifest.xml (the launcher activity), VReaderApp.kt
+//   (the DI container), library/LibraryViewModel.kt, library/LibraryScreen.kt
 package com.vreader.app
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.vreader.app.library.LibraryEvent
+import com.vreader.app.library.LibraryScreen
+import com.vreader.app.library.LibraryViewModel
+import com.vreader.app.ui.theme.VReaderTheme
+import androidx.compose.runtime.LaunchedEffect
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { LibraryScreen() } }
-    }
-}
+        val container = (application as VReaderApp).container
+        val factory = viewModelFactory {
+            initializer { LibraryViewModel(container.repository, container.importer, contentResolver) }
+        }
 
-/** The empty Library screen — WI-3 replaces the placeholder with the book list. */
-@Composable
-fun LibraryScreen() {
-    Scaffold { innerPadding ->
-        Box(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(text = "Library")
+        setContent {
+            VReaderTheme {
+                val viewModel: LibraryViewModel = viewModel(factory = factory)
+                val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+                val picker = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument(),
+                ) { uri -> uri?.let(viewModel::import) }
+
+                LaunchedEffect(Unit) {
+                    viewModel.events.collect { event ->
+                        if (event is LibraryEvent.ImportFailed) {
+                            Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+
+                LibraryScreen(
+                    state = state,
+                    onOpenBook = { /* reader host — design-blocked surface #1745 */ },
+                    // EPUBs are exposed by SAF providers under varied MIME types
+                    // (epub+zip, octet-stream, generic); accept broadly and let
+                    // BookImporter reject non-EPUBs by extension with a clear toast.
+                    onImport = {
+                        picker.launch(
+                            arrayOf("application/epub+zip", "application/octet-stream", "*/*"),
+                        )
+                    },
+                )
+            }
         }
     }
 }

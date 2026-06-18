@@ -71,9 +71,13 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")   // WI-8 — design's nav icons
     implementation("androidx.compose.ui:ui")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
+    // feature #106 WI-8 — Library screen: ViewModel + lifecycle-aware Flow collection.
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
 
     // feature #106 WI-2 — the shared identity/locator contracts (proves the
     // conformance lane tests the SAME code the app uses). WI-3 keys Room on it.
