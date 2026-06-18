@@ -33,7 +33,8 @@ complete.
 
 | Capability | iOS | Android | Notes |
 | --- | --- | --- | --- |
-| EPUB rendering | ✓ (Readium/legacy) | ✗ (⛔) | Android reader host design-needed #1745; the Readium opener (WI-5) rides with it. |
+| EPUB open / parse (Readium) | ✓ | ✓ | Android `BookOpener` (Readium 3.3.0 shared+streamer) — emulator-verified open + metadata. |
+| EPUB rendering (navigator screen) | ✓ (Readium/legacy) | ✗ (⛔) | Android reader-host *rendering* design-needed #1745; the opener (above) is done. |
 | Resume (precise-first / canonical-fallback) | ✓ | ◑ | Android `ReadiumLocatorBridge` + `ResumeResolver` are the plumbing; `locationDidChange` wiring is ⛔ #1745. |
 | AZW3 / PDF / TXT / MD readers | ✓ | ✗ | Phase 3. |
 
