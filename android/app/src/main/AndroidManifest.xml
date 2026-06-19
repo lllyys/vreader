@@ -18,5 +18,10 @@
             android:name=".reader.ReaderActivity"
             android:exported="false"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+        <!-- feature #111 WI-2 — TXT reader; pure Compose, no fragment, so the app's
+             default theme is fine (no AppCompat host needed). -->
+        <activity
+            android:name=".reader.TxtReaderActivity"
+            android:exported="false" />
     </application>
 </manifest>

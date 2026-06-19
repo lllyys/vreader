@@ -27,15 +27,19 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import vreader.contracts.BookFormat
 
 /** A book as the Library grid/list renders it (the design's BOOK shape, available fields). */
 data class LibraryBook(
-    val id: String,           // fingerprintKey
+    val id: String,                    // fingerprintKey
     val title: String,
-    val format: String,       // upper-case chip, e.g. "EPUB"
+    val originalFormat: BookFormat,    // typed — drives reader routing
     val addedAt: Long,
     val lastOpenedAt: Long?,
-)
+) {
+    /** Upper-case chip label (e.g. "EPUB"), derived from the typed format. */
+    val format: String get() = originalFormat.name.uppercase()
+}
 
 /** Immutable Library UI state — a pure function of the persisted library. */
 data class LibraryUiState(
@@ -96,7 +100,7 @@ class LibraryViewModel(
     private fun toUi(book: Book): LibraryBook = LibraryBook(
         id = book.fingerprintKey,
         title = book.title,
-        format = book.originalFormat.name.uppercase(),
+        originalFormat = book.originalFormat,
         addedAt = book.addedAt,
         lastOpenedAt = book.lastOpenedAt,
     )

@@ -23,7 +23,9 @@ import com.vreader.app.library.LibraryEvent
 import com.vreader.app.library.LibraryScreen
 import com.vreader.app.library.LibraryViewModel
 import com.vreader.app.reader.ReaderActivity
+import com.vreader.app.reader.TxtReaderActivity
 import com.vreader.app.ui.theme.VReaderTheme
+import vreader.contracts.BookFormat
 import androidx.compose.runtime.LaunchedEffect
 
 class MainActivity : ComponentActivity() {
@@ -54,7 +56,21 @@ class MainActivity : ComponentActivity() {
                 LibraryScreen(
                     state = state,
                     onOpenBook = { book ->
-                        startActivity(ReaderActivity.intent(this@MainActivity, book.id))
+                        // Route by the typed format (exhaustive — never open a format into
+                        // the wrong host). Formats without a reader yet are surfaced, not
+                        // silently mis-opened.
+                        when (book.originalFormat) {
+                            BookFormat.epub ->
+                                startActivity(ReaderActivity.intent(this@MainActivity, book.id))
+                            BookFormat.txt ->
+                                startActivity(TxtReaderActivity.intent(this@MainActivity, book.id))
+                            BookFormat.pdf, BookFormat.md, BookFormat.azw3 ->
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "${book.format} reading isn't available yet",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                        }
                     },
                     // EPUBs are exposed by SAF providers under varied MIME types
                     // (epub+zip, octet-stream, generic); accept broadly and let
