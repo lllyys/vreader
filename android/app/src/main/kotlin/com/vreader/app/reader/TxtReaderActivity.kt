@@ -1,6 +1,8 @@
-// Purpose: TXT reader host — feature #111 WI-2/WI-3 (#110 Phase 3). Renders a decoded
-// .txt in a Compose LazyColumn over the WI-1 TxtDocument chunk ranges, with the shared
-// reader chrome (vreader-reader.jsx subset). WI-3 adds resume via the LEGACY locator
+// Purpose: plain-text + Markdown reader host — feature #111 (TXT) + #112 (MD), #110
+// Phase 3. Renders a decoded .txt/.md in a Compose LazyColumn over the WI-1 TxtDocument
+// chunk ranges, with the shared reader chrome (vreader-reader.jsx subset). For BookFormat.md
+// each line-chunk renders through MarkdownRenderer (styled AnnotatedString); .txt renders
+// the chunk verbatim. WI-3 adds resume via the LEGACY locator
 // path (NOT the Readium bridge): save the top-visible chunk's charOffsetUTF16 as a
 // VReaderLocator.wrapLegacy envelope (debounced + onStop flush) and restore it via
 // ResumeResolver → Canonical → chunkForOffset.
@@ -34,6 +36,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +51,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import vreader.contracts.BookFormat
 import vreader.contracts.Locator
 import java.io.File
 
@@ -122,7 +126,9 @@ class TxtReaderActivity : ComponentActivity() {
                                 .debounce(1_000)
                                 .collect { savePosition(s.book, s.document, it) }
                         }
-                        TxtReaderScaffold(s.title, ::finish) { TxtBody(s.document, listState) }
+                        TxtReaderScaffold(s.title, ::finish) {
+                            TxtBody(s.document, listState, s.book.originalFormat)
+                        }
                     }
                 }
             }
@@ -202,9 +208,11 @@ private fun TxtReaderScaffold(title: String, onBack: () -> Unit, body: @Composab
     }
 }
 
-/** The reading body — a LazyColumn over the document's chunk ranges (serif, reading margins). */
+/** The reading body — a LazyColumn over the document's chunk ranges (serif, reading margins).
+ *  For BookFormat.md each chunk renders through MarkdownRenderer (styled); else verbatim. */
 @Composable
-private fun TxtBody(document: TxtDocument, listState: LazyListState) {
+private fun TxtBody(document: TxtDocument, listState: LazyListState, format: BookFormat) {
+    val isMarkdown = format == BookFormat.md
     LazyColumn(
         Modifier.fillMaxSize(),
         state = listState,
@@ -212,8 +220,10 @@ private fun TxtBody(document: TxtDocument, listState: LazyListState) {
     ) {
         // Count-based: indices on demand (a newline-dense 14MB file can be 100k+ chunks).
         items(count = document.chunkCount, key = { it }) { i ->
+            val raw = document.textForChunk(i).toString()
             Text(
-                text = document.textForChunk(i).toString(),
+                // .md → styled markdown spans; .txt → the raw text verbatim (markers literal).
+                text = if (isMarkdown) MarkdownRenderer.render(raw) else AnnotatedString(raw),
                 color = VReaderColors.Ink,
                 fontFamily = VReaderFonts.Serif,
                 fontWeight = FontWeight.Normal,

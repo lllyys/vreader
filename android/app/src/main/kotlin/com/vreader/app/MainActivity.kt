@@ -62,9 +62,11 @@ class MainActivity : ComponentActivity() {
                         when (book.originalFormat) {
                             BookFormat.epub ->
                                 startActivity(ReaderActivity.intent(this@MainActivity, book.id))
-                            BookFormat.txt ->
+                            BookFormat.txt, BookFormat.md ->
+                                // .md reuses the text reader host (#112): same decode/
+                                // document/resume/chrome, MarkdownRenderer per chunk.
                                 startActivity(TxtReaderActivity.intent(this@MainActivity, book.id))
-                            BookFormat.pdf, BookFormat.md, BookFormat.azw3 ->
+                            BookFormat.pdf, BookFormat.azw3 ->
                                 Toast.makeText(
                                     this@MainActivity,
                                     "${book.format} reading isn't available yet",
