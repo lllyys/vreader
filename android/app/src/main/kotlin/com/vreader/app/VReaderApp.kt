@@ -30,6 +30,13 @@ class AppContainer(context: Context) {
      *  (e.g. the reader's onStop position flush — it must finish even as the activity
      *  is being torn down). */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** In-memory last reading char-offset per fingerprintKey. Written synchronously on
+     *  save so a fast rotation / reopen restores the LATEST position without waiting for
+     *  the async Room write to commit; Room remains the durable store across process death. */
+    private val lastOffsets = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    fun cacheOffset(fingerprintKey: String, charOffsetUtf16: Int) { lastOffsets[fingerprintKey] = charOffsetUtf16 }
+    fun cachedOffset(fingerprintKey: String): Int? = lastOffsets[fingerprintKey]
 }
 
 class VReaderApp : Application() {
