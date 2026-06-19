@@ -34,9 +34,10 @@ complete.
 | Capability | iOS | Android | Notes |
 | --- | --- | --- | --- |
 | EPUB open / parse (Readium) | ✓ | ✓ | Android `BookOpener` (Readium 3.3.0 shared+streamer) — emulator-verified open + metadata. |
-| EPUB rendering (navigator screen) | ✓ (Readium/legacy) | ✗ (⛔) | Android reader-host *rendering* design-needed #1745; the opener (above) is done. |
-| Resume (precise-first / canonical-fallback) | ✓ | ◑ | Android `ReadiumLocatorBridge` + `ResumeResolver` are the plumbing; `locationDidChange` wiring is ⛔ #1745. |
-| AZW3 / PDF / TXT / MD readers | ✓ | ✗ | Phase 3. |
+| EPUB rendering (navigator screen) | ✓ (Readium/legacy) | ✓ | Android `ReaderActivity` hosts Readium's EpubNavigatorFragment (scroll) — emulator-verified incl. a real EPUB (WI-9, `android/v0.3.0`). |
+| Resume (precise-first / canonical-fallback) | ✓ | ✓ | Android: `ReaderActivity` saves on locationDidChange (debounced + onStop flush) + restores precise-first via `ResumeResolver` (WI-9). |
+| TXT reader | ✓ | ◑ | Phase 3 — feature #111 (in progress; the next reuse-leverage capability). |
+| AZW3 / PDF / MD readers | ✓ | ✗ | Phase 3 — filed per-capability under the #110 driver as prioritized. |
 
 ## Out of scope for the foundation bar (Phase 3)
 
