@@ -38,7 +38,16 @@ complete.
 | Resume (precise-first / canonical-fallback) | ✓ | ✓ | Android: `ReaderActivity` saves on locationDidChange (debounced + onStop flush) + restores precise-first via `ResumeResolver` (WI-9). |
 | TXT reader | ✓ | ✓ | feature #111 (`android/v0.4.0`) — encoding-detected decode (UTF-16LE/CJK) + LazyColumn render + charOffsetUTF16 resume, emulator-verified incl. a real 14MB book. |
 | Markdown (.md) reader | ✓ | ✓ | feature #112 (`android/v0.5.0`) — thin delta over the TXT reader: `MarkdownRenderer` (line-chunk → AnnotatedString, single-line CommonMark subset: headers/bold/italic/code/bullets) reusing the TXT decode/document/resume/chrome; `md` routes to the shared text reader. Emulator-verified (library-path render + TXT-renders-literally regression + md resume). |
-| AZW3 / PDF readers | ✓ | ✗ | Phase 3 — filed per-capability under the #110 driver as prioritized. |
+| AZW3 reader | ✓ | ✗ | Phase 3 — DEFERRED on feasibility: Readium-Kotlin has no native AZW3/MOBI; iOS uses a libmobi C lib (large/HIGH-risk port). |
+| PDF reader | ✓ | ⛔ | Phase 3 — base page-view reader UI design-needed #1766 (Android `PdfRenderer` gives bitmaps only; the bundle has only the PDF translation panel, not a base reader surface). |
+
+## Sync & backup (Phase 3)
+
+| Capability | iOS | Android | Notes |
+| --- | --- | --- | --- |
+| Backup format model (sections + manifest, schema 3 / manifest 1) | ✓ | ◑ | feature #113 — Kotlin `@Serializable` DTOs matching `contracts/identity/backup-format.md` (ISO8601 UTC dates, plain `Locator` locatorJSON), golden-vector conformance. Backend only. |
+| WebDAV client + restore import pipeline | ✓ | ◑ | feature #113 — non-UI; emulator-verified via instrumented round-trip against a local WebDAV (no paid service). |
+| Backup/restore + WebDAV-settings UI | ✓ | ⛔ | design-needed #1767 (no backup/restore/WebDAV surface in the committed bundle). |
 
 ## Out of scope for the foundation bar (Phase 3)
 
