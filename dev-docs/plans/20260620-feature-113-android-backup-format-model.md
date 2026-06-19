@@ -95,8 +95,9 @@ read/write; the restore-import pipeline into Room; `:app` wiring; ALL user-facin
 
 | WI | Scope | Tier |
 |---|---|---|
-| WI-1 | `BackupSchema` + `BackupRestoreError` + `BackupJson` (`explicitNulls=false`/`IsoInstantSerializer`/`Base64DataSerializer`/`canonicalEncode`) + `BackupMetadata` + the 4 core identity-bearing sections (annotations/positions/collections/library-manifest). Tests: round-trip, **omitted-null shape**, **base64-Data shape**, **ISO8601 exact-string**, sorted-key canonical, edge cases | foundational |
-| WI-2 | remaining 6 sections (settings type-tagged value w/ base64 data, book-sources w/ rule data, per-book-settings + override, replacement-rules, reading-history, ai-conversations) + `contracts/vectors/backup-*.json` golden vectors generated from the iOS encoder + Kotlin `BackupConformanceTest` (decode vector → re-encode → parsed-`JsonElement` equality) wired like `IdentityConformanceTest` | foundational |
+| WI-1 ✅ | `BackupSchema` + `BackupRestoreError` + `BackupJson` (`explicitNulls=false`/`IsoInstantSerializer`/`Base64DataSerializer`/`canonicalEncode`) + `BackupMetadata` + the 4 core identity-bearing sections (annotations/positions/collections/library-manifest). Tests: round-trip, **omitted-null shape**, **base64-Data shape**, **ISO8601 exact-string**, sorted-key canonical, edge cases | foundational |
+| WI-2 ✅ | remaining 6 sections (settings type-tagged value w/ base64 data **+ Int=Long for Swift Int64**, book-sources w/ rule data, per-book-settings + override, replacement-rules, reading-history, ai-conversations) + their round-trip/shape tests | foundational |
+| WI-3 | `contracts/vectors/backup-*.json` golden vectors generated from the iOS encoder + Kotlin `BackupConformanceTest` (decode vector → re-encode → parsed-`JsonElement` equality) wired like `IdentityConformanceTest`. **Split from WI-2** (Gate-4): needs the iOS Swift encoder run + a `contracts/` change → its own focused pass | foundational |
 
 Both WIs are **foundational** (pure DTOs/serializers, no user-observable behavior) → unit +
 conformance tests are sufficient, no device verification (rule 47 Gate-5 tier).
