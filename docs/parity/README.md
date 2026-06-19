@@ -36,7 +36,7 @@ complete.
 | EPUB open / parse (Readium) | ✓ | ✓ | Android `BookOpener` (Readium 3.3.0 shared+streamer) — emulator-verified open + metadata. |
 | EPUB rendering (navigator screen) | ✓ (Readium/legacy) | ✓ | Android `ReaderActivity` hosts Readium's EpubNavigatorFragment (scroll) — emulator-verified incl. a real EPUB (WI-9, `android/v0.3.0`). |
 | Resume (precise-first / canonical-fallback) | ✓ | ✓ | Android: `ReaderActivity` saves on locationDidChange (debounced + onStop flush) + restores precise-first via `ResumeResolver` (WI-9). |
-| TXT reader | ✓ | ◑ | Phase 3 — feature #111 (in progress; the next reuse-leverage capability). |
+| TXT reader | ✓ | ✓ | feature #111 (`android/v0.4.0`) — encoding-detected decode (UTF-16LE/CJK) + LazyColumn render + charOffsetUTF16 resume, emulator-verified incl. a real 14MB book. |
 | AZW3 / PDF / MD readers | ✓ | ✗ | Phase 3 — filed per-capability under the #110 driver as prioritized. |
 
 ## Out of scope for the foundation bar (Phase 3)
