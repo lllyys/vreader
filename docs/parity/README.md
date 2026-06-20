@@ -25,8 +25,8 @@ complete.
 | --- | --- | --- | --- |
 | Persistent book store | ✓ (SwiftData) | ✓ (Room) | `VReaderDatabase` v2 + `MIGRATION_1_2` scaffold. |
 | Reading-position store (full envelope) | ✓ | ✓ | One `vreaderLocatorJSON` column; evolves independently of the schema. |
-| EPUB import → local-artifact fingerprint | ✓ | ◑ | Android `BookImporter` is the UI-free seam; the SAF picker + Library list are ⛔ #1744. |
-| Library list UI | ✓ | ⛔ | Android: design-needed #1744. |
+| EPUB import → local-artifact fingerprint | ✓ | ✓ | Android `BookImporter` + the SAF picker + Library list shipped (#106 WI-8, design reuse; #1744 closed). |
+| Library list UI | ✓ | ✓ | Android Library screen shipped #106 WI-8 (reused the committed `vreader-fidelity-v1` design bundle; #1744 closed). |
 | Content-hash dedup on import | ✓ | ✓ | Same key ⇒ identical bytes; `@Upsert` preserves the saved position. |
 
 ## Reader
@@ -39,19 +39,35 @@ complete.
 | TXT reader | ✓ | ✓ | feature #111 (`android/v0.4.0`) — encoding-detected decode (UTF-16LE/CJK) + LazyColumn render + charOffsetUTF16 resume, emulator-verified incl. a real 14MB book. |
 | Markdown (.md) reader | ✓ | ✓ | feature #112 (`android/v0.5.0`) — thin delta over the TXT reader: `MarkdownRenderer` (line-chunk → AnnotatedString, single-line CommonMark subset: headers/bold/italic/code/bullets) reusing the TXT decode/document/resume/chrome; `md` routes to the shared text reader. Emulator-verified (library-path render + TXT-renders-literally regression + md resume). |
 | AZW3 reader | ✓ | ✗ | Phase 3 — DEFERRED on feasibility: Readium-Kotlin has no native AZW3/MOBI; iOS uses a libmobi C lib (large/HIGH-risk port). |
-| PDF reader | ✓ | ✗ | Phase 3 — **design LANDED** (#1766; `dev-docs/designs/vreader-fidelity-v1/project/vreader-pdf-reader.jsx` + `design-notes/android-phase3-issues.md`: continuous-scroll canonical + paged toggle, rendering/encrypted/corrupt/scan/page-jump states). Implementation not yet started (Android `PdfRenderer` bitmaps). |
+| PDF reader | ✓ | ✓ | feature #115 (`android/v0.7.0`, VERIFIED) — `PdfDocument` (PdfRenderer, Mutex-serialized) + `PdfReaderActivity` continuous-scroll page bitmaps + 'Page N of M' pill + resume by page; emulator-verified. (DEFERRED designed follow-ons: paged toggle, page-jump overlay, encrypted-unlock — platform/API constraints.) |
 
 ## Sync & backup (Phase 3)
 
 | Capability | iOS | Android | Notes |
 | --- | --- | --- | --- |
-| Backup format model (sections + manifest, schema 3 / manifest 1) | ✓ | ◑ | feature #113 — Kotlin `@Serializable` DTOs matching `contracts/identity/backup-format.md` (ISO8601 UTC dates, plain `Locator` locatorJSON), golden-vector conformance. Backend only. |
-| WebDAV client + restore import pipeline | ✓ | ◑ | feature #113 — non-UI; emulator-verified via instrumented round-trip against a local WebDAV (no paid service). |
-| Backup/restore + WebDAV-settings UI | ✓ | ✗ | Phase 3 — **design LANDED** (#1767; `dev-docs/designs/vreader-fidelity-v1/project/vreader-backup-webdav.jsx` + `design-notes/android-phase3-issues.md`: 5 surfaces — WebDAV server list, server edit + test-connection, backup&restore + every WebDAV error, restore confirm→progress→result, selective restore picker). Implementation: feature #114. |
+| Backup format model (sections + manifest, schema 3 / manifest 1) | ✓ | ✓ | feature #113 (`android/v0.6.1`, VERIFIED) — Kotlin `@Serializable` DTOs matching `contracts/identity/backup-format.md` (ISO8601 UTC dates, plain `Locator` locatorJSON); golden-vector conformance green both sides. |
+| WebDAV client + backup/restore pipeline | ✓ | ✓ | feature #116 (`android/v0.7.7`, VERIFIED) — `WebDavClient` + content-addressed blob store + `BackupCollector`/`RestoreImporter` + `WebDavBackupService` (byte-for-byte the iOS materializing-restore layout); credentials in DataStore + AndroidKeyStore. Verified by a LIVE rclone round-trip on the emulator (`scripts/run-webdav-roundtrip.sh`). |
+| Backup/restore + WebDAV-settings UI | ✓ | ✓ | feature #114 (`android/v0.6.0`, VERIFIED) — the 5 designed Compose surfaces (#1767): WebDAV server list, server edit + test-connection, backup&restore + every WebDAV error, restore confirm→progress→result, selective picker. DEBUG-reachable; production entry-point wiring is the remaining design-gated step. |
 
-## Out of scope for the foundation bar (Phase 3)
+## Remaining Phase-3 backlog (the #110 driver's queue)
 
-AI translation / chat, TTS, book sources / OPDS, backup & WebDAV restore, the
-visual-identity design system, full library management. Each becomes its own
-Android feature row once #106's bar (one EPUB: import → open → resume) is
-end-to-end on an emulator.
+The foundation bar (#106) and the readers + backup capabilities above are
+shipped. What's left, with why it isn't yet an autonomously-driven feature:
+
+- **AZW3/MOBI reader** — DEFERRED on feasibility: Readium-Kotlin has no native
+  AZW3/MOBI; iOS uses a libmobi C library (a large, HIGH-risk NDK port). Needs an
+  explicit go/no-go, not an autonomous start.
+- **TTS (read-aloud)** — **design-gated** (rule 51): no Android TTS control-bar
+  surface exists in a committed `dev-docs/designs/...` bundle. Needs a
+  `claude.ai/design` handoff before implementation.
+- **AI translation / chat (bilingual)** — provider-credential-gated: the live
+  path needs a user-configured AI provider; only a mock/integration path is
+  autonomously testable.
+- **Book sources / OPDS, reading stats, highlights/annotations UI,
+  full library management (collections, search)** — not yet laddered into a
+  tracked Android feature; each becomes its own row + (where it has UI) a
+  design-bundle prerequisite when picked up.
+
+Every item here is either feasibility-deferred or gated on a user input
+(a design bundle or an AI credential) — there is no autonomously-completable
+Android-parity capability open at this time.
