@@ -30,3 +30,21 @@ sealed interface BackupEvent {
     data object OpenServerSettings : BackupEvent
     data class Toast(val message: String) : BackupEvent
 }
+
+// ── Server add / edit sheet (surface B) ───────────────────────
+
+/** The Test-Connection lifecycle for the edit sheet. */
+enum class ConnTest { idle, testing, ok, fail }
+
+/** The add/edit server form's durable state — the live form (Test Connection runs against it). */
+data class ServerEditState(
+    val editMode: Boolean = false,
+    val name: String = "",
+    val baseUrl: String = "",
+    val username: String = "",
+    val password: String = "",
+    val wifiOnly: Boolean = true,
+    val test: ConnTest = ConnTest.idle,
+    val testMessage: String = "",
+    val showRemoveConfirm: Boolean = false,
+)

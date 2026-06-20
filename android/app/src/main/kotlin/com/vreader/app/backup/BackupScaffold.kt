@@ -7,17 +7,21 @@ package com.vreader.app.backup
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,11 +32,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -152,6 +158,83 @@ fun BackupTag(text: String) {
 @Composable
 fun VSpace(dp: Int) {
     Box(Modifier.height(dp.dp))
+}
+
+/** A bottom-aligned modal sheet (the design's AppSheet): dim scrim, top-rounded sheet, drag
+ *  grabber, Cancel/title/Save header, and a scrollable body. */
+@Composable
+fun AppSheet(
+    title: String,
+    leading: @Composable () -> Unit,
+    trailing: @Composable () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val t = LocalBackupTokens.current
+    Box(Modifier.fillMaxSize().background(Color(0x59000000)), contentAlignment = Alignment.BottomCenter) {
+        Column(
+            Modifier.fillMaxWidth().fillMaxHeight(0.96f)
+                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(t.sheetBg),
+        ) {
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(36.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(t.sep))
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(64.dp)) { leading() }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(title, color = t.ink, fontFamily = BackupFonts.Serif, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Box(Modifier.width(64.dp), contentAlignment = Alignment.CenterEnd) { trailing() }
+            }
+            Box(Modifier.fillMaxWidth().height(0.5.dp).background(t.sep))
+            Column(
+                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
+                content = content,
+            )
+        }
+    }
+}
+
+/** A centered iOS-style confirm alert (the design's AppAlert) — Cancel + a confirm action. */
+@Composable
+fun AppAlert(
+    title: String,
+    message: androidx.compose.ui.text.AnnotatedString,
+    confirmLabel: String,
+    confirmDanger: Boolean = false,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val t = LocalBackupTokens.current
+    Box(
+        Modifier.fillMaxSize().background(Color(0x66000000)).clickable(onClick = onDismiss).padding(28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.widthIn(max = 300.dp).fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp)).background(if (t.isDark) Color(0xFF2A2724) else Color(0xFFFBF7EF))
+                // An ENABLED no-op consumer reliably swallows taps inside the card so they
+                // don't fall through to the scrim's dismiss (Gate-4 r2).
+                .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {},
+        ) {
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, color = t.ink, fontFamily = BackupFonts.Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text(message, color = t.sec, fontFamily = BackupFonts.Sans, fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+            }
+            Box(Modifier.fillMaxWidth().height(0.5.dp).background(t.sep))
+            Row(Modifier.fillMaxWidth()) {
+                Box(Modifier.weight(1f).clickable(onClick = onDismiss).padding(vertical = 13.dp), contentAlignment = Alignment.Center) {
+                    Text("Cancel", color = t.tint, fontFamily = BackupFonts.Sans, fontSize = 15.5.sp, fontWeight = FontWeight.Medium)
+                }
+                Box(Modifier.width(0.5.dp).height(46.dp).background(t.sep))
+                Box(Modifier.weight(1f).clickable(onClick = onConfirm).padding(vertical = 13.dp), contentAlignment = Alignment.Center) {
+                    Text(confirmLabel, color = if (confirmDanger) t.red else t.tint, fontFamily = BackupFonts.Sans, fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
 }
 
 private fun Modifier.clickableBack(onBack: () -> Unit): Modifier =
