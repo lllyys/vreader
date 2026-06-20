@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
 import org.xml.sax.helpers.DefaultHandler
+import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -39,6 +40,21 @@ data class WebDavEntry(
     val contentLength: Long?,
 )
 
+/** The WebDAV operations the backup service needs — an interface so the service can be unit-tested
+ *  against an in-memory fake (a full backup→restore round-trip) without a live server. */
+interface WebDavTransport {
+    suspend fun propfind(path: String): List<WebDavEntry>
+    suspend fun mkcol(path: String)
+    suspend fun put(path: String, bytes: ByteArray)
+    /** Streams [file] as the PUT body (fixed-length) — never buffers a large book in memory. */
+    suspend fun putFile(path: String, file: File)
+    suspend fun get(path: String): ByteArray
+    suspend fun getStream(path: String): InputStream
+    suspend fun move(from: String, to: String)
+    suspend fun delete(path: String)
+    suspend fun exists(path: String): Boolean
+}
+
 /**
  * A WebDAV client rooted at [baseUrl] (e.g. `http://10.0.2.2:8080/`) with Basic auth. All calls
  * are `suspend` on [dispatcher]; the body is blocking HttpURLConnection. Paths are resolved
@@ -51,12 +67,12 @@ class WebDavClient(
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val connectTimeoutMs: Int = 15_000,
     private val readTimeoutMs: Int = 30_000,
-) {
+) : WebDavTransport {
     private val authHeader: String =
         "Basic " + Base64.getEncoder().encodeToString("$username:$password".toByteArray(Charsets.UTF_8))
 
     /** PROPFIND Depth:1 → the entries directly under [path] (excludes [path] itself). */
-    suspend fun propfind(path: String): List<WebDavEntry> = withContext(dispatcher) {
+    override suspend fun propfind(path: String): List<WebDavEntry> = withContext(dispatcher) {
         val body = """<?xml version="1.0" encoding="utf-8"?>
 <D:propfind xmlns:D="DAV:"><D:prop><D:resourcetype/><D:getcontentlength/></D:prop></D:propfind>"""
         val (status, bytes) = request("PROPFIND", path, body.toByteArray(Charsets.UTF_8), mapOf("Depth" to "1"))
@@ -66,18 +82,40 @@ class WebDavClient(
     }
 
     /** Create a collection. Tolerates 405 (already exists). */
-    suspend fun mkcol(path: String): Unit = withContext(dispatcher) {
+    override suspend fun mkcol(path: String): Unit = withContext(dispatcher) {
         val (status, _) = request("MKCOL", path, null, emptyMap())
         if (status == 405 || status == 301) return@withContext  // already exists
         if (status / 100 != 2) throwForStatus(status, path)
     }
 
-    suspend fun put(path: String, bytes: ByteArray): Unit = withContext(dispatcher) {
+    override suspend fun put(path: String, bytes: ByteArray): Unit = withContext(dispatcher) {
         val (status, _) = request("PUT", path, bytes, mapOf("Content-Type" to "application/octet-stream"))
         if (status / 100 != 2) throwForStatus(status, path)
     }
 
-    suspend fun get(path: String): ByteArray = withContext(dispatcher) {
+    override suspend fun putFile(path: String, file: File): Unit = withContext(dispatcher) {
+        val url = resolve(path)
+        val conn = try { url.openConnection() as HttpURLConnection } catch (e: Exception) { throw offline(e) }
+        try {
+            setRequestMethod(conn, "PUT")
+            conn.connectTimeout = connectTimeoutMs
+            conn.readTimeout = readTimeoutMs
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("Authorization", authHeader)
+            conn.setRequestProperty("Content-Type", "application/octet-stream")
+            conn.doOutput = true
+            conn.setFixedLengthStreamingMode(file.length())  // stream — no full ByteArray in heap
+            file.inputStream().buffered().use { input -> conn.outputStream.use { input.copyTo(it) } }
+            val status = try { conn.responseCode } catch (e: SocketTimeoutException) {
+                throw WebDavException(WebDavErrorKind.timeout, "timeout PUT $path", e)
+            } catch (e: IOException) { throw offline(e) }
+            if (status / 100 != 2) { conn.errorStream?.use { it.readBytes() }; throwForStatus(status, path) }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    override suspend fun get(path: String): ByteArray = withContext(dispatcher) {
         val (status, bytes) = request("GET", path, null, emptyMap())
         if (status == HttpURLConnection.HTTP_NOT_FOUND) throw WebDavException(WebDavErrorKind.notFound404, "404 $path")
         if (status / 100 != 2) throwForStatus(status, path)
@@ -90,7 +128,7 @@ class WebDavClient(
      * connection: closing it disconnects. Errors (404 / auth / offline) are mapped before the
      * stream is returned; redirects (301/302/307/308) are followed manually.
      */
-    suspend fun getStream(path: String): InputStream = withContext(dispatcher) {
+    override suspend fun getStream(path: String): InputStream = withContext(dispatcher) {
         openStream(path, redirectsLeft = 5)
     }
 
@@ -125,13 +163,21 @@ class WebDavClient(
         }
     }
 
-    suspend fun delete(path: String): Unit = withContext(dispatcher) {
+    /** WebDAV MOVE [from] → [to] (overwriting). Used to atomically publish a blob (PUT to a
+     *  `.tmp` then MOVE into place) so a half-written upload is never seen as a complete blob. */
+    override suspend fun move(from: String, to: String): Unit = withContext(dispatcher) {
+        val destination = resolve(to).toString()
+        val (status, _) = request("MOVE", from, null, mapOf("Destination" to destination, "Overwrite" to "T"))
+        if (status / 100 != 2) throwForStatus(status, from)
+    }
+
+    override suspend fun delete(path: String): Unit = withContext(dispatcher) {
         val (status, _) = request("DELETE", path, null, emptyMap())
         if (status == HttpURLConnection.HTTP_NOT_FOUND) return@withContext
         if (status / 100 != 2) throwForStatus(status, path)
     }
 
-    suspend fun exists(path: String): Boolean = withContext(dispatcher) {
+    override suspend fun exists(path: String): Boolean = withContext(dispatcher) {
         try { propfind(path); true } catch (e: WebDavException) { if (e.kind == WebDavErrorKind.notFound404) false else throw e }
     }
 

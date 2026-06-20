@@ -51,7 +51,7 @@ class RestoreImporter(
     suspend fun restore(
         reader: BackupArchiveReader,
         selection: Set<String>? = null,
-        progress: (Int, Int) -> Unit = { _, _ -> },
+        progress: suspend (Int, Int) -> Unit = { _, _ -> },
     ): RestoreImportResult = withContext(ioDispatcher) {
         val books = reader.manifest.books.filter { selection == null || it.fingerprintKey in selection }
         val positions = decodePositions(reader)
