@@ -37,6 +37,12 @@ class AppContainer(context: Context) {
     private val lastOffsets = java.util.concurrent.ConcurrentHashMap<String, Int>()
     fun cacheOffset(fingerprintKey: String, charOffsetUtf16: Int) { lastOffsets[fingerprintKey] = charOffsetUtf16 }
     fun cachedOffset(fingerprintKey: String): Int? = lastOffsets[fingerprintKey]
+
+    /** In-memory last PDF page index per fingerprintKey — a TYPED cache distinct from the
+     *  char-offset one (feature #115; a PDF position is a page, not a UTF-16 offset). */
+    private val lastPages = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    fun cachePage(fingerprintKey: String, page: Int) { lastPages[fingerprintKey] = page }
+    fun cachedPage(fingerprintKey: String): Int? = lastPages[fingerprintKey]
 }
 
 class VReaderApp : Application() {
