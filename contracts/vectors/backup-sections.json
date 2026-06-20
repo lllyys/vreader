@@ -1,0 +1,189 @@
+{
+  "_comment": "Golden vectors for the cross-platform WebDAV backup archive sections (contracts/identity/backup-format.md, schema 3 / manifest 1). Each `sections.<name>` value is a representative canonical section JSON. Both the Swift conformance (vreaderTests/Contracts/BackupConformanceTests.swift, the reference encoder) and the Kotlin conformance (android/identity .../BackupConformanceTest) must DECODE each section into their DTO and RE-ENCODE to a payload whose PARSED JSON equals this vector (semantic equality — key order / whitespace insignificant; the contract needs both platforms to agree on field names + types + values, not byte-identical formatting). Dates are ISO8601 UTC second-precision (Swift .iso8601 / Kotlin IsoInstantSerializer); Data is base64 (Swift Data / Kotlin Base64DataSerializer); nil optionals are OMITTED (Swift Codable / Kotlin explicitNulls=false). Both suites green against this one vector set ⇒ a backup written by one platform restores on the other.",
+  "schemaVersion": 3,
+  "manifestSchemaVersion": 1,
+  "sections": {
+    "annotations": {
+      "schemaVersion": 3,
+      "highlights": [
+        {
+          "highlightId": "11111111-1111-1111-1111-111111111111",
+          "bookFingerprintKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024",
+          "locatorJSON": "{\"progression\":0.5}",
+          "selectedText": "选中的文本",
+          "color": "yellow",
+          "note": "a note",
+          "createdAt": "2026-06-20T16:00:00Z",
+          "updatedAt": "2026-06-20T16:05:00Z"
+        }
+      ],
+      "bookmarks": [
+        {
+          "bookmarkId": "22222222-2222-2222-2222-222222222222",
+          "bookFingerprintKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024",
+          "locatorJSON": "{}",
+          "createdAt": "2026-06-20T16:00:00Z",
+          "updatedAt": "2026-06-20T16:00:00Z"
+        }
+      ],
+      "notes": [
+        {
+          "annotationId": "33333333-3333-3333-3333-333333333333",
+          "bookFingerprintKey": "txt:0000000000000000000000000000000000000000000000000000000000000000:42",
+          "locatorJSON": "{\"charOffsetUTF16\":949}",
+          "content": "my note",
+          "createdAt": "2026-06-20T16:00:00Z",
+          "updatedAt": "2026-06-20T16:00:00Z"
+        }
+      ]
+    },
+    "positions": {
+      "schemaVersion": 3,
+      "positions": [
+        {
+          "bookFingerprintKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024",
+          "locatorJSON": "{\"progression\":0.5}",
+          "updatedAt": "2026-06-20T16:00:00Z",
+          "lastOpenedAt": "2026-06-20T16:30:00Z"
+        },
+        {
+          "bookFingerprintKey": "txt:0000000000000000000000000000000000000000000000000000000000000000:42",
+          "locatorJSON": "{}",
+          "updatedAt": "2026-06-19T10:00:00Z"
+        }
+      ]
+    },
+    "collections": {
+      "schemaVersion": 3,
+      "collections": [
+        {
+          "name": "收藏",
+          "createdAt": "2026-06-20T16:00:00Z",
+          "bookFingerprintKeys": [
+            "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024",
+            "txt:0000000000000000000000000000000000000000000000000000000000000000:42"
+          ]
+        }
+      ]
+    },
+    "library-manifest": {
+      "schemaVersion": 1,
+      "books": [
+        {
+          "fingerprintKey": "azw3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:2048",
+          "format": "azw3",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "byteCount": 2048,
+          "originalExtension": "mobi",
+          "title": "标题",
+          "addedAt": "2026-06-01T00:00:00Z",
+          "lastOpenedAt": "2026-06-20T16:30:00Z",
+          "blobPath": "VReader/books/azw3/bbbbbbbb_2048.azw3",
+          "sourceCanonicalKey": "azw3:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc:1500"
+        }
+      ]
+    },
+    "settings": {
+      "schemaVersion": 3,
+      "defaults": {
+        "readerTheme": { "type": "string", "value": "dark" },
+        "readerAutoPageTurn": { "type": "bool", "value": true },
+        "readerAutoPageTurnInterval": { "type": "double", "value": 3.0 },
+        "readerTypographyVersion": { "type": "int", "value": 2 },
+        "readerBlob": { "type": "data", "value": "AQIDBA==" }
+      }
+    },
+    "book-sources": {
+      "schemaVersion": 3,
+      "sources": [
+        {
+          "sourceURL": "https://opds.example/catalog",
+          "sourceName": "Example OPDS",
+          "sourceType": 1,
+          "enabled": true,
+          "ruleSearchData": "CQgH",
+          "customOrder": 0
+        }
+      ]
+    },
+    "per-book-settings": {
+      "schemaVersion": 3,
+      "entries": [
+        {
+          "bookFingerprintKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024",
+          "override": {
+            "fontSize": 18.0,
+            "bilingualEnabled": true,
+            "bilingualTargetLanguage": "Chinese"
+          }
+        }
+      ]
+    },
+    "replacement-rules": {
+      "schemaVersion": 3,
+      "rules": [
+        {
+          "ruleId": "66666666-6666-6666-6666-666666666666",
+          "pattern": "foo",
+          "replacement": "bar",
+          "isRegex": false,
+          "scopeKey": "global",
+          "enabled": true,
+          "order": 0,
+          "label": "规则",
+          "createdAt": "2026-06-20T16:00:00Z"
+        }
+      ]
+    },
+    "reading-history": {
+      "schemaVersion": 3,
+      "sessions": [
+        {
+          "sessionId": "44444444-4444-4444-4444-444444444444",
+          "bookFingerprintKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024",
+          "startedAt": "2026-06-20T16:00:00Z",
+          "endedAt": "2026-06-20T16:30:00Z",
+          "durationSeconds": 1800,
+          "pagesRead": 12,
+          "startLocatorJSON": "{}",
+          "deviceId": "dev-1",
+          "isRecovered": false
+        }
+      ],
+      "stats": [
+        {
+          "bookFingerprintKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024",
+          "totalReadingSeconds": 3600,
+          "sessionCount": 2,
+          "lastReadAt": "2026-06-20T16:30:00Z",
+          "averagePagesPerHour": 24.0,
+          "totalPagesRead": 24,
+          "longestSessionSeconds": 1800
+        }
+      ]
+    },
+    "ai-conversations": {
+      "schemaVersion": 3,
+      "sessions": [
+        {
+          "sessionId": "55555555-5555-5555-5555-555555555555",
+          "bookFingerprintKey": "epub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1024",
+          "title": "Chat",
+          "messagesPayloadData": "BQYH",
+          "lastMessageSnippet": "hello 你好",
+          "messageCount": 3,
+          "createdAt": "2026-06-20T16:00:00Z",
+          "updatedAt": "2026-06-20T16:30:00Z"
+        }
+      ]
+    },
+    "metadata": {
+      "id": "77777777-7777-7777-7777-777777777777",
+      "createdAt": "2026-06-20T16:30:00Z",
+      "deviceName": "Pixel 7",
+      "appVersion": "0.6.0",
+      "bookCount": 12,
+      "totalSizeBytes": 4404019
+    }
+  }
+}

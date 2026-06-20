@@ -68,8 +68,23 @@ sound (the v2 addition is `reading-history`, the v3 addition is
 
 ## Golden vectors / conformance
 
-`contracts/vectors/backup-*.json`: representative section envelopes →
-expected canonical JSON. Swift conformance (WI-2) asserts the iOS DTOs
-encode/decode the vectors at schema 3 / manifest 1; Kotlin (WI-5,
-toolchain-gated) the same — a round-trip backup → restore across platforms
-is the Phase-2+ end-to-end acceptance.
+`contracts/vectors/backup-sections.json` (landed — Android feature #113 WI-3):
+one representative canonical section JSON per section + the manifest + metadata.
+Both platforms' conformance suites **decode each section into their DTO and
+re-encode to a payload whose PARSED JSON equals the vector** (semantic equality —
+key order / whitespace / JSON-number formatting insignificant; the contract needs
+both platforms to agree on field names + types + values, not byte-identical
+output):
+
+- **Swift**: `vreaderTests/Contracts/BackupConformanceTests.swift` (the iOS DTOs).
+- **Kotlin**: `android/identity/.../contracts/backup/BackupConformanceTest.kt`
+  (the shared `:identity` DTOs the Android app consumes).
+
+Both green against this one vector set ⇒ a backup written by one platform restores
+on the other. Identity-bearing detail proven: ISO8601-UTC dates (`.iso8601` /
+`IsoInstantSerializer`), base64 `Data` (`Base64DataSerializer`), omitted nil
+optionals (Swift `Codable` / Kotlin `explicitNulls=false`), the type-tagged
+`BackupDefaultsValue` `{type,value}` union, and **valid-UUID id fields** (iOS uses
+strict `UUID`; Kotlin uses `String` — the vectors use real UUIDs so both decode).
+A round-trip backup → restore against a live WebDAV is the Phase-2+ end-to-end
+acceptance (a separate future backend feature).

@@ -1323,6 +1323,7 @@
 		C439F4679323C4D7486BB047 /* KeyboardInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41DD0013DEFFC287885D1A48 /* KeyboardInteractionTests.swift */; };
 		C470300A552B997B253D9856 /* LibraryFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D046EDAB83AA8534D942EAE /* LibraryFilterTests.swift */; };
 		C470F1CA738A8CC493BF7A3B /* RealDebugBridgeContext+TXTContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C69DD8E878FC41BDF6203450 /* RealDebugBridgeContext+TXTContent.swift */; };
+		C48DF6811D5C18C1E2AC9E01 /* BackupConformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A2B2A500B5E3706D86F007 /* BackupConformanceTests.swift */; };
 		C4D9C255C16464E2D4841EEC /* ReaderToolbarActionObservers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBFCD8F667D32D6DD20D739 /* ReaderToolbarActionObservers.swift */; };
 		C4E3C3AE9DB2C357B6EDCBA4 /* WebDAVServerProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 685C8ADDC85C551C75E38594 /* WebDAVServerProfileStore.swift */; };
 		C52D4B03AE65EC124C626291 /* SummaryScopeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19CA966D3696877E6EB055EA /* SummaryScopeTests.swift */; };
@@ -3331,6 +3332,7 @@
 		F40A3A67B0FABDC9116629CD /* BookTranslationViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookTranslationViewModelTests.swift; sourceTree = "<group>"; };
 		F4104BB5FAFACC19E9FBB4D7 /* LibraryProgressRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryProgressRing.swift; sourceTree = "<group>"; };
 		F44DBB94C251A533844E33BD /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
+		F4A2B2A500B5E3706D86F007 /* BackupConformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupConformanceTests.swift; sourceTree = "<group>"; };
 		F4C18F1E19149F8DBAE36A31 /* AIResponseCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIResponseCache.swift; sourceTree = "<group>"; };
 		F4C752B466744D1F453BE351 /* TOCTitleFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOCTitleFilterTests.swift; sourceTree = "<group>"; };
 		F4EA1C8202C4D559BB9E44CB /* BackupAIConversationsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupAIConversationsTests.swift; sourceTree = "<group>"; };
@@ -3611,6 +3613,7 @@
 				DB61B11E07DDB3EC558692C1 /* Helpers */,
 				B507E0BD7D08A4E11203ACB1 /* Integration */,
 				0B012D36F10FD0A92C516160 /* Models */,
+				5AD82895D4C8E34E5B1C9FF7 /* Reader */,
 				C89089F8D64EB38CF661EAB4 /* Services */,
 				3EC42569191D945E8426907A /* Utils */,
 				9B93CFA1683A5C606C3627E1 /* Verification */,
@@ -4274,6 +4277,13 @@
 				D978E90148FFF976EA612EB4 /* TypefacePillToggle.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		5AD82895D4C8E34E5B1C9FF7 /* Reader */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Reader;
 			sourceTree = "<group>";
 		};
 		5CF05FDFCFCF1A5110783282 /* Locator */ = {
@@ -5139,6 +5149,7 @@
 		AC8B0B173F1E128C9EBA13D1 /* Contracts */ = {
 			isa = PBXGroup;
 			children = (
+				F4A2B2A500B5E3706D86F007 /* BackupConformanceTests.swift */,
 				697354ABB2A62776172FF63A /* IdentityConformanceTests.swift */,
 			);
 			path = Contracts;
@@ -6447,6 +6458,7 @@
 				C9D2AE1A81222E67A05CA05C /* BackgroundIndexingCoordinatorTests.swift in Sources */,
 				403A2FEB89760E50142E7ECA /* BackupAIConversationsTests.swift in Sources */,
 				50D3F5B291DB7188E2BB0442 /* BackupBookProjectionTests.swift in Sources */,
+				C48DF6811D5C18C1E2AC9E01 /* BackupConformanceTests.swift in Sources */,
 				22612350C6FC7C43096271E9 /* BackupDataCollectorRestorerTests.swift in Sources */,
 				A1C0DD5C147F74C3C21B932B /* BackupLibraryManifestTests.swift in Sources */,
 				4F2FEC62B6D23F67263EDF34 /* BackupProviderContractTests.swift in Sources */,
