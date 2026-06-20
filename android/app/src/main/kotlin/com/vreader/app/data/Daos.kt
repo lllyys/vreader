@@ -25,6 +25,12 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE fingerprintKey = :key")
     suspend fun find(key: String): BookEntity?
 
+    // feature #116 WI-3 — one-shot snapshot for the backup collector (not the observable Flow).
+    // Ordered by fingerprintKey (NOT the library-display addedAt) so a repeat backup of unchanged
+    // content yields a byte-stable manifest (matches the iOS projection ordering).
+    @Query("SELECT * FROM books ORDER BY fingerprintKey")
+    suspend fun getAll(): List<BookEntity>
+
     @Query("DELETE FROM books WHERE fingerprintKey = :key")
     suspend fun delete(key: String)
 
@@ -39,6 +45,11 @@ interface ReadingPositionDao {
 
     @Query("SELECT * FROM reading_positions WHERE fingerprintKey = :key")
     suspend fun find(key: String): ReadingPositionEntity?
+
+    // feature #116 WI-3 — all saved positions, for the backup collector. Ordered by fingerprintKey
+    // for byte-stable repeat backups (positions.json array order is otherwise plan-dependent).
+    @Query("SELECT * FROM reading_positions ORDER BY fingerprintKey")
+    suspend fun getAll(): List<ReadingPositionEntity>
 
     @Query("DELETE FROM reading_positions WHERE fingerprintKey = :key")
     suspend fun delete(key: String)

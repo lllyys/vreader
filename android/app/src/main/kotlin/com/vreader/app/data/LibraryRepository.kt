@@ -29,6 +29,17 @@ data class Book(
 )
 
 /**
+ * A saved reading position paired with its book key + last-saved time — feature #116 WI-3.
+ * The backup collector needs the whole [VReaderLocator] envelope plus `updatedAt`, which the
+ * per-key [LibraryRepository.loadPosition] doesn't expose.
+ */
+data class ReadingPositionRecord(
+    val fingerprintKey: String,
+    val locator: VReaderLocator,
+    val updatedAt: Long,
+)
+
+/**
  * The library/position persistence boundary. Suspends for writes, exposes a Flow
  * for the observable library list. `json` is injectable for tests.
  */
@@ -38,6 +49,15 @@ class LibraryRepository(
     private val json: Json = DEFAULT_JSON,
 ) {
     fun observeLibrary(): Flow<List<Book>> = bookDao.observeAll().map { rows -> rows.map(::toBook) }
+
+    /** One-shot snapshot of the library — feature #116 WI-3 backup collector (not the Flow). */
+    suspend fun listBooks(): List<Book> = bookDao.getAll().map(::toBook)
+
+    /** Every saved reading position as a record (envelope + updatedAt) — feature #116 WI-3. */
+    suspend fun listPositions(): List<ReadingPositionRecord> =
+        positionDao.getAll().map { e ->
+            ReadingPositionRecord(e.fingerprintKey, e.toEnvelope(json), e.updatedAt)
+        }
 
     suspend fun upsertBook(book: Book) = bookDao.upsert(book.toEntity())
 

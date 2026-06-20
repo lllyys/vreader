@@ -251,6 +251,7 @@ class BookImporterTest {
             override suspend fun find(key: String): BookEntity? = null
             override suspend fun delete(key: String) = Unit
             override suspend fun markOpened(key: String, openedAt: Long) = Unit
+            override suspend fun getAll(): List<BookEntity> = emptyList()
         }
         val failingImporter = BookImporter(
             booksDir, LibraryRepository(throwingDao, db.readingPositionDao()), Dispatchers.Unconfined,
@@ -282,6 +283,7 @@ class BookImporterTest {
             override suspend fun find(key: String): BookEntity? = null
             override suspend fun delete(key: String) = Unit
             override suspend fun markOpened(key: String, openedAt: Long) = Unit
+            override suspend fun getAll(): List<BookEntity> = emptyList()
         }
         val failingImporter = BookImporter(
             booksDir, LibraryRepository(throwingDao, db.readingPositionDao()), Dispatchers.Unconfined,
