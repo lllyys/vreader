@@ -13,7 +13,9 @@ import kotlinx.coroutines.withContext
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
 import org.xml.sax.helpers.DefaultHandler
+import java.io.FilterInputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.ProtocolException
@@ -80,6 +82,47 @@ class WebDavClient(
         if (status == HttpURLConnection.HTTP_NOT_FOUND) throw WebDavException(WebDavErrorKind.notFound404, "404 $path")
         if (status / 100 != 2) throwForStatus(status, path)
         bytes
+    }
+
+    /**
+     * Streams a GET body without buffering the whole response in memory — for large book blobs
+     * (the in-memory [get] is fine for the small backup ZIPs). The returned stream OWNS the
+     * connection: closing it disconnects. Errors (404 / auth / offline) are mapped before the
+     * stream is returned; redirects (301/302/307/308) are followed manually.
+     */
+    suspend fun getStream(path: String): InputStream = withContext(dispatcher) {
+        openStream(path, redirectsLeft = 5)
+    }
+
+    private fun openStream(path: String, redirectsLeft: Int): InputStream {
+        val url = resolve(path)
+        val conn = try { url.openConnection() as HttpURLConnection } catch (e: Exception) { throw offline(e) }
+        var handOff = false
+        try {
+            setRequestMethod(conn, "GET")
+            conn.connectTimeout = connectTimeoutMs
+            conn.readTimeout = readTimeoutMs
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("Authorization", authHeader)
+            val status = try { conn.responseCode } catch (e: SocketTimeoutException) {
+                throw WebDavException(WebDavErrorKind.timeout, "timeout GET $path", e)
+            } catch (e: IOException) { throw offline(e) }
+            if (status in intArrayOf(301, 302, 307, 308)) {
+                val loc = conn.getHeaderField("Location")
+                if (loc != null && redirectsLeft > 0) {
+                    conn.disconnect()
+                    return openStream(loc, redirectsLeft - 1)
+                }
+            }
+            if (status == HttpURLConnection.HTTP_NOT_FOUND) throw WebDavException(WebDavErrorKind.notFound404, "404 $path")
+            if (status / 100 != 2) { conn.errorStream?.use { it.readBytes() }; throwForStatus(status, path) }
+            handOff = true
+            return object : FilterInputStream(conn.inputStream) {
+                override fun close() { try { super.close() } finally { conn.disconnect() } }
+            }
+        } finally {
+            if (!handOff) conn.disconnect()
+        }
     }
 
     suspend fun delete(path: String): Unit = withContext(dispatcher) {

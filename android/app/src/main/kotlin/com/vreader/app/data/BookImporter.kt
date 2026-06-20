@@ -19,6 +19,12 @@ import java.nio.file.StandardCopyOption
 sealed class ImportException(message: String) : Exception(message) {
     /** The picked file's extension isn't a supported book format. */
     class UnsupportedFormat(val name: String) : ImportException("unsupported format: $name")
+
+    /** The imported bytes' canonical key didn't match a caller-supplied [expected] (feature #116
+     *  WI-4 restore: the fetched blob doesn't match the manifest's declared identity). Thrown
+     *  BEFORE any artifact promotion / DB write, so no library state is touched. */
+    class FingerprintMismatch(val expected: String, val actual: String) :
+        ImportException("fingerprint mismatch: expected $expected, got $actual")
 }
 
 /**
@@ -43,7 +49,12 @@ class BookImporter(
      *
      * @throws ImportException.UnsupportedFormat if [displayName]'s extension is unknown.
      */
-    suspend fun importStream(sourceUri: String, displayName: String, input: InputStream): Book =
+    suspend fun importStream(
+        sourceUri: String,
+        displayName: String,
+        input: InputStream,
+        expectedKey: String? = null,
+    ): Book =
         withContext(ioDispatcher) {
             // Outer use closes [input] on EVERY exit (incl. unsupported-format /
             // temp-create failures), not only once hashing starts.
@@ -60,6 +71,14 @@ class BookImporter(
                         DocumentFingerprint.hashing(stream, sink)
                     }
                     val key = result.canonicalKey(format)
+
+                    // Verify identity BEFORE promoting the artifact or writing the DB row, so a
+                    // blob that doesn't match the caller's expected identity (a corrupt/mismatched
+                    // restore blob) never touches the library — in particular it cannot update or
+                    // delete a DIFFERENT pre-existing book that happens to own the computed key.
+                    if (expectedKey != null && key != expectedKey) {
+                        throw ImportException.FingerprintMismatch(expectedKey, key)
+                    }
 
                     // Final name derived from the (sanitized) canonical key — stable
                     // across re-imports, collision-free across distinct books.

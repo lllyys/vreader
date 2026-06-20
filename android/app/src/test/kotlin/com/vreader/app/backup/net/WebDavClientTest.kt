@@ -113,6 +113,15 @@ class WebDavClientTest {
         assertTrue(bytes.contentEquals(client().get("dav/x.txt")))
     }
 
+    @Test fun getStream_streamsBytes_andMaps404() = runBlocking {
+        val payload = "streamed 世界".toByteArray()
+        server.handlers["GET /blob"] = { Response(200, payload) }
+        server.handlers["GET /missing"] = { Response(404) }
+        client().getStream("blob").use { assertTrue(payload.contentEquals(it.readBytes())) }
+        val kind = (runCatching { client().getStream("missing") }.exceptionOrNull() as WebDavException).kind
+        assertEquals(WebDavErrorKind.notFound404, kind)
+    }
+
     @Test fun get_followsRedirect_307() = runBlocking {
         server.handlers["GET /a"] = { Response(307, headers = mapOf("Location" to "${base}b")) }
         server.handlers["GET /b"] = { Response(200, "redirected".toByteArray()) }
