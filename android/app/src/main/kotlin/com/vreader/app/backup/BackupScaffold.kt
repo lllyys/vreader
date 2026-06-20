@@ -167,6 +167,7 @@ fun AppSheet(
     title: String,
     leading: @Composable () -> Unit,
     trailing: @Composable () -> Unit,
+    footer: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalBackupTokens.current
@@ -193,6 +194,11 @@ fun AppSheet(
                 Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
                 content = content,
             )
+            // A pinned footer below the scrollable body (e.g. the selective-restore CTA).
+            if (footer != null) {
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(t.sep))
+                footer()
+            }
         }
     }
 }
