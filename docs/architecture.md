@@ -564,6 +564,30 @@ xcodegen/`project.yml` at the repo root; the two builds never overlap).
   with `ResumeTarget.Precise` carrying the canonical fallback so the host can
   degrade if the Readium anchor won't reapply.
 
+### Backup/restore backend (`com.vreader.app.backup`) — feature #116
+
+The WebDAV backup/restore backend, byte-for-byte the iOS materializing-restore
+layout (`VReader/backups/<ts>_<id>.vreader.zip` = `metadata.json` + the #113
+section JSONs + `library-manifest.json`, NO book bytes; `VReader/books/<format>/
+<sha>_<bytes>.<canonicalExt>` = content-addressed blob store), so an Android
+backup restores on iOS and vice-versa. No production user entry yet (the #114
+UI is the seam; its production wiring is design-gated).
+
+| Type | Depends on | Purpose |
+| --- | --- | --- |
+| `net.WebDavClient` (impl of `net.WebDavTransport`) | `HttpURLConnection` | PROPFIND(Depth:1, namespace-aware SAX, **fail-closed DOCTYPE ban + UTF-8 Reader** XXE hardening) / MKCOL / PUT / `putFile` (streaming) / GET / `getStream` (streaming) / MOVE / DELETE, Basic auth, typed `WebDavErrorKind`, manual non-GET redirect follow + reflective WebDAV-verb fallback (the JDK validator rejects PROPFIND/MKCOL). The `WebDavTransport` interface lets the service unit-test against an in-memory fake. |
+| `net.WebDavServerStore` | DataStore + `net.SecretCipher` | Saved server profiles (URL/user/name/wifiOnly as a JSON list); the password kept only as a `SecretCipher` token. |
+| `net.SecretCipher` / `KeystoreSecretCipher` | AndroidKeyStore | AES-256-GCM (fresh IV, non-exportable key) for the password at rest — the EncryptedSharedPreferences replacement. |
+| `archive.BlobPath` | `:identity` `BookFormat` | `(format, sha, bytes)` ↔ the iOS `VReader/books/...` blob path. |
+| `archive.BackupArchive` (Writer/Reader) | #113 `BackupJson`/DTOs | The `*.vreader.zip` container (NO book bytes); ZIP-bomb-bounded reader, dup/malformed/missing-metadata rejected, unknown-section tolerant. |
+| `BackupCollector` | `LibraryRepository` | Room library + positions → the #113 manifest (`BlobPath` per book) + positions section + the `BlobUpload` list; loud-fails on a missing local file or a positionless-Readium envelope. |
+| `RestoreImporter` | `BookImporter`, `LibraryRepository` | Streams each blob → `BookImporter.importStream(expectedKey=…)` (verify-before-mutate) → restore manifest metadata → restore position (book-first FK). Per-book failure isolation, idempotent. |
+| `WebDavBackupService` (impl of the #114 `BackupService`) | the above + a `WebDavTransport` factory | The real service: `listBackups` / `startBackup` (atomic `PUT .tmp`→`MOVE`, PROPFIND-dedupe) / `loadManifest` / `restore` (streaming `channelFlow`) / `retryBook` / `testConnection`. `backupId` = opaque `serverId/zipPath`. |
+
+Verified by `scripts/run-webdav-roundtrip.sh` — a live `rclone serve webdav`
+round-trip (import → backup → wipe → restore) on the emulator
+(`WebDavRoundTripConnectedTest`).
+
 ### Build / test / version
 
 - Toolchain (Spike-B-verified, pinned): Readium-Kotlin 3.3.0, AGP 8.13.2,

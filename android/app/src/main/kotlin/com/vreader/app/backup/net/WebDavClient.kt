@@ -286,23 +286,36 @@ class WebDavClient(
     /** Namespace-aware SAX parse of a DAV:multistatus body, XXE disabled. */
     private fun parseMultistatus(bytes: ByteArray): List<WebDavEntry> {
         if (bytes.isEmpty()) return emptyList()
+        // Parser-INDEPENDENT, fail-closed DOCTYPE ban — the primary XXE/DoS control. A legitimate
+        // WebDAV multistatus never carries a DTD; an inline internal DTD can hold a billion-laughs
+        // entity-expansion bomb that opens no external URI (so the resolveEntity no-op below never
+        // fires) and that disallow-doctype-decl would catch — but that flag throws on Android's
+        // harmony parser. Rejecting any DOCTYPE outright before parsing closes both the
+        // external-entity AND the internal-expansion vectors on every parser. (WebDAV is UTF-8.)
+        if (String(bytes, Charsets.UTF_8).contains("<!DOCTYPE", ignoreCase = true)) {
+            throw WebDavException(WebDavErrorKind.server, "multistatus must not contain a DOCTYPE")
+        }
         val factory = SAXParserFactory.newInstance().apply {
             isNamespaceAware = true
-            // XXE hardening — fail CLOSED: disallow-doctype-decl is the primary defence (it rejects
-            // any DOCTYPE outright). If the parser can't honour it we must not fall through to a
-            // DTD-processing parse on untrusted XML, so let the exception propagate.
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true)
-            // Belt-and-suspenders for parsers that ignore the above; failure here is non-fatal.
+            // XXE hardening that works on BOTH the JVM (Xerces) AND Android (harmony). The feature
+            // flags are BEST-EFFORT: Android's parser throws SAXNotRecognizedException for
+            // `disallow-doctype-decl` and friends, so requiring them breaks every PROPFIND on device
+            // (caught by the WI-6 connected test). FEATURE_SECURE_PROCESSING is the standard JAXP
+            // flag (limits entity expansion); the LOAD-BEARING, parser-agnostic defence is the
+            // MultistatusHandler's resolveEntity override below, which resolves EVERY external
+            // entity to nothing — so no file:// disclosure regardless of which features stuck.
+            runCatching { setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true) }
+            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
             runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
             runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
         }
-        // disallow-doctype-decl above already rejects every DOCTYPE, so no external DTD/entity can be
-        // referenced; the ACCESS_EXTERNAL_* properties (not present on all Android API levels) add
-        // nothing here.
         val parser = factory.newSAXParser()
         val handler = MultistatusHandler()
-        parser.parse(InputSource(bytes.inputStream()), handler)
+        // Feed the parser a fixed UTF-8 CHARACTER stream (Reader), not the raw byte stream: SAX uses
+        // the character stream and ignores the document's encoding declaration, so the parser sees
+        // exactly what the UTF-8 DOCTYPE scan above saw. This closes the encoding-bypass where a
+        // UTF-16 `<!DOCTYPE` slips past a UTF-8 byte scan but is still honoured by a byte-fed parser.
+        parser.parse(InputSource(bytes.inputStream().reader(Charsets.UTF_8)), handler)
         return handler.entries
     }
 
@@ -315,6 +328,12 @@ class WebDavClient(
         private var inResponse = false
         private var sawStatus = false      // any <status> line seen in this response
         private var sawOkStatus = false    // at least one 2xx <status> seen
+
+        // The parser-agnostic XXE defence: resolve EVERY external entity to an empty source, so a
+        // malicious `<!ENTITY x SYSTEM "file:///etc/passwd">` expands to nothing on ANY parser
+        // (Android's harmony parser doesn't honour the disallow-doctype-decl feature flag).
+        override fun resolveEntity(publicId: String?, systemId: String?): InputSource =
+            InputSource(java.io.StringReader(""))
 
         private fun local(qName: String) = qName.substringAfter(':')
 

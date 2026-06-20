@@ -155,8 +155,28 @@ class WebDavClientTest {
         val xml = """<?xml version="1.0"?><!DOCTYPE m [<!ENTITY x SYSTEM "file:///etc/passwd">]>
 <d:multistatus xmlns:d="DAV:"><d:response><d:href>/x/safe</d:href><d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat></d:response></d:multistatus>"""
         server.handlers["PROPFIND /x/"] = { Response(207, xml.toByteArray()) }
-        val result = runCatching { client().propfind("x/") }
-        // disallow-doctype-decl → parse throws; OR (if a parser ignores it) no entity content leaks.
+        // The fail-closed DOCTYPE ban rejects any DTD outright (parser-independent), so an external
+        // entity can never be referenced.
+        assertTrue(runCatching { client().propfind("x/") }.isFailure)
+    }
+
+    @Test fun internalEntityExpansion_isRejected() = runBlocking {
+        // Billion-laughs in an INTERNAL DTD subset — opens no external URI, so an external-only
+        // defence wouldn't stop it. The DOCTYPE ban must reject it.
+        val bomb = """<?xml version="1.0"?><!DOCTYPE m [
+          <!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>
+<d:multistatus xmlns:d="DAV:"><d:response><d:href>&b;</d:href></d:response></d:multistatus>"""
+        server.handlers["PROPFIND /b/"] = { Response(207, bomb.toByteArray()) }
+        assertTrue(runCatching { client().propfind("b/") }.isFailure)
+    }
+
+    @Test fun utf16Doctype_cannotBypassTheScan() = runBlocking {
+        // A UTF-16-encoded DOCTYPE would slip past a UTF-8 byte scan — but the parser is fed a fixed
+        // UTF-8 Reader, so the body is interpreted as (invalid) UTF-8 and never parsed as a DTD.
+        val xml = """<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE m [<!ENTITY x SYSTEM "file:///etc/passwd">]>
+<d:multistatus xmlns:d="DAV:"><d:response><d:href>&x;</d:href></d:response></d:multistatus>"""
+        server.handlers["PROPFIND /u/"] = { Response(207, xml.toByteArray(Charsets.UTF_16)) }
+        val result = runCatching { client().propfind("u/") }
         assertTrue(result.isFailure || result.getOrNull()?.none { it.href.contains("root:") } == true)
     }
 }
