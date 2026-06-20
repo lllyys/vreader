@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- feature #116 — DEBUG-only: allow cleartext HTTP ONLY to the emulator's host alias 10.0.2.2,
+     so the local-WebDAV backup/restore round-trip verification (rclone serve webdav on the Mac
+     host) works. Release ships no cleartext config (HTTPS-only). -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

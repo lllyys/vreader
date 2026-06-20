@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- DEBUG-only manifest additions (feature #114 WI-2): the backup/restore UI debug launcher.
-     Excluded from the release APK. exported=true so it can be started via `adb shell am start`
-     for emulator verification; it carries no production entry point. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+<!-- DEBUG-only manifest additions. feature #114: the backup/restore UI debug launcher.
+     feature #116: reference the debug network-security-config (cleartext to 10.0.2.2 for the
+     local-WebDAV round-trip verification). Excluded from the release APK. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:replace="android:networkSecurityConfig">
         <activity
             android:name=".backup.BackupDebugActivity"
             android:exported="true" />

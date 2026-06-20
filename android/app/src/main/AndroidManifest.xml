@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- feature #116 — WebDAV backup/restore. Release stays HTTPS-only (no cleartext config
+         here); the debug build adds a network-security-config allowing cleartext ONLY to the
+         emulator's host alias 10.0.2.2 for the local-WebDAV round-trip verification. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:name=".VReaderApp"
         android:label="VReader"

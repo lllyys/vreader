@@ -48,6 +48,11 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true   // Robolectric needs resources
+            // feature #116 — the WebDavClient's reflective WebDAV-verb fallback (PROPFIND/MKCOL,
+            // rejected by the JDK's HttpURLConnection validator) sets java.net's protected `method`
+            // field; under JDK 17 strong encapsulation that needs java.net opened to the test JVM.
+            // Android production never runs the fallback (OkHttp-backed runtime accepts the verbs).
+            all { it.jvmArgs("--add-opens", "java.base/java.net=ALL-UNNAMED") }
         }
     }
 }
