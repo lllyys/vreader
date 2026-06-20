@@ -73,7 +73,14 @@ data class BackupProgress(val done: Int, val total: Int)
 /** Restore progress: per-book download, then a terminal result (success/partial/failed). */
 sealed interface RestoreProgress {
     data class InProgress(val done: Int, val total: Int, val currentTitle: String) : RestoreProgress
-    data class Result(val outcome: RestoreOutcome, val restored: Int, val total: Int, val failed: Int) : RestoreProgress
+    /** `whenLabel` = the backup's display date (the success copy says "… restored from <date>"). */
+    data class Result(
+        val outcome: RestoreOutcome,
+        val restored: Int,
+        val total: Int,
+        val failed: Int,
+        val whenLabel: String = "",
+    ) : RestoreProgress
 }
 
 enum class RestoreOutcome { success, partial, failed }
