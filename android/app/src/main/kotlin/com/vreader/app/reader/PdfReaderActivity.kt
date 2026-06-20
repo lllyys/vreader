@@ -38,9 +38,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import com.vreader.app.data.Book
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
+import androidx.compose.runtime.snapshotFlow
+import vreader.contracts.Locator
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,17 +71,42 @@ private sealed interface PdfUiState {
     data object Protected : PdfUiState
     data object Corrupt : PdfUiState
     data object Empty : PdfUiState
-    data class Loaded(val title: String, val document: PdfDocument) : PdfUiState
+    data class Loaded(val title: String, val document: PdfDocument, val book: Book, val initialPage: Int) : PdfUiState
 }
 
 class PdfReaderActivity : ComponentActivity() {
 
     private val container get() = (application as VReaderApp).container
 
+    // Hoisted so onStop can flush the latest page synchronously (mirrors TxtReaderActivity).
+    private var flushPosition: (() -> Unit)? = null
+
+    // ALL position writes funnel through this CONFLATED channel + a SINGLE consumer so saves are
+    // serialized (latest-wins) — the debounced save + the onStop flush never land out of order.
+    private val saveRequests = Channel<PendingSave>(Channel.CONFLATED)
+    private data class PendingSave(val book: Book, val page: Int)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val key = intent.getStringExtra(EXTRA_FINGERPRINT_KEY)
         if (key == null) { finish(); return }
+
+        // The lone writer — drains in order; runs on the process scope so an onStop save
+        // completes through teardown; ends when onDestroy closes the channel.
+        container.appScope.launch {
+            for ((book, page) in saveRequests) {
+                val locator = Locator(
+                    contentSHA256 = book.contentSHA256,
+                    fileByteCount = book.fileByteCount,
+                    format = book.originalFormat.name,
+                    page = page,
+                )
+                container.repository.savePosition(
+                    vreader.contracts.VReaderLocator.wrapLegacy(locator),
+                    System.currentTimeMillis(),
+                )
+            }
+        }
 
         setContent {
             val state by produceState<PdfUiState>(PdfUiState.Loading, key) {
@@ -91,16 +124,32 @@ class PdfReaderActivity : ComponentActivity() {
                     CenterMessage("This PDF has no pages", null)
                 }
                 is PdfUiState.Loaded -> {
+                    val listState = rememberLazyListState(initialFirstVisibleItemIndex = s.initialPage)
                     // Close the renderer when the reader leaves composition — launched on the
                     // process scope (NOT runBlocking on main: close() awaits the doc mutex behind
                     // any in-flight render, which could ANR the teardown/rotation frame).
                     DisposableEffect(s.document) {
                         onDispose { container.appScope.launch { s.document.close() } }
                     }
-                    PdfContinuousReader(s.title, s.document, ::finish)
+                    SideEffect { flushPosition = { savePage(s.book, listState.firstVisibleItemIndex) } }
+                    LaunchedEffect(listState) {
+                        snapshotFlow { listState.firstVisibleItemIndex }
+                            .drop(1).debounce(800).collect { savePage(s.book, it) }
+                    }
+                    PdfContinuousReader(s.title, s.document, listState, ::finish)
                 }
             }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        flushPosition?.invoke()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        saveRequests.close()
     }
 
     private suspend fun load(key: String): PdfUiState {
@@ -111,11 +160,27 @@ class PdfReaderActivity : ComponentActivity() {
                 container.repository.markOpened(key, System.currentTimeMillis())
                 if (r.document.pageCount == 0) {
                     r.document.close(); PdfUiState.Empty
-                } else PdfUiState.Loaded(book.title, r.document)
+                } else PdfUiState.Loaded(book.title, r.document, book, computeInitialPage(key, r.document.pageCount))
             }
             PdfOpenResult.ProtectedOrUnsupported -> PdfUiState.Protected
             PdfOpenResult.Corrupt -> PdfUiState.Corrupt
         }
+    }
+
+    /** Restore the saved page index, clamped to a valid page (cache-first for fast reopen). */
+    private suspend fun computeInitialPage(key: String, pageCount: Int): Int {
+        val cached = container.cachedPage(key)
+        val page = cached ?: run {
+            val saved = container.repository.loadPosition(key) ?: return 0
+            (ResumeResolver.resolve(saved) as? ResumeTarget.Canonical)?.locator?.page ?: 0
+        }
+        return page.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+    }
+
+    /** Cache synchronously (fast reopen) + enqueue the durable save (latest-wins). */
+    private fun savePage(book: Book, page: Int) {
+        container.cachePage(book.fingerprintKey, page)
+        saveRequests.trySend(PendingSave(book, page))
     }
 
     companion object {
@@ -158,8 +223,7 @@ private fun PdfScaffold(title: String, onBack: () -> Unit, body: @Composable () 
 }
 
 @Composable
-private fun PdfContinuousReader(title: String, document: PdfDocument, onBack: () -> Unit) {
-    val listState = rememberLazyListState()
+private fun PdfContinuousReader(title: String, document: PdfDocument, listState: androidx.compose.foundation.lazy.LazyListState, onBack: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         PdfScaffold(title, onBack) {
             LazyColumn(
