@@ -45,8 +45,10 @@ class PdfDocument private constructor(
 
     /**
      * Render [pageIndex] into a Bitmap of [targetWidthPx] (height derived from the page aspect
-     * ratio). Serialized: only one page is ever open. Returns a freshly-allocated bitmap the
-     * caller OWNS and must recycle.
+     * ratio). Serialized: only one page is ever open. Returns a freshly-allocated bitmap; when
+     * displayed in Compose (the PDF reader), Compose owns its drawn lifetime — do NOT recycle it
+     * while it may still be drawn (recycling at the composable boundary races Compose's draw and
+     * crashes; the reader lets GC reclaim off-screen page bitmaps).
      */
     suspend fun renderPage(pageIndex: Int, targetWidthPx: Int): Bitmap = withContext(dispatcher) {
         require(targetWidthPx > 0) { "targetWidthPx must be > 0" }

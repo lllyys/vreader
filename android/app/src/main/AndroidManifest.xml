@@ -23,5 +23,9 @@
         <activity
             android:name=".reader.TxtReaderActivity"
             android:exported="false" />
+        <!-- feature #115 — PDF reader (PdfRenderer continuous-scroll); pure Compose. -->
+        <activity
+            android:name=".reader.PdfReaderActivity"
+            android:exported="false" />
     </application>
 </manifest>

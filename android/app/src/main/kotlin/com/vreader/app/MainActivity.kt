@@ -23,6 +23,7 @@ import com.vreader.app.library.LibraryEvent
 import com.vreader.app.library.LibraryScreen
 import com.vreader.app.library.LibraryViewModel
 import com.vreader.app.reader.ReaderActivity
+import com.vreader.app.reader.PdfReaderActivity
 import com.vreader.app.reader.TxtReaderActivity
 import com.vreader.app.ui.theme.VReaderTheme
 import vreader.contracts.BookFormat
@@ -66,7 +67,10 @@ class MainActivity : ComponentActivity() {
                                 // .md reuses the text reader host (#112): same decode/
                                 // document/resume/chrome, MarkdownRenderer per chunk.
                                 startActivity(TxtReaderActivity.intent(this@MainActivity, book.id))
-                            BookFormat.pdf, BookFormat.azw3 ->
+                            BookFormat.pdf ->
+                                // #115 — continuous-scroll PdfRenderer reader.
+                                startActivity(PdfReaderActivity.intent(this@MainActivity, book.id))
+                            BookFormat.azw3 ->
                                 Toast.makeText(
                                     this@MainActivity,
                                     "${book.format} reading isn't available yet",
