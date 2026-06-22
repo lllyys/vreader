@@ -127,6 +127,14 @@ class OpdsParserTest {
         assertEquals(AcquisitionKind.none, link(null).acquisitionKind)
     }
 
+    @Test fun formatExtension_isCaseAndParamInsensitive() {
+        assertEquals("epub", OpdsLink(null, "x", "Application/EPUB+ZIP; charset=utf-8").formatExtension)
+        assertEquals("pdf", OpdsLink(null, "x", "APPLICATION/PDF").formatExtension)
+        assertEquals("azw3", OpdsLink(null, "x", "application/x-mobipocket-ebook").formatExtension)
+        assertNull(OpdsLink(null, "x", "text/html").formatExtension)
+        assertNull(OpdsLink(null, "x", null).formatExtension)
+    }
+
     @Test fun resolvesQueryAndFragmentOnlyHrefs_preserveBasePath() {
         // base path is a FILE (root.xml) — a `?`/`#`-only ref must keep root.xml, not the dir.
         assertEquals("https://cat.example.org/opds/root.xml?page=2", OpdsLink(null, "?page=2", null).resolvedHref(base))

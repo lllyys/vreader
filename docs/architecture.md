@@ -588,6 +588,22 @@ Verified by `scripts/run-webdav-roundtrip.sh` — a live `rclone serve webdav`
 round-trip (import → backup → wipe → restore) on the emulator
 (`WebDavRoundTripConnectedTest`).
 
+### OPDS catalog backend (`com.vreader.app.opds`) — feature #117
+
+The non-UI OPDS slice (the browse/add UI is design-gated, #1799). Mirrors the iOS
+`OPDSParser`/`OPDSModels`/`OPDSClient`.
+
+| Type | Purpose |
+| --- | --- |
+| `OpdsModels` | OPDS 1.2 `OpdsFeed`/`OpdsEntry`/`OpdsLink` value types. `AcquisitionKind` — only `generic`+`open-access` auto-import (buy/borrow/sample/subscribe/unknown are non-importable); MIME→`formatExtension`; relative + query/fragment href resolution. `OpdsError` sealed type. |
+| `OpdsParser` | Namespace-aware SAX Atom→feed parse via `xml.SafeXml` (the shared XXE-hardened parser — fail-closed DOCTYPE ban + fixed-UTF-8 Reader, the #116 WI-6 lesson). |
+| `OpdsClient` | `HttpURLConnection` feed-fetch + blob-download: manual redirect, bounded reads, `Accept-Encoding: identity`, typed `OpdsError`; baseUrl = the post-redirect final URL. |
+| `OpdsAcquisitionService` | Pick an auto-importable acquisition (EPUB>PDF>AZW3) → content-type + magic-byte validate (no HTML imports as a book) → `BookImporter.importStream`. |
+| `xml.SafeXml` | Reusable hardened SAX-parse for untrusted external XML (OPDS feeds; the WebDAV-multistatus precedent). |
+
+Verified by `scripts/run-opds-roundtrip.sh` — a live local HTTP OPDS feed + EPUB,
+fetch→download→import on the emulator (`OpdsRoundTripConnectedTest`).
+
 ### Build / test / version
 
 - Toolchain (Spike-B-verified, pinned): Readium-Kotlin 3.3.0, AGP 8.13.2,

@@ -39,14 +39,17 @@ data class OpdsLink(
     val isAutoImportable: Boolean
         get() = acquisitionKind == AcquisitionKind.generic || acquisitionKind == AcquisitionKind.openAccess
 
-    /** Canonical file extension from the MIME [type], or null if unsupported/absent. */
+    /** Canonical file extension from the MIME [type], or null if unsupported/absent. Case- and
+     *  parameter-insensitive (`Application/EPUB+ZIP; charset=…` → `epub`). */
     val formatExtension: String?
-        get() = when {
-            type == null -> null
-            type.contains("epub") -> "epub"
-            type.contains("pdf") -> "pdf"
-            type.contains("mobi") || type.contains("x-mobipocket") -> "azw3"
-            else -> null
+        get() {
+            val media = type?.substringBefore(';')?.trim()?.lowercase() ?: return null
+            return when {
+                media.contains("epub") -> "epub"
+                media.contains("pdf") -> "pdf"
+                media.contains("mobi") || media.contains("x-mobipocket") -> "azw3"
+                else -> null
+            }
         }
 
     /** Resolve [href] against [baseUrl]: absolute hrefs pass through; relative resolve against base. */
