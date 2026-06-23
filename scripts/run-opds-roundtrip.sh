@@ -49,7 +49,10 @@ cat > "$SERVEDIR/feed.xml" <<EOF
 </feed>
 EOF
 
-( cd "$SERVEDIR" && python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 ) &
+# NOT `( cd … && python3 … ) &` — that captures the SUBSHELL pid in $!, so the trap's
+# `kill $SERVER_PID` reaps the subshell but ORPHANS the python child (it survives as a ghost
+# http.server). `--directory` runs python directly so $! is the real server pid (rule 49).
+python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$SERVEDIR" >/dev/null 2>&1 &
 SERVER_PID=$!
 
 # Wait (bounded) for the server to accept connections.
