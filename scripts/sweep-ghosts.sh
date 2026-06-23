@@ -15,6 +15,12 @@
 #   - `am instrument`             rule 52 Cause D — wedged Android instrumentation
 #   - `adb … logcat`              rule 49 — detached logcat side-channel capture
 #                                  (recurring; watchdogged by run-tests.sh)
+#   - `python … http.server`      rule 49 — detached verification HTTP server left
+#                                  by a round-trip harness (origin: two
+#                                  run-opds-roundtrip.sh servers orphaned ~10h via
+#                                  a subshell-pid trap, found 2026-06-23). No one
+#                                  runs a persistent http.server here, so any past
+#                                  the threshold is a leak.
 #
 # NOT flagged: SWBBuildService (Xcode's resident build daemon — alive and
 # idle between builds by design), the Gradle daemon + a booted Android
@@ -64,7 +70,8 @@ ghosts=$(ps -Ao pid=,etime=,pcpu=,command= | awk -v thr="$THRESHOLD_MIN" '
         otherClass = (cmd !~ /( grep | awk )/) && \
             (cmd ~ /tail -f/ || cmd ~ /log stream/ || \
              cmd ~ /(^|\/)codex( |$)/ || cmd ~ /xcodebuild (test|build)/ || \
-             cmd ~ /am instrument/ || cmd ~ /adb .*logcat/)
+             cmd ~ /am instrument/ || cmd ~ /adb .*logcat/ || \
+             cmd ~ /http\.server/)
         waiterClass = (cmd ~ /(until|while) .*do sleep [0-9]/)
     }
     otherClass || waiterClass {

@@ -104,6 +104,34 @@ Hard rules:
    session end. A capture nobody has killed by the time its consumer
    finished reading is already a leak.
 
+### Verification servers + the subshell-pid trap (2026-06-23)
+
+Round-trip harnesses (`run-webdav-roundtrip.sh`, `run-opds-roundtrip.sh`) stand
+up a throwaway local server (rclone / `python -m http.server`), run a connected
+test, and kill the server on an `EXIT` trap. Two `http.server` processes still
+leaked ~10h. Cause: the OPDS script started the server as
+
+```bash
+( cd "$DIR" && python3 -m http.server "$PORT" ) &   # WRONG
+SERVER_PID=$!                                         # ← the SUBSHELL's pid
+```
+
+`$!` captures the **subshell**, not the python grandchild. `kill $SERVER_PID`
+reaps the subshell and **orphans** python, which serves forever at 0% CPU.
+
+Hard rules for a script-owned server:
+
+1. **Start the server DIRECTLY, never in a `( … ) &` subshell**, so `$!` is the
+   real server pid. Use the tool's own cwd flag instead of `cd` in a subshell
+   (`python3 -m http.server --directory "$DIR"`, `rclone serve … "$DIR"`).
+2. **Belt-and-suspenders in `cleanup()`**: after `kill "$SERVER_PID"`, also
+   `pkill -f "<server> $PORT "` keyed to **this run's exact port** — never a
+   bare class match (that would catch another run's or the user's server).
+3. The backstop is **`scripts/sweep-ghosts.sh`**, which now flags a stale
+   `http.server` as a ghost class. It does NOT touch `rclone serve` — the user
+   runs persistent rclone WebDAV servers (`~/vreader-webdav-data` etc.); never
+   broad-`pkill` an `rclone`/`vreader-webdav` pattern.
+
 ## Cron-specific implications
 
 vreader's cron prompts (`.claude/cron-prompts/{verify,bugfix,watchdog}.md`) fire as fresh agent sessions. A background shell from a prior session can outlive that session's logical end (until the OS reaps it) and still appear in the operator's UI. To avoid this:

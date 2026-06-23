@@ -15,7 +15,13 @@ PORT="${PORT:-$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1
 SERVEDIR="$(mktemp -d -t vreader-opds)"
 SERVER_PID=""
 
-cleanup() { [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null; rm -rf "$SERVEDIR" 2>/dev/null; }
+cleanup() {
+  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null
+  # Belt-and-suspenders: reap any http.server bound to THIS run's exact port (never another run's
+  # or the user's anything), in case the pid above ever misses a forked child.
+  pkill -f "http.server $PORT " 2>/dev/null
+  rm -rf "$SERVEDIR" 2>/dev/null
+}
 trap cleanup EXIT INT TERM
 
 # Stage the EPUB.
