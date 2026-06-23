@@ -604,6 +604,25 @@ The non-UI OPDS slice (the browse/add UI is design-gated, #1799). Mirrors the iO
 Verified by `scripts/run-opds-roundtrip.sh` — a live local HTTP OPDS feed + EPUB,
 fetch→download→import on the emulator (`OpdsRoundTripConnectedTest`).
 
+### AI provider + chat (`com.vreader.app.ai`) — feature #118
+
+Implements the "VReader AI Provider & Chat" design (`vreader-ai-android.jsx`). One
+user-configured provider credential drives chat + summaries (bilingual interlinear is
+the follow-on #119). Mirrors iOS `ProviderKind`/`AIProvider`/`AIChatViewModel`.
+
+| Type | Purpose |
+| --- | --- |
+| `AiProviderKind` | `openAiCompatible` / `anthropicNative` + default base URL/model + appended endpoint path (`@SerialName` = iOS raw values). |
+| `AiProviderStore` | DataStore JSON list of provider profiles + an active-id; API key kept ONLY as a `KeystoreSecretCipher` token. Snapshot-consistent `apiKey(profile)`. |
+| `AiClient` / `BaseHttpAiClient` | `streamChat` (Flow) / `chat` / `testConnection` over `HttpURLConnection`: bounded SSE streaming, prompt-cancel disconnect, https-or-loopback-only key guard, path-dedup (Bug #185), typed `AiError`. |
+| `SseEventReader` | Shared bounded SSE framer (blank-line boundaries, `:` comments, multi-`data:`, `event:`). |
+| `OpenAiCompatibleProvider` / `AnthropicProvider` | `choices[].delta.content`/`[DONE]` (Bearer) · `content_block_delta`/`message_stop`/`error` (`x-api-key`+`anthropic-version`, `system` top-level). |
+| `AiSettingsViewModel` + `AiProviderListScreen`/`AiProviderEditSheet` | The provider gate + the `EditorSheet` (test-connection against the live form). |
+| `AiChatViewModel` + `AiChatPanel` + `AiMarkdownRenderer` | Streamed chat answers + per-chapter summary (SHA-256-keyed cache) + the unconfigured gate; multi-line markdown wraps the #112 single-line renderer. |
+
+Verified by `scripts/run-ai-roundtrip.sh` — a live OpenAI-compatible SSE stub,
+test-connection + streamed chat on the emulator (`AiRoundTripConnectedTest`).
+
 ### Build / test / version
 
 - Toolchain (Spike-B-verified, pinned): Readium-Kotlin 3.3.0, AGP 8.13.2,
