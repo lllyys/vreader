@@ -70,7 +70,9 @@ for _ in $(seq 1 40); do
 done
 [ "$ready" = 1 ] || { echo "RUN-OPDS-ROUNDTRIP RESULT: SERVER_NOT_READY"; exit 1; }
 
-ARGS="-Pandroid.testInstrumentationRunnerArguments.class=com.vreader.app.opds.OpdsRoundTripConnectedTest"
+# Both the #117 backend round-trip AND the #120 WI-4 VM-level acceptance (save→browse→download→
+# in-library through OpdsSourcesViewModel + OpdsBrowseViewModel).
+ARGS="-Pandroid.testInstrumentationRunnerArguments.class=com.vreader.app.opds.OpdsRoundTripConnectedTest,com.vreader.app.opds.ui.OpdsUiRoundTripConnectedTest"
 ARGS="$ARGS -Pandroid.testInstrumentationRunnerArguments.opdsFeedUrl=http://10.0.2.2:$PORT/feed.xml"
 
 cd "$REPO/android" || exit 1
