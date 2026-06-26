@@ -120,6 +120,8 @@ sealed class OpdsError(message: String) : Exception(message) {
     class InvalidUrl(url: String) : OpdsError("invalid URL: $url")
     class UnsupportedAcquisition(detail: String) : OpdsError("no importable acquisition: $detail")
     class NotABook(detail: String) : OpdsError("download is not a supported book: $detail")
+    /** A catalog requires sign-in but its URL is public cleartext http — refused (no password leak). */
+    object InsecureAuth : OpdsError("sign-in requires https or a local network address")
 }
 
 private const val ACQ_PREFIX = "http://opds-spec.org/acquisition"
