@@ -4,6 +4,13 @@
          here); the debug build adds a network-security-config allowing cleartext ONLY to the
          emulator's host alias 10.0.2.2 for the local-WebDAV round-trip verification. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- feature #121 — TTS read-aloud. Android 11+ (API 30) package visibility: declare the TTS
+         service intent so TextToSpeech can see + enumerate installed on-device TTS engines. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
     <application
         android:name=".VReaderApp"
         android:label="VReader"
