@@ -120,6 +120,16 @@ class TtsViewModel(
     fun installVoiceData() { _intents.tryEmit(TtsIntent.InstallVoiceData) }
     fun openSystemTts() { _intents.tryEmit(TtsIntent.OpenSystemTts) }
 
+    /** Snapshot the engine/voice options for the voice sheet (read locale). */
+    fun voiceListState(): TtsVoiceListState {
+        val engines = engine.engines()
+        val voices = engine.voices(readLocale)
+        return TtsVoiceListState(
+            engines = engines, selectedEngineId = engines.firstOrNull()?.id,
+            voices = voices, selectedVoiceName = voices.firstOrNull { it.label == _state.value.voiceLabel }?.name,
+        )
+    }
+
     // ── engine progress ─────────────────────────────────────────────
 
     private fun onProgress(p: TtsProgress) {
