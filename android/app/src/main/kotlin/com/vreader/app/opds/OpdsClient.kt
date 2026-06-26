@@ -26,16 +26,79 @@ class OpdsClient(
     private val readTimeoutMs: Int = 30_000,
     private val maxFeedBytes: Long = 8L * 1024 * 1024,
     private val maxDownloadBytes: Long = 256L * 1024 * 1024,
+    // feature #120 — optional Basic auth for a saved catalog. The credential is sent ONLY on a
+    // request whose origin (scheme+host+port) matches the catalog's [authOrigin] — so a cross-origin
+    // redirect or a cross-origin acquisition download never leaks it. And Basic is allowed only over
+    // https OR a local/private host (a public-http catalog with auth is refused — no cleartext leak).
+    private val username: String? = null,
+    private val password: String? = null,
+    private val authOrigin: String? = null,
 ) {
     /** GET + parse an OPDS feed. baseUrl = the final URL after redirects. */
     suspend fun fetchFeed(url: String): OpdsFeed = withContext(dispatcher) {
+        guardCleartextAuth()
         val dl = request(url, redirectsLeft = 5, maxBytes = maxFeedBytes)
         OpdsParser.parse(dl.bytes, dl.finalUrl)
     }
 
     /** GET an acquisition blob (bytes + content-type), bounded for large books. */
     suspend fun download(url: String): OpdsDownload = withContext(dispatcher) {
+        guardCleartextAuth()
         request(url, redirectsLeft = 5, maxBytes = maxDownloadBytes)
+    }
+
+    /** Refuse to send a configured Basic credential over cleartext to a public host. */
+    private fun guardCleartextAuth() {
+        if (username != null && authOrigin != null && !isSecureOrLocal(authOrigin)) throw OpdsError.InsecureAuth
+    }
+
+    /** Same-origin (scheme+host+port) as the catalog → send Basic; else (cross-origin redirect /
+     *  acquisition) send nothing. */
+    private fun applyAuth(conn: HttpURLConnection, url: String) {
+        val user = username ?: return
+        if (authOrigin == null || originOf(url) != authOrigin) return
+        val token = java.util.Base64.getEncoder().encodeToString("$user:${password.orEmpty()}".toByteArray(Charsets.UTF_8))
+        conn.setRequestProperty("Authorization", "Basic $token")
+    }
+
+    private fun originOf(url: String): String? = runCatching {
+        val u = URL(url)
+        val port = if (u.port == -1) u.defaultPort else u.port
+        "${u.protocol.lowercase()}://${u.host.lowercase()}:$port"
+    }.getOrNull()
+
+    private fun isSecureOrLocal(origin: String): Boolean {
+        val u = runCatching { URL(origin) }.getOrNull() ?: return false
+        if (u.protocol.equals("https", true)) return true
+        val h = u.host.lowercase().trim('[', ']')  // strip IPv6 brackets
+        if (h == "localhost" || h == "::1") return true
+        return isPrivateIpv4(h)
+    }
+
+    /** True ONLY for a numeric IPv4 LITERAL in a loopback/private range — never a hostname like
+     *  "10.evil.com" or "192.168.1.1.evil.com" (a `startsWith("10.")` test would wrongly accept
+     *  those and leak the Basic credential cleartext to an attacker-controlled host). */
+    private fun isPrivateIpv4(host: String): Boolean {
+        val parts = host.split('.')
+        if (parts.size != 4) return false
+        val o = parts.map { p -> canonicalOctet(p) ?: return false }
+        return when {
+            o[0] == 127 -> true                    // 127.0.0.0/8 loopback
+            o[0] == 10 -> true                     // 10.0.0.0/8 (incl. the emulator host 10.0.2.2)
+            o[0] == 192 && o[1] == 168 -> true     // 192.168.0.0/16
+            o[0] == 172 && o[1] in 16..31 -> true  // 172.16.0.0/12
+            else -> false
+        }
+    }
+
+    /** A canonical-decimal IPv4 octet (ASCII digits only, no sign, no leading zero except "0") in
+     *  0..255, else null. Rejects octal-ambiguous forms like "010" / "+10" that some resolvers read
+     *  differently than `toInt()` does — a textual-origin-vs-actual-address mismatch leaks auth. */
+    private fun canonicalOctet(p: String): Int? {
+        if (p.isEmpty() || p.length > 3) return null
+        if (!p.all { it in '0'..'9' }) return null
+        if (p.length > 1 && p[0] == '0') return null  // no leading zeros
+        return p.toInt().takeIf { it in 0..255 }
     }
 
     private fun request(url: String, redirectsLeft: Int, maxBytes: Long): OpdsDownload {
@@ -49,6 +112,7 @@ class OpdsClient(
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("Accept", "application/atom+xml, application/xml;q=0.9, */*;q=0.8")
             conn.setRequestProperty("Accept-Encoding", "identity")  // no gzip (decompression-bomb surface)
+            applyAuth(conn, url)  // origin-scoped Basic; never logged
             val status = try {
                 conn.responseCode
             } catch (e: SocketTimeoutException) {
