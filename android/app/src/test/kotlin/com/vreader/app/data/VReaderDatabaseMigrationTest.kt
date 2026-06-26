@@ -44,9 +44,9 @@ class VReaderDatabaseMigrationTest {
     fun migrate1To2_preservesData_andAddsNullableColumn() {
         seedVersion1Database()
 
-        // Open the current (v2) Room DB on the v1 file — triggers MIGRATION_1_2.
+        // Open the current Room DB on the v1 file — runs the full migration chain (1→2→3).
         val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
-            .addMigrations(VReaderDatabase.MIGRATION_1_2)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
             .build()
         try {
             val book = runBlocking { db.bookDao().find(key) }
@@ -128,6 +128,35 @@ class VReaderDatabaseMigrationTest {
                     "(fingerprintKey, vreaderLocatorJSON, canonicalHash, updatedAt) VALUES (?,?,?,?)",
                 arrayOf<Any?>(key, envelopeJson, "deadbeef", 1L),
             )
+        }
+    }
+
+    /**
+     * Feature #122 — the FULL migration chain 1→2→3 through [VReaderDatabase.ALL_MIGRATIONS]: a v1
+     * file opens as v3, the seeded book/position survive (Room's structural validation passes), and
+     * the new `daily_reading` table (added by MIGRATION_2_3) is created + usable.
+     */
+    @Test
+    fun migrate1To3_throughAllMigrations_preservesData_andAddsDailyReading() {
+        seedVersion1Database()
+
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            val book = runBlocking { db.bookDao().find(key) }
+            assertNotNull("book survived 1→3", book)
+            assertNull("v2 lastOpenedAt is null for the migrated row", book!!.lastOpenedAt)
+            assertNotNull("position survived 1→3", runBlocking { db.readingPositionDao().find(key) })
+
+            // the v3 daily_reading table is structurally valid + works
+            runBlocking {
+                db.readingStatsDao().addMinutes("2026-06-27", key, 9)
+                db.readingStatsDao().addMinutes("2026-06-27", key, 3)
+                assertEquals(12, db.readingStatsDao().rowsSince("2026-06-27").single().minutes)
+            }
+        } finally {
+            db.close()
         }
     }
 }

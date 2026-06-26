@@ -14,13 +14,14 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [BookEntity::class, ReadingPositionEntity::class],
-    version = 2,
+    entities = [BookEntity::class, ReadingPositionEntity::class, DailyReadingEntity::class],
+    version = 3,
     exportSchema = true,
 )
 abstract class VReaderDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun readingPositionDao(): ReadingPositionDao
+    abstract fun readingStatsDao(): ReadingStatsDao
 
     companion object {
         private const val DB_NAME = "vreader.db"
@@ -32,8 +33,20 @@ abstract class VReaderDatabase : RoomDatabase() {
             }
         }
 
+        /** v2 → v3: feature #122 — add the additive `daily_reading` per-day/per-book stats table +
+         *  its bookKey index. No data transform. DDL matches Room's generated schema exactly. */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `daily_reading` (`date` TEXT NOT NULL, `bookKey` TEXT NOT NULL, " +
+                        "`minutes` INTEGER NOT NULL, PRIMARY KEY(`date`, `bookKey`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_daily_reading_bookKey` ON `daily_reading` (`bookKey`)")
+            }
+        }
+
         /** All registered migrations, oldest first. Append future Migration(n,n+1) here. */
-        val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+        val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 
         /** The production on-disk database (app-private storage). */
         fun build(context: Context): VReaderDatabase =

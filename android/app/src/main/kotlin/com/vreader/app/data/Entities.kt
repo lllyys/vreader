@@ -7,6 +7,7 @@ package com.vreader.app.data
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
@@ -54,4 +55,18 @@ data class ReadingPositionEntity(
     val vreaderLocatorJSON: String,   // the FULL serialized VReaderLocator envelope
     val canonicalHash: String,        // derived dedup/sync key (locally deterministic)
     val updatedAt: Long,              // epoch millis of last save
+)
+
+/**
+ * Per-day, per-book reading minutes — feature #122 (reading-stats). PK is the composite
+ * `(date, bookKey)`; `date` is the LOCAL `yyyy-MM-dd`. Deliberately has NO ForeignKey to `books`:
+ * stats for a since-deleted book are PRESERVED as orphans (they still count toward window totals; the
+ * per-book dashboard table joins live titles and omits orphans). An `@Index("bookKey")` supports the
+ * per-book aggregate.
+ */
+@Entity(tableName = "daily_reading", primaryKeys = ["date", "bookKey"], indices = [Index("bookKey")])
+data class DailyReadingEntity(
+    val date: String,      // yyyy-MM-dd (local)
+    val bookKey: String,   // fingerprintKey
+    val minutes: Int,
 )
