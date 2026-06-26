@@ -54,6 +54,38 @@ import kotlinx.coroutines.withContext
 import vreader.contracts.BookFormat
 import vreader.contracts.Locator
 import java.io.File
+import android.speech.tts.TextToSpeech
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.vreader.app.tts.AndroidTtsEngine
+import com.vreader.app.tts.TtsChunker
+import com.vreader.app.tts.TtsControlBar
+import com.vreader.app.tts.TtsHighlight
+import com.vreader.app.tts.TtsIntent
+import com.vreader.app.tts.TtsPhase
+import com.vreader.app.tts.TtsSpeedSheet
+import com.vreader.app.tts.TtsViewModel
+import com.vreader.app.tts.TtsVoiceSheet
 
 private sealed interface TxtUiState {
     data object Loading : TxtUiState
@@ -126,9 +158,78 @@ class TxtReaderActivity : ComponentActivity() {
                                 .debounce(1_000)
                                 .collect { savePosition(s.book, s.document, it) }
                         }
-                        TxtReaderScaffold(s.title, ::finish) {
-                            TxtBody(s.document, listState, s.book.originalFormat)
+                        // feature #121 — read-aloud. The VM drives the designed control bar; the spoken
+                        // sentence is washed + auto-scrolled (TXT). Chunking is LAZY + off-main (only
+                        // on Read aloud) so a large book never scans the whole text on composition.
+                        val ttsVm: TtsViewModel = viewModel(factory = viewModelFactory {
+                            initializer { TtsViewModel(AndroidTtsEngine(applicationContext)) }
+                        })
+                        val tts by ttsVm.state.collectAsStateWithLifecycle()
+                        val ttsScope = rememberCoroutineScope()
+                        LaunchedEffect(ttsVm) { ttsVm.intents.collect { launchTtsIntent(it) } }
+                        // pause read-aloud when the reader is backgrounded (no MediaSession by design —
+                        // plan §OOS); the engine is shut down on Activity finish via the VM's onCleared.
+                        val lifecycleOwner = LocalLifecycleOwner.current
+                        DisposableEffect(lifecycleOwner) {
+                            // guard against ON_STOP firing on a rotation (config change) — the VM is
+                            // retained across rotation, so don't pause when we're just reconfiguring.
+                            val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_STOP && !isChangingConfigurations) ttsVm.pause() }
+                            lifecycleOwner.lifecycle.addObserver(obs)
+                            onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
                         }
+                        val active = tts.phase != TtsPhase.idle
+                        val spokenChunk = if (tts.phase == TtsPhase.speaking) s.document.chunkForOffset(tts.charStart) else -1
+                        // auto-scroll ONLY when the spoken chunk is off-screen — so a small manual scroll
+                        // while listening isn't fought on every sentence.
+                        LaunchedEffect(spokenChunk) {
+                            if (spokenChunk >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.index == spokenChunk }) {
+                                runCatching { listState.animateScrollToItem(spokenChunk) }
+                            }
+                        }
+                        var showSpeed by remember { mutableStateOf(false) }
+                        var showVoice by remember { mutableStateOf(false) }
+                        var starting by remember { mutableStateOf(false) }   // guards double-tap → double-chunk
+                        // snapshot the voice options once when the sheet opens (not every recomposition).
+                        val voiceList = remember(showVoice) { if (showVoice) ttsVm.voiceListState() else com.vreader.app.tts.TtsVoiceListState() }
+
+                        TxtReaderScaffold(
+                            title = s.title, onBack = ::finish,
+                            bottom = {
+                                if (active) TtsControlBar(
+                                    tts,
+                                    onPlayPause = { if (tts.phase == TtsPhase.speaking) ttsVm.pause() else ttsVm.play() },
+                                    onPrevious = ttsVm::previous, onNext = ttsVm::next, onStop = ttsVm::stop,
+                                    onSpeed = { showSpeed = true }, onVoice = { showVoice = true },
+                                    onInstallVoice = ttsVm::installVoiceData, onSystemTts = ttsVm::openSystemTts,
+                                ) else TtsEntryBar(enabled = !starting && s.document.text.isNotBlank()) {
+                                    starting = true
+                                    ttsScope.launch {
+                                        try {
+                                            val sentences = withContext(Dispatchers.Default) {
+                                                TtsChunker.chunk(s.document.text, TextToSpeech.getMaxSpeechInputLength())
+                                            }
+                                            ttsVm.start(sentences)
+                                        } finally { starting = false }
+                                    }
+                                }
+                            },
+                        ) {
+                            TxtBody(s.document, listState, s.book.originalFormat) { chunkIndex ->
+                                if (!active) null
+                                else {
+                                    val cs = s.document.offsetForChunk(chunkIndex)
+                                    val ce = if (chunkIndex + 1 < s.document.chunkCount) s.document.offsetForChunk(chunkIndex + 1) else s.document.text.length
+                                    TtsHighlight.localSpan(cs, ce, tts.charStart, tts.charEnd)
+                                }
+                            }
+                        }
+                        if (showSpeed) TtsSpeedSheet(tts.rate, onRate = ttsVm::setRate, onDone = { showSpeed = false })
+                        if (showVoice) TtsVoiceSheet(
+                            voiceList,
+                            onVoice = { ttsVm.selectVoice(it); showVoice = false },
+                            onInstall = { ttsVm.installVoiceData() },
+                            onDone = { showVoice = false },
+                        )
                     }
                 }
             }
@@ -179,6 +280,24 @@ class TxtReaderActivity : ComponentActivity() {
         saveRequests.trySend(PendingSave(book, offset))
     }
 
+    /** Launch a system intent for a read-aloud one-shot, guarded by resolveActivity with fallbacks
+     *  (there is no public Settings.ACTION_TTS_SETTINGS — fall back to accessibility / settings). */
+    private fun launchTtsIntent(i: TtsIntent) {
+        val candidates = when (i) {
+            TtsIntent.InstallVoiceData -> listOf(android.content.Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA))
+            TtsIntent.OpenSystemTts -> listOf(
+                android.content.Intent("com.android.settings.TTS_SETTINGS"),
+                android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                android.content.Intent(android.provider.Settings.ACTION_SETTINGS),
+            )
+        }
+        // Try each in order, catching ActivityNotFoundException — resolveActivity() is unreliable on
+        // API 30+ package visibility, so an actual startActivity attempt is the robust preflight.
+        for (intent in candidates) {
+            try { startActivity(intent); return } catch (_: android.content.ActivityNotFoundException) { /* next */ }
+        }
+    }
+
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
 
@@ -188,9 +307,12 @@ class TxtReaderActivity : ComponentActivity() {
     }
 }
 
-/** Shared reader chrome (back + title) over the reading body — the vreader-reader.jsx subset. */
+/** Shared reader chrome (back + title) over the reading body, with a bottom slot for the read-aloud
+ *  entry / control bar — the vreader-reader.jsx subset. */
 @Composable
-private fun TxtReaderScaffold(title: String, onBack: () -> Unit, body: @Composable () -> Unit) {
+private fun TxtReaderScaffold(
+    title: String, onBack: () -> Unit, bottom: @Composable () -> Unit = {}, body: @Composable () -> Unit,
+) {
     Column(Modifier.fillMaxSize().background(VReaderColors.Background).systemBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -204,15 +326,38 @@ private fun TxtReaderScaffold(title: String, onBack: () -> Unit, body: @Composab
             )
             Text(title, Modifier.padding(start = 8.dp), color = VReaderColors.Ink, fontSize = 16.sp, maxLines = 1)
         }
-        body()
+        Box(Modifier.weight(1f).fillMaxWidth()) { body() }
+        bottom()
+    }
+}
+
+/** The designed read-aloud entry (vreader-tts.jsx `TtsEntry` — the reader bottom-toolbar Read-aloud
+ *  / Volume item) shown when read-aloud is idle. Tapping it starts read-aloud. */
+@Composable
+private fun TtsEntryBar(enabled: Boolean, onReadAloud: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(VReaderColors.Background).padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            Modifier.clip(RoundedCornerShape(14.dp)).clickable(enabled = enabled, onClick = onReadAloud).padding(horizontal = 18.dp, vertical = 6.dp).testTag("tts-read-aloud-entry"),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Read aloud", tint = if (enabled) VReaderColors.Accent else VReaderColors.InkMuted, modifier = Modifier.size(26.dp))
+            Text("Read aloud", color = if (enabled) VReaderColors.Accent else VReaderColors.InkMuted, fontFamily = VReaderFonts.Sans, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 2.dp))
+        }
     }
 }
 
 /** The reading body — a LazyColumn over the document's chunk ranges (serif, reading margins).
  *  For BookFormat.md each chunk renders through MarkdownRenderer (styled); else verbatim. */
 @Composable
-private fun TxtBody(document: TxtDocument, listState: LazyListState, format: BookFormat) {
+private fun TxtBody(
+    document: TxtDocument, listState: LazyListState, format: BookFormat,
+    highlightSpan: (chunkIndex: Int) -> IntRange? = { null },
+) {
     val isMarkdown = format == BookFormat.md
+    val wash = VReaderColors.Accent.copy(alpha = 0.18f)
     LazyColumn(
         Modifier.fillMaxSize(),
         state = listState,
@@ -221,9 +366,20 @@ private fun TxtBody(document: TxtDocument, listState: LazyListState, format: Boo
         // Count-based: indices on demand (a newline-dense 14MB file can be 100k+ chunks).
         items(count = document.chunkCount, key = { it }) { i ->
             val raw = document.textForChunk(i).toString()
+            // .md → styled markdown spans (no read-aloud span wash — markers shift offsets, plan §OOS).
+            // .txt → raw verbatim, with the spoken-sentence span washed when read-aloud is active.
+            val span = if (isMarkdown) null else highlightSpan(i)
+            val text = when {
+                isMarkdown -> MarkdownRenderer.render(raw)
+                span != null -> buildAnnotatedString {
+                    append(raw)
+                    val a = span.first.coerceIn(0, raw.length); val b = (span.last + 1).coerceIn(a, raw.length)
+                    if (b > a) addStyle(SpanStyle(background = wash), a, b)
+                }
+                else -> AnnotatedString(raw)
+            }
             Text(
-                // .md → styled markdown spans; .txt → the raw text verbatim (markers literal).
-                text = if (isMarkdown) MarkdownRenderer.render(raw) else AnnotatedString(raw),
+                text = text,
                 color = VReaderColors.Ink,
                 fontFamily = VReaderFonts.Serif,
                 fontWeight = FontWeight.Normal,
