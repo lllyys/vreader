@@ -537,9 +537,11 @@ xcodegen/`project.yml` at the repo root; the two builds never overlap).
 
 ### Data layer (`com.vreader.app.data`) — the iOS `PersistenceActor` analog
 
-- **Room** is the SwiftData analog. `VReaderDatabase` (`@Database` v2,
-  `exportSchema`, schema-versioned `MIGRATION_1_2` scaffold) with
-  `BookEntity` + `ReadingPositionEntity`. The reading position stores the
+- **Room** is the SwiftData analog. `VReaderDatabase` (`@Database` v3,
+  `exportSchema`, schema-versioned `MIGRATION_1_2` + `MIGRATION_2_3` in
+  `ALL_MIGRATIONS`) with `BookEntity` + `ReadingPositionEntity` +
+  `DailyReadingEntity` (feature #122 — per-day/per-book minutes, composite
+  PK `(date, bookKey)` + `bookKey` index). The reading position stores the
   **whole serialized `VReaderLocator` envelope** in one `vreaderLocatorJSON`
   column (not flattened columns), so the envelope evolves independently of
   the Room schema.
@@ -622,6 +624,27 @@ the follow-on #119). Mirrors iOS `ProviderKind`/`AIProvider`/`AIChatViewModel`.
 
 Verified by `scripts/run-ai-roundtrip.sh` — a live OpenAI-compatible SSE stub,
 test-connection + streamed chat on the emulator (`AiRoundTripConnectedTest`).
+
+### Reading-stats (`com.vreader.app.stats`) — feature #122
+
+Reading-time tracking + the dashboard (design #1800). Mirrors the iOS feature
+#58 dashboard at the data layer; the iOS `ReadingSession`-row model is replaced
+by a pre-aggregated `daily_reading` table (per-day/per-book minutes) so a window
+query is a single indexed scan, not a session sweep.
+
+| Type | Purpose |
+| --- | --- |
+| `ReadingStatsDao` | `@Transaction addMinutes` = INSERT-OR-IGNORE a zero row + `UPDATE … += delta` (the minSdk-26-safe upsert-increment — NOT SQLite `UPSERT`/`@Upsert`); window/streak/per-book observe + read queries. |
+| `clock.ElapsedClock` / `clock.DateClock` | The two-clock split: a **monotonic** `SystemClock.elapsedRealtime` clock for durations (immune to wall-clock changes) + a calendar `DateClock` for local-date buckets (`splitByLocalDate` for midnight-crossing sessions). |
+| `ReadingTimeTracker` | Idempotent session state machine (process-singleton): `start`/`flush`/`stop(bookKey?)` bank whole minutes with a per-local-date sub-minute carry, clamp an idle gap to 0, never replay a recovered clock. The durable bank runs under `withContext(NonCancellable)` so a reader teardown can't drop minutes. |
+| `ReadingStatsRepository` | Combines `daily_reading` rows + the library → `DashboardData` (window totals · window-independent current streak · 14-day chart · per-book join omitting orphans). Future-dated rows excluded. |
+| `ReadingStatsViewModel` + `StatsDashboard` / `InReaderSessionPill` | The window-bar · hero · 14-day chart · per-book table sheet + the auto-fading in-reader session pill. Reuses the backup `AppSheet`/`SettingsCard`/`BackupTokens` vocab. |
+
+The TXT reader (`TxtReaderActivity`) brackets a session from the Activity
+lifecycle (`ON_RESUME` start / `ON_STOP` keyed stop, both on the process-lifetime
+`appScope`, skipped on a config-change rotation); the ticker + periodic flush run
+under `repeatOnLifecycle(RESUMED)`. Verified on the emulator by
+`ReadingStatsConnectedTest` (real tracker→repo→Room + a `LifecycleRegistry` bracket).
 
 ### Build / test / version
 
