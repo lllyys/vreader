@@ -1,0 +1,30 @@
+# CODEOWNERS — require owner review for the agent operating system + security controls.
+#
+# WHY: rule 54 (.claude/rules/54-untrusted-external-content.md) — the real risk from a public
+# `.claude/` is INTEGRITY (a poisoned PR weakening the rules/hooks/scanner), not confidentiality.
+# Assigning these paths to the owner means any change to them needs the owner's review.
+#
+# ENFORCEMENT: this file only takes effect when the default branch's protection rule has
+# **"Require review from Code Owners"** enabled (Settings → Branches → branch protection — a repo
+# setting only the owner can toggle). The agent runs under the owner's credentials, so this gates
+# EXTERNAL contributors, not the owner's own agent-driven merges.
+
+# --- the agent operating system: binding rules, enforcement hooks, skills, commands, crons ---
+/.claude/                                   @lllyys
+/AGENTS.md                                  @lllyys
+/CLAUDE.md                                  @lllyys
+
+# --- the untrusted-content security controls (scanner + canary) ---
+/scripts/scan-untrusted-content.sh          @lllyys
+/scripts/injection-canary-test.sh           @lllyys
+
+# --- CI / automation supply chain (if/when GitHub Actions are added) ---
+/.github/                                   @lllyys
+
+# --- release / version / build config (publishing path — worker ≠ publisher) ---
+/project.yml                                @lllyys
+/android/version.properties                 @lllyys
+/scripts/run-tests.sh                       @lllyys
+/scripts/run-android-tests.sh               @lllyys
+/scripts/run-android-verify.sh              @lllyys
+/scripts/run-codex.sh                       @lllyys
