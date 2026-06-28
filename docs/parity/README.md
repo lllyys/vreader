@@ -6,6 +6,10 @@ follows (ADR-0001). This ledger is the Phase-3 backlog source: each `Android: �
 row that matters becomes a tracked Android feature once the foundation bar is
 complete.
 
+> **The finite build queue lives in [`android-checklist.md`](android-checklist.md)** — the checkable
+> definition of "Android parity" (feature #110). This ledger records per-capability status; the
+> checklist distills it into a checkbox remaining-work list. Keep them in sync.
+
 **Legend:** ✓ shipped · ◑ plumbing only (no user-visible surface yet) · ✗ not yet
 · ⛔ design-gated (rule 51 — awaiting a `claude.ai/design` bundle) · — n/a.
 
@@ -51,23 +55,20 @@ complete.
 
 ## Remaining Phase-3 backlog (the #110 driver's queue)
 
-The foundation bar (#106) and the readers + backup capabilities above are
-shipped. What's left, with why it isn't yet an autonomously-driven feature:
+**See [`android-checklist.md`](android-checklist.md) for the authoritative, checkable queue.** As of
+2026-06-28, OPDS UI (#120), AI provider+chat (#118), and TTS read-aloud (#121) have ALL SHIPPED +
+VERIFIED (this section previously, wrongly, listed them as gated/unbuilt). The batch-2 designs
+(stats/annotations/library/bilingual) are now imported, so nothing remaining is design-blocked.
 
-- **AZW3/MOBI reader** — DEFERRED on feasibility: Readium-Kotlin has no native
-  AZW3/MOBI; iOS uses a libmobi C library (a large, HIGH-risk NDK port). Needs an
-  explicit go/no-go, not an autonomous start.
-- **TTS (read-aloud)** — **design-gated** (rule 51): no Android TTS control-bar
-  surface exists in a committed `dev-docs/designs/...` bundle. Needs a
-  `claude.ai/design` handoff before implementation.
-- **AI translation / chat (bilingual)** — provider-credential-gated: the live
-  path needs a user-configured AI provider; only a mock/integration path is
-  autonomously testable.
-- **Book sources / OPDS, reading stats, highlights/annotations UI,
-  full library management (collections, search)** — not yet laddered into a
-  tracked Android feature; each becomes its own row + (where it has UI) a
-  design-bundle prerequisite when picked up.
+Remaining (finite — the checklist's build queue):
 
-Every item here is either feasibility-deferred or gated on a user input
-(a design bundle or an AI credential) — there is no autonomously-completable
-Android-parity capability open at this time.
+- **Reading stats** (#122) — IN PROGRESS (WI-1 merged).
+- **Highlights & annotations** — designed (`vreader-android-annotations.jsx`), not started.
+- **Library management (collections + search)** — designed (`vreader-library-android.jsx`), not started.
+- **Bilingual interlinear reading** — designed (`vreader-ai-android.jsx`); live-translation verification
+  is AI-credential-gated, but the pipeline + UI are autonomously buildable.
+- **Reader display settings (themes/fonts/layout)** + **reader navigation chrome (TOC/bookmarks/
+  find-in-book/more-menu/details/share)** — designed (iOS bundle reuses per #106), not started.
+- **AZW3/MOBI reader** — DEFERRED on feasibility (libmobi NDK port, HIGH risk); needs a user go/no-go.
+
+Android parity = every checklist box `VERIFIED` (the AZW3 row excepted, pending its go/no-go).
