@@ -73,6 +73,42 @@ class ReaderActivityTest {
         }
     }
 
+    /** Feature #123 WI-3 — a stored highlight re-renders as a Readium decoration on the LIVE
+     *  navigator/WebView (the reopen path `observeHighlights` → `applyHighlights`). Seeds the highlight
+     *  at the actually-rendered href so the decoration targets loaded content. */
+    @Test
+    fun seededHighlight_appliesAsDecoration_onLiveNavigator() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val appContext = instrumentation.targetContext
+        val app = appContext.applicationContext as VReaderApp
+        val book = stageBook(appContext, instrumentation.context, app)
+
+        ActivityScenario.launch<ReaderActivity>(ReaderActivity.intent(appContext, book.fingerprintKey)).use { scenario ->
+            var href: String? = null
+            repeat(50) { scenario.onActivity { href = it.currentHref() }; if (href != null) return@repeat; Thread.sleep(200) }
+            assertNotNull("navigator rendered", href)
+
+            // seed a highlight at the rendered href through the real repository → the Flow re-applies it.
+            runBlocking {
+                val sel = org.readium.r2.shared.publication.Locator(
+                    href = org.readium.r2.shared.util.Url(href!!)!!,
+                    mediaType = org.readium.r2.shared.util.mediatype.MediaType.XHTML,
+                    locations = org.readium.r2.shared.publication.Locator.Locations(progression = 0.01),
+                    text = org.readium.r2.shared.publication.Locator.Text(highlight = "the"),
+                )
+                val inputs = com.vreader.app.annotations.EpubAnnotationMapper.selectionToInputs(sel, book)!!
+                app.container.annotationsRepository.addHighlight(
+                    book.fingerprintKey, com.vreader.app.annotations.AnnotationColor.yellow,
+                    inputs.selectedText, inputs.locator, inputs.anchor,
+                )
+            }
+
+            var applied = -1
+            repeat(50) { scenario.onActivity { applied = it.appliedHighlightCount() }; if (applied >= 1) return@repeat; Thread.sleep(200) }
+            assertTrue("the stored highlight applied as a decoration on the live navigator", applied >= 1)
+        }
+    }
+
     private fun stageBook(appContext: android.content.Context, testContext: android.content.Context, app: VReaderApp): Book {
         val staged = File(appContext.cacheDir, "reader-test-${System.nanoTime()}.epub")
         testContext.assets.open("minimal.epub").use { input ->
