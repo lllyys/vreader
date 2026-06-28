@@ -32,11 +32,14 @@ object TxtWashMapper {
 
 /** Paint [washes] behind a chunk's text using its [layout]. Call from `Modifier.drawBehind`. */
 fun DrawScope.drawWashes(layout: TextLayoutResult, washes: List<WashSpan>) {
-    for (w in washes) {
-        if (w.local.endExclusive <= w.local.startInclusive) continue
-        val end = w.local.endExclusive.coerceAtMost(layout.layoutInput.text.length)
-        val start = w.local.startInclusive.coerceIn(0, end)
-        if (end <= start) continue
-        drawPath(layout.getPathForRange(start, end), color = Color(android.graphics.Color.parseColor(w.color.washHex)))
-    }
+    for (w in washes) drawRangeFill(layout, w.local, Color(android.graphics.Color.parseColor(w.color.washHex)))
+}
+
+/** Paint a single chunk-local half-open range with [color] behind the text (used for the in-progress
+ *  selection accent). */
+fun DrawScope.drawRangeFill(layout: TextLayoutResult, local: Utf16Range, color: Color) {
+    val end = local.endExclusive.coerceAtMost(layout.layoutInput.text.length)
+    val start = local.startInclusive.coerceIn(0, end)
+    if (end <= start) return
+    drawPath(layout.getPathForRange(start, end), color = color)
 }

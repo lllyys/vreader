@@ -59,7 +59,15 @@ import java.io.File
 import android.speech.tts.TextToSpeech
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.runtime.DisposableEffect
@@ -217,6 +225,11 @@ class TxtReaderActivity : ComponentActivity() {
                                 flowOf(emptyMap())
                             }
                         }.collectAsStateWithLifecycle(emptyMap())
+
+                        // feature #124 — TXT custom selection + popover (TXT only).
+                        val selectionController = remember(s.document, isTxt) { if (isTxt) TxtSelectionController(s.document) else null }
+                        val popoverVm = remember(bookKey) { com.vreader.app.annotations.SelectionPopoverViewModel() }
+                        val popoverState by popoverVm.state.collectAsStateWithLifecycle()
                         DisposableEffect(lifecycleOwner, bookKey) {
                             val obs = LifecycleEventObserver { _, e ->
                                 when (e) {
@@ -263,7 +276,9 @@ class TxtReaderActivity : ComponentActivity() {
                                 }
                             },
                         ) {
-                            Box(Modifier.fillMaxSize()) {
+                            var boxOriginWindow by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+                            var boxSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+                            Box(Modifier.fillMaxSize().onGloballyPositioned { boxOriginWindow = it.localToWindow(androidx.compose.ui.geometry.Offset.Zero); boxSize = it.size }) {
                                 TxtBody(
                                     s.document, listState, s.book.originalFormat,
                                     highlightSpan = { chunkIndex ->
@@ -275,9 +290,31 @@ class TxtReaderActivity : ComponentActivity() {
                                         }
                                     },
                                     washesForChunk = { washMap[it] ?: emptyList() },
+                                    selectionController = selectionController,
+                                    onSelectionFinalized = { finalizeTxtSelection(selectionController, popoverVm) },
                                 )
                                 AnimatedVisibility(pillVisible, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
                                     InReaderSessionPill(sessionSeconds)
+                                }
+                                // the selection popover, anchored under the selection end. anchorX/anchorY
+                                // carry WINDOW px (set by finalizeTxtSelection); convert to box-local + clamp.
+                                if (popoverState.visible) {
+                                    val density = LocalDensity.current.density
+                                    val half = 150f * density
+                                    val popW = 320f * density
+                                    val popH = 130f * density
+                                    val margin = 8f * density
+                                    val maxX = (boxSize.width - popW - margin).coerceAtLeast(margin)
+                                    val xPx = (popoverState.anchorX - boxOriginWindow.x - half).coerceIn(margin, maxX)
+                                    // below the selection by default; flip above when it would overflow the bottom.
+                                    val belowY = popoverState.anchorY - boxOriginWindow.y + margin
+                                    val yPx = if (belowY + popH <= boxSize.height) belowY
+                                        else (popoverState.anchorY - boxOriginWindow.y - popH - margin).coerceAtLeast(margin)
+                                    com.vreader.app.annotations.SelectionPopover(
+                                        state = popoverState,
+                                        actions = txtPopoverActions(s.book, selectionController, popoverVm),
+                                        modifier = Modifier.offset { IntOffset(xPx.toInt(), yPx.toInt()) },
+                                    )
                                 }
                             }
                         }
@@ -356,6 +393,77 @@ class TxtReaderActivity : ComponentActivity() {
         }
     }
 
+    // ---- feature #124 TXT selection-popover side effects ----
+
+    private fun finalizeTxtSelection(controller: TxtSelectionController?, vm: com.vreader.app.annotations.SelectionPopoverViewModel) {
+        val c = controller ?: return
+        if (c.selectedText().isNullOrBlank() || !c.isCurrentSelectionValid()) { c.clear(); return }
+        val anchor = c.selectionEndAnchorWindow() ?: androidx.compose.ui.geometry.Offset.Zero
+        vm.showForSelection(anchor.x, anchor.y)   // WINDOW px
+    }
+
+    private fun txtPopoverActions(
+        book: com.vreader.app.data.Book,
+        controller: TxtSelectionController?,
+        vm: com.vreader.app.annotations.SelectionPopoverViewModel,
+    ) = com.vreader.app.annotations.SelectionPopoverActions(
+        onColor = { color ->
+            when (vm.state.value.mode) {
+                com.vreader.app.annotations.PopoverMode.SELECT -> createTxtHighlight(book, controller, vm, color, null)
+                else -> vm.selectColor(color)
+            }
+        },
+        onHighlight = { createTxtHighlight(book, controller, vm, vm.state.value.activeColor, null) },
+        onNote = { vm.beginNote() },
+        onCopy = { copyTxtSelection(controller); clearTxtSelection(controller, vm) },
+        onShare = { shareTxtSelection(controller); clearTxtSelection(controller, vm) },
+        onRemove = { /* edit/remove an existing TXT highlight — WI-4 */ },
+        onNoteDraftChange = { vm.updateNoteDraft(it) },
+        onSaveNote = { createTxtHighlight(book, controller, vm, vm.state.value.activeColor, vm.state.value.noteDraft.ifBlank { null }) },
+        onCancelNote = { clearTxtSelection(controller, vm) },
+    )
+
+    private fun createTxtHighlight(
+        book: com.vreader.app.data.Book,
+        controller: TxtSelectionController?,
+        vm: com.vreader.app.annotations.SelectionPopoverViewModel,
+        color: com.vreader.app.annotations.AnnotationColor,
+        note: String?,
+    ) {
+        val c = controller ?: return
+        val range = c.currentRange()
+        val text = c.selectedText()
+        if (range == null || text.isNullOrBlank() || !c.isCurrentSelectionValid()) { clearTxtSelection(c, vm); return }
+        val locator = vreader.contracts.Locator(
+            book.contentSHA256, book.fileByteCount, "txt",
+            charRangeStartUTF16 = range.startInclusive, charRangeEndUTF16 = range.endExclusive, textQuote = text,
+        )
+        val anchor = com.vreader.app.annotations.AnnotationAnchor.Text("text-document:${book.fingerprintKey}", range.startInclusive, range.endExclusive)
+        container.appScope.launch {
+            container.annotationsRepository.addHighlight(book.fingerprintKey, color, text, locator, anchor, note)
+        }
+        clearTxtSelection(c, vm)
+    }
+
+    private fun copyTxtSelection(controller: TxtSelectionController?) {
+        val text = controller?.selectedText() ?: return
+        val clip = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("vreader", text))
+    }
+
+    private fun shareTxtSelection(controller: TxtSelectionController?) {
+        val text = controller?.selectedText() ?: return
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, text)
+        }
+        startActivity(android.content.Intent.createChooser(send, null))
+    }
+
+    private fun clearTxtSelection(controller: TxtSelectionController?, vm: com.vreader.app.annotations.SelectionPopoverViewModel) {
+        controller?.clear()
+        vm.dismiss()
+    }
+
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
 
@@ -415,11 +523,33 @@ private fun TxtBody(
     highlightSpan: (chunkIndex: Int) -> IntRange? = { null },
     // feature #124 — annotation highlight washes per chunk (TXT only; the activity passes empty for MD).
     washesForChunk: (chunkIndex: Int) -> List<WashSpan> = { emptyList() },
+    // feature #124 — TXT custom selection (null = no selection, e.g. MD). onSelectionFinalized fires on
+    // long-press-drag release so the host can show the popover.
+    selectionController: TxtSelectionController? = null,
+    onSelectionFinalized: () -> Unit = {},
 ) {
     val isMarkdown = format == BookFormat.md
     val wash = VReaderColors.Accent.copy(alpha = 0.18f)
+    val selectionAccent = Color(0x575C8FC4)   // design selection bg rgba(92,143,196,0.34)
+    val selection by (selectionController?.selection ?: flowOf(null)).collectAsState(null)
     LazyColumn(
-        Modifier.fillMaxSize(),
+        Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { selectionController?.setLazyCoords(it) }
+            .then(
+                if (selectionController != null) {
+                    Modifier.pointerInput(selectionController) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { selectionController.beginAt(it) },
+                            onDrag = { change, _ -> selectionController.extendTo(change.position) },
+                            onDragEnd = { onSelectionFinalized() },
+                            onDragCancel = { onSelectionFinalized() },
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            ),
         state = listState,
         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
     ) {
@@ -441,6 +571,16 @@ private fun TxtBody(
             // annotation washes drawn BEHIND the text (getPathForRange) — separate from the read-aloud span.
             val washes = washesForChunk(i)
             var layout by remember(i) { mutableStateOf<TextLayoutResult?>(null) }
+            var coords by remember(i) { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+            if (selectionController != null) {
+                LaunchedEffect(i, layout, coords) {
+                    val l = layout; val c = coords
+                    if (l != null && c != null) selectionController.registerChunk(i, l, c)
+                }
+                DisposableEffect(selectionController, i) { onDispose { selectionController.unregisterChunk(i) } }
+            }
+            // read `selection` (a State) so a selection change recomposes + redraws the accent.
+            val selRange = if (selection != null) selectionController?.selectionForChunk(i) else null
             Text(
                 text = text,
                 color = VReaderColors.Ink,
@@ -449,7 +589,14 @@ private fun TxtBody(
                 fontSize = 18.sp,
                 lineHeight = 29.sp,
                 onTextLayout = { layout = it },
-                modifier = Modifier.drawBehind { layout?.let { drawWashes(it, washes) } },
+                modifier = Modifier
+                    .onGloballyPositioned { coords = it }
+                    .drawBehind {
+                        layout?.let { l ->
+                            drawWashes(l, washes)
+                            selRange?.let { drawRangeFill(l, it, selectionAccent) }
+                        }
+                    },
             )
         }
     }
