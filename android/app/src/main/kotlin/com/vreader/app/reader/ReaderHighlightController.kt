@@ -37,13 +37,14 @@ class ReaderHighlightController(private val navigator: EpubNavigatorFragment) {
 
     fun clearSelection() = navigator.clearSelection()
 
-    /** Relay taps on an existing highlight decoration → its id (WI-4 opens the edit/remove popover). */
-    fun observeActivations(onActivated: (highlightId: String) -> Unit) {
+    /** Relay taps on an existing highlight decoration → its id + the tapped rect (WI-4 opens the
+     *  edit/remove popover anchored at the rect). */
+    fun observeActivations(onActivated: (highlightId: String, rect: android.graphics.RectF?) -> Unit) {
         navigator.addDecorationListener(
             GROUP,
             object : DecorableNavigator.Listener {
                 override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
-                    onActivated(event.decoration.id)
+                    onActivated(event.decoration.id, event.rect)
                     return true
                 }
             },
