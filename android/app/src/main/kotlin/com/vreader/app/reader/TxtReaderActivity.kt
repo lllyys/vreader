@@ -59,7 +59,10 @@ import java.io.File
 import android.speech.tts.TextToSpeech
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.collectAsState
@@ -121,6 +124,11 @@ class TxtReaderActivity : ComponentActivity() {
     // Hoisted out of composition so onStop can flush the latest position synchronously
     // (mirrors ReaderActivity's onStop flush). Set once the document is loaded.
     private var flushPosition: (() -> Unit)? = null
+
+    // feature #124 WI-4 — the existing TXT highlight being edited (set on a tap; null = create context)
+    // + the text to copy/share (the selection's, or the tapped highlight's).
+    private var pendingTxtHighlightId: String? = null
+    private var pendingTxtText: String? = null
 
     // ALL position writes funnel through this CONFLATED channel + a SINGLE consumer, so
     // saves are serialized (latest-wins) — the debounced save and the onStop flush can
@@ -215,16 +223,13 @@ class TxtReaderActivity : ComponentActivity() {
                         val sessionSeconds by tracker.sessionSeconds.collectAsStateWithLifecycle()
 
                         // feature #124 — stored TXT highlights → per-chunk washes (BINDING gate: TXT only;
-                        // MD render-only until #125 adds the source-offset map).
+                        // MD render-only until #125 adds the source-offset map). Collect the list (for both
+                        // the wash recompute AND the WI-4 tap hit-test).
                         val isTxt = s.book.originalFormat == BookFormat.txt
-                        val washMap by remember(bookKey, s.document, isTxt) {
-                            if (isTxt) {
-                                container.annotationsRepository.highlights(bookKey)
-                                    .map { TxtWashMapper.washesByChunk(s.document, it) }
-                            } else {
-                                flowOf(emptyMap())
-                            }
-                        }.collectAsStateWithLifecycle(emptyMap())
+                        val highlightsList by remember(bookKey, isTxt) {
+                            if (isTxt) container.annotationsRepository.highlights(bookKey) else flowOf(emptyList())
+                        }.collectAsStateWithLifecycle(emptyList())
+                        val washMap = remember(highlightsList, s.document) { TxtWashMapper.washesByChunk(s.document, highlightsList) }
 
                         // feature #124 — TXT custom selection + popover (TXT only).
                         val selectionController = remember(s.document, isTxt) { if (isTxt) TxtSelectionController(s.document) else null }
@@ -292,6 +297,7 @@ class TxtReaderActivity : ComponentActivity() {
                                     washesForChunk = { washMap[it] ?: emptyList() },
                                     selectionController = selectionController,
                                     onSelectionFinalized = { finalizeTxtSelection(selectionController, popoverVm) },
+                                    onTapAt = { point -> onTxtTap(point, s.book, highlightsList, selectionController, popoverVm) },
                                 )
                                 AnimatedVisibility(pillVisible, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
                                     InReaderSessionPill(sessionSeconds)
@@ -398,8 +404,29 @@ class TxtReaderActivity : ComponentActivity() {
     private fun finalizeTxtSelection(controller: TxtSelectionController?, vm: com.vreader.app.annotations.SelectionPopoverViewModel) {
         val c = controller ?: return
         if (c.selectedText().isNullOrBlank() || !c.isCurrentSelectionValid()) { c.clear(); return }
+        pendingTxtHighlightId = null   // a fresh selection is CREATE context
+        pendingTxtText = c.selectedText()
         val anchor = c.selectionEndAnchorWindow() ?: androidx.compose.ui.geometry.Offset.Zero
         vm.showForSelection(anchor.x, anchor.y)   // WINDOW px
+    }
+
+    /** A tap on the body → if it lands inside an existing highlight, open the EDIT popover; else dismiss. */
+    private fun onTxtTap(
+        localPoint: androidx.compose.ui.geometry.Offset,
+        book: com.vreader.app.data.Book,
+        highlights: List<com.vreader.app.annotations.HighlightRecord>,
+        controller: TxtSelectionController?,
+        vm: com.vreader.app.annotations.SelectionPopoverViewModel,
+    ) {
+        val c = controller ?: return
+        val off = c.resolveSourceOffset(localPoint)
+        val hit = off?.let { TxtHighlightHitTester.highlightAt(it, highlights) }
+        if (hit == null) { clearTxtSelection(c, vm); return }
+        c.clear()
+        pendingTxtHighlightId = hit.id
+        pendingTxtText = hit.selectedText
+        val anchor = c.toWindow(localPoint) ?: androidx.compose.ui.geometry.Offset.Zero
+        vm.showForExisting(hit.color, hit.note, anchor.x, anchor.y)
     }
 
     private fun txtPopoverActions(
@@ -410,18 +437,52 @@ class TxtReaderActivity : ComponentActivity() {
         onColor = { color ->
             when (vm.state.value.mode) {
                 com.vreader.app.annotations.PopoverMode.SELECT -> createTxtHighlight(book, controller, vm, color, null)
-                else -> vm.selectColor(color)
+                com.vreader.app.annotations.PopoverMode.EDIT -> editTxtHighlightColor(controller, vm, color)
+                com.vreader.app.annotations.PopoverMode.NOTE -> vm.selectColor(color)
             }
         },
         onHighlight = { createTxtHighlight(book, controller, vm, vm.state.value.activeColor, null) },
         onNote = { vm.beginNote() },
-        onCopy = { copyTxtSelection(controller); clearTxtSelection(controller, vm) },
-        onShare = { shareTxtSelection(controller); clearTxtSelection(controller, vm) },
-        onRemove = { /* edit/remove an existing TXT highlight — WI-4 */ },
+        onCopy = { copyTxtTextForAction(controller); clearTxtSelection(controller, vm) },
+        onShare = { shareTxtTextForAction(controller); clearTxtSelection(controller, vm) },
+        onRemove = { removeTxtHighlight(controller, vm) },
         onNoteDraftChange = { vm.updateNoteDraft(it) },
-        onSaveNote = { createTxtHighlight(book, controller, vm, vm.state.value.activeColor, vm.state.value.noteDraft.ifBlank { null }) },
+        onSaveNote = { saveTxtNote(book, controller, vm, vm.state.value.noteDraft.ifBlank { null }) },
         onCancelNote = { clearTxtSelection(controller, vm) },
     )
+
+    /** Persist a note: update the existing highlight (EDIT) or create one from the selection (SELECT). */
+    private fun saveTxtNote(
+        book: com.vreader.app.data.Book,
+        controller: TxtSelectionController?,
+        vm: com.vreader.app.annotations.SelectionPopoverViewModel,
+        note: String?,
+    ) {
+        val id = pendingTxtHighlightId
+        if (id != null) {
+            container.appScope.launch { container.annotationsRepository.updateHighlight(id, vm.state.value.activeColor, note) }
+            clearTxtSelection(controller, vm)
+        } else {
+            createTxtHighlight(book, controller, vm, vm.state.value.activeColor, note)
+        }
+    }
+
+    private fun editTxtHighlightColor(
+        controller: TxtSelectionController?,
+        vm: com.vreader.app.annotations.SelectionPopoverViewModel,
+        color: com.vreader.app.annotations.AnnotationColor,
+    ) {
+        val id = pendingTxtHighlightId ?: return
+        val note = vm.state.value.noteDraft.ifBlank { null }
+        container.appScope.launch { container.annotationsRepository.updateHighlight(id, color, note) }
+        clearTxtSelection(controller, vm)
+    }
+
+    private fun removeTxtHighlight(controller: TxtSelectionController?, vm: com.vreader.app.annotations.SelectionPopoverViewModel) {
+        val id = pendingTxtHighlightId ?: return
+        container.appScope.launch { container.annotationsRepository.removeHighlight(id) }
+        clearTxtSelection(controller, vm)
+    }
 
     private fun createTxtHighlight(
         book: com.vreader.app.data.Book,
@@ -445,14 +506,18 @@ class TxtReaderActivity : ComponentActivity() {
         clearTxtSelection(c, vm)
     }
 
-    private fun copyTxtSelection(controller: TxtSelectionController?) {
-        val text = controller?.selectedText() ?: return
+    /** The text for copy/share — the live selection's, or (EDIT) the tapped highlight's. */
+    private fun txtTextForAction(controller: TxtSelectionController?): String? =
+        pendingTxtText ?: controller?.selectedText()
+
+    private fun copyTxtTextForAction(controller: TxtSelectionController?) {
+        val text = txtTextForAction(controller) ?: return
         val clip = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         clip.setPrimaryClip(android.content.ClipData.newPlainText("vreader", text))
     }
 
-    private fun shareTxtSelection(controller: TxtSelectionController?) {
-        val text = controller?.selectedText() ?: return
+    private fun shareTxtTextForAction(controller: TxtSelectionController?) {
+        val text = txtTextForAction(controller) ?: return
         val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
             type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, text)
         }
@@ -461,6 +526,8 @@ class TxtReaderActivity : ComponentActivity() {
 
     private fun clearTxtSelection(controller: TxtSelectionController?, vm: com.vreader.app.annotations.SelectionPopoverViewModel) {
         controller?.clear()
+        pendingTxtHighlightId = null
+        pendingTxtText = null
         vm.dismiss()
     }
 
@@ -527,24 +594,40 @@ private fun TxtBody(
     // long-press-drag release so the host can show the popover.
     selectionController: TxtSelectionController? = null,
     onSelectionFinalized: () -> Unit = {},
+    // feature #124 WI-4 — a tap (LazyColumn-local point) → host hit-tests an existing highlight to edit.
+    onTapAt: (androidx.compose.ui.geometry.Offset) -> Unit = {},
 ) {
     val isMarkdown = format == BookFormat.md
     val wash = VReaderColors.Accent.copy(alpha = 0.18f)
     val selectionAccent = Color(0x575C8FC4)   // design selection bg rgba(92,143,196,0.34)
     val selection by (selectionController?.selection ?: flowOf(null)).collectAsState(null)
+    // the pointerInput block keys on selectionController (stable), so without this it would capture the
+    // INITIAL onTapAt/onSelectionFinalized closures (stale highlightsList → tap-to-edit never hits).
+    val currentOnTap by androidx.compose.runtime.rememberUpdatedState(onTapAt)
+    val currentOnFinalize by androidx.compose.runtime.rememberUpdatedState(onSelectionFinalized)
     LazyColumn(
         Modifier
             .fillMaxSize()
             .onGloballyPositioned { selectionController?.setLazyCoords(it) }
             .then(
                 if (selectionController != null) {
+                    // ONE detector distinguishes a TAP (edit an existing highlight) from a LONG-PRESS+drag
+                    // (new selection) — two separate pointerInput detectors conflict over the same down event.
                     Modifier.pointerInput(selectionController) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { selectionController.beginAt(it) },
-                            onDrag = { change, _ -> selectionController.extendTo(change.position) },
-                            onDragEnd = { onSelectionFinalized() },
-                            onDragCancel = { onSelectionFinalized() },
-                        )
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val longPress = awaitLongPressOrCancellation(down.id)
+                            if (longPress != null) {
+                                // long-press → selection; finalize only on a COMPLETED drag/up (not a cancel).
+                                selectionController.beginAt(longPress.position)
+                                val completed = drag(longPress.id) { change -> selectionController.extendTo(change.position); change.consume() }
+                                if (completed) currentOnFinalize() else selectionController.clear()
+                            } else if (!down.isConsumed) {
+                                // null also means cancel (e.g. a scroll won) — only a TAP leaves the down
+                                // unconsumed; a scroll consumes it, so it won't be misread as tap-to-edit.
+                                currentOnTap(down.position)
+                            }
+                        }
                     }
                 } else {
                     Modifier

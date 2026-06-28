@@ -654,6 +654,16 @@ captures the live selection and shows the popover over a `ComposeView` overlay; 
 re-applied as decorations via an `observeHighlights` Flow on open. Verified on the emulator
 (`ReaderActivityTest.seededHighlight_appliesAsDecoration_onLiveNavigator` drives the real WebView).
 
+**TXT highlighting (feature #124)** reuses the same domain on the `TxtReaderActivity` side via a
+**custom Compose selection engine** (`TxtSelectionController`): the chunked `TxtBody` registers each
+visible chunk's `TextLayoutResult` + `LayoutCoordinates`; one `awaitEachGesture` distinguishes a tap
+(edit an existing highlight) from a long-press-drag (new word selection), converting the pointer
+→ window → chunk-local → SOURCE UTF-16 offset (`TxtSourceOffsets`). Stored highlights render as washes
+via `drawBehind` + `getPathForRange` (`TxtWashMapper`/`drawWashes`); a tap hit-tests via
+`TxtHighlightHitTester`. Everything is gated to `BookFormat.txt` (MD highlighting is the #125 follow-on,
+which needs a `MarkdownRenderer` source-offset map). The selection gesture is verifiable via the Compose
+test harness (`TxtReaderActivityTest` long-press/tap E2E), unlike the EPUB WebView gesture.
+
 ### Reading-stats (`com.vreader.app.stats`) — feature #122
 
 Reading-time tracking + the dashboard (design #1800). Mirrors the iOS feature
