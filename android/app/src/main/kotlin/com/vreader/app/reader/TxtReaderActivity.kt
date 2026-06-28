@@ -49,6 +49,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import vreader.contracts.BookFormat
@@ -67,6 +69,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -201,6 +205,18 @@ class TxtReaderActivity : ComponentActivity() {
                         val tracker = container.readingTimeTracker
                         val bookKey = s.book.fingerprintKey
                         val sessionSeconds by tracker.sessionSeconds.collectAsStateWithLifecycle()
+
+                        // feature #124 — stored TXT highlights → per-chunk washes (BINDING gate: TXT only;
+                        // MD render-only until #125 adds the source-offset map).
+                        val isTxt = s.book.originalFormat == BookFormat.txt
+                        val washMap by remember(bookKey, s.document, isTxt) {
+                            if (isTxt) {
+                                container.annotationsRepository.highlights(bookKey)
+                                    .map { TxtWashMapper.washesByChunk(s.document, it) }
+                            } else {
+                                flowOf(emptyMap())
+                            }
+                        }.collectAsStateWithLifecycle(emptyMap())
                         DisposableEffect(lifecycleOwner, bookKey) {
                             val obs = LifecycleEventObserver { _, e ->
                                 when (e) {
@@ -248,14 +264,18 @@ class TxtReaderActivity : ComponentActivity() {
                             },
                         ) {
                             Box(Modifier.fillMaxSize()) {
-                                TxtBody(s.document, listState, s.book.originalFormat) { chunkIndex ->
-                                    if (!active) null
-                                    else {
-                                        val cs = s.document.offsetForChunk(chunkIndex)
-                                        val ce = if (chunkIndex + 1 < s.document.chunkCount) s.document.offsetForChunk(chunkIndex + 1) else s.document.text.length
-                                        TtsHighlight.localSpan(cs, ce, tts.charStart, tts.charEnd)
-                                    }
-                                }
+                                TxtBody(
+                                    s.document, listState, s.book.originalFormat,
+                                    highlightSpan = { chunkIndex ->
+                                        if (!active) null
+                                        else {
+                                            val cs = s.document.offsetForChunk(chunkIndex)
+                                            val ce = if (chunkIndex + 1 < s.document.chunkCount) s.document.offsetForChunk(chunkIndex + 1) else s.document.text.length
+                                            TtsHighlight.localSpan(cs, ce, tts.charStart, tts.charEnd)
+                                        }
+                                    },
+                                    washesForChunk = { washMap[it] ?: emptyList() },
+                                )
                                 AnimatedVisibility(pillVisible, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
                                     InReaderSessionPill(sessionSeconds)
                                 }
@@ -393,6 +413,8 @@ private fun TtsEntryBar(enabled: Boolean, onReadAloud: () -> Unit) {
 private fun TxtBody(
     document: TxtDocument, listState: LazyListState, format: BookFormat,
     highlightSpan: (chunkIndex: Int) -> IntRange? = { null },
+    // feature #124 — annotation highlight washes per chunk (TXT only; the activity passes empty for MD).
+    washesForChunk: (chunkIndex: Int) -> List<WashSpan> = { emptyList() },
 ) {
     val isMarkdown = format == BookFormat.md
     val wash = VReaderColors.Accent.copy(alpha = 0.18f)
@@ -416,6 +438,9 @@ private fun TxtBody(
                 }
                 else -> AnnotatedString(raw)
             }
+            // annotation washes drawn BEHIND the text (getPathForRange) — separate from the read-aloud span.
+            val washes = washesForChunk(i)
+            var layout by remember(i) { mutableStateOf<TextLayoutResult?>(null) }
             Text(
                 text = text,
                 color = VReaderColors.Ink,
@@ -423,6 +448,8 @@ private fun TxtBody(
                 fontWeight = FontWeight.Normal,
                 fontSize = 18.sp,
                 lineHeight = 29.sp,
+                onTextLayout = { layout = it },
+                modifier = Modifier.drawBehind { layout?.let { drawWashes(it, washes) } },
             )
         }
     }

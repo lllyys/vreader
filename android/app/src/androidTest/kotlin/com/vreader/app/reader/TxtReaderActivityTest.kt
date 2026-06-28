@@ -53,6 +53,39 @@ class TxtReaderActivityTest {
     }
 
     @Test
+    fun rendersWithSeededHighlight_drawsWash_noCrash() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val appContext = instrumentation.targetContext
+        val app = appContext.applicationContext as VReaderApp
+
+        val staged = File(appContext.cacheDir, "sample-hl-${System.nanoTime()}.txt")
+        instrumentation.context.assets.open("sample.txt").use { input ->
+            staged.outputStream().use { output -> input.copyTo(output) }
+        }
+        val book = runBlocking {
+            app.container.importer.importStream("content://test/sample.txt", "sample.txt", staged.inputStream())
+        }
+        // seed a highlight over the first few source chars → the wash drawBehind path runs for chunk 0.
+        runBlocking {
+            val loc = Locator(book.contentSHA256, book.fileByteCount, "txt", charRangeStartUTF16 = 0, charRangeEndUTF16 = 8, textQuote = "seed")
+            app.container.annotationsRepository.addHighlight(
+                book.fingerprintKey, com.vreader.app.annotations.AnnotationColor.yellow, "seed", loc,
+                com.vreader.app.annotations.AnnotationAnchor.Text("text-document:${book.fingerprintKey}", 0, 8),
+            )
+        }
+
+        ActivityScenario.launch<TxtReaderActivity>(
+            TxtReaderActivity.intent(appContext, book.fingerprintKey),
+        ).use {
+            // render completes with the highlight present → the getPathForRange/drawWashes path executed.
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("quick brown fox", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("quick brown fox", substring = true).assertIsDisplayed()
+        }
+    }
+
+    @Test
     fun resumesToSavedCharOffset() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val appContext = instrumentation.targetContext
