@@ -2,8 +2,13 @@ package com.vreader.app.reader
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -49,6 +54,73 @@ class TxtReaderActivityTest {
                     .fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithText("quick brown fox", substring = true).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun longPressOnText_selectsWord_showsSelectionPopover() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val appContext = instrumentation.targetContext
+        val app = appContext.applicationContext as VReaderApp
+
+        val staged = File(appContext.cacheDir, "sample-sel-${System.nanoTime()}.txt")
+        instrumentation.context.assets.open("sample.txt").use { input ->
+            staged.outputStream().use { output -> input.copyTo(output) }
+        }
+        val book = runBlocking {
+            app.container.importer.importStream("content://test/sample.txt", "sample.txt", staged.inputStream())
+        }
+
+        ActivityScenario.launch<TxtReaderActivity>(
+            TxtReaderActivity.intent(appContext, book.fingerprintKey),
+        ).use {
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("quick brown fox", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            // a long-press on the text drives detectDragGesturesAfterLongPress → word selection → popover.
+            compose.onNodeWithText("quick brown fox", substring = true).performTouchInput { longClick() }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("selection-popover").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("selection-popover").assertIsDisplayed()
+            compose.onNodeWithText("Highlight").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun longPress_thenTapColor_createsAndPersistsHighlight() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val appContext = instrumentation.targetContext
+        val app = appContext.applicationContext as VReaderApp
+
+        val staged = File(appContext.cacheDir, "sample-create-${System.nanoTime()}.txt")
+        instrumentation.context.assets.open("sample.txt").use { input ->
+            staged.outputStream().use { output -> input.copyTo(output) }
+        }
+        val book = runBlocking {
+            app.container.importer.importStream("content://test/sample.txt", "sample.txt", staged.inputStream())
+        }
+
+        ActivityScenario.launch<TxtReaderActivity>(
+            TxtReaderActivity.intent(appContext, book.fingerprintKey),
+        ).use {
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("quick brown fox", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("quick brown fox", substring = true).performTouchInput { longClick() }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("popover-color-yellow").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("popover-color-yellow").performClick()
+
+            // createTxtHighlight runs on appScope (async) → poll Room for the persisted highlight.
+            var count = 0
+            repeat(50) {
+                count = runBlocking { app.container.annotationsRepository.highlightsForBook(book.fingerprintKey).size }
+                if (count >= 1) return@repeat
+                Thread.sleep(150)
+            }
+            org.junit.Assert.assertTrue("a highlight was created + persisted from the selection", count >= 1)
         }
     }
 
