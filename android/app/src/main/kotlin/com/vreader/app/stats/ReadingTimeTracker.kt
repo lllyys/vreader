@@ -8,6 +8,8 @@ package com.vreader.app.stats
 
 import com.vreader.app.stats.clock.DateClock
 import com.vreader.app.stats.clock.ElapsedClock
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,8 +49,10 @@ class ReadingTimeTracker(
     /** Bank the time since the last accounting, then keep going (periodic flush). */
     suspend fun flush() = mutex.withLock { flushLocked() }
 
-    /** Bank the time, then clear the active book. Idempotent (a second stop banks 0 and no-ops). */
-    suspend fun stop() = mutex.withLock {
+    /** Bank the time, then clear the active book. Idempotent (a second stop banks 0 and no-ops). A
+     *  [bookKey], when given, only stops that book — so a stale Activity can't stop another's session. */
+    suspend fun stop(bookKey: String? = null) = mutex.withLock {
+        if (bookKey != null && activeBook != bookKey) return@withLock
         flushLocked()
         activeBook = null
         _sessionSeconds.value = 0
@@ -75,12 +79,15 @@ class ReadingTimeTracker(
 
         // Add each local-date segment's millis to that DATE's carry, then bank whole minutes per date,
         // keeping the per-date remainder. Each segment lies within one local date, so attribution is
-        // exact + a fragment before midnight banks to the right day even across flushes.
-        for (seg in dateClock.splitByLocalDate(windowStart, windowStart + delta)) {
-            val total = (carryByDate[seg.date] ?: 0L) + (seg.endMs - seg.startMs)
-            val minutes = (total / 60_000L).toInt()
-            carryByDate[seg.date] = total % 60_000L
-            if (minutes > 0) repo.recordMinutes(book, seg.date, minutes)
+        // exact + a fragment before midnight banks to the right day even across flushes. NonCancellable
+        // so a teardown can't interrupt the durable write after the marks have advanced (no lost minutes).
+        withContext(NonCancellable) {
+            for (seg in dateClock.splitByLocalDate(windowStart, windowStart + delta)) {
+                val total = (carryByDate[seg.date] ?: 0L) + (seg.endMs - seg.startMs)
+                val minutes = (total / 60_000L).toInt()
+                carryByDate[seg.date] = total % 60_000L
+                if (minutes > 0) repo.recordMinutes(book, seg.date, minutes)
+            }
         }
     }
 }

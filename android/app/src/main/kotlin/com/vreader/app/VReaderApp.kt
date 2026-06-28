@@ -9,6 +9,10 @@ import android.content.Context
 import com.vreader.app.data.BookImporter
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
+import com.vreader.app.stats.ReadingStatsRepository
+import com.vreader.app.stats.ReadingTimeTracker
+import com.vreader.app.stats.clock.SystemDateClock
+import com.vreader.app.stats.clock.SystemElapsedClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +28,17 @@ class AppContainer(context: Context) {
     }
     val importer: BookImporter by lazy {
         BookImporter(File(appContext.filesDir, "books"), repository)
+    }
+
+    // feature #122 — reading-stats. The repository + the time tracker are process-singletons so a
+    // reading session survives the (shorter-lived) reader ViewModel / rotation. ONE shared DateClock
+    // so the dashboard's "today" and the tracker's bucket dates can't drift apart.
+    private val dateClock: SystemDateClock by lazy { SystemDateClock() }
+    val statsRepository: ReadingStatsRepository by lazy {
+        ReadingStatsRepository(database.readingStatsDao(), repository, dateClock)
+    }
+    val readingTimeTracker: ReadingTimeTracker by lazy {
+        ReadingTimeTracker(statsRepository, SystemElapsedClock(), dateClock)
     }
 
     /** Process-lifetime scope for fire-and-forget writes that must outlive a screen
