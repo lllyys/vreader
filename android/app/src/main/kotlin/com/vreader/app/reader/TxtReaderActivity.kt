@@ -55,6 +55,7 @@ import vreader.contracts.BookFormat
 import vreader.contracts.Locator
 import java.io.File
 import android.speech.tts.TextToSpeech
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
@@ -86,6 +88,8 @@ import com.vreader.app.tts.TtsPhase
 import com.vreader.app.tts.TtsSpeedSheet
 import com.vreader.app.tts.TtsViewModel
 import com.vreader.app.tts.TtsVoiceSheet
+import com.vreader.app.stats.InReaderSessionPill
+import kotlinx.coroutines.delay
 
 private sealed interface TxtUiState {
     data object Loading : TxtUiState
@@ -192,6 +196,35 @@ class TxtReaderActivity : ComponentActivity() {
                         // snapshot the voice options once when the sheet opens (not every recomposition).
                         val voiceList = remember(showVoice) { if (showVoice) ttsVm.voiceListState() else com.vreader.app.tts.TtsVoiceListState() }
 
+                        // feature #122 — reading-stats: track this session (the process-singleton tracker
+                        // survives rotation) + show the auto-fading session pill.
+                        val tracker = container.readingTimeTracker
+                        val bookKey = s.book.fingerprintKey
+                        val sessionSeconds by tracker.sessionSeconds.collectAsStateWithLifecycle()
+                        DisposableEffect(lifecycleOwner, bookKey) {
+                            val obs = LifecycleEventObserver { _, e ->
+                                when (e) {
+                                    // start/stop on the PROCESS scope (not the composition-scoped ttsScope) so the
+                                    // durable bank in stop()/flush() can't be cancelled by the reader's teardown.
+                                    Lifecycle.Event.ON_RESUME -> container.appScope.launch { tracker.start(bookKey) }
+                                    // don't end the session on a rotation (config change) — only a real background.
+                                    // keyed stop: a no-op unless THIS book is the active session (stale-Activity safe).
+                                    Lifecycle.Event.ON_STOP -> if (!isChangingConfigurations) container.appScope.launch { tracker.stop(bookKey) }
+                                    else -> Unit
+                                }
+                            }
+                            // addObserver replays lifecycle events up to the current state — so a Loaded
+                            // composition that arrives AFTER ON_RESUME still receives ON_RESUME here and the
+                            // initial open is tracked (no missed first session).
+                            lifecycleOwner.lifecycle.addObserver(obs)
+                            onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+                        }
+                        // live pill + periodic bank — gated to RESUMED so neither loop wakes while backgrounded.
+                        LaunchedEffect(Unit) { lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) { while (true) { delay(1_000); tracker.tickSessionSeconds() } } }
+                        LaunchedEffect(Unit) { lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) { while (true) { delay(60_000); tracker.flush() } } }
+                        var pillVisible by remember { mutableStateOf(true) }
+                        LaunchedEffect(Unit) { delay(5_000); pillVisible = false }                             // auto-fade
+
                         TxtReaderScaffold(
                             title = s.title, onBack = ::finish,
                             bottom = {
@@ -214,12 +247,17 @@ class TxtReaderActivity : ComponentActivity() {
                                 }
                             },
                         ) {
-                            TxtBody(s.document, listState, s.book.originalFormat) { chunkIndex ->
-                                if (!active) null
-                                else {
-                                    val cs = s.document.offsetForChunk(chunkIndex)
-                                    val ce = if (chunkIndex + 1 < s.document.chunkCount) s.document.offsetForChunk(chunkIndex + 1) else s.document.text.length
-                                    TtsHighlight.localSpan(cs, ce, tts.charStart, tts.charEnd)
+                            Box(Modifier.fillMaxSize()) {
+                                TxtBody(s.document, listState, s.book.originalFormat) { chunkIndex ->
+                                    if (!active) null
+                                    else {
+                                        val cs = s.document.offsetForChunk(chunkIndex)
+                                        val ce = if (chunkIndex + 1 < s.document.chunkCount) s.document.offsetForChunk(chunkIndex + 1) else s.document.text.length
+                                        TtsHighlight.localSpan(cs, ce, tts.charStart, tts.charEnd)
+                                    }
+                                }
+                                AnimatedVisibility(pillVisible, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
+                                    InReaderSessionPill(sessionSeconds)
                                 }
                             }
                         }
