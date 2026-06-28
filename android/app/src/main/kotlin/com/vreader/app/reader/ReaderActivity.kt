@@ -74,8 +74,11 @@ class ReaderActivity : AppCompatActivity() {
     // feature #123 — in-reader highlighting
     private var highlightController: ReaderHighlightController? = null
     private val popoverVm = SelectionPopoverViewModel()
-    // the Readium locator of the live selection (set when the popover opens for a fresh selection)
+    // the Readium locator of the live selection (create context: set on a fresh selection)
     private var pendingSelection: Locator? = null
+    // edit context: the existing highlight being edited (set on a decoration tap) + its text for copy/share
+    private var pendingHighlightId: String? = null
+    private var pendingSelectedText: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // The navigator fragment can't be restored before its FragmentFactory is set,
@@ -131,6 +134,19 @@ class ReaderActivity : AppCompatActivity() {
             repository.markOpened(key, System.currentTimeMillis())
             observePosition(nav, loaded)
             observeHighlights(loaded, controller)
+            controller.observeActivations { id, rect -> onHighlightTapped(id, rect) }
+        }
+    }
+
+    /** A tap on an existing highlight decoration → open the popover in EDIT mode (Note/Copy/Share/Remove). */
+    private fun onHighlightTapped(id: String, rect: android.graphics.RectF?) {
+        lifecycleScope.launch {
+            val h = annotations.findHighlight(id) ?: return@launch
+            pendingHighlightId = id
+            pendingSelectedText = h.selectedText
+            pendingSelection = null
+            val d = resources.displayMetrics.density
+            popoverVm.showForExisting(h.color, h.note, (rect?.centerX() ?: 0f) / d, (rect?.bottom ?: 0f) / d)
         }
     }
 
@@ -167,6 +183,8 @@ class ReaderActivity : AppCompatActivity() {
                     mode?.finish(); return@launch
                 }
                 pendingSelection = selection.locator
+                pendingHighlightId = null       // entering CREATE context — drop any stale EDIT context
+                pendingSelectedText = null
                 val rect = selection.rect
                 val density = resources.displayMetrics.density
                 popoverVm.showForSelection((rect?.centerX() ?: 0f) / density, (rect?.bottom ?: 0f) / density)
@@ -192,15 +210,43 @@ class ReaderActivity : AppCompatActivity() {
         clearSelectionAndDismiss()
     }
 
+    /** Update an existing highlight's color (EDIT context). */
+    private fun editHighlightColor(color: AnnotationColor) {
+        val id = pendingHighlightId ?: return
+        val note = popoverVm.state.value.noteDraft.ifBlank { null }
+        container.appScope.launch { annotations.updateHighlight(id, color, note) }
+        clearSelectionAndDismiss()
+    }
+
+    /** Persist a note: update the existing highlight (EDIT) or create one from the selection (SELECT). */
+    private fun saveNote(note: String?) {
+        val id = pendingHighlightId
+        if (id != null) {
+            container.appScope.launch { annotations.updateHighlight(id, popoverVm.state.value.activeColor, note) }
+            clearSelectionAndDismiss()
+        } else {
+            createHighlight(popoverVm.state.value.activeColor, note)
+        }
+    }
+
+    private fun removeCurrentHighlight() {
+        val id = pendingHighlightId ?: return
+        container.appScope.launch { annotations.removeHighlight(id) }
+        clearSelectionAndDismiss()
+    }
+
+    /** Copy/share work in both contexts — the live selection's text or the tapped highlight's text. */
+    private fun selectedTextForAction(): String? = pendingSelectedText ?: pendingSelection?.text?.highlight
+
     private fun copySelection() {
-        val text = pendingSelection?.text?.highlight ?: return
+        val text = selectedTextForAction() ?: return
         val clip = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clip.setPrimaryClip(ClipData.newPlainText("vreader", text))
         clearSelectionAndDismiss()
     }
 
     private fun shareSelection() {
-        val text = pendingSelection?.text?.highlight ?: return
+        val text = selectedTextForAction() ?: return
         val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) }
         startActivity(Intent.createChooser(send, null))
         clearSelectionAndDismiss()
@@ -209,6 +255,8 @@ class ReaderActivity : AppCompatActivity() {
     private fun clearSelectionAndDismiss() {
         highlightController?.clearSelection()
         pendingSelection = null
+        pendingHighlightId = null
+        pendingSelectedText = null
         popoverVm.dismiss()
     }
 
@@ -333,19 +381,17 @@ class ReaderActivity : AppCompatActivity() {
                     onColor = { c ->
                         when (popoverVm.state.value.mode) {
                             PopoverMode.SELECT -> createHighlight(c, null)   // one-tap highlight (iOS-like)
-                            else -> popoverVm.selectColor(c)
+                            PopoverMode.EDIT -> editHighlightColor(c)         // recolor the tapped highlight
+                            PopoverMode.NOTE -> popoverVm.selectColor(c)
                         }
                     },
                     onHighlight = { createHighlight(popoverVm.state.value.activeColor, null) },
                     onNote = { popoverVm.beginNote() },
                     onCopy = { copySelection() },
                     onShare = { shareSelection() },
-                    onRemove = { /* WI-4: edit/remove an existing highlight */ },
+                    onRemove = { removeCurrentHighlight() },
                     onNoteDraftChange = { popoverVm.updateNoteDraft(it) },
-                    onSaveNote = {
-                        val s = popoverVm.state.value
-                        createHighlight(s.activeColor, s.noteDraft.ifBlank { null })
-                    },
+                    onSaveNote = { saveNote(popoverVm.state.value.noteDraft.ifBlank { null }) },
                     onCancelNote = { clearSelectionAndDismiss() },
                 ),
                 modifier = Modifier.offset(
