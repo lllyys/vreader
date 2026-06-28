@@ -1,0 +1,437 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "d61b64afa89764836c4edd40268e78a9",
+    "entities": [
+      {
+        "tableName": "books",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`fingerprintKey` TEXT NOT NULL, `title` TEXT NOT NULL, `originalFormat` TEXT NOT NULL, `contentSHA256` TEXT NOT NULL, `fileByteCount` INTEGER NOT NULL, `localFilePath` TEXT, `sourceUri` TEXT, `addedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, PRIMARY KEY(`fingerprintKey`))",
+        "fields": [
+          {
+            "fieldPath": "fingerprintKey",
+            "columnName": "fingerprintKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalFormat",
+            "columnName": "originalFormat",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentSHA256",
+            "columnName": "contentSHA256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileByteCount",
+            "columnName": "fileByteCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localFilePath",
+            "columnName": "localFilePath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceUri",
+            "columnName": "sourceUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastOpenedAt",
+            "columnName": "lastOpenedAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "fingerprintKey"
+          ]
+        }
+      },
+      {
+        "tableName": "reading_positions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`fingerprintKey` TEXT NOT NULL, `vreaderLocatorJSON` TEXT NOT NULL, `canonicalHash` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`fingerprintKey`), FOREIGN KEY(`fingerprintKey`) REFERENCES `books`(`fingerprintKey`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "fingerprintKey",
+            "columnName": "fingerprintKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "vreaderLocatorJSON",
+            "columnName": "vreaderLocatorJSON",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalHash",
+            "columnName": "canonicalHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "fingerprintKey"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "books",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "fingerprintKey"
+            ],
+            "referencedColumns": [
+              "fingerprintKey"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "daily_reading",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`date` TEXT NOT NULL, `bookKey` TEXT NOT NULL, `minutes` INTEGER NOT NULL, PRIMARY KEY(`date`, `bookKey`))",
+        "fields": [
+          {
+            "fieldPath": "date",
+            "columnName": "date",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookKey",
+            "columnName": "bookKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minutes",
+            "columnName": "minutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "date",
+            "bookKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_daily_reading_bookKey",
+            "unique": false,
+            "columnNames": [
+              "bookKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_daily_reading_bookKey` ON `${TABLE_NAME}` (`bookKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "highlights",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`highlightId` TEXT NOT NULL, `bookKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `anchorKey` TEXT NOT NULL, `color` TEXT NOT NULL, `selectedText` TEXT NOT NULL, `note` TEXT, `locatorJSON` TEXT NOT NULL, `anchorJSON` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`highlightId`), FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "highlightId",
+            "columnName": "highlightId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookKey",
+            "columnName": "bookKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileKey",
+            "columnName": "profileKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorKey",
+            "columnName": "anchorKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "color",
+            "columnName": "color",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "selectedText",
+            "columnName": "selectedText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "locatorJSON",
+            "columnName": "locatorJSON",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorJSON",
+            "columnName": "anchorJSON",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "highlightId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_highlights_bookKey",
+            "unique": false,
+            "columnNames": [
+              "bookKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_highlights_bookKey` ON `${TABLE_NAME}` (`bookKey`)"
+          },
+          {
+            "name": "index_highlights_profileKey_anchorKey",
+            "unique": true,
+            "columnNames": [
+              "profileKey",
+              "anchorKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_highlights_profileKey_anchorKey` ON `${TABLE_NAME}` (`profileKey`, `anchorKey`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "books",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "bookKey"
+            ],
+            "referencedColumns": [
+              "fingerprintKey"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "annotation_notes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`noteId` TEXT NOT NULL, `bookKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `content` TEXT NOT NULL, `locatorJSON` TEXT NOT NULL, `anchorJSON` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`noteId`), FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "noteId",
+            "columnName": "noteId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookKey",
+            "columnName": "bookKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileKey",
+            "columnName": "profileKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "content",
+            "columnName": "content",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "locatorJSON",
+            "columnName": "locatorJSON",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorJSON",
+            "columnName": "anchorJSON",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "noteId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_annotation_notes_bookKey",
+            "unique": false,
+            "columnNames": [
+              "bookKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_annotation_notes_bookKey` ON `${TABLE_NAME}` (`bookKey`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "books",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "bookKey"
+            ],
+            "referencedColumns": [
+              "fingerprintKey"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "bookmarks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bookmarkId` TEXT NOT NULL, `bookKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `title` TEXT, `locatorJSON` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`bookmarkId`), FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "bookmarkId",
+            "columnName": "bookmarkId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookKey",
+            "columnName": "bookKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileKey",
+            "columnName": "profileKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "locatorJSON",
+            "columnName": "locatorJSON",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "bookmarkId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_bookmarks_bookKey",
+            "unique": false,
+            "columnNames": [
+              "bookKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_bookmarks_bookKey` ON `${TABLE_NAME}` (`bookKey`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "books",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "bookKey"
+            ],
+            "referencedColumns": [
+              "fingerprintKey"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd61b64afa89764836c4edd40268e78a9')"
+    ]
+  }
+}

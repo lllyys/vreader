@@ -70,3 +70,93 @@ data class DailyReadingEntity(
     val bookKey: String,   // fingerprintKey
     val minutes: Int,
 )
+
+/**
+ * A text highlight — feature #123 (EPUB highlights & notes). Mirrors the iOS `Highlight` @Model.
+ * `locatorJSON` is the canonical `vreader.contracts.Locator.canonicalJson()` (NOT a `VReaderLocator`
+ * envelope or Readium JSON — the #113 backup contract requires plain `Locator`); the engine-precise
+ * anchor (Readium CFI / TXT range) lives ONLY in `anchorJSON`. Dedupe is on the unique
+ * `(profileKey, anchorKey)` — `profileKey = "$bookKey:${locator.canonicalHash}"`, `anchorKey` is the
+ * NON-NULL `anchorHash ?: "__nil_anchor__"` sentinel (SQLite treats NULLs as distinct in a unique
+ * index, so a nullable column would let repeated null-anchor highlights bypass dedupe — the sentinel
+ * collapses them per `profileKey`, matching iOS's nil-anchor-by-profileKey dedupe).
+ */
+@Entity(
+    tableName = "highlights",
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["fingerprintKey"],
+            childColumns = ["bookKey"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("bookKey"), Index(value = ["profileKey", "anchorKey"], unique = true)],
+)
+data class HighlightEntity(
+    @PrimaryKey val highlightId: String,   // UUID string (iOS `highlightId: UUID` parity)
+    val bookKey: String,                   // fingerprintKey (FK)
+    val profileKey: String,                // "$bookKey:${locator.canonicalHash}"
+    val anchorKey: String,                 // anchorHash ?: "__nil_anchor__" (non-null dedupe key)
+    val color: String,                     // AnnotationColor.key (yellow/green/blue/pink/red) or hex
+    val selectedText: String,
+    val note: String?,                     // optional inline note on the highlight
+    val locatorJSON: String,               // canonical Locator.canonicalJson()
+    val anchorJSON: String?,               // serialized AnnotationAnchor (engine-precise)
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/**
+ * A standalone note — feature #123. Mirrors the iOS `AnnotationNote` @Model (the design's
+ * "STANDALONE" card). Same `locatorJSON` (canonical) + `anchorJSON` (precise) contract as
+ * [HighlightEntity]. No range-dedupe (a reader may keep several notes at one spot).
+ */
+@Entity(
+    tableName = "annotation_notes",
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["fingerprintKey"],
+            childColumns = ["bookKey"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("bookKey")],
+)
+data class AnnotationNoteEntity(
+    @PrimaryKey val noteId: String,
+    val bookKey: String,
+    val profileKey: String,
+    val content: String,
+    val locatorJSON: String,
+    val anchorJSON: String?,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/**
+ * A bookmark — feature #123 (schema only; the create/list UI is item F, which owns the reader
+ * chrome entry). Mirrors the iOS `Bookmark` @Model. `title` is the optional user/chapter label.
+ */
+@Entity(
+    tableName = "bookmarks",
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["fingerprintKey"],
+            childColumns = ["bookKey"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("bookKey")],
+)
+data class BookmarkEntity(
+    @PrimaryKey val bookmarkId: String,
+    val bookKey: String,
+    val profileKey: String,
+    val title: String?,
+    val locatorJSON: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)

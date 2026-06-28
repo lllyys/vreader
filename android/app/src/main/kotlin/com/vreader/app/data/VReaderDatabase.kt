@@ -14,14 +14,18 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [BookEntity::class, ReadingPositionEntity::class, DailyReadingEntity::class],
-    version = 3,
+    entities = [
+        BookEntity::class, ReadingPositionEntity::class, DailyReadingEntity::class,
+        HighlightEntity::class, AnnotationNoteEntity::class, BookmarkEntity::class,
+    ],
+    version = 4,
     exportSchema = true,
 )
 abstract class VReaderDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun readingPositionDao(): ReadingPositionDao
     abstract fun readingStatsDao(): ReadingStatsDao
+    abstract fun annotationDao(): AnnotationDao
 
     companion object {
         private const val DB_NAME = "vreader.db"
@@ -45,8 +49,53 @@ abstract class VReaderDatabase : RoomDatabase() {
             }
         }
 
+        /** v3 → v4: feature #123 — add the additive `highlights`, `annotation_notes`, and `bookmarks`
+         *  annotation tables (each FK→books ON DELETE CASCADE; highlights has the unique
+         *  `(profileKey, anchorKey)` dedupe index). No data transform. DDL matches Room's generated
+         *  schema for v4 exactly (the migration test opens the real Room DB, whose structural PRAGMA
+         *  validation catches any drift). */
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `highlights` (`highlightId` TEXT NOT NULL, " +
+                        "`bookKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `anchorKey` TEXT NOT NULL, " +
+                        "`color` TEXT NOT NULL, `selectedText` TEXT NOT NULL, `note` TEXT, " +
+                        "`locatorJSON` TEXT NOT NULL, `anchorJSON` TEXT, `createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`highlightId`), " +
+                        "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_highlights_bookKey` ON `highlights` (`bookKey`)")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_highlights_profileKey_anchorKey` " +
+                        "ON `highlights` (`profileKey`, `anchorKey`)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `annotation_notes` (`noteId` TEXT NOT NULL, " +
+                        "`bookKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `content` TEXT NOT NULL, " +
+                        "`locatorJSON` TEXT NOT NULL, `anchorJSON` TEXT, `createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`noteId`), " +
+                        "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_annotation_notes_bookKey` " +
+                        "ON `annotation_notes` (`bookKey`)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `bookmarks` (`bookmarkId` TEXT NOT NULL, " +
+                        "`bookKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `title` TEXT, " +
+                        "`locatorJSON` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`bookmarkId`), " +
+                        "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_bookmarks_bookKey` ON `bookmarks` (`bookKey`)")
+            }
+        }
+
         /** All registered migrations, oldest first. Append future Migration(n,n+1) here. */
-        val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
         /** The production on-disk database (app-private storage). */
         fun build(context: Context): VReaderDatabase =

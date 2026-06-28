@@ -537,11 +537,19 @@ xcodegen/`project.yml` at the repo root; the two builds never overlap).
 
 ### Data layer (`com.vreader.app.data`) — the iOS `PersistenceActor` analog
 
-- **Room** is the SwiftData analog. `VReaderDatabase` (`@Database` v3,
-  `exportSchema`, schema-versioned `MIGRATION_1_2` + `MIGRATION_2_3` in
-  `ALL_MIGRATIONS`) with `BookEntity` + `ReadingPositionEntity` +
-  `DailyReadingEntity` (feature #122 — per-day/per-book minutes, composite
-  PK `(date, bookKey)` + `bookKey` index). The reading position stores the
+- **Room** is the SwiftData analog. `VReaderDatabase` (`@Database` v4,
+  `exportSchema`, schema-versioned `MIGRATION_1_2` + `MIGRATION_2_3` +
+  `MIGRATION_3_4` in `ALL_MIGRATIONS`) with `BookEntity` + `ReadingPositionEntity`
+  + `DailyReadingEntity` (feature #122 — per-day/per-book minutes, composite
+  PK `(date, bookKey)` + `bookKey` index) + the feature #123 annotation tables
+  `HighlightEntity` / `AnnotationNoteEntity` / `BookmarkEntity` (each FK→`books`
+  ON DELETE CASCADE; `highlights` has a unique `(profileKey, anchorKey)` dedupe
+  index — `anchorKey` is the non-null `anchorHash ?: "__nil_anchor__"` sentinel so
+  SQLite NULL-distinctness can't bypass dedupe), exposed via `AnnotationDao`
+  (transactional INSERT-OR-IGNORE + UPDATE dedupe). An annotation's `locatorJSON`
+  is the canonical `Locator.canonicalJson()` (the #113 backup contract); the
+  engine-precise anchor (Readium CFI / TXT range) lives in `anchorJSON`. The
+  reading position stores the
   **whole serialized `VReaderLocator` envelope** in one `vreaderLocatorJSON`
   column (not flattened columns), so the envelope evolves independently of
   the Room schema.
