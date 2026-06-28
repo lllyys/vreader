@@ -116,8 +116,14 @@ abstract class AnnotationDao {
         updatedAt: Long,
     ): Int
 
+    @Query("SELECT * FROM highlights WHERE profileKey = :profileKey AND anchorKey = :anchorKey")
+    abstract suspend fun findHighlightByKey(profileKey: String, anchorKey: String): HighlightEntity?
+
+    /** Insert-or-update on the unique (profileKey, anchorKey), then return the PERSISTED row. On a
+     *  dedupe the persisted row keeps the EXISTING highlightId (the insert was ignored), so callers
+     *  must use the returned row's id — not the id of the entity they passed in (which was discarded). */
     @Transaction
-    open suspend fun upsertHighlight(highlight: HighlightEntity) {
+    open suspend fun upsertHighlight(highlight: HighlightEntity): HighlightEntity {
         val rowId = insertHighlightIfAbsent(highlight)
         if (rowId == -1L) {
             updateHighlightByKey(
@@ -125,6 +131,7 @@ abstract class AnnotationDao {
                 highlight.selectedText, highlight.locatorJSON, highlight.anchorJSON, highlight.updatedAt,
             )
         }
+        return findHighlightByKey(highlight.profileKey, highlight.anchorKey)!!
     }
 
     @Query("UPDATE highlights SET color = :color, note = :note, updatedAt = :updatedAt WHERE highlightId = :id")
