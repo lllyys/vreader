@@ -1,6 +1,7 @@
 package com.vreader.app.reader
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -121,6 +122,60 @@ class TxtReaderActivityTest {
                 Thread.sleep(150)
             }
             org.junit.Assert.assertTrue("a highlight was created + persisted from the selection", count >= 1)
+        }
+    }
+
+    @Test
+    fun tapExistingHighlight_opensEditPopover_andRemoveDeletesIt() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val appContext = instrumentation.targetContext
+        val app = appContext.applicationContext as VReaderApp
+
+        val staged = File(appContext.cacheDir, "sample-edit-${System.nanoTime()}.txt")
+        instrumentation.context.assets.open("sample.txt").use { input ->
+            staged.outputStream().use { output -> input.copyTo(output) }
+        }
+        val book = runBlocking {
+            app.container.importer.importStream("content://test/sample.txt", "sample.txt", staged.inputStream())
+        }
+
+        // tests share the real on-disk Room DB and sample.txt's content yields the same fingerprintKey,
+        // so highlights accumulate across methods — clear this book's highlights for a clean count.
+        runBlocking {
+            app.container.annotationsRepository.highlightsForBook(book.fingerprintKey).forEach {
+                app.container.annotationsRepository.removeHighlight(it.id)
+            }
+        }
+        // seed a highlight over the whole "The quick brown fox..." line [13,57) so any tap on it lands inside.
+        runBlocking {
+            val loc = Locator(book.contentSHA256, book.fileByteCount, "txt", charRangeStartUTF16 = 13, charRangeEndUTF16 = 57, textQuote = "line")
+            app.container.annotationsRepository.addHighlight(
+                book.fingerprintKey, com.vreader.app.annotations.AnnotationColor.yellow, "line", loc,
+                com.vreader.app.annotations.AnnotationAnchor.Text("text-document:${book.fingerprintKey}", 13, 57),
+            )
+        }
+
+        ActivityScenario.launch<TxtReaderActivity>(
+            TxtReaderActivity.intent(appContext, book.fingerprintKey),
+        ).use {
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("quick brown fox", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            // tap ON the highlighted text (15% width — the left-aligned text, not the full-width center
+            // which lands past the line end) → EDIT popover with Remove
+            compose.onNodeWithText("quick brown fox", substring = true).performTouchInput { click(percentOffset(0.15f, 0.5f)) }
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("Remove").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Remove").assertIsDisplayed()
+
+            // Remove deletes it
+            compose.onNodeWithText("Remove").performClick()
+            var count = 1
+            repeat(50) {
+                count = runBlocking { app.container.annotationsRepository.highlightsForBook(book.fingerprintKey).size }
+                if (count == 0) return@repeat
+                Thread.sleep(150)
+            }
+            org.junit.Assert.assertEquals("tap-to-edit → Remove deleted the highlight", 0, count)
         }
     }
 

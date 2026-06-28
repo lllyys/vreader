@@ -35,13 +35,15 @@ class TxtSelectionController(private val doc: TxtDocument) {
     fun unregisterChunk(index: Int) { chunks.remove(index) }
 
     /** Pointer (LazyColumn-local) → the hit chunk + chunk-local rendered offset + source offset. The hit
-     *  chunk is used for BOTH the source mapping AND word-boundary lookup (avoids a chunk-boundary shift). */
-    private fun hitAt(localPoint: Offset): Hit? {
+     *  chunk is used for BOTH the source mapping AND word-boundary lookup (avoids a chunk-boundary shift).
+     *  [allowNearest]: for a DRAG, fall back to the nearest chunk when the point is past the text; for a
+     *  TAP-to-edit, require the point to actually be inside a text chunk (else a margin tap could edit). */
+    private fun hitAt(localPoint: Offset, allowNearest: Boolean = true): Hit? {
         val lz = lazyCoords ?: return null
         if (chunks.isEmpty()) return null
         val windowPoint = lz.localToWindow(localPoint)
         val hit = chunks.entries.firstOrNull { it.value.coords.boundsInWindow().contains(windowPoint) }
-            ?: chunks.entries.minByOrNull { verticalDistance(it.value.coords.boundsInWindow(), windowPoint) }
+            ?: (if (allowNearest) chunks.entries.minByOrNull { verticalDistance(it.value.coords.boundsInWindow(), windowPoint) } else null)
             ?: return null
         val chunkLocal = hit.value.coords.windowToLocal(windowPoint)
         val rendered = hit.value.layout.getOffsetForPosition(chunkLocal).coerceIn(0, hit.value.layout.layoutInput.text.length)
@@ -76,6 +78,13 @@ class TxtSelectionController(private val doc: TxtDocument) {
 
     /** The current selection range, or null. */
     fun currentRange(): Utf16Range? = _selection.value
+
+    /** Resolve a tap (LazyColumn-local) to a SOURCE offset, for hit-testing an existing highlight. Strict
+     *  (no nearest-chunk fallback) so a tap in the margin/blank space doesn't edit a nearby highlight. */
+    fun resolveSourceOffset(localPoint: Offset): Int? = hitAt(localPoint, allowNearest = false)?.source
+
+    /** Convert a LazyColumn-local point to window coords (to anchor the edit popover at a tap). */
+    fun toWindow(localPoint: Offset): Offset? = lazyCoords?.localToWindow(localPoint)
 
     /** Whether the current selection is a persist-worthy range (in-bounds, non-empty, surrogate-safe). */
     fun isCurrentSelectionValid(): Boolean = _selection.value?.let { TxtSelection.isValid(it, doc.text) } ?: false
