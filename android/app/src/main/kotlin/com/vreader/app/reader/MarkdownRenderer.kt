@@ -3,170 +3,184 @@
 // CommonMark subset: ATX headers (`#`..`######`), `**bold**` / `*italic*` / `_italic_` /
 // `***both***`, `` `inline code` ``, and `- `/`* ` bullet prefixes. Unknown/multi-line
 // constructs degrade to literal text (no crash). v1 is a SINGLE-LINE subset because
-// TxtDocument is line-chunked — fenced code, multi-line lists, continuation paragraphs,
-// and emphasis spanning a newline are OUT of scope and render verbatim.
+// TxtDocument is line-chunked.
 //
-// Pure JVM (returns AnnotatedString, a Compose value type) so the span ranges are
-// unit-testable. Resume is unaffected: TxtDocument offsets index the RAW markdown source,
-// not these rendered spans.
+// feature #125: `renderWithMap` ALSO emits, per rendered char, the SOURCE span
+// [srcStart[r], srcEnd[r]) of the source chars that produced it (dual-affinity, so a stripped
+// marker between two visible runs doesn't collapse their distinct source positions). `render()`
+// delegates to `renderWithMap(chunk).text` — its output is byte-identical to the pre-#125 renderer.
+// The parser parses `content` by ABSOLUTE index (no substrings) so each appended char records its
+// source index directly; helpers are range-bounded.
 //
-// @coordinates-with: TxtReaderActivity.kt (calls render() per chunk when format == md),
-//   TxtDocument.kt (the line-chunk source).
+// Pure JVM (value types) so the spans + map are unit-testable. Resume/anchor offsets index the RAW
+// markdown source, not these rendered spans — the map bridges the two for highlighting.
+//
+// @coordinates-with: TxtReaderActivity.kt (renders + maps MD chunks), MarkdownOffsetMap.kt (#125 WI-2
+//   consumes srcStart/srcEnd), TxtDocument.kt (the line-chunk source).
 package com.vreader.app.reader
 
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
+/** A rendered chunk + the per-rendered-char source spans (`srcStart[r]..srcEnd[r]`). */
+data class MarkdownRendered(val text: AnnotatedString, val srcStart: IntArray, val srcEnd: IntArray) {
+    // data class with arrays — value equality by content (for tests).
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MarkdownRendered) return false
+        return text == other.text && srcStart.contentEquals(other.srcStart) && srcEnd.contentEquals(other.srcEnd)
+    }
+    override fun hashCode(): Int = (text.hashCode() * 31 + srcStart.contentHashCode()) * 31 + srcEnd.contentHashCode()
+}
+
 object MarkdownRenderer {
 
     private val HEADING_SIZES = floatArrayOf(26f, 22f, 19f, 17f, 16f, 15f)  // H1..H6
-    private val ATX = Regex("""^(#{1,6})[ \t]+(.*)$""")
+    private val ATX = Regex("""^(#{1,6})[ \t]+.*$""")
+    private val ESCAPABLE = setOf('*', '_', '`', '\\', '#', '-')
 
-    /** Render one line-chunk's text. The trailing line terminator (if any) is preserved
-     *  verbatim so paragraph spacing matches the plain-text path. */
-    fun render(chunk: String): AnnotatedString {
-        // Split off the trailing EOL run — markdown applies to the line content only.
-        var end = chunk.length
-        while (end > 0 && (chunk[end - 1] == '\n' || chunk[end - 1] == '\r')) end--
-        val content = chunk.substring(0, end)
-        val eol = chunk.substring(end)
+    /** Render one line-chunk's text (unchanged #112 output). */
+    fun render(chunk: String): AnnotatedString = renderWithMap(chunk).text
 
-        return buildAnnotatedString {
+    /** Render + the per-rendered-char source-span map. */
+    fun renderWithMap(chunk: String): MarkdownRendered {
+        var contentEnd = chunk.length
+        while (contentEnd > 0 && (chunk[contentEnd - 1] == '\n' || chunk[contentEnd - 1] == '\r')) contentEnd--
+
+        val b = MapBuilder()
+        if (contentEnd > 0) {
+            val heading = ATX.matchEntire(chunk.substring(0, contentEnd))
             when {
-                content.isEmpty() -> {}
-                else -> {
-                    val heading = ATX.matchEntire(content)
-                    when {
-                        heading != null -> {
-                            val level = heading.groupValues[1].length  // 1..6
-                            val text = heading.groupValues[2]
-                            val start = length
-                            parseInline(text)
-                            if (length > start) {
-                                addStyle(
-                                    SpanStyle(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = HEADING_SIZES[level - 1].sp,
-                                    ),
-                                    start, length,
-                                )
-                            }
-                        }
-                        isBullet(content) -> {
-                            append("• ")  // "• "
-                            parseInline(content.substring(2))
-                        }
-                        else -> parseInline(content)
+                heading != null -> {
+                    val level = heading.groupValues[1].length  // 1..6
+                    var textStart = level
+                    while (textStart < contentEnd && (chunk[textStart] == ' ' || chunk[textStart] == '\t')) textStart++
+                    val styleStart = b.length
+                    b.parseInline(chunk, textStart, contentEnd)
+                    if (b.length > styleStart) {
+                        b.addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = HEADING_SIZES[level - 1].sp), styleStart, b.length)
                     }
                 }
-            }
-            if (eol.isNotEmpty()) append(eol)
-        }
-    }
-
-    /** `- ` or `* ` at the very start (single-line bullet). */
-    private fun isBullet(s: String): Boolean =
-        s.length >= 2 && (s[0] == '-' || s[0] == '*') && (s[1] == ' ' || s[1] == '\t')
-
-    /**
-     * Inline pass: code spans (which suppress emphasis), `**`/`*`/`***` and non-intraword
-     * `_` emphasis, and backslash escapes. An unmatched delimiter is emitted literally.
-     */
-    private fun AnnotatedString.Builder.parseInline(s: String) {
-        var i = 0
-        while (i < s.length) {
-            val c = s[i]
-            when {
-                c == '\\' && i + 1 < s.length && s[i + 1] in ESCAPABLE -> {
-                    append(s[i + 1]); i += 2
+                isBullet(chunk, contentEnd) -> {
+                    // "- "/"* " → "• " ; both inserted glyphs map to the source bullet marker span [0,2).
+                    b.appendInserted('•', 0, 2)
+                    b.appendInserted(' ', 0, 2)
+                    b.parseInline(chunk, 2, contentEnd)
                 }
-                c == '`' -> i = parseCode(s, i)
-                c == '*' -> i = parseStar(s, i)
-                c == '_' -> i = parseUnderscore(s, i)
-                else -> { append(c); i++ }
+                else -> b.parseInline(chunk, 0, contentEnd)
+            }
+        }
+        // trailing EOL — 1:1 to source
+        for (k in contentEnd until chunk.length) b.appendSource(chunk, k)
+        return b.build()
+    }
+
+    /** `- ` or `* ` at the very start of the content. */
+    private fun isBullet(s: String, end: Int): Boolean =
+        end >= 2 && (s[0] == '-' || s[0] == '*') && (s[1] == ' ' || s[1] == '\t')
+
+    /** Inline pass over `content[start until end]` (absolute indices). */
+    private fun MapBuilder.parseInline(s: String, start: Int, end: Int) {
+        var i = start
+        while (i < end) {
+            val c = s[i]
+            i = when {
+                c == '\\' && i + 1 < end && s[i + 1] in ESCAPABLE -> { appendSpan(s[i + 1], i, i + 2); i + 2 }
+                c == '`' -> parseCode(s, i, end)
+                c == '*' -> parseStar(s, i, end)
+                c == '_' -> parseUnderscore(s, i, end)
+                else -> { appendSource(s, i); i + 1 }
             }
         }
     }
 
-    /** Inline code `` `…` `` — monospace, backticks dropped, contents raw (no emphasis). */
-    private fun AnnotatedString.Builder.parseCode(s: String, i: Int): Int {
-        val close = s.indexOf('`', i + 1)
-        if (close == -1) { append('`'); return i + 1 }
+    private fun MapBuilder.parseCode(s: String, i: Int, end: Int): Int {
+        val close = indexOf(s, '`', i + 1, end)
+        if (close == -1) { appendSource(s, i); return i + 1 }
         val start = length
-        append(s.substring(i + 1, close))
+        for (k in i + 1 until close) appendSource(s, k)
         addStyle(SpanStyle(fontFamily = FontFamily.Monospace), start, length)
         return close + 1
     }
 
-    /** `***`/`**`/`*` emphasis. Run length decides bold / italic / both. */
-    private fun AnnotatedString.Builder.parseStar(s: String, i: Int): Int {
-        val run = (i until s.length).takeWhile { s[it] == '*' }.count().coerceAtMost(3)
+    private fun MapBuilder.parseStar(s: String, i: Int, end: Int): Int {
+        val run = (i until end).takeWhile { s[it] == '*' }.count().coerceAtMost(3)
         val marker = "*".repeat(run)
-        val close = findUnescaped(s, i + run, marker)
-        if (close == -1) { append(marker); return i + run }
-        val inner = s.substring(i + run, close)
-        // Empty inner (`******`, `before ****** after`) is NOT emphasis — degrade to
-        // literal so visible separator runs aren't dropped (Gate-4 Medium).
-        if (inner.isEmpty()) { append(marker); return i + run }
+        val close = findUnescaped(s, i + run, end, marker)
+        if (close == -1) { for (k in i until i + run) appendSource(s, k); return i + run }
+        if (close == i + run) { for (k in i until i + run) appendSource(s, k); return i + run }  // empty inner → literal
         val start = length
-        parseInline(inner)
+        parseInline(s, i + run, close)
         when (run) {
             1 -> addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, length)
             2 -> addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
-            else -> {
-                addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
-                addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, length)
-            }
+            else -> { addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length); addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, length) }
         }
         return close + run
     }
 
-    /** `_italic_` — single underscore only, and only when not intraword (the CommonMark
-     *  left/right-flanking rule). A run of 2+ underscores (`__bold__`) is literal in v1. */
-    private fun AnnotatedString.Builder.parseUnderscore(s: String, i: Int): Int {
-        val run = (i until s.length).takeWhile { s[it] == '_' }.count()
-        if (run != 1) { append("_".repeat(run)); return i + run }  // __bold__ etc. → literal (v1)
+    private fun MapBuilder.parseUnderscore(s: String, i: Int, end: Int): Int {
+        val run = (i until end).takeWhile { s[it] == '_' }.count()
+        if (run != 1) { for (k in i until i + run) appendSource(s, k); return i + run }
         val canOpen = i == 0 || !s[i - 1].isLetterOrDigit()
-        if (!canOpen) { append('_'); return i + 1 }
+        if (!canOpen) { appendSource(s, i); return i + 1 }
         var j = i + 1
-        while (j < s.length) {
-            // A `\_` is escaped — not a closing delimiter (Gate-4 Low).
-            if (s[j] == '_' && !isEscaped(s, j)) {
-                val canClose = j + 1 >= s.length || !s[j + 1].isLetterOrDigit()
+        while (j < end) {
+            if (s[j] == '_' && !isEscaped(s, j, i)) {
+                val canClose = j + 1 >= end || !s[j + 1].isLetterOrDigit()
                 if (canClose && j > i + 1) break
             }
             j++
         }
-        if (j >= s.length) { append('_'); return i + 1 }  // unmatched → literal
-        val inner = s.substring(i + 1, j)
+        if (j >= end) { appendSource(s, i); return i + 1 }
         val start = length
-        parseInline(inner)
+        parseInline(s, i + 1, j)
         addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, length)
         return j + 1
     }
 
-    /** Index of [marker] at/after [from] that is NOT backslash-escaped, or -1. */
-    private fun findUnescaped(s: String, from: Int, marker: String): Int {
-        var idx = s.indexOf(marker, from)
-        while (idx != -1) {
-            if (!isEscaped(s, idx)) return idx
-            idx = s.indexOf(marker, idx + 1)
+    /** Index of [ch] in `s[from until end)`, or -1. */
+    private fun indexOf(s: String, ch: Char, from: Int, end: Int): Int {
+        for (k in from until end) if (s[k] == ch) return k
+        return -1
+    }
+
+    /** Index of [marker] (unescaped) at/after [from], within `[from, end)`, or -1. */
+    private fun findUnescaped(s: String, from: Int, end: Int, marker: String): Int {
+        var idx = from
+        val ml = marker.length
+        while (idx + ml <= end) {
+            if (s.regionMatches(idx, marker, 0, ml) && !isEscaped(s, idx, from)) return idx
+            idx++
         }
         return -1
     }
 
-    /** True if the char at [pos] is preceded by an ODD run of backslashes (escaped). */
-    private fun isEscaped(s: String, pos: Int): Boolean {
+    /** True if the char at [pos] is preceded by an ODD run of backslashes, not counting below [lowerBound]. */
+    private fun isEscaped(s: String, pos: Int, lowerBound: Int): Boolean {
         var backslashes = 0
         var k = pos - 1
-        while (k >= 0 && s[k] == '\\') { backslashes++; k-- }
+        while (k >= lowerBound && s[k] == '\\') { backslashes++; k-- }
         return backslashes % 2 == 1
     }
 
-    private val ESCAPABLE = setOf('*', '_', '`', '\\', '#', '-')
+    /** Builds the rendered AnnotatedString + the parallel per-char source spans. */
+    private class MapBuilder {
+        private val sb = AnnotatedString.Builder()
+        private val ss = ArrayList<Int>()
+        private val se = ArrayList<Int>()
+        val length: Int get() = sb.length
+        /** Append `content[k]` (one rendered char from source [k, k+1)). */
+        fun appendSource(content: String, k: Int) { sb.append(content[k]); ss.add(k); se.add(k + 1) }
+        /** Append a single char that came from the source span [from, to) (escape: 2 source → 1 rendered). */
+        fun appendSpan(ch: Char, from: Int, to: Int) { sb.append(ch); ss.add(from); se.add(to) }
+        /** Append an INSERTED glyph (no direct source char) mapped to source span [from, to). */
+        fun appendInserted(ch: Char, from: Int, to: Int) { sb.append(ch); ss.add(from); se.add(to) }
+        fun addStyle(style: SpanStyle, start: Int, end: Int) { sb.addStyle(style, start, end) }
+        fun build(): MarkdownRendered = MarkdownRendered(sb.toAnnotatedString(), ss.toIntArray(), se.toIntArray())
+    }
 }
