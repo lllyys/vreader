@@ -89,3 +89,88 @@ abstract class ReadingStatsDao {
     @Query("SELECT DISTINCT date FROM daily_reading WHERE date >= :since ORDER BY date DESC")
     abstract suspend fun activeDatesSince(since: String): List<String>
 }
+
+@Dao
+abstract class AnnotationDao {
+    // ---- highlights ----
+    // Dedupe on the unique (profileKey, anchorKey): a re-highlight of the same range UPDATES in place
+    // rather than inserting a duplicate (the iOS PersistenceActor+Highlights analog). @Insert(IGNORE)
+    // returns -1 when the unique index rejects the row; then UPDATE the existing row by its key. The
+    // whole thing is @Transaction so a concurrent re-highlight can't race insert-vs-update.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertHighlightIfAbsent(highlight: HighlightEntity): Long
+
+    @Query(
+        "UPDATE highlights SET color = :color, note = :note, selectedText = :selectedText, " +
+            "locatorJSON = :locatorJSON, anchorJSON = :anchorJSON, updatedAt = :updatedAt " +
+            "WHERE profileKey = :profileKey AND anchorKey = :anchorKey",
+    )
+    abstract suspend fun updateHighlightByKey(
+        profileKey: String,
+        anchorKey: String,
+        color: String,
+        note: String?,
+        selectedText: String,
+        locatorJSON: String,
+        anchorJSON: String?,
+        updatedAt: Long,
+    ): Int
+
+    @Transaction
+    open suspend fun upsertHighlight(highlight: HighlightEntity) {
+        val rowId = insertHighlightIfAbsent(highlight)
+        if (rowId == -1L) {
+            updateHighlightByKey(
+                highlight.profileKey, highlight.anchorKey, highlight.color, highlight.note,
+                highlight.selectedText, highlight.locatorJSON, highlight.anchorJSON, highlight.updatedAt,
+            )
+        }
+    }
+
+    @Query("UPDATE highlights SET color = :color, note = :note, updatedAt = :updatedAt WHERE highlightId = :id")
+    abstract suspend fun updateHighlightColorNote(id: String, color: String, note: String?, updatedAt: Long): Int
+
+    @Query("SELECT * FROM highlights WHERE bookKey = :bookKey ORDER BY createdAt")
+    abstract fun observeHighlights(bookKey: String): Flow<List<HighlightEntity>>
+
+    @Query("SELECT * FROM highlights WHERE bookKey = :bookKey ORDER BY createdAt")
+    abstract suspend fun highlightsForBook(bookKey: String): List<HighlightEntity>
+
+    @Query("SELECT * FROM highlights ORDER BY bookKey, createdAt")
+    abstract suspend fun allHighlights(): List<HighlightEntity>
+
+    @Query("SELECT * FROM highlights WHERE highlightId = :id")
+    abstract suspend fun findHighlight(id: String): HighlightEntity?
+
+    @Query("DELETE FROM highlights WHERE highlightId = :id")
+    abstract suspend fun deleteHighlight(id: String)
+
+    @Query("SELECT COUNT(*) FROM highlights WHERE bookKey = :bookKey")
+    abstract suspend fun highlightCount(bookKey: String): Int
+
+    // ---- standalone notes ----
+    @Upsert
+    abstract suspend fun upsertNote(note: AnnotationNoteEntity)
+
+    @Query("SELECT * FROM annotation_notes WHERE bookKey = :bookKey ORDER BY createdAt")
+    abstract fun observeNotes(bookKey: String): Flow<List<AnnotationNoteEntity>>
+
+    @Query("SELECT * FROM annotation_notes WHERE bookKey = :bookKey ORDER BY createdAt")
+    abstract suspend fun notesForBook(bookKey: String): List<AnnotationNoteEntity>
+
+    @Query("DELETE FROM annotation_notes WHERE noteId = :id")
+    abstract suspend fun deleteNote(id: String)
+
+    // ---- bookmarks (schema wired; create/list UI is item F) ----
+    @Upsert
+    abstract suspend fun upsertBookmark(bookmark: BookmarkEntity)
+
+    @Query("SELECT * FROM bookmarks WHERE bookKey = :bookKey ORDER BY createdAt")
+    abstract fun observeBookmarks(bookKey: String): Flow<List<BookmarkEntity>>
+
+    @Query("SELECT * FROM bookmarks WHERE bookKey = :bookKey ORDER BY createdAt")
+    abstract suspend fun bookmarksForBook(bookKey: String): List<BookmarkEntity>
+
+    @Query("DELETE FROM bookmarks WHERE bookmarkId = :id")
+    abstract suspend fun deleteBookmark(id: String)
+}

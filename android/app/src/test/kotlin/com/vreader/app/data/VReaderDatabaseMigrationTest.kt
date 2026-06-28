@@ -159,4 +159,41 @@ class VReaderDatabaseMigrationTest {
             db.close()
         }
     }
+
+    /**
+     * Feature #123 — the FULL migration chain 1→2→3→4 through [VReaderDatabase.ALL_MIGRATIONS]: a v1
+     * file opens as v4, the seeded book/position survive (Room's structural validation passes), and the
+     * new annotation tables (added by MIGRATION_3_4) are created + usable, incl. the unique
+     * (profileKey, anchorKey) dedupe index on `highlights`.
+     */
+    @Test
+    fun migrate1To4_throughAllMigrations_preservesData_andAddsAnnotations() {
+        seedVersion1Database()
+
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            assertNotNull("book survived 1→4", runBlocking { db.bookDao().find(key) })
+            assertNotNull("position survived 1→4", runBlocking { db.readingPositionDao().find(key) })
+
+            // the v4 annotation tables are structurally valid + work; the unique dedupe index holds.
+            runBlocking {
+                val dao = db.annotationDao()
+                val h = HighlightEntity(
+                    highlightId = "h1", bookKey = key, profileKey = "$key:abc", anchorKey = "anchor1",
+                    color = "yellow", selectedText = "hello", note = null,
+                    locatorJSON = "{}", anchorJSON = null, createdAt = 1L, updatedAt = 1L,
+                )
+                dao.upsertHighlight(h)
+                // same (profileKey, anchorKey), different id + color → UPDATE in place, not a duplicate.
+                dao.upsertHighlight(h.copy(highlightId = "h2", color = "pink", updatedAt = 2L))
+                val all = dao.highlightsForBook(key)
+                assertEquals("dedupe collapsed to one row", 1, all.size)
+                assertEquals("update-in-place changed the color", "pink", all.single().color)
+            }
+        } finally {
+            db.close()
+        }
+    }
 }
