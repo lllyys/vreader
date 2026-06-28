@@ -57,9 +57,11 @@ Build order is roughly reuse-leverage / dependency order.
   Status: **IN PROGRESS** — decomposed into 3 features (Gate-2 entry-point decision).
   **#123 EPUB highlighting VERIFIED 2026-06-28** (`android/v0.11.0`, GH #1835 closed: schema +
   domain + Readium selection/decoration + edit/remove, on-device-verified incl. live-navigator render).
-  Remaining for box B: **#124 TXT/MD highlighting** (custom Compose selection engine) + the
-  **annotations review sheet + bookmark creation** (ride with item **F**, which owns the chrome entry).
-  Box checks when all three land.
+  **#124 TXT highlighting VERIFIED 2026-06-28** (`android/v0.12.0`, GH #1841 closed: custom Compose
+  long-press-drag selection + wash render + tap-edit/remove; the gesture is automatable via the Compose
+  harness). Remaining for box B: **#125 MD highlighting** (needs a `MarkdownRenderer` source-offset map)
+  + the **annotations review sheet + bookmark creation** (ride with item **F**, which owns the chrome
+  entry). Box checks when all land.
 
 - [ ] **C. Library management — collections + search** — a collections shelf-bar over the grid +
   manage/assign sheets + search (metadata hits split from in-text hits).
