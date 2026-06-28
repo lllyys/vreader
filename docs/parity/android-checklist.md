@@ -43,10 +43,11 @@ These are done — listed so progress is visible and parity isn't re-litigated.
 The finite list. Each is autonomously buildable (its design is committed; none is design-blocked).
 Build order is roughly reuse-leverage / dependency order.
 
-- [~] **A. Reading stats** — in-reader session pill + time-detail card + dashboard (window bar · hero ·
+- [x] **A. Reading stats** — in-reader session pill + time-detail card + dashboard (window bar · hero ·
   14-day chart · per-book table) over a Room reading-time tracker.
-  Design: `vreader-stats-android.jsx`. Status: **IN PROGRESS** — #122, WI-1 merged (`android/v0.9.1`);
-  WI-2 (repo+tracker+VM) / WI-3 (Compose) / WI-4 (reader hook + accept) remain. GH #1828.
+  Design: `vreader-stats-android.jsx`. Status: **VERIFIED 2026-06-28** — #122, all 4 WIs merged
+  (`android/v0.9.1`→`v0.10.0`); Gate-5b `dev-docs/verification/feature-122-20260628.md` (`result: pass`).
+  GH #1828 closed.
 
 - [ ] **B. Highlights & annotations** — in-reader text-selection popover (5 colors · highlight · note ·
   copy · translate · share) + the annotations review sheet (highlights / notes / bookmarks filter).
