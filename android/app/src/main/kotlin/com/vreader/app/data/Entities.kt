@@ -73,13 +73,17 @@ data class DailyReadingEntity(
 
 /**
  * A text highlight — feature #123 (EPUB highlights & notes). Mirrors the iOS `Highlight` @Model.
- * `locatorJSON` is the canonical `vreader.contracts.Locator.canonicalJson()` (NOT a `VReaderLocator`
- * envelope or Readium JSON — the #113 backup contract requires plain `Locator`); the engine-precise
- * anchor (Readium CFI / TXT range) lives ONLY in `anchorJSON`. Dedupe is on the unique
- * `(profileKey, anchorKey)` — `profileKey = "$bookKey:${locator.canonicalHash}"`, `anchorKey` is the
- * NON-NULL `anchorHash ?: "__nil_anchor__"` sentinel (SQLite treats NULLs as distinct in a unique
- * index, so a nullable column would let repeated null-anchor highlights bypass dedupe — the sentinel
- * collapses them per `profileKey`, matching iOS's nil-anchor-by-profileKey dedupe).
+ * `locatorJSON` stores the FULL round-trippable `vreader.contracts.Locator` (the data-class JSON — a
+ * PLAIN `Locator`, NEVER a `VReaderLocator` envelope or Readium JSON), the position-precedent of
+ * keeping the round-trippable form in Room. **The #113 backup collector (deferred) MUST convert it to
+ * `record.locator.canonicalJson()` for the on-wire `BackupHighlight.locatorJSON` — do NOT copy this
+ * column verbatim into a backup.** The engine-precise anchor (Readium CFI / TXT range) lives ONLY in
+ * `anchorJSON`. Dedupe is on the unique `(profileKey, anchorKey)` — `profileKey =
+ * "$bookKey:${sha256(locator.canonicalJson())}"` (derived from the CANONICAL form so dedup is
+ * cross-platform-stable regardless of the stored round-trip form), `anchorKey` is the NON-NULL
+ * `anchorHash ?: "__nil_anchor__"` sentinel (SQLite treats NULLs as distinct in a unique index, so a
+ * nullable column would let repeated null-anchor highlights bypass dedupe — the sentinel collapses
+ * them per `profileKey`, matching iOS's nil-anchor-by-profileKey dedupe).
  */
 @Entity(
     tableName = "highlights",
@@ -101,7 +105,7 @@ data class HighlightEntity(
     val color: String,                     // AnnotationColor.key (yellow/green/blue/pink/red) or hex
     val selectedText: String,
     val note: String?,                     // optional inline note on the highlight
-    val locatorJSON: String,               // canonical Locator.canonicalJson()
+    val locatorJSON: String,               // full round-trippable plain Locator JSON (backup converts to canonicalJson)
     val anchorJSON: String?,               // serialized AnnotationAnchor (engine-precise)
     val createdAt: Long,
     val updatedAt: Long,
@@ -109,8 +113,9 @@ data class HighlightEntity(
 
 /**
  * A standalone note — feature #123. Mirrors the iOS `AnnotationNote` @Model (the design's
- * "STANDALONE" card). Same `locatorJSON` (canonical) + `anchorJSON` (precise) contract as
- * [HighlightEntity]. No range-dedupe (a reader may keep several notes at one spot).
+ * "STANDALONE" card). Same `locatorJSON` (full round-trippable plain Locator; backup converts to
+ * canonical) + `anchorJSON` (precise) contract as [HighlightEntity]. No range-dedupe (a reader may
+ * keep several notes at one spot).
  */
 @Entity(
     tableName = "annotation_notes",

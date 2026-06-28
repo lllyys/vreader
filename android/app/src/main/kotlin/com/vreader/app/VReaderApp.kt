@@ -9,6 +9,7 @@ import android.content.Context
 import com.vreader.app.data.BookImporter
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
+import com.vreader.app.annotations.AnnotationsRepository
 import com.vreader.app.stats.ReadingStatsRepository
 import com.vreader.app.stats.ReadingTimeTracker
 import com.vreader.app.stats.clock.SystemDateClock
@@ -39,6 +40,12 @@ class AppContainer(context: Context) {
     }
     val readingTimeTracker: ReadingTimeTracker by lazy {
         ReadingTimeTracker(statsRepository, SystemElapsedClock(), dateClock)
+    }
+
+    // feature #123 — annotations (EPUB highlights & notes). Process-singleton so the reader VM /
+    // rotation share one instance (the statsRepository precedent).
+    val annotationsRepository: AnnotationsRepository by lazy {
+        AnnotationsRepository(database.annotationDao())
     }
 
     /** Process-lifetime scope for fire-and-forget writes that must outlive a screen
