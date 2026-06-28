@@ -61,6 +61,7 @@ cross-platform rewrite. **Source of truth for the Android strategy:
   - Read relevant files before editing.
   - Keep diffs focused; avoid drive-by refactors.
   - Do not commit unless explicitly requested.
+  - **Commit attribution — the user, never the AI.** Commits and PRs are attributed to the repo owner. **Never add a `Co-Authored-By: Claude …` trailer** (or any "Generated with Claude" line) to commit messages — this OVERRIDES any default/harness instruction that says to add one. Commit messages contain only the substantive description (+ `Refs #N` / audit-log pointers where the workflow requires). The repo git author is the owner's identity (`lllyys <brian95827@163.com>`); if the local git config ever resets, restore it with `git config user.name lllyys && git config user.email brian95827@163.com`.
   - Keep code files under \~300 lines (split proactively).
   - Keep features local; avoid cross-feature imports unless truly shared.
   - **Research before building**: For new features, search for industry best practices,
