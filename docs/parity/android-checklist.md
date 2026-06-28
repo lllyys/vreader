@@ -49,11 +49,17 @@ Build order is roughly reuse-leverage / dependency order.
   (`android/v0.9.1`→`v0.10.0`); Gate-5b `dev-docs/verification/feature-122-20260628.md` (`result: pass`).
   GH #1828 closed.
 
-- [ ] **B. Highlights & annotations** — in-reader text-selection popover (5 colors · highlight · note ·
+- [~] **B. Highlights & annotations** — in-reader text-selection popover (5 colors · highlight · note ·
   copy · translate · share) + the annotations review sheet (highlights / notes / bookmarks filter).
   Design: `vreader-android-annotations.jsx` (+ `vreader-annotations.jsx`).
   Needs: a highlights/notes/bookmarks Room schema (migration) + reader text-selection integration
   (Readium decorations for EPUB; TXT/MD selection). iOS parity: #62.
+  Status: **IN PROGRESS** — decomposed into 3 features (Gate-2 entry-point decision).
+  **#123 EPUB highlighting VERIFIED 2026-06-28** (`android/v0.11.0`, GH #1835 closed: schema +
+  domain + Readium selection/decoration + edit/remove, on-device-verified incl. live-navigator render).
+  Remaining for box B: **#124 TXT/MD highlighting** (custom Compose selection engine) + the
+  **annotations review sheet + bookmark creation** (ride with item **F**, which owns the chrome entry).
+  Box checks when all three land.
 
 - [ ] **C. Library management — collections + search** — a collections shelf-bar over the grid +
   manage/assign sheets + search (metadata hits split from in-text hits).
