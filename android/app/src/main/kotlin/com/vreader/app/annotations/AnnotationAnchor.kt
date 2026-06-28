@@ -30,7 +30,16 @@ sealed interface AnnotationAnchor {
 
     @Serializable
     @SerialName("epub")
-    data class Epub(val href: String, val cfi: String, val serializedRange: EpubSerializedRange? = null) : AnnotationAnchor
+    data class Epub(
+        val href: String,
+        val cfi: String,
+        val serializedRange: EpubSerializedRange? = null,
+        // The verbatim Readium `Locator` JSON of the selection — the exact, lossless re-application
+        // anchor for `DecorableNavigator.applyDecorations` on reopen (reconstructed via
+        // `Locator.fromJSON`, the proven position-restore path). Android-originated (Readium-specific),
+        // additive + nullable so iOS-shaped anchors (href/cfi/serializedRange) still decode.
+        val readiumLocatorJSON: String? = null,
+    ) : AnnotationAnchor
 
     /** SHA-256 (hex) of the canonical JSON — the dedupe discriminant. Locally deterministic
      *  (kotlinx fixed field order), the same basis as `VReaderLocator.canonicalHash`. */

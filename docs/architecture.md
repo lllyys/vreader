@@ -633,6 +633,27 @@ the follow-on #119). Mirrors iOS `ProviderKind`/`AIProvider`/`AIChatViewModel`.
 Verified by `scripts/run-ai-roundtrip.sh` — a live OpenAI-compatible SSE stub,
 test-connection + streamed chat on the emulator (`AiRoundTripConnectedTest`).
 
+### Annotations (`com.vreader.app.annotations`) — feature #123 (EPUB highlights & notes)
+
+Select text in an EPUB → a 5-color highlight / note / copy / share, persisted to the WI-1 Room tables
+and re-rendered as Readium decorations on reopen. The selection gesture is the entry point (no reader
+chrome). TXT/MD highlighting (#124) and the annotations review sheet + bookmark creation (item F) are
+follow-ons; the bookmark table/repo ship here unused-by-UI.
+
+| Type | Purpose |
+| --- | --- |
+| `AnnotationColor` | The 5 design colors (yellow/green/blue/pink/red — design parity; iOS has 4, `red` is Android-only). |
+| `AnnotationAnchor` | Sealed `Text`(sourceUnitId/UTF-16 range) / `Epub`(href/cfi/serializedRange + the verbatim Readium locator JSON for lossless re-apply); SHA-256 `anchorHash` = the dedupe discriminant. |
+| `AnnotationsRepository` | DTO boundary over `AnnotationDao`: CRUD + Flow reads; `addHighlight` dedupes via the transactional upsert and returns the PERSISTED row; rejects a locator whose `fingerprintKey` ≠ the book. Process-singleton in `AppContainer`. |
+| `EpubAnnotationMapper` | Readium `Selection` → (canonical `Locator` + `AnnotationAnchor.Epub` + text); a stored highlight → a Readium `Locator` (via `Locator.fromJSON`) for `applyDecorations`. |
+| `SelectionPopover` + `SelectionPopoverViewModel` | The designed floating popover (color row + select/edit/note modes); a plain `StateFlow` holder, the Activity performs the side effects. |
+| `reader.ReaderHighlightController` | Wraps Readium's `SelectableNavigator`/`DecorableNavigator`: `applyHighlights` (builds `Decoration.Style.Highlight`), `currentSelectionLocator`, `clearSelection`, `observeActivations` (decoration taps → WI-4 edit/remove). |
+
+`ReaderActivity` configures the `EpubNavigatorFragment` with a `selectionActionModeCallback` that
+captures the live selection and shows the popover over a `ComposeView` overlay; stored highlights are
+re-applied as decorations via an `observeHighlights` Flow on open. Verified on the emulator
+(`ReaderActivityTest.seededHighlight_appliesAsDecoration_onLiveNavigator` drives the real WebView).
+
 ### Reading-stats (`com.vreader.app.stats`) — feature #122
 
 Reading-time tracking + the dashboard (design #1800). Mirrors the iOS feature
