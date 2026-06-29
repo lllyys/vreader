@@ -115,6 +115,11 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.fragment:fragment-ktx:1.8.9")
 
+    // feature #126 WI-3 — the AZW3/foliate reader's secure WebView bridge:
+    // WebViewAssetLoader (virtual https origin), WebViewCompat.addWebMessageListener
+    // (origin-allowlisted bridge, never addJavascriptInterface), WebViewFeature gating.
+    implementation("androidx.webkit:webkit:1.16.0")
+
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     testImplementation("junit:junit:4.13.2")
@@ -133,9 +138,4 @@ dependencies {
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
-
-    // feature #126 WI-0 (spike) — WebView + foliate-js go/no-go harness.
-    // WebViewAssetLoader (virtual https origin) + WebViewCompat.addWebMessageListener
-    // (secure bridge) + WebViewFeature gating. WI-3 promotes this to `implementation`.
-    androidTestImplementation("androidx.webkit:webkit:1.12.1")
 }
