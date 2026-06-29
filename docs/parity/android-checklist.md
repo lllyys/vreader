@@ -88,9 +88,14 @@ Build order is roughly reuse-leverage / dependency order.
 
 ### Deferred (explicit go/no-go — not autonomously startable)
 
-- [-] **AZW3 / MOBI reader** — Readium-Kotlin has no native AZW3/MOBI; iOS uses a libmobi C library, so
-  Android needs a large, HIGH-risk NDK port. **Requires a user go/no-go**, not an autonomous start.
-  iOS parity: Foliate/libmobi path.
+- [ ] **AZW3 / MOBI / KF8 reader** → tracked as **feature #126** (`docs/features.md`). **Go/no-go = GO**
+  (user, 2026-06-29: "the azw3 is needed"). **Framing corrected**: iOS does NOT read these via libmobi —
+  it renders them with **foliate-js (`mobi.js`) in a WKWebView** (`FoliateSpikeView`); libmobi is auxiliary
+  (metadata/cover/convert). So Android's path is a **`WebView` + pinned foliate-js host** (mirror
+  `FoliateSpikeView`), NOT a "large HIGH-risk NDK port". Prior art: Anx-Reader, Readest. **Gated on a
+  go/no-go Spike #1** (WebView↔native **bridge security** is the #1 risk: `WebViewCompat.addWebMessageListener`
+  + `WebViewAssetLoader`, never `addJavascriptInterface`) before any WIs — run via `/feature-workflow #126`.
+  iOS parity: Foliate path.
 
 ---
 
