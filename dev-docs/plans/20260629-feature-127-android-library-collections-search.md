@@ -193,6 +193,18 @@ sections per the manifest model) tolerate; restoring an iOS backup's collections
 
 ## Revision history
 
+- v5 (2026-06-29) — **WI-5 merged** (`android/v0.13.6`, PR #1876, Gate-4 ship-as-is): the manage sheet
+  rule-51 rework — removed the invented nav-pill + trash button; reach the manage sheet from the designed
+  scoped-collection "edit collection" header; delete UI deferred to **needs-design #1875**; split the
+  manage sheet + scoped header into `CollectionManageSheet.kt` (file-size). Gate-5 `ManageSheetUiTest`
+  3/3 connected. **WI-6 in progress** — `BackupCollector` emits a deterministic `collections.json`
+  (collections sorted by `nameKey`, each `bookFingerprintKeys` filtered to backed-up books + sorted →
+  byte-stable); `RestoreImporter` merges by `nameKey` (create-with-backup-`createdAt` if absent, else keep
+  existing + its `createdAt`) and unions membership for existing books only (unknown keys dropped) via a
+  transactional `CollectionDao.restoreCollection` + FK-safe `addMembershipIfBookExists`. JVM
+  `CollectionBackupTest` covers collect-determinism + byte-stability + round-trip + merge-collision +
+  unknown-key-dropped + absent-section.
+
 - v3 (2026-06-29) — **Gate-2 round-2 fixes** (Codex `019f1296`, gpt-5.5/high; round-1's 1C/4H structural
   findings confirmed resolved; round-2 raised 1H/4M/3L on the backup design): **(High)** `collections.json`
   determinism — sort collections by `(nameKey, createdAt)` + sort each `bookFingerprintKeys`; byte-stability
