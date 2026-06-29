@@ -48,6 +48,18 @@ class CollectionRepository(
         }
     }
 
+    /** Create a collection AND add [bookKey] to it ATOMICALLY (one DB transaction — an FK failure on the
+     *  membership rolls back the collection, no orphan). Rejects empty / duplicate (case-insensitive). */
+    suspend fun createAndAssign(rawName: String, bookKey: String): Result<Collection> {
+        val name = normalize(rawName) ?: return fail(CollectionError.EmptyName)
+        val entity = CollectionEntity(id = newId(), name = name, nameKey = nameKey(name), createdAt = now())
+        return if (dao.createAndAssign(entity, bookKey)) {
+            Result.success(Collection(entity.id, entity.name, entity.createdAt, bookCount = 1))
+        } else {
+            fail(CollectionError.DuplicateName)
+        }
+    }
+
     /** Rename a collection; rejects empty / a name taken by ANOTHER collection; NotFound if gone. */
     suspend fun rename(id: String, rawName: String): Result<Unit> {
         val name = normalize(rawName) ?: return fail(CollectionError.EmptyName)

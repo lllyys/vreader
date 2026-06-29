@@ -118,4 +118,19 @@ class CollectionRepositoryTest {
         repo.delete(c.id) // no throw on a gone collection
         assertFalse(repo.observeCollections().first().any { it.id == c.id })
     }
+
+    @Test fun createAndAssign_succeeds_forAnExistingBook() = runBlocking {
+        val c = repo.createAndAssign("Fiction", bookKey).getOrThrow()
+        assertEquals(1, c.bookCount)
+        assertEquals(listOf(bookKey), db.collectionDao().bookKeysInCollection(c.id))
+    }
+
+    @Test fun createAndAssign_fkFailure_rollsBack_noOrphanCollection() = runBlocking {
+        val before = db.collectionDao().getAllCollections().size
+        // a non-existent book → the membership FK insert fails → the @Transaction rolls BOTH back.
+        try {
+            repo.createAndAssign("Orphan", "epub:${"z".repeat(64)}:9")
+        } catch (e: Exception) { /* expected: FK constraint → rollback */ }
+        assertEquals("no orphan collection survives the membership FK rollback", before, db.collectionDao().getAllCollections().size)
+    }
 }

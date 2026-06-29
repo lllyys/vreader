@@ -19,6 +19,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -97,5 +98,19 @@ class LibraryViewModelCollectionsTest {
         vm.selectCollection(b.id)
         // flatMapLatest cancels A's flow → B shows only Beta, never the stale Alpha.
         assertEquals("B → only Beta (no leak from A)", listOf("Beta"), awaitTitles("Beta"))
+    }
+
+    @Test fun createCollectionAndAssign_createsTheCollection_andAddsTheBook() = runBlocking {
+        vm.createCollectionAndAssign("Fiction", key1)
+        val col = withTimeout(3_000) { vm.collections.first { list -> list.any { it.name == "Fiction" } } }.first { it.name == "Fiction" }
+        val members = withTimeout(3_000) { collections.observeBookKeysInCollection(col.id).first { it.contains(key1) } }
+        assertTrue("the new collection contains the assigned book", members.contains(key1))
+    }
+
+    @Test fun createCollectionAndAssign_duplicateName_doesNotCreateASecond() = runBlocking {
+        collections.createCollection("Fiction").getOrThrow()
+        vm.createCollectionAndAssign("FICTION", key1) // case-folded duplicate → rejected (event)
+        val count = withTimeout(3_000) { vm.collections.first { it.isNotEmpty() } }.count { it.name.equals("fiction", ignoreCase = true) }
+        assertEquals("the duplicate did not create a second collection", 1, count)
     }
 }
