@@ -234,16 +234,25 @@ Tier: **F** foundational · **B** behavioral (Gate-5a slice on emulator).
   cleanly to the iOS bundle. Small PR.
 - **WI-2 — `FoliateMessageParser` + `FoliateAssetServer` (shell + book loaders) — F.** Small–medium PR.
 - **WI-3 — `FoliateBridge` security integration (+`androidx.webkit`) — F (own audit).**
-  `addWebMessageListener` shell-origin-only + `isMainFrame`/`sourceOrigin` reject;
-  CSP; nav-block; feature-gate → `WebViewUnsupported`. **Re-runs the WI-0 hostile-AZW3
-  test as a gate.** Medium PR.
+  `FoliateAssetServer` (virtual-https loader + book `PathHandler`), `FoliateBridgePolicy`
+  (pure decisions: trusted-message origin/`isMainFrame`, allowed-nav, remote-resource block),
+  `FoliateBridge` (WebView hardening + `addWebMessageListener` shell-origin-only + `shouldInterceptRequest`
+  remote-block + nav-block + render-death passthrough + `WebViewFeature` gate → `WebViewUnsupported`).
+  Verified by `FoliateBridgePolicyTest` (JVM) + WI-0's on-device proof of the same mechanism.
+  **The real-bridge on-device hostile re-test is folded into WI-6's Activity end-to-end test** (a
+  standalone connected test here wedged the runner via a leaked collector/WebView; WI-6 drives the
+  real bridge with a real book + render, the stronger integration). Medium PR.
 - **WI-4 — `Azw3Document` (@MainThread WebView controller) — F.** Medium PR.
 - **WI-5 — `Azw3LocatorBridge` (relocate → wrapLegacy) — F.** Small–medium PR.
 - **WI-6 — `Azw3ReaderActivity` + Compose host + dispatch + manifest + render-death recovery — B.**
   Owns `onRenderProcessGone` recovery (snapshot `latestLocator` → remove+`destroy` →
   recreate on main → reopen → restore → return `true`). Design check: chrome mirrors
   the committed Android reader surfaces; `WebViewUnsupported` reuses the Pdf
-  Corrupt/Empty pattern (else `needs-design`). Medium PR.
+  Corrupt/Empty pattern (else `needs-design`). **MUST verify on-device (WI-3 audit
+  residual): a valid AZW3 renders through the real `FoliateBridge`'s `blob:` subframes,
+  off-origin top-level nav is blocked, and remote subresource loads are blocked** — the
+  real-bridge smoke deferred from WI-3 (its standalone connected test wedged the runner).
+  Medium PR.
 - **WI-7 — resume persist/restore + onStop flush — B.** Save per relocate via the
   conflated channel; onStop synchronously enqueues main-owned `latestLocator`, drains
   before close; restore `loadPosition→resolve→Canonical→readerAPI.init({cfi}|{fraction})`;
