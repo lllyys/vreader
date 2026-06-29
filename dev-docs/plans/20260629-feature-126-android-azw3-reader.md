@@ -133,6 +133,42 @@ section blobs (also a bundle patch) or section-HTML sanitization, and re-tests.
 
 ---
 
+## WI-0 spike verdict — **GO** (2026-06-29, emulator `vreader-test` API 35)
+
+Run on a real Android emulator via `FoliateSpikeHarnessTest` (2 tests, 0 failures):
+
+- **Render** (`GO — sections=85, relocates=5 (init=1, +nav=4)`): the **security-patched**
+  bundle (`allow-scripts` stripped from all section iframes, SHA `aa4327f1…`) + the
+  `window.webkit.messageHandlers` shim **load in Android System WebView, mobi.js
+  decodes the real 6 MB CJK AZW3 (85 sections), foliate renders it, and eventing
+  (book-ready + relocate on init + navigation) flows through the shim →
+  `addWebMessageListener`**. A control with the *unpatched* bundle confirmed the only
+  hurdle was WebView sizing (a detached 0×0 WebView can't paginate) — **stripping
+  `allow-scripts` does NOT break rendering or eventing on Chromium** (the source's
+  "WebKit bug" caveat does not apply to Android WebView).
+- **Security** (`blocked=0, control=[(parent.vreaderHost,true),(top.vreaderHost,true),(parent.webkit,true)]`):
+  a hostile blob-iframe section (same shape foliate mints for MOBI/KF8) attempting
+  `parent.vreaderHost`, `top.vreaderHost`, and `parent.webkit.messageHandlers`
+  **reaches native via all 3 paths WITH `allow-scripts` and is COMPLETELY blocked
+  WITHOUT it (0 hits)**. Crucially, all 3 control hits report **`isMainFrame=true`** —
+  empirically confirming Codex's round-2 point that **`isMainFrame` alone is NOT a
+  sufficient boundary** (a same-origin section script calling `parent.vreaderHost`
+  is attributed to the main frame), so **stripping `allow-scripts` is the
+  load-bearing mitigation**. A third test asserts the shipped bundle has **zero**
+  `allow-scripts` (every section iframe patched, reflowable + fixed-layout).
+
+**Decision: GO.** The WebView+foliate-js approach is viable; the disallow-book-scripts
+security model is empirically validated on-device.
+
+**Scope proven by this spike** (narrowed per Gate-4): real **reflowable** AZW3 render +
+eventing on Android WebView, the synthetic same-origin script-escape sandbox boundary
+(before/after), and full-bundle patch coverage. **Deferred to their owning WIs** (not
+claimed proven here): passive-resource CSP + `shouldInterceptRequest` (WI-3), the
+hostile payload through the REAL foliate fixed-layout section path + a fixed-layout KF8
+fixture (WI-3 test), `onRenderProcessGone` recovery (WI-6), large-book memory + locator
+round-trip (WI-7/WI-8). The shell CSP's `'unsafe-inline'` is a spike posture; WI-1/WI-3
+ship the nonce/hash + section CSP.
+
 ## Surface area (file-by-file)
 
 App paths under `android/app/src/main/kotlin/com/vreader/app/reader/`.
