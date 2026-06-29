@@ -35,13 +35,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val container = (application as VReaderApp).container
         val factory = viewModelFactory {
-            initializer { LibraryViewModel(container.repository, container.importer, contentResolver) }
+            initializer { LibraryViewModel(container.repository, container.importer, container.collectionRepository, contentResolver) }
         }
 
         setContent {
             VReaderTheme {
                 val viewModel: LibraryViewModel = viewModel(factory = factory)
                 val state by viewModel.uiState.collectAsStateWithLifecycle()
+                val collections by viewModel.collections.collectAsStateWithLifecycle()
+                val selectedCollectionId by viewModel.selectedCollectionId.collectAsStateWithLifecycle()
 
                 val picker = rememberLauncherForActivityResult(
                     ActivityResultContracts.OpenDocument(),
@@ -49,14 +51,19 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(Unit) {
                     viewModel.events.collect { event ->
-                        if (event is LibraryEvent.ImportFailed) {
-                            Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_SHORT).show()
+                        val message = when (event) {
+                            is LibraryEvent.ImportFailed -> event.message
+                            is LibraryEvent.CollectionOpFailed -> event.message
                         }
+                        Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
                     }
                 }
 
                 LibraryScreen(
                     state = state,
+                    collections = collections,
+                    selectedCollectionId = selectedCollectionId,
+                    onSelectCollection = viewModel::selectCollection,
                     onOpenBook = { book ->
                         // Route by the typed format (exhaustive — never open a format into
                         // the wrong host). Formats without a reader yet are surfaced, not

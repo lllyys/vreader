@@ -13,15 +13,23 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vreader.app.data.Book
 import com.vreader.app.data.BookImporter
+import com.vreader.app.data.Collection
+import com.vreader.app.data.CollectionException
+import com.vreader.app.data.CollectionRepository
 import com.vreader.app.data.ImportException
 import com.vreader.app.data.LibraryRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -52,18 +60,81 @@ data class LibraryUiState(
 /** One-shot events (e.g. an import error toast) the screen consumes. */
 sealed interface LibraryEvent {
     data class ImportFailed(val message: String) : LibraryEvent
+    /** A collection create/rename/delete/assign was rejected (feature #127). */
+    data class CollectionOpFailed(val message: String) : LibraryEvent
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class LibraryViewModel(
     private val repository: LibraryRepository,
     private val importer: BookImporter,
+    private val collectionRepository: CollectionRepository,
     private val resolver: ContentResolver,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
-    val uiState: StateFlow<LibraryUiState> = repository.observeLibrary()
+    // feature #127 — the user collections (for the shelf-bar) + the selected chip ("All" = null).
+    val collections: StateFlow<List<Collection>> = collectionRepository.observeCollections()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _selectedCollectionId = MutableStateFlow<String?>(null)
+    val selectedCollectionId: StateFlow<String?> = _selectedCollectionId.asStateFlow()
+
+    // flatMapLatest so changing the selection CANCELS the previous selection's membership flow —
+    // a stale previous-selection list can never filter the new selection (Gate-2 race fix).
+    val uiState: StateFlow<LibraryUiState> = _selectedCollectionId
+        .flatMapLatest { id ->
+            if (id == null) {
+                repository.observeLibrary()
+            } else {
+                combine(repository.observeLibrary(), collectionRepository.observeBookKeysInCollection(id)) { books, keys ->
+                    val members = keys.toHashSet()
+                    books.filter { it.fingerprintKey in members }
+                }
+            }
+        }
         .map { books -> LibraryUiState(loading = false, books = books.map(::toUi)) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState(loading = true))
+
+    init {
+        // reset the selection to "All" when the selected collection is deleted/gone underneath it.
+        viewModelScope.launch {
+            collections.collect { cols ->
+                val sel = _selectedCollectionId.value
+                if (sel != null && cols.none { it.id == sel }) _selectedCollectionId.value = null
+            }
+        }
+    }
+
+    fun selectCollection(id: String?) { _selectedCollectionId.value = id }
+
+    fun createCollection(name: String) = runCollectionOp { collectionRepository.createCollection(name) }
+    fun renameCollection(id: String, name: String) = runCollectionOp { collectionRepository.rename(id, name) }
+    fun deleteCollection(id: String) = runCollectionOp { collectionRepository.delete(id); Result.success(Unit) }
+    fun assign(bookKey: String, collectionId: String) = runCollectionOp { collectionRepository.assign(bookKey, collectionId); Result.success(Unit) }
+    fun unassign(bookKey: String, collectionId: String) = runCollectionOp { collectionRepository.unassign(bookKey, collectionId); Result.success(Unit) }
+
+    /** The single failure boundary for ALL collection mutations: surfaces a returned [Result] failure
+     *  AND a THROWN exception (e.g. an FK constraint race when assigning to a just-deleted collection) as
+     *  a [LibraryEvent.CollectionOpFailed] toast (Gate-4 WI-3 Medium) — never crashes the screen. */
+    private fun runCollectionOp(op: suspend () -> Result<*>) {
+        viewModelScope.launch {
+            try {
+                op().onFailure { e -> _events.trySend(LibraryEvent.CollectionOpFailed(collectionErrorMessage(e))) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _events.trySend(LibraryEvent.CollectionOpFailed(collectionErrorMessage(e)))
+            }
+        }
+    }
+
+    private fun collectionErrorMessage(e: Throwable): String = when ((e as? CollectionException)?.error) {
+        com.vreader.app.data.CollectionError.EmptyName -> "Enter a collection name"
+        com.vreader.app.data.CollectionError.DuplicateName -> "A collection with that name already exists"
+        com.vreader.app.data.CollectionError.NotFound -> "That collection no longer exists"
+        null -> "Couldn't update the collection"
+    }
 
     // A Channel (one consumer) rather than a non-replaying SharedFlow: an import that
     // finishes during the LaunchedEffect collector gap around a config change is
