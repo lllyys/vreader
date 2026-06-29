@@ -53,6 +53,19 @@ class AppContainer(context: Context) {
         com.vreader.app.data.CollectionRepository(database.collectionDao())
     }
 
+    // feature #129 — reader display settings. A device-local DataStore (the OpdsSourceStore /
+    // AiProviderStore precedent), global (not per-book), process-singleton so a settings change
+    // propagates to whatever reader is open. Stored under noBackupFilesDir — display prefs are
+    // per-device (NOT in the backup contract), so they must be excluded from Android Auto Backup.
+    private val readerSettingsDataStore: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> by lazy {
+        androidx.datastore.preferences.core.PreferenceDataStoreFactory.create {
+            File(appContext.noBackupFilesDir, "reader_settings.preferences_pb")
+        }
+    }
+    val readerSettingsStore: com.vreader.app.reader.settings.ReaderSettingsStore by lazy {
+        com.vreader.app.reader.settings.ReaderSettingsStore(readerSettingsDataStore)
+    }
+
     /** Process-lifetime scope for fire-and-forget writes that must outlive a screen
      *  (e.g. the reader's onStop position flush — it must finish even as the activity
      *  is being torn down). */
