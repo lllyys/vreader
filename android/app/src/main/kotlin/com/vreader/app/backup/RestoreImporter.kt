@@ -10,6 +10,7 @@ package com.vreader.app.backup
 
 import com.vreader.app.backup.archive.BackupArchiveReader
 import com.vreader.app.data.BookImporter
+import com.vreader.app.data.CollectionDao
 import com.vreader.app.data.LibraryRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -17,12 +18,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import vreader.contracts.Locator
 import vreader.contracts.VReaderLocator
+import vreader.contracts.backup.BackupCollectionsEnvelope
 import vreader.contracts.backup.BackupJson
 import vreader.contracts.backup.BackupLibraryEntry
 import vreader.contracts.backup.BackupPosition
 import vreader.contracts.backup.BackupPositionsEnvelope
 import vreader.contracts.backup.BackupSchema
 import java.io.InputStream
+import java.util.Locale
+import java.util.UUID
 
 /** One book that failed to restore (the others still restore). */
 data class RestoreBookFailure(val fingerprintKey: String, val reason: String)
@@ -34,6 +38,7 @@ data class RestoreImportResult(
     val restored: List<String>,
     val failed: List<RestoreBookFailure>,
     val positionsRestored: Int,
+    val collectionsRestored: Int = 0,
 )
 
 /**
@@ -47,6 +52,9 @@ class RestoreImporter(
     private val repository: LibraryRepository,
     private val fetchBlob: suspend (String) -> InputStream,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    // feature #127 WI-6 — when present, collections.json is restored (merge by nameKey, membership
+    // union) AFTER books so the membership FK holds. Null (default) skips collections (pre-#127).
+    private val collectionDao: CollectionDao? = null,
 ) {
     suspend fun restore(
         reader: BackupArchiveReader,
@@ -72,7 +80,49 @@ class RestoreImporter(
             }
             progress(index + 1, books.size)
         }
-        RestoreImportResult(restored, failed, positionsRestored)
+        // Collections restore AFTER all books so the membership FK (bookKey → books) holds for every key.
+        // `selection` scopes it: a FULL restore (null) restores every collection + membership; a SELECTIVE
+        // restore / retryBook restores only memberships for the selected books and skips collections with no
+        // selected member (so a single-book retry can't materialize unrelated collections — Gate-4 High).
+        val collectionsRestored = restoreCollections(reader, selection)
+        RestoreImportResult(restored, failed, positionsRestored, collectionsRestored)
+    }
+
+    /** Restore collections.json (feature #127 WI-6): merge each backed-up collection by nameKey
+     *  (create-with-backup-createdAt if absent, else keep the existing collection + its createdAt) and
+     *  union its membership (only for books that exist — FK-safe). [eligible] scopes a selective restore:
+     *  null = full restore (every collection, including empty ones); non-null = restore only memberships for
+     *  those keys and skip a collection with no eligible member. Names are trimmed before keying (parity with
+     *  CollectionRepository's `name.trim().lowercase`), and an empty name is skipped. Each collection is one
+     *  @Transaction; a single failure is swallowed. Absent / wrong-schema → 0. Returns the count merged. */
+    private suspend fun restoreCollections(reader: BackupArchiveReader, eligible: Set<String>?): Int {
+        val dao = collectionDao ?: return 0
+        val json = reader.sectionJson(BackupCollector.COLLECTIONS_SECTION) ?: return 0
+        val env = runCatching { BackupJson.decode<BackupCollectionsEnvelope>(json) }.getOrNull() ?: return 0
+        if (env.schemaVersion !in BackupSchema.ACCEPTED_SCHEMA_VERSIONS) return 0
+        var restored = 0
+        for (c in env.collections) {
+            val keys = if (eligible == null) c.bookFingerprintKeys else c.bookFingerprintKeys.filter { it in eligible }
+            // Partial restore: a collection with no selected member is out of scope — don't materialize it.
+            if (eligible != null && keys.isEmpty()) continue
+            val name = c.name.trim()
+            if (name.isEmpty()) continue  // a malformed all-whitespace name has no valid identity
+            try {
+                dao.restoreCollection(
+                    id = UUID.randomUUID().toString(),
+                    name = name,
+                    nameKey = name.lowercase(Locale.ROOT),
+                    createdAt = c.createdAt.toEpochMilli(),
+                    bookKeys = keys,
+                )
+                restored++
+            } catch (e: CancellationException) {
+                throw e  // never swallow coroutine cancellation
+            } catch (e: Exception) {
+                // skip this collection (e.g. an unexpected constraint); the others still restore
+            }
+        }
+        return restored
     }
 
     /** Fetch the blob, import it (re-fingerprint), verify identity, restore manifest metadata. */

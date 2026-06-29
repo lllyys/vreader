@@ -9,8 +9,11 @@ package com.vreader.app.backup
 import com.vreader.app.backup.archive.BackupArchiveEntries
 import com.vreader.app.backup.archive.BlobPath
 import com.vreader.app.data.Book
+import com.vreader.app.data.CollectionDao
 import com.vreader.app.data.LibraryRepository
 import vreader.contracts.BookFormat
+import vreader.contracts.backup.BackupCollection
+import vreader.contracts.backup.BackupCollectionsEnvelope
 import vreader.contracts.backup.BackupJson
 import vreader.contracts.backup.BackupLibraryEntry
 import vreader.contracts.backup.BackupLibraryManifestEnvelope
@@ -52,6 +55,9 @@ class BackupCollector(
     private val repository: LibraryRepository,
     // isFile (not merely exists) — a readable directory must not masquerade as a backable book file.
     private val fileChecker: (String) -> Boolean = { File(it).let { f -> f.isFile && f.canRead() } },
+    // feature #127 WI-6 — when present, a deterministic collections.json section is emitted. Null (the
+    // default) keeps the pre-#127 behavior (no collections section) for callers that don't back up them.
+    private val collectionDao: CollectionDao? = null,
 ) {
     suspend fun collect(
         deviceName: String,
@@ -99,7 +105,10 @@ class BackupCollector(
         val positionsJson = BackupJson.encode(
             BackupPositionsEnvelope(BackupSchema.CURRENT_SCHEMA_VERSION, backupPositions)
         )
-        val sections = mapOf(POSITIONS_SECTION to positionsJson)
+        val sections = buildMap {
+            put(POSITIONS_SECTION, positionsJson)
+            collectCollectionsJson(collectedKeys)?.let { put(COLLECTIONS_SECTION, it) }
+        }
 
         // iOS computes totalSizeBytes as the sum of the section payload sizes (no blobs in the ZIP).
         val totalSize = sections.values.sumOf { it.toByteArray(Charsets.UTF_8).size.toLong() } +
@@ -134,8 +143,29 @@ class BackupCollector(
         sourceCanonicalKey = null,
     )
 
+    /** A deterministic collections.json (feature #127 WI-6): every collection sorted by (nameKey,
+     *  createdAt), each collection's bookFingerprintKeys filtered to the books actually backed up
+     *  ([collectedKeys]) and sorted — so the same logical library serializes byte-identically regardless
+     *  of row insert order (byte-stability). Empty collections are kept (an empty key list). Null when no
+     *  collectionDao is wired (pre-#127 callers). */
+    private suspend fun collectCollectionsJson(collectedKeys: Set<String>): String? {
+        val dao = collectionDao ?: return null
+        val backupCollections = dao.getAllCollections()
+            .sortedWith(compareBy({ it.nameKey }, { it.createdAt }))
+            .map { col ->
+                val keys = dao.bookKeysInCollection(col.id).filter { it in collectedKeys }.sorted()
+                BackupCollection(
+                    name = col.name,
+                    createdAt = Instant.ofEpochMilli(col.createdAt),
+                    bookFingerprintKeys = keys,
+                )
+            }
+        return BackupJson.encode(BackupCollectionsEnvelope(BackupSchema.CURRENT_SCHEMA_VERSION, backupCollections))
+    }
+
     companion object {
         const val POSITIONS_SECTION = "positions.json"
+        const val COLLECTIONS_SECTION = "collections.json"
 
         // Re-exported for the WI-5 service so it doesn't reach into the archive package directly.
         val METADATA_ENTRY = BackupArchiveEntries.METADATA

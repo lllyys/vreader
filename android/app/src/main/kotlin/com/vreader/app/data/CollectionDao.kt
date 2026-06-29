@@ -55,6 +55,15 @@ abstract class CollectionDao {
     @Query("INSERT OR IGNORE INTO book_collection (bookKey, collectionId) VALUES (:bookKey, :collectionId)")
     abstract suspend fun addMembership(bookKey: String, collectionId: String)
 
+    /** Membership add that no-ops when the book isn't in the library — restore (feature #127 WI-6) may
+     *  reference a book that wasn't selected / failed to restore; the FK forbids a dangling membership,
+     *  so guard with WHERE EXISTS (the bookKey FK → books) rather than risk a constraint throw. */
+    @Query(
+        "INSERT OR IGNORE INTO book_collection (bookKey, collectionId) " +
+            "SELECT :bookKey, :collectionId WHERE EXISTS (SELECT 1 FROM books WHERE fingerprintKey = :bookKey)",
+    )
+    abstract suspend fun addMembershipIfBookExists(bookKey: String, collectionId: String)
+
     @Query("DELETE FROM book_collection WHERE bookKey = :bookKey AND collectionId = :collectionId")
     abstract suspend fun removeMembership(bookKey: String, collectionId: String)
 
@@ -100,5 +109,21 @@ abstract class CollectionDao {
         if (existing != null && existing.id != id) return RenameOutcome.Duplicate
         updateName(id, name, nameKey)
         return RenameOutcome.Ok
+    }
+
+    /** Restore one backed-up collection by **nameKey** merge (feature #127 WI-6): if no collection with
+     *  [nameKey] exists, create it with the backup's [createdAt]; otherwise keep the existing collection
+     *  (and its createdAt — never overwrite) and union the membership into it. Memberships are added only
+     *  for books that exist (FK-safe), idempotently. One @Transaction so a partial failure rolls back. */
+    @Transaction
+    open suspend fun restoreCollection(id: String, name: String, nameKey: String, createdAt: Long, bookKeys: List<String>) {
+        val existing = findByNameKey(nameKey)
+        val collectionId = if (existing == null) {
+            insertCollection(CollectionEntity(id = id, name = name, nameKey = nameKey, createdAt = createdAt))
+            id
+        } else {
+            existing.id
+        }
+        for (key in bookKeys) addMembershipIfBookExists(key, collectionId)
     }
 }
