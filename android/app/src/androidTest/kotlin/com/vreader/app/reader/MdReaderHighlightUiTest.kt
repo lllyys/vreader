@@ -50,9 +50,14 @@ class MdReaderHighlightUiTest {
     private fun app() = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as VReaderApp
     private fun ctx() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    /** The whole styled line's SOURCE range (chunk start..end-newline), for seeding a tappable highlight. */
+    /** The whole styled line's SOURCE range (chunk start..end-newline), for seeding a tappable highlight.
+     *  Computed from the IMPORTED asset content (not the hardcoded string) so a fixture edit can't seed
+     *  the wrong range; the drift check fails loudly if `sample-note.md` and `mdContent` diverge. */
     private fun styledLineSourceRange(): Pair<Int, Int> {
-        val doc = TxtDocument.of(mdContent)
+        val content = InstrumentationRegistry.getInstrumentation().context.assets
+            .open("sample-note.md").use { it.readBytes().decodeToString() }
+        check(content == mdContent) { "sample-note.md drifted from the test's mdContent — update mdContent" }
+        val doc = TxtDocument.of(content)
         val ci = (0 until doc.chunkCount).first { doc.textForChunk(it).contains("bold") }
         val base = doc.offsetForChunk(ci)
         val len = doc.textForChunk(ci).length
@@ -103,9 +108,15 @@ class MdReaderHighlightUiTest {
             val loc = Locator(book.contentSHA256, book.fileByteCount, "md", charRangeStartUTF16 = s, charRangeEndUTF16 = e, textQuote = "styled")
             app().container.annotationsRepository.addHighlight(key, AnnotationColor.yellow, "styled", loc, AnnotationAnchor.Text("text-document:$key", s, e))
         }
+        // PROVE the seeded MD highlight produces a NON-EMPTY rendered wash span (else this test would
+        // pass even if washes were disabled — Gate-4 Medium). The activity's drawBehind then paints it.
+        val hls = runBlocking { app().container.annotationsRepository.highlightsForBook(key) }
+        val washes = TxtWashMapper.washesByChunk(TxtDocument.of(mdContent), hls, MarkdownChunkTextMapper(TxtDocument.of(mdContent)))
+        assertTrue("the seeded MD highlight projects to a non-empty rendered wash span", washes.values.any { it.isNotEmpty() })
+
         ActivityScenario.launch<TxtReaderActivity>(TxtReaderActivity.intent(ctx(), key)).use {
             // render completes WITH the md highlight present → the source→rendered wash projection +
-            // getPathForRange path executed for the MD chunk without crashing.
+            // getPathForRange drawBehind path executed for the MD chunk without crashing.
             compose.waitUntil(12_000) { compose.onAllNodesWithText("This is bold and italic", substring = true).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("This is bold and italic", substring = true).assertIsDisplayed()
         }
