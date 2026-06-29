@@ -48,6 +48,11 @@ class AppContainer(context: Context) {
         AnnotationsRepository(database.annotationDao())
     }
 
+    // feature #127 — library collections. Process-singleton (the annotationsRepository precedent).
+    val collectionRepository: com.vreader.app.data.CollectionRepository by lazy {
+        com.vreader.app.data.CollectionRepository(database.collectionDao())
+    }
+
     /** Process-lifetime scope for fire-and-forget writes that must outlive a screen
      *  (e.g. the reader's onStop position flush — it must finish even as the activity
      *  is being torn down). */
