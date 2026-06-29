@@ -62,6 +62,8 @@ fun LibraryScreen(
     onSelectCollection: (String?) -> Unit = {},
     // feature #127 WI-4 — long-press a book to assign it to collections.
     onAssignBook: (LibraryBook) -> Unit = {},
+    // feature #127 WI-5 — open the manage-collections sheet (shown once a collection exists).
+    onManageCollections: () -> Unit = {},
 ) {
     // Boolean (not the enum) so rememberSaveable persists the mode across rotation /
     // process recreation without a custom Saver.
@@ -71,48 +73,63 @@ fun LibraryScreen(
     Column(
         Modifier.fillMaxSize().background(VReaderColors.Background).systemBarsPadding(),
     ) {
-        // Nav bar — the functional controls (view-toggle / import). The design's
-        // settings + search pills are added when those features land (separate WIs);
-        // shipping non-functional controls is a fidelity defect, so they're omitted now.
-        Row(
-            Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 6.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillIcon(
-                    if (view == LibraryView.Grid) Icons.AutoMirrored.Filled.ViewList else Icons.Filled.GridView,
-                    "Toggle view",
-                ) { isGrid = !isGrid }
-                PillIcon(Icons.Filled.Add, "Import book", onImport)
-            }
-        }
-
-        // Title + count.
-        Text(
-            "Library",
-            Modifier.padding(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 4.dp),
-            color = VReaderColors.Ink,
-            fontFamily = VReaderFonts.Serif,
-            fontSize = 36.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            "${state.books.size} books · ${state.readingCount} reading",
-            Modifier.padding(start = 22.dp, bottom = 16.dp),
-            color = VReaderColors.InkMuted,
-            fontSize = 13.sp,
-        )
-
-        // feature #127 — the collections shelf-bar (shown once the user has a collection; the
-        // create/assign entry points are the WI-4/WI-5 sheets). Tapping a chip filters the grid.
-        if (collections.isNotEmpty()) {
-            CollectionShelfBar(
-                collections = collections,
-                selectedId = selectedCollectionId,
-                onSelect = onSelectCollection,
-                modifier = Modifier.padding(bottom = 12.dp),
+        // feature #127 — header. When a collection is selected the design's `scope === 'collection'`
+        // surface replaces the WHOLE all-library header (nav pills + "Library" title + shelf-bar) with
+        // just the scoped-collection header: a back breadcrumb to "All", the collection name (serif), and
+        // a "N books · edit collection" subtitle (the DESIGNED manage-sheet entry). The scoped view has NO
+        // action pills (Gate-4 WI-5 round-2 Medium, rule 51) — the nav pills live only in the All branch.
+        val selectedCollection = collections.firstOrNull { it.id == selectedCollectionId }
+        if (selectedCollection != null) {
+            ScopedCollectionHeader(
+                collectionName = selectedCollection.name,
+                bookCount = state.books.size,
+                onBack = { onSelectCollection(null) },
+                onEditCollection = onManageCollections,
             )
+        } else {
+            // Nav bar — the functional controls (view-toggle / import). The design's
+            // settings + search pills are added when those features land (separate WIs);
+            // shipping non-functional controls is a fidelity defect, so they're omitted now.
+            Row(
+                Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 6.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PillIcon(
+                        if (view == LibraryView.Grid) Icons.AutoMirrored.Filled.ViewList else Icons.Filled.GridView,
+                        "Toggle view",
+                    ) { isGrid = !isGrid }
+                    PillIcon(Icons.Filled.Add, "Import book", onImport)
+                }
+            }
+
+            // Title + count.
+            Text(
+                "Library",
+                Modifier.padding(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 4.dp),
+                color = VReaderColors.Ink,
+                fontFamily = VReaderFonts.Serif,
+                fontSize = 36.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "${state.books.size} books · ${state.readingCount} reading",
+                Modifier.padding(start = 22.dp, bottom = 16.dp),
+                color = VReaderColors.InkMuted,
+                fontSize = 13.sp,
+            )
+
+            // feature #127 — the collections shelf-bar (shown once the user has a collection; the
+            // create/assign entry points are the WI-4/WI-5 sheets). Tapping a chip filters the grid.
+            if (collections.isNotEmpty()) {
+                CollectionShelfBar(
+                    collections = collections,
+                    selectedId = selectedCollectionId,
+                    onSelect = onSelectCollection,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+            }
         }
 
         when {

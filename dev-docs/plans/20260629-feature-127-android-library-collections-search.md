@@ -135,9 +135,9 @@ iOS (`vreader/`); library/in-reader search (#128 / #F); reorder; the Android `Bo
 | WI-2 | foundational | `CollectionDao` full + `CollectionRepository` (transactional create with trim/≤100/case-insensitive dedup; rename; delete; membership). Tests: CRUD + dedup goldens (case variants, whitespace, CJK, >100, empty) + cascade-on-book-delete + `observeCollectionsWithCount` correctness | L |
 | WI-3 | behavioral | `LibraryViewModel` collections state + **`flatMapLatest`** membership filter (+ reset-to-All on delete) + `CollectionShelfBar` Compose. Tests: VM filter (JVM, incl. the stale-selection race) + a shelf-bar UI test | L |
 | WI-4 | behavioral | `AssignToCollectionsSheet` (checklist + inline create) + the sheet route state, wired VM→repo. Tests: assign/unassign persists + the chip count updates (connected) | M |
-| WI-5 | behavioral | `CollectionsManageSheet` (create / rename / delete — no reorder) wired VM→repo with `CollectionError` surfacing. Tests: manage create/rename(dup→error)/delete round-trip (connected) | M |
+| WI-5 | behavioral | `CollectionsManageSheet` (list + inline rename + inline create — no reorder; **delete UI deferred to needs-design #1875**, Gate-4 round-2 rule-51) opened from the DESIGNED scoped-collection "edit collection" header. Wired VM→repo with `CollectionError` surfacing. Tests: manage list/rename/create (connected) | M |
 | WI-6 | behavioral | Backup/restore: `BackupCollector` emits `collections.json` (`BackupCollectionsEnvelope`) + `RestoreImporter` restores it (case-insensitive merge, membership union). Tests: collect→restore round-trip + (if a shared golden vector exists) cross-platform conformance | M-L |
-| WI-7 | behavioral (final) | Acceptance on the emulator: import → create collection → assign → filter by chip → manage rename/delete → **backup → wipe → restore** preserves collections + membership. Evidence file → VERIFIED | M |
+| WI-7 | behavioral (final) | Acceptance on the emulator: import → create collection → assign → filter by chip → manage rename → **backup → wipe → restore** preserves collections + membership. (Delete UI is needs-design #1875 — out of this acceptance pass.) Evidence file → VERIFIED | M |
 
 ## Test catalogue
 
@@ -151,7 +151,8 @@ iOS (`vreader/`); library/in-reader search (#128 / #F); reorder; the Android `Bo
 - `LibraryViewModelCollectionsTest` (JVM, WI-3): chip select filters; "All" resets; deleting the
   selected collection resets to All; the `flatMapLatest` doesn't leak the previous selection's membership.
 - `CollectionShelfBarUiTest` / `AssignSheetUiTest` / `ManageSheetUiTest` (connected, WI-3/4/5):
-  chip select, checklist toggle persists, inline create, rename, delete + the duplicate-name error.
+  chip select, checklist toggle persists, inline create, inline rename. (Manage delete UI deferred —
+  needs-design #1875; the delete capability stays repo/VM-tested.)
 - `CollectionBackupRoundTripTest` (JVM/connected, WI-6): collect → `BackupCollectionsEnvelope` →
   restore → collections + membership preserved; **byte-stability** (same logical DB, different insert
   order → identical `collections.json`); restore merge goldens — same name / different case / different
@@ -176,6 +177,12 @@ iOS (`vreader/`); library/in-reader search (#128 / #F); reorder; the Android `Bo
   display order = createdAt; reorder deferred pending a cross-platform decision. **The manage sheet ships
   NO drag handles / no reorder affordance** — inert reorder UI is not acceptable (rule 51); reorder is
   tracked as a separate cross-platform feature/design decision, not a placeholder here.
+- **R7 — manage delete affordance is undesigned** (Gate-4 WI-5 round-2, rule 51): the committed
+  `CollectionsManageSheet` depicts list/create/rename + an Edit-mode chevron disclosure, but the
+  per-collection detail screen where **delete** lives is NOT depicted. The first WI-5 cut invented an
+  inline trash button (+ an invented nav-bar manage entry); both were removed. The manage sheet now
+  opens from the DESIGNED scoped-collection "edit collection" header and ships list + rename + create
+  only. Delete UI is deferred to **needs-design #1875**; the capability stays repo/VM-backed + tested.
 
 ## Backward compat
 

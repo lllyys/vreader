@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.vreader.app.library.AssignToCollectionsSheet
+import com.vreader.app.library.ManageCollectionsSheet
 import com.vreader.app.library.LibraryEvent
 import com.vreader.app.library.LibraryScreen
 import com.vreader.app.library.LibraryViewModel
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
                     selectedCollectionId = selectedCollectionId,
                     onSelectCollection = viewModel::selectCollection,
                     onAssignBook = { book -> sheetRoute = SheetRoute.Assign(book.id) },
+                    onManageCollections = { sheetRoute = SheetRoute.Manage },
                     onOpenBook = { book ->
                         // Route by the typed format (exhaustive — never open a format into
                         // the wrong host). Formats without a reader yet are surfaced, not
@@ -127,6 +129,18 @@ class MainActivity : ComponentActivity() {
                             onDismiss = { sheetRoute = SheetRoute.None },
                         )
                     }
+                }
+
+                // feature #127 WI-5 — the manage-collections sheet (list + rename + create), opened from
+                // the designed scoped-collection "edit collection" header. Delete is deferred to a
+                // needs-design follow-up (the design routes it behind an undepicted detail disclosure).
+                if (route is SheetRoute.Manage) {
+                    ManageCollectionsSheet(
+                        collections = collections,
+                        onRename = { id, newName -> viewModel.renameCollection(id, newName) },
+                        onCreate = { name -> viewModel.createCollection(name) },
+                        onDismiss = { sheetRoute = SheetRoute.None },
+                    )
                 }
             }
         }
