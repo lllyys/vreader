@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.test.uiautomator.UiDevice
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -14,6 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -95,6 +97,40 @@ class Azw3ReaderActivityTest {
             val restored = runBlocking { app.container.repository.loadPosition(key)?.legacyLocator?.progression }
             assertNotNull("no position after reopen", restored)
             assertTrue("restored position should resume near the seeded 0.5, got $restored", restored!! > 0.25)
+        }
+    }
+
+    /**
+     * KNOWN-FAILING verification target for the reading-interaction bug: the AZW3 reader renders +
+     * resumes, but NO user interaction advances the content — neither `next()` (paginated) nor a real
+     * swipe (scrolled, via UiDevice), with the patched OR unpatched bundle (so it is NOT the
+     * security patch, and NOT Compose touch-routing — real touches reach the WebView). foliate's
+     * content does not scroll/paginate via touch in Android System WebView. Tracked as a bug; un-`@Ignore`
+     * when fixed. Exhaustively isolated 2026-06-29 (logged in the bug + dev-docs).
+     */
+    @Ignore("AZW3 reading-interaction bug #357 (GH #1860) — foliate content renders + goToFraction seeks, but next()/scroll do not advance in Android WebView; un-ignore when fixed")
+    @Test
+    fun scrollingForward_advancesReadingPosition() {
+        val book = importAzw3OrSkip()
+        val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as VReaderApp
+        val key = book.fingerprintKey
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        ActivityScenario.launch<Azw3ReaderActivity>(
+            Azw3ReaderActivity.intent(InstrumentationRegistry.getInstrumentation().targetContext, key),
+        ).use {
+            compose.waitUntil(40_000) { runBlocking { app.container.repository.loadPosition(key) != null } }
+            val before = runBlocking { app.container.repository.loadPosition(key)?.legacyLocator?.progression ?: 0.0 }
+            val w = device.displayWidth
+            val h = device.displayHeight
+            repeat(5) {
+                device.swipe(w / 2, (h * 0.75).toInt(), w / 2, (h * 0.25).toInt(), 12)
+                Thread.sleep(500)
+            }
+            compose.waitUntil(20_000) {
+                runBlocking { (app.container.repository.loadPosition(key)?.legacyLocator?.progression ?: 0.0) > before + 1e-6 }
+            }
+            val after = runBlocking { app.container.repository.loadPosition(key)?.legacyLocator?.progression!! }
+            assertTrue("scrolling should advance the reading position (before=$before, after=$after)", after > before)
         }
     }
 }

@@ -53,6 +53,22 @@ class FoliateBridge(
             domStorageEnabled = true
             mediaPlaybackRequiresUserGesture = true
         }
+        // Keep the render process bound to the app's priority while the reader is open — without this
+        // the OS freezer can suspend it after a few idle seconds, so a page-turn (evaluateJavascript)
+        // wouldn't run until it thaws. It still drops with the app when backgrounded (render-death
+        // recovery handles a kill). Plan R1.
+        webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, false)
+        // Surface JS console warnings/errors to logcat (diagnostics; mirrors the iOS error logging).
+        webView.webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR ||
+                    m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.WARNING
+                ) {
+                    android.util.Log.w("FoliateBridge", "console[${m.messageLevel()}]: ${m.message()} @${m.sourceId()}:${m.lineNumber()}")
+                }
+                return true
+            }
+        }
         webView.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val url = request.url?.toString()
