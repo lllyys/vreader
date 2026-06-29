@@ -15,15 +15,22 @@ import com.vreader.app.annotations.HighlightRecord
 data class WashSpan(val local: Utf16Range, val color: AnnotationColor)
 
 object TxtWashMapper {
-    /** Project every highlight's `[charRangeStartUTF16, charRangeEndUTF16)` onto the chunks it spans. */
-    fun washesByChunk(doc: TxtDocument, highlights: List<HighlightRecord>): Map<Int, List<WashSpan>> {
+    /**
+     * Project every highlight's SOURCE range `[charRangeStartUTF16, charRangeEndUTF16)` onto the chunks
+     * it spans, as chunk-LOCAL RENDERED ranges (`getPathForRange` speaks rendered coords). [mapper]
+     * converts each chunk-local source range → rendered (TXT = identity; MD strips markers, so a
+     * marker-only slice collapses to empty and draws nothing).
+     */
+    fun washesByChunk(doc: TxtDocument, highlights: List<HighlightRecord>, mapper: ChunkTextMapper): Map<Int, List<WashSpan>> {
         val map = HashMap<Int, MutableList<WashSpan>>()
         for (h in highlights) {
             val s = h.locator.charRangeStartUTF16 ?: continue
             val e = h.locator.charRangeEndUTF16 ?: continue
             if (e <= s) continue
             for (cr in TxtSourceOffsets.chunkRanges(doc, Utf16Range(s, e))) {
-                map.getOrPut(cr.chunkIndex) { mutableListOf() }.add(WashSpan(cr.local, h.color))
+                val rendered = mapper.sourceRangeToRendered(cr.chunkIndex, cr.local)
+                if (rendered.isEmpty) continue
+                map.getOrPut(cr.chunkIndex) { mutableListOf() }.add(WashSpan(rendered, h.color))
             }
         }
         return map

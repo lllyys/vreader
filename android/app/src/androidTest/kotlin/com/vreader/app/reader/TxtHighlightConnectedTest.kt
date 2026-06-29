@@ -48,7 +48,7 @@ class TxtHighlightConnectedTest {
 
         val highlights = repo.highlights(key).first()
         assertEquals(1, highlights.size)
-        val map = TxtWashMapper.washesByChunk(doc, highlights)
+        val map = TxtWashMapper.washesByChunk(doc, highlights, IdentityChunkTextMapper(doc))
         assertTrue("wash projected onto chunk 1", map.containsKey(1))
         assertEquals(WashSpan(Utf16Range(1, 3), AnnotationColor.green), map[1]!!.single())
     }
