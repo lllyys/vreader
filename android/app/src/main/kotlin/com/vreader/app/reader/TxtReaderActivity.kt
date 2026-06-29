@@ -222,17 +222,22 @@ class TxtReaderActivity : ComponentActivity() {
                         val bookKey = s.book.fingerprintKey
                         val sessionSeconds by tracker.sessionSeconds.collectAsStateWithLifecycle()
 
-                        // feature #124 — stored TXT highlights → per-chunk washes (BINDING gate: TXT only;
-                        // MD render-only until #125 adds the source-offset map). Collect the list (for both
-                        // the wash recompute AND the WI-4 tap hit-test).
-                        val isTxt = s.book.originalFormat == BookFormat.txt
-                        val highlightsList by remember(bookKey, isTxt) {
-                            if (isTxt) container.annotationsRepository.highlights(bookKey) else flowOf(emptyList())
+                        // feature #124/#125 — stored highlights → per-chunk washes. Enabled for TXT AND MD
+                        // (#125 added the MarkdownChunkTextMapper source-offset map, so MD is no longer
+                        // render-only). The mapper is the single rendered↔source bridge + render owner,
+                        // shared by the wash, the selection controller, and the body.
+                        val annotatable = s.book.originalFormat == BookFormat.txt || s.book.originalFormat == BookFormat.md
+                        val chunkMapper = remember(s.document, s.book.originalFormat) {
+                            if (s.book.originalFormat == BookFormat.md) MarkdownChunkTextMapper(s.document)
+                            else IdentityChunkTextMapper(s.document)
+                        }
+                        val highlightsList by remember(bookKey, annotatable) {
+                            if (annotatable) container.annotationsRepository.highlights(bookKey) else flowOf(emptyList())
                         }.collectAsStateWithLifecycle(emptyList())
-                        val washMap = remember(highlightsList, s.document) { TxtWashMapper.washesByChunk(s.document, highlightsList) }
+                        val washMap = remember(highlightsList, s.document, chunkMapper) { TxtWashMapper.washesByChunk(s.document, highlightsList, chunkMapper) }
 
-                        // feature #124 — TXT custom selection + popover (TXT only).
-                        val selectionController = remember(s.document, isTxt) { if (isTxt) TxtSelectionController(s.document) else null }
+                        // feature #124/#125 — custom selection + popover (TXT + MD).
+                        val selectionController = remember(s.document, chunkMapper) { if (annotatable) TxtSelectionController(s.document, chunkMapper) else null }
                         val popoverVm = remember(bookKey) { com.vreader.app.annotations.SelectionPopoverViewModel() }
                         val popoverState by popoverVm.state.collectAsStateWithLifecycle()
                         DisposableEffect(lifecycleOwner, bookKey) {
@@ -285,7 +290,7 @@ class TxtReaderActivity : ComponentActivity() {
                             var boxSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
                             Box(Modifier.fillMaxSize().onGloballyPositioned { boxOriginWindow = it.localToWindow(androidx.compose.ui.geometry.Offset.Zero); boxSize = it.size }) {
                                 TxtBody(
-                                    s.document, listState, s.book.originalFormat,
+                                    s.document, listState, s.book.originalFormat, chunkMapper,
                                     highlightSpan = { chunkIndex ->
                                         if (!active) null
                                         else {
@@ -403,9 +408,9 @@ class TxtReaderActivity : ComponentActivity() {
 
     private fun finalizeTxtSelection(controller: TxtSelectionController?, vm: com.vreader.app.annotations.SelectionPopoverViewModel) {
         val c = controller ?: return
-        if (c.selectedText().isNullOrBlank() || !c.isCurrentSelectionValid()) { c.clear(); return }
+        if (c.selectedVisibleText().isNullOrBlank() || !c.isCurrentSelectionValid()) { c.clear(); return }
         pendingTxtHighlightId = null   // a fresh selection is CREATE context
-        pendingTxtText = c.selectedText()
+        pendingTxtText = c.selectedVisibleText()
         val anchor = c.selectionEndAnchorWindow() ?: androidx.compose.ui.geometry.Offset.Zero
         vm.showForSelection(anchor.x, anchor.y)   // WINDOW px
     }
@@ -493,22 +498,23 @@ class TxtReaderActivity : ComponentActivity() {
     ) {
         val c = controller ?: return
         val range = c.currentRange()
-        val text = c.selectedText()
-        if (range == null || text.isNullOrBlank() || !c.isCurrentSelectionValid()) { clearTxtSelection(c, vm); return }
+        val visible = c.selectedVisibleText()   // #125: stored selectedText = what the user sees (rendered)
+        val source = c.selectedSourceText()      // #125: textQuote + anchor = the markdown/raw source span
+        if (range == null || visible.isNullOrBlank() || source.isNullOrBlank() || !c.isCurrentSelectionValid()) { clearTxtSelection(c, vm); return }
         val locator = vreader.contracts.Locator(
-            book.contentSHA256, book.fileByteCount, "txt",
-            charRangeStartUTF16 = range.startInclusive, charRangeEndUTF16 = range.endExclusive, textQuote = text,
+            book.contentSHA256, book.fileByteCount, book.originalFormat.name,   // #125: NOT hardcoded "txt" — MD key is "md:…"
+            charRangeStartUTF16 = range.startInclusive, charRangeEndUTF16 = range.endExclusive, textQuote = source,
         )
         val anchor = com.vreader.app.annotations.AnnotationAnchor.Text("text-document:${book.fingerprintKey}", range.startInclusive, range.endExclusive)
         container.appScope.launch {
-            container.annotationsRepository.addHighlight(book.fingerprintKey, color, text, locator, anchor, note)
+            container.annotationsRepository.addHighlight(book.fingerprintKey, color, visible, locator, anchor, note)
         }
         clearTxtSelection(c, vm)
     }
 
     /** The text for copy/share — the live selection's, or (EDIT) the tapped highlight's. */
     private fun txtTextForAction(controller: TxtSelectionController?): String? =
-        pendingTxtText ?: controller?.selectedText()
+        pendingTxtText ?: controller?.selectedVisibleText()
 
     private fun copyTxtTextForAction(controller: TxtSelectionController?) {
         val text = txtTextForAction(controller) ?: return
@@ -587,6 +593,9 @@ private fun TtsEntryBar(enabled: Boolean, onReadAloud: () -> Unit) {
 @Composable
 private fun TxtBody(
     document: TxtDocument, listState: LazyListState, format: BookFormat,
+    // feature #125 — the single render owner. MD chunks render via mapper.renderedText so the body's
+    // TextLayoutResult matches the controller/wash's offset map exactly (no double render, no drift).
+    mapper: ChunkTextMapper,
     highlightSpan: (chunkIndex: Int) -> IntRange? = { null },
     // feature #124 — annotation highlight washes per chunk (TXT only; the activity passes empty for MD).
     washesForChunk: (chunkIndex: Int) -> List<WashSpan> = { emptyList() },
@@ -643,7 +652,7 @@ private fun TxtBody(
             // .txt → raw verbatim, with the spoken-sentence span washed when read-aloud is active.
             val span = if (isMarkdown) null else highlightSpan(i)
             val text = when {
-                isMarkdown -> MarkdownRenderer.render(raw)
+                isMarkdown -> mapper.renderedText(i)   // #125: the mapper is the single render owner
                 span != null -> buildAnnotatedString {
                     append(raw)
                     val a = span.first.coerceIn(0, raw.length); val b = (span.last + 1).coerceIn(a, raw.length)

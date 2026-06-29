@@ -16,7 +16,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 @Stable
-class TxtSelectionController(private val doc: TxtDocument) {
+class TxtSelectionController(
+    private val doc: TxtDocument,
+    // feature #125 — format-aware rendered↔source bridge. The chunk TextLayoutResults are built from the
+    // RENDERED text, so getOffsetForPosition/getWordBoundary/getCursorRect speak rendered coords; the
+    // mapper converts them to/from the SOURCE coords selections + highlights are stored in. TXT = identity.
+    private val mapper: ChunkTextMapper,
+) {
     private data class ChunkInfo(val layout: TextLayoutResult, val coords: LayoutCoordinates)
     /** A resolved hit: the chunk index/info + the chunk-local rendered offset + the absolute source offset. */
     private data class Hit(val chunkIndex: Int, val info: ChunkInfo, val rendered: Int, val source: Int)
@@ -47,16 +53,20 @@ class TxtSelectionController(private val doc: TxtDocument) {
             ?: return null
         val chunkLocal = hit.value.coords.windowToLocal(windowPoint)
         val rendered = hit.value.layout.getOffsetForPosition(chunkLocal).coerceIn(0, hit.value.layout.layoutInput.text.length)
-        return Hit(hit.key, hit.value, rendered, TxtSourceOffsets.sourceOffset(doc, hit.key, rendered))
+        // rendered cursor → chunk-local source (empty rendered range maps to the source edge) → global source.
+        val localSource = mapper.renderedRangeToSource(hit.key, Utf16Range(rendered, rendered)).startInclusive
+        return Hit(hit.key, hit.value, rendered, doc.offsetForChunk(hit.key) + localSource)
     }
 
     /** Long-press: select the word under [localPoint] (word boundary in the HIT chunk, mapped to source). */
     fun beginAt(localPoint: Offset) {
         val hit = hitAt(localPoint) ?: return
-        val word = hit.info.layout.getWordBoundary(hit.rendered)   // rendered coords in the hit chunk
+        val word = hit.info.layout.getWordBoundary(hit.rendered)   // RENDERED coords in the hit chunk
         val base = doc.offsetForChunk(hit.chunkIndex)
-        val start = base + word.start
-        val end = base + word.end
+        // rendered word → chunk-local source span → global source (markers stripped for MD).
+        val src = mapper.renderedRangeToSource(hit.chunkIndex, Utf16Range(word.start, word.end))
+        val start = base + src.startInclusive
+        val end = base + src.endExclusive
         val range = if (end > start) Utf16Range(start, end) else Utf16Range(hit.source, (hit.source + 1).coerceAtMost(doc.text.length))
         anchorRange = range
         _selection.value = range
@@ -89,17 +99,31 @@ class TxtSelectionController(private val doc: TxtDocument) {
     /** Whether the current selection is a persist-worthy range (in-bounds, non-empty, surrogate-safe). */
     fun isCurrentSelectionValid(): Boolean = _selection.value?.let { TxtSelection.isValid(it, doc.text) } ?: false
 
-    /** The SOURCE substring of the current selection (for the popover's text / copy / share). */
-    fun selectedText(): String? {
+    /** The VISIBLE (rendered) substring of the current selection — for the popover / copy / share / UI.
+     *  For TXT this equals the source; for MD it's the marker-stripped rendered text the user sees. */
+    fun selectedVisibleText(): String? {
+        val r = _selection.value ?: return null
+        if (r.isEmpty || r.endExclusive > doc.text.length) return null
+        val sb = StringBuilder()
+        for (cr in TxtSourceOffsets.chunkRanges(doc, r)) {
+            sb.append(mapper.visibleText(cr.chunkIndex, mapper.sourceRangeToRendered(cr.chunkIndex, cr.local)))
+        }
+        return sb.toString().ifEmpty { null }
+    }
+
+    /** The SOURCE (markdown/raw) substring of the current selection — for the locator textQuote + anchor. */
+    fun selectedSourceText(): String? {
         val r = _selection.value ?: return null
         if (r.isEmpty || r.endExclusive > doc.text.length) return null
         return doc.text.substring(r.startInclusive, r.endExclusive)
     }
 
-    /** The in-progress selection projected onto [chunkIndex] (chunk-local), for the accent wash. */
+    /** The in-progress selection projected onto [chunkIndex] as a chunk-local RENDERED range, for the
+     *  accent wash (`getPathForRange` speaks rendered coords). Source→rendered via the mapper (MD). */
     fun selectionForChunk(chunkIndex: Int): Utf16Range? {
         val r = _selection.value ?: return null
-        return TxtSourceOffsets.chunkRanges(doc, r).firstOrNull { it.chunkIndex == chunkIndex }?.local
+        val localSource = TxtSourceOffsets.chunkRanges(doc, r).firstOrNull { it.chunkIndex == chunkIndex }?.local ?: return null
+        return mapper.sourceRangeToRendered(chunkIndex, localSource)
     }
 
     /** The window-space point just below the selection's end, to anchor the popover. */
@@ -108,7 +132,9 @@ class TxtSelectionController(private val doc: TxtDocument) {
         val endChunk = doc.chunkForOffset((r.endExclusive - 1).coerceAtLeast(0)).coerceIn(0, doc.chunkCount - 1)
         val info = chunks[endChunk] ?: return null
         val base = doc.offsetForChunk(endChunk)
-        val renderedEnd = (r.endExclusive - base).coerceIn(0, info.layout.layoutInput.text.length)
+        // source end → chunk-local source → rendered cursor (end-affinity) for getCursorRect.
+        val localSourceEnd = (r.endExclusive - base).coerceAtLeast(0)
+        val renderedEnd = mapper.renderedCursorForSourceEnd(endChunk, localSourceEnd).coerceIn(0, info.layout.layoutInput.text.length)
         val rect = info.layout.getCursorRect(renderedEnd)
         return info.coords.localToWindow(Offset(rect.left, rect.bottom))
     }

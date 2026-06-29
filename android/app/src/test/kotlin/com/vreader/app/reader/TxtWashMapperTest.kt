@@ -10,6 +10,7 @@ import vreader.contracts.Locator
 /** Feature #124 WI-2 — [TxtWashMapper.washesByChunk] projects highlights onto per-chunk washes. */
 class TxtWashMapperTest {
     private val doc = TxtDocument.of("AAAA\nBBBB\nCCCC\nDDDD\n", maxChunkChars = 6)
+    private val mapper = IdentityChunkTextMapper(doc)   // #125: TXT = identity, so washes are unchanged
     private val key = "txt:${"a".repeat(64)}:20"
 
     private fun hl(start: Int, end: Int, color: AnnotationColor = AnnotationColor.yellow) = HighlightRecord(
@@ -20,7 +21,7 @@ class TxtWashMapperTest {
 
     @Test fun singleChunkHighlight_oneWash() {
         val base1 = doc.offsetForChunk(1)
-        val map = TxtWashMapper.washesByChunk(doc, listOf(hl(base1 + 1, base1 + 3, AnnotationColor.pink)))
+        val map = TxtWashMapper.washesByChunk(doc, listOf(hl(base1 + 1, base1 + 3, AnnotationColor.pink)), mapper)
         assertEquals(setOf(1), map.keys)
         assertEquals(WashSpan(Utf16Range(1, 3), AnnotationColor.pink), map[1]!!.single())
     }
@@ -28,7 +29,7 @@ class TxtWashMapperTest {
     @Test fun multiChunkHighlight_splitsAcrossChunks() {
         val start = doc.offsetForChunk(0) + 2
         val end = doc.offsetForChunk(2) + 2
-        val map = TxtWashMapper.washesByChunk(doc, listOf(hl(start, end)))
+        val map = TxtWashMapper.washesByChunk(doc, listOf(hl(start, end)), mapper)
         assertTrue("covers >= 2 chunks", map.keys.size >= 2)
         // reassembling the per-chunk locals back to source equals the original range
         var cursor = start
@@ -44,12 +45,12 @@ class TxtWashMapperTest {
 
     @Test fun multipleHighlights_distinctChunks() {
         val b0 = doc.offsetForChunk(0); val b3 = doc.offsetForChunk(3)
-        val map = TxtWashMapper.washesByChunk(doc, listOf(hl(b0, b0 + 2), hl(b3, b3 + 2)))
+        val map = TxtWashMapper.washesByChunk(doc, listOf(hl(b0, b0 + 2), hl(b3, b3 + 2)), mapper)
         assertTrue(map.containsKey(0) && map.containsKey(3))
     }
 
     @Test fun highlightWithoutCharRange_skipped() {
         val noRange = HighlightRecord("h", key, AnnotationColor.blue, "x", null, Locator("a".repeat(64), 20L, "txt", href = "c"), null, 1L, 1L)
-        assertTrue(TxtWashMapper.washesByChunk(doc, listOf(noRange)).isEmpty())
+        assertTrue(TxtWashMapper.washesByChunk(doc, listOf(noRange), mapper).isEmpty())
     }
 }

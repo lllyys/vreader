@@ -660,9 +660,15 @@ visible chunk's `TextLayoutResult` + `LayoutCoordinates`; one `awaitEachGesture`
 (edit an existing highlight) from a long-press-drag (new word selection), converting the pointer
 → window → chunk-local → SOURCE UTF-16 offset (`TxtSourceOffsets`). Stored highlights render as washes
 via `drawBehind` + `getPathForRange` (`TxtWashMapper`/`drawWashes`); a tap hit-tests via
-`TxtHighlightHitTester`. Everything is gated to `BookFormat.txt` (MD highlighting is the #125 follow-on,
-which needs a `MarkdownRenderer` source-offset map). The selection gesture is verifiable via the Compose
-test harness (`TxtReaderActivityTest` long-press/tap E2E), unlike the EPUB WebView gesture.
+`TxtHighlightHitTester`. **Feature #125 extended this to MD** (the same `TxtReaderActivity` hosts both):
+a format-aware `ChunkTextMapper` — `IdentityChunkTextMapper` for TXT, `MarkdownChunkTextMapper` for MD
+over `MarkdownRenderer.renderWithMap`'s per-rendered-char source spans (`MarkdownOffsetMap`) — threads
+through the controller + wash + `TxtBody`, so a chunk's RENDERED offsets (the `TextLayoutResult` speaks
+rendered coords) map to/from the SOURCE UTF-16 coords highlights persist in, with markers stripped (a
+marker-only slice washes nothing). The old `BookFormat.txt` gate is gone — `TxtReaderActivity` builds the
+mapper from `book.originalFormat` and stores `selectedText` = visible text / `locator.textQuote` = source
+/ `locator.format` = `originalFormat.name`. The selection gesture is verifiable via the Compose test
+harness (`TxtReaderActivityTest` long-press/tap E2E), unlike the EPUB WebView gesture.
 
 ### Reading-stats (`com.vreader.app.stats`) — feature #122
 
