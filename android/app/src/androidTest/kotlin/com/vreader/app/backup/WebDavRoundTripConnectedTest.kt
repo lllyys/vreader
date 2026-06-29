@@ -8,6 +8,7 @@ import com.vreader.app.backup.net.KeystoreSecretCipher
 import com.vreader.app.backup.net.WebDavClient
 import com.vreader.app.backup.net.WebDavServerStore
 import com.vreader.app.data.BookImporter
+import com.vreader.app.data.CollectionRepository
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
 import kotlinx.coroutines.Dispatchers
@@ -56,12 +57,14 @@ class WebDavRoundTripConnectedTest {
             PreferenceDataStoreFactory.create { prefsFile },
             KeystoreSecretCipher("vreader.test.webdav"),  // exercises the REAL AndroidKeyStore cipher
         )
+        val collections = CollectionRepository(db.collectionDao())
         try {
             store.upsert("srv", "rclone", baseUrl!!, user, pass, wifiOnly = false)
             val service = WebDavBackupService(
-                store, repo, importer, BackupCollector(repo), "ConnectedTest", "0.7.7",
+                store, repo, importer, BackupCollector(repo, collectionDao = db.collectionDao()), "ConnectedTest", "0.7.7",
                 transportFactory = { b, u, p -> WebDavClient(b, u, p) },
                 ioDispatcher = Dispatchers.IO,
+                collectionDao = db.collectionDao(),  // feature #127 WI-7 — restore re-creates collections + membership
             )
 
             // testConnection against the live server.
@@ -78,12 +81,20 @@ class WebDavRoundTripConnectedTest {
                 updatedAt = Instant.now().toEpochMilli(),
             )
 
+            // feature #127 WI-7 — a collection containing the book, so the round-trip exercises
+            // collections.json backup + (selective) restore + membership.
+            val collectionName = "RoundTrip-${UUID.randomUUID()}"
+            val collection = collections.createCollection(collectionName).getOrThrow()
+            collections.assign(book.fingerprintKey, collection.id)
+
             // Back up to the live server.
             service.startBackup("srv").toList()
 
-            // Wipe locally.
+            // Wipe locally — the book AND the collection (deleteBook cascades only the membership row).
             repo.deleteBook(book.fingerprintKey)
+            collections.delete(collection.id)
             assertNull(repo.findBook(book.fingerprintKey))
+            assertTrue("collections wiped before restore", db.collectionDao().getAllCollections().isEmpty())
 
             // List → find our backup → restore → book + position come back.
             val list = service.listBackups("srv")
@@ -95,6 +106,16 @@ class WebDavRoundTripConnectedTest {
             assertEquals(RestoreOutcome.success, result.outcome)
             assertEquals(book.fingerprintKey, repo.findBook(book.fingerprintKey)?.fingerprintKey)
             assertEquals(0.37, repo.loadPosition(book.fingerprintKey)!!.legacyLocator!!.progression!!, 1e-9)
+
+            // feature #127 WI-7 — the collection + its membership came back. The restore was selective
+            // (the one book), so this also proves the selective path re-creates the collection it belongs to.
+            val restoredCollections = db.collectionDao().getAllCollections()
+            assertEquals("the backed-up collection was restored", 1, restoredCollections.size)
+            assertEquals(collectionName, restoredCollections[0].name)
+            assertTrue(
+                "the book's membership was restored",
+                book.fingerprintKey in db.collectionDao().bookKeysInCollection(restoredCollections[0].id),
+            )
         } finally {
             db.close()
             booksDir.deleteRecursively()

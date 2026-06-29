@@ -72,10 +72,11 @@ Build order is roughly reuse-leverage / dependency order.
   manage/assign sheets + search (metadata hits split from in-text hits).
   Design: `vreader-library-android.jsx` (+ `vreader-search.jsx`).
   Needs: a collections Room schema (+ book↔collection join) + a search index. iOS parity: #60.
-  **IN PROGRESS — split into two features (Gate-2 decision): #127 collections (GH #1869, PLANNED — Gate-2
-  clean, 2 Codex rounds; collections are backup-contract-bound so #127 wires backup/restore) + #128 search
-  (Android `Book` has no author field + no cross-format FTS → search design/data gap, filed separately).
-  Box C checks when BOTH #127 and #128 are VERIFIED.**
+  **IN PROGRESS — split into two features (Gate-2 decision): #127 collections (GH #1869, **VERIFIED
+  2026-06-29** `android/v0.13.7` — shelf-bar + assign/manage sheets + collections.json backup/restore
+  proven end-to-end over live WebDAV; delete UI deferred to needs-design #1875) + #128 search (Android
+  `Book` has no author field + no cross-format FTS → search design/data gap, filed separately — NOT yet
+  done). Box C checks when BOTH #127 and #128 are VERIFIED — #127 ✓, #128 remains.**
 
 - [ ] **D. Bilingual interlinear reading** — interlinear original+translation rendering + the bilingual
   setup sheet (languages · provider · model · style), building on the #118 AI provider.
