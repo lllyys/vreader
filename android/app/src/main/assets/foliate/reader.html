@@ -9,10 +9,15 @@
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'self' blob: data:; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; connect-src 'self' blob:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline' blob:; font-src 'self' blob: data:; frame-src blob:; form-action 'none'">
 <style>
-html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+/* Viewport units (100dvh), NOT height:100% — the html/body height:100% chain resolves to 0 in the
+   Android WebView, collapsing foliate-view to 0 height → the paginator computes 1 page → next() no-ops
+   (bug #357). 100dvh is viewport-relative and robust (mirrors Anx-Reader's host page). The 100vh line
+   first is a fallback for an older System WebView that supports the bridge but not dynamic viewport
+   units — without it an unknown `height: 100dvh` could leave foliate-view auto/zero-height again. */
+html, body { margin: 0; padding: 0; width: 100vw; height: 100vh; height: 100dvh; overflow: hidden;
     background: #fff; -webkit-user-select: none; user-select: none;
     -webkit-tap-highlight-color: transparent; }
-foliate-view { display: block; width: 100%; height: 100%; }
+foliate-view { display: block; width: 100vw; height: 100vh; height: 100dvh; }
 </style>
 </head>
 <body>

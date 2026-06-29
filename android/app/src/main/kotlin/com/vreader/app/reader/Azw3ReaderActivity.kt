@@ -13,10 +13,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -44,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -160,8 +163,18 @@ private fun Azw3ReaderHost(
     // Latest known position, for render-death resume (starts at the persisted restore point).
     var resume by remember { mutableStateOf(restore) }
 
-    // A fresh WebView + document each reloadKey (render-process-death recovery).
-    val holder = remember(reloadKey) { Holder(WebView(context), bookFile, context) }
+    // A fresh WebView + document each reloadKey (render-process-death recovery). The WebView needs
+    // MATCH_PARENT layout params — a default WRAP_CONTENT WebView measures its content height (0 before
+    // content fills) → a 0-height viewport → foliate paginates to 1 page → next() no-ops (bug #357).
+    val holder = remember(reloadKey) {
+        val wv = WebView(context).apply {
+            layoutParams = android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        Holder(wv, bookFile, context)
+    }
     val state by holder.document.state.collectAsState()
 
     DisposableEffect(holder) {
@@ -180,8 +193,20 @@ private fun Azw3ReaderHost(
     ReaderScaffold(book.title, onBack) {
         Box(Modifier.fillMaxSize().testTag("azw3-webview")) {
             // Keyed on reloadKey so render-death recovery swaps in the NEW WebView node (not the dead one).
-            // foliate renders in scrolled mode — the WebView receives touches directly so the reader scrolls.
             key(reloadKey) { AndroidView(factory = { holder.webView }, modifier = Modifier.fillMaxSize()) }
+            // Host-driven page-turn tap zones (design vreader-tap-zones.jsx: left third = prev, right third
+            // = next, centre reserved). foliate is paginated, so the host drives next/prev like iOS — there
+            // is no scroll gesture to preserve. Contract: WebView-native interactions (link/footnote taps,
+            // and text selection once the Foliate annotation adapter lands — deferred from the AZW3 MVP)
+            // are reachable in the CENTRE third; the side thirds are page-turn only. The zones use
+            // detectTapGestures (confirmed tap only) so a stray move isn't read as a turn.
+            if (state is Azw3DocState.Loaded) {
+                Row(Modifier.fillMaxSize()) {
+                    TapZone(Modifier.weight(1f).testTag("azw3-prev-zone"), holder) { it.prev() }
+                    Box(Modifier.weight(1f).fillMaxHeight()) // centre — reserved
+                    TapZone(Modifier.weight(1f).testTag("azw3-next-zone"), holder) { it.next() }
+                }
+            }
             when (state) {
                 Azw3DocState.Loading -> Centered { CircularProgressIndicator() }
                 Azw3DocState.WebViewUnsupported -> Centered { Text("Update Android System WebView to read this format.", color = Ink) }
@@ -223,6 +248,12 @@ private fun ReaderScaffold(title: String, onBack: () -> Unit, body: @Composable 
         }
         Box(Modifier.weight(1f)) { body() }
     }
+}
+
+/** A transparent page-turn tap region. Re-keyed on [holder] so it always drives the current document. */
+@Composable
+private fun TapZone(modifier: Modifier, holder: Holder, onTap: (Azw3Document) -> Unit) {
+    Box(modifier.fillMaxHeight().pointerInput(holder) { detectTapGestures { onTap(holder.document) } })
 }
 
 @Composable
