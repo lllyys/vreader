@@ -88,6 +88,11 @@ Build order is roughly reuse-leverage / dependency order.
   line spacing, layout (scroll/paged) — applied across the EPUB/TXT/MD/PDF readers.
   Design: `vreader-themes.jsx` + `vreader-panels.jsx` (+ `vreader-reader.jsx` chrome).
   Needs: an Android `ReaderSettingsStore` (DataStore) + per-host application. iOS parity: #60 WI-10.
+  **IN PROGRESS — split (Gate-2 decision): #129 (GH #1879, PLANNED — Gate-2 clean 3 Codex rounds) is the
+  TYPOGRAPHY slice (5 themes + font family/size + line spacing + margin + the designed `ReaderBottomChrome`
+  Display slot); the LAYOUT (scroll/paged) toggle is a separate tracked follow-up (TXT/MD are scroll-only
+  Compose hosts → needs a paged renderer first; a layout toggle there would be a non-functional control).
+  Box E checks when BOTH #129 AND the layout follow-up are VERIFIED.**
 
 - [ ] **F. Reader navigation chrome** — the designed top/bottom reader bars hosting: Contents (TOC) +
   bookmarks, find-in-book (in-reader text search), and the More menu (book details · share · export).
