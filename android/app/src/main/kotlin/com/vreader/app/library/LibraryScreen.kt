@@ -55,6 +55,10 @@ fun LibraryScreen(
     state: LibraryUiState,
     onOpenBook: (LibraryBook) -> Unit,
     onImport: () -> Unit,
+    // feature #127 — collections shelf-bar (empty list = no bar; "All" = null selection).
+    collections: List<com.vreader.app.data.Collection> = emptyList(),
+    selectedCollectionId: String? = null,
+    onSelectCollection: (String?) -> Unit = {},
 ) {
     // Boolean (not the enum) so rememberSaveable persists the mode across rotation /
     // process recreation without a custom Saver.
@@ -97,9 +101,25 @@ fun LibraryScreen(
             fontSize = 13.sp,
         )
 
+        // feature #127 — the collections shelf-bar (shown once the user has a collection; the
+        // create/assign entry points are the WI-4/WI-5 sheets). Tapping a chip filters the grid.
+        if (collections.isNotEmpty()) {
+            CollectionShelfBar(
+                collections = collections,
+                selectedId = selectedCollectionId,
+                onSelect = onSelectCollection,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
+
         when {
             state.loading -> Unit
-            state.books.isEmpty() -> EmptyState(onImport)
+            // The import EmptyState is ONLY for a truly-empty LIBRARY ("All" selected) — a selected
+            // collection that happens to be empty must NOT show "Tap + to import" (misleading + import
+            // wouldn't add to the collection). No designed collection-filter-empty state exists, so per
+            // rule 51 we render nothing rather than invent one (Gate-4 WI-3 Medium).
+            state.books.isEmpty() && selectedCollectionId == null -> EmptyState(onImport)
+            state.books.isEmpty() -> Unit
             view == LibraryView.Grid -> BookGrid(state.books, onOpenBook)
             else -> BookList(state.books, onOpenBook)
         }

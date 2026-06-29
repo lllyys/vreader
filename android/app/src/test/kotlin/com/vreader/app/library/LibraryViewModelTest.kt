@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.vreader.app.data.Book
 import com.vreader.app.data.BookImporter
+import com.vreader.app.data.CollectionRepository
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +52,9 @@ class LibraryViewModelTest {
         val importer = BookImporter(
             File(context.cacheDir, "books-${System.nanoTime()}"), repository, Dispatchers.Unconfined,
         )
-        viewModel = LibraryViewModel(repository, importer, context.contentResolver, Dispatchers.Unconfined)
+        viewModel = LibraryViewModel(
+            repository, importer, CollectionRepository(db.collectionDao()), context.contentResolver, Dispatchers.Unconfined,
+        )
     }
 
     @After
