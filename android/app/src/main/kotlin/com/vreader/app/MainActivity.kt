@@ -19,9 +19,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import com.vreader.app.library.AssignToCollectionsSheet
 import com.vreader.app.library.LibraryEvent
 import com.vreader.app.library.LibraryScreen
 import com.vreader.app.library.LibraryViewModel
+import com.vreader.app.library.SheetRoute
+import com.vreader.app.library.SheetRouteSaver
 import com.vreader.app.reader.Azw3ReaderActivity
 import com.vreader.app.reader.ReaderActivity
 import com.vreader.app.reader.PdfReaderActivity
@@ -44,6 +51,8 @@ class MainActivity : ComponentActivity() {
                 val state by viewModel.uiState.collectAsStateWithLifecycle()
                 val collections by viewModel.collections.collectAsStateWithLifecycle()
                 val selectedCollectionId by viewModel.selectedCollectionId.collectAsStateWithLifecycle()
+                // feature #127 WI-4 — which collections sheet is open (survives rotation/process death).
+                var sheetRoute by rememberSaveable(stateSaver = SheetRouteSaver) { mutableStateOf<SheetRoute>(SheetRoute.None) }
 
                 val picker = rememberLauncherForActivityResult(
                     ActivityResultContracts.OpenDocument(),
@@ -64,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     collections = collections,
                     selectedCollectionId = selectedCollectionId,
                     onSelectCollection = viewModel::selectCollection,
+                    onAssignBook = { book -> sheetRoute = SheetRoute.Assign(book.id) },
                     onOpenBook = { book ->
                         // Route by the typed format (exhaustive — never open a format into
                         // the wrong host). Formats without a reader yet are surfaced, not
@@ -92,6 +102,32 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                 )
+
+                // feature #127 WI-4 — the assign-to-collections sheet (long-press a book).
+                val route = sheetRoute
+                if (route is SheetRoute.Assign) {
+                    // resolve from the UNFILTERED library so unassigning from a filtered collection
+                    // doesn't drop the book + close the sheet (Gate-4 WI-4 High).
+                    val allBooks by viewModel.allBooks.collectAsStateWithLifecycle()
+                    val book = allBooks.firstOrNull { it.id == route.bookKey }
+                    if (book == null && allBooks.isNotEmpty()) {
+                        // the library has loaded and the book is genuinely gone (deleted) → close.
+                        LaunchedEffect(route) { sheetRoute = SheetRoute.None }
+                    } else if (book != null) {
+                        val memberIdsFlow = remember(route.bookKey) { viewModel.collectionIdsForBook(route.bookKey) }
+                        val memberIds by memberIdsFlow.collectAsStateWithLifecycle(emptyList())
+                        AssignToCollectionsSheet(
+                            bookTitle = book.title,
+                            collections = collections,
+                            memberIds = memberIds.toHashSet(),
+                            onToggle = { id, nowMember ->
+                                if (nowMember) viewModel.assign(route.bookKey, id) else viewModel.unassign(route.bookKey, id)
+                            },
+                            onCreateAndAssign = { name -> viewModel.createCollectionAndAssign(name, route.bookKey) },
+                            onDismiss = { sheetRoute = SheetRoute.None },
+                        )
+                    }
+                }
             }
         }
     }

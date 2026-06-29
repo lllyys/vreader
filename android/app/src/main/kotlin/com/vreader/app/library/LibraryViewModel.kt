@@ -114,6 +114,24 @@ class LibraryViewModel(
     fun assign(bookKey: String, collectionId: String) = runCollectionOp { collectionRepository.assign(bookKey, collectionId); Result.success(Unit) }
     fun unassign(bookKey: String, collectionId: String) = runCollectionOp { collectionRepository.unassign(bookKey, collectionId); Result.success(Unit) }
 
+    /** Create a collection AND add [bookKey] to it — the assign sheet's "New Collection…" inline create.
+     *  Atomic in the repository (one DB transaction, no orphan on an FK failure); a duplicate name
+     *  surfaces the error. */
+    fun createCollectionAndAssign(name: String, bookKey: String) = runCollectionOp {
+        collectionRepository.createAndAssign(name, bookKey)
+    }
+
+    /** The collection ids a book currently belongs to (for the assign sheet's checked state). */
+    fun collectionIdsForBook(bookKey: String): Flow<List<String>> =
+        collectionRepository.observeCollectionIdsForBook(bookKey)
+
+    /** The UNFILTERED library — the assign sheet resolves its book here, NOT from the collection-filtered
+     *  uiState, so unassigning a book from the currently-filtered collection doesn't close the sheet
+     *  (Gate-4 WI-4 High). Empty initially → the sheet's close-if-gone guard waits for it to load. */
+    val allBooks: StateFlow<List<LibraryBook>> = repository.observeLibrary()
+        .map { books -> books.map(::toUi) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     /** The single failure boundary for ALL collection mutations: surfaces a returned [Result] failure
      *  AND a THROWN exception (e.g. an FK constraint race when assigning to a just-deleted collection) as
      *  a [LibraryEvent.CollectionOpFailed] toast (Gate-4 WI-3 Medium) — never crashes the screen. */

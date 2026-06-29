@@ -78,6 +78,18 @@ abstract class CollectionDao {
         return true
     }
 
+    /** Atomic create-AND-assign: create the collection (if the name is free) and add [bookKey] to it in
+     *  ONE transaction — so an FK failure on the membership insert rolls back the collection too (no
+     *  orphan empty collection). Returns false on a duplicate name; throws (→ rollback) if the book FK
+     *  is invalid. Gate-4 WI-4 Medium. */
+    @Transaction
+    open suspend fun createAndAssign(collection: CollectionEntity, bookKey: String): Boolean {
+        if (findByNameKey(collection.nameKey) != null) return false
+        insertCollection(collection)
+        addMembership(bookKey, collection.id)
+        return true
+    }
+
     /** Atomic rename: NotFound if [id] is gone (checked FIRST), else Duplicate if the name is taken by
      *  ANOTHER collection, else update. The order matters — a gone id must report NotFound even when the
      *  target name exists elsewhere (Gate-4 WI-2 Medium). */

@@ -9,6 +9,7 @@ package com.vreader.app.library
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,8 @@ fun LibraryScreen(
     collections: List<com.vreader.app.data.Collection> = emptyList(),
     selectedCollectionId: String? = null,
     onSelectCollection: (String?) -> Unit = {},
+    // feature #127 WI-4 — long-press a book to assign it to collections.
+    onAssignBook: (LibraryBook) -> Unit = {},
 ) {
     // Boolean (not the enum) so rememberSaveable persists the mode across rotation /
     // process recreation without a custom Saver.
@@ -120,8 +123,8 @@ fun LibraryScreen(
             // rule 51 we render nothing rather than invent one (Gate-4 WI-3 Medium).
             state.books.isEmpty() && selectedCollectionId == null -> EmptyState(onImport)
             state.books.isEmpty() -> Unit
-            view == LibraryView.Grid -> BookGrid(state.books, onOpenBook)
-            else -> BookList(state.books, onOpenBook)
+            view == LibraryView.Grid -> BookGrid(state.books, onOpenBook, onAssignBook)
+            else -> BookList(state.books, onOpenBook, onAssignBook)
         }
     }
 }
@@ -141,8 +144,9 @@ private fun PillIcon(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun BookGrid(books: List<LibraryBook>, onOpen: (LibraryBook) -> Unit) {
+private fun BookGrid(books: List<LibraryBook>, onOpen: (LibraryBook) -> Unit, onAssign: (LibraryBook) -> Unit) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
         contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 60.dp),
@@ -151,7 +155,14 @@ private fun BookGrid(books: List<LibraryBook>, onOpen: (LibraryBook) -> Unit) {
         modifier = Modifier.fillMaxSize(),
     ) {
         items(books, key = { it.id }) { book ->
-            Column(Modifier.clickable { onOpen(book) }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.combinedClickable(
+                    onClick = { onOpen(book) },
+                    onLongClickLabel = "Add to collection",
+                    onLongClick = { onAssign(book) },
+                ),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 FallbackCover(book, Modifier.fillMaxWidth().aspectRatio(104f / 156f), 4.dp)
                 Text(
                     book.title,
@@ -167,8 +178,9 @@ private fun BookGrid(books: List<LibraryBook>, onOpen: (LibraryBook) -> Unit) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun BookList(books: List<LibraryBook>, onOpen: (LibraryBook) -> Unit) {
+private fun BookList(books: List<LibraryBook>, onOpen: (LibraryBook) -> Unit, onAssign: (LibraryBook) -> Unit) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(1),
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 60.dp),
@@ -177,7 +189,8 @@ private fun BookList(books: List<LibraryBook>, onOpen: (LibraryBook) -> Unit) {
     ) {
         items(books, key = { it.id }) { book ->
             Row(
-                Modifier.fillMaxWidth().clickable { onOpen(book) }
+                Modifier.fillMaxWidth()
+                    .combinedClickable(onClick = { onOpen(book) }, onLongClickLabel = "Add to collection", onLongClick = { onAssign(book) })
                     .background(VReaderColors.Surface).padding(14.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
