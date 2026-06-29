@@ -16,10 +16,12 @@ enum class ReaderTheme(
     val ink: Color,
     val accent: Color,
     val isDark: Boolean,
+    /** The user-facing label (the design capitalizes OLED); enum [name] stays the stable persistence/test key. */
+    val displayName: String,
 ) {
-    Paper(background = Color(0xFFF4EEE0), ink = Color(0xFF1D1A14), accent = Color(0xFF8C2F2F), isDark = false),
-    Sepia(background = Color(0xFFE6D6B6), ink = Color(0xFF3A2913), accent = Color(0xFF7A3A1F), isDark = false),
-    Dark(background = Color(0xFF1A1815), ink = Color(0xFFD8D2C5), accent = Color(0xFFD6885A), isDark = true),
-    Oled(background = Color(0xFF000000), ink = Color(0xFFB9B6B0), accent = Color(0xFFD6885A), isDark = true),
-    Photo(background = Color(0xFF2A2520), ink = Color(0xFFE8E0D0), accent = Color(0xFFE8B465), isDark = true),
+    Paper(background = Color(0xFFF4EEE0), ink = Color(0xFF1D1A14), accent = Color(0xFF8C2F2F), isDark = false, displayName = "Paper"),
+    Sepia(background = Color(0xFFE6D6B6), ink = Color(0xFF3A2913), accent = Color(0xFF7A3A1F), isDark = false, displayName = "Sepia"),
+    Dark(background = Color(0xFF1A1815), ink = Color(0xFFD8D2C5), accent = Color(0xFFD6885A), isDark = true, displayName = "Dark"),
+    Oled(background = Color(0xFF000000), ink = Color(0xFFB9B6B0), accent = Color(0xFFD6885A), isDark = true, displayName = "OLED"),
+    Photo(background = Color(0xFF2A2520), ink = Color(0xFFE8E0D0), accent = Color(0xFFE8B465), isDark = true, displayName = "Photo"),
 }

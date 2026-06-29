@@ -36,6 +36,14 @@ class ReaderThemeTest {
         assertEquals(Color(0xFFE8B465), ReaderTheme.Photo.accent)
     }
 
+    @Test fun displayName_capitalizesOled() {
+        assertEquals("OLED", ReaderTheme.Oled.displayName)   // design label is OLED, not "Oled"
+        assertEquals("Paper", ReaderTheme.Paper.displayName)
+        assertEquals("Sepia", ReaderTheme.Sepia.displayName)
+        assertEquals("Dark", ReaderTheme.Dark.displayName)
+        assertEquals("Photo", ReaderTheme.Photo.displayName)
+    }
+
     @Test fun isDark_classifiesLightVsDark() {
         assertFalse(ReaderTheme.Paper.isDark)
         assertFalse(ReaderTheme.Sepia.isDark)
