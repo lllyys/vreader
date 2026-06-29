@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<!-- Shell CSP: scripts only from this origin (the bundle) + the inline bootstrap below.
+     Book section documents get their own strict CSP (WI-3, via the book-origin response);
+     the primary book-script boundary is the bundle patch (no `allow-scripts` on section iframes). -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self' blob: data:; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; connect-src 'self' blob:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline' blob:; font-src 'self' blob: data:; frame-src blob:; form-action 'none'">
+<style>
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+    background: #fff; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; }
+foliate-view { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<script>
+    // --- Android bridge shim ---------------------------------------------------
+    // The vendored foliate bundle posts JS->native via
+    // `window.webkit.messageHandlers[name].postMessage(detail)` (iOS WKWebView API,
+    // foliate-host.js:11). On Android we forward that to the native side via the
+    // `vreaderHost` object injected by WebViewCompat.addWebMessageListener — which
+    // exposes a single `postMessage(String)`. The shim wraps every handler name and
+    // serializes {name, detail} so the Kotlin FoliateMessageParser can route it.
+    // Installed BEFORE the bundle loads so the bundle's lexical `post()` uses it.
+    (function () {
+        function send(name, detail) {
+            try {
+                if (window.vreaderHost && typeof window.vreaderHost.postMessage === 'function') {
+                    window.vreaderHost.postMessage(JSON.stringify({ name: name, detail: detail == null ? {} : detail }));
+                }
+            } catch (e) { /* swallow — never throw into book/render code */ }
+        }
+        // Proxy so messageHandlers[anyName].postMessage(detail) resolves lazily.
+        var handlers = new Proxy({}, {
+            get: function (_t, name) { return { postMessage: function (detail) { send(String(name), detail); } }; }
+        });
+        window.webkit = window.webkit || {};
+        window.webkit.messageHandlers = handlers;
+        // Expose for the inline bootstrap below + error hooks.
+        window.__vreaderPost = send;
+    })();
+    window.onerror = function (msg, src, line) {
+        window.__vreaderPost('error', { message: 'JS: ' + msg + ' @ ' + line, type: 'window.onerror' });
+    };
+    window.addEventListener('unhandledrejection', function (e) {
+        window.__vreaderPost('error', { message: 'Promise: ' + ((e.reason && e.reason.message) || e.reason || 'unknown'), type: 'unhandledrejection' });
+    });
+</script>
+<!-- The element MUST precede the bundle: foliate-host.js does `getElementById('view')` at
+     load time (mirrors iOS FoliateSpikeView.swift order, not the standalone reader.html). -->
+<foliate-view id="view"></foliate-view>
+<script src="./foliate-bundle.js"></script>
+<script>
+    if (window.readerAPI) { window.__vreaderPost('bridge-ready', {}); }
+    else { window.__vreaderPost('error', { message: 'readerAPI not found after bundle load', type: 'init' }); }
+</script>
+</body>
+</html>

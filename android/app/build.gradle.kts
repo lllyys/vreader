@@ -133,4 +133,9 @@ dependencies {
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // feature #126 WI-0 (spike) — WebView + foliate-js go/no-go harness.
+    // WebViewAssetLoader (virtual https origin) + WebViewCompat.addWebMessageListener
+    // (secure bridge) + WebViewFeature gating. WI-3 promotes this to `implementation`.
+    androidTestImplementation("androidx.webkit:webkit:1.12.1")
 }
