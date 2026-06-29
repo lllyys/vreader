@@ -22,6 +22,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.vreader.app.library.LibraryEvent
 import com.vreader.app.library.LibraryScreen
 import com.vreader.app.library.LibraryViewModel
+import com.vreader.app.reader.Azw3ReaderActivity
 import com.vreader.app.reader.ReaderActivity
 import com.vreader.app.reader.PdfReaderActivity
 import com.vreader.app.reader.TxtReaderActivity
@@ -71,11 +72,8 @@ class MainActivity : ComponentActivity() {
                                 // #115 — continuous-scroll PdfRenderer reader.
                                 startActivity(PdfReaderActivity.intent(this@MainActivity, book.id))
                             BookFormat.azw3 ->
-                                Toast.makeText(
-                                    this@MainActivity,
-                                    "${book.format} reading isn't available yet",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
+                                // #126 — foliate-js WebView reader (AZW3/MOBI/KF8).
+                                startActivity(Azw3ReaderActivity.intent(this@MainActivity, book.id))
                         }
                     },
                     // EPUBs are exposed by SAF providers under varied MIME types

@@ -38,5 +38,8 @@
         <activity
             android:name=".reader.PdfReaderActivity"
             android:exported="false" />
+        <activity
+            android:name=".reader.Azw3ReaderActivity"
+            android:exported="false" />
     </application>
 </manifest>
