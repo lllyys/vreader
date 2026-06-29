@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -177,8 +178,9 @@ private fun Azw3ReaderHost(
     LaunchedEffect(holder) { holder.document.run(resume) }
 
     ReaderScaffold(book.title, onBack) {
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().testTag("azw3-webview")) {
             // Keyed on reloadKey so render-death recovery swaps in the NEW WebView node (not the dead one).
+            // foliate renders in scrolled mode — the WebView receives touches directly so the reader scrolls.
             key(reloadKey) { AndroidView(factory = { holder.webView }, modifier = Modifier.fillMaxSize()) }
             when (state) {
                 Azw3DocState.Loading -> Centered { CircularProgressIndicator() }
@@ -190,6 +192,7 @@ private fun Azw3ReaderHost(
         }
     }
 }
+
 
 /** Bundles the per-session WebView + document so `remember(reloadKey)` recreates both together. */
 private class Holder(val webView: WebView, bookFile: File, context: android.content.Context) {

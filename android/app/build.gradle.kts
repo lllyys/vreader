@@ -137,5 +137,8 @@ dependencies {
     // feature #111 WI-2 — Compose UI test for the TXT reader render.
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // feature #126 WI-8 — real touch injection (Compose performTouchInput doesn't propagate to an
+    // embedded AndroidView/WebView; UiDevice sends real system touch events that reach foliate).
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
