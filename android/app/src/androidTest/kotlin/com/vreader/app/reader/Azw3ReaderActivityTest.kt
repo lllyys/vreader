@@ -1,10 +1,12 @@
 package com.vreader.app.reader
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.test.uiautomator.UiDevice
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -15,7 +17,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
-import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -101,36 +102,39 @@ class Azw3ReaderActivityTest {
     }
 
     /**
-     * KNOWN-FAILING verification target for the reading-interaction bug: the AZW3 reader renders +
-     * resumes, but NO user interaction advances the content — neither `next()` (paginated) nor a real
-     * swipe (scrolled, via UiDevice), with the patched OR unpatched bundle (so it is NOT the
-     * security patch, and NOT Compose touch-routing — real touches reach the WebView). foliate's
-     * content does not scroll/paginate via touch in Android System WebView. Tracked as a bug; un-`@Ignore`
-     * when fixed. Exhaustively isolated 2026-06-29 (logged in the bug + dev-docs).
+     * Feature #126 — turning the page (paginated mode) advances the reading position. Tapping the
+     * right (next) zone calls `readerAPI.next()` → the page turns → a relocate with a higher fraction
+     * → saved. The tap targets a Compose [TapZone] (Compose touches reach it, unlike the embedded
+     * WebView). Verifies the fix for bug #357 (was: foliate stuck on screen 1 with no `setLayout`).
      */
-    @Ignore("AZW3 reading-interaction bug #357 (GH #1860) — foliate content renders + goToFraction seeks, but next()/scroll do not advance in Android WebView; un-ignore when fixed")
     @Test
-    fun scrollingForward_advancesReadingPosition() {
+    fun tappingNext_turnsThePage_advancesPosition() {
         val book = importAzw3OrSkip()
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as VReaderApp
         val key = book.fingerprintKey
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         ActivityScenario.launch<Azw3ReaderActivity>(
             Azw3ReaderActivity.intent(InstrumentationRegistry.getInstrumentation().targetContext, key),
         ).use {
             compose.waitUntil(40_000) { runBlocking { app.container.repository.loadPosition(key) != null } }
-            val before = runBlocking { app.container.repository.loadPosition(key)?.legacyLocator?.progression ?: 0.0 }
-            val w = device.displayWidth
-            val h = device.displayHeight
-            repeat(5) {
-                device.swipe(w / 2, (h * 0.75).toInt(), w / 2, (h * 0.25).toInt(), 12)
-                Thread.sleep(500)
+            // Let the initial relocate settle before recording `before` — otherwise a delayed layout
+            // relocate (not the tap) could inflate `after` and false-green the advance. Read twice ~1s
+            // apart and require the fraction to be stable AND the tap zone to be present first.
+            compose.onNodeWithTag("azw3-next-zone").assertIsDisplayed()
+            fun fraction() = runBlocking { app.container.repository.loadPosition(key)?.legacyLocator?.progression ?: 0.0 }
+            var before = fraction()
+            compose.waitUntil(10_000) {
+                Thread.sleep(1_000)
+                val now = fraction(); val stable = now == before; before = now; stable
+            }
+            repeat(4) {
+                compose.onNodeWithTag("azw3-next-zone").performTouchInput { click() }
+                Thread.sleep(600)
             }
             compose.waitUntil(20_000) {
                 runBlocking { (app.container.repository.loadPosition(key)?.legacyLocator?.progression ?: 0.0) > before + 1e-6 }
             }
             val after = runBlocking { app.container.repository.loadPosition(key)?.legacyLocator?.progression!! }
-            assertTrue("scrolling should advance the reading position (before=$before, after=$after)", after > before)
+            assertTrue("turning the page should advance the reading position (before=$before, after=$after)", after > before)
         }
     }
 }
