@@ -88,7 +88,11 @@ Build order is roughly reuse-leverage / dependency order.
 
 ### Deferred (explicit go/no-go — not autonomously startable)
 
-- [ ] **AZW3 / MOBI / KF8 reader** → tracked as **feature #126** (`docs/features.md`). **Go/no-go = GO**
+- [x] **AZW3 / MOBI / KF8 reader** → **feature #126 VERIFIED 2026-06-29** (`android/v0.12.9`, GH #1851
+  closed; evidence `dev-docs/verification/feature-126-20260629.md`). WebView + pinned security-patched
+  foliate-js bundle (NO NDK); render/resume/page-turn/secure-bridge/backup all pass on the real 6 MB CJK
+  AZW3 (API-35). The final blocker (bug #357 — page-turn stuck on screen 1 = a 0-height Compose WebView
+  viewport) is fixed (MATCH_PARENT LayoutParams + `100dvh`). **Go/no-go = GO**
   (user, 2026-06-29: "the azw3 is needed"). **Framing corrected**: iOS does NOT read these via libmobi —
   it renders them with **foliate-js (`mobi.js`) in a WKWebView** (`FoliateSpikeView`); libmobi is auxiliary
   (metadata/cover/convert). So Android's path is a **`WebView` + pinned foliate-js host** (mirror
