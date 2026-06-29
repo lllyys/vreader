@@ -17,8 +17,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         BookEntity::class, ReadingPositionEntity::class, DailyReadingEntity::class,
         HighlightEntity::class, AnnotationNoteEntity::class, BookmarkEntity::class,
+        CollectionEntity::class, BookCollectionCrossRef::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class VReaderDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class VReaderDatabase : RoomDatabase() {
     abstract fun readingPositionDao(): ReadingPositionDao
     abstract fun readingStatsDao(): ReadingStatsDao
     abstract fun annotationDao(): AnnotationDao
+    abstract fun collectionDao(): CollectionDao
 
     companion object {
         private const val DB_NAME = "vreader.db"
@@ -94,8 +96,37 @@ abstract class VReaderDatabase : RoomDatabase() {
             }
         }
 
+        /** v4 → v5: feature #127 — add the additive `collections` table (unique `nameKey` index) +
+         *  the `book_collection` many-to-many join (composite PK, both FKs ON DELETE CASCADE, a
+         *  `collectionId` index for the reverse lookup). No data transform. DDL matches Room's generated
+         *  v5 schema exactly (the migration test opens the real Room DB, whose structural PRAGMA
+         *  validation catches any drift). */
+        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `collections` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                        "`nameKey` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_collections_nameKey` ON `collections` (`nameKey`)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `book_collection` (`bookKey` TEXT NOT NULL, " +
+                        "`collectionId` TEXT NOT NULL, PRIMARY KEY(`bookKey`, `collectionId`), " +
+                        "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                        "FOREIGN KEY(`collectionId`) REFERENCES `collections`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_book_collection_collectionId` " +
+                        "ON `book_collection` (`collectionId`)",
+                )
+            }
+        }
+
         /** All registered migrations, oldest first. Append future Migration(n,n+1) here. */
-        val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 
         /** The production on-disk database (app-private storage). */
         fun build(context: Context): VReaderDatabase =

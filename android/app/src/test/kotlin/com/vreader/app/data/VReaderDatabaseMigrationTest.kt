@@ -196,4 +196,46 @@ class VReaderDatabaseMigrationTest {
             db.close()
         }
     }
+
+    /**
+     * Feature #127 WI-1 — the FULL migration chain 1→2→3→4→5 through [VReaderDatabase.ALL_MIGRATIONS]:
+     * a v1 file opens as v5 (Room's structural PRAGMA validation passes, so MIGRATION_4_5's DDL matches
+     * the generated v5 schema exactly), the new `collections` + `book_collection` tables work, the
+     * `book_collection` FK CASCADES when its book is deleted, and the unique `nameKey` index holds.
+     */
+    @Test
+    fun migrate1To5_throughAllMigrations_addsCollections_cascades_andEnforcesUniqueName() {
+        seedVersion1Database()
+
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            assertNotNull("book survived 1→5", runBlocking { db.bookDao().find(key) })
+            val dao = db.collectionDao()
+            runBlocking {
+                // create a collection + add the seeded book → membership works.
+                val c = CollectionEntity(id = "c1", name = "Fiction", nameKey = "fiction", createdAt = 1L)
+                dao.insertCollection(c)
+                dao.addMembership(key, "c1")
+                assertEquals("the book is in the collection", listOf(key), dao.bookKeysInCollection("c1"))
+
+                // the unique nameKey index rejects a second collection with the SAME nameKey (diff id).
+                var threw = false
+                try {
+                    dao.insertCollection(CollectionEntity(id = "c2", name = "FICTION", nameKey = "fiction", createdAt = 2L))
+                } catch (e: android.database.sqlite.SQLiteConstraintException) {
+                    threw = true
+                }
+                assertTrue("the unique nameKey index rejects a case-folded duplicate", threw)
+
+                // deleting the book CASCADES the cross-ref (FK ON DELETE CASCADE), not the collection.
+                db.bookDao().delete(key)
+                assertTrue("the membership cascaded away with the book", dao.bookKeysInCollection("c1").isEmpty())
+                assertEquals("the collection itself survives the book delete", 1, dao.getAllCollections().size)
+            }
+        } finally {
+            db.close()
+        }
+    }
 }
