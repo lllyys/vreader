@@ -110,6 +110,9 @@ class LibraryViewModel(
 
     fun createCollection(name: String) = runCollectionOp { collectionRepository.createCollection(name) }
     fun renameCollection(id: String, name: String) = runCollectionOp { collectionRepository.rename(id, name) }
+    // The delete CAPABILITY is repo-backed + tested (CollectionRepositoryTest, LibraryViewModelCollectionsTest
+    // reset-on-delete); its UI is deferred to a needs-design follow-up (the design routes delete behind an
+    // undepicted per-collection detail disclosure — rule 51). This seam is what that UI will wire.
     fun deleteCollection(id: String) = runCollectionOp { collectionRepository.delete(id); Result.success(Unit) }
     fun assign(bookKey: String, collectionId: String) = runCollectionOp { collectionRepository.assign(bookKey, collectionId); Result.success(Unit) }
     fun unassign(bookKey: String, collectionId: String) = runCollectionOp { collectionRepository.unassign(bookKey, collectionId); Result.success(Unit) }
