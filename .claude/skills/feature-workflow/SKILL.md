@@ -19,10 +19,9 @@ normal.
 
 ## Input
 
-Parse the user's request to extract a feature identifier — either a numeric id from
-`docs/features.md` (e.g. `48`) or a short slug (e.g. `materializing-restore`). If
-the user did not name a feature, list `TODO`/`PLANNED` candidates from `docs/features.md`
-and ask the user to pick.
+```text
+$ARGUMENTS
+```
 
 `$ARGUMENTS` is the feature identifier — either a numeric id from
 `docs/features.md` (e.g. `48`) or a short slug (e.g.
@@ -45,6 +44,24 @@ running a fix through this skill skips the bug-tracker workflow.
 | `check_codex_audit_artifact.sh` | `gh pr merge` on a Swift-touching PR | `.claude/codex-audits/<branch>-audit.md` with `final_verdict` ∈ {ship-as-is, follow-up-recommended} |
 
 Plan around them; do not bypass.
+
+## Platform routing (feature #107 — binding for every gate below)
+
+vreader is two native apps (iOS at root, Android under `android/`). Classify the
+feature's changed files with `code_paths_platform`
+(`.claude/hooks/lib/code-paths.sh`) → `ios`/`android-app`/`android-spike`/`shared`,
+and **substitute the lane in every gate** (the gates are written iOS-first):
+
+- **Gate 3 test gate**: iOS → `scripts/run-tests.sh`; Android →
+  `scripts/run-android-tests.sh` (never bare `./gradlew` — rule 52 Cause D).
+- **Gate 5 verify**: iOS → iPhone 17 Pro Sim + `vreader-debug://`; Android →
+  `scripts/run-android-verify.sh` (emulator; rule 47 Android tier). Evidence
+  `device_or_simulator` = the AVD.
+- **Version bump**: stays iOS (`project.yml`) for `shared`/spike PRs until #106;
+  Android `android/version.properties` + `android/vX.Y.Z` tags begin with #106
+  (rule 40).
+- **`shared`-only and pre-#106 spike work → iOS lane.** An `android-app` feature
+  whose Gate-5 needs the app shell is **blocked on #106**.
 
 ## Pre-flight Checks
 
@@ -279,14 +296,22 @@ File-size guideline: ~300 lines max.
 
 ## 3c. Test gate
 
+ALWAYS through the watchdog wrapper — never bare `xcodebuild test` (rule 52):
+
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
-  -project vreader.xcodeproj -scheme vreader \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:vreaderTests
+# The WI's targeted suites (from the plan's per-WI test catalogue / Spec block),
+# one wrapper call per suite:
+scripts/run-tests.sh vreaderTests/<SuiteFromTheWIPlan>
+
+# Android WIs route through the Android wrapper instead (rule 52 Cause D):
+#   scripts/run-android-tests.sh
 ```
 
-Pass → continue. Fail → fix and retry. 3 failures → stop, report.
+Pass → continue. Fail → fix and retry. 3 failures → stop, report. A
+`RUN-TESTS RESULT: TIMEOUT` is sim contention, not flakiness (rule 52 hard
+rule 3). Full-suite sweeps (`TIMEOUT_SECS=2400 scripts/run-tests.sh
+vreaderTests`) are periodic/CI, never a per-WI gate. In a parallel lane, pass
+the leased sim via `TEST_UDID=<udid>`.
 
 > **Note**: `xcodebuild` CLI builds to a different DerivedData than
 > Xcode's Run button. **Never use `simctl uninstall`** — wipes user
@@ -454,7 +479,7 @@ Audit log: `.claude/codex-audits/{branch-slug}-audit.md`
 
 ## Validation
 
-- [x] `xcodebuild test` passes (Gate 3 test gate)
+- [x] test gate green: `RUN-TESTS RESULT: SUCCEEDED` from `scripts/run-tests.sh` on the WI's targeted suites (Gate 3 test gate)
 - [x] Tests cover changed behavior (TDD: RED → GREEN)
 - [x] Codex audit loop completed ({M} iterations, verdict: {verdict})
 - [x] Docs sync — {architecture.md updated | README.md updated | n/a}

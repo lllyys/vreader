@@ -11,7 +11,9 @@ close-gate finalizer.
 
 ## Input
 
-Parse the user's request to extract one or more issue numbers (e.g. `#123`, `123`, `#123 #456`). If no numbers were provided, print usage and STOP.
+```text
+$ARGUMENTS
+```
 
 ## Scope
 
@@ -50,6 +52,24 @@ Three PreToolUse hooks gate this pipeline:
 | `check_terminal_status_evidence.sh` | tracker flip to `VERIFIED` (features) or `FIXED` only on `docs/features.md` | matching `dev-docs/verification/<kind>-<id>-<YYYYMMDD>.md`. **Bug `FIXED` flips on `docs/bugs.md` are NOT hook-enforced** — verification is enforced at GH-issue-close time, not at row flip. |
 
 Plan around them; do not bypass.
+
+## Platform routing (feature #107 — binding for every phase below)
+
+vreader is two native apps (iOS at root, Android under `android/`). Determine the
+issue's platform from its changed files and **substitute the lane in every
+phase** — the phases below are written iOS-first; the Android substitutions are:
+
+| Phase | iOS (default) | Android (`android-app` / `android-spike`) |
+|---|---|---|
+| Classify | `printf '%s\n' <changed> \| code_paths_platform` (`.claude/hooks/lib/code-paths.sh`) → `ios`/`android-app`/`android-spike`/`shared` |
+| Test gate (Phase 5) | `scripts/run-tests.sh` (xcodebuild) | `scripts/run-android-tests.sh` |
+| Pre-FIXED / Gate-5 verify | iPhone 17 Pro Sim + `vreader-debug://` | `scripts/run-android-verify.sh` (emulator) |
+| Version bump (Phase 7) | `project.yml` (`vX.Y.Z`) | **stays iOS** until #106 — rule 40: spike/shared PRs bump `project.yml`; an Android `android/version.properties` + `android/vX.Y.Z` tag lane begins only with #106 |
+| Evidence `device_or_simulator` | "iPhone 17 Pro Simulator" | the AVD (e.g. "Pixel 7 API 35 emulator") |
+
+**`shared`-only and pre-#106 spike work route to the iOS lane** (rule 40). An
+`android-app` issue whose Gate-5 needs the app shell is **blocked on #106** — mark
+it `verification-blocked` rather than forcing it.
 
 ## Pre-flight Checks
 
@@ -213,14 +233,24 @@ fix commit — but it must be on the branch before the PR opens.
 
 ### Phase 5: Test Gate
 
-Up to 3 attempts:
+Up to 3 attempts, ALWAYS through the watchdog wrapper — never bare
+`xcodebuild test` (rule 52: no watchdog = ghost hazard; full suite = >20 min,
+Cause C):
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
-  -project vreader.xcodeproj -scheme vreader \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:vreaderTests
+# Targeted suites covering the fix's touched areas (seconds–minutes) — the
+# per-fix gate. Mirror source paths to suites
+# (vreader/Services/Foo/Bar.swift → vreaderTests/Services/Foo/BarTests)
+# and always include the regression test's suite. One wrapper call per suite:
+scripts/run-tests.sh vreaderTests/<SuiteCoveringTheFix>
+
+# Full-suite sweep = periodic/CI only, NEVER the per-fix gate:
+TIMEOUT_SECS=2400 scripts/run-tests.sh vreaderTests
 ```
+
+Wait for the single `RUN-TESTS RESULT:` line. `TIMEOUT` means sim contention —
+do not "retry harder" (rule 52 hard rule 3). In a parallel lane, run against
+the leased simulator: `TEST_UDID=<udid> scripts/run-tests.sh …`.
 
 > **Note**: `xcodebuild` CLI builds to a different DerivedData than
 > Xcode's Run button. For debugger-attached builds or when
@@ -336,7 +366,7 @@ Audit log: `.claude/codex-audits/{branch-slug}-audit.md`
 
 ## Validation
 
-- [x] `xcodebuild test` passes
+- [x] test gate green: `RUN-TESTS RESULT: SUCCEEDED` from `scripts/run-tests.sh` on the targeted suites
 - [x] Tests cover changed behavior (TDD: RED → GREEN)
 - [x] Codex audit loop completed ({M} iterations, verdict: {verdict})
 - [x] Docs sync — {architecture.md updated | README.md updated | n/a}
@@ -475,6 +505,13 @@ If Phase 1 classified the issue as `question`:
 ---
 
 # Multi-Issue Pipeline
+
+> **⚠️ Scheduled for replacement by `/dispatch` (feature #130 WI-4).** The
+> M-step prose below has a known structural defect: M3's "resume each
+> worktree-agent through Phases 7→8" is NOT executable — subagents are
+> fire-and-forget with a single return (rule 48); there is no resume. Do NOT
+> hand-execute the agent-resume steps. Until /dispatch lands, run multi-issue
+> batches SEQUENTIALLY through the single-issue pipeline above.
 
 When multiple issue numbers are provided (e.g. `#123 #456 #789`).
 

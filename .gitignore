@@ -32,6 +32,10 @@ test-books/
 .claude/tdd-guardian/state.json
 # Cron / loop runtime locks (per-session)
 .claude/scheduled_tasks.lock
+# Feature #130 — tracker row-ID reservation state (local, never tracked;
+# reserve-id.sh reconciles against the tracker max so local-only is safe)
+docs/.id-locks/
+docs/.id-counters/
 
 # Tokenize / inspection scratch
 .tokenize/
