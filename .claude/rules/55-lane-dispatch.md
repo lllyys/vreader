@@ -133,6 +133,71 @@ Example (strict JSON):
 }
 ```
 
+### Normative JSON Schema (authoritative — the table above is a summary)
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "vreader lane HANDOFF",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "branch", "head_sha", "outcome", "files_touched",
+               "test_result_line", "tracker_edit", "docs_sync",
+               "bump_tier", "blockers"],
+  "properties": {
+    "id":        { "type": "string", "pattern": "^(bug:#[0-9]+|feat:#[0-9]+(/WI-[0-9]+)?)$" },
+    "branch":    { "type": "string", "minLength": 1 },
+    "head_sha":  { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "outcome":   { "enum": ["ready-for-integration", "blocked", "failed"] },
+    "root_cause": { "type": "string" },
+    "red_test":   { "type": "string" },
+    "files_touched": { "type": "array", "items": { "type": "string" } },
+    "test_result_line": { "type": "string", "pattern": "RUN-(TESTS|ANDROID-TESTS) RESULT:" },
+    "audit": {
+      "type": "object",
+      "required": ["artifact_path", "final_verdict", "rounds", "thread_id"],
+      "properties": {
+        "artifact_path": { "type": "string" },
+        "final_verdict": { "enum": ["ship-as-is", "follow-up-recommended", "block-recommended"] },
+        "rounds":        { "type": "integer", "minimum": 1 },
+        "thread_id":     { "type": "string" }
+      }
+    },
+    "tracker_edit": {
+      "type": "object",
+      "required": ["file", "row_id", "status_to", "notes_append"],
+      "properties": {
+        "file":         { "enum": ["docs/bugs.md", "docs/features.md"] },
+        "row_id":       { "type": "integer", "minimum": 1 },
+        "status_to":    { "type": "string" },
+        "notes_append": { "type": "string" }
+      }
+    },
+    "docs_sync": {
+      "type": "object",
+      "required": ["needed", "files", "proposed_lines"],
+      "properties": {
+        "needed":         { "type": "boolean" },
+        "files":          { "type": "array", "items": { "type": "string" } },
+        "proposed_lines": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "bump_tier": { "enum": ["patch", "minor", "major"] },
+    "blockers":  { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [
+    { "if":   { "properties": { "outcome": { "const": "ready-for-integration" } } },
+      "then": { "required": ["red_test", "audit"] } },
+    { "if":   { "properties": { "outcome": { "const": "blocked" } } },
+      "then": { "properties": { "blockers": { "minItems": 1 } } } }
+  ]
+}
+```
+
+(`root_cause` is additionally required for `bug:#N` items when outcome is
+ready — expressed here as convention since the schema cannot see the id kind
+without further nesting.)
+
 Orchestrator behavior: validate the HANDOFF; **invalid or missing = lane
 failure** — requeue the item once (fresh lane), then escalate. The
 orchestrator independently re-runs the declared targeted suite on the rebased
@@ -143,9 +208,32 @@ The HANDOFF doubles as the PR body and the GH gate-timeline comment.
 
 Every brief MUST contain, in this order:
 
-1. **The rule-48 "Critical Operational" cwd preamble, verbatim** (from rule
-   48's template, with the absolute worktree path substituted). Non-optional
-   — PR #1029 precedent.
+1. **The rule-48 "Critical Operational" cwd preamble, verbatim** (absolute
+   worktree path substituted). Non-optional — PR #1029 precedent. The exact
+   block (kept in sync with rule 48's template):
+
+```
+## CRITICAL OPERATIONAL — binding
+
+Your worktree path is: <ABSOLUTE-WORKTREE-PATH>
+
+Every `Bash` tool call you issue MUST begin with `cd "<ABSOLUTE-WORKTREE-PATH>"`.
+Before your first edit or write, run `pwd` and confirm it prints the worktree
+path. If `pwd` does NOT match, stop and report — do NOT attempt to recover by
+guessing.
+
+The Agent harness creates the worktree but does NOT set your initial cwd to
+it. Your Bash tool starts with cwd = the orchestrator's main checkout
+(`/Users/ll/workspace/vreader`). A single Bash call that forgets the `cd`
+prefix can write to the main checkout instead of your worktree; a later
+`xcodegen generate` then folds stray files into `project.pbxproj` and breaks
+the build on every clean clone. Standing precedent: PR #1029 (v3.37.19) was a
+hotfix for exactly this pattern; bug #957's agent self-rescued from the same
+drift mid-flow.
+
+This is binding for every Bash call, not just the first. Do not skip this in
+the interest of brevity.
+```
 2. The rule-48 six-field contract instantiated: objective (the one work
    unit), inputs (Spec block or bug micro-spec: repro + expected-vs-actual +
    regression-test name; exact file list; leased `TEST_UDID`), allowed

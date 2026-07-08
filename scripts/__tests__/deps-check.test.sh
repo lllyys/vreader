@@ -9,7 +9,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/../deps-check.sh"
 fails=0
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || { echo "FATAL: mktemp failed"; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 
 ok()   { echo "ok   — $1"; }
@@ -48,6 +48,12 @@ cat <<'EOF'
 EOF
 printf '| 28 | ghdesign | x | Low | TODO | Deps:[gh:#500, design:#501] notes |\n'
 printf '| 29 | prose-mention | x | Low | TODO | this row merely MENTIONS the typed Deps:[…] token mid-notes |\n'
+printf '| 31 | escaped \\| pipe in summary | x | Low | TODO | Deps:[bug:#12] notes |\n'
+printf '| 32 | short malformed row |\n'
+printf '| 33 | empty token | x | Low | TODO | Deps:[] notes |\n'
+printf '| 34 | trailing comma | x | Low | TODO | Deps:[bug:#10,] notes |\n'
+printf '| 35 | gh-only | x | Low | TODO | Deps:[gh:#500] notes |\n'
+printf '|129| big id | x | Low | TODO | Deps:[bug:#12] notes |\n'
 } > "$FEATS"
 # pad row 27's notes to a multi-KB single line (parse must stay grep-scoped)
 python3 - "$FEATS" <<'EOF'
@@ -120,7 +126,40 @@ if [ "$RC" -eq 0 ] && grep -q "no-deps-token" <<<"$OUT"; then ok "mid-notes Deps
 OUT="$(run feature 999)"; RC=$?
 if [ "$RC" -ne 0 ]; then ok "missing row → non-zero"; else fail "missing row returned READY"; fi
 
+# 8b. escaped pipe in an earlier cell must not shift Status/Notes parsing:
+#     row 31 has '\|' in Summary; its token names open bug:#12 → BLOCKED
+OUT="$(run feature 31)"; RC=$?
+if [ "$RC" -eq 2 ] && grep -q "bug:#12" <<<"$OUT"; then ok "escaped-pipe row parses (BLOCKED on bug:#12)"; else fail "escaped-pipe row (rc=$RC): $OUT"; fi
+
+# 8c. malformed/short row asked about → fail closed (exit 1)
+OUT="$(run feature 32)"; RC=$?
+if [ "$RC" -eq 1 ]; then ok "short/malformed row → fail closed (exit 1)"; else fail "malformed row (rc=$RC): $OUT"; fi
+
+# 8d. empty token and trailing comma are STRICTLY malformed (exit 1)
+OUT="$(run feature 33)"; RC=$?
+if [ "$RC" -eq 1 ]; then ok "Deps:[] → malformed"; else fail "empty token (rc=$RC): $OUT"; fi
+OUT="$(run feature 34)"; RC=$?
+if [ "$RC" -eq 1 ]; then ok "trailing comma → malformed"; else fail "trailing comma (rc=$RC): $OUT"; fi
+
+# 8e. ID prefix isolation: row 29 (READY, no token) vs row 129 (BLOCKED)
+OUT="$(run feature 129)"; RC=$?
+if [ "$RC" -eq 2 ]; then ok "row 129 resolves independently (BLOCKED)"; else fail "row 129 (rc=$RC): $OUT"; fi
+
+# 8f. gh unavailable → conservative BLOCKED (state UNKNOWN), not READY
+BROKEN="$TMP/broken-bin"; mkdir -p "$BROKEN"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$BROKEN/gh"; chmod +x "$BROKEN/gh"
+OUT="$(env PATH="$BROKEN:/usr/bin:/bin" DEPS_BUGS_FILE="$BUGS" DEPS_FEATURES_FILE="$FEATS" bash "$CHECK" feature 35 2>&1)"; RC=$?
+if [ "$RC" -eq 2 ] && grep -qi "UNKNOWN" <<<"$OUT"; then ok "gh failure → BLOCKED (UNKNOWN), never READY"; else fail "gh-unavailable (rc=$RC): $OUT"; fi
+
+# 8g. non-numeric id → usage error
+OUT="$(run feature 'abc|def')"; RC=$?
+if [ "$RC" -eq 64 ]; then ok "non-numeric id rejected (64)"; else fail "id validation (rc=$RC): $OUT"; fi
+
 echo "== deps-check.sh --lint =="
+
+# 9a. missing tracker file → exit 3, never a clean 0
+OUT="$(env PATH="$BIN:$PATH" bash "$CHECK" --lint "$TMP/nope.md" 2>&1)"; RC=$?
+if [ "$RC" -eq 3 ]; then ok "missing lint target → exit 3"; else fail "missing lint target (rc=$RC): $OUT"; fi
 
 # 9. lint: malformed token → error line; legacy prose on non-terminal row →
 #    warning ONLY (exit stays 1 due to the malformed row, but the legacy row
