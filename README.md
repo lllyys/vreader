@@ -118,6 +118,7 @@ What sets VReader apart from a conventional e-reader:
 
 - **DebugBridge** — `vreader-debug://` URL scheme for autonomous testing. Drives the app from outside via `xcrun simctl openurl`: reset library, seed fixtures, set theme, open books, snapshot state to JSON. Compiled out of Release builds. Reference: [`docs/subsystems/debug-bridge.md`](docs/subsystems/debug-bridge.md)
 - **`scripts/sim-tap.sh`** — CU-free gesture driver for the booted Simulator, built on [idb](https://github.com/facebook/idb). Taps by accessibility label or point, swipes, launches apps by bundle id, dumps the on-screen element tree, and screenshots — without the computer-use MCP server (which can't target the Xcode-nested Simulator). Pairs with DebugBridge for verification flows (preference order: DebugBridge command → XCUITest → idb). Requires `brew install facebook/fb/idb-companion` + `pip3 install --user fb-idb`. Reference: [`docs/subsystems/sim-gesture-driver.md`](docs/subsystems/sim-gesture-driver.md)
+- **`scripts/reserve-id.sh`** — atomic tracker row-ID allocation for `docs/bugs.md` / `docs/features.md` (mkdir-atomic locking via `scripts/lib/lock.sh`; closes the concurrent-session ID race). Part of the feature #130 agent-lane harness.
 
 ## Tech Stack
 

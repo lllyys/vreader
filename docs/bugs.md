@@ -9,6 +9,7 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 - **Bugs vs features**: If something was implemented but doesn't work correctly, it is a **bug** — track it here. If something was never implemented, it is a **feature** — track it in `docs/features.md`. Never mix them.
 - **Partial implementations**: If something is partially implemented, the broken part is a bug here; the missing capability is a feature in `docs/features.md`. Link them.
 - **Source of truth**: This **Summary table** is the single source of truth for bug status.
+- **ID allocation**: New row IDs come from `scripts/reserve-id.sh bug` (atomic — closes the concurrent-session ID race). Never hand-pick "max + 1" by reading the file.
 - **Open bug details**: Bugs with status TODO/IN PROGRESS/REOPENED should have an entry in `## Open Bug Details` with repro context. Move to archive on FIXED.
 - **History**: Root causes, solutions, and lessons for FIXED bugs are archived in `archive/bugs-history.md`.
 

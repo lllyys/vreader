@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# Feature #130 WI-1 — contract tests for scripts/lib/lock.sh, the ONE
+# mkdir-atomic lock helper every #130 lock/lease primitive builds on.
+# Staleness contract (plan v5 "Lock model"): steal ONLY on dead pid or
+# pid-reuse (start-time mismatch); a live matching owner is NEVER stolen,
+# regardless of age (no heartbeat-TTL stealing).
+#
+# Run: bash scripts/__tests__/lock.test.sh
+
+set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB="$HERE/../lib/lock.sh"
+fails=0
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+ok()   { echo "ok   — $1"; }
+fail() { echo "FAIL — $1"; fails=$((fails+1)); }
+
+if [ ! -f "$LIB" ]; then
+    echo "FAIL — $LIB does not exist"
+    echo "1 FAILURE(S)"; exit 1
+fi
+# shellcheck source=../lib/lock.sh
+source "$LIB"
+
+echo "== lib/lock.sh contract =="
+
+# 1. basic acquire/release round-trip
+D="$TMP/basic.lock.d"
+if lock_acquire "$D"; then ok "acquire succeeds on a free lock"; else fail "acquire on free lock"; fi
+if [ -f "$D/owner" ] && grep -q "pid=$$" "$D/owner"; then ok "owner record carries our pid"; else fail "owner record missing/wrong"; fi
+if lock_release "$D"; then ok "owner can release"; else fail "owner release"; fi
+if [ ! -d "$D" ]; then ok "release removes the lock dir"; else fail "lock dir survived release"; fi
+
+# 2. contention: a lock held by a LIVE process is not re-acquirable (exit 2)
+D="$TMP/held.lock.d"
+sleep 60 & HOLDER=$!
+LOCK_OWNER_PID=$HOLDER lock_acquire "$D" || fail "setup: acquire as holder"
+if lock_acquire "$D"; then fail "second acquire succeeded on a live-held lock"; else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then ok "live-held lock → exit 2 (blocked)"; else fail "live-held lock → exit $rc, want 2"; fi
+fi
+
+# 3. live matching owner is NEVER stolen, even when the record is OLD (no TTL steal)
+python3 - "$D/owner" <<'EOF'
+import sys,re
+p=sys.argv[1]; s=open(p).read()
+s=re.sub(r'created=.*', 'created=2020-01-01T00:00:00Z', s)
+open(p,"w").write(s)
+EOF
+if lock_acquire "$D"; then fail "STOLE a live matching owner's old lock (TTL steal is forbidden)"; else ok "old-but-live owner never stolen"; fi
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+
+# 4. dead-pid steal: holder died → acquire steals
+if lock_acquire "$D" 2>/dev/null; then ok "dead-pid lock is stolen"; else fail "dead-pid lock not stolen"; fi
+lock_release "$D" || true
+
+# 5. PID-reuse steal: pid is alive but start-time mismatches the record
+D="$TMP/reuse.lock.d"
+sleep 60 & IMPOSTOR=$!
+LOCK_OWNER_PID=$IMPOSTOR lock_acquire "$D" || fail "setup: acquire as impostor-pid"
+python3 - "$D/owner" <<'EOF'
+import sys,re
+p=sys.argv[1]; s=open(p).read()
+s=re.sub(r'start=.*', 'start=Wed Jan  1 00:00:00 2020', s)
+open(p,"w").write(s)
+EOF
+if lock_acquire "$D" 2>/dev/null; then ok "pid-reuse (start-time mismatch) is stolen"; else fail "pid-reuse lock not stolen"; fi
+lock_release "$D" || true
+kill "$IMPOSTOR" 2>/dev/null; wait "$IMPOSTOR" 2>/dev/null
+
+# 6. release by a non-owner refuses (exit 3), lock survives
+D="$TMP/notmine.lock.d"
+sleep 60 & OTHER=$!
+LOCK_OWNER_PID=$OTHER lock_acquire "$D" || fail "setup: acquire as other"
+if lock_release "$D" 2>/dev/null; then fail "non-owner release succeeded"; else
+    rc=$?
+    if [ "$rc" -eq 3 ] && [ -d "$D" ]; then ok "non-owner release refused (exit 3), lock intact"; else fail "non-owner release rc=$rc dir=$([ -d "$D" ] && echo yes || echo no)"; fi
+fi
+kill "$OTHER" 2>/dev/null; wait "$OTHER" 2>/dev/null
+
+# 7. atomicity: N parallel acquires on one fresh lock → exactly 1 winner
+D="$TMP/race.lock.d"
+WINS="$TMP/wins"; : > "$WINS"
+for i in $(seq 1 8); do
+    ( source "$LIB"; if lock_acquire "$D" 2>/dev/null; then echo "$i" >> "$WINS"; fi ) &
+done
+wait
+WINNERS=$(wc -l < "$WINS" | tr -d ' ')
+if [ "$WINNERS" -eq 1 ]; then ok "8 parallel acquires → exactly 1 winner"; else fail "8 parallel acquires → $WINNERS winners"; fi
+
+# 8. STALE-STEAL race (Gate-4 High): 8 concurrent acquires on a lock whose
+#    owner is DEAD must yield exactly ONE winner whose own pid ends up in the
+#    owner record — a naive check-then-rm steal lets a slow stealer delete the
+#    winner's fresh lock. 5 rounds to shake the interleave out.
+for round in 1 2 3 4 5; do
+    D="$TMP/stale-race-$round.lock.d"
+    mkdir "$D"
+    printf 'pid=99999999\nstart=Wed Jan  1 00:00:00 2020\nhost=x\ncreated=2020-01-01T00:00:00Z\n' > "$D/owner"
+    WINS="$TMP/stale-wins-$round"; : > "$WINS"
+    for i in $(seq 1 8); do
+        # Separate PROCESSES (not subshells): each contender's $$ is its own
+        # pid, so the owner-record assertion below is meaningful ($BASHPID
+        # doesn't exist in macOS bash 3.2). The winner HOLDS the lock (stays
+        # alive) — an instantly-exiting winner leaves a dead-owner lock that
+        # is LEGALLY stealable, which would make every contender "win"
+        # sequentially and test nothing.
+        bash -c 'source "$1"; if lock_acquire "$2" 2>/dev/null; then echo "$$" >> "$3"; sleep 1.5; fi' _ "$LIB" "$D" "$WINS" &
+    done
+    wait
+    WINNERS=$(wc -l < "$WINS" | tr -d ' ')
+    REC_PID="$(sed -n 's/^pid=//p' "$D/owner" 2>/dev/null)"
+    if [ "$WINNERS" -eq 1 ] && [ "$REC_PID" = "$(cat "$WINS")" ]; then
+        ok "stale-steal round $round: 1 winner, owner record = winner"
+    else
+        fail "stale-steal round $round: $WINNERS winners, owner=$REC_PID vs wins=$(tr '\n' ' ' < "$WINS")"
+    fi
+done
+
+# 8b. PARTIAL owner record with a LIVE pid must NOT be stolen (Gate-4 R2
+#     High 1): under atomic publish this state is un-manufacturable by the
+#     lib, but a hand-made/corrupt record with a live pid and NO start= line
+#     is treated conservatively as live — only a PRESENT-but-mismatched
+#     start (PID reuse) is stealable.
+D="$TMP/partial.lock.d"
+sleep 60 & PARTIAL=$!
+mkdir "$D"
+printf 'pid=%s\n' "$PARTIAL" > "$D/owner"
+if lock_acquire "$D" 2>/dev/null; then fail "stole a live-pid partial record"; else ok "live-pid partial record not stolen"; fi
+kill "$PARTIAL" 2>/dev/null; wait "$PARTIAL" 2>/dev/null
+rm -rf "$D"
+
+# 8c. DEAD steal mutex wedges acquire SAFELY (Gate-4 R2 High 2): no waiter
+#     may reap another's mutex (that re-opens the non-holder-rm race one
+#     level down); acquire exits 2 and leaves both dirs intact; the single
+#     sweep actor (sweep-ghosts) reaps, after which acquire succeeds.
+D="$TMP/deadsteal.lock.d"
+mkdir "$D"
+printf 'pid=99999999\nstart=Wed Jan  1 00:00:00 2020\nhost=x\ncreated=x\n' > "$D/owner"
+mkdir "$D.steal.d"
+printf 'pid=99999998\nstart=Wed Jan  1 00:00:00 2020\n' > "$D.steal.d/owner"
+if lock_acquire "$D" 2>/dev/null; then fail "acquired past a foreign steal mutex"; else
+    if [ -d "$D.steal.d" ] && [ -d "$D" ]; then ok "dead steal mutex: blocked (exit 2), nothing reaped inline"; else fail "dead steal mutex: something was reaped inline"; fi
+fi
+rm -rf "$D.steal.d"   # the sweep actor's job
+if lock_acquire "$D" 2>/dev/null; then ok "after sweep reaps the mutex, acquire succeeds"; else fail "post-sweep acquire failed"; fi
+lock_release "$D" || true
+
+# 9. release refuses a REUSED pid (start-time mismatch): record pid=$$ but a
+#    wrong start-time — release must NOT delete a lock we can't prove is ours.
+D="$TMP/release-reuse.lock.d"
+mkdir "$D"
+printf 'pid=%s\nstart=Wed Jan  1 00:00:00 2020\nhost=x\ncreated=2020-01-01T00:00:00Z\n' "$$" > "$D/owner"
+if lock_release "$D" 2>/dev/null; then fail "release deleted a reused-pid lock"; else
+    if [ -d "$D" ]; then ok "release refuses reused-pid (start mismatch), lock intact"; else fail "release-reuse: lock dir gone"; fi
+fi
+rm -rf "$D"
+
+# 10. publish-failure fault path (Gate-4 R3 Low): if the owner record can't
+#     be published, acquire must NOT report success or leave an ownerless dir.
+D="$TMP/pubfail.lock.d"
+if ( source "$LIB"; _lock_publish_owner() { return 1; }; lock_acquire "$D" 2>/dev/null ); then
+    fail "acquire returned 0 despite publish failure"
+else
+    if [ ! -d "$D" ]; then ok "publish failure → no success, no ownerless dir left"; else fail "publish failure left an ownerless lock dir"; fi
+fi
+
+echo
+if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

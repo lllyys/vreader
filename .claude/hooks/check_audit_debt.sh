@@ -17,7 +17,8 @@ set -euo pipefail
 
 # Bail quietly if not in a git repo (don't break unrelated sessions).
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-cd "$PROJECT_DIR"
+# A missing/unreadable dir must not fail the Stop hook (exit-0 contract).
+cd "$PROJECT_DIR" 2>/dev/null || exit 0
 if ! git rev-parse --git-dir >/dev/null 2>&1; then exit 0; fi
 
 # Feature #107 WI-1: classify "touched code" via the shared classifier (the
@@ -32,12 +33,32 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PROJECT_DIR")"
 source "$REPO_ROOT/.claude/hooks/lib/code-paths.sh" 2>/dev/null || exit 0
 
 # Find recent squash-merges on main. The default `gh pr merge --squash`
-# leaves "(#N)" in the commit subject. Walk the last few commits and
+# leaves "(#N)" in the commit subject. Walk the scan window and
 # extract branch names from PR refs where possible.
 DEBT=""
 COUNT=0
 
-# Look at the last 5 commits on main, grab any squash-merge headers.
+# Feature #130 WI-1 — the scan window. The old `main -5` window was outrun by
+# any batch of >5 merges between Stop events (silently dropping debt), and it
+# scanned a possibly-stale LOCAL ref. Now: best-effort fetch, prefer
+# origin/main, and scan since the last version tag — every merge that
+# completed ceremony is tagged, so the untagged tail is exactly the
+# unfinalized work — with a MINIMUM floor of 15 commits so a rogue merge
+# hidden behind a later tag still surfaces.
+git fetch --quiet origin main 2>/dev/null || true
+SCAN_REF="main"
+if git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then SCAN_REF="origin/main"; fi
+COMMITS="$(git log --format='%H%x09%s' "$SCAN_REF" -15 2>/dev/null || true)"
+LAST_TAG="$(git describe --tags --abbrev=0 "$SCAN_REF" 2>/dev/null || true)"
+if [[ -n "$LAST_TAG" ]]; then
+    SINCE="$(git log --format='%H%x09%s' "${LAST_TAG}..${SCAN_REF}" 2>/dev/null || true)"
+    # grep -c prints "0" AND exits 1 on zero matches — capture the count, swallow
+    # only the exit code (an `|| echo 0` here would emit a SECOND zero).
+    SINCE_COUNT="$(printf '%s' "$SINCE" | grep -c . || true)"
+    [[ -z "$SINCE_COUNT" ]] && SINCE_COUNT=0
+    if [[ "$SINCE_COUNT" -gt 15 ]]; then COMMITS="$SINCE"; fi
+fi
+
 while IFS=$'\t' read -r sha subject; do
     # Skip merge commits without a PR marker. GitHub's squash-merge
     # subjects end with " (#N)" — anchor to end so we don't pick up a
@@ -67,12 +88,14 @@ while IFS=$'\t' read -r sha subject; do
 
     # Look for matching audit log.
     SAFE_BRANCH="${BRANCH//\//-}"
-    AUDIT_FILE="$PROJECT_DIR/.claude/codex-audits/${SAFE_BRANCH}-audit.md"
+    # REPO_ROOT, not PROJECT_DIR — the hook may run from a subdirectory
+    # (Gate-4 audit, thread 019f4237…, Medium).
+    AUDIT_FILE="$REPO_ROOT/.claude/codex-audits/${SAFE_BRANCH}-audit.md"
     if [[ -f "$AUDIT_FILE" ]]; then continue; fi
 
     DEBT+="  - ${sha:0:7} #${PR_NUMBER} (${BRANCH})"$'\n'
     COUNT=$((COUNT + 1))
-done < <(git log --format='%H%x09%s' main -5 2>/dev/null)
+done <<< "$COMMITS"
 
 if [[ "$COUNT" -gt 0 ]]; then
     cat >&2 <<EOF
