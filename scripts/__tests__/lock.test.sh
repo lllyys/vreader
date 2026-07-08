@@ -157,5 +157,14 @@ if lock_release "$D" 2>/dev/null; then fail "release deleted a reused-pid lock";
 fi
 rm -rf "$D"
 
+# 10. publish-failure fault path (Gate-4 R3 Low): if the owner record can't
+#     be published, acquire must NOT report success or leave an ownerless dir.
+D="$TMP/pubfail.lock.d"
+if ( source "$LIB"; _lock_publish_owner() { return 1; }; lock_acquire "$D" 2>/dev/null ); then
+    fail "acquire returned 0 despite publish failure"
+else
+    if [ ! -d "$D" ]; then ok "publish failure → no success, no ownerless dir left"; else fail "publish failure left an ownerless lock dir"; fi
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

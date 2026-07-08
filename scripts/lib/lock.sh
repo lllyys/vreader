@@ -78,8 +78,13 @@ lock_acquire() {
     while [ "$tries" -lt 20 ]; do
         tries=$((tries + 1))
         if mkdir "$dir" 2>/dev/null; then
-            _lock_publish_owner "$dir" "$pid"
-            return 0
+            if _lock_publish_owner "$dir" "$pid"; then
+                return 0
+            fi
+            # Publish failed (disk/perms): don't hold an ownerless lock that
+            # will later read as stale — undo our own dir and fail.
+            rm -rf "$dir"
+            return 2
         fi
         if _lock_owner_live_matching "$dir"; then
             return 2   # live matching owner — never stolen
@@ -88,7 +93,11 @@ lock_acquire() {
         # the steal: exactly one contender may remove the lock dir, and only
         # after RE-validating staleness while holding the steal mutex.
         if mkdir "$steal" 2>/dev/null; then
-            _lock_publish_owner "$steal" "$$"
+            if ! _lock_publish_owner "$steal" "$$"; then
+                rm -rf "$steal"   # our own dir — holder removal is legal
+                sleep 0.05
+                continue
+            fi
             if [ -d "$dir" ] && ! _lock_owner_live_matching "$dir"; then
                 if [ ! -f "$dir/owner" ]; then
                     # Mid-publish acquirer (mkdir done, owner not yet moved
