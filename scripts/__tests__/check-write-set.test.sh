@@ -75,5 +75,27 @@ if [ "$RC" -eq 0 ]; then ok "exact-file prefix matches"; else fail "exact file (
 OUT="$( cd "$REPO" && env CHECK_BASE_REF=main bash "$CHECK" "$REPO" 2>&1 )"; RC=$?
 if [ "$RC" -eq 64 ]; then ok "missing prefixes → usage (64)"; else fail "usage (rc=$RC): $OUT"; fi
 
+# 8. STANDING ALLOWANCE: the lane contract commits .claude/codex-audits/ on
+#    the branch — it never appears in a Spec write-set and must still pass
+#    (lucid finding: without this, every contract-compliant lane fails 6a)
+mkdir -p "$REPO/.claude/codex-audits"
+echo audit > "$REPO/.claude/codex-audits/lane-branch-audit.md"
+echo mod3 >> "$REPO/src/feature/a.txt"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm m8
+OUT="$(run src/feature/)"; RC=$?
+if [ "$RC" -eq 0 ]; then ok "committed audit artifact passes via standing allowance"; else fail "audit allowance (rc=$RC): $OUT"; fi
+
+# 9. worktree-path run: gate a LANE WORKTREE while cwd = main checkout
+#    (lucid FIX-1 class: 'fires' ≠ 'fires correctly in a lane')
+git -C "$REPO" checkout -q main
+git -C "$REPO" worktree add "$REPO/.claude/worktrees/lane-x" -b lane-x main -q 2>/dev/null || git -C "$REPO" worktree add "$REPO/.claude/worktrees/lane-x" -b lane-x main
+WT="$REPO/.claude/worktrees/lane-x"
+echo lane >> "$WT/src/feature/a.txt"; git -C "$WT" commit -aqm lane1
+OUT="$( cd "$REPO" && env CHECK_BASE_REF=main bash "$CHECK" "$WT" src/feature/ 2>&1 )"; RC=$?
+if [ "$RC" -eq 0 ]; then ok "lane worktree gated from main-checkout cwd"; else fail "worktree cwd (rc=$RC): $OUT"; fi
+echo stray >> "$WT/other/o.txt"; git -C "$WT" commit -aqm lane2
+OUT="$( cd "$REPO" && env CHECK_BASE_REF=main bash "$CHECK" "$WT" src/feature/ 2>&1 )"; RC=$?
+if [ "$RC" -ne 0 ] && grep -q "other/o.txt" <<<"$OUT"; then ok "lane worktree violation caught from main-checkout cwd"; else fail "worktree violation (rc=$RC): $OUT"; fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

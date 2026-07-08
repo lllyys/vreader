@@ -41,6 +41,10 @@ docs/.id-counters/
 .claude/locks/
 .claude/worktrees/
 .claude/state/
+# Lane overflow channel (lucid precedent): long logs (test output, codex
+# transcripts, repro captures) go to <tree>/.reports/ and travel as PATHS in
+# the HANDOFF — never committed, never swept into a branch by git add -A
+.reports/
 
 # Tokenize / inspection scratch
 .tokenize/

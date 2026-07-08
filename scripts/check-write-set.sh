@@ -37,9 +37,15 @@ path_forbidden() { # $1=path → 0 iff forbidden
     return 1
 }
 
-path_in_prefixes() { # $1=path → 0 iff covered by a declared prefix
+# Standing allowances (lucid post-return-check precedent): the lane CONTRACT
+# itself requires committing the Gate-4 audit artifact on the branch, so it
+# can never appear in a Spec block's write-set — without this allowance every
+# contract-compliant lane fails its own gate.
+STANDING_ALLOWED=(".claude/codex-audits/")
+
+path_in_prefixes() { # $1=path → 0 iff covered by a declared prefix/allowance
     local p="$1" pref
-    for pref in "${PREFIXES[@]}"; do
+    for pref in "${STANDING_ALLOWED[@]}" "${PREFIXES[@]}"; do
         if [ "$p" = "$pref" ]; then return 0; fi
         case "$pref" in
             */) case "$p" in "$pref"*) return 0 ;; esac ;;
