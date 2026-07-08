@@ -118,6 +118,35 @@ for round in 1 2 3 4 5; do
     fi
 done
 
+# 8b. PARTIAL owner record with a LIVE pid must NOT be stolen (Gate-4 R2
+#     High 1): under atomic publish this state is un-manufacturable by the
+#     lib, but a hand-made/corrupt record with a live pid and NO start= line
+#     is treated conservatively as live — only a PRESENT-but-mismatched
+#     start (PID reuse) is stealable.
+D="$TMP/partial.lock.d"
+sleep 60 & PARTIAL=$!
+mkdir "$D"
+printf 'pid=%s\n' "$PARTIAL" > "$D/owner"
+if lock_acquire "$D" 2>/dev/null; then fail "stole a live-pid partial record"; else ok "live-pid partial record not stolen"; fi
+kill "$PARTIAL" 2>/dev/null; wait "$PARTIAL" 2>/dev/null
+rm -rf "$D"
+
+# 8c. DEAD steal mutex wedges acquire SAFELY (Gate-4 R2 High 2): no waiter
+#     may reap another's mutex (that re-opens the non-holder-rm race one
+#     level down); acquire exits 2 and leaves both dirs intact; the single
+#     sweep actor (sweep-ghosts) reaps, after which acquire succeeds.
+D="$TMP/deadsteal.lock.d"
+mkdir "$D"
+printf 'pid=99999999\nstart=Wed Jan  1 00:00:00 2020\nhost=x\ncreated=x\n' > "$D/owner"
+mkdir "$D.steal.d"
+printf 'pid=99999998\nstart=Wed Jan  1 00:00:00 2020\n' > "$D.steal.d/owner"
+if lock_acquire "$D" 2>/dev/null; then fail "acquired past a foreign steal mutex"; else
+    if [ -d "$D.steal.d" ] && [ -d "$D" ]; then ok "dead steal mutex: blocked (exit 2), nothing reaped inline"; else fail "dead steal mutex: something was reaped inline"; fi
+fi
+rm -rf "$D.steal.d"   # the sweep actor's job
+if lock_acquire "$D" 2>/dev/null; then ok "after sweep reaps the mutex, acquire succeeds"; else fail "post-sweep acquire failed"; fi
+lock_release "$D" || true
+
 # 9. release refuses a REUSED pid (start-time mismatch): record pid=$$ but a
 #    wrong start-time — release must NOT delete a lock we can't prove is ours.
 D="$TMP/release-reuse.lock.d"

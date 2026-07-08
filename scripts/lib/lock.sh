@@ -21,28 +21,53 @@
 #   Long-held locks are sweep-ghosts.sh's to REPORT, never this file's to
 #   break.
 #
-# Steal serialization (Gate-4 audit, thread 019f4237…, High): a naive
+# Steal serialization (Gate-4 audit, thread 019f4237…, R1+R2 Highs): a naive
 # check-then-`rm -rf` steal lets two contenders both classify the lock as
 # stale — the slower one then deletes the winner's FRESH lock and mutual
 # exclusion breaks (empirically reproduced: 2 winners in 4/5 race rounds).
-# All removal therefore happens under a dedicated steal mutex
-# (<lock-dir>.steal.d) with the staleness verdict RE-validated while holding
-# it; a fresh-but-torn owner record (mkdir done, owner file not yet written)
-# gets a grace re-read before it may be judged stale.
+# Constructions, in order of the invariant they protect:
+#   1. NO non-holder ever removes anything. All lock-dir removal happens
+#      under the steal mutex (<lock-dir>.steal.d); the steal mutex itself is
+#      NEVER reaped inline (that would re-open the same race one level down —
+#      R2 High 2). A stealer crashing inside its ~0.3s critical section
+#      wedges that lock until the single sweep actor (sweep-ghosts.sh)
+#      reaps the dead-owner .steal.d; acquire meanwhile fails fast (exit 2)
+#      with a pointer.
+#   2. The owner record is PUBLISHED ATOMICALLY (tmp + mv), so a present
+#      `owner` file is always complete (R2 High 1: the pid= line used to
+#      land before start= was computed, and that live-pid/no-start state
+#      read as stealable). A MISSING owner file inside an existing lock dir
+#      is a mid-publish acquirer → grace re-read before stale judgment.
+#   3. A record with a live pid and NO start= line (hand-made/corrupt — the
+#      lib can no longer produce it) is conservatively LIVE, never stolen;
+#      only a PRESENT-but-mismatched start (PID reuse) is stealable.
 
 _lock_pid_start() {
     ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//;s/ *$//'
 }
 
-# 0 iff the lock dir has an owner record whose pid is alive AND whose
-# start-time matches (i.e. the one case that must never be stolen).
+# 0 iff the lock dir's owner must be treated as alive (never stolen):
+# pid alive + matching start, or pid alive + no start recorded (construction 3).
 _lock_owner_live_matching() {
     local rec_pid rec_start
     rec_pid="$(sed -n 's/^pid=//p' "$1/owner" 2>/dev/null)"
-    rec_start="$(sed -n 's/^start=//p' "$1/owner" 2>/dev/null)"
     [ -n "$rec_pid" ] || return 1
     kill -0 "$rec_pid" 2>/dev/null || return 1
+    if ! grep -q '^start=' "$1/owner" 2>/dev/null; then
+        return 0   # live pid, corrupt/partial record → conservative: live
+    fi
+    rec_start="$(sed -n 's/^start=//p' "$1/owner" 2>/dev/null)"
     [ "$(_lock_pid_start "$rec_pid")" = "$rec_start" ]
+}
+
+_lock_publish_owner() {  # $1=dir $2=pid — atomic: a present owner file is complete
+    local tmp="$1/owner.tmp.$$"
+    {
+        echo "pid=$2"
+        echo "start=$(_lock_pid_start "$2")"
+        echo "host=$(hostname -s 2>/dev/null || echo unknown)"
+        echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } > "$tmp" && mv -f "$tmp" "$1/owner"
 }
 
 lock_acquire() {
@@ -53,26 +78,21 @@ lock_acquire() {
     while [ "$tries" -lt 20 ]; do
         tries=$((tries + 1))
         if mkdir "$dir" 2>/dev/null; then
-            {
-                echo "pid=$pid"
-                echo "start=$(_lock_pid_start "$pid")"
-                echo "host=$(hostname -s 2>/dev/null || echo unknown)"
-                echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            } > "$dir/owner"
+            _lock_publish_owner "$dir" "$pid"
             return 0
         fi
         if _lock_owner_live_matching "$dir"; then
             return 2   # live matching owner — never stolen
         fi
-        # Candidate-stale (dead pid / reused pid / torn record). Serialize the
-        # steal: exactly one contender may remove the dir, and only after
-        # RE-validating staleness while holding the steal mutex.
+        # Candidate-stale (dead pid / reused pid / missing record). Serialize
+        # the steal: exactly one contender may remove the lock dir, and only
+        # after RE-validating staleness while holding the steal mutex.
         if mkdir "$steal" 2>/dev/null; then
-            echo "pid=$$" > "$steal/owner"
+            _lock_publish_owner "$steal" "$$"
             if [ -d "$dir" ] && ! _lock_owner_live_matching "$dir"; then
-                if [ ! -s "$dir/owner" ]; then
-                    # Torn record: a legitimate acquirer may be between its
-                    # mkdir and its owner-write. Grace re-read before judging.
+                if [ ! -f "$dir/owner" ]; then
+                    # Mid-publish acquirer (mkdir done, owner not yet moved
+                    # into place). Grace re-read before judging.
                     sleep 0.2
                 fi
                 if [ -d "$dir" ] && ! _lock_owner_live_matching "$dir"; then
@@ -82,15 +102,15 @@ lock_acquire() {
             fi
             rm -rf "$steal"
         else
-            # Another stealer holds the mutex. Clear it only if ITS holder is
-            # dead (crashed mid-steal); otherwise give it a moment.
+            # Another stealer holds the mutex. NEVER reap it here (R2 High 2)
+            # — if its holder crashed, sweep-ghosts.sh is the single reaper.
             local spid
             spid="$(sed -n 's/^pid=//p' "$steal/owner" 2>/dev/null)"
             if [ -n "$spid" ] && ! kill -0 "$spid" 2>/dev/null; then
-                rm -rf "$steal"
-            else
-                sleep 0.05
+                echo "[lock] $steal held by dead pid $spid — blocked until sweep-ghosts reaps it" >&2
+                return 2
             fi
+            sleep 0.05
         fi
     done
     return 2
