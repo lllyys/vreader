@@ -10,6 +10,7 @@ Track bugs here. Tell the agent "fix bug #N" to start a fix.
 - **Partial implementations**: If something is partially implemented, the broken part is a bug here; the missing capability is a feature in `docs/features.md`. Link them.
 - **Source of truth**: This **Summary table** is the single source of truth for bug status.
 - **ID allocation**: New row IDs come from `scripts/reserve-id.sh bug` (atomic — closes the concurrent-session ID race). Never hand-pick "max + 1" by reading the file.
+- **Deps token** (feature #130, rule 55): CURRENT dependency edges live in a typed token at the HEAD of the Notes cell — `Deps:[bug:#N, feat:#N, gh:#N, design:#N]` (comma-separated; bare `#N` inside the brackets is an error — the plain form is 4-way ambiguous). Current edges only; resolved/historical dependency prose belongs in the GH issue timeline, not the Notes cell. Readiness is resolved mechanically by `scripts/deps-check.sh bug <id>`; `deps-check.sh --lint docs/bugs.md` errors on malformed tokens and warns on legacy dependency prose in non-terminal rows. In lane-dispatch mode tracker writes are orchestrator-only, always via Edit/Write tools, never Bash (rule 55).
 - **Open bug details**: Bugs with status TODO/IN PROGRESS/REOPENED should have an entry in `## Open Bug Details` with repro context. Move to archive on FIXED.
 - **History**: Root causes, solutions, and lessons for FIXED bugs are archived in `archive/bugs-history.md`.
 
