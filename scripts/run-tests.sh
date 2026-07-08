@@ -60,19 +60,47 @@ pid=$!
 (
   sleep "$TIMEOUT_SECS"
   if kill -0 "$pid" 2>/dev/null; then
-    echo "[run-tests][watchdog] exceeded ${TIMEOUT_SECS}s — killing tree of $pid + build daemon"
+    # Sentinel FIRST: the moment we kill $pid, main's `wait` wakes and must
+    # know to let this cleanup finish instead of killing us mid-decision.
+    : > "$LOG.timedout"
+    echo "[run-tests][watchdog] exceeded ${TIMEOUT_SECS}s — killing tree of $pid"
+    # Feature #130 WI-3 (rule 55): SWBBuildService is a shared singleton — a
+    # global kill would poison a CONCURRENT healthy lane's build. Decide on
+    # siblings BEFORE killing our own tree (excluding $pid + its children so
+    # we don't count ourselves).
+    # RUN_TESTS_SIBLING_CMD is injectable for the contract test — spawning
+    # real xcodebuild-named processes is unreliable on this host (freshly
+    # copied binaries wedge in uninterruptible-exit on SIGKILL).
+    kids="$(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ' || true)"
+    siblings=""
+    for x in $(${RUN_TESTS_SIBLING_CMD:-pgrep -x xcodebuild} 2>/dev/null || true); do
+      [ "$x" = "$pid" ] && continue
+      case " $kids " in *" $x "*) continue ;; esac
+      siblings="$siblings $x"
+    done
     pkill -9 -P "$pid" 2>/dev/null
     kill -9 "$pid" 2>/dev/null
-    pkill -9 -x SWBBuildService 2>/dev/null   # clear the wedged build daemon
+    if [ -n "$siblings" ]; then
+      echo "[run-tests][watchdog] sibling xcodebuild alive ($siblings) — NOT killing SWBBuildService (a genuinely wedged daemon then needs a manual pkill once the sibling finishes — rule 52 Cause B residual)"
+    else
+      pkill -9 -x SWBBuildService 2>/dev/null   # clear the wedged build daemon
+    fi
   fi
 ) &
 wd=$!
 
 wait "$pid"
 rc=$?
-# Cancel the watchdog if the test finished on its own.
-kill "$wd" 2>/dev/null
-wait "$wd" 2>/dev/null
+if [ -f "$LOG.timedout" ]; then
+  # Timeout path: the watchdog is mid-cleanup — let it finish (ms), never
+  # kill it between the tree-kill and the daemon decision.
+  wait "$wd" 2>/dev/null
+  rm -f "$LOG.timedout"
+else
+  # Test finished on its own — cancel the watchdog.
+  kill "$wd" 2>/dev/null
+  wait "$wd" 2>/dev/null
+fi
 
 echo "----- last log lines -----"
 tail -12 "$LOG"

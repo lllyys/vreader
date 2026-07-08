@@ -36,6 +36,11 @@ test-books/
 # reserve-id.sh reconciles against the tracker max so local-only is safe)
 docs/.id-locks/
 docs/.id-counters/
+# Feature #130 WI-3 — lane runtime state (locks/leases, lane worktrees,
+# session state incl. verify-udid + the dispatch kill switch)
+.claude/locks/
+.claude/worktrees/
+.claude/state/
 
 # Tokenize / inspection scratch
 .tokenize/
