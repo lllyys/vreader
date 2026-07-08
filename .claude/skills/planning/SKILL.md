@@ -66,6 +66,15 @@ Output:
      - **Dependencies** (other WIs, external tools/services)
      - **Risks + mitigations**
      - **Rollback / revert strategy**
+   - **Spec block (machine-readable, MANDATORY per WI — feature #130 / rule 55)**:
+     a fenced ```yaml block per WI with `id`, `tier` (foundational|behavioral),
+     `depends` (WI ids and named `M-*` milestones — a milestone is ready when its
+     evidence artifact exists), `writes` (path prefixes/files — becomes the lane's
+     allowed-writes contract, enforced by `scripts/check-write-set.sh`), `tests`
+     (named test files/suites — the exact targeted gate both the lane and the
+     orchestrator's re-test run), `acceptance` (criterion list). This block is the
+     dispatch unit: a lane brief carries ONLY its WI's Spec block, so it must stand
+     alone without conversation context.
    - Add **priority + estimates** (S/M/L) and explicit ordering/dependencies between WIs.
    - **Capture gaps**: map each gap to at least one WI (or record as “out of scope”).
    - **Plan lint (required)**:

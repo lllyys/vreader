@@ -127,6 +127,12 @@ and **substitute the lane in every gate** (the gates are written iOS-first):
 - **Work-item sequencing** — small, testable units (typically 1–15
   WIs). Each WI is one PR's worth of work. Estimate PR size per WI.
   **Mark each WI as foundational or behavioral** (see Gate 5).
+- **Spec block per WI (machine-readable, MANDATORY — feature #130 /
+  rule 55)** — a fenced ```yaml block with `id`, `tier`, `depends`
+  (WI ids + `M-*` milestones), `writes` (path prefixes — the lane's
+  allowed-writes contract), `tests` (the named targeted suites),
+  `acceptance`. The Spec block is the dispatch unit: lane briefs carry
+  only their WI's block, so it must stand alone.
 - **Test catalogue** — concrete test files, what each covers,
   including audit-driven additions (corruption, partial failure,
   idempotency edge cases).
@@ -200,6 +206,12 @@ plan where it's wrong — focusing on:
    correct? (Foundational = DTOs/protocols/utilities, no user-observable
    behavior. Behavioral = anything that changes app behavior, persistence,
    networking, backup format, reader rendering, or UI flow.)
+7. Spec-block ↔ test-catalogue alignment (feature #130 / rule 55) — does
+   every WI carry a machine-readable Spec block; does every acceptance
+   criterion map to a NAMED test in `tests:`; are the `writes:` prefixes
+   consistent with the surface-area section and disjoint where the plan
+   claims WI independence; are `depends:` edges consistent with the
+   sequencing prose?
 
 Have it report findings as: file:line | severity (Critical/High/Medium/Low) | issue | fix
 
