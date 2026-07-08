@@ -296,7 +296,8 @@ File-size guideline: ~300 lines max.
 
 ## 3c. Test gate
 
-ALWAYS through the watchdog wrapper — never bare `xcodebuild test` (rule 52):
+ALWAYS through the watchdog wrapper — never a raw Xcode test invocation
+(rule 52):
 
 ```bash
 # The WI's targeted suites (from the plan's per-WI test catalogue / Spec block),

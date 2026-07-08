@@ -90,5 +90,43 @@ wait
 WINNERS=$(wc -l < "$WINS" | tr -d ' ')
 if [ "$WINNERS" -eq 1 ]; then ok "8 parallel acquires → exactly 1 winner"; else fail "8 parallel acquires → $WINNERS winners"; fi
 
+# 8. STALE-STEAL race (Gate-4 High): 8 concurrent acquires on a lock whose
+#    owner is DEAD must yield exactly ONE winner whose own pid ends up in the
+#    owner record — a naive check-then-rm steal lets a slow stealer delete the
+#    winner's fresh lock. 5 rounds to shake the interleave out.
+for round in 1 2 3 4 5; do
+    D="$TMP/stale-race-$round.lock.d"
+    mkdir "$D"
+    printf 'pid=99999999\nstart=Wed Jan  1 00:00:00 2020\nhost=x\ncreated=2020-01-01T00:00:00Z\n' > "$D/owner"
+    WINS="$TMP/stale-wins-$round"; : > "$WINS"
+    for i in $(seq 1 8); do
+        # Separate PROCESSES (not subshells): each contender's $$ is its own
+        # pid, so the owner-record assertion below is meaningful ($BASHPID
+        # doesn't exist in macOS bash 3.2). The winner HOLDS the lock (stays
+        # alive) — an instantly-exiting winner leaves a dead-owner lock that
+        # is LEGALLY stealable, which would make every contender "win"
+        # sequentially and test nothing.
+        bash -c 'source "$1"; if lock_acquire "$2" 2>/dev/null; then echo "$$" >> "$3"; sleep 1.5; fi' _ "$LIB" "$D" "$WINS" &
+    done
+    wait
+    WINNERS=$(wc -l < "$WINS" | tr -d ' ')
+    REC_PID="$(sed -n 's/^pid=//p' "$D/owner" 2>/dev/null)"
+    if [ "$WINNERS" -eq 1 ] && [ "$REC_PID" = "$(cat "$WINS")" ]; then
+        ok "stale-steal round $round: 1 winner, owner record = winner"
+    else
+        fail "stale-steal round $round: $WINNERS winners, owner=$REC_PID vs wins=$(tr '\n' ' ' < "$WINS")"
+    fi
+done
+
+# 9. release refuses a REUSED pid (start-time mismatch): record pid=$$ but a
+#    wrong start-time — release must NOT delete a lock we can't prove is ours.
+D="$TMP/release-reuse.lock.d"
+mkdir "$D"
+printf 'pid=%s\nstart=Wed Jan  1 00:00:00 2020\nhost=x\ncreated=2020-01-01T00:00:00Z\n' "$$" > "$D/owner"
+if lock_release "$D" 2>/dev/null; then fail "release deleted a reused-pid lock"; else
+    if [ -d "$D" ]; then ok "release refuses reused-pid (start mismatch), lock intact"; else fail "release-reuse: lock dir gone"; fi
+fi
+rm -rf "$D"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

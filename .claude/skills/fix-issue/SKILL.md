@@ -233,8 +233,8 @@ fix commit — but it must be on the branch before the PR opens.
 
 ### Phase 5: Test Gate
 
-Up to 3 attempts, ALWAYS through the watchdog wrapper — never bare
-`xcodebuild test` (rule 52: no watchdog = ghost hazard; full suite = >20 min,
+Up to 3 attempts, ALWAYS through the watchdog wrapper — never a raw Xcode
+test invocation (rule 52: no watchdog = ghost hazard; full suite = >20 min,
 Cause C):
 
 ```bash

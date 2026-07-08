@@ -17,7 +17,8 @@ set -euo pipefail
 
 # Bail quietly if not in a git repo (don't break unrelated sessions).
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-cd "$PROJECT_DIR"
+# A missing/unreadable dir must not fail the Stop hook (exit-0 contract).
+cd "$PROJECT_DIR" 2>/dev/null || exit 0
 if ! git rev-parse --git-dir >/dev/null 2>&1; then exit 0; fi
 
 # Feature #107 WI-1: classify "touched code" via the shared classifier (the
@@ -87,7 +88,9 @@ while IFS=$'\t' read -r sha subject; do
 
     # Look for matching audit log.
     SAFE_BRANCH="${BRANCH//\//-}"
-    AUDIT_FILE="$PROJECT_DIR/.claude/codex-audits/${SAFE_BRANCH}-audit.md"
+    # REPO_ROOT, not PROJECT_DIR — the hook may run from a subdirectory
+    # (Gate-4 audit, thread 019f4237…, Medium).
+    AUDIT_FILE="$REPO_ROOT/.claude/codex-audits/${SAFE_BRANCH}-audit.md"
     if [[ -f "$AUDIT_FILE" ]]; then continue; fi
 
     DEBT+="  - ${sha:0:7} #${PR_NUMBER} (${BRANCH})"$'\n'

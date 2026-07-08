@@ -91,5 +91,24 @@ else
     fail "tag-at-HEAD broke the hook (rc=$RC): $(grep -i 'arithmetic\|syntax' <<<"$OUT" | head -1)"
 fi
 
+# 6. prefers origin/main over a stale local main: a merge that exists ONLY on
+#    origin/main (local main is behind) must still be scanned + flagged.
+BARE="$TMP/origin.git"
+git init -q --bare "$BARE"
+git -C "$REPO" remote add origin "$BARE"
+git -C "$REPO" push -q origin main
+CLONE="$TMP/clone"
+git clone -q "$BARE" "$CLONE"
+git -C "$CLONE" config user.email t@t && git -C "$CLONE" config user.name t
+echo "code 8" > "$CLONE/vreader/File8.swift"
+git -C "$CLONE" add -A && git -C "$CLONE" commit -qm "feat: change 8 (#108)"
+git -C "$CLONE" push -q origin main
+OUT="$(run_hook)"
+if grep -q "#108" <<<"$OUT"; then
+    ok "origin-only merge (#108) scanned via origin/main (stale local main)"
+else
+    fail "origin-only merge (#108) not scanned — hook stuck on local main"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi
