@@ -127,6 +127,14 @@ GH_RE = re.compile(r"GH:\s*#?\d+")
 MIRROR_NO_FEATURE = re.compile(r"Mirror:\s*no", re.IGNORECASE)
 MIRROR_NO_BUG = re.compile(r"Mirror:\s*no\s*[—-]\s*local-only", re.IGNORECASE)
 
+def split_cells(line):
+    # Mask backslash-escaped pipes (`\|`) so they do not shift cell
+    # indices (bug #361); restore them after splitting. NOTE: no
+    # apostrophes in hook heredocs — bash 3.2 mis-parses unbalanced
+    # single quotes inside a heredoc within $( ).
+    masked = line.replace("\\|", "\x01")
+    return [c.strip().replace("\x01", "\\|") for c in masked.split("|")]
+
 def parse_rows(content):
     rows = {}
     for line in content.splitlines():
@@ -134,7 +142,7 @@ def parse_rows(content):
         if not m:
             continue
         rid = m.group(1)
-        cells = [c.strip() for c in line.split("|")]
+        cells = split_cells(line)
         # Cells: ['', id, title, area, priority, status, notes, '']
         if len(cells) < 7:
             continue
@@ -202,13 +210,19 @@ EOF
 for rid in $(echo "$MISSING" | tr ',' ' '); do
     echo "  - ${KIND} #${rid}" >&2
 done
+# ${KIND^} is bash 4+ — a fatal "bad substitution" under the /bin/bash 3.2
+# shebang runtime that turned the exit-2 block into a non-blocking exit 1.
+case "$KIND" in
+    feature) KIND_TITLE="Feature" ;;
+    *) KIND_TITLE="Bug" ;;
+esac
 cat >&2 <<EOF
 
 Per AGENTS.md "GitHub Issues — mechanical mirror" rule: every
 mirror-required tracker row needs a paired GH issue. Two ways to
 proceed:
 
-  1. Run \`gh issue create --title "${KIND^} #N: <summary>" --label "${KIND}" \\
+  1. Run \`gh issue create --title "${KIND_TITLE} #N: <summary>" --label "${KIND}" \\
        --body "..."\` then add \`GH: #<issue>\` to the Notes column.
      Easiest path: use the slash command \`/file-${KIND}\` if available.
   2. (Features only) Add \`Mirror: no\` to Notes if the row is

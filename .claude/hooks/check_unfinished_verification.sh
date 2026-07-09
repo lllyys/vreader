@@ -33,7 +33,13 @@ EVIDENCE_DIR="$PROJECT_DIR/dev-docs/verification"
 if [[ ! -f "$FEATURES" ]]; then exit 0; fi
 
 # Find every feature row whose status is exactly DONE. Cheap awk pass.
-DONE_IDS="$(awk '
+# Backslash-escaped pipes (`\|`) inside a cell are masked with \001 before
+# splitting so they don't shift cell indices (same pattern as
+# scripts/deps-check.sh). No restore needed inside awk: ids are numeric,
+# the DONE comparison can never match a masked cell, and the ack-marker
+# regex is unaffected by \001 elsewhere in the notes.
+ESC="$(printf '\001')"
+DONE_IDS="$(sed "s/\\\\|/$ESC/g" "$FEATURES" | awk '
     /^\| *[0-9]+ *\|/ {
         n = split($0, cells, "|")
         id = cells[2]; gsub(/^ *| *$/, "", id)
@@ -52,7 +58,7 @@ DONE_IDS="$(awk '
             }
         }
     }
-' "$FEATURES")"
+')"
 
 if [[ -z "$DONE_IDS" ]]; then exit 0; fi
 
@@ -104,6 +110,14 @@ MIRROR_NO_FEATURE = re.compile(r"Mirror:\s*no", re.IGNORECASE)
 MIRROR_NO_BUG = re.compile(r"Mirror:\s*no\s*[—-]\s*local-only", re.IGNORECASE)
 ID_RE = re.compile(r"^\| *(\d+) *\|")
 
+def split_cells(line):
+    # Mask backslash-escaped pipes (`\|`) so they do not shift cell
+    # indices (bug #361); restore them after splitting. NOTE: no
+    # apostrophes in this heredoc — bash 3.2 mis-parses unbalanced
+    # single quotes inside a heredoc within $( ).
+    masked = line.replace("\\|", "\x01")
+    return [c.strip().replace("\x01", "\\|") for c in masked.split("|")]
+
 def scan(path, kind):
     if not os.path.exists(path):
         return []
@@ -114,7 +128,7 @@ def scan(path, kind):
             if not m:
                 continue
             rid = m.group(1)
-            cells = [c.strip() for c in line.split("|")]
+            cells = split_cells(line)
             if len(cells) < 7:
                 continue
             status = cells[5]
