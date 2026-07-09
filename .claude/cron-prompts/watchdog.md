@@ -34,10 +34,14 @@ WATCHDOG: keep every session-only cron alive past the 7-day auto-expire AND swee
    - **ETIME 10 minutes – 1 hour**: log as `suspicious` in `.claude/cron-logs/watchdog.log` (PID, command, age). Do NOT kill — the operator may be running a long test on purpose.
    - **ETIME > 1 hour**: log as `ghost` AND kill with `kill <pid>` (TERM, not KILL-9). If still alive after 5 s, escalate to `kill -9 <pid>`. Print every kill action to stdout so it surfaces in cron telemetry.
 
-7. Also scan for stale iOS **and Android** tool ghosts (> 30 min). Prefer the
-   maintained sweeper, which already classifies every ghost class (iOS + Android)
-   and excludes the resident daemons (SWBBuildService / Gradle daemon / booted
-   emulator / idb_companion):
+7. Also scan for stale iOS **and Android** tool ghosts (> 30 min), plus the
+   feature #130 harness's stale state. Run the maintained sweeper EVERY fire —
+   it classifies every process ghost class (iOS + Android), excludes the
+   resident daemons (SWBBuildService / Gradle daemon / booted emulator /
+   idb_companion / Codex.app), and is THE single reaper for the #130 classes:
+   stale `agent-lock`/`sim-lease` dirs under `.claude/locks/` (dead-pid owners
+   only — a LIVE owner is never reaped, only reported when long-held), dead
+   steal mutexes, and orphaned lane worktrees under `.claude/worktrees/`:
 
    ```bash
    scripts/sweep-ghosts.sh           # report; --kill to reap; THRESHOLD_MIN to tune
