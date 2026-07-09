@@ -306,6 +306,17 @@ Per `.claude/rules/10-tdd.md`:
 Codebase conventions: see `.claude/rules/50-codebase-conventions.md`.
 File-size guideline: ~300 lines max.
 
+## Lane mode (feature #130 / rule 55 — Gate-3 WIs inside dispatch lanes)
+
+Independent WIs (disjoint `writes:`, satisfied `depends:` — **an intra-batch
+dependency counts only when the dependency WI's branch has MERGED**) may run
+as dispatch lanes via the `dispatch` skill. Inside a lane, this skill's
+standing steps are OVERRIDDEN: the lane runs ONE WI's 3a–3d (RED → GREEN →
+REFACTOR → in-lane Gate-4 via `scripts/run-codex.sh`) in its worktree on its
+leased `TEST_UDID`, then STOPS with the rule-55 HANDOFF. No PR, no merge, no
+tracker edits, no docs sync, no version bump, no tags — the orchestrator
+owns the integration tail and Gate 5 (verify-sim lease).
+
 ## 3c. Test gate
 
 ALWAYS through the watchdog wrapper — never a raw Xcode test invocation

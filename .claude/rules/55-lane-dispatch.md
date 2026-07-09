@@ -243,8 +243,12 @@ the interest of brevity.
 3. The test-gate command shape: `TEST_UDID=<udid> scripts/run-tests.sh
    <targeted-suite>` (Android: `scripts/run-android-tests.sh`) — wrappers
    only (rule 52), targeted suites only (never the >20-min full suite).
-4. The in-lane Gate-4 instruction: cc-suite runner or `scripts/run-codex.sh`
-   (rule 53), artifact committed on the branch, ≤3 rounds then blocked.
+4. The in-lane Gate-4 instruction: `scripts/run-codex.sh` (rule 53) is the
+   PRIMARY rung — **probed 2026-07-09 (twice, incl. with `Skill` in the
+   agent frontmatter): custom agents get NO Skill tool in this harness, so
+   cc-suite slash-skills are unreachable from a lane** — artifact committed
+   on the branch, ≤3 rounds then blocked. Long output goes to
+   `<worktree>/.reports/` and travels as paths.
 
 ## Degrades
 

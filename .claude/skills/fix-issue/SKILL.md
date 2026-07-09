@@ -504,14 +504,31 @@ If Phase 1 classified the issue as `question`:
 
 ---
 
+# Lane mode (feature #130 / rule 55 — when this skill runs INSIDE a dispatch lane)
+
+When the brief says you are a dispatch LANE, this skill's standing phases are
+**OVERRIDDEN** as follows (the lane contract wins — a skill loaded "for
+method" must not carry you past your dispatch):
+
+- You run **Phases 0.5 → 6a only** (reproduce → classify → fix with TDD →
+  in-lane Gate-4 audit via `scripts/run-codex.sh` → targeted test gate on
+  your leased `TEST_UDID`), inside YOUR worktree, on the branch the
+  orchestrator created.
+- **Dead to you**: branch ceremony (done), Phase 6b/6c tracker + docs-sync
+  edits, Phase 7 version bump, Phase 8 PR, Phase 9 finalizer/close-gate,
+  `git tag`, anything `gh` beyond reading the issue. The orchestrator owns
+  all of it (rule 55). Your `tracker_edit`/`docs_sync` are TEXT in the
+  HANDOFF, not edits.
+- **Stop condition**: emit the rule-55 HANDOFF JSON (outcome
+  `ready-for-integration` or `blocked`) and stop.
+
 # Multi-Issue Pipeline
 
-> **⚠️ Scheduled for replacement by `/dispatch` (feature #130 WI-4).** The
-> M-step prose below has a known structural defect: M3's "resume each
-> worktree-agent through Phases 7→8" is NOT executable — subagents are
-> fire-and-forget with a single return (rule 48); there is no resume. Do NOT
-> hand-execute the agent-resume steps. Until /dispatch lands, run multi-issue
-> batches SEQUENTIALLY through the single-issue pipeline above.
+> **⚠️ REPLACED by `/dispatch` (feature #130 WI-4 — live).** Do NOT
+> hand-execute the M-step prose below; it is retained only as historical
+> context and its defects are catalogued in the dispatch skill's "Dropped by
+> design" section (M3's agent-resume is not executable — subagents are
+> fire-and-forget, rule 48). Multiple issues → invoke the `dispatch` skill.
 
 When multiple issue numbers are provided (e.g. `#123 #456 #789`).
 
