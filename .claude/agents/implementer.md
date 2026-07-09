@@ -39,7 +39,9 @@ PR #1029). If `pwd` mismatches, STOP and report — do not guess.
   or `blocked` (with blockers[]) after the audit loop's 3rd round or a
   non-reproducible/needs-design situation. Never push past a block — report.
 
-## The inner loop (rule 10, unchanged)
+## The inner loop (rule 10, unchanged — canonical lane order:
+## RED → GREEN → REFACTOR → targeted test gate → in-lane audit loop →
+## targeted RE-test if audit fixes changed code → HANDOFF)
 
 1. **Preflight**: reproduce/describe current vs expected; trace the smallest
    safe change boundary; brainstorm edge cases (empty, nil, boundaries,

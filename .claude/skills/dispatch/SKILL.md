@@ -11,16 +11,20 @@ docs sync) and all policy decisions. Lanes never decide anything.
 
 ## Step 0 — preconditions (any failure ⇒ report, do not dispatch)
 
-1. **Kill switch**: if `.claude/state/dispatch-kill` exists → dispatch is
-   disabled; fall back to the inline single-item flow and say so.
-2. **Global lock**: `scripts/agent-lock.sh acquire dispatch` — exit 2 means
-   another orchestrator (interactive or cron) is mid-batch: report
+1. **Global lock FIRST**: `scripts/agent-lock.sh acquire dispatch` — exit 2
+   means another orchestrator (interactive or cron) is mid-batch: report
    "blocked (dispatch busy)" and STOP. Cron prompts take only their
    `cron-<kind>` lock; /dispatch itself owns `dispatch` (pre-acquiring it
    outside would self-deadlock — the lock is non-reentrant).
+2. **Kill switch**: if `.claude/state/dispatch-kill` exists → dispatch is
+   disabled; run the item(s) through the inline single-item flow
+   **while still holding the `dispatch` lock** (the inline flow edits the
+   same shared surfaces — running it unlocked could race a concurrent
+   batch), release the lock at the end, and say so.
 3. **N=1 degrade**: a single work item runs today's inline flow
    (/fix-issue or /feature-workflow) — fan-out overhead isn't worth it
-   (rule 48 decision test). Release the lock first.
+   (rule 48 decision test). Same rule: **the inline degrade runs under the
+   `dispatch` lock**, released when the inline flow finishes.
 4. **Width**: default 1 lane; open a second ONLY with memory headroom —
    check `vm_stat` free+inactive pages ≳ 4GB equivalent. Hard cap 2.
    `android-app`/`android-spike` items always width 1 (no ANDROID_SERIAL
@@ -106,13 +110,19 @@ the interest of brevity.
 
 Spawn a full wave in ONE message (both Agent calls together at width 2).
 
-## Step 4 — HANDOFF validation (per returned lane)
+## Step 4 — HANDOFF validation + contamination check (per returned lane)
 
-Validate against rule 55's JSON schema. Invalid or missing HANDOFF = lane
-failure → requeue the item ONCE with a fresh lane, then escalate.
-`outcome: blocked` → read `blockers`, release the lane's lease, tear down,
-escalate or requeue per cause. Never argue with a lane — re-brief once
-(rule 48) or collapse to inline.
+Validate against rule 55's JSON schema, then IMMEDIATELY run the first
+contamination check (both probes — see "Contamination checks" below).
+
+**One cleanup routine for EVERY non-ready outcome** (invalid HANDOFF,
+missing HANDOFF, `outcome: failed`, `outcome: blocked`): release the lane's
+lease (`scripts/sim-lease.sh release <udid>`), tear down the worktree
+(`scripts/worktree-teardown.sh <id>` — or preserve it with an explicit
+"preserved for investigation" ledger note when the failure needs forensics),
+update the ledger row, THEN requeue-once (fresh lane) or escalate per cause.
+No exit path leaves a lease or an unaccounted worktree behind. Never argue
+with a lane — re-brief once (rule 48) or collapse to inline.
 
 ## Step 5 — integration tail (serial, per lane, in ledger order)
 
@@ -126,43 +136,56 @@ b. Rebase the branch on `origin/main` IN the worktree. Conflict ⇒
 c. Independent re-run of the lane's declared targeted suite
    (`TEST_UDID=<its udid> scripts/run-tests.sh <suite>`) — never trust the
    HANDOFF's RESULT line.
-d. Apply `tracker_edit` + `docs_sync` yourself via Edit under
-   `scripts/agent-lock.sh acquire tracker-write` (release immediately
-   after). New row IDs were minted via `scripts/reserve-id.sh` BEFORE
-   taking tracker-write.
-e. **Version-at-slot**: compute X.Y.Z NOW from then-current `project.yml`
-   + latest `v*` tag, applying the HANDOFF's `bump_tier`; never pre-assign
-   (a requeued lane would shift every subsequent number). Edit
-   `project.yml`, `xcodegen generate`, commit both as the branch's LAST
-   commit.
+d. Apply `tracker_edit` + `docs_sync` yourself via Edit **on files under
+   `<worktree>/`** (e.g. `<worktree>/docs/bugs.md`), committed on the lane
+   branch with `git -C <worktree> commit` — the tracker/docs deltas ride
+   the PR, never main. Take `scripts/agent-lock.sh acquire tracker-write`
+   around the edit, release immediately after. New row IDs were minted via
+   `scripts/reserve-id.sh` BEFORE taking tracker-write.
+e. **Version-at-slot**: compute X.Y.Z NOW from the then-current
+   `<worktree>/project.yml` + latest `v*` tag, applying the HANDOFF's
+   `bump_tier`; never pre-assign (a requeued lane would shift every
+   subsequent number). Edit `<worktree>/project.yml`, run
+   `xcodegen generate` IN the worktree, commit both files with
+   `git -C <worktree>` as the branch's LAST commit.
+   **Pre-PR assertion**: `git -C <worktree> log origin/main..HEAD
+   --oneline` shows fix + audit-artifact + tracker/docs + bump commits,
+   AND the second contamination check (below) is clean.
 f. `gh pr create` (HANDOFF as body, `Part of feature #N` / `Refs #N` per
    the merge-gate convention), then run `gh pr merge --squash`
    **FROM the lane worktree** — the audit-artifact hook checks the
    artifact as a filesystem path under the resolved root; merging from
    main false-blocks. And never pass `--delete-branch` (gh then checks
-   out the default branch, which fails in a linked worktree — teardown
-   owns branch deletion). On a NON-hook nonzero exit: `gh pr view --json
-   state,mergeCommit` FIRST — never close-and-requeue an already-MERGED
-   PR (network blips happen).
-g. Lane cleanup on EVERY exit path: `scripts/sim-lease.sh release <udid>` +
-   `scripts/worktree-teardown.sh <id>`. Batch ends with
-   `sim-lease.sh status` clean.
+   out the default branch, which fails in a linked worktree — branch
+   deletion is teardown's `--delete-branch` flag, post-merge only). On a
+   NON-hook nonzero exit: `gh pr view --json state,mergeCommit` FIRST —
+   never close-and-requeue an already-MERGED PR (network blips happen).
+g. **Tag per PR, immediately**: on the MAIN checkout `git pull --rebase`
+   (local main may carry cron finalizer chore(tracker) commits), resolve
+   THIS PR's merge commit (`gh pr view --json mergeCommit`), tag its
+   `vX.Y.Z` there, push the tag — after EACH successful merge, never a
+   single batch-end tag pass (rule 40: every PR's bump gets its tag on
+   its own merge commit; a batch-end pass can miss earlier PRs and
+   corrupts version-at-slot's latest-tag input for the NEXT slot).
+h. Lane cleanup: `scripts/sim-lease.sh release <udid>` +
+   `scripts/worktree-teardown.sh <id> --delete-branch` (post-merge).
+   Batch ends with `sim-lease.sh status` clean.
 
-After the last item: on the MAIN checkout run `git pull --rebase` (local
-main may carry your own unpushed tracker-write commits), cut the annotated
-tag on the true merge commit, push. Post the per-WI Gate-6 comment.
+After the last item: post the per-WI Gate-6 comments and report the ledger.
 
-## Step 6 — post-return contamination check (per lane, before its merge)
+## Contamination checks (run at BOTH points: after each HANDOFF validation,
+## and again in step 5e's pre-PR assertion)
 
-BOTH checks, always:
+BOTH probes, always:
 - `git status --porcelain` on the main checkout (uncommitted contamination —
   the pbxproj class arrives via a later `xcodegen generate`).
-- `git log origin/main..main --oneline` — only YOUR OWN chore/tracker/plan/
-  evidence commits may appear. A drifted lane that COMMITTED from
-  main-checkout cwd leaves `git status` clean; the log check is the only
-  detector.
+- `git log origin/main..main --oneline` on the main checkout — only YOUR OWN
+  chore/tracker/plan/evidence commits may appear. A drifted lane that
+  COMMITTED from main-checkout cwd leaves `git status` clean; the log check
+  is the only detector. Anything unexpected ⇒ quarantine the lane's output
+  (do NOT merge), restore main, escalate.
 
-## Step 7 — Gate 5 + release the lock
+## Step 6 — Gate 5 + release the lock
 
 Release the `dispatch` lock BEFORE Gate-5 verification (rule 55: the lock
 covers dispatch+integration only — the next batch's lanes may start while

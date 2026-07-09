@@ -69,6 +69,16 @@ if [ "$RC" -ne 0 ] && [ -d "$WT" ]; then ok "teardown refuses dirty worktree"; e
 OUT="$(run_teardown issue-1 --force)"; RC=$?
 if [ "$RC" -eq 0 ] && [ ! -d "$WT" ]; then ok "teardown --force removes"; else fail "teardown --force (rc=$RC): $OUT"; fi
 
+# 6b. teardown --delete-branch removes the lane branch (post-merge path);
+#     plain teardown leaves it (requeue path needs it)
+OUT="$(run_setup issue-6 fix/issue-6-slug)"
+run_teardown issue-6 >/dev/null 2>&1
+if git -C "$REPO" rev-parse --verify -q fix/issue-6-slug >/dev/null; then ok "plain teardown preserves the branch"; else fail "plain teardown deleted the branch"; fi
+git -C "$REPO" worktree prune
+OUT="$(run_setup issue-7 fix/issue-7-slug)"
+run_teardown issue-7 --delete-branch >/dev/null 2>&1
+if ! git -C "$REPO" rev-parse --verify -q fix/issue-7-slug >/dev/null; then ok "--delete-branch removes the branch"; else fail "--delete-branch left the branch"; fi
+
 # 7. SETUP CAP RACE (Gate-4 Medium): 8 concurrent setups on an empty base →
 #    exactly 2 CREATED (the setup mutex serializes count+add)
 rm -rf "$REPO/.claude/worktrees"

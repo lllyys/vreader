@@ -47,6 +47,25 @@ has "$SKILL" "git log origin/main..main" "committed-contamination detection"
 has "$SKILL" "check-write-set.sh" "write-set gate in the tail"
 has "$SKILL" "sim-lease.sh" "sim leases wired"
 
+# Gate-4 R1 operational invariants (audit thread 019f4467)
+has "$SKILL" "git -C <worktree> commit" "tail tracker/docs edits committed ON the lane branch"
+has "$SKILL" "as the branch's LAST commit" "bump is the branch's last commit, in the worktree"
+has "$SKILL" "after EACH successful merge" "tags are per-PR, never batch-end"
+has "$SKILL" "EVERY non-ready outcome" "one cleanup routine for all failure exits"
+has "$SKILL" "while still holding the \`dispatch\` lock" "inline fallbacks run under the dispatch lock"
+has "$SKILL" "worktree-teardown.sh <id> --delete-branch" "post-merge branch deletion via teardown flag"
+# ordering: the contamination check must be defined for use BEFORE the merge
+# (validation-time + pre-PR assertion) — assert both call sites exist
+CONTAM_VALIDATION=$(grep -n "HANDOFF validation + contamination check" "$SKILL" | head -1 | cut -d: -f1)
+CONTAM_PREPR=$(grep -n "second contamination check" "$SKILL" | head -1 | cut -d: -f1)
+MERGE_LINE=$(grep -n "gh pr merge --squash" "$SKILL" | head -1 | cut -d: -f1)
+if [ -n "$CONTAM_VALIDATION" ] && [ -n "$CONTAM_PREPR" ] && [ -n "$MERGE_LINE" ] \
+   && [ "$CONTAM_VALIDATION" -lt "$MERGE_LINE" ] && [ "$CONTAM_PREPR" -lt "$MERGE_LINE" ]; then
+    ok "contamination checks precede the merge (lines $CONTAM_VALIDATION,$CONTAM_PREPR < $MERGE_LINE)"
+else
+    fail "contamination-check ordering (validation=$CONTAM_VALIDATION prePR=$CONTAM_PREPR merge=$MERGE_LINE)"
+fi
+
 # ledger + scheduling discipline
 has "$SKILL" "dispatched → returned → integrating" "ephemeral ledger statuses"
 has "$SKILL" "never persisted" "ledger declared ephemeral"
