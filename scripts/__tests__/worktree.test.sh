@@ -79,6 +79,18 @@ OUT="$(run_setup issue-7 fix/issue-7-slug)"
 run_teardown issue-7 --delete-branch >/dev/null 2>&1
 if ! git -C "$REPO" rev-parse --verify -q fix/issue-7-slug >/dev/null; then ok "--delete-branch removes the branch"; else fail "--delete-branch left the branch"; fi
 
+# 6c. flag permutations: --force --delete-branch in both orders
+git -C "$REPO" worktree prune
+run_setup issue-8 fix/issue-8-slug >/dev/null
+echo dirty > "$REPO/.claude/worktrees/issue-8/file.txt"
+run_teardown issue-8 --force --delete-branch >/dev/null 2>&1
+if [ ! -d "$REPO/.claude/worktrees/issue-8" ] && ! git -C "$REPO" rev-parse --verify -q fix/issue-8-slug >/dev/null; then ok "--force --delete-branch"; else fail "--force --delete-branch permutation"; fi
+git -C "$REPO" worktree prune
+run_setup issue-9 fix/issue-9-slug >/dev/null
+echo dirty > "$REPO/.claude/worktrees/issue-9/file.txt"
+run_teardown issue-9 --delete-branch --force >/dev/null 2>&1
+if [ ! -d "$REPO/.claude/worktrees/issue-9" ] && ! git -C "$REPO" rev-parse --verify -q fix/issue-9-slug >/dev/null; then ok "--delete-branch --force"; else fail "--delete-branch --force permutation"; fi
+
 # 7. SETUP CAP RACE (Gate-4 Medium): 8 concurrent setups on an empty base →
 #    exactly 2 CREATED (the setup mutex serializes count+add)
 rm -rf "$REPO/.claude/worktrees"

@@ -171,7 +171,9 @@ h. Lane cleanup: `scripts/sim-lease.sh release <udid>` +
    `scripts/worktree-teardown.sh <id> --delete-branch` (post-merge).
    Batch ends with `sim-lease.sh status` clean.
 
-After the last item: post the per-WI Gate-6 comments and report the ledger.
+After the last item: post the per-item GATE-TIMELINE comments on the GH
+issues (rule 47's per-WI-merge rows — unrelated to this skill's step
+numbering) and report the final ledger.
 
 ## Contamination checks (run at BOTH points: after each HANDOFF validation,
 ## and again in step 5e's pre-PR assertion)

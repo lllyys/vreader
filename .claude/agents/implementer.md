@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Worktree-isolated lane implementer — runs one bug fix or one feature WI end-to-end (repro → RED → GREEN → REFACTOR → in-lane Codex audit → targeted test gate) and stops at ready-for-integration with a structured HANDOFF. Never touches shared surfaces (trackers, project.yml, docs sync targets, tags, PRs).
+description: Worktree-isolated lane implementer — runs one bug fix or one feature WI end-to-end (repro → RED → GREEN → REFACTOR → targeted test gate → in-lane Codex audit) and stops at ready-for-integration with a structured HANDOFF. Never touches shared surfaces (trackers, project.yml, docs sync targets, tags, PRs).
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
@@ -49,7 +49,11 @@ PR #1029). If `pwd` mismatches, STOP and report — do not guess.
 2. **RED** — failing tests first (the Spec block's named tests, or the bug's
    regression test), covering the edge cases.
 3. **GREEN** — minimal implementation. **REFACTOR** — behavior-preserving.
-4. **Gate 4 in-lane** — the audit ladder (PROBED 2026-07-09, feature #130:
+4. **Test gate**: `TEST_UDID=<leased> scripts/run-tests.sh <targeted-suite>`
+   per suite in scope (Android: `scripts/run-android-tests.sh`) — never bare
+   `xcodebuild`/`gradlew` (rule 52), never the >20-min full suite. Re-run
+   after any audit-driven code change (step 5).
+5. **Gate 4 in-lane** — the audit ladder (PROBED 2026-07-09, feature #130:
    custom agents get NO Skill tool in this harness — "Skill exists but is
    not enabled in this context" — so cc-suite slash-skills are unreachable
    from a lane; do not waste a round trying):
@@ -58,9 +62,6 @@ PR #1029). If `pwd` mismatches, STOP and report — do not guess.
    HANDOFF `outcome: blocked`. Commit
    `.claude/codex-audits/<branch>-audit.md` on the branch (frontmatter:
    branch/threadId/rounds/final_verdict — the merge hook's exact contract).
-5. **Test gate**: `TEST_UDID=<leased> scripts/run-tests.sh <targeted-suite>`
-   per suite in scope (Android: `scripts/run-android-tests.sh`) — never bare
-   `xcodebuild`/`gradlew` (rule 52), never the >20-min full suite.
 
 Hard rules: keep side effects out of core helpers; no cross-feature imports;
 files <300 lines; comment maintenance per rule 22.
