@@ -846,6 +846,28 @@ WI-1/2/3/5/7: patch. WI-4: minor (new capability). WI-6 (if built): patch.
 
 ## Revision history
 
+- v7 2026-07-09 — post-proof consolidation (WI-5). **M4a single-lane canary
+  PASSED** (bug #360 end-to-end via /dispatch: PR #1892, v3.66.57, merged
+  FROM the worktree, per-PR tag, zero leases/locks at end; 6m47s lane,
+  ~1KB HANDOFF). **M-SHAKEDOWN PASSED** (two concurrent lanes: bug #361
+  hook-hygiene + export-formatter test chore; 1.76× lane-phase concurrency;
+  PRs #1894 v3.67.1 + #1895 v3.67.2 both merged from their worktrees with
+  per-PR tags; contamination probes clean; zero leases/locks/worktrees at
+  end; GH #1890 + #1891 verified & closed). **WI-6 dispositioned
+  dropped-pending-(b)**: runtime proof (a) PASSED (`.claude/workflows/hello-lane.js`
+  runs via Workflow scriptPath, structured output round-trips, 11s) but
+  proof (b) — a cron-fired headless session invoking Workflow — is not
+  cheaply provable; the workflow drivers are dropped until (b) is shown,
+  hello-lane.js is committed as the standing probe. Rule 55 widened from
+  shakedown findings: `ALL PASS` accepted as a bash-suite `test_result_line`;
+  `chore:<slug>` id class; optional HANDOFF `notes` field; width gate weighs
+  lane types (bash lane ≈ zero build load); new-Swift-file lanes need the
+  orchestrator's structural regen (extend-existing-file is the v1 answer);
+  the no-Bash-edits rule binds the orchestrator too (self-caught lapse in
+  the shakedown tail). 7 dead vmark agents deleted (auditor, impact-analyst,
+  manual-test-author, planner, release-steward, spec-guardian, test-runner)
+  — only `implementer` + `verifier` remain; test-runner's content confirmed
+  already covered by rules 52/55.
 - v6 2026-07-09 — lucid cross-pollination (structured study of the LIVE
   `../lucid/.claude` architecture — same problem, independently-converged
   design, proven in production there). WI-4 gains eleven procedure details

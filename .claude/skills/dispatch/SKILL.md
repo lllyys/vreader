@@ -57,6 +57,12 @@ For each candidate item:
 - Write-sets must be pairwise-disjoint across the batch (compare `writes:`
   prefixes against every in-flight ledger row); overlap ⇒ serialize those
   items into later waves.
+- **No new Swift files in a lane's write-set** (rule 55 Degrades): a new
+  file needs the orchestrator-owned xcodegen structural regen, which the
+  lane's test gate can't see and this tail has no post-regen retest for.
+  Shape the item to extend an existing file; if a new file is genuinely
+  unavoidable, the item is NOT dispatchable — route it inline
+  (`/fix-issue` / `/feature-workflow`).
 
 ## Step 2 — pre-spawn checklist (a failed item blocks the SPAWN)
 

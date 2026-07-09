@@ -92,6 +92,34 @@ else
     fail "commands/dispatch.md stub missing or oversized"
 fi
 
+# rule-55 HANDOFF schema block: must parse as JSON, patterns anchored,
+# widened classes present (WI-5 audit: an edit here could false-green)
+RULE55="$ROOT/.claude/rules/55-lane-dispatch.md"
+SCHEMA_JSON="$(awk '/^### Normative JSON Schema/,0' "$RULE55" | awk '/^```json$/{f=1;next} /^```$/{f=0} f')"
+if printf '%s' "$SCHEMA_JSON" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
+    ok "rule-55 normative schema block parses as JSON"
+else
+    fail "rule-55 normative schema block is not valid JSON"
+fi
+if printf '%s' "$SCHEMA_JSON" | grep -q '"pattern": "\^(RUN-(TESTS|ANDROID-TESTS) RESULT:\.\*|ALL PASS)\$"'; then
+    ok "test_result_line pattern is anchored (no over-match)"
+else
+    fail "test_result_line pattern missing or unanchored"
+fi
+has "$RULE55" "chore:\[a-z0-9\]\[a-z0-9-\]\*" "HANDOFF id accepts the chore class"
+has "$RULE55" '"notes"' "HANDOFF schema carries the optional notes field"
+has "$RULE55" "NOT dispatchable in v1" "new-Swift-file lanes forbidden in v1 (route inline)"
+has "$SKILL" "No new Swift files in a lane" "skill eligibility mirrors the new-file prohibition"
+
+# WI-6 standing probe: hello-lane.js meta must stay literal + named
+HELLO="$ROOT/.claude/workflows/hello-lane.js"
+if [ -f "$HELLO" ] && grep -q "^export const meta" "$HELLO" \
+   && grep -q "name: 'hello-lane'" "$HELLO" && grep -q "description:" "$HELLO"; then
+    ok "hello-lane.js standing probe present with literal meta"
+else
+    fail "hello-lane.js probe missing or meta malformed"
+fi
+
 # implementer ladder (probe-shaped: custom agents get NO Skill tool — probed
 # 2026-07-09 twice, incl. with Skill in frontmatter; run-codex.sh is PRIMARY)
 has "$IMPL" "PROBED 2026-07-09" "implementer records the probe verdict"
