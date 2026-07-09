@@ -15,7 +15,7 @@ PICK ORDER (highest priority first):
 3. **`PLANNED` features without a dev-docs/plans doc** — row-template definition was filled but full implementation plan was never lifted. Drawing up the plan doc IS this iteration's work (Gate 1 → Gate 2 → first WI of Gate 3 if time allows). Per the user-confirmed framing, "the plan must be drawn up before reaching Gate 1" — that means write it now, do not bail out.
 4. **`TODO` features** — only if their row already has Problem/Scope/Edge Cases/Test plan/Acceptance criteria filled in (i.e., they're effectively `PLANNED`-equivalent and the status flip was just missed). Otherwise skip — those need triage first, which is `/triage` work, not feature-workflow work.
 
-If no feature qualifies under categories 1–4, log `no_work_in_scope` and stop. Do NOT invent scope or pick an `IDEA`-level / empty-row entry.
+If no feature qualifies under categories 1–4, log `no_work_in_scope no-dispatch` and stop. Do NOT invent scope or pick an `IDEA`-level / empty-row entry.
 
 SCOPE GUARDRAIL — only implement features from your own planning chain:
 - Acceptable scope sources:
