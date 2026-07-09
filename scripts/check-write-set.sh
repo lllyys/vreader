@@ -73,7 +73,11 @@ if [ -n "$lane_platform" ]; then
     CLASSIFIER="$(git -C "$dir" rev-parse --show-toplevel)/.claude/hooks/lib/code-paths.sh"
     if [ -f "$CLASSIFIER" ]; then
         # shellcheck source=/dev/null
-        source "$CLASSIFIER"
+        if ! source "$CLASSIFIER" 2>/dev/null || ! type code_paths_platform >/dev/null 2>&1; then
+            echo "check-write-set: classifier failed to load — fail closed" >&2
+            echo "CHECK-WRITE-SET RESULT: ERROR"
+            exit 1
+        fi
         set_platform="$(printf '%s\n' "$DIFF" | awk -F'\t' '{print $2; if ($3 != "") print $3}' | code_paths_platform)"
         case "$lane_platform:$set_platform" in
             ios:android-*|android-*:ios)

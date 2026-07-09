@@ -105,6 +105,13 @@ git -C "$REPO" reset -q --hard HEAD~1
 echo mod4 >> "$REPO/src/feature/a.txt"; git -C "$REPO" commit -aqm m10
 OUT="$( cd "$REPO" && env CHECK_BASE_REF=main CHECK_LANE_PLATFORM=ios bash "$CHECK" "$REPO" src/feature/ .claude/ 2>&1 )"; RC=$?
 if [ "$RC" -eq 0 ]; then ok "ios lane + plain paths passes platform gate"; else fail "platform pass (rc=$RC): $OUT"; fi
+# reciprocal direction: an android-app lane touching iOS-owned paths fails
+mkdir -p "$REPO/vreader"
+echo swift > "$REPO/vreader/Foo.swift"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm m11
+OUT="$( cd "$REPO" && env CHECK_BASE_REF=main CHECK_LANE_PLATFORM=android-app bash "$CHECK" "$REPO" vreader/ src/feature/ .claude/ 2>&1 )"; RC=$?
+if [ "$RC" -eq 1 ] && grep -qi "platform boundary" <<<"$OUT"; then ok "android lane + .swift paths → platform violation (reciprocal)"; else fail "reciprocal platform gate (rc=$RC): $OUT"; fi
+git -C "$REPO" reset -q --hard HEAD~1
 
 # 9. worktree-path run: gate a LANE WORKTREE while cwd = main checkout
 #    (lucid FIX-1 class: 'fires' ≠ 'fires correctly in a lane')
