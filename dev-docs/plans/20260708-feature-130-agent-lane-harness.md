@@ -534,6 +534,74 @@ acceptance:
   rebase-conflict recovery) → Gate-5 → teardown → lock release. Escalation handling
   (audit round-3 failure, needs-design, blocked repro ⇒ orchestrator files issues/marks
   rows; lanes never make policy decisions). N=1 degrade to today's inline flow.
+  **Lucid-informed procedure details (v6 — from the live `../lucid/.claude`
+  architecture study, 2026-07-09):**
+  - **Merge FROM the lane worktree, never the main checkout** —
+    `check_codex_audit_artifact.sh` checks the audit artifact as a filesystem
+    path under the resolved root; run from main, the branch-committed artifact
+    doesn't exist there and the hook FALSE-BLOCKS. Never pass `--delete-branch`
+    (gh then checks out the default branch, which fails in a linked worktree —
+    `worktree-teardown.sh` owns branch deletion). Both grep-gated in
+    `dispatch-shape.test.sh`.
+  - **Post-merge-failure disambiguation**: on a non-hook nonzero `gh pr merge`
+    exit, run `gh pr view --json state,mergeCommit` BEFORE acting — never
+    close-and-requeue an ALREADY-MERGED PR (network-blip double-work hazard).
+  - **`git pull --rebase` on main before cutting the tag** — verify-flow
+    tracker-write commits can sit unpushed on local main while the batch
+    merges remotely; the tag must land on the true merge commit.
+  - **Committed-contamination detection** in the post-return check:
+    `git log origin/main..main --oneline` (only the orchestrator's own
+    chore/plan/evidence commits allowed) IN ADDITION to the porcelain check —
+    a drifted lane that COMMITTED from main-checkout cwd leaves `git status`
+    clean; the log check is the only detector. Keep both (pbxproj
+    contamination also arrives uncommitted via a later `xcodegen generate`).
+  - **Ephemeral batch ledger** (in-context, NEVER persisted — a durable file
+    is the two-sources-of-truth trap already rejected): one row per lane —
+    `item | branch | write-set | UDID | status | verdict/version`, statuses
+    dispatched → returned → integrating → merged | requeued | escalated.
+    Durable resumable state = tracker rows + GH gate-timeline comments +
+    `git worktree list` + `sim-lease.sh status` + `agent-lock.sh status`.
+  - **Pre-spawn checklist** (a failed item blocks the SPAWN): main tree clean;
+    worktree created + ABSOLUTE path in the brief; `GH: #N` stamped;
+    deps-check READY; write-set pairwise-disjoint vs the ledger; UDID leased;
+    and an intra-batch Spec dependency counts as satisfied only when the
+    dependency WI's branch has **MERGED** — not merely HANDOFF-returned or
+    PR-opened (a returned branch can still bounce at integration).
+  - **Never-READ lists** (context protection; the N=1 inline degrade stays):
+    in dispatch mode the orchestrator never reads full diffs, test logs,
+    Codex rawOutput, sim transcripts, or plan bodies (Spec blocks + HANDOFFs
+    only), and never runs `git diff` beyond `--name-only`.
+  - **Skill-in-custom-agent probe as the canary PRECONDITION**: dispatch a
+    real `implementer` (tools: frontmatter) invoking `Skill(cc-suite:status)`;
+    PASS ⇒ `Skill(cc-suite:audit)` stays the lanes' primary Gate-4 rung;
+    FAIL ⇒ `scripts/run-codex.sh` (rule 53) promotes to primary. Lucid's PASS
+    was observed in a broad-toolset subagent, NOT a tools:-frontmatter custom
+    agent — vreader observes its own case. cc-suite job state keys on
+    process.cwd(): the lane owns its audit loop end-to-end; the orchestrator
+    never polls a lane's Codex job.
+  - **Skill-override clause** in the lane-mode sections: name exactly which
+    standing phases the lane contract OVERRIDES (no PR creation, no tracker
+    edits, no close-gate, no version bump — STOP at ready-for-integration).
+    A skill loaded "for method" otherwise hijacks the lane past its dispatch.
+  - **Bug-mode Phase 0.5 in the brief template**: reproduce FIRST; one
+    explicit root-cause line ("the bug is X because Y"); the RED test must
+    fail for the bug's reason; re-run the original repro after GREEN and
+    record it in the HANDOFF's `notes_append`.
+  - **"Dropped by design — do not reintroduce"** section replaces M1–M5:
+    names the dead behaviors (resumable two-way agents, integrator "resuming"
+    agents through phases, per-WI inline bump/PR) so a future rewrite cannot
+    regress into fire-and-forget-incompatible designs.
+  - **Version-at-slot wording made explicit**: the orchestrator computes
+    X.Y.Z at the merge slot from then-current `project.yml` + latest tag;
+    the HANDOFF carries only `bump_tier`; never pre-assign (a requeued lane
+    would shift every subsequent number). Width-2 waves dispatch in ONE
+    message (both Agent calls together).
+- `.claude/agents/implementer.md` — CHANGE (v6): add `Skill` to the tools
+  frontmatter and spell the Gate-4 ladder explicitly —
+  `Skill(cc-suite:audit)` primary → `scripts/run-codex.sh` (rule 53, the
+  watchdogged rung — never bare `codex exec`) → HANDOFF `outcome: blocked`.
+  Without the Skill tool the contract's cc-suite wording is physically
+  uninvokable from a lane. Must land before the canary.
 - `.claude/commands/dispatch.md` — NEW: stub invoking the skill.
 - `.claude/skills/fix-issue/SKILL.md` — CHANGE: add "lane mode" section
   (STOP_AFTER=ready-for-integration contract; phases a lane runs: 0.5→6a + in-lane
@@ -581,6 +649,7 @@ writes:
   - ".claude/commands/dispatch.md"
   - ".claude/skills/fix-issue/SKILL.md"
   - ".claude/skills/feature-workflow/SKILL.md"
+  - ".claude/agents/implementer.md"   # v6: Skill tool + Gate-4 ladder
   - ".claude/rules/48-parallel-execution.md"
   - ".claude/rules/40-version-bump.md"
   - "scripts/__tests__/dispatch-shape.test.sh"
@@ -777,6 +846,25 @@ WI-1/2/3/5/7: patch. WI-4: minor (new capability). WI-6 (if built): patch.
 
 ## Revision history
 
+- v6 2026-07-09 — lucid cross-pollination (structured study of the LIVE
+  `../lucid/.claude` architecture — same problem, independently-converged
+  design, proven in production there). WI-4 gains eleven procedure details
+  (merge-from-worktree + no --delete-branch, gh-pr-view merge disambiguation,
+  pull --rebase before tag, committed-contamination log-check, ephemeral
+  ledger, merged-not-returned dependency rule, never-READ lists, Skill-probe
+  canary precondition, skill-override clause, bug Phase-0.5 brief discipline,
+  dropped-by-design section, explicit version-at-slot wording);
+  implementer.md added to WI-4's writes (Skill tool + Gate-4 ladder). WI-3
+  absorbed the immediate items pre-audit: `.claude/codex-audits/` standing
+  allowance in check-write-set (every contract-compliant lane would have
+  failed its own gate), `.reports/` overflow channel, worktree-cwd test
+  cases, sweep-ghosts as the single lock reaper + Codex.app ghost-class
+  exclusion. Deliberate rejections recorded (integrator agent, cap 3,
+  absolute never-inline, prose envelope, planner-packed Gates 1+2, verifier
+  evidence-writing, weakened FIXED gate, bare codex exec, persisted ledger).
+  Two same-class hook defects confirmed in vreader and queued as a separate
+  hook-hygiene bug PR (phantom verify-skip bypass; naive pipe-split columns
+  in check_unfinished_verification.sh).
 - v5 2026-07-08 — Gate-2 round-3 fixes (same thread, verdict NEEDS REVISION with 7 new
   findings, all introduced by v4's lock-model additions; the 3-round ceiling is
   reached — v5 applies every finding and is escalated to the owner per rule 47):

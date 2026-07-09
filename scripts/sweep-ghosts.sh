@@ -65,7 +65,7 @@ ghosts=$(ps -Ao pid=,etime=,pcpu=,command= | awk -v thr="$THRESHOLD_MIN" '
     # bridge idb_companion, the Gradle daemon (alive + idle between builds — rule
     # 52 Cause D), and a booted Android emulator (qemu/emulator — like a booted
     # simulator). The sweep ps/ugrep pipeline is excluded too.
-    cmd ~ /(ps -Ao|ugrep|sweep-ghosts|idb_companion|SWBBuildService|GradleDaemon|org\.gradle\.launcher\.daemon|qemu-system|emulator64|\/emulator )/ { next }
+    cmd ~ /(ps -Ao|ugrep|sweep-ghosts|idb_companion|SWBBuildService|GradleDaemon|org\.gradle\.launcher\.daemon|qemu-system|emulator64|\/emulator |Codex\.app)/ { next }
     {
         otherClass = (cmd !~ /( grep | awk )/) && \
             (cmd ~ /tail -f/ || cmd ~ /log stream/ || \
@@ -85,17 +85,118 @@ ghosts=$(ps -Ao pid=,etime=,pcpu=,command= | awk -v thr="$THRESHOLD_MIN" '
             printf "%s\t%s\t%s%%\t%s\n", $1, $2, $3, cmd
     }')
 
-if [[ -z "$ghosts" ]]; then
+# ---- Feature #130 WI-3: stale locks/leases + orphaned lane worktrees ----
+# This sweeper is THE single reaper for lock-state (rule 55): lock_acquire
+# never removes a foreign steal mutex (that race broke mutual exclusion —
+# Gate-4 finding), so a stealer that crashed mid-steal wedges its lock until
+# this runs. Staleness = lib/lock.sh semantics (dead pid / PID-reuse); a
+# LIVE matching owner is never reaped — long-held (>threshold) live locks
+# are REPORTED for the operator only.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOCK_ROOT="${AGENT_LOCK_ROOT:-$ROOT/.claude/locks}"
+WT_ROOT="$ROOT/.claude/worktrees"
+lock_stale=""
+lock_longheld=""
+if [[ -d "$LOCK_ROOT" ]] && source "$ROOT/scripts/lib/lock.sh" 2>/dev/null; then
+    for d in "$LOCK_ROOT"/*.d; do
+        [[ -e "$d" ]] || continue
+        if _lock_owner_live_matching "$d"; then
+            created="$(sed -n 's/^created=//p' "$d/owner" 2>/dev/null)"
+            age_min="$(python3 -c "
+import sys, datetime
+try:
+    t = datetime.datetime.strptime(sys.argv[1], '%Y-%m-%dT%H:%M:%SZ')
+    print(int((datetime.datetime.utcnow() - t).total_seconds() // 60))
+except Exception:
+    print(0)" "$created" 2>/dev/null || echo 0)"
+            if [[ "$age_min" -ge "$THRESHOLD_MIN" ]]; then
+                lock_longheld+="$d (live owner, held ${age_min}m — REPORT ONLY, never auto-reaped)"$'\n'
+            fi
+        else
+            lock_stale+="$d"$'\n'
+        fi
+    done
+fi
+wt_orphans=""
+if [[ -d "$WT_ROOT" ]]; then
+    now="$(date +%s)"
+    for w in "$WT_ROOT"/*; do
+        [[ -d "$w" ]] || continue
+        mtime="$(stat -f %m "$w" 2>/dev/null || echo "$now")"
+        age_min=$(( (now - mtime) / 60 ))
+        if [[ "$age_min" -ge "$THRESHOLD_MIN" ]]; then
+            wt_orphans+="$w (${age_min}m old)"$'\n'
+        fi
+    done
+fi
+
+lock_count=$(printf '%s' "$lock_stale" | grep -c . || true)
+wt_count=$(printf '%s' "$wt_orphans" | grep -c . || true)
+proc_count=0
+[[ -n "$ghosts" ]] && proc_count=$(printf '%s\n' "$ghosts" | wc -l | tr -d ' ')
+
+if [[ -n "$lock_longheld" ]]; then
+    echo "LONG-HELD LOCKS (live owners — informational):"
+    printf '%s' "$lock_longheld"
+fi
+
+if [[ "$proc_count" -eq 0 && "$lock_count" -eq 0 && "$wt_count" -eq 0 ]]; then
     echo "SWEEP-GHOSTS RESULT: CLEAN"
     exit 0
 fi
 
-echo "PID	ELAPSED	CPU	COMMAND"
-echo "$ghosts"
-count=$(printf '%s\n' "$ghosts" | wc -l | tr -d ' ')
+if [[ "$proc_count" -gt 0 ]]; then
+    echo "PID	ELAPSED	CPU	COMMAND"
+    echo "$ghosts"
+fi
+if [[ "$lock_count" -gt 0 ]]; then
+    echo "STALE LOCKS (dead/reused owner):"
+    printf '%s' "$lock_stale"
+fi
+if [[ "$wt_count" -gt 0 ]]; then
+    echo "ORPHANED LANE WORKTREES (>${THRESHOLD_MIN}m):"
+    printf '%s' "$wt_orphans"
+fi
+count=$((proc_count + lock_count + wt_count))
 
 if [[ "$KILL" -eq 1 ]]; then
-    printf '%s\n' "$ghosts" | cut -f1 | xargs kill 2>/dev/null || true
+    if [[ "$proc_count" -gt 0 ]]; then
+        printf '%s\n' "$ghosts" | cut -f1 | xargs kill 2>/dev/null || true
+    fi
+    if [[ "$lock_count" -gt 0 ]]; then
+        # Reap = REVALIDATE-at-removal, never rm a snapshot (Gate-4 High: the
+        # scan can see a just-created lock before its owner file is atomically
+        # published; a snapshot rm would delete a FRESH lock post-publish).
+        # *.lock.d dirs reap via lock_acquire+lock_release — the helper already
+        # implements serialized stealing with the mid-publish grace re-read.
+        # *.steal.d mutexes are revalidated inline and rm'd only when their
+        # owner is dead/reused; two sweepers racing on the same dead mutex is
+        # the accepted single-sweep-actor residual (documented in rule 55).
+        printf '%s' "$lock_stale" | while IFS= read -r d; do
+            [[ -n "$d" && -d "$d" ]] || continue
+            case "$d" in
+                *.steal.d)
+                    if ! _lock_owner_live_matching "$d"; then
+                        if [[ ! -f "$d/owner" ]]; then sleep 0.3; fi
+                        if [[ -d "$d" ]] && ! _lock_owner_live_matching "$d"; then
+                            rm -rf "$d"
+                        fi
+                    fi ;;
+                *)
+                    if LOCK_OWNER_PID=$$ lock_acquire "$d" 2>/dev/null; then
+                        LOCK_OWNER_PID=$$ lock_release "$d" 2>/dev/null || true
+                    fi ;;
+            esac
+        done
+    fi
+    if [[ "$wt_count" -gt 0 ]]; then
+        printf '%s' "$wt_orphans" | while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            w="${line%% *}"
+            bash "$ROOT/scripts/worktree-teardown.sh" "$(basename "$w")" --force 2>/dev/null \
+                || echo "[sweep] worktree $w teardown failed — remove manually"
+        done
+    fi
     echo "SWEEP-GHOSTS RESULT: KILLED $count"
     exit 0
 fi
