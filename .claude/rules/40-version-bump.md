@@ -89,6 +89,20 @@ git diff vreader.xcodeproj/project.pbxproj | grep -E "MARKETING_VERSION|CURRENT_
 
 After a bump, the App's About / TestFlight build number both should reflect the new `MARKETING_VERSION`. The build number from `CURRENT_PROJECT_VERSION` is shown in TestFlight's release lists.
 
+## Batch mode (feature #130 lane dispatch — version-at-slot)
+
+In a `/dispatch` batch, **the orchestrator allocates versions at the merge
+slot** (the fix-issue M3 integrator pattern as the universal rule): lanes
+never touch `project.yml`/pbxproj; the HANDOFF carries only a `bump_tier`
+(patch|minor|major); at each item's integration slot the orchestrator
+computes X.Y.Z from the THEN-current `project.yml` + latest `v*` tag,
+applies the bump + `xcodegen generate`, and commits both files as the
+branch's last commit before `gh pr create`. Never pre-assign numbers — a
+requeued lane would shift every subsequent one. The letter of this rule is
+preserved: every PR still ends with its own bump commit before opening;
+monotonic `CURRENT_PROJECT_VERSION` holds because exactly one allocator
+exists per batch (serialized by the `dispatch` lock).
+
 ## Multi-platform (Android port — feature #103 Phase 0)
 
 vreader is becoming two independently-shippable native apps (iOS at the

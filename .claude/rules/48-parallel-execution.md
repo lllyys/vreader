@@ -158,6 +158,21 @@ the interest of brevity.
 - [ ] If the brief includes multi-step bash sequences, every step starts with `cd "<worktree-path>"` (compound commands `cd X && Y && Z` are fine — what's not fine is a later Bash call that omits the prefix and assumes the previous call's cwd persists).
 - [ ] If the agent reports something that smells like contamination (PR has unexpected `project.pbxproj` references, `git status` in main checkout shows files the agent shouldn't have written), treat the agent's output as suspect and verify by inspecting the main checkout's working tree before merging.
 
+## Lane dispatch (feature #130 — THE sanctioned fan-out mechanism)
+
+Multi-item parallel work runs through **`/dispatch`**
+(`.claude/skills/dispatch/SKILL.md`) under the **rule 55** lane contract —
+worktree-isolated `implementer` lanes on leased simulators
+(`scripts/sim-lease.sh`), write-sets gated by `scripts/check-write-set.sh`,
+dependencies gated by `scripts/deps-check.sh`, one global `dispatch` lock
+(`scripts/agent-lock.sh`), a serial integration tail with version-at-slot,
+and ≤2 lanes (width 1 default). Lane briefs are GENERATED from the dispatch
+skill's template — never hand-written — and always embed this rule's
+"Critical Operational" preamble verbatim. The subagent contract above now
+includes the rule-55 HANDOFF JSON as the required return format for lanes.
+Hand-rolled multi-worktree orchestration (the old fix-issue M1–M5 prose) is
+dead — see the dispatch skill's "Dropped by design" section.
+
 ## Worked examples
 
 **Good — mixed gates, this session's `#46 WI-0a + #48 planning`**:
