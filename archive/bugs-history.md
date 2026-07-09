@@ -2113,3 +2113,10 @@ The scroll math (`attemptScrollRestore`, `scrollToMatchedOffset`) is unchanged �
 **Impact**: Every TTS user who starts playback mid-document must listen through already-read content or manually skip, defeating the use case.
 **Fix direction**: Pass the current `currentOffsetUTF16` / locator as the start offset when initiating TTS playback, instead of defaulting to offset 0.
 
+### Bug #358 — bugs.md Open-Bug-Detail section drifted: ~119 stale entries for terminal rows (FILED 2026-07-08 via feature #130 Gate-2 recount)
+
+- **Repro**: count `### Bug #N` entries in that section whose Summary row is terminal — was ~119 (e.g. #344–#350). Expected: entries only for non-terminal rows.
+- **Cause**: the "Move to archive on FIXED" rule was applied ad hoc (one 2026-05-07 sweep of 11 entries), never as part of the fix workflow's Track step, so entries accumulated for a year of fixes.
+- **Solution (FIXED 2026-07-09)**: assertion-guarded mechanical move of all 119 terminal-row entries, verbatim, into this file's "Archived Open-Bug-Detail entries (2026-07-09 reconciliation)" section; Summary/Rules regions asserted byte-identical; post-fix stale scan = 0.
+- **Lesson**: a prose invariant with no scan drifts; the reconciliation scan (detail-entry id → row status) is cheap and should be re-run whenever the section looks bloated.
+
