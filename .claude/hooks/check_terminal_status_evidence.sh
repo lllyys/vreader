@@ -195,9 +195,6 @@ EOF
 Run the verification per .claude/rules/47-feature-workflow.md Gate 5,
 write the evidence file (schema: dev-docs/verification/SCHEMA.md),
 then retry the edit.
-
-To bypass for legitimate reasons (rare), submit your next prompt
-prefixed with: verify-skip:<id>:<reason>
 EOF
     exit 2
 fi
