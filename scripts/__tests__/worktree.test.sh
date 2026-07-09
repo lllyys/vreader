@@ -69,5 +69,17 @@ if [ "$RC" -ne 0 ] && [ -d "$WT" ]; then ok "teardown refuses dirty worktree"; e
 OUT="$(run_teardown issue-1 --force)"; RC=$?
 if [ "$RC" -eq 0 ] && [ ! -d "$WT" ]; then ok "teardown --force removes"; else fail "teardown --force (rc=$RC): $OUT"; fi
 
+# 7. SETUP CAP RACE (Gate-4 Medium): 8 concurrent setups on an empty base →
+#    exactly 2 CREATED (the setup mutex serializes count+add)
+rm -rf "$REPO/.claude/worktrees"
+git -C "$REPO" worktree prune
+CWINS="$TMP/cap-wins"; : > "$CWINS"
+for i in 1 2 3 4 5 6 7 8; do
+    ( cd "$REPO" && env AGENT_LOCK_ROOT="$TMP/race-locks" bash "$SETUP" "race-$i" "fix/race-$i" >> "$CWINS" 2>/dev/null ) &
+done
+wait
+CREATED=$(grep -c "WORKTREE RESULT: CREATED" "$CWINS" || true)
+if [ "$CREATED" -eq 2 ]; then ok "8-way setup race → exactly 2 worktrees (cap held)"; else fail "setup race: $CREATED created"; fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

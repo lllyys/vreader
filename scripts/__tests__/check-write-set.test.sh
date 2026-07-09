@@ -85,6 +85,27 @@ git -C "$REPO" add -A && git -C "$REPO" commit -qm m8
 OUT="$(run src/feature/)"; RC=$?
 if [ "$RC" -eq 0 ]; then ok "committed audit artifact passes via standing allowance"; else fail "audit allowance (rc=$RC): $OUT"; fi
 
+# 8b. FAIL CLOSED on diff error (Gate-4 High): a bogus base ref must never
+#     print CLEAN
+OUT="$( cd "$REPO" && env CHECK_BASE_REF=no-such-ref bash "$CHECK" "$REPO" src/feature/ 2>&1 )"; RC=$?
+if [ "$RC" -eq 1 ] && grep -q "ERROR" <<<"$OUT" && ! grep -q "CLEAN" <<<"$OUT"; then ok "diff failure → fail closed (ERROR, never CLEAN)"; else fail "diff failure (rc=$RC): $OUT"; fi
+
+# 8c. platform boundary (rule 48): an ios lane touching android-owned paths
+#     is rejected via the real classifier
+mkdir -p "$REPO/.claude/hooks/lib"
+cp "$HERE/../../.claude/hooks/lib/code-paths.sh" "$REPO/.claude/hooks/lib/code-paths.sh"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm m9-classifier
+mkdir -p "$REPO/android/app"
+echo kt > "$REPO/android/app/Foo.kt"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm m9
+OUT="$(run android/ src/feature/)"; RC=$?   # prefixes allow it — platform gate must still fire
+OUT="$( cd "$REPO" && env CHECK_BASE_REF=main CHECK_LANE_PLATFORM=ios bash "$CHECK" "$REPO" android/ src/feature/ .claude/ 2>&1 )"; RC=$?
+if [ "$RC" -eq 1 ] && grep -qi "platform boundary" <<<"$OUT"; then ok "ios lane + .kt paths → platform violation"; else fail "platform gate (rc=$RC): $OUT"; fi
+git -C "$REPO" reset -q --hard HEAD~1
+echo mod4 >> "$REPO/src/feature/a.txt"; git -C "$REPO" commit -aqm m10
+OUT="$( cd "$REPO" && env CHECK_BASE_REF=main CHECK_LANE_PLATFORM=ios bash "$CHECK" "$REPO" src/feature/ .claude/ 2>&1 )"; RC=$?
+if [ "$RC" -eq 0 ]; then ok "ios lane + plain paths passes platform gate"; else fail "platform pass (rc=$RC): $OUT"; fi
+
 # 9. worktree-path run: gate a LANE WORKTREE while cwd = main checkout
 #    (lucid FIX-1 class: 'fires' ≠ 'fires correctly in a lane')
 git -C "$REPO" checkout -q main

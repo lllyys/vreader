@@ -70,14 +70,34 @@ lease_purpose() { # $1=udid → recorded purpose ('' if not leased)
     cat "$(lease_dir "$1")/purpose" 2>/dev/null || true
 }
 
-held_count() { # $1=purpose → number of live leases with that purpose
+# Count only LIVE leases (Gate-4 High: a dead/PID-reused stale lease must not
+# occupy capacity — a stale verify lease would BUSY-block verify forever).
+# Stale dirs are left for lock_acquire's steal path / sweep-ghosts to clear.
+held_count() { # $1=purpose → number of LIVE leases with that purpose
     local n=0 d
     for d in "$LOCK_ROOT"/sim-*.lock.d; do
         [ -e "$d/purpose" ] || continue
-        if [ "$(cat "$d/purpose" 2>/dev/null)" = "$1" ]; then n=$((n + 1)); fi
+        [ "$(cat "$d/purpose" 2>/dev/null)" = "$1" ] || continue
+        if _lock_owner_live_matching "$d"; then n=$((n + 1)); fi
     done
     echo "$n"
 }
+
+# The capacity check + candidate selection + acquire + purpose write is a
+# check-then-act sequence (Gate-4 High: three concurrent acquires can all
+# observe <cap). The whole critical section is serialized under a select
+# mutex (bounded spin — the section runs milliseconds).
+SELECT_LOCK="$LOCK_ROOT/sim-select.lock.d"
+select_lock_acquire() {
+    local i
+    for i in $(seq 1 100); do
+        if LOCK_OWNER_PID=$$ lock_acquire "$SELECT_LOCK" 2>/dev/null; then return 0; fi
+        sleep 0.05
+    done
+    echo "SIM-LEASE RESULT: ERROR select mutex busy" >&2
+    return 1
+}
+select_lock_release() { LOCK_OWNER_PID=$$ lock_release "$SELECT_LOCK" 2>/dev/null || true; }
 
 # The verify UDID resolution ladder (rule 55): VERIFY_UDID env → persisted
 # choice → booted iPhone 17 Pro → any iPhone 17 Pro (booted on lease).
@@ -100,6 +120,8 @@ case "$cmd" in
             echo "usage: sim-lease.sh acquire {test|verify}" >&2; exit 64 ;;
         esac
         mkdir -p "$LOCK_ROOT" "$STATE_DIR"
+        select_lock_acquire || exit 1
+        trap 'select_lock_release' EXIT
 
         if [ "$purpose" = "verify" ]; then
             if [ "$(held_count verify)" -ge 1 ]; then
@@ -138,7 +160,6 @@ case "$cmd" in
             [ -n "$udid" ] || continue
             [ "$udid" = "$verify_udid" ] && continue   # never share with verify
             case "$name" in iPhone*) : ;; *) continue ;; esac
-            [ -n "$(lease_purpose "$udid")" ] && continue
             if lock_acquire "$(lease_dir "$udid")" 2>/dev/null; then
                 echo "test" > "$(lease_dir "$udid")/purpose"
                 [ "$state" = "Booted" ] || boot_sim "$udid"

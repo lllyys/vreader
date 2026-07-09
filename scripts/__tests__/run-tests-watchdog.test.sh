@@ -73,5 +73,27 @@ OUT="$(env PATH="$BIN:$PATH" TEST_UDID="FAKE-UDID-0000" TIMEOUT_SECS=30 RUN_TEST
 if [ "$RC" -eq 0 ] && grep -q "RUN-TESTS RESULT: SUCCEEDED" <<<"$OUT"; then ok "natural finish → SUCCEEDED"; else fail "natural finish (rc=$RC): $(tail -2 <<<"$OUT")"; fi
 if [ ! -s "$PKILL_LOG" ]; then ok "natural finish → no pkill at all"; else fail "natural finish ran pkill: $(cat "$PKILL_LOG")"; fi
 
+# 4. DEFAULT sibling command shape (Gate-4 Low): with RUN_TESTS_SIBLING_CMD
+#    unset, the watchdog must invoke `pgrep -x xcodebuild` — proven via a
+#    PATH-stubbed pgrep that logs its args (and reports no siblings).
+PGREP_LOG="$TMP/pgrep.log"; : > "$PGREP_LOG"
+cat > "$BIN/pgrep" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> "$PGREP_LOG"
+case "\$*" in "-x xcodebuild") exit 1 ;; esac
+exec /usr/bin/pgrep "\$@"
+EOF
+chmod +x "$BIN/pgrep"
+cat > "$BIN/xcodebuild" <<'EOF'
+#!/usr/bin/env bash
+sleep 300
+EOF
+chmod +x "$BIN/xcodebuild"
+: > "$PKILL_LOG"
+OUT="$(env PATH="$BIN:$PATH" TEST_UDID="FAKE-UDID-0000" TIMEOUT_SECS=2 bash "$RUN" vreaderTests/Fake 2>&1)"; RC=$?
+if grep -q -- "-x xcodebuild" "$PGREP_LOG"; then ok "default sibling check is 'pgrep -x xcodebuild'"; else fail "default shape: $(cat "$PGREP_LOG")"; fi
+if [ "$RC" -eq 3 ] && grep -q -- "-x SWBBuildService" "$PKILL_LOG"; then ok "default path: no sibling → daemon cleared"; else fail "default path (rc=$RC): $(cat "$PKILL_LOG")"; fi
+rm -f "$BIN/pgrep"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

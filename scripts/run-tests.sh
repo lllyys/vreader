@@ -43,6 +43,10 @@ if [ -z "$UDID" ]; then
 fi
 
 LOG="$(mktemp -t run-tests.XXXXXX)"
+# The timeout sentinel must not outlive this run (Gate-4 Low: an abnormal
+# wrapper exit after the watchdog created it would leak it; a leaked sentinel
+# is harmless to LATER runs — the path is per-mktemp — but untidy).
+trap 'rm -f "$LOG.timedout"' EXIT
 echo "[run-tests] targets=${ONLY_ARGS[*]} udid=$UDID timeout=${TIMEOUT_SECS}s log=$LOG"
 
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \

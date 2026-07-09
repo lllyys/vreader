@@ -35,8 +35,24 @@ if [ -n "$DIRTY" ]; then
     exit 1
 fi
 
-# Cap: at most 2 lane worktrees (the machine's honest build ceiling).
-mkdir -p "$WT_BASE"
+# Cap: at most 2 lane worktrees (the machine's honest build ceiling). The
+# count+add sequence is serialized under a setup mutex (Gate-4 Medium:
+# check-then-add lets two concurrent setups both observe <2).
+# shellcheck source=lib/lock.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/lock.sh"
+SETUP_LOCK="${AGENT_LOCK_ROOT:-$ROOT/.claude/locks}/worktree-setup.lock.d"
+mkdir -p "$(dirname "$SETUP_LOCK")" "$WT_BASE"
+got_lock=0
+for _ in $(seq 1 100); do
+    if LOCK_OWNER_PID=$$ lock_acquire "$SETUP_LOCK" 2>/dev/null; then got_lock=1; break; fi
+    sleep 0.05
+done
+if [ "$got_lock" -ne 1 ]; then
+    echo "worktree-setup: setup mutex busy" >&2
+    exit 1
+fi
+trap 'LOCK_OWNER_PID=$$ lock_release "$SETUP_LOCK" 2>/dev/null || true' EXIT
+
 count="$(find "$WT_BASE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
 if [ "$count" -ge 2 ]; then
     echo "worktree-setup: lane cap reached ($count worktrees exist) — teardown one first" >&2

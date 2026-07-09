@@ -74,6 +74,28 @@ OUT="$(env LOCK_OWNER_PID=$$ VERIFY_UDID="BBBBBBBB-0000-0000-0000-000000000002" 
 if grep -q "BBBBBBBB-0000-0000-0000-000000000002" <<<"$OUT"; then ok "VERIFY_UDID override wins"; else fail "override: $OUT"; fi
 env LOCK_OWNER_PID=$$ SIM_LEASE_LOCK_ROOT="$TMP/locks" SIM_LEASE_STATE_DIR="$TMP/state" SIM_LEASE_DISCOVER_CMD="$DISCOVER" SIM_LEASE_BOOT_CMD="$BOOT" bash "$CLI" release "BBBBBBBB-0000-0000-0000-000000000002" >/dev/null 2>&1
 
+# 6b. CAPACITY RACE (Gate-4 High): 6 concurrent `acquire test` on a fresh
+#     root must yield exactly 2 winners — the select mutex serializes the
+#     check-then-acquire sequence.
+RWINS="$TMP/race-wins"; : > "$RWINS"
+for i in 1 2 3 4 5 6; do
+    ( env LOCK_OWNER_PID=$$ SIM_LEASE_LOCK_ROOT="$TMP/locks-race" SIM_LEASE_STATE_DIR="$TMP/state-race" \
+        SIM_LEASE_DISCOVER_CMD="$DISCOVER" SIM_LEASE_BOOT_CMD="$BOOT" bash "$CLI" acquire test >> "$RWINS" 2>/dev/null ) &
+done
+wait
+RACE_OK=$(grep -c "ACQUIRED test" "$RWINS" || true)
+if [ "$RACE_OK" -eq 2 ]; then ok "6-way capacity race → exactly 2 test leases"; else fail "capacity race: $RACE_OK winners"; fi
+
+# 6c. STALE lease does NOT occupy capacity (Gate-4 High): a dead-owner verify
+#     lease must not BUSY-block verify forever — held_count counts live only,
+#     and the stale lease dir is stolen by the fresh acquire.
+SL="$TMP/locks-stale"; mkdir -p "$SL/sim-AAAAAAAA-0000-0000-0000-000000000001.lock.d"
+printf 'pid=99999999\nstart=Wed Jan  1 00:00:00 2020\n' > "$SL/sim-AAAAAAAA-0000-0000-0000-000000000001.lock.d/owner"
+echo verify > "$SL/sim-AAAAAAAA-0000-0000-0000-000000000001.lock.d/purpose"
+OUT="$(env LOCK_OWNER_PID=$$ SIM_LEASE_LOCK_ROOT="$SL" SIM_LEASE_STATE_DIR="$TMP/state-stale" \
+    SIM_LEASE_DISCOVER_CMD="$DISCOVER" SIM_LEASE_BOOT_CMD="$BOOT" bash "$CLI" acquire verify 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] && grep -q "ACQUIRED verify" <<<"$OUT"; then ok "stale verify lease doesn't block (stolen + reacquired)"; else fail "stale lease (rc=$RC): $OUT"; fi
+
 # 7. no available sims → error exit 1 (not a hang)
 EMPTY="$TMP/empty.sh"; printf '#!/usr/bin/env bash\necho "{\\"devices\\":{}}"\n' > "$EMPTY"; chmod +x "$EMPTY"
 OUT="$(env LOCK_OWNER_PID=$$ SIM_LEASE_LOCK_ROOT="$TMP/locks2" SIM_LEASE_STATE_DIR="$TMP/state2" SIM_LEASE_DISCOVER_CMD="$EMPTY" SIM_LEASE_BOOT_CMD="$BOOT" bash "$CLI" acquire test 2>&1)"; RC=$?

@@ -164,8 +164,29 @@ if [[ "$KILL" -eq 1 ]]; then
         printf '%s\n' "$ghosts" | cut -f1 | xargs kill 2>/dev/null || true
     fi
     if [[ "$lock_count" -gt 0 ]]; then
+        # Reap = REVALIDATE-at-removal, never rm a snapshot (Gate-4 High: the
+        # scan can see a just-created lock before its owner file is atomically
+        # published; a snapshot rm would delete a FRESH lock post-publish).
+        # *.lock.d dirs reap via lock_acquire+lock_release — the helper already
+        # implements serialized stealing with the mid-publish grace re-read.
+        # *.steal.d mutexes are revalidated inline and rm'd only when their
+        # owner is dead/reused; two sweepers racing on the same dead mutex is
+        # the accepted single-sweep-actor residual (documented in rule 55).
         printf '%s' "$lock_stale" | while IFS= read -r d; do
-            [[ -n "$d" ]] && rm -rf "$d"
+            [[ -n "$d" && -d "$d" ]] || continue
+            case "$d" in
+                *.steal.d)
+                    if ! _lock_owner_live_matching "$d"; then
+                        if [[ ! -f "$d/owner" ]]; then sleep 0.3; fi
+                        if [[ -d "$d" ]] && ! _lock_owner_live_matching "$d"; then
+                            rm -rf "$d"
+                        fi
+                    fi ;;
+                *)
+                    if LOCK_OWNER_PID=$$ lock_acquire "$d" 2>/dev/null; then
+                        LOCK_OWNER_PID=$$ lock_release "$d" 2>/dev/null || true
+                    fi ;;
+            esac
         done
     fi
     if [[ "$wt_count" -gt 0 ]]; then
