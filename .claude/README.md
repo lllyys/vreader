@@ -64,7 +64,8 @@ Project-specific commands (not from plugins):
 | Command | Purpose |
 |---------|---------|
 | `/bump` | Version bump (project.yml → xcodegen → commit → tag → push) |
-| `/feature-workflow` | Gated agent-driven workflow with specialized subagents |
+| `/dispatch` | Parallel lane orchestrator (feature #130) — fans items out to worktree-isolated implementer lanes, integrates serially |
+| `/feature-workflow` | Gated agent-driven workflow (6 gates, rule 47) |
 | `/fix` | Root-cause bug fixing with TDD |
 | `/fix-issue` | End-to-end GitHub issue resolver (fetch, branch, fix, audit, PR) |
 | `/merge-prs` | Review and merge open PRs sequentially |
@@ -72,19 +73,16 @@ Project-specific commands (not from plugins):
 
 ## Agents (`agents/`)
 
-Subagent definitions used by `/feature-workflow`:
+Lane subagents for the feature #130 dispatch harness (contract:
+`rules/55-lane-dispatch.md`). The seven vmark-era role agents (planner,
+auditor, test-runner, spec-guardian, impact-analyst, release-steward,
+manual-test-author) were deleted in #130 WI-5 — their duties live in the
+orchestrating session + the rules they duplicated.
 
 | Agent | Role |
 |-------|------|
-| `planner` | Research, edge cases, modular work items |
-| `implementer` | TDD-driven code changes |
-| `auditor` | Diff review for correctness and rule violations |
-| `test-runner` | Test execution and E2E coordination |
-| `verifier` | Final pre-release checklist |
-| `spec-guardian` | Validates work against specifications |
-| `impact-analyst` | Finds minimal correct change set |
-| `release-steward` | Commit messages and release notes |
-| `manual-test-author` | Manual testing guide maintenance |
+| `implementer` | Worktree-isolated lane: one bug/WI end-to-end (repro → RED → GREEN → REFACTOR → test gate → in-lane audit) → structured HANDOFF |
+| `verifier` | Gate-5 observer on the leased verify simulator — returns observations, never writes evidence or flips rows |
 
 ## Hooks (`hooks/`)
 

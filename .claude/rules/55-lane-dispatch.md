@@ -152,7 +152,7 @@ Example (strict JSON):
     "root_cause": { "type": "string" },
     "red_test":   { "type": "string" },
     "files_touched": { "type": "array", "items": { "type": "string" } },
-    "test_result_line": { "type": "string", "pattern": "RUN-(TESTS|ANDROID-TESTS) RESULT:|ALL PASS" },
+    "test_result_line": { "type": "string", "pattern": "^(RUN-(TESTS|ANDROID-TESTS) RESULT:.*|ALL PASS)$" },
     "audit": {
       "type": "object",
       "required": ["artifact_path", "final_verdict", "rounds", "thread_id"],
@@ -265,13 +265,15 @@ the interest of brevity.
   sim ≈ real load); a bash-only lane (hooks/scripts work) adds near-zero
   build load — a mixed bash+Swift pair is effectively width 1 for memory
   purposes. Document any deviation in the batch evidence.
-- **New Swift FILES in a lane's write-set** (M-SHAKEDOWN finding): a new file
-  needs an xcodegen structural regen to join `project.pbxproj`, which is
-  orchestrator-owned. v1 answer: design the item to EXTEND an existing test
-  file (target globs pick it up with no regen). If a new file is
-  unavoidable, the orchestrator's bump-slot regen folds it in — but the
-  lane's own test gate cannot see it, so the orchestrator runs the suite
-  post-bump instead; first-class support is a named follow-up.
+- **New Swift FILES in a lane's write-set are NOT dispatchable in v1**
+  (M-SHAKEDOWN finding): a new file needs an xcodegen structural regen to
+  join `project.pbxproj`, which is orchestrator-owned — so the lane's own
+  test gate can never compile the file, and the integration tail has no
+  post-regen retest step. Design the item to EXTEND an existing file
+  (target globs pick it up with no regen); if a new file is genuinely
+  unavoidable, the item routes INLINE (`/fix-issue` / `/feature-workflow`),
+  not through a lane. First-class support (a conditional post-regen suite
+  run in the tail) is a named follow-up.
 - **The no-Bash-file-edits rule binds the ORCHESTRATOR too** (M-SHAKEDOWN
   self-caught deviation): shared-surface tracker/docs edits go through
   Edit/Write even in the integration tail — a heredoc edit dodges the
