@@ -120,6 +120,30 @@ else
     fail "hello-lane.js probe missing or meta malformed"
 fi
 
+# WI-7 cron cutover: the four prompts must keep their load-bearing clauses
+BUGFIX="$ROOT/.claude/cron-prompts/bugfix.md"
+FEATURE="$ROOT/.claude/cron-prompts/feature.md"
+VERIFY="$ROOT/.claude/cron-prompts/verify.md"
+WATCHDOG="$ROOT/.claude/cron-prompts/watchdog.md"
+has "$BUGFIX" "agent-lock.sh acquire cron-bugfix" "bugfix cron takes its reentry lock"
+has "$BUGFIX" "dispatch-kill" "bugfix cron honors the kill switch"
+has "$BUGFIX" "agent-lock.sh acquire dispatch" "kill-switch inline fallback takes the global dispatch lock"
+has "$BUGFIX" "dispatch-inline-mode" "bugfix cron distinguishes the N=1 inline degrade from a true lane run"
+has "$BUGFIX" "no-dispatch" "bugfix cron has a mode token for pre-dispatch exits"
+has "$BUGFIX" "scan-untrusted-content.sh" "bugfix cron keeps rule-54 comment scanning"
+# the self-gate pattern must exist VERBATIM in both files (feature greps what bugfix logs)
+if grep -qF 'ENDED work_done dispatch-mode' "$BUGFIX" && grep -qF 'ENDED work_done dispatch-mode' "$FEATURE"; then
+    ok "self-gate grep pattern identical across bugfix/feature prompts"
+else
+    fail "self-gate pattern mismatch between bugfix.md and feature.md"
+fi
+has "$FEATURE" "agent-lock.sh acquire cron-feature" "feature cron takes its reentry lock"
+has "$FEATURE" "dispatch-inline-mode" "feature cron is honest about the N=1 degrade"
+has "$VERIFY" "sim-lease.sh acquire verify" "verify cron leases the verify sim"
+has "$VERIFY" "tracker-write" "verify cron scopes tracker-write around row flips"
+has "$VERIFY" "reserve-id.sh bug" "verify cron mints IDs atomically"
+has "$WATCHDOG" "sweep-ghosts.sh" "watchdog runs the single reaper"
+
 # implementer ladder (probe-shaped: custom agents get NO Skill tool — probed
 # 2026-07-09 twice, incl. with Skill in frontmatter; run-codex.sh is PRIMARY)
 has "$IMPL" "PROBED 2026-07-09" "implementer records the probe verdict"
