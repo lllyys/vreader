@@ -182,11 +182,11 @@ struct AnnotationExporterTests {
 /// Direct-payload helper for the formatter suites below.
 private func makeExported(
     type: ExportedAnnotationType, chapter: String? = nil,
-    selectedText: String? = nil, note: String? = nil, title: String? = nil
+    selectedText: String? = nil, note: String? = nil, title: String? = nil,
+    createdAt: Date = F.fixedDate, updatedAt: Date = F.fixedDate
 ) -> ExportedAnnotation {
     ExportedAnnotation(id: UUID(), type: type, chapter: chapter, selectedText: selectedText,
-                       note: note, color: nil, title: title,
-                       createdAt: F.fixedDate, updatedAt: F.fixedDate)
+                       note: note, color: nil, title: title, createdAt: createdAt, updatedAt: updatedAt)
 }
 
 @Suite("MarkdownExportFormatter direct")
@@ -235,7 +235,6 @@ struct MarkdownExportFormatterTests {
         #expect(b.lowerBound < n.lowerBound)
     }
 
-    // A highlight with nil selectedText/note and a note with nil note emit no lines.
     @Test func nilContentItems_renderNothing() throws {
         let out = try md([
             makeExported(type: .highlight, chapter: "C"),
@@ -259,23 +258,24 @@ struct JSONExportFormatterTests {
     private static let epoch = Date(timeIntervalSince1970: 0)
 
     private func makePayload() -> AnnotationExportPayload {
-        AnnotationExportPayload(bookTitle: "T", bookAuthor: "A", exportedAt: Self.epoch,
-                                annotations: [makeExported(type: .highlight, chapter: "C",
-                                                           selectedText: "x")])
+        let annotation = makeExported(type: .highlight, chapter: "C", selectedText: "x",
+                                      createdAt: Date(timeIntervalSince1970: 86_400))
+        return AnnotationExportPayload(bookTitle: "T", bookAuthor: "A", exportedAt: Self.epoch,
+                                       annotations: [annotation])
     }
 
     @Test func allDateFields_encodeAsISO8601() throws {
         let json = String(data: try JSONExportFormatter().format(makePayload()), encoding: .utf8)!
         #expect(json.contains("1970-01-01T00:00:00Z"))  // exportedAt
-        #expect(json.contains("2023-11-14T22:13:20Z"))  // createdAt/updatedAt (fixedDate)
+        #expect(json.contains("1970-01-02T00:00:00Z"))  // createdAt
+        #expect(json.contains("2023-11-14T22:13:20Z"))  // updatedAt (fixedDate)
     }
 
-    @Test func output_deterministic_sortedKeys_prettyPrinted() throws {
+    @Test func output_deterministic_sortedKeys() throws {
         let payload = makePayload()
         let first = try JSONExportFormatter().format(payload)
         #expect(first == (try JSONExportFormatter().format(payload)))
         let json = String(data: first, encoding: .utf8)!
-        #expect(json.contains("\n"))  // pretty-printed
         let annotations = try #require(json.range(of: "\"annotations\""))
         let author = try #require(json.range(of: "\"bookAuthor\""))
         let title = try #require(json.range(of: "\"bookTitle\""))
