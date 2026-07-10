@@ -19,7 +19,10 @@ data class ReaderSettings(
     val marginDp: Float = DEFAULT_MARGIN,
 ) {
     companion object {
-        // Defaults = the current hardcoded look (so an install with no stored settings is unchanged).
+        // Defaults: font size keeps the pre-#129 hardcoded 18sp; line spacing + margin are round
+        // in-range values near the old look. NOTE (WI-4): applying them shifts an untouched install
+        // slightly — line height 29sp → 18×1.5 = 27sp, margin 24dp → 20dp. Accepted intentionally:
+        // the old constants were ad-hoc (pre-settings), and both values are now user-adjustable.
         const val DEFAULT_FONT_SIZE = 18f
         const val DEFAULT_LINE_SPACING = 1.5f
         const val DEFAULT_MARGIN = 20f

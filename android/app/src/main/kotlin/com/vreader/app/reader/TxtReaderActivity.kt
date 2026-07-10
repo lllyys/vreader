@@ -147,6 +147,12 @@ class TxtReaderActivity : ComponentActivity() {
     private val saveRequests = Channel<PendingSave>(Channel.CONFLATED)
     private data class PendingSave(val book: Book, val offsetUtf16: Int)
 
+    // feature #129 WI-4 — Display-settings writes funnel through ONE ordered channel + a single
+    // consumer (the saveRequests precedent): independent appScope launches on a multi-threaded
+    // dispatcher could commit rapid same-slider updates out of order (Gate-4 High). trySend from
+    // the main thread preserves call order; the lone consumer persists serially.
+    private val settingsWrites = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val key = intent.getStringExtra(EXTRA_FINGERPRINT_KEY)
@@ -170,6 +176,10 @@ class TxtReaderActivity : ComponentActivity() {
             }
         }
 
+        // The lone Display-settings writer — persists sheet edits strictly in submission order
+        // (#129 WI-4; ends when onDestroy closes the channel, pending writes drain first).
+        container.appScope.launch { for (write in settingsWrites) write() }
+
         setContent {
             VReaderTheme {
                 val state by produceState<TxtUiState>(TxtUiState.Loading, key) {
@@ -177,14 +187,19 @@ class TxtReaderActivity : ComponentActivity() {
                         runCatching { load(key) }.getOrDefault(TxtUiState.Failed)
                     }
                 }
-                // feature #129 — the live Display settings (theme/font/size/spacing/margin); defaults
-                // until the DataStore's first emission (which matches an untouched install).
-                val displaySettings by container.readerSettingsStore.settings
-                    .collectAsStateWithLifecycle(initialValue = ReaderSettings())
-                when (val s = state) {
+                // feature #129 — the live Display settings (theme/font/size/spacing/margin). NULL until
+                // the DataStore's first emission; the reader body is withheld until then (Gate-4 Medium:
+                // rendering defaults first would flash the wrong theme/typography for a user with stored
+                // non-default settings). The empty loading scaffold is the only pre-emission surface.
+                val settingsOrNull by container.readerSettingsStore.settings
+                    .collectAsStateWithLifecycle(initialValue = null)
+                val gated = if (settingsOrNull == null && state !is TxtUiState.Failed) TxtUiState.Loading else state
+                when (val s = gated) {
                     is TxtUiState.Failed -> LaunchedEffect(Unit) { finish() }
-                    is TxtUiState.Loading -> TxtReaderScaffold("", ::finish, displaySettings.theme) {}
+                    is TxtUiState.Loading -> TxtReaderScaffold("", ::finish, (settingsOrNull ?: ReaderSettings()).theme) {}
                     is TxtUiState.Loaded -> {
+                        // non-null by the gate above (Loaded is unreachable pre-emission).
+                        val displaySettings = checkNotNull(settingsOrNull)
                         val listState = rememberLazyListState(initialFirstVisibleItemIndex = s.initialIndex)
                         // onStop flush — captures the live list state + book/document.
                         SideEffect {
@@ -377,15 +392,17 @@ class TxtReaderActivity : ComponentActivity() {
                             onInstall = { ttsVm.installVoiceData() },
                             onDone = { showVoice = false },
                         )
-                        // feature #129 — the designed Display sheet; setters persist on the process
-                        // scope (the position-flush precedent) so a write survives sheet dismissal.
+                        // feature #129 — the designed Display sheet; setters funnel through the
+                        // ordered settingsWrites channel (Gate-4 High: independent launches could
+                        // commit rapid slider updates out of order) on the process scope, so a
+                        // write both stays ordered AND survives sheet dismissal.
                         if (showDisplaySheet) ReaderSettingsSheet(
                             settings = displaySettings,
-                            onTheme = { v -> container.appScope.launch { container.readerSettingsStore.setTheme(v) } },
-                            onFontFamily = { v -> container.appScope.launch { container.readerSettingsStore.setFontFamily(v) } },
-                            onFontSize = { v -> container.appScope.launch { container.readerSettingsStore.setFontSize(v) } },
-                            onLineSpacing = { v -> container.appScope.launch { container.readerSettingsStore.setLineSpacing(v) } },
-                            onMargin = { v -> container.appScope.launch { container.readerSettingsStore.setMargin(v) } },
+                            onTheme = { v -> settingsWrites.trySend { container.readerSettingsStore.setTheme(v) } },
+                            onFontFamily = { v -> settingsWrites.trySend { container.readerSettingsStore.setFontFamily(v) } },
+                            onFontSize = { v -> settingsWrites.trySend { container.readerSettingsStore.setFontSize(v) } },
+                            onLineSpacing = { v -> settingsWrites.trySend { container.readerSettingsStore.setLineSpacing(v) } },
+                            onMargin = { v -> settingsWrites.trySend { container.readerSettingsStore.setMargin(v) } },
                             onDismiss = { showDisplaySheet = false },
                         )
                     }
@@ -401,7 +418,8 @@ class TxtReaderActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        saveRequests.close()   // the writer drains the final (conflated) save, then ends
+        saveRequests.close()     // the writer drains the final (conflated) save, then ends
+        settingsWrites.close()   // the settings writer drains any pending sheet edits, then ends
     }
 
     /** Load + decode the book and compute the initial scroll index from the saved position. */
@@ -639,7 +657,8 @@ private fun ReadAloudChromeSlot(theme: ReaderTheme, enabled: Boolean, onReadAlou
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Read aloud", tint = tint, modifier = Modifier.size(24.dp))
-        Text("Read aloud", color = theme.ink.copy(alpha = 0.6f), fontFamily = VReaderFonts.Sans, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+        // accent label when enabled — the committed TtsEntry active treatment (pre-#129 TtsEntryBar parity).
+        Text("Read aloud", color = tint, fontFamily = VReaderFonts.Sans, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
 
