@@ -732,7 +732,9 @@ private fun TxtBody(
             val selRange = if (selection != null) selectionController?.selectionForChunk(i) else null
             Text(
                 text = text,
-                style = textStyle,
+                // merge over the material default (the pre-#129 explicit-param behavior) so platform
+                // text defaults (letterSpacing etc.) are kept — only the Display settings change.
+                style = androidx.compose.material3.LocalTextStyle.current.merge(textStyle),
                 onTextLayout = { layout = it },
                 modifier = Modifier
                     .onGloballyPositioned { coords = it }
