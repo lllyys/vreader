@@ -383,20 +383,24 @@ class TxtReaderActivity : ComponentActivity() {
                             onDone = { showVoice = false },
                         )
                         // feature #129 — the designed Display sheet; setters persist on the process
-                        // scope (so a write survives sheet dismissal / Activity teardown). Latest-wins
-                        // ordering across rapid edits + rotation is guaranteed by ReaderSettingsStore
-                        // itself (a synchronous per-field submission sequence + drop-if-stale under one
-                        // write Mutex), NOT by lock-acquisition order — so a fire-and-forget launch per
-                        // slider event is safe (a stale intermediate value can never win). (Gate-4 High.)
-                        if (showDisplaySheet) ReaderSettingsSheet(
-                            settings = displaySettings,
-                            onTheme = { v -> container.appScope.launch { container.readerSettingsStore.setTheme(v) } },
-                            onFontFamily = { v -> container.appScope.launch { container.readerSettingsStore.setFontFamily(v) } },
-                            onFontSize = { v -> container.appScope.launch { container.readerSettingsStore.setFontSize(v) } },
-                            onLineSpacing = { v -> container.appScope.launch { container.readerSettingsStore.setLineSpacing(v) } },
-                            onMargin = { v -> container.appScope.launch { container.readerSettingsStore.setMargin(v) } },
-                            onDismiss = { showDisplaySheet = false },
-                        )
+                        // scope (so a write survives sheet dismissal / Activity teardown). The submission
+                        // sequence is stamped SYNCHRONOUSLY here in the sheet callback (main thread, in
+                        // slider order) via nextSeq() and passed into the setter — so the store's per-field
+                        // latest-wins drop reflects the user's true edit order, NOT the multi-threaded
+                        // dispatcher's coroutine-start order. A fire-and-forget launch per edit is then
+                        // safe across rapid edits + rotation: a stale value can never win (Gate-4 High).
+                        if (showDisplaySheet) {
+                            val store = container.readerSettingsStore
+                            ReaderSettingsSheet(
+                                settings = displaySettings,
+                                onTheme = { v -> val o = store.nextSeq(); container.appScope.launch { store.setTheme(v, o) } },
+                                onFontFamily = { v -> val o = store.nextSeq(); container.appScope.launch { store.setFontFamily(v, o) } },
+                                onFontSize = { v -> val o = store.nextSeq(); container.appScope.launch { store.setFontSize(v, o) } },
+                                onLineSpacing = { v -> val o = store.nextSeq(); container.appScope.launch { store.setLineSpacing(v, o) } },
+                                onMargin = { v -> val o = store.nextSeq(); container.appScope.launch { store.setMargin(v, o) } },
+                                onDismiss = { showDisplaySheet = false },
+                            )
+                        }
                     }
                 }
             }

@@ -112,25 +112,30 @@ class ReaderSettingsStoreTest {
         assertTrue("committed size must be one of the submitted values", store.current().fontSizeSp in sizes)
     }
 
-    // feature #129 WI-4 (Gate-4 High r2) — latest-submission-wins for a same-field write EVEN when the
-    // stale write acquires the lock last. The store stamps a synchronous monotonic sequence per setter
-    // call and drops a same-field write whose sequence is older than one already committed. Here the
-    // NEWER value (seq 2) is submitted first and awaited; then the OLDER-intent value re-runs — its
-    // sequence is higher so it commits, proving the drop is keyed on submission order, not value. To
-    // prove the DROP path deterministically we submit the newest sequence LAST via a controlled order:
-    @Test fun staleSameFieldWrite_isDropped_newestSubmissionWins() = runBlocking {
-        // Submit three sizes strictly in order; each has an increasing sequence, so the LAST wins.
-        store.setFontSize(16f)
-        store.setFontSize(22f)
-        store.setFontSize(26f)
+    // feature #129 WI-4 (Gate-4 High r2/r3) — latest-submission-wins for a same-field write regardless of
+    // execution/lock-acquisition order. The submission order is a caller-supplied `order` (the reader
+    // stamps it synchronously in the UI callback); inside the store a same-field write is DROPPED when a
+    // newer `order` already committed. This test EXECUTES the writes in INVERTED order (the newer-order
+    // write commits FIRST, then the older-order write runs LAST) and proves the older one is dropped —
+    // exactly the multi-threaded-dispatcher reorder the reader can hit.
+    @Test fun staleSameFieldWrite_isDropped_evenWhenItRunsLast() = runBlocking {
+        // order=2 (newer) commits first; order=1 (older) runs AFTER and must be dropped.
+        store.setFontSize(26f, order = 2L)
         assertEquals(26f, store.current().fontSizeSp, 1e-4f)
+        store.setFontSize(13f, order = 1L)               // older submission, executed last
+        assertEquals("the stale (lower-order) write must not overwrite the newer one",
+            26f, store.current().fontSizeSp, 1e-4f)
 
-        // Now a burst where the final read must equal the value from the HIGHEST sequence that ran.
-        // Because sequences are stamped at call entry and the drop is keyed on them, no earlier-stamped
-        // write can overwrite a later-stamped one regardless of lock-acquisition order.
-        val newest = 13f
-        store.setFontSize(20f)     // seq n
-        store.setFontSize(newest)  // seq n+1 — newest submission
-        assertEquals(newest, store.current().fontSizeSp, 1e-4f)
+        // And a strictly-newer write (order=3) DOES commit — the high-water only blocks OLDER ones.
+        store.setFontSize(20f, order = 3L)
+        assertEquals(20f, store.current().fontSizeSp, 1e-4f)
+    }
+
+    @Test fun perFieldHighWater_isIndependent_aStaleWriteInOneFieldDoesNotBlockAnother() = runBlocking {
+        store.setFontSize(24f, order = 5L)               // font-size high-water = 5
+        store.setMargin(40f, order = 2L)                 // margin high-water = 2 (its own track)
+        // margin's older order (2) must NOT be blocked by font-size's newer order (5) — fields are independent.
+        assertEquals(24f, store.current().fontSizeSp, 1e-4f)
+        assertEquals(40f, store.current().marginDp, 1e-4f)
     }
 }
