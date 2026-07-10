@@ -301,6 +301,7 @@ class ReaderActivity : AppCompatActivity() {
         lifecycleScope.launch {
             container.readerSettingsStore.settings.collect { settings ->
                 runCatching { nav.submitPreferences(EpubPreferences(scroll = true) + settings.toEpubPreferences()) }
+                    .onFailure { android.util.Log.w("ReaderActivity", "submitPreferences failed; display change not applied", it) }
             }
         }
     }
@@ -425,9 +426,10 @@ class ReaderActivity : AppCompatActivity() {
     @androidx.annotation.VisibleForTesting
     fun currentHref(): String? = navigator?.currentLocator?.value?.href?.toString()
 
-    /** Test hook (feature #129 WI-5): the ARGB the navigator is actually rendering as its background
-     *  (the applied theme background color), or null before the navigator/settings exist — proves the
-     *  Display setting reached the live EpubNavigatorFragment. */
+    /** Test hook (feature #129 WI-5): the background ARGB the live navigator has *accepted/computed*
+     *  for its EpubSettings (the applied theme background), or null before the navigator/settings exist.
+     *  Proves the Display setting reached and was resolved by the live EpubNavigatorFragment — it does
+     *  NOT assert the WebView painted that pixel (a CSS/pixel assertion would; that's WI-8 acceptance). */
     @androidx.annotation.VisibleForTesting
     fun appliedBackgroundArgb(): Int? = navigator?.settings?.value?.backgroundColor?.int
 
