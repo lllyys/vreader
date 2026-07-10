@@ -383,10 +383,11 @@ class TxtReaderActivity : ComponentActivity() {
                             onDone = { showVoice = false },
                         )
                         // feature #129 — the designed Display sheet; setters persist on the process
-                        // scope (so a write survives sheet dismissal / Activity teardown). Ordering
-                        // across rapid edits + rotation is guaranteed by ReaderSettingsStore's own
-                        // write Mutex (Gate-4 High: an Activity-owned channel serialized only within
-                        // ONE Activity, so a rotation replacement could commit out of order).
+                        // scope (so a write survives sheet dismissal / Activity teardown). Latest-wins
+                        // ordering across rapid edits + rotation is guaranteed by ReaderSettingsStore
+                        // itself (a synchronous per-field submission sequence + drop-if-stale under one
+                        // write Mutex), NOT by lock-acquisition order — so a fire-and-forget launch per
+                        // slider event is safe (a stale intermediate value can never win). (Gate-4 High.)
                         if (showDisplaySheet) ReaderSettingsSheet(
                             settings = displaySettings,
                             onTheme = { v -> container.appScope.launch { container.readerSettingsStore.setTheme(v) } },

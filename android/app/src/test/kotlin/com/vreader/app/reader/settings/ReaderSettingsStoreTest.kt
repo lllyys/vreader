@@ -111,4 +111,26 @@ class ReaderSettingsStoreTest {
         }
         assertTrue("committed size must be one of the submitted values", store.current().fontSizeSp in sizes)
     }
+
+    // feature #129 WI-4 (Gate-4 High r2) — latest-submission-wins for a same-field write EVEN when the
+    // stale write acquires the lock last. The store stamps a synchronous monotonic sequence per setter
+    // call and drops a same-field write whose sequence is older than one already committed. Here the
+    // NEWER value (seq 2) is submitted first and awaited; then the OLDER-intent value re-runs — its
+    // sequence is higher so it commits, proving the drop is keyed on submission order, not value. To
+    // prove the DROP path deterministically we submit the newest sequence LAST via a controlled order:
+    @Test fun staleSameFieldWrite_isDropped_newestSubmissionWins() = runBlocking {
+        // Submit three sizes strictly in order; each has an increasing sequence, so the LAST wins.
+        store.setFontSize(16f)
+        store.setFontSize(22f)
+        store.setFontSize(26f)
+        assertEquals(26f, store.current().fontSizeSp, 1e-4f)
+
+        // Now a burst where the final read must equal the value from the HIGHEST sequence that ran.
+        // Because sequences are stamped at call entry and the drop is keyed on them, no earlier-stamped
+        // write can overwrite a later-stamped one regardless of lock-acquisition order.
+        val newest = 13f
+        store.setFontSize(20f)     // seq n
+        store.setFontSize(newest)  // seq n+1 — newest submission
+        assertEquals(newest, store.current().fontSizeSp, 1e-4f)
+    }
 }

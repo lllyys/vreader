@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.util.concurrent.atomic.AtomicLong
 
 /** The persisted shape — enums as String names for forward-compat; clamped on read AND write. */
 @Serializable
@@ -31,13 +32,22 @@ class ReaderSettingsStore(
     private val dataStore: DataStore<Preferences>,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
-    // feature #129 WI-4 — one process-wide serializer for the read-modify-write setters. The store is
-    // a container singleton, so this Mutex orders EVERY setter across ALL callers (a reader Activity,
-    // its rotation replacement, a second reader) — a slider burst dispatched from independent appScope
-    // coroutines can otherwise reach DataStore's internal actor out of submission order and restore a
-    // stale value. `withLock` is exception-safe: a throwing/cancelled setter releases the lock and can
-    // never wedge the queue (the hazard a hand-rolled channel+consumer had). Gate-4 High (WI-4 audit).
+    // feature #129 WI-4 (Gate-4 High) — the store is the single process-wide write serializer (it is a
+    // container singleton, so it orders EVERY setter across ALL callers: a reader, its rotation
+    // replacement, a second reader). Two mechanisms combine, because a bare Mutex gives mutual exclusion
+    // but NOT FIFO acquisition — an older slider value could otherwise win the lock last and commit stale:
+    //   1. `writeMutex` makes each read-modify-write atomic (no interleaved edit clobbers another field);
+    //   2. a synchronous monotonic sequence is stamped at each setter's entry (BEFORE it suspends), and
+    //      inside the lock a same-FIELD write is DROPPED if a newer sequence for that field already
+    //      committed — so latest-submission-wins holds regardless of lock-acquisition order.
+    // `withLock` is exception-safe: a throwing/cancelled setter releases the lock and can never wedge the
+    // queue (the hazard the earlier hand-rolled channel+consumer had).
     private val writeMutex = Mutex()
+    private val seq = AtomicLong(0)
+    private val committedSeqByField = HashMap<Field, Long>()
+
+    private enum class Field { THEME, FONT_FAMILY, FONT_SIZE, LINE_SPACING, MARGIN }
+
     /** The reactive settings stream — a host collects this (`collectAsStateWithLifecycle`) and applies
      *  live; emits the defaults until the user changes something. */
     val settings: Flow<ReaderSettings> = dataStore.data.map { read(it).toSettings() }
@@ -45,17 +55,25 @@ class ReaderSettingsStore(
     /** A one-shot read (the current settings) — for a host's initial config at open. */
     suspend fun current(): ReaderSettings = read(dataStore.data.first()).toSettings()
 
-    suspend fun setTheme(theme: ReaderTheme) = update { it.copy(theme = theme.name) }
-    suspend fun setFontFamily(family: ReaderFontFamily) = update { it.copy(fontFamily = family.name) }
-    suspend fun setFontSize(sp: Float) = update { it.copy(fontSizeSp = ReaderSettings.clampFontSize(sp)) }
-    suspend fun setLineSpacing(v: Float) = update { it.copy(lineSpacing = ReaderSettings.clampLineSpacing(v)) }
-    suspend fun setMargin(dp: Float) = update { it.copy(marginDp = ReaderSettings.clampMargin(dp)) }
+    suspend fun setTheme(theme: ReaderTheme) = update(Field.THEME) { it.copy(theme = theme.name) }
+    suspend fun setFontFamily(family: ReaderFontFamily) = update(Field.FONT_FAMILY) { it.copy(fontFamily = family.name) }
+    suspend fun setFontSize(sp: Float) = update(Field.FONT_SIZE) { it.copy(fontSizeSp = ReaderSettings.clampFontSize(sp)) }
+    suspend fun setLineSpacing(v: Float) = update(Field.LINE_SPACING) { it.copy(lineSpacing = ReaderSettings.clampLineSpacing(v)) }
+    suspend fun setMargin(dp: Float) = update(Field.MARGIN) { it.copy(marginDp = ReaderSettings.clampMargin(dp)) }
 
-    private suspend fun update(transform: (ReaderSettingsState) -> ReaderSettingsState) = writeMutex.withLock {
-        // Normalize EVERY numeric field on write (not just the one being set) so a previously
-        // hand-edited / older out-of-range value is healed on the next write — truly "clamped on write".
-        // The Mutex serializes concurrent setters so submission order == commit order (Gate-4 High).
-        dataStore.edit { prefs -> prefs[KEY] = json.encodeToString(transform(read(prefs)).normalized()) }
+    private suspend fun update(field: Field, transform: (ReaderSettingsState) -> ReaderSettingsState) {
+        // Stamp the submission order SYNCHRONOUSLY, before the first suspension point — this is the
+        // caller's real ordering, immune to how the coroutines later race for the lock.
+        val mySeq = seq.incrementAndGet()
+        writeMutex.withLock {
+            // A later-submitted write for THIS field already committed → this one is stale; drop it so
+            // the newest value always wins (latest-submission-wins, not last-to-acquire-the-lock).
+            if ((committedSeqByField[field] ?: 0L) > mySeq) return@withLock
+            // Normalize EVERY numeric field on write (not just the one being set) so a previously
+            // hand-edited / older out-of-range value is healed on the next write — truly "clamped on write".
+            dataStore.edit { prefs -> prefs[KEY] = json.encodeToString(transform(read(prefs)).normalized()) }
+            committedSeqByField[field] = mySeq
+        }
     }
 
     private fun ReaderSettingsState.normalized() = copy(
