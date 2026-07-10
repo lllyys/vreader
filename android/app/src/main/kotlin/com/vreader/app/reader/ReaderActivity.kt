@@ -104,6 +104,9 @@ class ReaderActivity : AppCompatActivity() {
             publication = pub
 
             val initial = computeInitialLocator(key)
+            // feature #129 WI-5 — open with the user's stored Display settings already applied (so a
+            // non-default theme/typography renders on first paint, no flash), keeping the scroll layout.
+            val initialPrefs = EpubPreferences(scroll = true) + container.readerSettingsStore.current().toEpubPreferences()
             val factory = EpubNavigatorFactory(pub)
             // Attach only when the activity is at least STARTED AND its fragment state
             // isn't already saved — `commitNow` against a state-saved manager throws
@@ -113,7 +116,7 @@ class ReaderActivity : AppCompatActivity() {
                 if (supportFragmentManager.isStateSaved) return@withStarted null
                 supportFragmentManager.fragmentFactory = factory.createFragmentFactory(
                     initialLocator = initial,
-                    initialPreferences = EpubPreferences(scroll = true),
+                    initialPreferences = initialPrefs,
                     listener = object : EpubNavigatorFragment.Listener {
                         override fun onExternalLinkActivated(url: AbsoluteUrl) {}
                     },
@@ -133,6 +136,7 @@ class ReaderActivity : AppCompatActivity() {
             highlightController = controller
             repository.markOpened(key, System.currentTimeMillis())
             observePosition(nav, loaded)
+            observeDisplaySettings(nav)
             observeHighlights(loaded, controller)
             controller.observeActivations { id, rect -> onHighlightTapped(id, rect) }
         }
@@ -288,6 +292,20 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    /** feature #129 WI-5 — apply the live "Display" settings to the navigator: re-submit Readium
+     *  EpubPreferences (typography + per-theme colors) on every change so a settings edit updates the
+     *  open reader immediately. Scroll layout is preserved (WI-5 owns typography/theme only). The
+     *  open-time value is already applied via `initialPrefs`; re-submitting the same value is a cheap
+     *  no-op, so we don't drop the first emission (keeps the render authoritative). */
+    private fun observeDisplaySettings(nav: EpubNavigatorFragment) {
+        lifecycleScope.launch {
+            container.readerSettingsStore.settings.collect { settings ->
+                runCatching { nav.submitPreferences(EpubPreferences(scroll = true) + settings.toEpubPreferences()) }
+                    .onFailure { android.util.Log.w("ReaderActivity", "submitPreferences failed; display change not applied", it) }
+            }
+        }
+    }
+
     /** Save the current Readium position as a VReaderLocator envelope (debounced steady-state). */
     private fun observePosition(nav: EpubNavigatorFragment, current: Book) {
         lifecycleScope.launch {
@@ -407,6 +425,13 @@ class ReaderActivity : AppCompatActivity() {
     /** Test hook: the current reading href, or null until the navigator has rendered. */
     @androidx.annotation.VisibleForTesting
     fun currentHref(): String? = navigator?.currentLocator?.value?.href?.toString()
+
+    /** Test hook (feature #129 WI-5): the background ARGB the live navigator has *accepted/computed*
+     *  for its EpubSettings (the applied theme background), or null before the navigator/settings exist.
+     *  Proves the Display setting reached and was resolved by the live EpubNavigatorFragment — it does
+     *  NOT assert the WebView painted that pixel (a CSS/pixel assertion would; that's WI-8 acceptance). */
+    @androidx.annotation.VisibleForTesting
+    fun appliedBackgroundArgb(): Int? = navigator?.settings?.value?.backgroundColor?.int
 
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
