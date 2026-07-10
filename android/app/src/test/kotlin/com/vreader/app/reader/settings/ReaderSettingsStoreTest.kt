@@ -5,9 +5,14 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,5 +75,40 @@ class ReaderSettingsStoreTest {
         assertEquals(ReaderTheme.Paper, store.settings.first().theme)   // default
         store.setTheme(ReaderTheme.Sepia)
         assertEquals(ReaderTheme.Sepia, store.settings.first().theme)
+    }
+
+    // feature #129 WI-4 (Gate-4 High) — the store's write Mutex + DataStore make each setter's internal
+    // read-modify-write atomic and serialized, so a burst of concurrent DIFFERENT-field writes (the exact
+    // shape the reader produces — each sheet edit fires on its own appScope coroutine) can NEVER tear the
+    // stored JSON: the final decode always holds a valid value for EVERY field, never a half-written blob
+    // that falls back to defaults. Without serialization, two concurrent read-modify-write edits could
+    // interleave and one clobbers the other's field.
+    @Test fun concurrentDifferentFieldWrites_allLand_noTornState() = runBlocking {
+        withContext(Dispatchers.Default) {
+            listOf(
+                async { store.setTheme(ReaderTheme.Dark) },
+                async { store.setFontFamily(ReaderFontFamily.Sans) },
+                async { store.setFontSize(24f) },
+                async { store.setLineSpacing(1.9f) },
+                async { store.setMargin(40f) },
+            ).awaitAll()
+        }
+        // Every field committed — no interleaved edit dropped another field back to its default.
+        val s = store.current()
+        assertEquals(ReaderTheme.Dark, s.theme)
+        assertEquals(ReaderFontFamily.Sans, s.fontFamily)
+        assertEquals(24f, s.fontSizeSp, 1e-4f)
+        assertEquals(1.9f, s.lineSpacing, 1e-4f)
+        assertEquals(40f, s.marginDp, 1e-4f)
+    }
+
+    @Test fun concurrentSameFieldBurst_leavesAValidSubmittedValue() = runBlocking {
+        // A rapid slider burst on ONE field: every write is a valid submitted value, and the committed
+        // result is always one of them (never a garbage decode / lost enum). Serialized writes can't tear.
+        val sizes = listOf(13f, 16f, 20f, 24f, 26f)
+        withContext(Dispatchers.Default) {
+            (0 until 40).map { i -> async { store.setFontSize(sizes[i % sizes.size]) } }.awaitAll()
+        }
+        assertTrue("committed size must be one of the submitted values", store.current().fontSizeSp in sizes)
     }
 }

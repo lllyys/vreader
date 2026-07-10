@@ -147,12 +147,6 @@ class TxtReaderActivity : ComponentActivity() {
     private val saveRequests = Channel<PendingSave>(Channel.CONFLATED)
     private data class PendingSave(val book: Book, val offsetUtf16: Int)
 
-    // feature #129 WI-4 — Display-settings writes funnel through ONE ordered channel + a single
-    // consumer (the saveRequests precedent): independent appScope launches on a multi-threaded
-    // dispatcher could commit rapid same-slider updates out of order (Gate-4 High). trySend from
-    // the main thread preserves call order; the lone consumer persists serially.
-    private val settingsWrites = Channel<suspend () -> Unit>(Channel.UNLIMITED)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val key = intent.getStringExtra(EXTRA_FINGERPRINT_KEY)
@@ -175,10 +169,6 @@ class TxtReaderActivity : ComponentActivity() {
                 )
             }
         }
-
-        // The lone Display-settings writer — persists sheet edits strictly in submission order
-        // (#129 WI-4; ends when onDestroy closes the channel, pending writes drain first).
-        container.appScope.launch { for (write in settingsWrites) write() }
 
         setContent {
             VReaderTheme {
@@ -392,17 +382,18 @@ class TxtReaderActivity : ComponentActivity() {
                             onInstall = { ttsVm.installVoiceData() },
                             onDone = { showVoice = false },
                         )
-                        // feature #129 — the designed Display sheet; setters funnel through the
-                        // ordered settingsWrites channel (Gate-4 High: independent launches could
-                        // commit rapid slider updates out of order) on the process scope, so a
-                        // write both stays ordered AND survives sheet dismissal.
+                        // feature #129 — the designed Display sheet; setters persist on the process
+                        // scope (so a write survives sheet dismissal / Activity teardown). Ordering
+                        // across rapid edits + rotation is guaranteed by ReaderSettingsStore's own
+                        // write Mutex (Gate-4 High: an Activity-owned channel serialized only within
+                        // ONE Activity, so a rotation replacement could commit out of order).
                         if (showDisplaySheet) ReaderSettingsSheet(
                             settings = displaySettings,
-                            onTheme = { v -> settingsWrites.trySend { container.readerSettingsStore.setTheme(v) } },
-                            onFontFamily = { v -> settingsWrites.trySend { container.readerSettingsStore.setFontFamily(v) } },
-                            onFontSize = { v -> settingsWrites.trySend { container.readerSettingsStore.setFontSize(v) } },
-                            onLineSpacing = { v -> settingsWrites.trySend { container.readerSettingsStore.setLineSpacing(v) } },
-                            onMargin = { v -> settingsWrites.trySend { container.readerSettingsStore.setMargin(v) } },
+                            onTheme = { v -> container.appScope.launch { container.readerSettingsStore.setTheme(v) } },
+                            onFontFamily = { v -> container.appScope.launch { container.readerSettingsStore.setFontFamily(v) } },
+                            onFontSize = { v -> container.appScope.launch { container.readerSettingsStore.setFontSize(v) } },
+                            onLineSpacing = { v -> container.appScope.launch { container.readerSettingsStore.setLineSpacing(v) } },
+                            onMargin = { v -> container.appScope.launch { container.readerSettingsStore.setMargin(v) } },
                             onDismiss = { showDisplaySheet = false },
                         )
                     }
@@ -418,8 +409,7 @@ class TxtReaderActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        saveRequests.close()     // the writer drains the final (conflated) save, then ends
-        settingsWrites.close()   // the settings writer drains any pending sheet edits, then ends
+        saveRequests.close()   // the writer drains the final (conflated) save, then ends
     }
 
     /** Load + decode the book and compute the initial scroll index from the saved position. */

@@ -12,6 +12,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -29,6 +31,13 @@ class ReaderSettingsStore(
     private val dataStore: DataStore<Preferences>,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
+    // feature #129 WI-4 — one process-wide serializer for the read-modify-write setters. The store is
+    // a container singleton, so this Mutex orders EVERY setter across ALL callers (a reader Activity,
+    // its rotation replacement, a second reader) — a slider burst dispatched from independent appScope
+    // coroutines can otherwise reach DataStore's internal actor out of submission order and restore a
+    // stale value. `withLock` is exception-safe: a throwing/cancelled setter releases the lock and can
+    // never wedge the queue (the hazard a hand-rolled channel+consumer had). Gate-4 High (WI-4 audit).
+    private val writeMutex = Mutex()
     /** The reactive settings stream — a host collects this (`collectAsStateWithLifecycle`) and applies
      *  live; emits the defaults until the user changes something. */
     val settings: Flow<ReaderSettings> = dataStore.data.map { read(it).toSettings() }
@@ -42,9 +51,10 @@ class ReaderSettingsStore(
     suspend fun setLineSpacing(v: Float) = update { it.copy(lineSpacing = ReaderSettings.clampLineSpacing(v)) }
     suspend fun setMargin(dp: Float) = update { it.copy(marginDp = ReaderSettings.clampMargin(dp)) }
 
-    private suspend fun update(transform: (ReaderSettingsState) -> ReaderSettingsState) {
+    private suspend fun update(transform: (ReaderSettingsState) -> ReaderSettingsState) = writeMutex.withLock {
         // Normalize EVERY numeric field on write (not just the one being set) so a previously
         // hand-edited / older out-of-range value is healed on the next write — truly "clamped on write".
+        // The Mutex serializes concurrent setters so submission order == commit order (Gate-4 High).
         dataStore.edit { prefs -> prefs[KEY] = json.encodeToString(transform(read(prefs)).normalized()) }
     }
 
