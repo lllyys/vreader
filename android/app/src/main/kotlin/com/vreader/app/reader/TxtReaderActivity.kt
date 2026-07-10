@@ -6,6 +6,11 @@
 // path (NOT the Readium bridge): save the top-visible chunk's charOffsetUTF16 as a
 // VReaderLocator.wrapLegacy envelope (debounced + onStop flush) and restore it via
 // ResumeResolver → Canonical → chunkForOffset.
+//
+// feature #129 WI-4: the reader collects ReaderSettingsStore.settings live and applies them —
+// theme background/ink on the scaffold, bodyTextStyle (size/family/lineHeight/ink) + margin padding
+// on the body — and hosts the designed ReaderBottomChrome (scrubber + Display slot + the read-aloud
+// slot, replacing the pre-chrome TtsEntryBar) which opens the ReaderSettingsSheet.
 package com.vreader.app.reader
 
 import android.os.Bundle
@@ -94,6 +99,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.compose.ui.text.TextStyle
+import com.vreader.app.reader.chrome.ReaderBottomChrome
+import com.vreader.app.reader.settings.ReaderSettings
+import com.vreader.app.reader.settings.ReaderSettingsSheet
+import com.vreader.app.reader.settings.ReaderTheme
+import com.vreader.app.reader.settings.bodyTextStyle
 import com.vreader.app.tts.AndroidTtsEngine
 import com.vreader.app.tts.TtsChunker
 import com.vreader.app.tts.TtsControlBar
@@ -166,10 +177,19 @@ class TxtReaderActivity : ComponentActivity() {
                         runCatching { load(key) }.getOrDefault(TxtUiState.Failed)
                     }
                 }
-                when (val s = state) {
+                // feature #129 — the live Display settings (theme/font/size/spacing/margin). NULL until
+                // the DataStore's first emission; the reader body is withheld until then (Gate-4 Medium:
+                // rendering defaults first would flash the wrong theme/typography for a user with stored
+                // non-default settings). The empty loading scaffold is the only pre-emission surface.
+                val settingsOrNull by container.readerSettingsStore.settings
+                    .collectAsStateWithLifecycle(initialValue = null)
+                val gated = if (settingsOrNull == null && state !is TxtUiState.Failed) TxtUiState.Loading else state
+                when (val s = gated) {
                     is TxtUiState.Failed -> LaunchedEffect(Unit) { finish() }
-                    is TxtUiState.Loading -> TxtReaderScaffold("", ::finish) {}
+                    is TxtUiState.Loading -> TxtReaderScaffold("", ::finish, (settingsOrNull ?: ReaderSettings()).theme) {}
                     is TxtUiState.Loaded -> {
+                        // non-null by the gate above (Loaded is unreachable pre-emission).
+                        val displaySettings = checkNotNull(settingsOrNull)
                         val listState = rememberLazyListState(initialFirstVisibleItemIndex = s.initialIndex)
                         // onStop flush — captures the live list state + book/document.
                         SideEffect {
@@ -264,8 +284,11 @@ class TxtReaderActivity : ComponentActivity() {
                         var pillVisible by remember { mutableStateOf(true) }
                         LaunchedEffect(Unit) { delay(5_000); pillVisible = false }                             // auto-fade
 
+                        // feature #129 WI-4 — the Display sheet, opened from the chrome's Aa slot.
+                        var showDisplaySheet by remember { mutableStateOf(false) }
+
                         TxtReaderScaffold(
-                            title = s.title, onBack = ::finish,
+                            title = s.title, onBack = ::finish, theme = displaySettings.theme,
                             bottom = {
                                 if (active) TtsControlBar(
                                     tts,
@@ -273,17 +296,38 @@ class TxtReaderActivity : ComponentActivity() {
                                     onPrevious = ttsVm::previous, onNext = ttsVm::next, onStop = ttsVm::stop,
                                     onSpeed = { showSpeed = true }, onVoice = { showVoice = true },
                                     onInstallVoice = ttsVm::installVoiceData, onSystemTts = ttsVm::openSystemTts,
-                                ) else TtsEntryBar(enabled = !starting && s.document.text.isNotBlank()) {
-                                    starting = true
-                                    ttsScope.launch {
-                                        try {
-                                            val sentences = withContext(Dispatchers.Default) {
-                                                TtsChunker.chunk(s.document.text, TextToSpeech.getMaxSpeechInputLength())
+                                ) else ReaderBottomChrome(
+                                    theme = displaySettings.theme,
+                                    progress = TxtProgress.fraction(
+                                        s.document.offsetForChunk(listState.firstVisibleItemIndex),
+                                        s.document.text.length,
+                                    ),
+                                    displayPage = 0, totalPages = 0,   // TXT/MD scroll-only — no page labels
+                                    onScrub = { f ->
+                                        ttsScope.launch {
+                                            val target = (f * s.document.text.length).toInt()
+                                                .coerceIn(0, (s.document.text.length - 1).coerceAtLeast(0))
+                                            listState.scrollToItem(s.document.chunkForOffset(target))
+                                        }
+                                    },
+                                    onOpenDisplay = { showDisplaySheet = true },
+                                    extraSlot = {
+                                        ReadAloudChromeSlot(
+                                            theme = displaySettings.theme,
+                                            enabled = !starting && s.document.text.isNotBlank(),
+                                        ) {
+                                            starting = true
+                                            ttsScope.launch {
+                                                try {
+                                                    val sentences = withContext(Dispatchers.Default) {
+                                                        TtsChunker.chunk(s.document.text, TextToSpeech.getMaxSpeechInputLength())
+                                                    }
+                                                    ttsVm.start(sentences)
+                                                } finally { starting = false }
                                             }
-                                            ttsVm.start(sentences)
-                                        } finally { starting = false }
-                                    }
-                                }
+                                        }
+                                    },
+                                )
                             },
                         ) {
                             var boxOriginWindow by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
@@ -291,6 +335,8 @@ class TxtReaderActivity : ComponentActivity() {
                             Box(Modifier.fillMaxSize().onGloballyPositioned { boxOriginWindow = it.localToWindow(androidx.compose.ui.geometry.Offset.Zero); boxSize = it.size }) {
                                 TxtBody(
                                     s.document, listState, s.book.originalFormat, chunkMapper,
+                                    textStyle = displaySettings.bodyTextStyle(),
+                                    marginDp = displaySettings.marginDp,
                                     highlightSpan = { chunkIndex ->
                                         if (!active) null
                                         else {
@@ -336,6 +382,25 @@ class TxtReaderActivity : ComponentActivity() {
                             onInstall = { ttsVm.installVoiceData() },
                             onDone = { showVoice = false },
                         )
+                        // feature #129 — the designed Display sheet; setters persist on the process
+                        // scope (so a write survives sheet dismissal / Activity teardown). The submission
+                        // sequence is stamped SYNCHRONOUSLY here in the sheet callback (main thread, in
+                        // slider order) via nextSeq() and passed into the setter — so the store's per-field
+                        // latest-wins drop reflects the user's true edit order, NOT the multi-threaded
+                        // dispatcher's coroutine-start order. A fire-and-forget launch per edit is then
+                        // safe across rapid edits + rotation: a stale value can never win (Gate-4 High).
+                        if (showDisplaySheet) {
+                            val store = container.readerSettingsStore
+                            ReaderSettingsSheet(
+                                settings = displaySettings,
+                                onTheme = { v -> val o = store.nextSeq(); container.appScope.launch { store.setTheme(v, o) } },
+                                onFontFamily = { v -> val o = store.nextSeq(); container.appScope.launch { store.setFontFamily(v, o) } },
+                                onFontSize = { v -> val o = store.nextSeq(); container.appScope.launch { store.setFontSize(v, o) } },
+                                onLineSpacing = { v -> val o = store.nextSeq(); container.appScope.launch { store.setLineSpacing(v, o) } },
+                                onMargin = { v -> val o = store.nextSeq(); container.appScope.launch { store.setMargin(v, o) } },
+                                onDismiss = { showDisplaySheet = false },
+                            )
+                        }
                     }
                 }
             }
@@ -546,13 +611,14 @@ class TxtReaderActivity : ComponentActivity() {
     }
 }
 
-/** Shared reader chrome (back + title) over the reading body, with a bottom slot for the read-aloud
- *  entry / control bar — the vreader-reader.jsx subset. */
+/** Shared reader chrome (back + title) over the reading body, with a bottom slot for the reader
+ *  chrome / TTS control bar — the vreader-reader.jsx subset. Renders in the active [theme]'s colors. */
 @Composable
 private fun TxtReaderScaffold(
-    title: String, onBack: () -> Unit, bottom: @Composable () -> Unit = {}, body: @Composable () -> Unit,
+    title: String, onBack: () -> Unit, theme: ReaderTheme = ReaderTheme.Paper,
+    bottom: @Composable () -> Unit = {}, body: @Composable () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().background(VReaderColors.Background).systemBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -560,10 +626,10 @@ private fun TxtReaderScaffold(
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Back",
-                tint = VReaderColors.Ink,
+                tint = theme.ink,
                 modifier = Modifier.size(28.dp).clickable(onClick = onBack).padding(2.dp),
             )
-            Text(title, Modifier.padding(start = 8.dp), color = VReaderColors.Ink, fontSize = 16.sp, maxLines = 1)
+            Text(title, Modifier.padding(start = 8.dp), color = theme.ink, fontSize = 16.sp, maxLines = 1)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) { body() }
         bottom()
@@ -571,31 +637,36 @@ private fun TxtReaderScaffold(
 }
 
 /** The designed read-aloud entry (vreader-tts.jsx `TtsEntry` — the reader bottom-toolbar Read-aloud
- *  / Volume item) shown when read-aloud is idle. Tapping it starts read-aloud. */
+ *  / Volume item) as a ReaderBottomChrome toolbar slot (feature #129 WI-4 moved it into the chrome,
+ *  the plan's sanctioned TtsEntryBar reconciliation). Tapping it starts read-aloud. */
 @Composable
-private fun TtsEntryBar(enabled: Boolean, onReadAloud: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(VReaderColors.Background).padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+private fun ReadAloudChromeSlot(theme: ReaderTheme, enabled: Boolean, onReadAloud: () -> Unit) {
+    val tint = if (enabled) theme.accent else theme.ink.copy(alpha = 0.35f)
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, onClick = onReadAloud)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .testTag("tts-read-aloud-entry"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Column(
-            Modifier.clip(RoundedCornerShape(14.dp)).clickable(enabled = enabled, onClick = onReadAloud).padding(horizontal = 18.dp, vertical = 6.dp).testTag("tts-read-aloud-entry"),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Read aloud", tint = if (enabled) VReaderColors.Accent else VReaderColors.InkMuted, modifier = Modifier.size(26.dp))
-            Text("Read aloud", color = if (enabled) VReaderColors.Accent else VReaderColors.InkMuted, fontFamily = VReaderFonts.Sans, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 2.dp))
-        }
+        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Read aloud", tint = tint, modifier = Modifier.size(24.dp))
+        // accent label when enabled — the committed TtsEntry active treatment (pre-#129 TtsEntryBar parity).
+        Text("Read aloud", color = tint, fontFamily = VReaderFonts.Sans, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
 
-/** The reading body — a LazyColumn over the document's chunk ranges (serif, reading margins).
- *  For BookFormat.md each chunk renders through MarkdownRenderer (styled); else verbatim. */
+/** The reading body — a LazyColumn over the document's chunk ranges. For BookFormat.md each chunk
+ *  renders through MarkdownRenderer (styled); else verbatim. [textStyle] + [marginDp] come from the
+ *  #129 Display settings (bodyTextStyle + the margin slider). */
 @Composable
 private fun TxtBody(
     document: TxtDocument, listState: LazyListState, format: BookFormat,
     // feature #125 — the single render owner. MD chunks render via mapper.renderedText so the body's
     // TextLayoutResult matches the controller/wash's offset map exactly (no double render, no drift).
     mapper: ChunkTextMapper,
+    textStyle: TextStyle, marginDp: Float,
     highlightSpan: (chunkIndex: Int) -> IntRange? = { null },
     // feature #124 — annotation highlight washes per chunk (TXT only; the activity passes empty for MD).
     washesForChunk: (chunkIndex: Int) -> List<WashSpan> = { emptyList() },
@@ -643,7 +714,7 @@ private fun TxtBody(
                 },
             ),
         state = listState,
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(horizontal = marginDp.dp, vertical = 16.dp),
     ) {
         // Count-based: indices on demand (a newline-dense 14MB file can be 100k+ chunks).
         items(count = document.chunkCount, key = { it }) { i ->
@@ -675,11 +746,9 @@ private fun TxtBody(
             val selRange = if (selection != null) selectionController?.selectionForChunk(i) else null
             Text(
                 text = text,
-                color = VReaderColors.Ink,
-                fontFamily = VReaderFonts.Serif,
-                fontWeight = FontWeight.Normal,
-                fontSize = 18.sp,
-                lineHeight = 29.sp,
+                // merge over the material default (the pre-#129 explicit-param behavior) so platform
+                // text defaults (letterSpacing etc.) are kept — only the Display settings change.
+                style = androidx.compose.material3.LocalTextStyle.current.merge(textStyle),
                 onTextLayout = { layout = it },
                 modifier = Modifier
                     .onGloballyPositioned { coords = it }

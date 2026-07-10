@@ -5,9 +5,14 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,5 +75,67 @@ class ReaderSettingsStoreTest {
         assertEquals(ReaderTheme.Paper, store.settings.first().theme)   // default
         store.setTheme(ReaderTheme.Sepia)
         assertEquals(ReaderTheme.Sepia, store.settings.first().theme)
+    }
+
+    // feature #129 WI-4 (Gate-4 High) — the store's write Mutex + DataStore make each setter's internal
+    // read-modify-write atomic and serialized, so a burst of concurrent DIFFERENT-field writes (the exact
+    // shape the reader produces — each sheet edit fires on its own appScope coroutine) can NEVER tear the
+    // stored JSON: the final decode always holds a valid value for EVERY field, never a half-written blob
+    // that falls back to defaults. Without serialization, two concurrent read-modify-write edits could
+    // interleave and one clobbers the other's field.
+    @Test fun concurrentDifferentFieldWrites_allLand_noTornState() = runBlocking {
+        withContext(Dispatchers.Default) {
+            listOf(
+                async { store.setTheme(ReaderTheme.Dark) },
+                async { store.setFontFamily(ReaderFontFamily.Sans) },
+                async { store.setFontSize(24f) },
+                async { store.setLineSpacing(1.9f) },
+                async { store.setMargin(40f) },
+            ).awaitAll()
+        }
+        // Every field committed — no interleaved edit dropped another field back to its default.
+        val s = store.current()
+        assertEquals(ReaderTheme.Dark, s.theme)
+        assertEquals(ReaderFontFamily.Sans, s.fontFamily)
+        assertEquals(24f, s.fontSizeSp, 1e-4f)
+        assertEquals(1.9f, s.lineSpacing, 1e-4f)
+        assertEquals(40f, s.marginDp, 1e-4f)
+    }
+
+    @Test fun concurrentSameFieldBurst_leavesAValidSubmittedValue() = runBlocking {
+        // A rapid slider burst on ONE field: every write is a valid submitted value, and the committed
+        // result is always one of them (never a garbage decode / lost enum). Serialized writes can't tear.
+        val sizes = listOf(13f, 16f, 20f, 24f, 26f)
+        withContext(Dispatchers.Default) {
+            (0 until 40).map { i -> async { store.setFontSize(sizes[i % sizes.size]) } }.awaitAll()
+        }
+        assertTrue("committed size must be one of the submitted values", store.current().fontSizeSp in sizes)
+    }
+
+    // feature #129 WI-4 (Gate-4 High r2/r3) — latest-submission-wins for a same-field write regardless of
+    // execution/lock-acquisition order. The submission order is a caller-supplied `order` (the reader
+    // stamps it synchronously in the UI callback); inside the store a same-field write is DROPPED when a
+    // newer `order` already committed. This test EXECUTES the writes in INVERTED order (the newer-order
+    // write commits FIRST, then the older-order write runs LAST) and proves the older one is dropped —
+    // exactly the multi-threaded-dispatcher reorder the reader can hit.
+    @Test fun staleSameFieldWrite_isDropped_evenWhenItRunsLast() = runBlocking {
+        // order=2 (newer) commits first; order=1 (older) runs AFTER and must be dropped.
+        store.setFontSize(26f, order = 2L)
+        assertEquals(26f, store.current().fontSizeSp, 1e-4f)
+        store.setFontSize(13f, order = 1L)               // older submission, executed last
+        assertEquals("the stale (lower-order) write must not overwrite the newer one",
+            26f, store.current().fontSizeSp, 1e-4f)
+
+        // And a strictly-newer write (order=3) DOES commit — the high-water only blocks OLDER ones.
+        store.setFontSize(20f, order = 3L)
+        assertEquals(20f, store.current().fontSizeSp, 1e-4f)
+    }
+
+    @Test fun perFieldHighWater_isIndependent_aStaleWriteInOneFieldDoesNotBlockAnother() = runBlocking {
+        store.setFontSize(24f, order = 5L)               // font-size high-water = 5
+        store.setMargin(40f, order = 2L)                 // margin high-water = 2 (its own track)
+        // margin's older order (2) must NOT be blocked by font-size's newer order (5) — fields are independent.
+        assertEquals(24f, store.current().fontSizeSp, 1e-4f)
+        assertEquals(40f, store.current().marginDp, 1e-4f)
     }
 }

@@ -162,8 +162,11 @@ class TxtReaderActivityTest {
                 compose.onAllNodesWithText("quick brown fox", substring = true).fetchSemanticsNodes().isNotEmpty()
             }
             // tap ON the highlighted text (15% width — the left-aligned text, not the full-width center
-            // which lands past the line end) → EDIT popover with Remove
-            compose.onNodeWithText("quick brown fox", substring = true).performTouchInput { click(percentOffset(0.15f, 0.5f)) }
+            // which lands past the line end; 25% height — the GLYPH line of the 2-line chunk box: the
+            // trailing "\n" adds an empty second line, and since #129 makes line height a user setting
+            // the node's vertical center can fall on that empty line → offset == chunk end → no hit)
+            // → EDIT popover with Remove
+            compose.onNodeWithText("quick brown fox", substring = true).performTouchInput { click(percentOffset(0.15f, 0.25f)) }
             compose.waitUntil(5_000) { compose.onAllNodesWithText("Remove").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Remove").assertIsDisplayed()
 

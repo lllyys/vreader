@@ -12,8 +12,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.util.concurrent.atomic.AtomicLong
 
 /** The persisted shape — enums as String names for forward-compat; clamped on read AND write. */
 @Serializable
@@ -29,6 +32,31 @@ class ReaderSettingsStore(
     private val dataStore: DataStore<Preferences>,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
+    // feature #129 WI-4 (Gate-4 High) — the store is the single process-wide write serializer (it is a
+    // container singleton, so it orders EVERY setter across ALL callers: a reader, its rotation
+    // replacement, a second reader). Two mechanisms combine, because a bare Mutex gives mutual exclusion
+    // but NOT FIFO acquisition — an older slider value could otherwise win the lock last and commit stale:
+    //   1. `writeMutex` makes each read-modify-write atomic (no interleaved edit clobbers another field);
+    //   2. a monotonic submission sequence keyed per FIELD: inside the lock a same-field write is DROPPED
+    //      if a newer sequence already committed — so latest-submission-wins holds regardless of
+    //      lock-acquisition order.
+    // The sequence MUST be stamped at the caller's true submission point, not at the coroutine's entry:
+    // the reader fires each slider edit as a fire-and-forget `launch` on a multi-threaded dispatcher, so
+    // stamping inside the setter body would inherit the dispatcher's (unordered) start order. `nextSeq()`
+    // is therefore called SYNCHRONOUSLY on the main thread in the UI callback, in slider order, and the
+    // sequence is passed into the suspend setter. `withLock` is exception-safe: a throwing/cancelled
+    // setter releases the lock and can never wedge the queue.
+    private val writeMutex = Mutex()
+    private val seq = AtomicLong(0)
+    private val committedSeqByField = HashMap<Field, Long>()
+
+    private enum class Field { THEME, FONT_FAMILY, FONT_SIZE, LINE_SPACING, MARGIN }
+
+    /** Allocate the next monotonic submission sequence. Call this SYNCHRONOUSLY at the UI callback (on
+     *  the main thread, in edit order) and pass the result into the setter, so latest-wins reflects the
+     *  user's actual edit order — not the dispatcher's coroutine-start order. */
+    fun nextSeq(): Long = seq.incrementAndGet()
+
     /** The reactive settings stream — a host collects this (`collectAsStateWithLifecycle`) and applies
      *  live; emits the defaults until the user changes something. */
     val settings: Flow<ReaderSettings> = dataStore.data.map { read(it).toSettings() }
@@ -36,16 +64,25 @@ class ReaderSettingsStore(
     /** A one-shot read (the current settings) — for a host's initial config at open. */
     suspend fun current(): ReaderSettings = read(dataStore.data.first()).toSettings()
 
-    suspend fun setTheme(theme: ReaderTheme) = update { it.copy(theme = theme.name) }
-    suspend fun setFontFamily(family: ReaderFontFamily) = update { it.copy(fontFamily = family.name) }
-    suspend fun setFontSize(sp: Float) = update { it.copy(fontSizeSp = ReaderSettings.clampFontSize(sp)) }
-    suspend fun setLineSpacing(v: Float) = update { it.copy(lineSpacing = ReaderSettings.clampLineSpacing(v)) }
-    suspend fun setMargin(dp: Float) = update { it.copy(marginDp = ReaderSettings.clampMargin(dp)) }
+    // Each setter takes an optional pre-stamped submission [order]. Concurrent callers (the reader's
+    // per-slider launches) MUST pass an order from nextSeq() taken at the synchronous UI callback;
+    // sequential callers (tests) may omit it and get an entry-time stamp (order == call order there).
+    suspend fun setTheme(theme: ReaderTheme, order: Long = nextSeq()) = update(Field.THEME, order) { it.copy(theme = theme.name) }
+    suspend fun setFontFamily(family: ReaderFontFamily, order: Long = nextSeq()) = update(Field.FONT_FAMILY, order) { it.copy(fontFamily = family.name) }
+    suspend fun setFontSize(sp: Float, order: Long = nextSeq()) = update(Field.FONT_SIZE, order) { it.copy(fontSizeSp = ReaderSettings.clampFontSize(sp)) }
+    suspend fun setLineSpacing(v: Float, order: Long = nextSeq()) = update(Field.LINE_SPACING, order) { it.copy(lineSpacing = ReaderSettings.clampLineSpacing(v)) }
+    suspend fun setMargin(dp: Float, order: Long = nextSeq()) = update(Field.MARGIN, order) { it.copy(marginDp = ReaderSettings.clampMargin(dp)) }
 
-    private suspend fun update(transform: (ReaderSettingsState) -> ReaderSettingsState) {
-        // Normalize EVERY numeric field on write (not just the one being set) so a previously
-        // hand-edited / older out-of-range value is healed on the next write — truly "clamped on write".
-        dataStore.edit { prefs -> prefs[KEY] = json.encodeToString(transform(read(prefs)).normalized()) }
+    private suspend fun update(field: Field, order: Long, transform: (ReaderSettingsState) -> ReaderSettingsState) {
+        writeMutex.withLock {
+            // A later-submitted write for THIS field already committed → this one is stale; drop it so
+            // the newest value always wins (latest-submission-wins, not last-to-acquire-the-lock).
+            if ((committedSeqByField[field] ?: 0L) > order) return@withLock
+            // Normalize EVERY numeric field on write (not just the one being set) so a previously
+            // hand-edited / older out-of-range value is healed on the next write — truly "clamped on write".
+            dataStore.edit { prefs -> prefs[KEY] = json.encodeToString(transform(read(prefs)).normalized()) }
+            committedSeqByField[field] = order
+        }
     }
 
     private fun ReaderSettingsState.normalized() = copy(

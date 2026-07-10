@@ -81,8 +81,10 @@ class MdReaderHighlightUiTest {
             assertEquals("markdown markers must be stripped in the rendered text", 0,
                 compose.onAllNodesWithText("**bold**", substring = true).fetchSemanticsNodes().size)
 
-            // long-press the styled line → selection popover.
-            compose.onNodeWithText("This is bold and italic", substring = true).performTouchInput { longClick() }
+            // long-press the styled line → selection popover. 25% height targets the GLYPH line of the
+            // 2-line chunk box (trailing "\n" = empty second line; #129 makes line height a user setting,
+            // so the node center can fall on the empty line → end-offset selection → blank → no popover).
+            compose.onNodeWithText("This is bold and italic", substring = true).performTouchInput { longClick(percentOffset(0.5f, 0.25f)) }
             compose.waitUntil(5_000) { compose.onAllNodesWithTag("popover-color-yellow").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("popover-color-yellow").performClick()
 
@@ -135,8 +137,9 @@ class MdReaderHighlightUiTest {
         ActivityScenario.launch<TxtReaderActivity>(TxtReaderActivity.intent(ctx(), key)).use {
             compose.waitUntil(12_000) { compose.onAllNodesWithText("This is bold and italic", substring = true).fetchSemanticsNodes().isNotEmpty() }
             // tap the left part of the styled (highlighted) rendered line → its rendered offset maps to a
-            // SOURCE offset inside the seeded range → EDIT popover with Remove.
-            compose.onNodeWithText("This is bold and italic", substring = true).performTouchInput { click(percentOffset(0.15f, 0.5f)) }
+            // SOURCE offset inside the seeded range → EDIT popover with Remove. (25% height = the glyph
+            // line of the 2-line chunk box — see the long-press comment above.)
+            compose.onNodeWithText("This is bold and italic", substring = true).performTouchInput { click(percentOffset(0.15f, 0.25f)) }
             compose.waitUntil(5_000) { compose.onAllNodesWithText("Remove").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Remove").performClick()
             var count = 1
