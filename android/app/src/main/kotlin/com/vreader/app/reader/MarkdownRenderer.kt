@@ -8,9 +8,13 @@
 // feature #125: `renderWithMap` ALSO emits, per rendered char, the SOURCE span
 // [srcStart[r], srcEnd[r]) of the source chars that produced it (dual-affinity, so a stripped
 // marker between two visible runs doesn't collapse their distinct source positions). `render()`
-// delegates to `renderWithMap(chunk).text` — its output is byte-identical to the pre-#125 renderer.
+// delegates to `renderWithMap(chunk).text` — same rendered text + spans.
 // The parser parses `content` by ABSOLUTE index (no substrings) so each appended char records its
 // source index directly; helpers are range-bounded.
+//
+// feature #129 WI-4: heading SpanStyle sizes are EM-RELATIVE (ratio to the 18sp default body size),
+// not absolute sp, so headings scale with the reader's Display font-size setting — and the render
+// stays settings-independent (the ChunkTextMapper cache never needs invalidating on a settings change).
 //
 // Pure JVM (value types) so the spans + map are unit-testable. Resume/anchor offsets index the RAW
 // markdown source, not these rendered spans — the map bridges the two for highlighting.
@@ -24,7 +28,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.em
 
 /** A rendered chunk + the per-rendered-char source spans (`srcStart[r]..srcEnd[r]`). */
 data class MarkdownRendered(val text: AnnotatedString, val srcStart: IntArray, val srcEnd: IntArray) {
@@ -39,7 +43,11 @@ data class MarkdownRendered(val text: AnnotatedString, val srcStart: IntArray, v
 
 object MarkdownRenderer {
 
-    private val HEADING_SIZES = floatArrayOf(26f, 22f, 19f, 17f, 16f, 15f)  // H1..H6
+    // H1..H6 sizes in sp AT the 18sp default body size; emitted as EM ratios (size/18) so heading
+    // spans scale with the reader's font-size setting (feature #129 WI-4) — the body Text's fontSize
+    // is the em base.
+    private val HEADING_SIZES = floatArrayOf(26f, 22f, 19f, 17f, 16f, 15f)
+    private const val BODY_BASE_SP = 18f
     private val ATX = Regex("""^(#{1,6})[ \t]+.*$""")
     private val ESCAPABLE = setOf('*', '_', '`', '\\', '#', '-')
 
@@ -62,7 +70,7 @@ object MarkdownRenderer {
                     val styleStart = b.length
                     b.parseInline(chunk, textStart, contentEnd)
                     if (b.length > styleStart) {
-                        b.addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = HEADING_SIZES[level - 1].sp), styleStart, b.length)
+                        b.addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = (HEADING_SIZES[level - 1] / BODY_BASE_SP).em), styleStart, b.length)
                     }
                 }
                 isBullet(chunk, contentEnd) -> {

@@ -2,7 +2,8 @@
 // (vreader-reader.jsx ReaderBottomChrome): an interactive progress scrubber (track + fill + centered
 // thumb + "Page N / M pages left" labels, tap/drag → onScrub) and a toolbar. Per #129 scope (Gate-2 —
 // omit non-functional slots, the LibraryScreen precedent, no dead placeholders) the toolbar ships ONLY
-// the "Display" (Aa) slot, which opens the WI-2 ReaderSettingsSheet; Contents / Notes / AI are added by
+// the "Display" (Aa) slot, which opens the WI-2 ReaderSettingsSheet, plus an optional host-provided
+// slot (WI-4: the TXT/MD read-aloud entry); Contents / Notes / AI are added by
 // feature F / D later. Renders in the active [ReaderTheme]'s colors (chrome = the theme background +
 // a top rule — a local mapping of the design's chrome/rule tokens). Pure function of state + callbacks.
 package com.vreader.app.reader.chrome
@@ -41,7 +42,9 @@ import com.vreader.app.ui.theme.VReaderFonts
  * The reader bottom chrome. [progress] is 0..1; [displayPage]/[totalPages] drive the scrubber labels
  * (pass totalPages <= 0 to hide them for hosts without paging). [onScrub] is invoked with the tapped/
  * dragged fraction (0..1) — the host WI wires it to the reader's seek. [onOpenDisplay] opens the Display
- * settings sheet. Renders in [theme]'s colors.
+ * settings sheet. [extraSlot] is an optional host-provided toolbar slot rendered beside Display (the
+ * TXT/MD read-aloud entry — the vreader-tts.jsx TtsEntry toolbar item); null = Display only.
+ * Renders in [theme]'s colors.
  */
 @Composable
 fun ReaderBottomChrome(
@@ -52,6 +55,7 @@ fun ReaderBottomChrome(
     onScrub: (Float) -> Unit,
     onOpenDisplay: () -> Unit,
     modifier: Modifier = Modifier,
+    extraSlot: (@Composable () -> Unit)? = null,
 ) {
     val ink = theme.ink
     val sub = theme.ink.copy(alpha = 0.6f)
@@ -105,8 +109,10 @@ fun ReaderBottomChrome(
                 }
             }
 
-            // Toolbar — Display only (Contents/Notes/AI omitted until F/D, no dead placeholders).
+            // Toolbar — Display (+ an optional host slot); Contents/Notes/AI omitted until F/D,
+            // no dead placeholders.
             Row(Modifier.fillMaxWidth().padding(top = 14.dp, start = 12.dp, end = 12.dp), horizontalArrangement = Arrangement.Center) {
+                extraSlot?.invoke()
                 Column(
                     Modifier.clickable { onOpenDisplay() }.padding(horizontal = 12.dp, vertical = 4.dp).testTag("chrome-display"),
                     horizontalAlignment = Alignment.CenterHorizontally,
