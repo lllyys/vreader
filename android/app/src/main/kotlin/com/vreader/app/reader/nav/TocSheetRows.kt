@@ -53,10 +53,20 @@ fun TocContentsRow(
     val ink = theme.ink
     val accent = theme.accent
     val sub = ink.copy(alpha = 0.55f)
-    // The design's per-scheme highlight tint (accent at low alpha over the sheet background).
-    val highlight = accent.copy(alpha = if (theme.isDark) 0.14f else 0.10f)
+    // The design's per-scheme highlighted-row tint: the theme accent (light oxblood 8C2F2F,
+    // dark amber D6885A — matching vreader-panels.jsx's rgba(140,47,47,0.08)/rgba(214,136,90,0.12))
+    // at the design's exact alphas: 0.08 in light schemes, 0.12 in dark.
+    val highlight = accent.copy(alpha = if (theme.isDark) 0.12f else 0.08f)
 
     val title = entry.title?.takeIf { it.isNotBlank() } ?: "Untitled"
+    // A11y: announce the chapter number, the title, the page label, and the current-chapter state —
+    // not just the title (so the row is not collapsed to a single word for screen readers).
+    val a11yLabel = buildString {
+        append("Chapter ${index + 1}, ")
+        append(title)
+        entry.pageLabel?.let { append(", page $it") }
+        if (isCurrent) append(", current chapter")
+    }
 
     Row(
         Modifier
@@ -67,7 +77,7 @@ fun TocContentsRow(
             .heightIn(min = 48.dp)
             .padding(horizontal = 14.dp, vertical = 10.dp)
             .testTag("toc-row-$index")
-            .semantics { contentDescription = title },
+            .semantics { contentDescription = a11yLabel },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {

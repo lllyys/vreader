@@ -63,7 +63,7 @@ class TocContentsSheetTest {
 
     @Test fun rendersAllContentsRows() {
         compose.setContent {
-            TocContentsSheetContent(theme = ReaderTheme.Paper, entries = threeEntries, currentTocIndex = 0, onJump = { true })
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "Pride and Prejudice", entries = threeEntries, currentTocIndex = 0, onJump = { true })
         }
         compose.onAllNodes(isTocRow, useUnmergedTree = true).assertCountEquals(3)
         compose.onNodeWithText("Chapter One", useUnmergedTree = true).assertExists()
@@ -75,7 +75,7 @@ class TocContentsSheetTest {
 
     @Test fun currentRowIsHighlighted() {
         compose.setContent {
-            TocContentsSheetContent(theme = ReaderTheme.Paper, entries = threeEntries, currentTocIndex = 1, onJump = { true })
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "Pride and Prejudice", entries = threeEntries, currentTocIndex = 1, onJump = { true })
         }
         // The highlighted row carries a stable "current" marker so the highlight is assertable without
         // reading pixels (the design's accent bg + accent/600 title is the visible form of this state).
@@ -87,7 +87,7 @@ class TocContentsSheetTest {
     @Test fun tapRow_invokesOnJumpWithIndex() {
         var jumped: Int? = null
         compose.setContent {
-            TocContentsSheetContent(theme = ReaderTheme.Paper, entries = threeEntries, currentTocIndex = 0, onJump = { jumped = it; true })
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "Pride and Prejudice", entries = threeEntries, currentTocIndex = 0, onJump = { jumped = it; true })
         }
         compose.onNodeWithTag("toc-row-2", useUnmergedTree = true).performClick()
         assertEquals(2, jumped)
@@ -102,6 +102,7 @@ class TocContentsSheetTest {
         compose.setContent {
             TocContentsSheetContent(
                 theme = ReaderTheme.Paper,
+                bookTitle = "Pride and Prejudice",
                 entries = threeEntries,
                 currentTocIndex = 0,
                 onJump = { true },
@@ -118,6 +119,7 @@ class TocContentsSheetTest {
         compose.setContent {
             TocContentsSheetContent(
                 theme = ReaderTheme.Paper,
+                bookTitle = "Pride and Prejudice",
                 entries = threeEntries,
                 currentTocIndex = 0,
                 onJump = { false },
@@ -137,7 +139,7 @@ class TocContentsSheetTest {
 
     @Test fun emptyEntries_showsEmptyState_noRows() {
         compose.setContent {
-            TocContentsSheetContent(theme = ReaderTheme.Paper, entries = emptyList(), currentTocIndex = -1, onJump = { true })
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "Pride and Prejudice", entries = emptyList(), currentTocIndex = -1, onJump = { true })
         }
         compose.onNodeWithTag("toc-empty", useUnmergedTree = true).assertExists()
         compose.onAllNodes(isTocRow, useUnmergedTree = true).assertCountEquals(0)
@@ -148,7 +150,7 @@ class TocContentsSheetTest {
         val entries = listOf(entry(null, 3), entry("Named", 9))
         var jumped: Int? = null
         compose.setContent {
-            TocContentsSheetContent(theme = ReaderTheme.Dark, entries = entries, currentTocIndex = 0, onJump = { jumped = it; true })
+            TocContentsSheetContent(theme = ReaderTheme.Dark, bookTitle = "Pride and Prejudice", entries = entries, currentTocIndex = 0, onJump = { jumped = it; true })
         }
         compose.onAllNodes(isTocRow, useUnmergedTree = true).assertCountEquals(2)
         compose.onNodeWithTag("toc-row-0", useUnmergedTree = true).performClick()
@@ -159,18 +161,30 @@ class TocContentsSheetTest {
         // A null pageLabel must not render a stray "p. " — the row renders without the page span.
         val entries = listOf(entry("No Page", null))
         compose.setContent {
-            TocContentsSheetContent(theme = ReaderTheme.Paper, entries = entries, currentTocIndex = 0, onJump = { true })
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "Pride and Prejudice", entries = entries, currentTocIndex = 0, onJump = { true })
         }
         compose.onNodeWithText("No Page", useUnmergedTree = true).assertExists()
         compose.onAllNodesWithTag("toc-page-0", useUnmergedTree = true).assertCountEquals(0)
     }
 
-    // Smoke: the `ModalBottomSheet` wrapper renders its Contents content (rows land in the sheet's
-    // window; asserting via the merged tree keeps this off the flaky click-into-sheet path).
+    @Test fun header_showsBookTitle_notInventedHeading() {
+        // Rule 51: the design's `Sheet` header is the BOOK TITLE (title="Pride and Prejudice"), not an
+        // invented "Contents" heading.
+        compose.setContent {
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "Wuthering Heights", entries = threeEntries, currentTocIndex = 0, onJump = { true })
+        }
+        compose.onNodeWithTag("toc-title", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("Wuthering Heights", useUnmergedTree = true).assertExists()
+        compose.onAllNodesWithTag("toc-tab-bookmarks", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    // Smoke: the `ModalBottomSheet` wrapper renders its Contents content — the book-title header lands
+    // in the sheet's window (asserting via the merged tree keeps this off the flaky click-into-sheet path).
     @Test fun modalBottomSheetWrapper_rendersContents() {
         compose.setContent {
             TocContentsSheet(
                 theme = ReaderTheme.Paper,
+                bookTitle = "Pride and Prejudice",
                 entries = threeEntries,
                 currentTocIndex = 0,
                 onJump = { true },
@@ -178,7 +192,7 @@ class TocContentsSheetTest {
             )
         }
         compose.waitForIdle()
-        compose.onNodeWithText("Contents").assertExists()
+        compose.onNodeWithText("Pride and Prejudice").assertExists()
     }
 
     // Guards the local Locator shape the fixtures use (contracts type is the WI-1 dependency).
