@@ -113,10 +113,14 @@ class MainActivity : ComponentActivity() {
                 )
 
                 // feature #128 WI-7 — the search takeover. Rendered OVER the library when open; fed by
-                // the AppContainer's SearchViewModel (WI-6). Remembered per open so it isn't rebuilt on
-                // every recomposition; a fresh instance is built each time the takeover opens.
+                // the AppContainer's SearchViewModel (WI-6). Obtained through `viewModel(factory=…)` so it's
+                // owned by the Activity's ViewModelStore — its viewModelScope is properly cleared on the
+                // Activity's destroy (a raw `remember { … }` would leak the coroutine collector forever).
                 if (searchOpen) {
-                    val searchViewModel = remember { container.searchViewModel() }
+                    val searchViewModel: com.vreader.app.search.SearchViewModel = viewModel(
+                        key = "search",
+                        factory = viewModelFactory { initializer { container.searchViewModel() } },
+                    )
                     val searchState by searchViewModel.state.collectAsStateWithLifecycle()
                     SearchScreen(
                         state = searchState,

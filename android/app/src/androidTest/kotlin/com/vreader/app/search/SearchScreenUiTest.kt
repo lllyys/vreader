@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.vreader.app.data.Book
 import com.vreader.app.data.Collection
@@ -69,25 +70,25 @@ class SearchScreenUiTest {
                 collections = listOf(Collection("c1", "Fiction", 1L, 3), Collection("c2", "Tech", 2L, 1)),
             ),
         )
-        compose.onNodeWithText("Recent").assertIsDisplayed()
+        compose.onNodeWithText("RECENT").assertIsDisplayed()
         compose.onNodeWithText("pragmatic").assertIsDisplayed()
         compose.onNodeWithText("austen").assertIsDisplayed()
-        compose.onNodeWithText("Browse collections").assertIsDisplayed()
+        compose.onNodeWithText("BROWSE COLLECTIONS").assertIsDisplayed()
         compose.onNodeWithText("Fiction").assertIsDisplayed()
         compose.onNodeWithText("Tech").assertIsDisplayed()
     }
 
     @Test fun emptyState_recentsHidden_whenNoRecents() {
         render(SearchUiState(query = "", recents = emptyList(), collections = listOf(Collection("c1", "Fiction", 1L, 3))))
-        compose.onNodeWithText("Recent").assertIsNotDisplayed()
+        compose.onNodeWithText("RECENT").assertIsNotDisplayed()
         // the browse-collections section is still shown.
-        compose.onNodeWithText("Browse collections").assertIsDisplayed()
+        compose.onNodeWithText("BROWSE COLLECTIONS").assertIsDisplayed()
     }
 
     @Test fun emptyState_collectionsHidden_whenNoCollections() {
         render(SearchUiState(query = "", recents = listOf("austen"), collections = emptyList()))
-        compose.onNodeWithText("Browse collections").assertIsNotDisplayed()
-        compose.onNodeWithText("Recent").assertIsDisplayed()
+        compose.onNodeWithText("BROWSE COLLECTIONS").assertIsNotDisplayed()
+        compose.onNodeWithText("RECENT").assertIsDisplayed()
     }
 
     @Test fun emptyState_recentTap_reQueries() {
@@ -195,7 +196,23 @@ class SearchScreenUiTest {
         // a settled, un-searched screen (searched = false) shows the empty state, never no-results.
         render(SearchUiState(query = "", searched = false, indexComplete = true, recents = listOf("austen")))
         compose.onNodeWithText("No matches for", substring = true).assertIsNotDisplayed()
-        compose.onNodeWithText("Recent").assertIsDisplayed()
+        compose.onNodeWithText("RECENT").assertIsDisplayed()
+    }
+
+    // ── the search field ───────────────────────────────────────────
+
+    @Test fun typingInField_flowsThroughOnQueryChange() {
+        var typed = ""
+        render(SearchUiState(query = "", recents = listOf("austen")), onQueryChange = { typed += it })
+        compose.onNodeWithText("Search title, author, or text…").performTextInput("pra")
+        assertEquals("pra", typed)
+    }
+
+    @Test fun clearAffordance_emitsEmptyQuery() {
+        var lastQuery: String? = null
+        render(SearchUiState(query = "pra", searched = true, indexComplete = true), onQueryChange = { lastQuery = it })
+        compose.onNodeWithContentDescription("Clear search").performClick()
+        assertEquals("", lastQuery)
     }
 
     // ── Cancel ─────────────────────────────────────────────────────

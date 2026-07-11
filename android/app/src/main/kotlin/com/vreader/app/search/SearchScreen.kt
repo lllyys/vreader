@@ -17,7 +17,10 @@
 package com.vreader.app.search
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,11 +47,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -121,23 +128,49 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit, onCancel
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val hasQuery = query.isNotEmpty()
-        // The rounded field. The design draws an accent inset ring while a query is present; we approximate
-        // that focused affordance with the fill (the ring is a polish follow-on when a real TextField lands).
+        // The rounded field. The design draws an accent inset ring while a query is present; we render an
+        // accent border while there's text to mirror that focused affordance (the caret is the TextField's).
+        val fieldShape = RoundedCornerShape(12.dp)
         Row(
-            Modifier.weight(1f).height(42.dp).clip(RoundedCornerShape(12.dp))
-                .background(VReaderColors.PillFill).padding(horizontal = 13.dp),
+            Modifier.weight(1f).height(42.dp).clip(fieldShape)
+                .background(VReaderColors.PillFill)
+                .then(
+                    if (hasQuery) {
+                        Modifier.border(1.5.dp, VReaderColors.Accent, fieldShape)
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(horizontal = 13.dp),
             horizontalArrangement = Arrangement.spacedBy(9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Filled.Search, contentDescription = "Search", tint = VReaderColors.InkMuted, modifier = Modifier.size(19.dp))
-            Text(
-                if (hasQuery) query else "Search title, author, or text…",
-                Modifier.weight(1f),
-                color = if (hasQuery) VReaderColors.Ink else VReaderColors.InkMuted,
-                fontFamily = VReaderFonts.Sans,
-                fontSize = 15.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                textStyle = TextStyle(
+                    color = VReaderColors.Ink,
+                    fontFamily = VReaderFonts.Sans,
+                    fontSize = 15.5.sp,
+                ),
+                cursorBrush = SolidColor(VReaderColors.Accent),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                decorationBox = { inner ->
+                    if (!hasQuery) {
+                        Text(
+                            "Search title, author, or text…",
+                            color = VReaderColors.InkMuted,
+                            fontFamily = VReaderFonts.Sans,
+                            fontSize = 15.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    inner()
+                },
             )
             if (hasQuery) {
                 Icon(
@@ -183,8 +216,9 @@ private fun EmptyState(
 
 @Composable
 private fun SectionLabel(text: String, topPadding: androidx.compose.ui.unit.Dp) {
+    // The design applies `textTransform: uppercase` to the section labels (RECENT / BROWSE COLLECTIONS).
     Text(
-        text,
+        text.uppercase(),
         Modifier.padding(start = 2.dp, end = 2.dp, top = topPadding, bottom = 10.dp),
         color = VReaderColors.InkMuted,
         fontFamily = VReaderFonts.Sans,
@@ -260,8 +294,11 @@ private fun Results(state: SearchUiState, onOpenResult: (SearchResultRow) -> Uni
 
 @Composable
 private fun ResultRow(row: SearchResultRow, query: String, onOpen: () -> Unit) {
+    // The design draws a 0.5px rule under each result row with a 12px gap below it.
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(top = 8.dp, bottom = 16.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onOpen)
+            .drawBottomRule(VReaderColors.Ink.copy(alpha = 0.10f))
+            .padding(top = 8.dp, bottom = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(13.dp),
     ) {
         SmallCover(book = row.book)
@@ -307,9 +344,10 @@ private fun ResultRow(row: SearchResultRow, query: String, onOpen: () -> Unit) {
 
 @Composable
 private fun SmallCover(book: com.vreader.app.data.Book) {
+    // The design's result Cover is 62 wide at the library's 104:156 (2:3) proportion → ~93 tall.
     val tint = CoverTints[(book.fingerprintKey.hashCode() and 0x7FFFFFFF) % CoverTints.size]
     Box(
-        Modifier.size(width = 44.dp, height = 62.dp).clip(RoundedCornerShape(3.dp)).background(tint),
+        Modifier.size(width = 62.dp, height = 93.dp).clip(RoundedCornerShape(4.dp)).background(tint),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -317,9 +355,20 @@ private fun SmallCover(book: com.vreader.app.data.Book) {
             color = Color(0xCCFFFFFF),
             fontFamily = VReaderFonts.Serif,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 18.sp,
+            fontSize = 22.sp,
         )
     }
+}
+
+/** A 0.5px hairline rule along the bottom edge (the design's `borderBottom: 0.5px solid`). */
+private fun Modifier.drawBottomRule(color: Color): Modifier = drawBehind {
+    val stroke = 0.5.dp.toPx()
+    drawLine(
+        color = color,
+        start = androidx.compose.ui.geometry.Offset(0f, size.height - stroke / 2),
+        end = androidx.compose.ui.geometry.Offset(size.width, size.height - stroke / 2),
+        strokeWidth = stroke,
+    )
 }
 
 // ── no-results state ───────────────────────────────────────────────
