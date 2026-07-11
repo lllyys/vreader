@@ -61,6 +61,10 @@ data class BookmarkRecord(
     val updatedAt: Long,
 )
 
+/** The outcome of an atomic bookmark toggle (feature #135 WI-3): a create-or-remove decided by the
+ *  presence of a bookmark at the same `(bookKey, profileKey)` — the top-bar toggle's semantics. */
+enum class BookmarkToggleResult { Added, Removed }
+
 // ---- record -> entity ----
 
 fun HighlightRecord.toEntity() = com.vreader.app.data.HighlightEntity(

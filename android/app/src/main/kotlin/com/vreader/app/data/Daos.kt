@@ -263,6 +263,39 @@ abstract class AnnotationDao {
     @Query("DELETE FROM bookmarks WHERE bookmarkId = :id")
     abstract suspend fun deleteBookmark(id: String)
 
+    // ---- feature #135 WI-3: atomic toggle + presence on the unique (bookKey, profileKey) ----
+    // insertBookmarkIfAbsent (@Insert(IGNORE)) already exists below (added by #132 WI-6b for
+    // restore); the toggle REUSES it — a re-bookmark of the same position is rejected by the unique
+    // index (returns -1), which the transaction reads as "already bookmarked → remove".
+
+    @Query("SELECT * FROM bookmarks WHERE bookKey = :bookKey AND profileKey = :profileKey")
+    abstract suspend fun findBookmarkByProfile(bookKey: String, profileKey: String): BookmarkEntity?
+
+    @Query("DELETE FROM bookmarks WHERE bookKey = :bookKey AND profileKey = :profileKey")
+    abstract suspend fun deleteBookmarkByProfile(bookKey: String, profileKey: String): Int
+
+    /** Presence for the top-bar toggle: is the current position bookmarked? (>0 ⇒ yes). */
+    @Query("SELECT COUNT(*) FROM bookmarks WHERE bookKey = :bookKey AND profileKey = :profileKey")
+    abstract suspend fun isBookmarked(bookKey: String, profileKey: String): Int
+
+    /**
+     * Atomically toggle a bookmark at the entity's `(bookKey, profileKey)` position: insert-if-absent
+     * (reusing [insertBookmarkIfAbsent] on the unique index) → [BookmarkToggleResult.Added]; if the
+     * insert is IGNOREd (a bookmark already exists at this position) → DELETE by profile →
+     * [BookmarkToggleResult.Removed]. Wrapped in @Transaction so a concurrent/repeat toggle can't
+     * race insert-vs-delete (the highlights `upsertHighlight` transactional-toggle precedent). The
+     * caller supplies the entity via `BookmarkRecord.toEntity()`, which derives the `profileKey`.
+     */
+    @Transaction
+    open suspend fun toggleBookmark(bookmark: BookmarkEntity): com.vreader.app.annotations.BookmarkToggleResult {
+        return if (insertBookmarkIfAbsent(bookmark) != -1L) {
+            com.vreader.app.annotations.BookmarkToggleResult.Added
+        } else {
+            deleteBookmarkByProfile(bookmark.bookKey, bookmark.profileKey)
+            com.vreader.app.annotations.BookmarkToggleResult.Removed
+        }
+    }
+
     // ---- feature #132 WI-6b: UUID-preserving restore (insert-if-absent per kind) ----
     // Each insert IGNOREs on any constraint conflict (PK/unique index), returning -1. A -1 means
     // the row already exists (a repeated restore of the same UUID, or a same-anchor different-UUID

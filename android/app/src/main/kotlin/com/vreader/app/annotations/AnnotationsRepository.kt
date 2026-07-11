@@ -94,6 +94,29 @@ class AnnotationsRepository(
 
     suspend fun removeBookmark(id: String) = dao.deleteBookmark(id)
 
+    /**
+     * Atomic idempotent bookmark toggle at `locator`'s position (feature #135 WI-3 — the top-bar
+     * toggle's create/remove). Builds the entity via [BookmarkRecord.toEntity] (which derives the
+     * `profileKey`) and delegates to the DAO's `@Transaction` toggle on the unique `(bookKey,
+     * profileKey)` index: no bookmark there yet → `Added`; one already there → `Removed`. Re-firing
+     * (a rapid double-tap) is idempotent — the unique index guarantees exactly one row per position.
+     */
+    suspend fun toggleBookmark(bookKey: String, title: String?, locator: Locator): BookmarkToggleResult {
+        requireSameBook(bookKey, locator)
+        val t = now()
+        val record = BookmarkRecord(
+            id = newAnnotationId(), bookKey = bookKey, title = title,
+            locator = locator, createdAt = t, updatedAt = t,
+        )
+        return dao.toggleBookmark(record.toEntity())
+    }
+
+    /** Is the given position bookmarked? (the top-bar toggle's filled/empty state). */
+    suspend fun isBookmarked(bookKey: String, locator: Locator): Boolean {
+        requireSameBook(bookKey, locator)
+        return dao.isBookmarked(bookKey, profileKeyFor(bookKey, locator)) > 0
+    }
+
     suspend fun highlightCount(bookKey: String): Int = dao.highlightCount(bookKey)
 
     // ---- feature #132 WI-6b: review-sheet snapshot + backup collector reads + restore seam ----
