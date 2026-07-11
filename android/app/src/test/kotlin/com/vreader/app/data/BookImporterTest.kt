@@ -170,6 +170,27 @@ class BookImporterTest {
         assertEquals("红楼梦", book.title)
     }
 
+    /**
+     * Gate-2 CRITICAL regression (feature #128 WI-1): a duplicate SAF import of an already-indexed
+     * book must NOT null-clobber a backfilled author. BookImporter goes through the author-preserving
+     * upsert, so a re-import of identical bytes (fresh null-author Book) leaves the author intact while
+     * the import-owned columns (here the sourceUri) still update.
+     */
+    @Test
+    fun reimport_afterAuthorBackfill_preservesAuthor() = runTest {
+        val repo = LibraryRepository(db.bookDao(), db.readingPositionDao())
+        val first = importer.importStream("content://saf/a1", "Book.epub", ByteArrayInputStream(epubBytes))
+        db.bookDao().backfillAuthorIfNull(first.fingerprintKey, "Herman Melville")
+
+        // Duplicate import: same bytes ⇒ same fingerprintKey; the importer builds a null-author Book.
+        importer.importStream("content://saf/a2", "Book.epub", ByteArrayInputStream(epubBytes))
+
+        val after = repo.findBook(first.fingerprintKey)!!
+        assertEquals("author survives the duplicate import", "Herman Melville", after.author)
+        assertEquals("no duplicate library row", 1, repo.observeLibrary().first().size)
+        assertEquals("import-owned sourceUri DID update to the re-import URI", "content://saf/a2", after.sourceUri)
+    }
+
     @Test
     fun import_emptyStream_storesZeroByteArtifact() = runTest {
         val book = importer.importStream("content://saf/e", "empty.epub", ByteArrayInputStream(ByteArray(0)))
@@ -244,15 +265,9 @@ class BookImporterTest {
     @Test
     fun import_dbWriteFailure_rollsBackPromotedArtifact() = runTest {
         // A repository whose book write fails AFTER the artifact is promoted — the
-        // import must leave no orphaned file behind (Gate-4 r2 Medium).
-        val throwingDao = object : BookDao {
-            override suspend fun upsert(book: BookEntity): Unit = throw RuntimeException("db down")
-            override fun observeAll() = emptyFlow<List<BookEntity>>()
-            override suspend fun find(key: String): BookEntity? = null
-            override suspend fun delete(key: String) = Unit
-            override suspend fun markOpened(key: String, openedAt: Long) = Unit
-            override suspend fun getAll(): List<BookEntity> = emptyList()
-        }
+        // import must leave no orphaned file behind (Gate-4 r2 Medium). The import path now
+        // goes through upsertBookPreservingAuthor, whose first write is insertIfAbsent.
+        val throwingDao = ThrowingBookDao()
         val failingImporter = BookImporter(
             booksDir, LibraryRepository(throwingDao, db.readingPositionDao()), Dispatchers.Unconfined,
         ) { 1L }
@@ -277,14 +292,7 @@ class BookImporterTest {
         // Re-import the SAME bytes through a repo whose write fails after promotion.
         // Same key ⇒ identical content, so the existing row still validly references
         // this file — the rollback must NOT delete it.
-        val throwingDao = object : BookDao {
-            override suspend fun upsert(book: BookEntity): Unit = throw RuntimeException("db down")
-            override fun observeAll() = emptyFlow<List<BookEntity>>()
-            override suspend fun find(key: String): BookEntity? = null
-            override suspend fun delete(key: String) = Unit
-            override suspend fun markOpened(key: String, openedAt: Long) = Unit
-            override suspend fun getAll(): List<BookEntity> = emptyList()
-        }
+        val throwingDao = ThrowingBookDao()
         val failingImporter = BookImporter(
             booksDir, LibraryRepository(throwingDao, db.readingPositionDao()), Dispatchers.Unconfined,
         ) { 2L }
@@ -302,4 +310,28 @@ class BookImporterTest {
         assertEquals(local.absolutePath, repo.findBook(first.fingerprintKey)?.localFilePath)
         assertEquals(first.fingerprintKey, DocumentFingerprint.hash(local).canonicalKey(BookFormat.epub))
     }
+}
+
+/**
+ * A [BookDao] whose every WRITE path throws, used by the DB-write-failure rollback tests. The
+ * import path now goes through the author-preserving upsert (insert-if-absent → update), so this
+ * fails the FIRST write (`insertIfAbsent`) and the whole-row `upsert`; reads return absent/empty.
+ * The `@Transaction` default `upsertPreservingAuthor` body is inherited from the interface and calls
+ * these throwing members, so the failure surfaces exactly where the real DAO's would.
+ */
+private class ThrowingBookDao : BookDao {
+    override suspend fun upsert(book: BookEntity): Unit = throw RuntimeException("db down")
+    override suspend fun insertIfAbsent(book: BookEntity): Long = throw RuntimeException("db down")
+    override suspend fun updateImportedColumns(
+        key: String, title: String, fmt: String, sha: String, bytes: Long, path: String?, uri: String?, addedAt: Long,
+    ): Unit = throw RuntimeException("db down")
+    override suspend fun backfillAuthorIfNull(key: String, author: String?): Unit = throw RuntimeException("db down")
+    override suspend fun applyRestoredMetadata(
+        key: String, title: String, addedAt: Long, lastOpenedAt: Long?, manifestAuthor: String?,
+    ): Unit = throw RuntimeException("db down")
+    override fun observeAll() = emptyFlow<List<BookEntity>>()
+    override suspend fun find(key: String): BookEntity? = null
+    override suspend fun delete(key: String) = Unit
+    override suspend fun markOpened(key: String, openedAt: Long) = Unit
+    override suspend fun getAll(): List<BookEntity> = emptyList()
 }

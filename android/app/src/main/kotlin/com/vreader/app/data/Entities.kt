@@ -14,7 +14,10 @@ import androidx.room.PrimaryKey
  * A book in the Android library, keyed by its canonical fingerprint
  * (`DocumentFingerprint.canonicalKey`). `localFilePath`/`sourceUri` are nullable
  * until WI-4 wires SAF import → app-private-storage copy. `lastOpenedAt` is the
- * v2 schema addition (recents) — null until first open.
+ * v2 schema addition (recents) — null until first open. `author` is the v6 addition
+ * (feature #128 library search) — nullable, set by an author backfill or a restore,
+ * NEVER by the SAF import path (a duplicate import must not null-clobber it: the import
+ * path goes through [BookDao.upsertPreservingAuthor], not the whole-row `@Upsert`).
  */
 @Entity(tableName = "books")
 data class BookEntity(
@@ -27,6 +30,7 @@ data class BookEntity(
     val sourceUri: String?,       // SAF source URI metadata (WI-4)
     val addedAt: Long,            // epoch millis
     val lastOpenedAt: Long?,      // v2 addition — epoch millis of last open, or null
+    val author: String? = null,   // v6 addition (feature #128) — nullable; tail default so no positional site breaks
 )
 
 /**

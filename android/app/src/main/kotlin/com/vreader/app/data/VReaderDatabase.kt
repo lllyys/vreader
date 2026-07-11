@@ -1,9 +1,10 @@
 // Purpose: Room database + schema-versioned migration scaffold — feature #106 WI-3.
-// Version 2 is the current schema; v1 was the initial books+positions baseline and
+// Version 6 is the current schema; v1 was the initial books+positions baseline and
 // MIGRATION_1_2 is the worked example of the additive-migration pattern (adds
-// books.lastOpenedAt). The migration round-trip test (VReaderDatabaseMigrationTest)
-// guards it. Future schema changes append a Migration(n, n+1) to ALL_MIGRATIONS and
-// bump `version`.
+// books.lastOpenedAt). Subsequent additive migrations: 2→3 daily_reading (#122),
+// 3→4 annotations (#123), 4→5 collections (#127), 5→6 books.author (#128 search).
+// The migration round-trip test (VReaderDatabaseMigrationTest) guards them. Future
+// schema changes append a Migration(n, n+1) to ALL_MIGRATIONS and bump `version`.
 package com.vreader.app.data
 
 import android.content.Context
@@ -19,7 +20,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HighlightEntity::class, AnnotationNoteEntity::class, BookmarkEntity::class,
         CollectionEntity::class, BookCollectionCrossRef::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class VReaderDatabase : RoomDatabase() {
@@ -125,8 +126,17 @@ abstract class VReaderDatabase : RoomDatabase() {
             }
         }
 
+        /** v5 → v6: feature #128 — add the nullable `author` column to `books` (library search).
+         *  Purely additive; migrated rows read `author = null` until a backfill or restore sets it. */
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE books ADD COLUMN author TEXT")
+            }
+        }
+
         /** All registered migrations, oldest first. Append future Migration(n,n+1) here. */
-        val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        val ALL_MIGRATIONS: Array<Migration> =
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 
         /** The production on-disk database (app-private storage). */
         fun build(context: Context): VReaderDatabase =

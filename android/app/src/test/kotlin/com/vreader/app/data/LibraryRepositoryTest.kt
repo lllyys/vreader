@@ -36,6 +36,7 @@ class LibraryRepositoryTest {
         title: String = "Moby-Dick",
         format: BookFormat = BookFormat.epub,
         addedAt: Long = 1000L,
+        author: String? = null,
     ) = Book(
         fingerprintKey = k,
         title = title,
@@ -43,6 +44,7 @@ class LibraryRepositoryTest {
         contentSHA256 = sha,
         fileByteCount = 2048,
         addedAt = addedAt,
+        author = author,
     )
 
     @Before
@@ -107,6 +109,102 @@ class LibraryRepositoryTest {
     fun cjkTitle_roundTrips() = runTest {
         repo.upsertBook(book(title = "红楼梦"))
         assertEquals("红楼梦", repo.findBook(key)?.title)
+    }
+
+    // MARK: - feature #128 WI-1 — author column + author-preserving persistence
+
+    @Test
+    fun author_roundTripsThroughInsertAndRead() = runTest {
+        repo.upsertBook(book(author = "Herman Melville"))
+        assertEquals("Herman Melville", repo.findBook(key)?.author)
+    }
+
+    @Test
+    fun author_defaultsToNull_whenAbsent() = runTest {
+        repo.upsertBook(book())
+        assertNull("a book imported without an author has null author", repo.findBook(key)?.author)
+    }
+
+    @Test
+    fun author_cjkRoundTrips() = runTest {
+        repo.upsertBook(book(author = "曹雪芹"))
+        assertEquals("曹雪芹", repo.findBook(key)?.author)
+    }
+
+    @Test
+    fun backfillAuthorIfNull_setsAuthor_whenCurrentlyNull() = runTest {
+        repo.upsertBook(book())                       // author is null
+        db.bookDao().backfillAuthorIfNull(key, "Herman Melville")
+        assertEquals("Herman Melville", repo.findBook(key)?.author)
+    }
+
+    @Test
+    fun backfillAuthorIfNull_preservesExistingAuthor() = runTest {
+        repo.upsertBook(book(author = "Real Author"))
+        db.bookDao().backfillAuthorIfNull(key, "Should Not Overwrite")
+        assertEquals("Real Author", repo.findBook(key)?.author)   // no-op: already set
+    }
+
+    /**
+     * Gate-2 CRITICAL regression — a duplicate SAF import must NOT null-clobber a backfilled author.
+     * The import path calls [LibraryRepository.upsertBookPreservingAuthor], whose UPDATE branch touches
+     * only the import-owned columns (title/format/sha/bytes/path/uri/addedAt) and leaves `author`
+     * (and `lastOpenedAt`) alone. A whole-row `@Upsert` here would erase the author with a null.
+     */
+    @Test
+    fun upsertBookPreservingAuthor_reImportWithNullAuthor_preservesAuthor_updatesImportColumns() = runTest {
+        // First import + a backfilled author.
+        repo.upsertBookPreservingAuthor(book(title = "Moby-Dick", addedAt = 1000L))
+        db.bookDao().backfillAuthorIfNull(key, "Herman Melville")
+        repo.markOpened(key, 5555L)   // a lastOpenedAt the re-import must also preserve
+
+        // Duplicate import: SAME fingerprintKey, a fresh null-author Book with new import-owned values.
+        repo.upsertBookPreservingAuthor(
+            book(title = "Moby-Dick (re-import)", addedAt = 9999L, author = null),
+        )
+
+        val after = repo.findBook(key)!!
+        assertEquals("author survives the duplicate import", "Herman Melville", after.author)
+        assertEquals("lastOpenedAt is untouched by the import path", 5555L, after.lastOpenedAt)
+        assertEquals("import-owned title DID update", "Moby-Dick (re-import)", after.title)
+        assertEquals("import-owned addedAt DID update", 9999L, after.addedAt)
+        assertEquals("still one row", 1, repo.observeLibrary().first().size)
+    }
+
+    @Test
+    fun upsertBookPreservingAuthor_firstInsert_recordsTheBook() = runTest {
+        repo.upsertBookPreservingAuthor(book(title = "Brand New"))
+        val found = repo.findBook(key)
+        assertEquals("Brand New", found?.title)
+        assertNull("a fresh insert has no author yet", found?.author)
+    }
+
+    @Test
+    fun applyRestoredMetadata_nonNullManifestAuthor_wins() = runTest {
+        repo.upsertBook(book(author = "Existing Author"))
+        repo.applyRestoredMetadata(
+            key = key, title = "Restored Title", addedAt = 111L, lastOpenedAt = 222L,
+            manifestAuthor = "Manifest Author",
+        )
+        val after = repo.findBook(key)!!
+        assertEquals("Manifest Author", after.author)   // non-null manifest author WINS
+        assertEquals("Restored Title", after.title)
+        assertEquals(111L, after.addedAt)
+        assertEquals(222L, after.lastOpenedAt)
+    }
+
+    @Test
+    fun applyRestoredMetadata_nullManifestAuthor_preservesExisting() = runTest {
+        repo.upsertBook(book(author = "Coordinator Backfilled"))
+        repo.applyRestoredMetadata(
+            key = key, title = "Restored Title", addedAt = 111L, lastOpenedAt = null,
+            manifestAuthor = null,
+        )
+        val after = repo.findBook(key)!!
+        assertEquals("null manifest author PRESERVES the existing value", "Coordinator Backfilled", after.author)
+        assertEquals("Restored Title", after.title)
+        assertEquals(111L, after.addedAt)
+        assertNull("a null restored lastOpenedAt is applied as null", after.lastOpenedAt)
     }
 
     @Test

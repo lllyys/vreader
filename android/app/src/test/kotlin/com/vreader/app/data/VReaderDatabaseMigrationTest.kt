@@ -238,4 +238,109 @@ class VReaderDatabaseMigrationTest {
             db.close()
         }
     }
+
+    /**
+     * Feature #128 WI-1 — MIGRATION_5_6 adds the nullable `books.author` column. Seed a v5-shaped
+     * `books` row (WITHOUT `author`), then open the current Room DB (v6) with the full migration chain
+     * registered: the additive column is created, Room's structural PRAGMA validation passes, and the
+     * pre-existing row reads back with `author = null` (a migrated legacy book has no author yet).
+     */
+    @Test
+    fun migrate5To6_addsNullableAuthor_andExistingRowReadsNull() {
+        seedVersion1Database()
+
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            val book = runBlocking { db.bookDao().find(key) }
+            assertNotNull("book survived 1→6", book)
+            assertNull("the new v6 author column defaults to null for migrated rows", book!!.author)
+
+            // The column is writable + reads back — round-trip an author onto the migrated row.
+            runBlocking {
+                db.bookDao().backfillAuthorIfNull(key, "Herman Melville")
+                assertEquals("Herman Melville", db.bookDao().find(key)?.author)
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * Feature #128 WI-1 (audit follow-up) — MIGRATION_5_6 in ISOLATION against an AUTHENTIC v5 `books`
+     * table (has `lastOpenedAt`, has NO `author`). Hand-builds exactly the v5 `books` shape, seeds a
+     * legacy row + an already-set-lastOpenedAt row, applies ONLY the 5→6 DDL via a raw SupportSQLite
+     * helper, and asserts: (a) the `author` column now exists and is nullable, (b) every pre-existing
+     * value survives, (c) migrated rows read `author = NULL`, (d) an author is writable onto the new
+     * column. This validates the migration's SQL directly, not just its registration in the full chain.
+     */
+    @Test
+    fun migrate5To6_inIsolation_onAuthenticV5Books_addsNullableAuthor_preservesData() {
+        val isoDbName = "iso-5-to-6.db"
+        context.deleteDatabase(isoDbName)
+        try {
+            // Build the v5 `books` table directly (v5 shape: fingerprintKey..addedAt + lastOpenedAt, NO author).
+            val v5Callback = object : SupportSQLiteOpenHelper.Callback(5) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `books` (`fingerprintKey` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, `originalFormat` TEXT NOT NULL, `contentSHA256` TEXT NOT NULL, " +
+                            "`fileByteCount` INTEGER NOT NULL, `localFilePath` TEXT, `sourceUri` TEXT, " +
+                            "`addedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, PRIMARY KEY(`fingerprintKey`))",
+                    )
+                }
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(v5Callback).build(),
+            ).writableDatabase.use { db ->
+                db.execSQL(
+                    "INSERT INTO books (fingerprintKey, title, originalFormat, contentSHA256, fileByteCount, " +
+                        "localFilePath, sourceUri, addedAt, lastOpenedAt) VALUES (?,?,?,?,?,?,?,?,?)",
+                    arrayOf<Any?>("k-legacy", "Legacy", "epub", "a".repeat(64), 100L, "/p", "content://s", 1L, null),
+                )
+                db.execSQL(
+                    "INSERT INTO books (fingerprintKey, title, originalFormat, contentSHA256, fileByteCount, " +
+                        "localFilePath, sourceUri, addedAt, lastOpenedAt) VALUES (?,?,?,?,?,?,?,?,?)",
+                    arrayOf<Any?>("k-opened", "Opened", "txt", "b".repeat(64), 200L, null, null, 2L, 4242L),
+                )
+            }
+
+            // Apply ONLY MIGRATION_5_6 through a raw helper whose onUpgrade runs the real migration.
+            val migrateCallback = object : SupportSQLiteOpenHelper.Callback(6) {
+                override fun onCreate(db: SupportSQLiteDatabase) = Unit  // never called — the file already exists at v5
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    assertEquals(5, oldVersion)
+                    assertEquals(6, newVersion)
+                    VReaderDatabase.MIGRATION_5_6.migrate(db)
+                }
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(migrateCallback).build(),
+            ).writableDatabase.use { db ->
+                // The `author` column now exists (else this SELECT throws).
+                db.query("SELECT fingerprintKey, title, lastOpenedAt, author FROM books ORDER BY addedAt").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("k-legacy", c.getString(0))
+                    assertEquals("Legacy", c.getString(1))
+                    assertTrue("legacy lastOpenedAt preserved (null)", c.isNull(2))
+                    assertTrue("migrated legacy row has NULL author", c.isNull(3))
+
+                    assertTrue(c.moveToNext())
+                    assertEquals("k-opened", c.getString(0))
+                    assertEquals("data survived: lastOpenedAt", 4242L, c.getLong(2))
+                    assertTrue("migrated opened row has NULL author", c.isNull(3))
+                }
+                // The new column is writable.
+                db.execSQL("UPDATE books SET author = ? WHERE fingerprintKey = ?", arrayOf<Any?>("Herman Melville", "k-legacy"))
+                db.query("SELECT author FROM books WHERE fingerprintKey = 'k-legacy'").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("Herman Melville", c.getString(0))
+                }
+            }
+        } finally {
+            context.deleteDatabase(isoDbName)
+        }
+    }
 }

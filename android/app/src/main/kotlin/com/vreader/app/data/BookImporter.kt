@@ -43,9 +43,11 @@ class BookImporter(
      * Copies [input] into app-private storage, fingerprints the stored bytes
      * (exact-match identity — Gate-2 High-2), upserts the [Book], and returns it.
      * Idempotent: re-importing identical bytes yields the same `fingerprintKey` and
-     * atomically replaces the file (the @Upsert preserves any saved position). The
-     * caller (UI) resolves [displayName] + [input] from the SAF content URI;
-     * [sourceUri] is persisted only as provenance metadata. [input] is always closed.
+     * atomically replaces the file. The author-preserving upsert updates in place (not
+     * delete+insert), so a saved position survives AND a backfilled `author` is never
+     * null-clobbered by the re-import (feature #128 WI-1). The caller (UI) resolves
+     * [displayName] + [input] from the SAF content URI; [sourceUri] is persisted only as
+     * provenance metadata. [input] is always closed.
      *
      * @throws ImportException.UnsupportedFormat if [displayName]'s extension is unknown.
      */
@@ -100,7 +102,9 @@ class BookImporter(
                         addedAt = clock(),
                     )
                     try {
-                        repository.upsertBook(book)
+                        // Author-preserving upsert: a duplicate import updates only the import-owned
+                        // columns and never null-clobbers a backfilled `author` (feature #128 WI-1).
+                        repository.upsertBookPreservingAuthor(book)
                     } catch (e: Throwable) {
                         // The artifact is promoted but the DB row failed. Delete it ONLY
                         // if it was freshly created — that's a true orphan. If it

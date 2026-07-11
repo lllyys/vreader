@@ -44,6 +44,7 @@ data class LibraryBook(
     val originalFormat: BookFormat,    // typed — drives reader routing
     val addedAt: Long,
     val lastOpenedAt: Long?,
+    val author: String? = null,        // v6 (feature #128) — nullable; drives the search index (WI-4)
 ) {
     /** Upper-case chip label (e.g. "EPUB"), derived from the typed format. */
     val format: String get() = originalFormat.name.uppercase()
@@ -195,6 +196,7 @@ class LibraryViewModel(
         originalFormat = book.originalFormat,
         addedAt = book.addedAt,
         lastOpenedAt = book.lastOpenedAt,
+        author = book.author,
     )
 }
 
