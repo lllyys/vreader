@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
@@ -72,13 +73,35 @@ fun ReaderTopChrome(
             .background(theme.background)
             .testTag("reader-top-chrome"),
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // A single Box so the title centers across the FULL bar width (independent of the trailing
+        // cluster's size); the leading + trailing controls are OVERLAID at the ends. The title reserves
+        // horizontal room for the widest end cluster so it never overlaps the controls.
+        Box(
+            Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 6.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            // Leading — "‹ Library" back control (accent). ≥48dp touch target via the row height + padding.
+            // Centered — italic-serif title, single-line, ellipsized (design: Source Serif 4 italic, nowrap).
+            // The horizontal padding reserves room for the widest possible end cluster (the trailing
+            // Search+bookmark+More = 3 * 48dp = 144dp) so the title never overlaps the controls.
+            Text(
+                title,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 144.dp),
+                color = ink,
+                fontFamily = VReaderFonts.Serif,
+                fontStyle = FontStyle.Italic,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+
+            // Leading — "‹ Library" back control (accent). ≥48dp touch target via the row height.
             Row(
                 Modifier
+                    .align(Alignment.CenterStart)
                     .clip(CircleShape)
                     .clickable(onClick = onBack)
                     .height(48.dp)
@@ -103,25 +126,12 @@ fun ReaderTopChrome(
                 )
             }
 
-            // Centered — italic-serif title, single-line, ellipsized (design: Source Serif 4 italic, nowrap).
-            Text(
-                title,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 8.dp),
-                color = ink,
-                fontFamily = VReaderFonts.Serif,
-                fontStyle = FontStyle.Italic,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-
             // Trailing cluster — Search / bookmark slot / More (design order). Each present ONLY when
             // populated: null slots render nothing (the #129 dead-control rule).
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.align(Alignment.CenterEnd),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (onSearch != null) {
                     ChromeIconButton(
                         tag = "chrome-search",
@@ -132,8 +142,10 @@ fun ReaderTopChrome(
                     )
                 }
                 if (bookmarkSlot != null) {
+                    // The slot itself is host-supplied; the wrapper guarantees a ≥48dp minimum touch
+                    // target so the trailing-cluster a11y contract holds regardless of the slot's content.
                     Box(
-                        Modifier.testTag("chrome-bookmark-slot"),
+                        Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("chrome-bookmark-slot"),
                         contentAlignment = Alignment.Center,
                     ) { bookmarkSlot() }
                 }

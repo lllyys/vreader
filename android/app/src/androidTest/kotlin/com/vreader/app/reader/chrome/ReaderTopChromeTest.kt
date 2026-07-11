@@ -153,11 +153,28 @@ class ReaderTopChromeTest {
         compose.setContent {
             ReaderTopChrome(theme = ReaderTheme.Paper, title = "T", onBack = {}, onSearch = {}, onMore = {})
         }
-        // Every interactive control is at least 48dp in both dimensions (a11y minimum).
+        // Every interactive control is at least 48dp in both dimensions (a11y minimum) — incl. the
+        // always-present back control.
+        compose.onNodeWithContentDescription("Back to library")
+            .assertHeightIsAtLeast(48.dp)
         compose.onNodeWithContentDescription("Search")
             .assertWidthIsAtLeast(48.dp)
             .assertHeightIsAtLeast(48.dp)
         compose.onNodeWithContentDescription("More")
+            .assertWidthIsAtLeast(48.dp)
+            .assertHeightIsAtLeast(48.dp)
+    }
+
+    @Test fun bookmarkSlotHasMinimumTouchTarget() {
+        // The wrapper guarantees a >=48dp minimum around the host-supplied slot so the trailing-cluster
+        // a11y contract holds regardless of the slot's content.
+        compose.setContent {
+            ReaderTopChrome(
+                theme = ReaderTheme.Paper, title = "T", onBack = {},
+                bookmarkSlot = { Text("B", modifier = Modifier.testTag("bmk")) },
+            )
+        }
+        compose.onNodeWithTag("chrome-bookmark-slot", useUnmergedTree = true)
             .assertWidthIsAtLeast(48.dp)
             .assertHeightIsAtLeast(48.dp)
     }
