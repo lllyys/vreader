@@ -54,8 +54,15 @@ fun tocPositions(tocEntries: List<TocEntry>): List<TocPosition> =
  * Contents sheet. [positions] are the plain descriptors from [tocPositions] (one per TOC entry, same
  * order), so this function is Readium-free and pure/JVM-testable.
  *
- * Rule (spine-ordered TOC): the current entry is the LAST entry whose position is at-or-before the
- * reading position, comparing first by spine order (href, ascending) then by intra-chapter progression.
+ * Rule: the current entry is the LAST entry whose position is at-or-before the reading position.
+ * "At-or-before" is decided PRIMARILY by an exact href match (the common case — the current spine item
+ * IS a TOC entry): among entries whose href == [currentHref], the deepest section at-or-before
+ * [currentProgression] wins (list order preserves the flattened/spine order, so a later matching section
+ * is chosen). When NO entry matches the reading href exactly (the reader is in a spine item with no TOC
+ * row, e.g. between chapters), a lexical href comparison is the best-effort fallback for the highlight —
+ * `currentTocIndex` is a cosmetic Contents-sheet highlight, not a navigation target, so an approximate
+ * row here is acceptable.
+ *
  * Edge behavior:
  *  - empty [positions] → -1 (there is no row to highlight);
  *  - a non-empty TOC but no entry is at-or-before the reading position (the reading href sorts before
@@ -73,19 +80,20 @@ fun tocIndexFor(
     if (currentHref == null) return 0
 
     val readProg = currentProgression ?: 0.0
-    var best = -1
+    // Primary: the deepest section within the CURRENT spine item (exact href match) at-or-before progression.
+    var exactBest = -1
+    positions.forEachIndexed { index, pos ->
+        if (pos.href == currentHref && (pos.progression ?: 0.0) <= readProg) exactBest = index
+    }
+    if (exactBest >= 0) return exactBest
+
+    // Fallback: no exact-href row → the last entry whose href lexically sorts at-or-before the reading
+    // href (best-effort highlight for a spine item with no TOC row; not a navigation target).
+    var lexBest = -1
     positions.forEachIndexed { index, pos ->
         val entryHref = pos.href
-        val entryProg = pos.progression ?: 0.0
-        // At-or-before the reading position: an earlier href, or the same href at-or-before progression.
-        val atOrBefore = when {
-            entryHref == null -> false
-            entryHref < currentHref -> true
-            entryHref == currentHref -> entryProg <= readProg
-            else -> false
-        }
-        if (atOrBefore) best = index
+        if (entryHref != null && entryHref <= currentHref) lexBest = index
     }
     // No entry at-or-before → default to the first row (a TOC exists; never -1 here).
-    return if (best >= 0) best else 0
+    return if (lexBest >= 0) lexBest else 0
 }
