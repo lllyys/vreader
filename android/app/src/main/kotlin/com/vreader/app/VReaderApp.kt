@@ -9,6 +9,11 @@ import android.content.Context
 import com.vreader.app.data.BookImporter
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
+import com.vreader.app.reader.BookOpener
+import com.vreader.app.search.BookTextExtractor
+import com.vreader.app.search.EpubTextExtractor
+import com.vreader.app.search.SearchIndexCoordinator
+import com.vreader.app.search.TxtMdTextExtractor
 import com.vreader.app.annotations.AnnotationsRepository
 import com.vreader.app.stats.ReadingStatsRepository
 import com.vreader.app.stats.ReadingTimeTracker
@@ -17,6 +22,7 @@ import com.vreader.app.stats.clock.SystemElapsedClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import vreader.contracts.BookFormat
 import java.io.File
 
 /** Process-wide singletons, lazily built. */
@@ -71,6 +77,32 @@ class AppContainer(context: Context) {
      *  is being torn down). */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    // feature #128 WI-5 — cross-book search index. The coordinator observes the library and
+    // streams each indexable book (epub/txt/md) through the WI-3 extractors into WI-4's staging →
+    // atomic publish. Eagerly started once from onCreate; pdf/azw3 map to null (never indexable).
+    private val bookOpener: BookOpener by lazy { BookOpener(appContext) }
+    private val epubTextExtractor: EpubTextExtractor by lazy { EpubTextExtractor(bookOpener) }
+    private val txtMdTextExtractor: TxtMdTextExtractor by lazy { TxtMdTextExtractor() }
+    val searchIndexCoordinator: SearchIndexCoordinator by lazy {
+        SearchIndexCoordinator(
+            repository = repository,
+            searchDao = database.searchDao(),
+            extractorFor = { fmt: BookFormat ->
+                when (fmt) {
+                    BookFormat.epub -> epubTextExtractor
+                    BookFormat.txt, BookFormat.md -> txtMdTextExtractor
+                    BookFormat.pdf, BookFormat.azw3 -> null   // metadata-only — never indexed
+                }
+            },
+            scope = appScope,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+
+    /** Idempotent — starts the single search-index collector (the coordinator's own AtomicBoolean
+     *  makes a repeat call a no-op). Called once from [VReaderApp.onCreate]. */
+    fun startSearchIndexing() = searchIndexCoordinator.startSearchIndexing()
+
     /** In-memory last reading char-offset per fingerprintKey. Written synchronously on
      *  save so a fast rotation / reopen restores the LATEST position without waiting for
      *  the async Room write to commit; Room remains the durable store across process death. */
@@ -92,5 +124,7 @@ class VReaderApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // feature #128 WI-5 — eagerly start the cross-book search-index collector (idempotent).
+        container.startSearchIndexing()
     }
 }
