@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -39,7 +38,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -274,86 +272,4 @@ fun InBookRecentRow(
     }
 }
 
-/**
- * The TXT/MD Indexing hint (the design/plan's "still building" state — NOT a false NoResults). The held
- * query re-runs automatically when the index settles; this is the interim reassurance. testTag
- * `inbook-indexing`.
- */
-@Composable
-fun InBookIndexingHint(theme: ReaderTheme) {
-    val ink = theme.ink
-    val sub = ink.copy(alpha = 0.55f)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 96.dp)
-            .padding(horizontal = 24.dp, vertical = 24.dp)
-            .testTag("inbook-indexing"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            "Indexing this book…",
-            color = ink,
-            fontFamily = VReaderFonts.Serif,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
-        )
-        Text(
-            "Search will run automatically when it finishes.",
-            modifier = Modifier.weight(1f),
-            color = sub,
-            fontFamily = VReaderFonts.Sans,
-            fontSize = 12.sp,
-        )
-    }
-}
-
-/**
- * The `NoResults` empty state (the design's `NoResults`): a circular tinted search badge, the "No matches
- * for "query"" heading, and the approved guidance copy. testTag `inbook-no-results`.
- */
-@Composable
-fun InBookNoResults(theme: ReaderTheme, query: String) {
-    val ink = theme.ink
-    val sub = ink.copy(alpha = 0.55f)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 200.dp)
-            .padding(horizontal = 30.dp, vertical = 48.dp)
-            .testTag("inbook-no-results"),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier
-                .padding(bottom = 12.dp)
-                .clip(CircleShape)
-                .background(ink.copy(alpha = if (theme.isDark) 0.05f else 0.04f))
-                .size(44.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Filled.Search,
-                contentDescription = null,
-                tint = sub,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-        Text(
-            "No matches for “$query”",
-            color = ink,
-            fontFamily = VReaderFonts.Serif,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium,
-        )
-        Text(
-            "Try a different spelling or a partial word.",
-            modifier = Modifier.padding(top = 8.dp),
-            color = sub,
-            fontFamily = VReaderFonts.Sans,
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
+// The Indexing hint + NoResults empty state live in InBookSearchStates.kt (this file owns the list rows).
