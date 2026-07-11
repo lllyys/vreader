@@ -2,7 +2,10 @@
 // (first-hit-per-book), the settled-completeness helper, the staging batch ops, and the single
 // atomic staging→sections publish transaction. The repository (WI-6) is the boundary that turns
 // these into observable TextHit results; the coordinator (WI-5) drives extraction → staging →
-// publish. Views never touch this DAO directly (rule 50 §2).
+// publish. Feature #133 WI-1 additively adds the book-scoped in-book (TXT/MD) find surface
+// (`matchingChunksPage` cursor page, `chunkAtOrAfter` inclusive resume, `matchingChunkCount`,
+// `observeIndexState` Flow) over the SAME FTS4 tables — no schema change (DB stays v7). Views never
+// touch this DAO directly (rule 50 §2).
 //
 // Design notes:
 //  - No window functions (minSdk 26 = SQLite 3.18 has no ROW_NUMBER). First-hit-per-book is a
@@ -133,6 +136,74 @@ abstract class SearchDao {
     /** The first hit for up to [limit] distinct matching books — one row per book (Gate-2 HIGH). */
     suspend fun firstHitsPerBook(ftsQuery: String, limit: Int = 200): List<SearchSectionEntity> =
         matchingBookKeys(ftsQuery, limit).mapNotNull { firstMatchingSection(it, ftsQuery) }
+
+    // ---- in-book (TXT/MD) find, book-scoped + cursor-paged (feature #133 WI-1) ----
+
+    /**
+     * One PAGE of matching chunks for a single TXT/MD book, reading-order-stable and cursor-paged.
+     * Returns whole [SearchSectionEntity] chunks (per-occurrence expansion happens in the repository —
+     * FTS4 has no per-occurrence row). Cursor = the `(sectionIndex, chunkOrdinal, id)` of the prior
+     * page's last chunk; the first page passes `(-1, -1, -1)`. The bound is a STRICT `>` on the
+     * `(sectionIndex, chunkOrdinal, id)` tuple, so consecutive pages are disjoint. `s.id = f.rowid`
+     * (the live join shape) MATCHes `search_sections_fts`, book-scoped by `bookKey`, ordered by the
+     * unique `(sectionIndex, chunkOrdinal, id)` tuple (reading order, deterministic — FTS4 has no bm25).
+     */
+    @Query(
+        "SELECT s.* FROM search_sections_fts f " +
+            "JOIN search_sections s ON s.id = f.rowid " +
+            "WHERE search_sections_fts MATCH :ftsQuery AND s.bookKey = :bookKey " +
+            "AND ( s.sectionIndex > :afterSectionIndex " +
+            "   OR (s.sectionIndex = :afterSectionIndex AND s.chunkOrdinal > :afterChunkOrdinal) " +
+            "   OR (s.sectionIndex = :afterSectionIndex AND s.chunkOrdinal = :afterChunkOrdinal AND s.id > :afterId) ) " +
+            "ORDER BY s.sectionIndex ASC, s.chunkOrdinal ASC, s.id ASC " +
+            "LIMIT :limit",
+    )
+    abstract suspend fun matchingChunksPage(
+        bookKey: String,
+        ftsQuery: String,
+        afterSectionIndex: Int,
+        afterChunkOrdinal: Int,
+        afterId: Long,
+        limit: Int,
+    ): List<SearchSectionEntity>
+
+    /**
+     * The current chunk INCLUSIVELY (round-3 completeness): the first matching chunk AT-OR-AFTER the
+     * cursor tuple, so a partially-consumed chunk (whose `occurrenceIndex > 0` upstream) is RE-FETCHED
+     * rather than skipped by [matchingChunksPage]'s strict `>`. Same MATCH/join/order shape, but `>=`
+     * on the `id` leg of the `(sectionIndex, chunkOrdinal, id)` tuple, `LIMIT 1`.
+     */
+    @Query(
+        "SELECT s.* FROM search_sections_fts f " +
+            "JOIN search_sections s ON s.id = f.rowid " +
+            "WHERE search_sections_fts MATCH :ftsQuery AND s.bookKey = :bookKey " +
+            "AND ( s.sectionIndex > :atSectionIndex " +
+            "   OR (s.sectionIndex = :atSectionIndex AND s.chunkOrdinal > :atChunkOrdinal) " +
+            "   OR (s.sectionIndex = :atSectionIndex AND s.chunkOrdinal = :atChunkOrdinal AND s.id >= :atId) ) " +
+            "ORDER BY s.sectionIndex ASC, s.chunkOrdinal ASC, s.id ASC LIMIT 1",
+    )
+    abstract suspend fun chunkAtOrAfter(
+        bookKey: String,
+        ftsQuery: String,
+        atSectionIndex: Int,
+        atChunkOrdinal: Int,
+        atId: Long,
+    ): SearchSectionEntity?
+
+    /** Total matching CHUNK count for a book (the cheap aggregate; NOT a per-occurrence count). */
+    @Query(
+        "SELECT COUNT(*) FROM search_sections_fts f JOIN search_sections s ON s.id = f.rowid " +
+            "WHERE search_sections_fts MATCH :ftsQuery AND s.bookKey = :bookKey",
+    )
+    abstract suspend fun matchingChunkCount(bookKey: String, ftsQuery: String): Int
+
+    /**
+     * Per-book index-state as an OBSERVABLE Flow (the existing [indexState] is one-shot) — re-emits so
+     * a HELD in-book query un-gates when the current book settles. Null = MISSING (never indexed); the
+     * repository distinguishes missing / indexing / failed / indexed / skipped_unsupported downstream.
+     */
+    @Query("SELECT * FROM search_index_state WHERE bookKey = :bookKey")
+    abstract fun observeIndexState(bookKey: String): Flow<SearchIndexStateEntity?>
 
     // ---- the atomic staging→sections publish (Gate-2 HIGH atomicity + round-3 HIGH deletion-aware) ----
 
