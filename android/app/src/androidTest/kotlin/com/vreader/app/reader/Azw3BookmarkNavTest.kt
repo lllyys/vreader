@@ -72,8 +72,21 @@ class Azw3BookmarkNavTest {
 
             // First toggle → Added, one row, presence flips.
             assertEquals(BookmarkToggleResult.Added, annotations.toggleBookmark(bookKey, title = null, locator = at))
-            assertEquals("one bookmark row appears", 1, annotations.allBookmarks().size)
+            val listed = annotations.allBookmarks().single()
+            assertEquals("the listed bookmark row is at the toggled position", at, listed.locator)
             assertTrue("the position now reads bookmarked", annotations.isBookmarked(bookKey, at))
+
+            // The FULL workflow: the created+listed bookmark's OWN locator is what the host would jump on.
+            // A live (real-WebView) document with the listed row's locator → Succeeded (dismiss); a null
+            // document (nothing loaded, the pre-render state) → Failed (the sheet stays open, rule 51).
+            val ctxForDoc = ctx
+            lateinit var live: Azw3Document
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                live = Azw3Document(WebView(ctxForDoc), File(ctxForDoc.cacheDir, "azw3-toggle-jump-noop"), ctxForDoc)
+            }
+            document = live
+            assertEquals("jump on the listed bookmark → dismiss", JumpResult.Succeeded, azw3JumpDecision(live, listed.locator))
+            assertEquals("no document loaded → the sheet stays open", JumpResult.Failed, azw3JumpDecision(null, listed.locator))
 
             // A repeat toggle at the SAME position → Removed (toggle alternates); no duplicate row.
             assertEquals(BookmarkToggleResult.Removed, annotations.toggleBookmark(bookKey, title = null, locator = at))
@@ -151,8 +164,12 @@ class Azw3BookmarkNavTest {
         }
         document = replacement
         scope.launch { replacement.run(restore = null, pendingGoTo = carried) }
-        awaitLoaded(replacement)
+        val loaded = awaitLoaded(replacement)
         withContext(Dispatchers.Main) { dying.destroy() }
+        // The replacement must actually reach book-ready — only then does its book-ready hook re-issue the
+        // carried bookmark jump (asserting takePendingGoTo()==null on a never-loaded document would be
+        // vacuous, since the target is cleared BEFORE the reissue launches).
+        assertTrue("the replacement document reached book-ready (the reissue path ran)", loaded)
         // After book-ready re-issued the carried bookmark jump, the replacement's held target is cleared
         // (exactly once — a second render-death would not loop it).
         assertEquals(null, withContext(Dispatchers.Main) { replacement.takePendingGoTo() })
@@ -204,11 +221,15 @@ class Azw3BookmarkNavTest {
         wv.layout(0, 0, ww, hh)
     }
 
-    private fun awaitLoaded(doc: Azw3Document) {
+    /** Poll the document's state until Loaded (the WebView renders off the main loop, so a foreground poll
+     *  is the observable — mirrors [com.vreader.app.reader.foliate.Azw3GoToSliceTest]). Returns whether it
+     *  reached book-ready within the deadline so the caller can assert on it (not a silent return). */
+    private fun awaitLoaded(doc: Azw3Document): Boolean {
         val deadline = System.currentTimeMillis() + 30_000
         while (System.currentTimeMillis() < deadline) {
-            if (doc.state.value is Azw3DocState.Loaded) return
+            if (doc.state.value is Azw3DocState.Loaded) return true
             Thread.sleep(200)
         }
+        return false
     }
 }

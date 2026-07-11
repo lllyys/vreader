@@ -119,11 +119,14 @@ class BookmarkBackupRestoreJumpTest {
             assertNull(repo.findBook(book.fingerprintKey))
             assertTrue("bookmarks wiped before restore", annotations.allBookmarks().isEmpty())
 
-            // List → find our backup → selectively restore → book + bookmark come back.
+            // List → pick OUR backup deterministically (the one we just wrote is `latest`; a reused live
+            // server may hold older archives, so never "first with books>=1") → selectively restore.
             val list = service.listBackups("srv")
             assertTrue("listBackups ok: $list", list is BackupListResult.Ok)
-            val summary = (list as BackupListResult.Ok).backups.firstOrNull { it.books >= 1 }
-            assertNotNull("a backup with our book exists", summary)
+            val backups = (list as BackupListResult.Ok).backups
+            val summary = backups.firstOrNull { it.latest && it.books >= 1 }
+                ?: backups.firstOrNull { it.books >= 1 }
+            assertNotNull("the backup we just wrote (latest) exists", summary)
             restoreExpectingSuccess(service, summary!!.id, setOf(book.fingerprintKey))
 
             // (1) restored under the ORIGINAL UUID with its canonical position intact.
@@ -141,6 +144,12 @@ class BookmarkBackupRestoreJumpTest {
                 val readium = ReadiumLocatorReconstructor(book.fingerprintKey, pub).toReadium(restored.locator)
                 assertNotNull("the restored canonical-only bookmark reconstructs a Readium locator", readium)
                 assertEquals("the reconstruction resolves to the bookmarked resource", realHref, readium!!.href.toString())
+                // A real POSITION, not just an href match: the canonical progression is carried into the
+                // reconstructed Readium locator (the landing precision `navigator.go` uses at WI-9).
+                assertEquals(
+                    "the reconstruction carries the bookmark's canonical progression",
+                    0.25, readium.locations.progression!!, 1e-9,
+                )
 
                 val renamed = restored.locator.copy(href = "renamed-does-not-exist.xhtml")
                 val nullRecon = ReadiumLocatorReconstructor(book.fingerprintKey, pub).toReadium(renamed)
@@ -149,11 +158,24 @@ class BookmarkBackupRestoreJumpTest {
                 pub.close()
             }
 
-            // (3) re-restore does NOT duplicate — the WI-3 unique index + UUID-preserving insert-if-absent.
+            // (3a) re-restore does NOT duplicate — the UUID-preserving insert-if-absent.
             restoreExpectingSuccess(service, summary.id, setOf(book.fingerprintKey))
             val afterReRestore = annotations.allBookmarks()
             assertEquals("re-restore inserts no duplicate bookmark", 1, afterReRestore.size)
             assertEquals("the single surviving bookmark keeps its original UUID", originalUuid, afterReRestore.single().id)
+
+            // (3b) the WI-3 (bookKey, profileKey) UNIQUE INDEX fallback — NOT just the UUID primary key: a
+            // LOCAL bookmark at the SAME position but with a DIFFERENT UUID (a device that bookmarked the
+            // spot independently) must not co-exist with the restored one after a re-restore. Wipe, recreate
+            // the same-position bookmark via the toggle path (fresh UUID), then re-restore: the restored row
+            // (its own UUID) collides on (bookKey, profileKey) and is suppressed → still exactly one row.
+            for (b in annotations.allBookmarks()) annotations.removeBookmark(b.id)
+            annotations.toggleBookmark(book.fingerprintKey, title = null, locator = bookmarked)
+            val localRow = annotations.allBookmarks().single()
+            assertTrue("the local same-position bookmark has a DIFFERENT UUID", localRow.id != originalUuid)
+            restoreExpectingSuccess(service, summary.id, setOf(book.fingerprintKey))
+            val afterProfileFallback = annotations.allBookmarks()
+            assertEquals("the profile-key unique index keeps exactly one bookmark per position", 1, afterProfileFallback.size)
         } finally {
             db.close()
             booksDir.deleteRecursively()
