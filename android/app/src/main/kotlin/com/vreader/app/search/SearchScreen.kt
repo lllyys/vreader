@@ -231,7 +231,10 @@ private fun SectionLabel(text: String, topPadding: androidx.compose.ui.unit.Dp) 
 @Composable
 private fun RecentRow(query: String, onTap: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onTap).padding(horizontal = 2.dp, vertical = 11.dp),
+        // The design draws a 0.5px bottom rule under each recent row.
+        Modifier.fillMaxWidth().clickable(onClick = onTap)
+            .drawBottomRule(VReaderColors.Ink.copy(alpha = 0.10f))
+            .padding(horizontal = 2.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.spacedBy(11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -287,7 +290,9 @@ private fun Results(state: SearchUiState, onOpenResult: (SearchResultRow) -> Uni
             )
         }
         items(state.results, key = { it.book.fingerprintKey }) { row ->
+            // 12px gap below each result row's bottom rule (design marginBottom: 12).
             ResultRow(row = row, query = state.query, onOpen = { onOpenResult(row) })
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -415,16 +420,23 @@ internal fun summaryText(bookCount: Int, inTextMatchCount: Int): String {
     return "$books · $matches"
 }
 
-/** The title with the FIRST case-insensitive occurrence of [query] wash-highlighted (design `hl`). */
+/**
+ * The title with the FIRST case-insensitive occurrence of [query] wash-highlighted (design `hl`).
+ * Matches against the ORIGINAL string via `indexOf(ignoreCase = true)` — never `lowercase()` then index
+ * back into the original, which can throw when a case-fold changes length (Turkish İ→i̇, ß→ss, etc.).
+ * Bounds are re-clamped defensively so a pathological match can never `substring`-crash.
+ */
 private fun highlightMatch(title: String, query: String) = buildAnnotatedString {
     val q = query.trim()
-    val idx = if (q.isEmpty()) -1 else title.lowercase().indexOf(q.lowercase())
+    val idx = if (q.isEmpty()) -1 else title.indexOf(q, ignoreCase = true)
     if (idx < 0) {
         append(title)
     } else {
-        append(title.substring(0, idx))
-        withStyle(SpanStyle(background = Wash)) { append(title.substring(idx, idx + q.length)) }
-        append(title.substring(idx + q.length))
+        val start = idx.coerceIn(0, title.length)
+        val end = (idx + q.length).coerceIn(start, title.length)
+        append(title.substring(0, start))
+        withStyle(SpanStyle(background = Wash)) { append(title.substring(start, end)) }
+        append(title.substring(end))
     }
 }
 
@@ -436,15 +448,17 @@ private fun snippetWithAttribution(hit: TextHit) = buildAnnotatedString {
     append("“")
     val text = hit.snippet
     var cursor = 0
-    // Apply each match range as an upright wash span; guard ranges to the snippet bounds.
+    // Apply each match range as an upright wash span. Ranges are clamped to the snippet bounds AND to at
+    // least `cursor`, so an overlapping/nested/reversed/negative/past-end range can never re-append earlier
+    // text or move `cursor` backward (duplicating the snippet). `cursor` is monotonic non-decreasing.
     hit.matchRanges.sortedBy { it.first }.forEach { r ->
-        val start = r.first.coerceIn(0, text.length)
+        val start = r.first.coerceIn(cursor, text.length)
         val end = (r.last + 1).coerceIn(start, text.length)
         if (start > cursor) append(text.substring(cursor, start))
         if (end > start) {
             withStyle(SpanStyle(background = Wash, fontStyle = FontStyle.Normal)) { append(text.substring(start, end)) }
         }
-        cursor = end
+        cursor = maxOf(cursor, end)
     }
     if (cursor < text.length) append(text.substring(cursor))
     append("”")

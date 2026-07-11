@@ -199,6 +199,35 @@ class SearchScreenUiTest {
         compose.onNodeWithText("RECENT").assertIsDisplayed()
     }
 
+    // ── robustness: Unicode case-fold title + hostile match ranges ──
+
+    @Test fun resultsState_unicodeCaseFoldTitle_doesNotCrash() {
+        // "İ".lowercase() expands (İ→i̇), so a lowercase-then-index-back match would go out of bounds.
+        // The screen must render the title without crashing.
+        val row = SearchResultRow(
+            book = book("k0", "İstanbul Nights", author = "A"),
+            titleMatch = true,
+            authorMatch = false,
+            textHit = null,
+        )
+        render(SearchUiState(query = "nights", results = listOf(row), searched = true, indexComplete = true))
+        compose.onNodeWithText("İstanbul Nights").assertIsDisplayed()
+    }
+
+    @Test fun resultsState_overlappingMatchRanges_doNotDuplicateSnippet() {
+        // Overlapping/nested/reversed/past-end ranges must not duplicate or crash the snippet.
+        val hit = TextHit(
+            bookKey = "k0",
+            sectionTitle = null,
+            snippet = "alpha beta gamma",
+            matchRanges = listOf(IntRange(0, 8), IntRange(2, 4), IntRange(6, 10), IntRange(-3, 2), IntRange(100, 200)),
+        )
+        val row = SearchResultRow(book = book("k0", "Doc", author = null), titleMatch = false, authorMatch = false, textHit = hit)
+        render(SearchUiState(query = "alpha", results = listOf(row), searched = true, indexComplete = true))
+        // the snippet renders once (the wrapping quotes appear exactly once around the single text run).
+        compose.onNodeWithText("alpha beta gamma", substring = true).assertIsDisplayed()
+    }
+
     // ── the search field ───────────────────────────────────────────
 
     @Test fun typingInField_flowsThroughOnQueryChange() {
