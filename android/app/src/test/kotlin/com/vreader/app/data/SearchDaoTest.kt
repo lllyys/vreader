@@ -160,6 +160,22 @@ class SearchDaoTest {
         assertEquals("backfill never overwrites a set author", "Existing Author", db.bookDao().find(bookA)?.author)
     }
 
+    @Test fun publishBook_rejectsStateForADifferentBook() = runBlocking {
+        seedBook(bookA)
+        seedBook(bookB)
+        dao.insertStagingBatch(listOf(staging(bookA, 0, 0, "text")))
+        var threw = false
+        try {
+            // state row is for bookB while publishing bookA — a caller mistake must be rejected.
+            dao.publishBook(bookA, SearchIndexStateEntity(bookB, 1, 1L, "indexed"))
+        } catch (e: IllegalArgumentException) {
+            threw = true
+        }
+        assertTrue("publishBook rejects a state row for a different book", threw)
+        assertNull("no state row written for the mismatched publish", dao.indexState(bookB))
+        assertTrue("bookA's staging is untouched (rejected before any write)", dao.sectionsFor(bookA).isEmpty())
+    }
+
     @Test fun publishBook_noOps_whenParentBookDeletedMidIndex() = runBlocking {
         seedBook(bookA)
         dao.insertStagingBatch(listOf(staging(bookA, 0, 0, "staged before delete")))
@@ -225,6 +241,14 @@ class SearchDaoTest {
         seedBook(bookA, format = "epub")
         dao.markIndexed(SearchIndexStateEntity(bookA, 1, 1L, "failed"))
         assertEquals("a retryable failed row keeps completeness open", 1, dao.countUnsettledIndexable())
+        assertFalse(dao.isIndexComplete())
+    }
+
+    @Test fun completeness_unexpectedStatus_isTreatedAsUnsettled() = runBlocking {
+        seedBook(bookA, format = "epub")
+        // An unexpected/typo status must NOT be silently treated as settled (Gate-4 Low).
+        dao.markIndexed(SearchIndexStateEntity(bookA, 1, 1L, "indexing"))
+        assertEquals("an unrecognized status holds completeness open", 1, dao.countUnsettledIndexable())
         assertFalse(dao.isIndexComplete())
     }
 

@@ -68,11 +68,15 @@ abstract class SearchDao {
      * or "skipped_unsupported" row is settled (does NOT count), so a no-content-service EPUB does not
      * block completeness forever; only a missing or a retrying-`failed` book keeps it open.
      */
+    // NOTE: unsettled = a MISSING row OR any status that is NOT one of the two SETTLED terminals
+    // (`indexed`, `skipped_unsupported`). Written as `NOT IN (…)` rather than `= 'failed'` so an
+    // unexpected/typo status (`indexing`, `faild`, …) counts as unsettled and holds completeness open
+    // rather than being silently treated as settled (Gate-4 Low).
     @Query(
         "SELECT COUNT(*) FROM books b " +
             "LEFT JOIN search_index_state s ON s.bookKey = b.fingerprintKey " +
             "WHERE b.originalFormat IN ('epub', 'txt', 'md') " +
-            "AND (s.status IS NULL OR s.status = 'failed')",
+            "AND (s.status IS NULL OR s.status NOT IN ('indexed', 'skipped_unsupported'))",
     )
     abstract suspend fun countUnsettledIndexable(): Int
 
@@ -82,7 +86,7 @@ abstract class SearchDao {
         "SELECT COUNT(*) FROM books b " +
             "LEFT JOIN search_index_state s ON s.bookKey = b.fingerprintKey " +
             "WHERE b.originalFormat IN ('epub', 'txt', 'md') " +
-            "AND (s.status IS NULL OR s.status = 'failed')",
+            "AND (s.status IS NULL OR s.status NOT IN ('indexed', 'skipped_unsupported'))",
     )
     abstract fun observeUnsettledIndexableCount(): Flow<Int>
 
@@ -150,6 +154,12 @@ abstract class SearchDao {
         state: SearchIndexStateEntity,
         author: String? = null,
     ) {
+        // The state row and the published sections MUST be for the same book — otherwise a caller
+        // mistake could publish A's sections while writing B's state row (or FK-fail if B is absent)
+        // (Gate-4 Medium).
+        require(state.bookKey == bookKey) {
+            "publishBook: state.bookKey (${state.bookKey}) must equal bookKey ($bookKey)"
+        }
         if (!bookExists(bookKey)) return
         deleteSections(bookKey)
         copyStagingToSections(bookKey)
