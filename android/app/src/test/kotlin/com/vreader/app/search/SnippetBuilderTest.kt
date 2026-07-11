@@ -76,4 +76,25 @@ class SnippetBuilderTest {
         val r = snippet.matchRanges.first()
         assertEquals("pragmatic", snippet.text.substring(r.first, r.last + 1))
     }
+
+    @Test fun cjkMatch_highlightsOnlyMatchedIdeographs_notWholeRun() {
+        // Unspaced CJK run — query "编程" must wash ONLY 编 程, not the whole 关于编程的书 run.
+        val text = "关于编程的书"
+        val snippet = SnippetBuilder.build(text, query("编程"), window = 20)!!
+        assertTrue("has match ranges", snippet.matchRanges.isNotEmpty())
+        // The union of the highlighted spans is exactly "编程" (the two matched ideographs).
+        val highlighted = snippet.matchRanges.joinToString("") {
+            snippet.text.substring(it.first, it.last + 1)
+        }
+        assertEquals("编程", highlighted)
+        // The whole run is NOT highlighted (的书 stays un-washed).
+        assertFalse(snippet.matchRanges.any { snippet.text.substring(it.first, it.last + 1).contains("的") })
+    }
+
+    @Test fun cjkSingleChar_highlightsOnlyThatChar() {
+        val text = "关于编程的书"
+        val snippet = SnippetBuilder.build(text, query("编"), window = 20)!!
+        val union = snippet.matchRanges.joinToString("") { snippet.text.substring(it.first, it.last + 1) }
+        assertEquals("编", union)
+    }
 }

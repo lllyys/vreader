@@ -18,6 +18,7 @@ package com.vreader.app.search
 
 import com.vreader.app.data.Book
 import com.vreader.app.reader.BookOpener
+import kotlinx.coroutines.CancellationException
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
@@ -41,7 +42,9 @@ class EpubTextExtractor(
 
         val publication = try {
             bookOpener.open(file)
-        } catch (e: Throwable) {
+        } catch (e: CancellationException) {
+            throw e   // never swallow structured cancellation as a per-book failure
+        } catch (e: Exception) {
             return ExtractResult.Failed(e.message ?: e.javaClass.simpleName)
         }
         try {
@@ -51,7 +54,9 @@ class EpubTextExtractor(
             val tocTitles = tocTitlesByHref(publication)
             streamSections(content, tocTitles, sink)
             return ExtractResult.Success(author)
-        } catch (e: Throwable) {
+        } catch (e: CancellationException) {
+            throw e   // rethrow cancellation; the finally still closes the publication
+        } catch (e: Exception) {
             return ExtractResult.Failed(e.message ?: e.javaClass.simpleName)
         } finally {
             publication.close()
@@ -69,68 +74,85 @@ class EpubTextExtractor(
         sink: SectionSink,
     ) {
         val iterator = content.iterator()
-        var chunkOrdinal = 0
-        var sectionIndex = -1
-        var currentHref: String? = null
-        var currentTitle: String? = null
-        val buffer = StringBuilder()
-
-        // Emits the buffer (split into ~maxChunkChars chunks) then resets it.
-        suspend fun flushSection() {
-            if (buffer.isEmpty()) return
-            var start = 0
-            val n = buffer.length
-            while (start < n) {
-                val end = splitBoundary(buffer, start, n)
-                val chunk = buffer.substring(start, end)
-                if (chunk.isNotBlank()) {
-                    sink.emit(
-                        BookTextSection(
-                            sectionIndex = sectionIndex,
-                            chunkOrdinal = chunkOrdinal++,
-                            title = currentTitle,
-                            text = chunk,
-                        ),
-                    )
-                }
-                start = end
-            }
-            buffer.setLength(0)
-        }
+        // Mutable extraction state carried across boundaries; the running chunkOrdinal is unique
+        // across the whole book, sectionIndex groups a resource's chunks for chapter attribution.
+        val state = StreamState()
 
         while (iterator.hasNext()) {
             val element = iterator.next()
             if (element !is Content.TextElement) continue
             val href = normalizeHref(element.locator.href.toString())
             val isHeading = element.role is Content.TextElement.Role.Heading
-            // A resource change OR a heading starts a new section: flush the prior buffer first.
-            if (href != currentHref || isHeading) {
-                flushSection()
-                sectionIndex++
-                currentHref = href
-                currentTitle = element.locator.title
+            // A resource change OR a heading starts a new section: drain the prior buffer first.
+            if (href != state.currentHref || isHeading) {
+                drainRemaining(state, sink)
+                state.sectionIndex++
+                state.currentHref = href
+                state.currentTitle = element.locator.title
                     ?: tocTitles[href]
                     ?: if (isHeading) element.text.trim().ifEmpty { null } else null
             }
             val text = element.text
             if (text.isNotEmpty()) {
-                if (buffer.isNotEmpty()) buffer.append('\n')
-                buffer.append(text)
+                if (state.buffer.isNotEmpty()) state.buffer.append('\n')
+                state.buffer.append(text)
+                // Emit completed chunks from the FRONT as soon as the buffer crosses the threshold,
+                // retaining only a short (< maxChunkChars) tail — so at most ~one chunk + tail is
+                // resident regardless of the resource size (bounded-memory / O(batch), not O(book)).
+                emitFullChunks(state, sink)
             }
         }
-        flushSection()
+        drainRemaining(state, sink)
     }
 
-    /** Split index at ~maxChunkChars from [start], never mid-surrogate-pair, preferring a newline. */
-    private fun splitBoundary(buffer: CharSequence, start: Int, n: Int): Int {
-        if (n - start <= maxChunkChars) return n
-        var end = (start + maxChunkChars).coerceAtMost(n)
+    /** Emits every completed leading chunk (buffer ≥ maxChunkChars), keeping only the sub-chunk tail. */
+    private suspend fun emitFullChunks(state: StreamState, sink: SectionSink) {
+        while (state.buffer.length >= maxChunkChars) {
+            val end = splitBoundary(state.buffer, maxChunkChars)
+            if (end <= 0 || end >= state.buffer.length) break
+            emitChunk(state, sink, state.buffer.substring(0, end))
+            state.buffer.delete(0, end)
+        }
+    }
+
+    /** Drains any remaining buffered text for the current section (the partial tail). */
+    private suspend fun drainRemaining(state: StreamState, sink: SectionSink) {
+        while (state.buffer.length >= maxChunkChars) {
+            val end = splitBoundary(state.buffer, maxChunkChars)
+            val cut = if (end in 1 until state.buffer.length) end else state.buffer.length
+            emitChunk(state, sink, state.buffer.substring(0, cut))
+            state.buffer.delete(0, cut)
+        }
+        if (state.buffer.isNotEmpty()) {
+            emitChunk(state, sink, state.buffer.toString())
+            state.buffer.setLength(0)
+        }
+    }
+
+    private suspend fun emitChunk(state: StreamState, sink: SectionSink, chunk: String) {
+        if (chunk.isBlank()) return
+        sink.emit(
+            BookTextSection(
+                sectionIndex = state.sectionIndex,
+                chunkOrdinal = state.chunkOrdinal++,
+                title = state.currentTitle,
+                text = chunk,
+            ),
+        )
+    }
+
+    /** The split length for the FIRST chunk of [buffer] (≥ [target]), preferring a newline, never
+     *  mid-surrogate-pair. Returns the exclusive end index within `buffer`. */
+    private fun splitBoundary(buffer: CharSequence, target: Int): Int {
+        val n = buffer.length
+        if (n <= target) return n
+        var end = target.coerceAtMost(n)
         // Prefer a newline boundary within the last quarter of the chunk for readable snippets.
-        val minNl = start + maxChunkChars * 3 / 4
+        val minNl = target * 3 / 4
         val nl = lastNewline(buffer, minNl, end)
-        if (nl in (start + 1) until end) end = nl + 1
+        if (nl in 1 until end) end = nl + 1
         // Never split between a high and low surrogate.
-        if (end < n && end > start && Character.isHighSurrogate(buffer[end - 1])) end++
+        if (end < n && Character.isHighSurrogate(buffer[end - 1])) end++
         return end.coerceAtMost(n)
     }
 
@@ -141,6 +163,15 @@ class EpubTextExtractor(
             i--
         }
         return -1
+    }
+
+    /** Mutable per-book extraction state carried across section boundaries. */
+    private class StreamState {
+        var chunkOrdinal = 0
+        var sectionIndex = -1
+        var currentHref: String? = null
+        var currentTitle: String? = null
+        val buffer = StringBuilder()
     }
 
     /** Builds an href → TOC title map, normalizing each TOC entry's href the same way. */

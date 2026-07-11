@@ -11,6 +11,7 @@ package com.vreader.app.search
 import com.vreader.app.data.Book
 import com.vreader.app.reader.TxtDecoder
 import com.vreader.app.reader.TxtDocument
+import kotlinx.coroutines.CancellationException
 import java.io.File
 
 /** Streams a TXT/MD book's TxtDocument chunks to a [SectionSink]; author is always null on Success. */
@@ -36,7 +37,9 @@ class TxtMdTextExtractor : BookTextExtractor {
                 )
             }
             ExtractResult.Success(null)
-        } catch (e: Throwable) {
+        } catch (e: CancellationException) {
+            throw e   // never swallow structured cancellation as a per-book failure
+        } catch (e: Exception) {
             ExtractResult.Failed(e.message ?: e.javaClass.simpleName)
         }
     }
