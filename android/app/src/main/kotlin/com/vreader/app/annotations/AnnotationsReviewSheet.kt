@@ -1,12 +1,13 @@
-// Purpose: feature #132 WI-4 (#110 Phase 3) — the annotations review sheet (design
+// Purpose: feature #132 WI-4 + #135 WI-6 (#110 Phase 3) — the annotations review sheet (design
 // vreader-android-annotations.jsx `AnnotationsSheet`, the reader's "Notes" surface) as a
-// `ModalBottomSheet` over WI-6b's [AnnotationsSnapshot]. Renders `All / Highlights / Notes` filter
-// chips (NO Bookmarks chip — that arrives with #135), a `HighlightCard` per highlight + a
-// `StandaloneNoteCard` per note (NO `BookmarkCard` — #135), an empty state, and the design's
-// sheet-level trailing Share control (`onShareAll`, `AnnotationsSheet trailing={<Share/>}`). Tap-to-jump
-// on the card body is capability-based: a non-null `onJumpToAnnotation` makes cards clickable and jumps;
-// a null one leaves them review-only, non-clickable (§review-sheet-contract — EPUB/AZW3 pass null before
-// #135 supplies their nav seam). Per-card Copy/Share and the `⋯` Edit/Delete menu are NOT depicted on the
+// `ModalBottomSheet` over WI-6b's [AnnotationsSnapshot] + #135's [BookmarkCardItem] list. Renders the
+// `All / Highlights / Notes / Bookmarks` filter chips (#135 WI-6 added the Bookmarks chip), a
+// `HighlightCard` per highlight + a `StandaloneNoteCard` per note + a `BookmarkCard` per bookmark (#135),
+// an empty state, and the design's sheet-level trailing Share control (`onShareAll`, `AnnotationsSheet
+// trailing={<Share/>}`). Tap-to-jump on the card body is capability-based: a non-null `onJumpToAnnotation`
+// (highlights/notes) / `onJumpToBookmark` (bookmarks) makes cards clickable and jumps; a null one leaves
+// them review-only, non-clickable (§review-sheet-contract — a host passes null before its nav seam lands).
+// Per-card Copy/Share, the `⋯` Edit/Delete menu, and per-bookmark DELETE (deferred) are NOT depicted on the
 // Android cards and are NOT built (rule 51 gate). Pure function of state (rule 50 §4); same [ReaderTheme]
 // token map as the reader chrome / Contents sheet.
 package com.vreader.app.annotations
@@ -51,22 +52,24 @@ import androidx.compose.ui.unit.sp
 import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
 
-/** The review sheet's filter chips (design `FilterChips` minus the `Bookmarks` chip — that is #135). */
+/** The review sheet's filter chips (design `FilterChips` — All / Highlights / Notes / Bookmarks). */
 enum class AnnotationFilter(val label: String) {
     All("All"),
     Highlights("Highlights"),
     Notes("Notes"),
+    Bookmarks("Bookmarks"),
     ;
 
-    /** The stable testTag suffix (`annot-filter-all` / `-highlights` / `-notes`). */
+    /** The stable testTag suffix (`annot-filter-all` / `-highlights` / `-notes` / `-bookmarks`). */
     val tag: String get() = name.lowercase()
 }
 
 /**
  * The annotations review sheet as a [ModalBottomSheet]. [snapshot] is WI-6b's one-shot read of a book's
- * highlights + notes. [onShareAll] is the design's sheet-level trailing Share. [onJumpToAnnotation] is
- * the capability-based nullable tap-to-jump (null → cards are review-only, non-clickable). [onDismiss]
- * closes the sheet. Renders in [theme]'s colors.
+ * highlights + notes; [bookmarks] is #135's projected bookmark-card list. [onShareAll] is the design's
+ * sheet-level trailing Share. [onJumpToAnnotation] / [onJumpToBookmark] are the capability-based nullable
+ * tap-to-jump callbacks (null → cards are review-only, non-clickable). [onDismiss] closes the sheet.
+ * Renders in [theme]'s colors.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,6 +80,8 @@ fun AnnotationsReviewSheet(
     onJumpToAnnotation: ((AnnotationItem) -> Unit)?,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    bookmarks: List<BookmarkCardItem> = emptyList(),
+    onJumpToBookmark: ((BookmarkRecord) -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -88,8 +93,10 @@ fun AnnotationsReviewSheet(
         AnnotationsReviewSheetContent(
             theme = theme,
             snapshot = snapshot,
+            bookmarks = bookmarks,
             onShareAll = onShareAll,
             onJumpToAnnotation = onJumpToAnnotation,
+            onJumpToBookmark = onJumpToBookmark,
         )
     }
 }
@@ -98,8 +105,9 @@ fun AnnotationsReviewSheet(
  * The review sheet's content, extracted from the [ModalBottomSheet] wrapper so it's directly UI-testable
  * (the `TocContentsSheetContent` precedent — a modal sheet's content renders in a separate window that
  * instrumented clicks reach unreliably). Owns the filter state (survives config change via
- * [rememberSaveable]). Renders the filter chip row, then the filtered cards or the empty state, with the
- * sheet-level Share pinned in the header.
+ * [rememberSaveable]). Renders the filter chip row, then the filtered cards (highlights/notes via
+ * [onJumpToAnnotation], bookmarks via [onJumpToBookmark]) or the empty state, with the sheet-level Share
+ * pinned in the header.
  */
 @Composable
 fun AnnotationsReviewSheetContent(
@@ -107,9 +115,14 @@ fun AnnotationsReviewSheetContent(
     snapshot: AnnotationsSnapshot,
     onShareAll: () -> Unit,
     onJumpToAnnotation: ((AnnotationItem) -> Unit)?,
+    bookmarks: List<BookmarkCardItem> = emptyList(),
+    onJumpToBookmark: ((BookmarkRecord) -> Unit)? = null,
 ) {
     var filter by rememberSaveable { mutableStateOf(AnnotationFilter.All) }
     val items = remember(snapshot, filter) { itemsFor(snapshot, filter) }
+    val marks = remember(bookmarks, filter) {
+        if (filter == AnnotationFilter.All || filter == AnnotationFilter.Bookmarks) bookmarks else emptyList()
+    }
 
     Column(
         Modifier
@@ -120,7 +133,7 @@ fun AnnotationsReviewSheetContent(
         Header(theme = theme, onShareAll = onShareAll)
         FilterChipRow(theme = theme, active = filter, onSelect = { filter = it })
 
-        if (items.isEmpty()) {
+        if (items.isEmpty() && marks.isEmpty()) {
             AnnotationsEmptyState(theme)
             return@Column
         }
@@ -138,11 +151,13 @@ fun AnnotationsReviewSheetContent(
                     is AnnotationItem.Note -> StandaloneNoteCard(theme, item.record, onJumpToAnnotation)
                 }
             }
+            // #135 WI-6 — bookmarks render after highlights/notes (All), or alone (Bookmarks filter).
+            marks.forEach { mark -> BookmarkCard(theme, mark, onJumpToBookmark) }
         }
     }
 }
 
-/** The filtered, deterministically-ordered items for [filter]. All = highlights then notes. */
+/** The filtered, deterministically-ordered highlight/note items for [filter]. All = highlights then notes. */
 private fun itemsFor(snapshot: AnnotationsSnapshot, filter: AnnotationFilter): List<AnnotationItem> {
     val highlights = snapshot.highlights.map { AnnotationItem.Highlight(it) }
     val notes = snapshot.notes.map { AnnotationItem.Note(it) }
@@ -150,6 +165,7 @@ private fun itemsFor(snapshot: AnnotationsSnapshot, filter: AnnotationFilter): L
         AnnotationFilter.All -> highlights + notes
         AnnotationFilter.Highlights -> highlights
         AnnotationFilter.Notes -> notes
+        AnnotationFilter.Bookmarks -> emptyList()
     }
 }
 
@@ -184,7 +200,7 @@ private fun Header(theme: ReaderTheme, onShareAll: () -> Unit) {
     }
 }
 
-/** The `All / Highlights / Notes` chip row (design `FilterChips`, minus the #135 Bookmarks chip). */
+/** The `All / Highlights / Notes / Bookmarks` chip row (design `FilterChips`; #135 WI-6 added Bookmarks). */
 @Composable
 private fun FilterChipRow(theme: ReaderTheme, active: AnnotationFilter, onSelect: (AnnotationFilter) -> Unit) {
     Row(

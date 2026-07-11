@@ -1,13 +1,14 @@
-// Purpose: feature #132 WI-4 — the two annotation review cards (design vreader-android-annotations.jsx
-// `HighlightCard` + `StandaloneNoteCard`). A [HighlightCard] shows a color left-rule + the quote + an
-// optional attached-note line + a meta footer (`date · Note`); a [StandaloneNoteCard] shows the design's
-// DASHED left-rule + the note body + a "STANDALONE" tag + a meta date. Both are pure functions of a
-// record + a nullable jump callback: the card body is clickable ONLY when [onJump] is non-null (the
-// §review-sheet-contract capability gate — EPUB/AZW3 hosts pass null so their cards are review-only, not
-// silent no-ops). The Android design depicts NO per-card Copy/Share button and NO `⋯` menu (those live on
-// the in-reader SelectionPopover / the iOS notes-delete surface) — so neither is rendered here (rule 51
-// gate). Colors are derived from the active [ReaderTheme] token map (the same local derivation the nav
-// sheet rows use), plus the designed card shadow.
+// Purpose: feature #132 WI-4 + #135 WI-6 — the three annotation review cards (design
+// vreader-android-annotations.jsx `HighlightCard` + `StandaloneNoteCard` + `BookmarkCard`). A
+// [HighlightCard] shows a color left-rule + the quote + an optional attached-note line + a meta footer
+// (`date · Note`); a [StandaloneNoteCard] shows the design's DASHED left-rule + the note body + a
+// "STANDALONE" tag + a meta date; a [BookmarkCard] (#135 WI-6) shows a filled bookmark icon (accent) + a
+// serif label (single-line ellipsized) + a sans meta. All are pure functions of a record + a nullable jump
+// callback: the card body is clickable ONLY when the jump callback is non-null (the §review-sheet-contract
+// capability gate — EPUB/AZW3 hosts pass null so their cards are review-only, not silent no-ops). The
+// Android design depicts NO per-card Copy/Share button and NO `⋯` menu, and NO per-card DELETE for bookmarks
+// (deferred) — so none is rendered here (rule 51 gate). Colors are derived from the active [ReaderTheme]
+// token map (the same local derivation the nav sheet rows use), plus the designed card shadow.
 package com.vreader.app.annotations
 
 import androidx.compose.foundation.background
@@ -21,10 +22,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -37,6 +43,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vreader.app.reader.settings.ReaderTheme
@@ -180,6 +187,70 @@ fun StandaloneNoteCard(theme: ReaderTheme, record: NoteRecord, onJump: ((Annotat
             // The design's `meta` line on the standalone note (previously omitted).
             Text(
                 metaLine(record.createdAt, record.locator.page),
+                color = theme.tertiary(),
+                fontFamily = VReaderFonts.Sans,
+                fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+/**
+ * feature #135 WI-6 — one bookmark for the review sheet's `BookmarkCard`. Pairs the stored
+ * [BookmarkRecord] (the jump target the card passes back to `onJumpToBookmark`) with the display
+ * [label] (the design's serif single-line label) + [meta] (the sans sub-line, e.g. `Ch. 1 · 14%`).
+ * The host projects these from WI-4's presentation layer; the sheet renders them.
+ */
+data class BookmarkCardItem(
+    val record: BookmarkRecord,
+    val label: String,
+    val meta: String,
+)
+
+/**
+ * A bookmark review card (design `BookmarkCard`): a filled bookmark icon (accent), a serif [item.label]
+ * (single-line, ellipsized), and a sans [item.meta] sub-line. The card body is clickable → [onJump] with
+ * the record ONLY when [onJump] is non-null (the same capability gate as [HighlightCard]). testTag
+ * `annot-card-${record.id}`. NO left-rule (the design's bookmark card has none), NO per-card delete
+ * (deferred — rule 51).
+ */
+@Composable
+fun BookmarkCard(theme: ReaderTheme, item: BookmarkCardItem, onJump: ((BookmarkRecord) -> Unit)?) {
+    val shape = RoundedCornerShape(14.dp)
+    val base = Modifier
+        .fillMaxWidth()
+        .padding(bottom = 10.dp)
+        .shadow(theme.cardElevation(), shape, clip = false)
+        .clip(shape)
+    val clickable = if (onJump != null) base.clickable { onJump(item.record) } else base
+    Row(
+        clickable
+            .background(theme.cardBackground())
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 15.dp, vertical = 13.dp)
+            .testTag("annot-card-${item.record.id}")
+            .semantics { contentDescription = "Bookmark: ${item.label}, ${item.meta}" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            Icons.Filled.Bookmark,
+            contentDescription = null,
+            tint = theme.accent,
+            modifier = Modifier.size(20.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                item.label,
+                color = theme.ink,
+                fontFamily = VReaderFonts.Serif,
+                fontSize = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                item.meta,
+                modifier = Modifier.padding(top = 2.dp),
                 color = theme.tertiary(),
                 fontFamily = VReaderFonts.Sans,
                 fontSize = 12.sp,

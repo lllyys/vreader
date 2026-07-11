@@ -26,7 +26,8 @@
 //   + chrome/ReaderBottomChrome (the reused designed bands), chrome/BookmarkToggleButton (the #135 top-bar
 //   bookmark toggle filling the top band's bookmark slot), chrome/ReaderChromeState (the hoisted
 //   sheet/visibility state incl. the #135 Bookmarks route), chrome/ReaderChromeScaffold (the shared
-//   readerMoreRows assembler), more/MorePopup + details/BookDetailsSheet + nav/TocContentsSheet +
+//   readerMoreRows assembler), more/MorePopup + details/BookDetailsSheet + nav/TocBookmarksSheet (the #135
+//   WI-6 promoted two-tab Contents|Bookmarks sheet, which reuses nav/TocContentsSheet's Contents body) +
 //   annotations/AnnotationsReviewSheet (the popup + modal sheets).
 package com.vreader.app.reader
 
@@ -50,10 +51,14 @@ import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderSheet
 import com.vreader.app.reader.chrome.ReaderTopChrome
 import com.vreader.app.reader.chrome.readerMoreRows
+import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.reader.details.BookDetailsSheet
 import com.vreader.app.reader.details.BookDetailsUiModel
 import com.vreader.app.reader.more.MorePopup
-import com.vreader.app.reader.nav.TocContentsSheet
+import com.vreader.app.reader.nav.BookmarkRowItem
+import com.vreader.app.reader.nav.JumpResult
+import com.vreader.app.reader.nav.TocBookmarksSheet
+import com.vreader.app.reader.nav.TocTab
 import com.vreader.app.reader.settings.ReaderTheme
 import kotlinx.coroutines.flow.StateFlow
 
@@ -148,13 +153,17 @@ fun EpubBottomBand(
  * ModalBottomSheet. This keeps the Readium fragment's scroll/selection/link input alive whenever no sheet
  * is up.
  *
- * [onJumpToc] performs the native-locator TOC jump (returns success → the Contents sheet dismisses on
+ * [onJumpToc] performs the native-locator TOC jump (returns success → the Contents tab dismisses on
  * success, stays open on false — no invented error surface). [onShareAnnotations] is the Notes sheet-level
- * Share. EPUB Notes cards are review-only (onJumpToAnnotation NULL) until #135. feature #134 WI-5 —
- * [bookDetails] drives the Details sheet (the WI-4 [BookDetailsSheet]); [onShareBook] is its Share flow and
- * [onCopyFingerprint] its copy-fingerprint mini-action (the host copies to the OS clipboard — no invented
- * toast, rule 51). A Details route with no [bookDetails] (should not happen — the route is only reachable
- * when the More menu was fed a model) treats the scrim as present but shows no sheet (a safe no-op).
+ * Share. EPUB Notes cards are review-only (onJumpToAnnotation NULL) until #135's nav seam lands. feature
+ * #135 WI-6 — the Toc route renders the promoted two-tab [TocBookmarksSheet]; [bookmarks] feed its
+ * Bookmarks tab and [onJumpBookmark] is the capability-based nullable bookmark jump (non-null → clickable
+ * rows + dismiss-on-Succeeded; null → review-only, non-clickable rows before WI-7 lights up the EPUB jump);
+ * the Bookmarks route opens the same sheet on its Bookmarks tab. feature #134 WI-5 — [bookDetails] drives the Details sheet
+ * (the WI-4 [BookDetailsSheet]); [onShareBook] is its Share flow and [onCopyFingerprint] its copy-fingerprint
+ * mini-action (the host copies to the OS clipboard — no invented toast, rule 51). A Details route with no
+ * [bookDetails] (should not happen — the route is only reachable when the More menu was fed a model) treats
+ * the scrim as present but shows no sheet (a safe no-op).
  */
 @Composable
 fun EpubReaderSheets(
@@ -166,6 +175,8 @@ fun EpubReaderSheets(
     bookDetails: BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
+    bookmarks: List<BookmarkRowItem> = emptyList(),
+    onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
 ) {
     val chrome by model.collectAsStateWithLifecycle()
     val sheet = chromeState.value.sheet
@@ -182,13 +193,8 @@ fun EpubReaderSheets(
         return
     }
 
-    // feature #135 WI-5 — the Bookmarks route has no rendered surface yet (WI-6 wires the designed
-    // TocBookmarksSheet; rule 51 forbids an invented list here). Normalize it to None BEFORE the scrim so
-    // it never intercepts the Readium fragment's scroll/selection/link input.
-    if (sheet is ReaderSheet.Bookmarks) {
-        closeSheet()
-        return
-    }
+    // feature #135 WI-6 — the Bookmarks route now DOES render (the two-tab TocBookmarksSheet with the
+    // Bookmarks tab pre-selected), so it is NOT normalized away — it lays the scrim + the sheet like Toc.
 
     // The open-only full-screen dismiss overlay — a transparent scrim under the sheet. An outside tap
     // (a tap that reaches the scrim, not the sheet) closes the sheet. Present ONLY while a sheet is open.
@@ -204,14 +210,17 @@ fun EpubReaderSheets(
 
     when (sheet) {
         ReaderSheet.None -> Unit
-        ReaderSheet.Toc -> TocContentsSheet(
+        // feature #135 WI-6 — the promoted two-tab TOC sheet (Contents|Bookmarks). The Contents tab REUSES
+        // #132's TocContentsSheet body unchanged; dismiss-on-success (Contents) / dismiss-on-Succeeded
+        // (Bookmarks) — a false/Failed jump keeps the sheet open, NO invented error surface (rule 51).
+        ReaderSheet.Toc -> TocBookmarksSheet(
             theme = theme,
             bookTitle = chrome.title,
             entries = chrome.tocEntries,
             currentTocIndex = chrome.currentTocIndex,
-            // Dismiss-on-success: TocContentsSheet dismisses ONLY when onJump returns true; a false return
-            // keeps the sheet open with NO invented error surface (rule 51 §nav-error-presentation).
-            onJump = onJumpToc,
+            bookmarks = bookmarks,
+            onJumpToc = onJumpToc,
+            onJumpBookmark = onJumpBookmark,
             onDismiss = { closeSheet() },
         )
         ReaderSheet.Notes -> AnnotationsReviewSheet(
@@ -231,9 +240,18 @@ fun EpubReaderSheets(
             onShare = onShareBook,
             onDismiss = { closeSheet() },
         )
-        // feature #135 WI-5 — the Bookmarks route is normalized to None BEFORE the scrim (see the guard
-        // above), so this branch is unreachable; it exists only to keep the `when` exhaustive. WI-6 wires
-        // the designed TocBookmarksSheet (rule 51 — no invented list here).
-        ReaderSheet.Bookmarks -> Unit
+        // feature #135 WI-6 — the Bookmarks route opens the SAME two-tab sheet with the Bookmarks tab
+        // pre-selected (the designed [TocBookmarksSheet]; rule 51 — no invented list surface).
+        ReaderSheet.Bookmarks -> TocBookmarksSheet(
+            theme = theme,
+            bookTitle = chrome.title,
+            entries = chrome.tocEntries,
+            currentTocIndex = chrome.currentTocIndex,
+            bookmarks = bookmarks,
+            onJumpToc = onJumpToc,
+            onJumpBookmark = onJumpBookmark,
+            onDismiss = { closeSheet() },
+            initialTab = TocTab.Bookmarks,
+        )
     }
 }
