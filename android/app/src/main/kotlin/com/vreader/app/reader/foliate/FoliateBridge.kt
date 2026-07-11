@@ -129,6 +129,12 @@ class FoliateBridge(
 
     fun prev() = eval("try{readerAPI.prev&&readerAPI.prev()}catch(e){}")
 
+    /** feature #129 WI-6 — apply the "Display" theme+typography CSS to the rendered book. The JS is
+     *  built by the SHARED [foliateSetStylesJs] seam — which JSON-encodes the CSS into a valid,
+     *  injection-safe JS string literal — so the escaping the unit test pins is the EXACT escaping
+     *  `evaluateJavascript` runs (no test-vs-production drift). Mirrors iOS Foliate `setStyles`. */
+    fun setStyles(css: String) = eval(foliateSetStylesJs(css))
+
     fun destroy() = webView.destroy()
 
     private fun eval(js: String) = webView.evaluateJavascript(js, null)
@@ -143,3 +149,13 @@ class FoliateBridge(
         const val BRIDGE_NAME = "vreaderHost"
     }
 }
+
+/**
+ * feature #129 WI-6 — the SHARED foliate `setStyles` JS builder. The CSS is JSON-encoded into a JS
+ * string literal (the FoliateJSEscaper analog) so ANY value — quotes, backslashes, newlines,
+ * `</script>` — is neutralized and cannot break out of the shell JS. This is the SINGLE production
+ * seam [FoliateBridge.setStyles] runs through `evaluateJavascript`, so the escaping the unit test pins
+ * (`Azw3DisplayCssTest`) is exactly the escaping production applies. Deterministic for a given [css].
+ */
+fun foliateSetStylesJs(css: String): String =
+    "try{readerAPI.setStyles&&readerAPI.setStyles(${Json.encodeToString(String.serializer(), css)})}catch(e){}"

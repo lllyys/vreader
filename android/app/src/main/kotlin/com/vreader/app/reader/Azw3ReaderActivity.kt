@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vreader.app.VReaderApp
 import com.vreader.app.data.Book
 import com.vreader.app.reader.foliate.Azw3DocState
@@ -96,6 +97,7 @@ class Azw3ReaderActivity : ComponentActivity() {
                         book = o.book,
                         bookFile = File(o.path),
                         restore = o.restore,
+                        settings = container.readerSettingsStore.settings,
                         onBack = ::finish,
                         onRelocate = { rel -> enqueueSave(o.book, rel) },
                     )
@@ -155,6 +157,7 @@ private fun Azw3ReaderHost(
     book: Book,
     bookFile: File,
     restore: VReaderLocator?,
+    settings: kotlinx.coroutines.flow.Flow<com.vreader.app.reader.settings.ReaderSettings>,
     onBack: () -> Unit,
     onRelocate: (FoliateMessage.Relocate) -> Unit,
 ) {
@@ -162,6 +165,9 @@ private fun Azw3ReaderHost(
     var reloadKey by remember { mutableIntStateOf(0) }
     // Latest known position, for render-death resume (starts at the persisted restore point).
     var resume by remember { mutableStateOf(restore) }
+    // feature #129 WI-6 — the live "Display" settings; applied as foliate CSS on every change AND on a
+    // fresh render (the document re-applies pendingStylesCss at book-ready, incl. after render-death).
+    val displaySettings by settings.collectAsStateWithLifecycle(initialValue = com.vreader.app.reader.settings.ReaderSettings())
 
     // A fresh WebView + document each reloadKey (render-process-death recovery). The WebView needs
     // MATCH_PARENT layout params — a default WRAP_CONTENT WebView measures its content height (0 before
@@ -189,6 +195,12 @@ private fun Azw3ReaderHost(
 
     // Holder-scoped: the collector lives exactly as long as this holder (cancelled on reload/dispose).
     LaunchedEffect(holder) { holder.document.run(resume) }
+
+    // feature #129 WI-6 — apply the Display CSS to the current document. Re-keyed on `holder` so a fresh
+    // render (reload / render-death recovery) re-records the CSS, and on `displaySettings` so a live
+    // settings change re-injects. `setStyles` is a no-op-until-book-ready record inside the document, so
+    // an early apply is safe; the document re-applies at book-ready.
+    LaunchedEffect(holder, displaySettings) { holder.document.setStyles(displaySettings.foliateDisplayCss()) }
 
     ReaderScaffold(book.title, onBack) {
         Box(Modifier.fillMaxSize().testTag("azw3-webview")) {
