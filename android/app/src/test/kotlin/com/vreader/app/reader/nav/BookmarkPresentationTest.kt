@@ -143,6 +143,61 @@ class BookmarkPresentationTest {
         assertNull(row.chapter)
     }
 
+    @Test fun epub_partialTocMissingTotalProgressionUsesHrefFallback() {
+        // Not every entry carries totalProgression (a partially-populated TOC): totalProgression is
+        // NOT a reliable cross-chapter key here, so the lookup must fall back to href matching and
+        // still return the correct chapter — NOT a wrong one from a broken progression search.
+        val toc = listOf(
+            TocEntry("Chapter 1", 0, "1",
+                Locator(sha, 1234L, "epub", href = "ch1.xhtml", progression = 0.0), null),
+            // Chapter 2 lacks totalProgression.
+            TocEntry("Chapter 2", 0, "17",
+                Locator(sha, 1234L, "epub", href = "ch2.xhtml", progression = 0.0), null),
+            TocEntry("Chapter 3", 0, "42",
+                Locator(sha, 1234L, "epub", href = "ch3.xhtml", progression = 0.0,
+                    totalProgression = 0.6), null),
+        )
+        val row = BookmarkPresentation.bookmarkRow(
+            record(BookFormat.epub, href = "ch2.xhtml", progression = 0.5),
+            BookFormat.epub, toc, null, dateRenderer,
+        )
+        assertEquals("Chapter 2", row.chapter)
+        assertEquals("17", row.pageLabel)
+    }
+
+    @Test fun epub_targetHasTotalProgressionButEntryMissingItAbortsToHrefFallback() {
+        // Target carries totalProgression, but a TOC entry lacks it (not monotonic). The fast path
+        // must abort to the href fallback rather than binary-search a non-monotonic key.
+        val toc = listOf(
+            TocEntry("Chapter 1", 0, "1",
+                Locator(sha, 1234L, "epub", href = "ch1.xhtml", progression = 0.0,
+                    totalProgression = 0.0), null),
+            // Chapter 2 lacks totalProgression.
+            TocEntry("Chapter 2", 0, "17",
+                Locator(sha, 1234L, "epub", href = "ch2.xhtml", progression = 0.0), null),
+        )
+        val row = BookmarkPresentation.bookmarkRow(
+            record(BookFormat.epub, href = "ch2.xhtml", progression = 0.5, totalProgression = 0.5),
+            BookFormat.epub, toc, null, dateRenderer,
+        )
+        assertEquals("Chapter 2", row.chapter)
+        assertEquals("17", row.pageLabel)
+    }
+
+    @Test fun epub_targetWithoutTotalProgressionAndUnknownHrefYieldsNullChapter() {
+        // The target has neither totalProgression nor a matching href -> no fabricated chapter.
+        val toc = listOf(
+            TocEntry("Chapter 1", 0, "1",
+                Locator(sha, 1234L, "epub", href = "ch1.xhtml", progression = 0.0), null),
+        )
+        val row = BookmarkPresentation.bookmarkRow(
+            record(BookFormat.epub, href = "unknown.xhtml", progression = 0.5),
+            BookFormat.epub, toc, null, dateRenderer,
+        )
+        assertNull(row.chapter)
+        assertNull(row.pageLabel)
+    }
+
     @Test fun azw3_usesTocLikeEpub() {
         val toc = listOf(
             tocEntry("Part One", "p1", totalProgression = 0.0),
@@ -216,6 +271,38 @@ class BookmarkPresentationTest {
         assertNull(row.pageLabel)
     }
 
+    @Test fun pdf_pageZeroIsOne() {
+        val row = BookmarkPresentation.bookmarkRow(
+            record(BookFormat.pdf, page = 0),
+            BookFormat.pdf, null, null, dateRenderer,
+        )
+        assertEquals("p. 1", row.pageLabel)
+    }
+
+    @Test fun pdf_negativePageDegradesToNull() {
+        // A structurally-invalid stored page index must not render "p. 0" or crash.
+        val loc = Locator(
+            contentSHA256 = sha, fileByteCount = 1234L, format = "pdf",
+        ).copy(page = -3)
+        val row = BookmarkPresentation.bookmarkRow(
+            BookmarkRecord("id-1", "pdf:$sha:1234", null, loc, epochMs, epochMs),
+            BookFormat.pdf, null, null, dateRenderer,
+        )
+        assertNull(row.pageLabel)
+    }
+
+    @Test fun pdf_intMaxPageDegradesToNullNoOverflow() {
+        val loc = Locator(
+            contentSHA256 = sha, fileByteCount = 1234L, format = "pdf",
+        ).copy(page = Int.MAX_VALUE)
+        val row = BookmarkPresentation.bookmarkRow(
+            BookmarkRecord("id-1", "pdf:$sha:1234", null, loc, epochMs, epochMs),
+            BookFormat.pdf, null, null, dateRenderer,
+        )
+        // No `Int.MAX_VALUE + 1` overflow into a negative "p. -..." label.
+        assertNull(row.pageLabel)
+    }
+
     // ---- TXT/MD: bounded, single-line, ellipsized preview ----
 
     @Test fun txt_previewFromProvider() {
@@ -282,18 +369,19 @@ class BookmarkPresentationTest {
         assertNull(row.preview)
     }
 
-    @Test fun txt_nullOffsetPassesClampedNonNegativeOffset() {
-        var seen = -1
-        val provider = BookmarkPreviewProvider { offset, _ ->
-            seen = offset
-            "ok"
+    @Test fun txt_nullOffsetYieldsNullPreviewAndSkipsProvider() {
+        var called = false
+        val provider = BookmarkPreviewProvider { _, _ ->
+            called = true
+            "should-not-be-used"
         }
-        BookmarkPresentation.bookmarkRow(
+        val row = BookmarkPresentation.bookmarkRow(
             record(BookFormat.txt, charOffsetUTF16 = null),
             BookFormat.txt, null, provider, dateRenderer,
         )
-        // A missing offset clamps to 0 (never negative -> no provider crash).
-        assertEquals(0, seen)
+        // A missing position must NOT fabricate a start-of-book preview.
+        assertNull(row.preview)
+        assertTrue("provider must not be invoked for a null offset", !called)
     }
 
     @Test fun txt_negativeOffsetClampedToZero() {

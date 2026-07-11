@@ -79,13 +79,18 @@ object BookmarkPresentation {
             BookFormat.pdf -> BookmarkRowUi(
                 preview = null,
                 chapter = null,
-                pageLabel = locator.page?.let { "p. ${it + 1}" },
+                // One-based, and only for a valid (non-negative, non-overflowing) page index.
+                pageLabel = locator.page
+                    ?.takeIf { it in 0 until Int.MAX_VALUE }
+                    ?.let { "p. ${it + 1}" },
                 dateLabel = dateLabel,
             )
 
             BookFormat.txt, BookFormat.md -> {
-                val offset = (locator.charOffsetUTF16 ?: 0).coerceAtLeast(0)
-                val raw = previewProvider?.snippet(offset, PREVIEW_MAX_LEN)
+                // A missing position yields NO preview (do not fabricate a start-of-book snippet);
+                // a stored-but-negative offset is defensively clamped to 0.
+                val raw = locator.charOffsetUTF16
+                    ?.let { previewProvider?.snippet(it.coerceAtLeast(0), PREVIEW_MAX_LEN) }
                 BookmarkRowUi(
                     preview = raw?.let { clampPreview(it, PREVIEW_MAX_LEN) },
                     chapter = null,
@@ -97,37 +102,78 @@ object BookmarkPresentation {
     }
 
     /**
-     * The rightmost (deepest-in-reading-order) TOC entry whose position is at or before [target], via a
-     * binary search over the reading-ordered TOC — O(log n) for huge books. Returns null when the target
-     * precedes the first entry or the TOC is empty. The position order is defined by [positionKey]: the
-     * book-wide `totalProgression` when present (the Readium/EPUB norm), else in-chapter `progression`
-     * (best-effort), so entries authored in reading order stay monotonically ordered by this key.
+     * The nearest TOC chapter at or before [target] — the row's chapter. Two strategies, both safe:
+     *
+     * 1. **Fast path (huge-book O(log n)):** when the target carries a book-wide `totalProgression` (the
+     *    Readium/EPUB norm — the only key guaranteed monotonic across chapters), binary-search the
+     *    reading-ordered TOC for the rightmost entry whose `totalProgression <=` the target's. The
+     *    monotonic-ness precondition is checked WHILE searching (never via an O(n) prescan, which would
+     *    defeat the huge-book bound): if any entry visited by the search lacks `totalProgression`, the
+     *    TOC is not reliably monotonic under that key, so the search aborts to strategy 2. A fully
+     *    populated Readium TOC never aborts, so this stays O(log n) for huge books.
+     * 2. **Href fallback (correctness for partially-populated TOCs):** match on the target's `href` — the
+     *    chapter file the bookmark points into — picking the last same-href entry at or before the
+     *    target's in-chapter `progression`. This is what keeps a partial TOC correct: mixing book-wide
+     *    `totalProgression` with chapter-local `progression` would break the binary search's monotonicity
+     *    invariant and return the wrong chapter. Same-href entries are few (typically one).
+     *
+     * Returns null (no fabricated chapter) when the target precedes the first entry, the TOC is empty,
+     * or no strategy can place it.
      */
     private fun nearestTocEntryAtOrAbove(entries: List<TocEntry>, target: Locator): TocEntry? {
         if (entries.isEmpty()) return null
-        val targetKey = positionKey(target)
+        val targetTotal = target.totalProgression
+        if (targetTotal != null) {
+            binarySearchAtOrBelow(entries, targetTotal)?.let { return it.entryOrNull }
+            // Search aborted (a visited entry lacked totalProgression) -> fall through.
+        }
+        return hrefFallback(entries, target)
+    }
+
+    /**
+     * Wraps a binary-search outcome so an *aborted* search (a visited entry lacked `totalProgression`)
+     * is distinguishable from a completed search that legitimately found nothing.
+     */
+    private data class SearchOutcome(val entryOrNull: TocEntry?)
+
+    /**
+     * Rightmost entry whose `totalProgression <= [targetTotal]`, via binary search (O(log n)). Returns
+     * null (an ABORT) the moment a visited entry lacks `totalProgression` — the caller then degrades to
+     * the href fallback; a completed search returns a [SearchOutcome] (whose [entryOrNull] may itself be
+     * null when the target precedes the first entry).
+     */
+    private fun binarySearchAtOrBelow(entries: List<TocEntry>, targetTotal: Double): SearchOutcome? {
         var lo = 0
         var hi = entries.size - 1
         var found = -1
         while (lo <= hi) {
             val mid = (lo + hi) ushr 1
-            if (positionKey(entries[mid].canonicalLocator) <= targetKey) {
+            val key = entries[mid].canonicalLocator.totalProgression ?: return null // abort: not monotonic
+            if (key <= targetTotal) {
                 found = mid
                 lo = mid + 1
             } else {
                 hi = mid - 1
             }
         }
-        return if (found >= 0) entries[found] else null
+        return SearchOutcome(if (found >= 0) entries[found] else null)
     }
 
     /**
-     * A monotonic ordering key for a locator's reading position: book-wide `totalProgression` when set,
-     * else in-chapter `progression`, else 0.0. A reading-ordered EPUB TOC (and the bookmarks that point
-     * into it) is monotonic under this key, which is what makes the binary search correct.
+     * The last TOC entry whose `href` matches the target's and whose in-chapter `progression` is at or
+     * before the target's — the chapter the bookmark lives in. Null when no entry shares the href.
      */
-    private fun positionKey(locator: Locator): Double =
-        locator.totalProgression ?: locator.progression ?: 0.0
+    private fun hrefFallback(entries: List<TocEntry>, target: Locator): TocEntry? {
+        val href = target.href ?: return null
+        val targetProg = target.progression ?: 0.0
+        var best: TocEntry? = null
+        for (entry in entries) {
+            val loc = entry.canonicalLocator
+            if (loc.href != href) continue
+            if ((loc.progression ?: 0.0) <= targetProg) best = entry
+        }
+        return best
+    }
 
     /** Clamp a raw snippet to a single line, at most [maxLen] chars, ellipsized when truncated. */
     private fun clampPreview(raw: String, maxLen: Int): String {

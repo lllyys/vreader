@@ -7,10 +7,13 @@ package com.vreader.app.reader.nav
 /**
  * Supplies a short body snippet for a TXT/MD bookmark row.
  *
- * The TXT/MD host implements this over its already-decoded text. [BookmarkPresentation] passes the
- * bookmark's UTF-16 char offset (clamped non-negative) and the max length it wants; the projection
- * still clamps/single-lines/ellipsizes the returned text, so an over-long or multi-line snippet is
- * safe. Return null when no meaningful snippet is available (empty document, offset past EOF).
+ * The TXT/MD host implements this over its ALREADY-DECODED, in-memory text. The implementation MUST be
+ * pure and side-effect-free — a plain read against an immutable text buffer — so [BookmarkPresentation]
+ * stays a deterministic, no-I/O projection (Risk-7): do NOT read files, hit the DB, or touch mutable
+ * state here. [BookmarkPresentation] passes the bookmark's UTF-16 char offset (clamped non-negative) and
+ * the max length it wants; the projection still clamps/single-lines/ellipsizes the returned text, so an
+ * over-long or multi-line snippet is safe. Return null when no meaningful snippet is available (empty
+ * document, offset past EOF).
  */
 fun interface BookmarkPreviewProvider {
     /** A snippet starting near [charOffsetUTF16] (clamped >= 0), at most [maxLen] chars, or null. */
