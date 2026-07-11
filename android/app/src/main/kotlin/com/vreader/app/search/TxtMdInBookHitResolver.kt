@@ -14,8 +14,13 @@
 // - The occurrence's raw span becomes both the jump anchor (`charOffsetUTF16`) AND the highlight range
 //   (`charRangeStartUTF16`/`charRangeEndUTF16`), shifted by the chunk start — the same identity triple +
 //   offset shape the TXT/MD host builds for a bookmark/resume (txtBookmarkLocator).
-// - `validatedOrNull()` gates the result: a corrupt/out-of-range occurrence (negative offset, inverted
-//   range) yields `null` and the hit is skipped rather than jumped to a bogus position.
+// - Out-of-range inputs are REJECTED (→ null) BEFORE the offset math, not just by validatedOrNull():
+//   TxtDocument.offsetForChunk CLAMPS an out-of-band sectionIndex to a valid chunk and validatedOrNull
+//   only checks non-negativity / range ordering — neither would catch a sectionIndex past chunkCount or
+//   an endUtf16 past the chunk's own length. So the resolver bounds-checks sectionIndex in
+//   [0, chunkCount) and the occurrence span within the chunk's own text length, then applies
+//   validatedOrNull() as the final structural gate. A corrupt/out-of-range occurrence yields null and
+//   the hit is skipped rather than jumped to a bogus (silently clamped) position.
 package com.vreader.app.search
 
 import com.vreader.app.reader.TxtDocument
@@ -41,6 +46,15 @@ class TxtMdInBookHitResolver(
     private val document: TxtDocument by lazy { TxtDocument.of(decodedText) }
 
     override fun resolve(sectionIndex: Int, occurrence: RawOccurrence): Locator? {
+        // Reject out-of-band inputs BEFORE the offset math — offsetForChunk CLAMPS an invalid
+        // sectionIndex (so -1 would silently resolve chunk 0, an oversized index the last chunk), and a
+        // span past the chunk's own length would produce a "valid" locator pointing outside the chunk,
+        // breaking the chunkForOffset round-trip.
+        if (sectionIndex < 0 || sectionIndex >= document.chunkCount) return null
+        if (occurrence.startUtf16 < 0 || occurrence.endUtf16 < occurrence.startUtf16) return null
+        val chunkLength = document.textForChunk(sectionIndex).length
+        if (occurrence.endUtf16 > chunkLength) return null
+
         val chunkStart = document.offsetForChunk(sectionIndex)
         val start = chunkStart + occurrence.startUtf16
         val end = chunkStart + occurrence.endUtf16

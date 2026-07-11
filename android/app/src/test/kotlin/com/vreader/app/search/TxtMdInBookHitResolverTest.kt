@@ -1,6 +1,8 @@
 package com.vreader.app.search
 
+import com.vreader.app.data.Book
 import com.vreader.app.reader.TxtDocument
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -8,6 +10,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import vreader.contracts.BookFormat
+import java.io.File
 
 /**
  * Feature #133 WI-4 — [TxtMdInBookHitResolver]: maps a matched TXT/MD chunk (its `sectionIndex`) plus a
@@ -47,10 +51,24 @@ class TxtMdInBookHitResolverTest {
             decodedText = text,
         )
 
-    /** Enumerate every extractor chunk for [text] (the same emission the FTS extractor produces). */
-    private fun chunkTexts(text: String): List<String> {
-        val doc = TxtDocument.of(text)
-        return (0 until doc.chunkCount).map { doc.textForChunk(it).toString() }
+    /** A collecting fake sink: records every emit (mirrors TxtMdTextExtractorTest.CollectingSink). */
+    private class CollectingSink : SectionSink {
+        val sections = mutableListOf<BookTextSection>()
+        override suspend fun emit(section: BookTextSection) { sections.add(section) }
+        override suspend fun flushRemaining() {}
+    }
+
+    private fun bookFor(file: File, format: BookFormat = BookFormat.txt) = Book(
+        fingerprintKey = "${format.name}:$sha:$byteCount",
+        title = "T", originalFormat = format, contentSHA256 = sha,
+        fileByteCount = byteCount, localFilePath = file.absolutePath, addedAt = 1L,
+    )
+
+    private fun writeTemp(name: String, text: String): File {
+        val f = File.createTempFile("wi4-$name", ".txt")
+        f.writeBytes(text.toByteArray(Charsets.UTF_8))
+        f.deleteOnExit()
+        return f
     }
 
     // ── exact offset re-derivation ──────────────────────────────────────────────
@@ -97,16 +115,37 @@ class TxtMdInBookHitResolverTest {
     }
 
     @Test
-    fun roundTrip_matchesExtractorBoundaries() {
-        // The resolver's re-derived TxtDocument.of MUST match the boundaries the extractor streamed:
-        // chunkForOffset(offsetForChunk(i)) == i for every chunk i, and the chunk texts are identical.
-        val body = (0 until 8).joinToString("\n") { "chapter $it paragraph with words" } + "\n"
+    fun roundTrip_matchesRealExtractorBoundaries() = runTest {
+        // Drive the REAL TxtMdTextExtractor.extract() over a real temp file, then resolve an occurrence
+        // located within EACH emitted BookTextSection and assert the resolved offset maps back (via the
+        // resolver's independently re-derived TxtDocument) to the SAME sectionIndex the extractor emitted.
+        // This proves the resolver's re-derivation matches what the FTS index was built from — no drift.
+        val body = (0 until 8).joinToString("\n") { "chapter $it needle paragraph with words" } + "\n"
+        val file = writeTemp("extract", body)
+        val sink = CollectingSink()
+        val result = TxtMdTextExtractor().extract(bookFor(file), sink)
+        assertTrue("extraction succeeded", result is ExtractResult.Success)
+        assertTrue("multiple sections emitted", sink.sections.size >= 3)
+
+        val resolver = resolver(body)
         val doc = TxtDocument.of(body)
-        val extractorChunks = chunkTexts(body)
-        assertEquals(doc.chunkCount, extractorChunks.size)
-        for (i in 0 until doc.chunkCount) {
-            assertEquals("offset->chunk identity at $i", i, doc.chunkForOffset(doc.offsetForChunk(i)))
-            assertEquals("chunk text at $i", extractorChunks[i], doc.textForChunk(i).toString())
+        assertEquals("resolver chunk count == extractor section count", sink.sections.size, doc.chunkCount)
+
+        for (section in sink.sections) {
+            // Locate "needle" INSIDE the extractor-emitted section text, resolve it, and round-trip.
+            val rawStart = section.text.indexOf("needle")
+            assertTrue("needle in section ${section.sectionIndex}", rawStart >= 0)
+            val occ = RawOccurrence(rawStart, rawStart + "needle".length, occurrenceIndex = 0)
+            val locator = resolver.resolve(section.sectionIndex, occ)
+            assertNotNull("section ${section.sectionIndex} resolves", locator)
+            // The resolved offset maps back to the SAME section the extractor emitted.
+            assertEquals(
+                "section ${section.sectionIndex} round-trips",
+                section.sectionIndex,
+                doc.chunkForOffset(locator!!.charOffsetUTF16!!),
+            )
+            // And it equals the extractor's own chunk-start + the raw offset (exact re-derivation).
+            assertEquals(doc.offsetForChunk(section.sectionIndex) + rawStart, locator.charOffsetUTF16)
         }
     }
 
@@ -237,15 +276,51 @@ class TxtMdInBookHitResolverTest {
         assertEquals(text.indexOf("needle"), locator.charOffsetUTF16)
     }
 
-    // ── validation guard (out-of-range / negative offsets are rejected) ─────────
+    // ── out-of-range / corrupt inputs are rejected (→ null, never a clamped bogus jump) ──
 
     @Test
     fun negativeOffset_isRejected() {
-        // A corrupt occurrence that would produce a negative absolute offset → validatedOrNull → null.
-        // (Chunk 0 starts at 0; a negative rawStart is structurally invalid.)
+        // A corrupt occurrence with a negative raw offset → null (structurally invalid).
         val text = "body text\n"
         val occ = RawOccurrence(startUtf16 = -5, endUtf16 = -1, occurrenceIndex = 0)
-        val locator = resolver(text).resolve(0, occ)
-        assertNull("negative offset fails validatedOrNull", locator)
+        assertNull("negative offset rejected", resolver(text).resolve(0, occ))
+    }
+
+    @Test
+    fun negativeSectionIndex_isRejected() {
+        // offsetForChunk CLAMPS -1 to chunk 0 — the resolver must reject it BEFORE that clamp, not
+        // silently resolve against the first chunk.
+        val text = "first line\nsecond line\n"
+        val occ = RawOccurrence(startUtf16 = 0, endUtf16 = 4, occurrenceIndex = 0)
+        assertNull("negative sectionIndex rejected", resolver(text).resolve(-1, occ))
+    }
+
+    @Test
+    fun sectionIndexPastChunkCount_isRejected() {
+        // offsetForChunk CLAMPS an oversized index to the LAST chunk — the resolver must reject it.
+        val text = "first line\nsecond line\n"
+        val doc = TxtDocument.of(text)
+        val occ = RawOccurrence(startUtf16 = 0, endUtf16 = 4, occurrenceIndex = 0)
+        assertNull("out-of-range sectionIndex rejected", resolver(text).resolve(doc.chunkCount, occ))
+    }
+
+    @Test
+    fun occurrenceEndPastChunkLength_isRejected() {
+        // An end offset past the chunk's own text length would map OUTSIDE the chunk, breaking the
+        // chunkForOffset round-trip — validatedOrNull alone would NOT catch it (it only checks
+        // non-negativity + ordering), so the resolver bounds-checks the span against the chunk length.
+        val text = "first line\nsecond line\n"
+        val sectionIndex = 0
+        val chunkLength = TxtDocument.of(text).textForChunk(sectionIndex).length
+        val occ = RawOccurrence(startUtf16 = 0, endUtf16 = chunkLength + 5, occurrenceIndex = 0)
+        assertNull("span past chunk length rejected", resolver(text).resolve(sectionIndex, occ))
+    }
+
+    @Test
+    fun invertedSpan_isRejected() {
+        // end < start is a corrupt span → null.
+        val text = "the quick brown fox\n"
+        val occ = RawOccurrence(startUtf16 = 9, endUtf16 = 4, occurrenceIndex = 0)
+        assertNull("inverted span rejected", resolver(text).resolve(0, occ))
     }
 }
