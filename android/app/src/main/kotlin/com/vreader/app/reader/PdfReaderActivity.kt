@@ -1,8 +1,9 @@
 // Purpose: feature #115 WI-2 / WI-3 (#110 Phase 3) — the PDF reader HOST Activity. Opens the book's
 // PDF via PdfDocument off the main thread → Loading / ProtectedOrUnsupported / Corrupt / Empty /
 // Loaded, gates composition on the store's first settings emission (WI-7), then hands off to the
-// PdfReaderScreen composables (PdfScaffold / PdfContinuousReader / CenterMessage). The PdfDocument is
-// closed in a DisposableEffect; the page index is saved (debounced + onStop flush) via a conflated,
+// PdfReaderScreen composables (PdfScaffold + CenterMessage for the pre-Loaded states; PdfReaderChrome
+// wrapping PdfReaderBody for Loaded — feature #132 WI-7-hosts). The PdfDocument is closed in a
+// DisposableEffect; the page index is saved (debounced + onStop flush) via a conflated,
 // single-consumer channel (WI-3 resume).
 //
 // feature #129 WI-7: PDF is rasterized (can't reflow), so it inherits ONLY the theme background from
@@ -11,8 +12,16 @@
 // live (GATED — nothing painted until the first emission, so a stored dark theme never flashes a
 // bright frame) and threads `ReaderSettings.pdfBackdrop()` (= theme.background) to the viewer backdrop.
 //
-// @coordinates-with: PdfReaderScreen.kt (the Compose surface it hosts), PdfDisplayBackdrop.kt (the
-//   settings→backdrop mapping), ReaderSettingsStore (the live settings source).
+// feature #132 WI-7-hosts: the Loaded state now renders the shared ReaderChromeScaffold via
+// PdfReaderChrome (top bar + Notes review sheet; Contents hidden — no PDF TOC; NO Display control — the
+// #129 theme-only affordance is preserved as a live backdrop with no control surface). onJumpToAnnotation
+// is NON-null: it scrolls the page list to the annotation's page (pdfAnnotationPage, clamped). The chrome
+// state is persisted across rotation via ReaderChromeStateSaver; the Notes snapshot is a one-shot read
+// of this book's annotationsForBook (empty pre-Loaded states keep the bare PdfScaffold messages).
+//
+// @coordinates-with: PdfReaderScreen.kt (the Compose surface it hosts + PdfReaderChrome), PdfDisplayBackdrop.kt
+//   (the settings→backdrop mapping), ReaderSettingsStore (the live settings source), AnnotationsRepository
+//   (the review-sheet snapshot), ReaderChromeScaffold/ReaderChromeState (the shared chrome).
 package com.vreader.app.reader
 
 import android.os.Bundle
@@ -25,13 +34,19 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vreader.app.VReaderApp
+import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.data.Book
+import com.vreader.app.reader.chrome.ReaderChromeState
+import com.vreader.app.reader.chrome.ReaderChromeStateSaver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.debounce
@@ -128,7 +143,34 @@ class PdfReaderActivity : ComponentActivity() {
                             snapshotFlow { listState.firstVisibleItemIndex }
                                 .drop(1).debounce(800).collect { savePage(s.book, it) }
                         }
-                        PdfContinuousReader(s.title, s.document, listState, backdrop, ::finish)
+                        // feature #132 WI-7-hosts — the shared reader chrome. State persists across
+                        // rotation / process death via ReaderChromeStateSaver (keyed on the book).
+                        val bookKey = s.book.fingerprintKey
+                        val chromeState = rememberSaveable(bookKey, stateSaver = ReaderChromeStateSaver) {
+                            mutableStateOf(ReaderChromeState())
+                        }
+                        // The Notes review sheet's one-shot snapshot of this book's highlights + notes.
+                        val annotationsSnapshot by produceState(
+                            AnnotationsSnapshot(emptyList(), emptyList()), bookKey,
+                        ) {
+                            value = runCatching { container.annotationsRepository.annotationsForBook(bookKey) }
+                                .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
+                        }
+                        val jumpScope = rememberCoroutineScope()
+                        PdfReaderChrome(
+                            theme = settings.theme,
+                            title = s.title,
+                            chromeState = chromeState,
+                            annotations = annotationsSnapshot,
+                            onBack = ::finish,
+                            // PDF tap-to-jump: scroll the page list to the annotation's clamped page —
+                            // the existing resume/save page-scroll seam (listState.firstVisibleItemIndex).
+                            onJumpToAnnotation = { item ->
+                                jumpScope.launch { listState.scrollToItem(pdfAnnotationPage(item, s.document.pageCount)) }
+                            },
+                            onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
+                            body = { PdfReaderBody(s.document, listState, backdrop) },
+                        )
                     }
                 }
             }
@@ -143,6 +185,17 @@ class PdfReaderActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         saveRequests.close()
+    }
+
+    /** feature #132 WI-7-hosts — share ALL reviewed annotations as one plain-text blob (the review sheet's
+     *  trailing Share → ACTION_SEND). Reuses the shared [annotationsShareText] formatter; no-op when empty. */
+    private fun shareAnnotations(snapshot: AnnotationsSnapshot) {
+        val text = annotationsShareText(snapshot)
+        if (text.isBlank()) return
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, text)
+        }
+        startActivity(android.content.Intent.createChooser(send, null))
     }
 
     private suspend fun load(key: String): PdfUiState {

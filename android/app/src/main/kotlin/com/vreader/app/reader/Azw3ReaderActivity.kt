@@ -5,6 +5,13 @@
 // is a valid Android design source — rule 51). Persists the reading position (conflated, latest-wins)
 // + flushes on onStop, and recreates the WebView on render-process death.
 // Feature #126 WI-4 + WI-6. Routing from MainActivity; AZW3 import already exists.
+//
+// feature #132 WI-7-hosts: the Ready state now renders the shared ReaderChromeScaffold via
+// Azw3ReaderChrome (top bar + Notes review sheet) over the WebView body. AZW3 has no reader TOC →
+// Contents is hidden (empty tocEntries / EmptyTocProvider posture); it has no Display control (the #129
+// CSS is applied live from the store with no control surface), so the bottom chrome is Notes-only.
+// onJumpToAnnotation is NULL (review-only capability gate — no in-session goTo until #135; FoliateBridge/
+// Azw3Document/foliate-js stay UNTOUCHED, and the MATCH_PARENT WebView sizing (bug #357) is undisturbed).
 package com.vreader.app.reader
 
 import android.os.Bundle
@@ -31,15 +38,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
+import androidx.compose.material.icons.outlined.BorderColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,17 +60,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vreader.app.VReaderApp
+import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.data.Book
+import com.vreader.app.reader.chrome.ReaderChromeScaffold
+import com.vreader.app.reader.chrome.ReaderChromeState
+import com.vreader.app.reader.chrome.ReaderChromeStateSaver
 import com.vreader.app.reader.foliate.Azw3DocState
 import com.vreader.app.reader.foliate.Azw3Document
 import com.vreader.app.reader.foliate.Azw3LocatorBridge
 import com.vreader.app.reader.foliate.FoliateMessage
+import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -93,13 +111,37 @@ class Azw3ReaderActivity : ComponentActivity() {
                 OuterState.NoBook -> ReaderScaffold("", ::finish) { Centered { Text("This book can’t be opened.", color = Ink) } }
                 is OuterState.Ready -> {
                     currentBook = o.book
-                    Azw3ReaderHost(
-                        book = o.book,
-                        bookFile = File(o.path),
-                        restore = o.restore,
-                        settings = container.readerSettingsStore.settings,
+                    // feature #132 WI-7-hosts — the shared reader chrome. State persists across rotation /
+                    // process death via ReaderChromeStateSaver (keyed on the book).
+                    val bookKey = o.book.fingerprintKey
+                    val chromeState = rememberSaveable(bookKey, stateSaver = ReaderChromeStateSaver) {
+                        mutableStateOf(ReaderChromeState())
+                    }
+                    val displayTheme by container.readerSettingsStore.settings
+                        .collectAsStateWithLifecycle(initialValue = com.vreader.app.reader.settings.ReaderSettings())
+                    // The Notes review sheet's one-shot snapshot of this book's highlights + notes.
+                    val annotationsSnapshot by produceState(
+                        AnnotationsSnapshot(emptyList(), emptyList()), bookKey,
+                    ) {
+                        value = runCatching { container.annotationsRepository.annotationsForBook(bookKey) }
+                            .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
+                    }
+                    Azw3ReaderChrome(
+                        theme = displayTheme.theme,
+                        title = o.book.title,
+                        chromeState = chromeState,
+                        annotations = annotationsSnapshot,
                         onBack = ::finish,
-                        onRelocate = { rel -> enqueueSave(o.book, rel) },
+                        onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
+                        body = {
+                            Azw3ReaderHost(
+                                book = o.book,
+                                bookFile = File(o.path),
+                                restore = o.restore,
+                                settings = container.readerSettingsStore.settings,
+                                onRelocate = { rel -> enqueueSave(o.book, rel) },
+                            )
+                        },
                     )
                 }
             }
@@ -134,6 +176,17 @@ class Azw3ReaderActivity : ComponentActivity() {
         saveRequests.close()
     }
 
+    /** feature #132 WI-7-hosts — share ALL reviewed annotations as one plain-text blob (the review sheet's
+     *  trailing Share → ACTION_SEND). Reuses the shared [annotationsShareText] formatter; no-op when empty. */
+    private fun shareAnnotations(snapshot: AnnotationsSnapshot) {
+        val text = annotationsShareText(snapshot)
+        if (text.isBlank()) return
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, text)
+        }
+        startActivity(android.content.Intent.createChooser(send, null))
+    }
+
     private sealed interface OuterState {
         data object Loading : OuterState
         data object NoBook : OuterState
@@ -151,14 +204,16 @@ private val Ink = Color(0xFF1D1A14)
 private val ChromeFill = Color(0xFFF7F4EE)
 private val Accent = Color(0xFF8C2F2F)
 
-/** The reader screen: the WebView fills the body; a state overlay covers it until Loaded. */
+/** The reader BODY: the WebView fills it; a state overlay covers it until Loaded (feature #132 WI-7-hosts
+ *  moved the top bar into the shared [Azw3ReaderChrome], so this composable no longer wraps its own
+ *  ReaderScaffold — it renders directly into the scaffold's body slot). The MATCH_PARENT WebView sizing
+ *  (bug #357) + the page-turn tap zones + FoliateBridge/Azw3Document wiring are UNCHANGED. */
 @Composable
 private fun Azw3ReaderHost(
     book: Book,
     bookFile: File,
     restore: VReaderLocator?,
     settings: kotlinx.coroutines.flow.Flow<com.vreader.app.reader.settings.ReaderSettings>,
-    onBack: () -> Unit,
     onRelocate: (FoliateMessage.Relocate) -> Unit,
 ) {
     val context = LocalContext.current
@@ -202,29 +257,112 @@ private fun Azw3ReaderHost(
     // an early apply is safe; the document re-applies at book-ready.
     LaunchedEffect(holder, displaySettings) { holder.document.setStyles(displaySettings.foliateDisplayCss()) }
 
-    ReaderScaffold(book.title, onBack) {
-        Box(Modifier.fillMaxSize().testTag("azw3-webview")) {
-            // Keyed on reloadKey so render-death recovery swaps in the NEW WebView node (not the dead one).
-            key(reloadKey) { AndroidView(factory = { holder.webView }, modifier = Modifier.fillMaxSize()) }
-            // Host-driven page-turn tap zones (design vreader-tap-zones.jsx: left third = prev, right third
-            // = next, centre reserved). foliate is paginated, so the host drives next/prev like iOS — there
-            // is no scroll gesture to preserve. Contract: WebView-native interactions (link/footnote taps,
-            // and text selection once the Foliate annotation adapter lands — deferred from the AZW3 MVP)
-            // are reachable in the CENTRE third; the side thirds are page-turn only. The zones use
-            // detectTapGestures (confirmed tap only) so a stray move isn't read as a turn.
-            if (state is Azw3DocState.Loaded) {
-                Row(Modifier.fillMaxSize()) {
-                    TapZone(Modifier.weight(1f).testTag("azw3-prev-zone"), holder) { it.prev() }
-                    Box(Modifier.weight(1f).fillMaxHeight()) // centre — reserved
-                    TapZone(Modifier.weight(1f).testTag("azw3-next-zone"), holder) { it.next() }
-                }
+    // The body renders directly into the shared scaffold's body slot (no own top bar). The WebView keeps
+    // its MATCH_PARENT sizing (bug #357) — the scaffold's body Box fills the space between the chrome bars.
+    Box(Modifier.fillMaxSize().testTag("azw3-webview")) {
+        // Keyed on reloadKey so render-death recovery swaps in the NEW WebView node (not the dead one).
+        key(reloadKey) { AndroidView(factory = { holder.webView }, modifier = Modifier.fillMaxSize()) }
+        // Host-driven page-turn tap zones (design vreader-tap-zones.jsx: left third = prev, right third
+        // = next, centre reserved). foliate is paginated, so the host drives next/prev like iOS — there
+        // is no scroll gesture to preserve. Contract: WebView-native interactions (link/footnote taps,
+        // and text selection once the Foliate annotation adapter lands — deferred from the AZW3 MVP)
+        // are reachable in the CENTRE third; the side thirds are page-turn only. The zones use
+        // detectTapGestures (confirmed tap only) so a stray move isn't read as a turn. A tap on the centre
+        // (reserved) third is not consumed here → it bubbles to the scaffold's center-tap chrome toggle.
+        if (state is Azw3DocState.Loaded) {
+            Row(Modifier.fillMaxSize()) {
+                TapZone(Modifier.weight(1f).testTag("azw3-prev-zone"), holder) { it.prev() }
+                Box(Modifier.weight(1f).fillMaxHeight()) // centre — reserved
+                TapZone(Modifier.weight(1f).testTag("azw3-next-zone"), holder) { it.next() }
             }
-            when (state) {
-                Azw3DocState.Loading -> Centered { CircularProgressIndicator() }
-                Azw3DocState.WebViewUnsupported -> Centered { Text("Update Android System WebView to read this format.", color = Ink) }
-                Azw3DocState.Corrupt -> Centered { Text("This book can’t be opened.", color = Ink) }
-                Azw3DocState.Empty -> Centered { Text("This book has no readable content.", color = Ink) }
-                is Azw3DocState.Loaded -> Unit // the WebView shows the book
+        }
+        when (state) {
+            Azw3DocState.Loading -> Centered { CircularProgressIndicator() }
+            Azw3DocState.WebViewUnsupported -> Centered { Text("Update Android System WebView to read this format.", color = Ink) }
+            Azw3DocState.Corrupt -> Centered { Text("This book can’t be opened.", color = Ink) }
+            Azw3DocState.Empty -> Centered { Text("This book has no readable content.", color = Ink) }
+            is Azw3DocState.Loaded -> Unit // the WebView shows the book
+        }
+    }
+}
+
+/**
+ * The AZW3 reader host chrome — feature #132 WI-7-hosts (mirror of WI-6's [TxtReaderChrome]). Renders the
+ * shared [ReaderChromeScaffold] (top bar + the Notes review sheet) over the AZW3 [body] (the WebView). AZW3
+ * has no reader TOC → `tocEntries` is EMPTY (the EmptyTocProvider posture) → the scaffold hides the Contents
+ * control. It has no Display control (the #129 CSS applies live from the store with no control surface); the
+ * bottom chrome is a Notes-only toolbar ([Azw3NotesBottomChrome]). The top bar's Search/More/bookmark slots
+ * are omitted (null — #133/#134/#135; no dead controls). [onJumpToAnnotation] is NULL — AZW3 review is
+ * review-only (no in-session goTo until #135; the card is non-clickable, a capability gate — FoliateBridge/
+ * Azw3Document/foliate-js stay untouched). Wrapped in a `systemBarsPadding()` Column so the chrome clears
+ * the status/nav bars. Extracted (internal) so the host wiring is directly testable.
+ */
+@Composable
+internal fun Azw3ReaderChrome(
+    theme: ReaderTheme,
+    title: String,
+    chromeState: MutableState<ReaderChromeState>,
+    annotations: AnnotationsSnapshot,
+    onBack: () -> Unit,
+    onShareAnnotations: () -> Unit,
+    body: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
+        ReaderChromeScaffold(
+            theme = theme,
+            title = title,
+            chromeState = chromeState,
+            onBack = onBack,
+            tocEntries = emptyList(),           // no TOC → the scaffold hides the Contents control
+            currentTocIndex = 0,
+            annotations = annotations,
+            onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
+            // AZW3 tap-to-jump is NULL — review-only capability gate (no goTo until #135); cards non-clickable.
+            onJumpToAnnotation = null,
+            onShareAnnotations = onShareAnnotations,
+            // Search/More/bookmark top-bar slots stay null (#133/#134/#135 — no dead controls).
+            bottomChrome = { _, onOpenNotes ->
+                // AZW3 has no Contents (empty TOC) + no Display control → Notes only.
+                Azw3NotesBottomChrome(theme = theme, onOpenNotes = onOpenNotes)
+            },
+            body = body,
+        )
+    }
+}
+
+/**
+ * The AZW3 host's bottom chrome — the designed reader-toolbar "Notes" button only (feature #132 WI-7-hosts).
+ * AZW3 has no reader TOC (Contents hidden) and no Display control surface (#129 applies CSS live from the
+ * store), so of the design's Contents · Notes · Display · AI toolbar only the Notes slot applies. Uses the
+ * same designed icon-above-label treatment as ReaderBottomChrome's Notes slot (the Highlighter/BorderColor
+ * glyph, `chrome-notes` testTag). Rendered ONLY when [onOpenNotes] is non-null (always so for #132).
+ */
+@Composable
+private fun Azw3NotesBottomChrome(theme: ReaderTheme, onOpenNotes: (() -> Unit)?) {
+    if (onOpenNotes == null) return
+    val ink = theme.ink
+    val sub = theme.ink.copy(alpha = 0.6f)
+    val rule = theme.ink.copy(alpha = 0.10f)
+    Column(
+        Modifier.fillMaxWidth().background(theme.background).testTag("azw3-bottom-chrome"),
+    ) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 0.5.dp, max = 0.5.dp).background(rule))
+        Row(
+            Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 28.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onOpenNotes)
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .testTag("chrome-notes")
+                    .semantics { contentDescription = "Notes" },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Icon(Icons.Outlined.BorderColor, contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
+                Text("Notes", color = sub, fontSize = 10.sp, fontWeight = FontWeight.Medium)
             }
         }
     }

@@ -9,8 +9,17 @@
 // "Page N of M" pill tracks the top-visible page; the shared reader chrome (back "Library" + serif
 // title + PDF tag). The `backdrop` is threaded by the Activity — mandatory, no fallback (WI-7).
 //
+// feature #132 WI-7-hosts: the PDF host renders the shared ReaderChromeScaffold (top bar + the Notes
+// review sheet) via the extracted [PdfReaderChrome]. PDF has no TOC → Contents is hidden (empty
+// tocEntries / EmptyTocProvider posture); PDF is rasterized → NO Display control (the #129 theme-only
+// backdrop is applied live from the store, with no control surface — a reduced Display sheet would be
+// undesigned, rule 51). So the bottom chrome is Notes-only ([PdfNotesBottomChrome], the designed Notes
+// toolbar button). PDF tap-to-jump is NON-null: [pdfAnnotationPage] resolves the annotation locator's
+// page (clamped) and the host scrolls the page list to it.
+//
 // @coordinates-with: PdfReaderActivity.kt (hosts these composables, threads the theme backdrop +
-//   PdfDocument + list state), PdfDocument.kt (the renderer), PdfDisplayBackdrop.kt (the mapping).
+//   PdfDocument + list state, wires onJumpToAnnotation to the page-scroll seam), PdfDocument.kt (the
+//   renderer), PdfDisplayBackdrop.kt (the mapping), ReaderChromeScaffold.kt (the shared chrome).
 package com.vreader.app.reader
 
 import android.graphics.Bitmap
@@ -34,9 +43,11 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
+import androidx.compose.material.icons.outlined.BorderColor
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -46,10 +57,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vreader.app.annotations.AnnotationItem
+import com.vreader.app.annotations.AnnotationsSnapshot
+import com.vreader.app.reader.chrome.ReaderChromeScaffold
+import com.vreader.app.reader.chrome.ReaderChromeState
+import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
 
 /** Reader chrome (back + serif title + PDF tag) over the body, on the theme-derived viewer [backdrop]
@@ -81,18 +100,21 @@ internal fun PdfScaffold(title: String, onBack: () -> Unit, backdrop: Color, bod
     }
 }
 
+/**
+ * The PDF reading BODY — the continuous page list on the [backdrop] + the floating "Page N of M" pill —
+ * WITHOUT any chrome. Used inside [PdfReaderChrome]'s scaffold body slot (feature #132 WI-7-hosts): the
+ * shared [ReaderChromeScaffold] now owns the top bar, so the body no longer stacks its own [PdfScaffold].
+ */
 @Composable
-internal fun PdfContinuousReader(title: String, document: PdfDocument, listState: LazyListState, backdrop: Color, onBack: () -> Unit) {
-    Box(Modifier.fillMaxSize()) {
-        PdfScaffold(title, onBack, backdrop) {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                state = listState,
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                items(count = document.pageCount, key = { it }) { i -> PdfPage(document, i) }
-            }
+internal fun PdfReaderBody(document: PdfDocument, listState: LazyListState, backdrop: Color) {
+    Box(Modifier.fillMaxSize().background(backdrop)) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            items(count = document.pageCount, key = { it }) { i -> PdfPage(document, i) }
         }
         // Floating "Page N of M" pill — tracks the top-visible page (1-based).
         PageProgressPill(
@@ -102,6 +124,96 @@ internal fun PdfContinuousReader(title: String, document: PdfDocument, listState
         )
     }
 }
+
+/**
+ * The PDF reader host chrome — feature #132 WI-7-hosts (mirror of WI-6's [TxtReaderChrome]). Renders the
+ * shared [ReaderChromeScaffold] (top bar + the Notes review sheet) over the PDF [body] (the page list).
+ * PDF has no TOC → `tocEntries` is EMPTY (the EmptyTocProvider posture) → the scaffold hides the Contents
+ * control. PDF is rasterized → NO Display control (the #129 theme backdrop applies live from the store with
+ * no control surface); the bottom chrome is a Notes-only toolbar ([PdfNotesBottomChrome]). The top bar's
+ * Search/More/bookmark slots are omitted (null — #133/#134/#135; no dead controls). [onJumpToAnnotation] is
+ * NON-null (PDF jumps via the annotation's page). Wrapped in a `systemBarsPadding()` Column so the chrome
+ * clears the status/nav bars. Extracted (internal) so the host wiring is directly testable.
+ */
+@Composable
+internal fun PdfReaderChrome(
+    theme: ReaderTheme,
+    title: String,
+    chromeState: MutableState<ReaderChromeState>,
+    annotations: AnnotationsSnapshot,
+    onBack: () -> Unit,
+    onJumpToAnnotation: (AnnotationItem) -> Unit,
+    onShareAnnotations: () -> Unit,
+    body: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
+        ReaderChromeScaffold(
+            theme = theme,
+            title = title,
+            chromeState = chromeState,
+            onBack = onBack,
+            tocEntries = emptyList(),           // no TOC → the scaffold hides the Contents control
+            currentTocIndex = 0,
+            annotations = annotations,
+            onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
+            onJumpToAnnotation = onJumpToAnnotation,
+            onShareAnnotations = onShareAnnotations,
+            // Search/More/bookmark top-bar slots stay null (#133/#134/#135 — no dead controls).
+            bottomChrome = { _, onOpenNotes ->
+                // PDF has no Contents (empty TOC) + no Display control → Notes only.
+                PdfNotesBottomChrome(theme = theme, onOpenNotes = onOpenNotes)
+            },
+            body = body,
+        )
+    }
+}
+
+/**
+ * The PDF host's bottom chrome — the designed reader-toolbar "Notes" button only (feature #132 WI-7-hosts).
+ * PDF has no TOC (Contents hidden) and no reflow (#129 gives it NO Display control), so of the design's
+ * Contents · Notes · Display · AI toolbar only the Notes slot applies. Uses the same designed icon-above-
+ * label treatment as ReaderBottomChrome's Notes slot (the Highlighter/BorderColor glyph, `chrome-notes`
+ * testTag) so it reads identically. Rendered ONLY when [onOpenNotes] is non-null (it always is for #132).
+ */
+@Composable
+private fun PdfNotesBottomChrome(theme: ReaderTheme, onOpenNotes: (() -> Unit)?) {
+    if (onOpenNotes == null) return
+    val ink = theme.ink
+    val sub = theme.ink.copy(alpha = 0.6f)
+    val rule = theme.ink.copy(alpha = 0.10f)
+    Column(
+        Modifier.fillMaxWidth().background(theme.background).testTag("pdf-bottom-chrome"),
+    ) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 0.5.dp, max = 0.5.dp).background(rule))
+        Row(
+            Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 28.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onOpenNotes)
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .testTag("chrome-notes")
+                    .semantics { contentDescription = "Notes" },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Icon(Icons.Outlined.BorderColor, contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
+                Text("Notes", color = sub, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+/**
+ * The tap-to-jump target PAGE index for an annotation (feature #132 WI-7-hosts), clamped to a valid page
+ * of a [pageCount]-page document. A PDF locator carries its position in `Locator.page`; a locator with no
+ * page (or a negative one) clamps to 0, and a page past the end clamps to the last page (a safe scroll
+ * target). Pure/JVM-testable ([PdfAnnotationPageTest]). The PDF analog of the TXT [annotationScrollOffset].
+ */
+internal fun pdfAnnotationPage(item: AnnotationItem, pageCount: Int): Int =
+    (item.locator.page ?: 0).coerceIn(0, (pageCount - 1).coerceAtLeast(0))
 
 /** One PDF page — lazily renders ONE bitmap at the measured width (only visible pages render;
  *  off-screen page bitmaps are reclaimed by GC when their composable + reference go away).
