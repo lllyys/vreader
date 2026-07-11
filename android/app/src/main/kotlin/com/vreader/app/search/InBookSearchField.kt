@@ -11,8 +11,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -112,27 +114,36 @@ internal fun InBookSearchField(
             },
         )
         if (hasQuery) {
-            Icon(
-                Icons.Filled.Close,
-                contentDescription = "Clear search",
-                tint = sub,
-                modifier = Modifier
-                    .size(16.dp)
+            // A ≥48dp invisible tap target around the 16dp glyph (the visual stays design-faithful).
+            Box(
+                Modifier
+                    .size(44.dp)
                     .clickable { onQueryChange("") }
-                    .testTag("inbook-search-clear"),
-            )
+                    .testTag("inbook-search-clear")
+                    .semantics { contentDescription = "Clear search" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = null, tint = sub, modifier = Modifier.size(16.dp))
+            }
         }
-        Text(
-            "Cancel",
-            modifier = Modifier
+        // Cancel: the same 14sp text, but its clickable box fills the pill height so the tap target reaches
+        // the 48dp minimum without changing the visible label.
+        Box(
+            Modifier
+                .heightIn(min = 44.dp)
                 .clickable(onClick = onDismiss)
-                .padding(start = 6.dp)
+                .padding(start = 6.dp, end = 2.dp)
                 .testTag("inbook-search-cancel")
                 .semantics { contentDescription = "Cancel search" },
-            color = theme.accent,
-            fontFamily = VReaderFonts.Sans,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "Cancel",
+                color = theme.accent,
+                fontFamily = VReaderFonts.Sans,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
     }
 }

@@ -173,16 +173,21 @@ private fun ResultsBody(
     val groups = results.groups
     val listState = rememberLazyListState()
     val lastGroupIndex = groups.lastIndex
+    // The tail identity that must change when a new page arrives. `loadMore()` coalesces adjacent same-section
+    // results, so a page can extend the CURRENT last group's hit count WITHOUT adding a new group — keying the
+    // re-arm on `(lastGroupIndex, lastGroupHitCount)` restarts the trigger in that case too, so the next page
+    // is still requested (round-2 audit Medium).
+    val lastGroupHitCount = groups.lastOrNull()?.hits?.size ?: 0
 
     val matchCount = remember(groups) { groups.sumOf { it.hits.size } }
     // A group's hits are wrapped in the design's tinted rounded container.
     val containerFill = theme.ink.copy(alpha = if (theme.isDark) 0.03f else 0.02f)
 
     // Append-on-scroll: fire onLoadMore once each time the tail group becomes the last-visible item AND more
-    // pages are available. Keyed on (moreAvailable, lastGroupIndex) so a new page resets the trigger;
-    // `distinctUntilChanged` collapses the burst of layout emissions into one fire per tail; `filter { it }`
-    // fires only on the edge into the tail (not on the edge back out).
-    LaunchedEffect(results.moreAvailable, lastGroupIndex, listState) {
+    // pages are available. Keyed on (moreAvailable, lastGroupIndex, lastGroupHitCount) so a new page — whether
+    // it adds a group OR grows the last one — resets the trigger; `distinctUntilChanged` collapses the burst
+    // of layout emissions into one fire per tail; `filter { it }` fires only on the edge into the tail.
+    LaunchedEffect(results.moreAvailable, lastGroupIndex, lastGroupHitCount, listState) {
         if (!results.moreAvailable || lastGroupIndex < 0) return@LaunchedEffect
         snapshotFlow {
             // The tail is reached once the last group's container is the last laid-out item.

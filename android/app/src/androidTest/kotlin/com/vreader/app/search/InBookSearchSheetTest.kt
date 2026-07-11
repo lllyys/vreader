@@ -296,6 +296,57 @@ class InBookSearchSheetTest {
         assertEquals("moreAvailable=false must never fire onLoadMore", 0, loadMoreCount)
     }
 
+    @Test fun appendGrowingTheLastGroup_reArmsOnLoadMore() {
+        // `loadMore()` coalesces adjacent same-section hits, so a new page can grow the CURRENT last group's
+        // hit count WITHOUT adding a new group. The trigger must re-arm on `(lastGroupIndex, hitCount)` so the
+        // next page is still requested (round-2 audit Medium). Drive a growing tail group and assert a second
+        // fire.
+        var loadMoreCount = 0
+        val state = androidx.compose.runtime.mutableStateOf(
+            InBookSearchScreenState(
+                query = "bingley",
+                recents = emptyList(),
+                content = InBookSearchContent.Results(
+                    listOf(InBookGroup("Chapter 1", listOf(hit("a Bingley aside", listOf(IntRange(2, 8)), "Chapter 1", 1)))),
+                    moreAvailable = true,
+                ),
+            ),
+        )
+        compose.setContent {
+            InBookSearchSheetContent(
+                theme = ReaderTheme.Paper,
+                bookTitle = "Pride and Prejudice",
+                state = state.value,
+                query = "bingley",
+                onQueryChange = {},
+                onPickRecent = {},
+                onJump = { JumpResult.Succeeded },
+                onLoadMore = { loadMoreCount++ },
+                onDismiss = {},
+            )
+        }
+        compose.waitForIdle()
+        val firstFire = loadMoreCount
+        assertTrue("initial tail should fire onLoadMore", firstFire >= 1)
+        // A next page grows the SAME last group (no new group) — the trigger must re-arm.
+        state.value = state.value.copy(
+            content = InBookSearchContent.Results(
+                listOf(
+                    InBookGroup(
+                        "Chapter 1",
+                        listOf(
+                            hit("a Bingley aside", listOf(IntRange(2, 8)), "Chapter 1", 1),
+                            hit("more Bingley later", listOf(IntRange(5, 11)), "Chapter 1", 2),
+                        ),
+                    ),
+                ),
+                moreAvailable = true,
+            ),
+        )
+        compose.waitForIdle()
+        assertTrue("growing the last group must re-arm + re-fire onLoadMore", loadMoreCount > firstFire)
+    }
+
     // ── Indexing ───────────────────────────────────────────────────────
 
     @Test fun indexingContent_showsIndexingHint() {
