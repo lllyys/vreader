@@ -11,7 +11,7 @@
 
 **Design authority (rule 51):** `vreader-reader.jsx` (`ReaderTopChrome` bookmark toggle — `bookmarked` state, `onToggleBookmark`, `Icons.BookmarkFilled`/`Icons.Bookmark`), `vreader-panels.jsx` (`TOCSheet` **Bookmarks tab**: bookmark icon · italic serif preview · `chapter · p.N · date` · chevron), `vreader-android-annotations.jsx` (`BookmarkCard` + the `Bookmarks` filter chip). Every surface built below is depicted. **Bookmark row DELETION is now DESIGNED on Android** (`dev-docs/designs/vreader-fidelity-v1/project/vreader-bookmark-delete.jsx` — swipe / long-press / confirm; **GH #1903 CLOSED**, the plan predates the close) but is **DEFERRED to a follow-up WI** to keep #135 scoped to create/toggle/list/jump — a legitimate SCOPING choice, not a rule-51 block.
 
-**Status:** Gate-1 v2 (2026-07-11, round-1 audit findings applied — see `## Gate-2 audit — round 1`). Gate-2 re-audit pending.
+**Status:** Gate-2 SIGNED OFF (2026-07-11, v2 — round-1 findings applied, round-2 re-audit CLEAN; see the #135 row in `docs/features.md` for the sign-off record). READY TO BUILD. In progress: WI-1 merged.
 
 ## 1. Problem
 
