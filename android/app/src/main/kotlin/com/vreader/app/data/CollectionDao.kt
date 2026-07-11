@@ -77,6 +77,16 @@ abstract class CollectionDao {
     @Query("SELECT collectionId FROM book_collection WHERE bookKey = :bookKey")
     abstract fun observeCollectionIdsForBook(bookKey: String): Flow<List<String>>
 
+    /** The ordered collection NAMES a book belongs to (feature #134 WI-1 — the Book Details tag chips).
+     *  ONE atomic join (names, not ids), oldest-first, so the chips never transiently mismatch a
+     *  separate collections read + membership read. Empty when the book is in no collection. */
+    @Query(
+        "SELECT c.name FROM book_collection bc " +
+            "INNER JOIN collections c ON bc.collectionId = c.id " +
+            "WHERE bc.bookKey = :bookKey ORDER BY c.createdAt ASC",
+    )
+    abstract fun collectionNamesForBook(bookKey: String): Flow<List<String>>
+
     // --- transactional dedup (check-then-write atomically) ---
 
     /** Atomic create-if-absent: inserts only when [nameKey] is free. Returns false on a duplicate. */
