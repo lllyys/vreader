@@ -33,9 +33,12 @@ object RawOffsetMatcher {
 
     /**
      * A memory-safety ceiling on how many occurrences a single chunk may enumerate. This is an OOM
-     * guard set FAR above any realistic occurrence count (a ~4 KB chunk cannot hold anywhere near this
-     * many word occurrences), NOT a user-visible truncation — pagination completeness is provided by
-     * the [fromOccurrenceIndex]/[RawOccurrenceSlice.nextOccurrenceIndex] window, not by this cap.
+     * guard set FAR above any realistic occurrence count (a ~4 KB #128 chunk cannot hold anywhere near
+     * this many word/phrase occurrences, so it is UNREACHABLE in practice), NOT a user-visible
+     * truncation — pagination completeness is provided by the
+     * [fromOccurrenceIndex]/[RawOccurrenceSlice.nextOccurrenceIndex] window, not by this cap. If the
+     * guard were ever tripped it returns the current index as a RESUME point, never a false "exhausted"
+     * (null), so completeness holds even at the guard boundary.
      */
     private const val OCCURRENCE_OOM_GUARD = 100_000
 
@@ -76,8 +79,14 @@ object RawOffsetMatcher {
                     emitted.add(RawOccurrence(startUtf16 = i, endUtf16 = end, occurrenceIndex = occurrenceIndex))
                 }
                 occurrenceIndex++
-                if (occurrenceIndex >= OCCURRENCE_OOM_GUARD) break
                 i = end   // non-overlapping: advance past this match.
+                if (occurrenceIndex >= OCCURRENCE_OOM_GUARD) {
+                    // OOM guard tripped. A real chunk (bounded to ~4 KB by the #128 extractor) holds at
+                    // most a few thousand word/phrase occurrences, so this is UNREACHABLE in practice.
+                    // If it is ever hit we must NOT falsely claim exhaustion — return the current index
+                    // as the resume point so no occurrence is silently dropped (completeness contract).
+                    return RawOccurrenceSlice(emitted, occurrenceIndex)
+                }
             } else {
                 i += Character.charCount(text.codePointAt(i))
             }
@@ -154,9 +163,31 @@ object RawOffsetMatcher {
         return if (matches) end else start
     }
 
-    /** A word separator: whitespace or an ISO control character (mirrors SnippetBuilder's collapse). */
-    private fun isSeparator(codePoint: Int): Boolean =
-        Character.isWhitespace(codePoint) || Character.isISOControl(codePoint)
+    /**
+     * A word separator — anything that is NOT a token character. Mirrors SQLite FTS4 `unicode61`, which
+     * treats letters, digits, AND combining marks as token characters, and EVERY other code point
+     * (whitespace, punctuation, symbols, an em-dash, a period, brackets) as a separator. So
+     * `cat, dog` / `(cat)` / `cat—dog` delimit `cat` as a whole word, matching what made the chunk hit
+     * the FTS MATCH — without this, punctuation-glued runs would miss real anchors (Gate-4 finding 1).
+     *
+     * - Combining marks (Unicode categories Mn/Mc/Me — e.g. a combining acute over a preceding letter)
+     *   are token continuation, NOT separators, so a diacritic stays INSIDE its word's raw span (the
+     *   raw span must include the mark even though the fold strips it — a length-changing fold must not
+     *   shift the span).
+     * - A CJK ideograph is a separator for the WORD path (CJK is matched by the phrase path), so a
+     *   Latin word adjacent to a CJK run is still bounded correctly.
+     */
+    private fun isSeparator(codePoint: Int): Boolean {
+        if (SearchTextNormalizer.isCjk(codePoint)) return true
+        if (Character.isLetterOrDigit(codePoint)) return false
+        return when (Character.getType(codePoint)) {
+            Character.NON_SPACING_MARK.toInt(),      // Mn — combining diacritics (e.g. U+0301)
+            Character.COMBINING_SPACING_MARK.toInt(), // Mc
+            Character.ENCLOSING_MARK.toInt(),         // Me
+            -> false
+            else -> true
+        }
+    }
 
     /** The code point ENDING immediately before raw index [index] (surrogate-pair aware). */
     private fun prevCodePoint(text: String, index: Int): Int {

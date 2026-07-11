@@ -16,21 +16,35 @@ import org.robolectric.RobolectricTestRunner
  *
  * Robolectric-run so the normalizer's bundled `android.icu` case-fold is present. The query is always
  * built via [SearchQueryBuilder.structuredQuery] so the units mirror exactly what made the chunk MATCH.
+ * CJK / combining / non-BMP chars are written as explicit `\uXXXX` escapes so the raw byte layout the
+ * offset assertions depend on is unambiguous.
  *
  * Invariants asserted here:
  * - Spans are RAW UTF-16 offsets into the UN-folded chunk text (NOT display-collapsed, NOT segmented).
- * - A length-changing fold (NFKC full-width→half, ß→ss, combining-mark strip) does NOT shift the span.
+ * - A length-changing fold (NFKC full-width->half, ss<->ß, combining-mark strip) does NOT shift the span.
  * - Surrogate pairs are never split (code-point iteration).
- * - A CJK Phrase span is TIGHT (关于编程的书 + 编程 → the 编程 span only).
- * - PrefixTerm matches at a word boundary; Term matches the whole token.
+ * - A CJK Phrase span is TIGHT (关于编程的书 + 编程 -> the 编程
+ *   span only).
+ * - PrefixTerm matches at a word boundary; Term matches the whole token; word boundaries respect FTS
+ *   `unicode61` (punctuation is a separator).
  * - Overlapping matches are deduped (non-overlapping, start-ordered).
- * - A folded-only match with no locatable raw anchor → 0 occurrences (head-fallback contract).
+ * - A folded-only match with no locatable raw anchor -> 0 occurrences (head-fallback contract).
  * - COMPLETENESS: a 40-occurrence chunk requested with maxThisPage=10 is retrieved IN FULL across 4
  *   paged calls threading fromOccurrenceIndex; the union = all 40 in order, no gap/dupe, last slice's
  *   nextOccurrenceIndex == null.
  */
 @RunWith(RobolectricTestRunner::class)
 class RawOffsetMatcherTest {
+
+    // Explicit escapes so the raw byte layout is unambiguous (offset assertions depend on it).
+    private val guanYu = "关于"       // 关于
+    private val bianCheng = "编程"    // 编程
+    private val deShu = "的书"        // 的书
+    private val henHao = "很好"       // 很好
+    private val zaiLai = "再来"       // 再来
+    private val zhong = "中"              // 中
+    private val ext = "𠀀"          // U+20000 (CJK Ext B) — a surrogate PAIR, 2 UTF-16 units
+    private val combiningAcute = "́"     // combining acute accent
 
     private fun sq(raw: String): StructuredQuery = SearchQueryBuilder.structuredQuery(raw)!!
 
@@ -47,10 +61,22 @@ class RawOffsetMatcherTest {
         return all
     }
 
-    /** Assert every occurrence's span folds to the same normalized form as the FIRST query unit. */
-    private fun assertSpanFoldsToFirstUnit(text: String, occ: RawOccurrence, expectedFold: String) {
+    /** Assert the raw span folds to the same normalized form as the FIRST query unit. */
+    private fun assertSpanFoldsTo(text: String, occ: RawOccurrence, expectedFold: String) {
         val slice = text.substring(occ.startUtf16, occ.endUtf16)
         assertEquals(expectedFold, SearchTextNormalizer.normalize(slice))
+    }
+
+    /** Assert no span boundary lands inside a UTF-16 surrogate pair. */
+    private fun assertNoSurrogateSplit(text: String, occ: RawOccurrence) {
+        // start is not a LOW surrogate (would mean we split the pair whose high half is at start-1).
+        if (occ.startUtf16 in text.indices) {
+            assertTrue("start splits a surrogate pair", !Character.isLowSurrogate(text[occ.startUtf16]))
+        }
+        // end is not the low half of a pair whose high half is at end-1 (i.e. end doesn't cut a pair).
+        if (occ.endUtf16 in text.indices) {
+            assertTrue("end splits a surrogate pair", !Character.isLowSurrogate(text[occ.endUtf16]))
+        }
     }
 
     // ---- N occurrences in one chunk; exact raw spans ----
@@ -61,7 +87,6 @@ class RawOffsetMatcherTest {
         val q = sq("cat")
         val occ = allOccurrences(text, q, pageSize = 100)
         assertEquals(3, occ.size)
-        // Exact raw offsets of each "cat".
         assertEquals(listOf(0, 13, 24), occ.map { it.startUtf16 })
         assertEquals(listOf(3, 16, 27), occ.map { it.endUtf16 })
         assertEquals(listOf(0, 1, 2), occ.map { it.occurrenceIndex })
@@ -80,91 +105,120 @@ class RawOffsetMatcherTest {
         assertEquals("alpha", text.substring(occ[1].startUtf16, occ[1].endUtf16))
     }
 
+    // ---- punctuation is a word separator (FTS unicode61 parity) ----
+
+    @Test fun punctuationBoundsWords_notGluedIntoOneRun() {
+        // Term("cat") must match "cat" even when glued to punctuation: "cat," / "(cat)" / "cat—dog".
+        // Without unicode61-style separators these punctuation-glued runs would miss the anchor (the
+        // FTS index matched via unicode61 tokens, so the raw matcher must use the same boundaries).
+        val text = "cat, (cat) then cat—dog"   // — = em dash; 3 occurrences of the word "cat"
+        // A query whose FIRST unit is Term("cat"): "cat and x" -> Term("cat"), Term("and"), PrefixTerm("x").
+        val q = sq("cat and x")
+        val occ = allOccurrences(text, q, pageSize = 100)
+        assertEquals(3, occ.size)
+        assertEquals(listOf(0, 6, 16), occ.map { it.startUtf16 })
+        occ.forEach { assertEquals("cat", text.substring(it.startUtf16, it.endUtf16)) }
+    }
+
     // ---- ß → ss : a length-changing fold does NOT shift the raw span ----
 
     @Test fun eszettFoldsToSs_rawSpanStaysRaw() {
-        // Query "strasse" (folded); raw text has "Straße" (6 UTF-16 units) — one raw char ß folds to
-        // TWO fold-chars "ss". The returned span must be the RAW 6-unit "Straße", not a 7-char span.
-        val text = "das Straße hier"
-        val q = sq("Straße")   // -> PrefixTerm("strasse")
+        // Query "Straße" (ß) folds to "strasse"; raw "Straße" is 6 UTF-16 units, one raw ß
+        // folding to TWO fold-chars. The span must be the RAW 6-unit word, not a 7-char folded span.
+        val text = "das Straße hier"   // "Straße" starts at raw index 4, ends at 10 (6 units)
+        val q = sq("Straße")           // -> PrefixTerm("strasse")
         val occ = allOccurrences(text, q, pageSize = 100)
         assertEquals(1, occ.size)
         val s = occ[0]
+        assertEquals(4, s.startUtf16)                // exact absolute raw offsets
+        assertEquals(10, s.endUtf16)
         assertEquals("Straße", text.substring(s.startUtf16, s.endUtf16))
-        assertEquals(6, s.endUtf16 - s.startUtf16)   // RAW length, not folded length
-        assertSpanFoldsToFirstUnit(text, s, "strasse")
+        assertEquals(6, s.endUtf16 - s.startUtf16)   // RAW length, not the 7-char folded length
+        assertSpanFoldsTo(text, s, "strasse")
     }
 
     // ---- NFKC full-width → half-width : raw span preserved ----
 
     @Test fun fullWidthLatin_nfkcFold_rawSpanStaysRaw() {
-        // Full-width "ｃｏｄｅ" (4 full-width code units) folds to half-width "code". The span must be
-        // the RAW full-width run.
-        val text = "the ｃｏｄｅ example"
+        // Full-width "ｃｏｄｅ" (ｃｏｄｅ) folds to half-width "code". The span is the RAW run.
+        val fullWidth = "ｃｏｄｅ"
+        val text = "the $fullWidth example"    // run at raw index 4..8 (4 BMP full-width units)
         val q = sq("code")   // PrefixTerm("code")
         val occ = allOccurrences(text, q, pageSize = 100)
         assertEquals(1, occ.size)
-        val fullWidth = "ｃｏｄｅ"
+        assertEquals(4, occ[0].startUtf16)            // exact absolute raw offsets
+        assertEquals(8, occ[0].endUtf16)
         assertEquals(fullWidth, text.substring(occ[0].startUtf16, occ[0].endUtf16))
-        assertSpanFoldsToFirstUnit(text, occ[0], "code")
+        assertSpanFoldsTo(text, occ[0], "code")
     }
 
     // ---- combining marks : diacritic strip does not shift the raw span ----
 
     @Test fun combiningMarks_diacriticStrip_rawSpanStaysRaw() {
-        // "café" written with a combining acute (e + U+0301) folds to "cafe". The span must include the
-        // combining mark (raw), i.e. 5 UTF-16 units, not the folded 4.
-        val text = "a café shop"   // "café" = c a f e ́  (combining acute), starts at raw index 2
+        // "cafe" + combining acute over the 'e' folds to "cafe". The raw word is 5 UTF-16 units
+        // (c a f e + the combining mark); the span must INCLUDE the combining mark, not drop it.
+        val cafe = "cafe$combiningAcute"          // c a f e ́  — 5 UTF-16 units
+        val text = "a $cafe shop"                       // word starts at raw index 2, ends at 7
         val q = sq("cafe")
         val occ = allOccurrences(text, q, pageSize = 100)
         assertEquals(1, occ.size)
         val s = occ[0]
-        assertEquals("café", text.substring(s.startUtf16, s.endUtf16))
-        assertEquals(5, s.endUtf16 - s.startUtf16)   // includes the combining mark
-        assertSpanFoldsToFirstUnit(text, s, "cafe")
+        assertEquals(2, s.startUtf16)                    // exact absolute raw offsets
+        assertEquals(7, s.endUtf16)
+        assertEquals(cafe, text.substring(s.startUtf16, s.endUtf16))
+        assertEquals(5, s.endUtf16 - s.startUtf16)       // includes the combining mark (folded form = 4)
+        assertSpanFoldsTo(text, s, "cafe")
     }
 
     // ---- surrogate pairs never split ----
 
     @Test fun surrogatePair_neverSplit_spanOnCodePointBoundary() {
-        // A non-BMP CJK ideograph (CJK Ext B, U+20000, "𠀀") is a surrogate PAIR (2 UTF-16 units).
-        // Query the two-char phrase 𠀀A? No — use it as a CJK char in a phrase with a BMP CJK char.
-        val ext = "𠀀"          // U+20000, CJK Ext B — 2 UTF-16 units, isCjk == true
-        val text = "x${ext}中y"           // ext at raw index 1..2, 中 at 3
-        val q = sq("${ext}中")            // Phrase([ext, "中"]) — a 2-char CJK run
+        // A non-BMP CJK ideograph (CJK Ext B, U+20000) is a surrogate PAIR (2 UTF-16 units). Query a
+        // 2-char CJK phrase [U+20000, 中] and assert the span brackets the pair without cutting it.
+        val text = "x$ext${zhong}y"    // x(0) [hi(1) lo(2)] 中(3) y(4)
+        val q = sq("$ext$zhong")       // Phrase([U+20000, 中]) — a 2-char CJK run
         val occ = allOccurrences(text, q, pageSize = 100)
         assertEquals(1, occ.size)
         val s = occ[0]
-        // span must be exactly the "𠀀中" run: start 1 (before the high surrogate), end 4 (after 中).
-        assertEquals(1, s.startUtf16)
-        assertEquals(4, s.endUtf16)
-        assertEquals("${ext}中", text.substring(s.startUtf16, s.endUtf16))
-        // start never lands inside a surrogate pair.
-        assertTrue(!Character.isLowSurrogate(text[s.startUtf16]))
+        assertEquals(1, s.startUtf16)   // before the high surrogate
+        assertEquals(4, s.endUtf16)     // after 中
+        assertEquals("$ext$zhong", text.substring(s.startUtf16, s.endUtf16))
+        assertNoSurrogateSplit(text, s)
+    }
+
+    @Test fun surrogatePair_beforeAnchor_notSplitOnAdvance() {
+        // A non-BMP char precedes a matchable BMP-only run: advancing past the pair must step over BOTH
+        // UTF-16 units (Character.charCount == 2), never landing a scan start on the low surrogate.
+        val text = "${ext}cat cat"     // pair at 0..1, "cat" at 2..5 and 6..9
+        val q = sq("cat")
+        val occ = allOccurrences(text, q, pageSize = 100)
+        assertEquals(2, occ.size)
+        assertEquals(listOf(2, 6), occ.map { it.startUtf16 })
+        occ.forEach { assertNoSurrogateSplit(text, it) }
     }
 
     // ---- tight CJK phrase span ----
 
     @Test fun cjkPhrase_spanIsTight_notWholeRun() {
         // 关于编程的书 + query 编程 -> the 编程 span ONLY (indices 2..4), not the surrounding text.
-        val text = "关于编程的书"
-        val q = sq("编程")   // Phrase(["编","程"])
+        val text = "$guanYu$bianCheng$deShu"   // 关于(0..1) 编程(2..3) 的书(4..5)
+        val q = sq(bianCheng)   // Phrase([编, 程])
         val occ = allOccurrences(text, q, pageSize = 100)
         assertEquals(1, occ.size)
         val s = occ[0]
-        assertEquals("编程", text.substring(s.startUtf16, s.endUtf16))
         assertEquals(2, s.startUtf16)
         assertEquals(4, s.endUtf16)
+        assertEquals(bianCheng, text.substring(s.startUtf16, s.endUtf16))
     }
 
     @Test fun cjkPhrase_multipleOccurrences_eachTight() {
-        val text = "编程很好编程再来编程"  // 编程 at 0..2, 4..6, 8..10
-        val q = sq("编程")
+        val text = "$bianCheng$henHao$bianCheng$zaiLai$bianCheng"  // 编程 at 0..2, 4..6, 8..10
+        val q = sq(bianCheng)
         val occ = allOccurrences(text, q, pageSize = 100)
         assertEquals(3, occ.size)
         assertEquals(listOf(0, 4, 8), occ.map { it.startUtf16 })
         assertEquals(listOf(2, 6, 10), occ.map { it.endUtf16 })
-        occ.forEach { assertEquals("编程", text.substring(it.startUtf16, it.endUtf16)) }
+        occ.forEach { assertEquals(bianCheng, text.substring(it.startUtf16, it.endUtf16)) }
     }
 
     // ---- PrefixTerm boundary ----
@@ -175,48 +229,63 @@ class RawOffsetMatcherTest {
         val text = "reprogram the program now"
         val q = sq("prog")   // PrefixTerm("prog")
         val occ = allOccurrences(text, q, pageSize = 100)
-        // only "program" (word-initial) matches; the anchor span is the tight fold of the word prefix.
         assertEquals(1, occ.size)
         val s = occ[0]
         assertEquals("program", text.substring(s.startUtf16, s.endUtf16))
+        // The standalone word "program" starts at 14; the "prog" INSIDE "reprogram" (index 2) is NOT a
+        // word-boundary match and is correctly skipped.
+        assertEquals(14, s.startUtf16)
     }
 
     // ---- Term whole-token ----
 
     @Test fun term_matchesWholeTokenOnly_notPrefix() {
         // A Term is a whole-token match. "cats and dogs" -> Term("cats"), Term("and"), PrefixTerm("dogs").
-        // The FIRST unit (anchor) is Term("cats"): matches the whole word "cats" but not "cat" or
-        // "category".
+        // The FIRST unit (anchor) is Term("cats"): matches the whole word "cats" but not "cat"/"category".
         val text = "cat category cats scatter"
         val q = sq("cats and dogs")   // first unit Term("cats")
         val occ = allOccurrences(text, q, pageSize = 100)
         assertEquals(1, occ.size)
         assertEquals("cats", text.substring(occ[0].startUtf16, occ[0].endUtf16))
+        assertEquals(text.indexOf("cats"), occ[0].startUtf16)
     }
 
-    // ---- overlapping-match dedupe ----
+    // ---- overlapping-match dedupe (precise, CJK phrase where overlap is possible) ----
 
-    @Test fun overlappingMatches_deduped_nonOverlappingStartOrdered() {
-        // "aa" queried against "aaaa": non-overlapping leftmost enumeration yields 2 matches (0..2,
-        // 2..4), NOT 3 (which overlapping would produce).
-        val text = "aaaa"
-        val q = sq("aa")   // PrefixTerm("aa")
+    @Test fun overlappingCjkPhrase_deduped_nonOverlappingLeftmost() {
+        // Query phrase 编编 against 编编编编 (4 identical CJK chars). Overlapping matching would find 3
+        // matches (0..2, 1..3, 2..4); the deterministic NON-overlapping leftmost rule finds exactly 2
+        // (0..2 then advance to 2, 2..4), never 3. This validates the dedupe rule precisely.
+        val bian = "编"                 // 编
+        val text = bian.repeat(4)           // 编编编编
+        val q = sq(bian + bian)             // Phrase([编, 编])
         val occ = allOccurrences(text, q, pageSize = 100)
-        // matches are non-overlapping: each start >= previous end.
+        assertEquals(2, occ.size)
+        assertEquals(listOf(0, 2), occ.map { it.startUtf16 })
+        assertEquals(listOf(2, 4), occ.map { it.endUtf16 })
+        // non-overlapping: each start >= previous end.
         for (i in 1 until occ.size) {
             assertTrue("occ $i overlaps prev", occ[i].startUtf16 >= occ[i - 1].endUtf16)
         }
-        assertTrue("expected at least 1 non-overlapping match", occ.isNotEmpty())
     }
 
     // ---- folded-only, no raw anchor → 0 occurrences (head fallback) ----
 
     @Test fun noRawAnchor_returnsZeroOccurrences() {
-        // The chunk does NOT actually contain the query's first unit as a raw anchor. (The FTS index
-        // matched some OTHER chunk / via AND across units, but this specific chunk has no locatable
-        // anchor for the first unit.) The matcher returns an empty slice — the repository head-fallback.
+        // The chunk does NOT contain the query's first unit as a raw anchor at all -> empty slice.
         val text = "nothing relevant here at all"
         val q = sq("zzzz")   // PrefixTerm("zzzz") — no anchor
+        val slice = RawOffsetMatcher.occurrences(text, q, fromOccurrenceIndex = 0, maxThisPage = 10)
+        assertEquals(emptyList<RawOccurrence>(), slice.occurrences)
+        assertNull(slice.nextOccurrenceIndex)
+    }
+
+    @Test fun foldedOnlyNoAnchor_multiUnitQuery_firstUnitAbsent_returnsZero() {
+        // A genuine folded/AND case: the chunk contains the SECOND unit ("beta") but NOT the anchor
+        // (first unit "alpha"). The chunk hit the FTS MATCH via AND, but the anchor has no raw span
+        // here -> the matcher returns 0 (the repository head-fallback jumps to the section head).
+        val text = "only beta appears in this chunk, no anchor word"
+        val q = sq("alpha beta gamma")   // first unit Term("alpha") — absent from the text
         val slice = RawOffsetMatcher.occurrences(text, q, fromOccurrenceIndex = 0, maxThisPage = 10)
         assertEquals(emptyList<RawOccurrence>(), slice.occurrences)
         assertNull(slice.nextOccurrenceIndex)
@@ -231,7 +300,7 @@ class RawOffsetMatcherTest {
     // ---- COMPLETENESS: 40 occurrences, maxThisPage=10, retrieved in full across 4 paged calls ----
 
     @Test fun completeness_fortyOccurrences_maxTenPerPage_retrievedInFullAcrossFourPages() {
-        // A chunk with EXACTLY 40 occurrences of "x" (whole-token). maxThisPage=10 → 4 gapless,
+        // A chunk with EXACTLY 40 occurrences of "hit" (whole-token). maxThisPage=10 → 4 gapless,
         // dupe-free pages; the 4th slice's nextOccurrenceIndex == null.
         val builder = StringBuilder()
         val starts = mutableListOf<Int>()
@@ -272,13 +341,12 @@ class RawOffsetMatcherTest {
         assertEquals(40, union.size)
         assertEquals((0..39).toList(), union.map { it.occurrenceIndex })
         assertEquals(starts, union.map { it.startUtf16 })   // exact raw offsets of every "hit"
-        // no duplicates.
-        assertEquals(40, union.map { it.startUtf16 }.toSet().size)
+        assertEquals(40, union.map { it.startUtf16 }.toSet().size)   // no duplicates
     }
 
     @Test fun occurrenceIndex_stableAcrossResumeFromMiddle() {
         // Resuming at fromOccurrenceIndex = 5 lands on the exact 6th occurrence (occurrenceIndex 5),
-        // identical to what a full page-0 enumeration reports at index 5.
+        // identical to what a full enumeration reports at index 5.
         val text = (0 until 12).joinToString(" ") { "hit" }
         val q = sq("hit")
         val full = allOccurrences(text, q, pageSize = 100)
