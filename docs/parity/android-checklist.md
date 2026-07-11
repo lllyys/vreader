@@ -49,12 +49,13 @@ Build order is roughly reuse-leverage / dependency order.
   (`android/v0.9.1`→`v0.10.0`); Gate-5b `dev-docs/verification/feature-122-20260628.md` (`result: pass`).
   GH #1828 closed.
 
-- [~] **B. Highlights & annotations** — in-reader text-selection popover (5 colors · highlight · note ·
+- [x] **B. Highlights & annotations** — in-reader text-selection popover (5 colors · highlight · note ·
   copy · translate · share) + the annotations review sheet (highlights / notes / bookmarks filter).
   Design: `vreader-android-annotations.jsx` (+ `vreader-annotations.jsx`).
   Needs: a highlights/notes/bookmarks Room schema (migration) + reader text-selection integration
   (Readium decorations for EPUB; TXT/MD selection). iOS parity: #62.
-  Status: **IN PROGRESS** — decomposed into 3 features (Gate-2 entry-point decision).
+  Status: **VERIFIED 2026-07-12** — decomposed into 3 highlight features (#123/#124/#125) + the annotations
+  review sheet (#132) + bookmark creation/list (#135); all VERIFIED. Box B COMPLETE.
   **#123 EPUB highlighting VERIFIED 2026-06-28** (`android/v0.11.0`, GH #1835 closed: schema +
   domain + Readium selection/decoration + edit/remove, on-device-verified incl. live-navigator render).
   **#124 TXT highlighting VERIFIED 2026-06-28** (`android/v0.12.0`, GH #1841 closed: custom Compose
@@ -65,8 +66,10 @@ Build order is roughly reuse-leverage / dependency order.
   through the selection controller + wash + `TxtReaderActivity` — the `BookFormat.txt` gate is gone, so
   MD select→highlight/note/copy/share→persist→wash→tap-edit/remove works on the same engine TXT uses;
   evidence `dev-docs/verification/feature-125-20260629.md`).
-  **Remaining for box B: the annotations review sheet + bookmark creation** (ride with item **F**, which
-  owns the chrome entry). Box checks when those land with F.
+  **Box B complete**: the annotations review sheet landed with **#132 VERIFIED 2026-07-11** (`android/v0.15.3`,
+  GH #1924) and bookmark creation/toggle/list/jump with **#135 VERIFIED 2026-07-12** (`android/v0.17.2`,
+  GH #1927 closed; evidence `dev-docs/verification/feature-135-20260712.md` — live-WebDAV bookmark
+  round-trip UUID-preserving + toggle/list/jump across all 5 formats).
 
 - [~] **C. Library management — collections + search** — a collections shelf-bar over the grid +
   manage/assign sheets + search (metadata hits split from in-text hits).
@@ -94,12 +97,17 @@ Build order is roughly reuse-leverage / dependency order.
   Compose hosts → needs a paged renderer first; a layout toggle there would be a non-functional control).
   Box E checks when BOTH #129 AND the layout follow-up are VERIFIED.**
 
-- [ ] **F. Reader navigation chrome** — the designed top/bottom reader bars hosting: Contents (TOC) +
+- [~] **F. Reader navigation chrome** — the designed top/bottom reader bars hosting: Contents (TOC) +
   bookmarks, find-in-book (in-reader text search), and the More menu (book details · share · export).
   Design: `vreader-reader.jsx` + `vreader-panels.jsx` + `vreader-more.jsx` + `vreader-book-details.jsx`
   + `vreader-search.jsx`. (The TTS Read-aloud entry from #121 already added the bottom-bar slot.)
   Likely splits into ≥2 features (TOC/bookmarks; find-in-book; more-menu/details/share). iOS parity:
   #60 WI-6 (chrome), #61 (details), #62 (TOC/bookmarks).
+  Status: **IN PROGRESS** — the chrome shell + Contents/TOC (**#132 VERIFIED 2026-07-11**, `android/v0.15.3`,
+  GH #1924), the More menu + Book Details + Share (**#134 VERIFIED 2026-07-11**, `android/v0.16.1`, GH #1926),
+  and Contents+**bookmarks** (**#135 VERIFIED 2026-07-12**, `android/v0.17.2`, GH #1927) are all VERIFIED.
+  **Remaining for box F: find-in-book (#133)** — needs a Gate-2 round-2 plan (search-anchor strategy).
+  Box checks when #133 is VERIFIED.
 
 ### Deferred (explicit go/no-go — not autonomously startable)
 
