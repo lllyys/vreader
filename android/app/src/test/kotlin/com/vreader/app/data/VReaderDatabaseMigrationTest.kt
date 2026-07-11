@@ -238,4 +238,32 @@ class VReaderDatabaseMigrationTest {
             db.close()
         }
     }
+
+    /**
+     * Feature #128 WI-1 — MIGRATION_5_6 adds the nullable `books.author` column. Seed a v5-shaped
+     * `books` row (WITHOUT `author`), then open the current Room DB (v6) with the full migration chain
+     * registered: the additive column is created, Room's structural PRAGMA validation passes, and the
+     * pre-existing row reads back with `author = null` (a migrated legacy book has no author yet).
+     */
+    @Test
+    fun migrate5To6_addsNullableAuthor_andExistingRowReadsNull() {
+        seedVersion1Database()
+
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            val book = runBlocking { db.bookDao().find(key) }
+            assertNotNull("book survived 1→6", book)
+            assertNull("the new v6 author column defaults to null for migrated rows", book!!.author)
+
+            // The column is writable + reads back — round-trip an author onto the migrated row.
+            runBlocking {
+                db.bookDao().backfillAuthorIfNull(key, "Herman Melville")
+                assertEquals("Herman Melville", db.bookDao().find(key)?.author)
+            }
+        } finally {
+            db.close()
+        }
+    }
 }

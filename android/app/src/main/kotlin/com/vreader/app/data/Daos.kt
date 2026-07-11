@@ -19,6 +19,12 @@ interface BookDao {
     // in SQLite, which would fire reading_positions' ON DELETE CASCADE and silently
     // wipe a book's saved position on every re-import (Gate-4 Critical). @Upsert
     // updates in place, preserving the child row.
+    //
+    // NOTE: the SAF import path does NOT use this whole-row @Upsert — it uses
+    // [upsertPreservingAuthor] below, so a duplicate import can't null-clobber a
+    // backfilled `author` (feature #128 WI-1 Gate-2 Critical). This whole-row upsert is
+    // kept for callers (e.g. the restore path pre-#128) that intentionally write every
+    // column, and is exercised by the reUpsert-preserves-position regression.
     @Upsert
     suspend fun upsert(book: BookEntity)
 
@@ -39,6 +45,72 @@ interface BookDao {
 
     @Query("UPDATE books SET lastOpenedAt = :openedAt WHERE fingerprintKey = :key")
     suspend fun markOpened(key: String, openedAt: Long)
+
+    // ---- feature #128 WI-1: author column + author-preserving persistence ----
+
+    /** Set `author` ONLY when it's currently null (a backfill never overwrites a real author). */
+    @Query("UPDATE books SET author = :author WHERE fingerprintKey = :key AND author IS NULL")
+    suspend fun backfillAuthorIfNull(key: String, author: String?)
+
+    /** Insert a fresh row iff absent; returns -1 (via OnConflictStrategy.IGNORE) when the PK already
+     *  exists, signalling the caller to take the author-preserving UPDATE branch. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(book: BookEntity): Long
+
+    /** UPDATE only the IMPORT-owned columns. Deliberately excludes `author` AND `lastOpenedAt` so a
+     *  duplicate SAF import refreshes the file/identity metadata without clobbering a backfilled author
+     *  or the last-opened recency (feature #128 WI-1 Gate-2 Critical). */
+    @Query(
+        "UPDATE books SET title = :title, originalFormat = :fmt, contentSHA256 = :sha, " +
+            "fileByteCount = :bytes, localFilePath = :path, sourceUri = :uri, addedAt = :addedAt " +
+            "WHERE fingerprintKey = :key",
+    )
+    suspend fun updateImportedColumns(
+        key: String,
+        title: String,
+        fmt: String,
+        sha: String,
+        bytes: Long,
+        path: String?,
+        uri: String?,
+        addedAt: Long,
+    )
+
+    /** Atomic insert-or-update-import-columns that leaves `author` (and `lastOpenedAt`) untouched on the
+     *  update branch — the SAF import path's upsert. Mirrors [AnnotationDao.upsertHighlight]: an
+     *  insert-if-absent returning -1 falls through to the column-scoped UPDATE, wrapped in @Transaction
+     *  so a concurrent re-import can't race insert-vs-update. */
+    @Transaction
+    suspend fun upsertPreservingAuthor(book: BookEntity) {
+        if (insertIfAbsent(book) == -1L) {
+            updateImportedColumns(
+                key = book.fingerprintKey,
+                title = book.title,
+                fmt = book.originalFormat,
+                sha = book.contentSHA256,
+                bytes = book.fileByteCount,
+                path = book.localFilePath,
+                uri = book.sourceUri,
+                addedAt = book.addedAt,
+            )
+        }
+    }
+
+    /** Restore-path metadata apply (wired by WI-2's RestoreImporter): sets the manifest's
+     *  title/addedAt/lastOpenedAt and COALESCEs the author — a non-null manifest author WINS, a null
+     *  manifest author PRESERVES whatever the coordinator backfilled. Book row already exists (restored
+     *  first, so the position FK holds). */
+    @Query(
+        "UPDATE books SET title = :title, addedAt = :addedAt, lastOpenedAt = :lastOpenedAt, " +
+            "author = COALESCE(:manifestAuthor, author) WHERE fingerprintKey = :key",
+    )
+    suspend fun applyRestoredMetadata(
+        key: String,
+        title: String,
+        addedAt: Long,
+        lastOpenedAt: Long?,
+        manifestAuthor: String?,
+    )
 }
 
 @Dao

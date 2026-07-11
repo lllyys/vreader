@@ -26,6 +26,7 @@ data class Book(
     val sourceUri: String? = null,
     val addedAt: Long,
     val lastOpenedAt: Long? = null,
+    val author: String? = null,   // v6 (feature #128) — nullable; set by backfill/restore, never SAF import
 )
 
 /**
@@ -60,6 +61,26 @@ class LibraryRepository(
         }
 
     suspend fun upsertBook(book: Book) = bookDao.upsert(book.toEntity())
+
+    /**
+     * The SAF import path's upsert (feature #128 WI-1). On a duplicate import it updates only the
+     * import-owned columns and leaves `author` (and `lastOpenedAt`) untouched — so a backfilled author
+     * survives a re-import (Gate-2 Critical). A first import inserts the fresh (author-null) row.
+     */
+    suspend fun upsertBookPreservingAuthor(book: Book) = bookDao.upsertPreservingAuthor(book.toEntity())
+
+    /**
+     * Restore-path metadata apply (built here; wired by WI-2's RestoreImporter). Applies the manifest's
+     * title/addedAt/lastOpenedAt and COALESCEs the author: a non-null [manifestAuthor] wins, a null one
+     * preserves whatever author the coordinator backfilled onto the just-imported row.
+     */
+    suspend fun applyRestoredMetadata(
+        key: String,
+        title: String,
+        addedAt: Long,
+        lastOpenedAt: Long?,
+        manifestAuthor: String?,
+    ) = bookDao.applyRestoredMetadata(key, title, addedAt, lastOpenedAt, manifestAuthor)
 
     suspend fun findBook(fingerprintKey: String): Book? = bookDao.find(fingerprintKey)?.let(::toBook)
 
@@ -100,6 +121,7 @@ class LibraryRepository(
         sourceUri = e.sourceUri,
         addedAt = e.addedAt,
         lastOpenedAt = e.lastOpenedAt,
+        author = e.author,
     )
 
     private fun Book.toEntity(): BookEntity = BookEntity(
@@ -112,6 +134,7 @@ class LibraryRepository(
         sourceUri = sourceUri,
         addedAt = addedAt,
         lastOpenedAt = lastOpenedAt,
+        author = author,
     )
 
     /** Nulls a non-finite progression in the legacy locator before storage. */
