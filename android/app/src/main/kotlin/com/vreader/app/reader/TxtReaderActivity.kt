@@ -11,6 +11,14 @@
 // theme background/ink on the scaffold, bodyTextStyle (size/family/lineHeight/ink) + margin padding
 // on the body — and hosts the designed ReaderBottomChrome (scrubber + Display slot + the read-aloud
 // slot, replacing the pre-chrome TtsEntryBar) which opens the ReaderSettingsSheet.
+//
+// feature #132 WI-6: the FIRST host to render the shared ReaderChromeScaffold (ReaderTopChrome +
+// the extended ReaderBottomChrome Contents/Notes/Display toolbar + the Notes review sheet). TXT/MD has
+// no TOC → Contents is hidden (EmptyTocProvider / empty tocEntries). Notes opens the
+// AnnotationsReviewSheet over this book's annotationsForBook snapshot; onJumpToAnnotation is non-null
+// (TXT/MD jump via the plain Locator's charRangeStartUTF16/charOffsetUTF16 → the existing chunk scroll
+// seam). The #129 Display sheet + the #121 TTS bar are preserved unchanged inside the scaffold's bottom
+// slot. Search/More/bookmark top-bar slots are null-omitted (#133/#134/#135), no dead controls.
 package com.vreader.app.reader
 
 import android.os.Bundle
@@ -100,7 +108,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.vreader.app.annotations.AnnotationItem
+import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.reader.chrome.ReaderBottomChrome
+import com.vreader.app.reader.chrome.ReaderChromeScaffold
+import com.vreader.app.reader.chrome.ReaderChromeState
+import com.vreader.app.reader.chrome.ReaderChromeStateSaver
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderSettingsSheet
 import com.vreader.app.reader.settings.ReaderTheme
@@ -186,7 +201,7 @@ class TxtReaderActivity : ComponentActivity() {
                 val gated = if (settingsOrNull == null && state !is TxtUiState.Failed) TxtUiState.Loading else state
                 when (val s = gated) {
                     is TxtUiState.Failed -> LaunchedEffect(Unit) { finish() }
-                    is TxtUiState.Loading -> TxtReaderScaffold("", ::finish, (settingsOrNull ?: ReaderSettings()).theme) {}
+                    is TxtUiState.Loading -> TxtLoadingScaffold((settingsOrNull ?: ReaderSettings()).theme)
                     is TxtUiState.Loaded -> {
                         // non-null by the gate above (Loaded is unreachable pre-emission).
                         val displaySettings = checkNotNull(settingsOrNull)
@@ -287,9 +302,39 @@ class TxtReaderActivity : ComponentActivity() {
                         // feature #129 WI-4 — the Display sheet, opened from the chrome's Aa slot.
                         var showDisplaySheet by remember { mutableStateOf(false) }
 
-                        TxtReaderScaffold(
-                            title = s.title, onBack = ::finish, theme = displaySettings.theme,
-                            bottom = {
+                        // feature #132 WI-6 — the shared reader-chrome state (top/bottom visibility + open
+                        // sheet), persisted across rotation / process death via ReaderChromeStateSaver.
+                        val chromeState = rememberSaveable(bookKey, stateSaver = ReaderChromeStateSaver) {
+                            mutableStateOf(ReaderChromeState())
+                        }
+                        // The Notes review sheet's one-shot snapshot. Reloads whenever this book's stored
+                        // highlights change (a fresh highlight/edit/remove OR a #124/#125 wash) so a newly
+                        // added annotation appears in the sheet without reopening the reader.
+                        val annotationsSnapshot by produceState(
+                            AnnotationsSnapshot(emptyList(), emptyList()), bookKey, annotatable, highlightsList,
+                        ) {
+                            value = if (!annotatable) AnnotationsSnapshot(emptyList(), emptyList())
+                            else runCatching { container.annotationsRepository.annotationsForBook(bookKey) }
+                                .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
+                        }
+
+                        TxtReaderChrome(
+                            theme = displaySettings.theme,
+                            title = s.title,
+                            chromeState = chromeState,
+                            annotations = annotationsSnapshot,
+                            onBack = ::finish,
+                            // TXT/MD jump: scroll to the annotation's UTF-16 offset via the existing chunk
+                            // scroll seam (the same path used by resume + scrubber).
+                            onJumpToAnnotation = { item ->
+                                ttsScope.launch {
+                                    val target = annotationScrollOffset(item)
+                                        .coerceIn(0, (s.document.text.length - 1).coerceAtLeast(0))
+                                    listState.scrollToItem(s.document.chunkForOffset(target))
+                                }
+                            },
+                            onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
+                            bottomBar = { (openContents, openNotes) ->
                                 if (active) TtsControlBar(
                                     tts,
                                     onPlayPause = { if (tts.phase == TtsPhase.speaking) ttsVm.pause() else ttsVm.play() },
@@ -311,6 +356,11 @@ class TxtReaderActivity : ComponentActivity() {
                                         }
                                     },
                                     onOpenDisplay = { showDisplaySheet = true },
+                                    // #132 WI-6: the scaffold hands the Contents/Notes open callbacks in.
+                                    // TXT/MD has no TOC → openContents is null (Contents control hidden);
+                                    // openNotes opens the review sheet.
+                                    onOpenContents = openContents,
+                                    onOpenNotes = openNotes,
                                     extraSlot = {
                                         ReadAloudChromeSlot(
                                             theme = displaySettings.theme,
@@ -329,7 +379,7 @@ class TxtReaderActivity : ComponentActivity() {
                                     },
                                 )
                             },
-                        ) {
+                            body = {
                             var boxOriginWindow by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
                             var boxSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
                             Box(Modifier.fillMaxSize().onGloballyPositioned { boxOriginWindow = it.localToWindow(androidx.compose.ui.geometry.Offset.Zero); boxSize = it.size }) {
@@ -374,7 +424,8 @@ class TxtReaderActivity : ComponentActivity() {
                                     )
                                 }
                             }
-                        }
+                            },
+                        )
                         if (showSpeed) TtsSpeedSheet(tts.rate, onRate = ttsVm::setRate, onDone = { showSpeed = false })
                         if (showVoice) TtsVoiceSheet(
                             voiceList,
@@ -602,6 +653,20 @@ class TxtReaderActivity : ComponentActivity() {
         vm.dismiss()
     }
 
+    // ---- feature #132 WI-6: the review sheet's sheet-level Share (ACTION_SEND) ----
+
+    /** Share ALL reviewed annotations (the review sheet's trailing Share) as one plain-text blob — the
+     *  design's `AnnotationsSheet trailing={<Share/>}`. Highlights first, then standalone notes; no-op
+     *  when nothing is saved (an empty share intent has nothing to offer). */
+    private fun shareAnnotations(snapshot: AnnotationsSnapshot) {
+        val text = annotationsShareText(snapshot)
+        if (text.isBlank()) return
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, text)
+        }
+        startActivity(android.content.Intent.createChooser(send, null))
+    }
+
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
 
@@ -611,29 +676,74 @@ class TxtReaderActivity : ComponentActivity() {
     }
 }
 
-/** Shared reader chrome (back + title) over the reading body, with a bottom slot for the reader
- *  chrome / TTS control bar — the vreader-reader.jsx subset. Renders in the active [theme]'s colors. */
+/**
+ * The TXT/MD reader host chrome — feature #132 WI-6. Renders the shared [ReaderChromeScaffold] (top bar +
+ * the extended bottom chrome + the Notes review sheet) over the reading [body]. TXT/MD has no TOC, so
+ * `tocEntries` is EMPTY (the [EmptyTocProvider] posture) → the scaffold hides the Contents control. The
+ * top bar's Search/More/bookmark slots are omitted (null — #133/#134/#135; no dead controls). [bottomBar]
+ * receives the scaffold's `(onOpenContents, onOpenNotes)` open callbacks and renders the host's bottom bar
+ * — either the #121 TTS control bar (while read-aloud is active) or the #129 [ReaderBottomChrome] (Display
+ * slot + read-aloud entry) wired to those callbacks. [onJumpToAnnotation] is NON-null (TXT/MD jump via the
+ * Locator offset). Wrapped in a `systemBarsPadding()` Column so the chrome clears the status/nav bars (the
+ * former TxtReaderScaffold's behavior). Extracted (internal) so the WI-6 host wiring is directly testable.
+ */
 @Composable
-private fun TxtReaderScaffold(
-    title: String, onBack: () -> Unit, theme: ReaderTheme = ReaderTheme.Paper,
-    bottom: @Composable () -> Unit = {}, body: @Composable () -> Unit,
+internal fun TxtReaderChrome(
+    theme: ReaderTheme,
+    title: String,
+    chromeState: MutableState<ReaderChromeState>,
+    annotations: AnnotationsSnapshot,
+    onBack: () -> Unit,
+    onJumpToAnnotation: (AnnotationItem) -> Unit,
+    onShareAnnotations: () -> Unit,
+    bottomBar: @Composable (Pair<(() -> Unit)?, (() -> Unit)?>) -> Unit,
+    body: @Composable () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = theme.ink,
-                modifier = Modifier.size(28.dp).clickable(onClick = onBack).padding(2.dp),
-            )
-            Text(title, Modifier.padding(start = 8.dp), color = theme.ink, fontSize = 16.sp, maxLines = 1)
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) { body() }
-        bottom()
+        ReaderChromeScaffold(
+            theme = theme,
+            title = title,
+            chromeState = chromeState,
+            onBack = onBack,
+            tocEntries = emptyList(),           // no TOC → the scaffold hides the Contents control
+            currentTocIndex = 0,
+            annotations = annotations,
+            onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
+            onJumpToAnnotation = onJumpToAnnotation,
+            onShareAnnotations = onShareAnnotations,
+            // Search/More/bookmark top-bar slots stay null (#133/#134/#135 — no dead controls).
+            bottomChrome = { onOpenContents, onOpenNotes -> bottomBar(onOpenContents to onOpenNotes) },
+            body = body,
+        )
     }
+}
+
+/** The pre-emission loading surface — a bare theme-colored full-screen fill while the Display settings +
+ *  document load (the only pre-emission surface; the reader body is withheld until settings emit — Gate-4
+ *  Medium). No chrome yet: chrome renders once the document is Loaded. */
+@Composable
+private fun TxtLoadingScaffold(theme: ReaderTheme) {
+    Box(Modifier.fillMaxSize().background(theme.background).systemBarsPadding())
+}
+
+/** The tap-to-jump target UTF-16 offset for an annotation (feature #132 WI-6). A highlight anchors at its
+ *  `charRangeStartUTF16`; a standalone note (or a highlight without a range) at `charOffsetUTF16`; a
+ *  locator carrying neither, or a negative value, clamps to 0 (a safe scroll target). Pure/JVM-testable. */
+internal fun annotationScrollOffset(item: AnnotationItem): Int {
+    val loc = item.locator
+    return (loc.charRangeStartUTF16 ?: loc.charOffsetUTF16 ?: 0).coerceAtLeast(0)
+}
+
+/** The plain-text blob shared by the review sheet's sheet-level Share (feature #132 WI-6): each highlight
+ *  quote (with its attached note, if any) then each standalone note, one per line. Pure/JVM-testable. */
+internal fun annotationsShareText(snapshot: AnnotationsSnapshot): String {
+    val lines = buildList {
+        snapshot.highlights.forEach { h ->
+            add(if (h.note.isNullOrBlank()) h.selectedText else "${h.selectedText}\n— ${h.note}")
+        }
+        snapshot.notes.forEach { add(it.content) }
+    }
+    return lines.joinToString("\n\n").trim()
 }
 
 /** The designed read-aloud entry (vreader-tts.jsx `TtsEntry` — the reader bottom-toolbar Read-aloud
