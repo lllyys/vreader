@@ -1,10 +1,12 @@
 // Purpose: Room database + schema-versioned migration scaffold — feature #106 WI-3.
-// Version 6 is the current schema; v1 was the initial books+positions baseline and
+// Version 7 is the current schema; v1 was the initial books+positions baseline and
 // MIGRATION_1_2 is the worked example of the additive-migration pattern (adds
 // books.lastOpenedAt). Subsequent additive migrations: 2→3 daily_reading (#122),
-// 3→4 annotations (#123), 4→5 collections (#127), 5→6 books.author (#128 search).
-// The migration round-trip test (VReaderDatabaseMigrationTest) guards them. Future
-// schema changes append a Migration(n, n+1) to ALL_MIGRATIONS and bump `version`.
+// 3→4 annotations (#123), 4→5 collections (#127), 5→6 books.author (#128 search),
+// 6→7 the FTS search index (search_sections + search_sections_fts + search_index_state
+// + search_sections_staging, all #128 WI-4). The migration round-trip test
+// (VReaderDatabaseMigrationTest) guards them. Future schema changes append a
+// Migration(n, n+1) to ALL_MIGRATIONS and bump `version`.
 package com.vreader.app.data
 
 import android.content.Context
@@ -19,8 +21,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookEntity::class, ReadingPositionEntity::class, DailyReadingEntity::class,
         HighlightEntity::class, AnnotationNoteEntity::class, BookmarkEntity::class,
         CollectionEntity::class, BookCollectionCrossRef::class,
+        SearchSectionEntity::class, SearchSectionFtsEntity::class,
+        SearchIndexStateEntity::class, SearchStagingEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class VReaderDatabase : RoomDatabase() {
@@ -29,6 +33,7 @@ abstract class VReaderDatabase : RoomDatabase() {
     abstract fun readingStatsDao(): ReadingStatsDao
     abstract fun annotationDao(): AnnotationDao
     abstract fun collectionDao(): CollectionDao
+    abstract fun searchDao(): SearchDao
 
     companion object {
         private const val DB_NAME = "vreader.db"
@@ -134,9 +139,50 @@ abstract class VReaderDatabase : RoomDatabase() {
             }
         }
 
+        /** v6 → v7: feature #128 WI-4 — add the cross-book search index (all in the one `vreader.db`):
+         *  `search_sections` (+ bookKey index + FK→books CASCADE), its FTS4/unicode61 content-table
+         *  shadow `search_sections_fts`, `search_index_state` (+ FK→books CASCADE), and the transient
+         *  `search_sections_staging` buffer (+ bookKey index + FK→books CASCADE). The migration ships
+         *  the base + FTS VIRTUAL tables only; Room recreates the FTS content-table sync triggers when
+         *  it opens the DB. DDL matches Room's generated v7 schema exactly (the migration test opens the
+         *  real Room DB, whose structural PRAGMA validation catches any drift). No data transform. */
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `search_sections` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`bookKey` TEXT NOT NULL, `sectionIndex` INTEGER NOT NULL, `chunkOrdinal` INTEGER NOT NULL, " +
+                        "`sectionTitle` TEXT, `text` TEXT NOT NULL, `indexedText` TEXT NOT NULL, " +
+                        "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_search_sections_bookKey` ON `search_sections` (`bookKey`)")
+                db.execSQL(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS `search_sections_fts` USING FTS4(" +
+                        "`indexedText` TEXT NOT NULL, tokenize=unicode61, content=`search_sections`)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `search_index_state` (`bookKey` TEXT NOT NULL, " +
+                        "`indexerVersion` INTEGER NOT NULL, `indexedAt` INTEGER NOT NULL, `status` TEXT NOT NULL, " +
+                        "PRIMARY KEY(`bookKey`), FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `search_sections_staging` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`bookKey` TEXT NOT NULL, `sectionIndex` INTEGER NOT NULL, `chunkOrdinal` INTEGER NOT NULL, " +
+                        "`sectionTitle` TEXT, `text` TEXT NOT NULL, `indexedText` TEXT NOT NULL, " +
+                        "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_search_sections_staging_bookKey` " +
+                        "ON `search_sections_staging` (`bookKey`)",
+                )
+            }
+        }
+
         /** All registered migrations, oldest first. Append future Migration(n,n+1) here. */
         val ALL_MIGRATIONS: Array<Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 
         /** The production on-disk database (app-private storage). */
         fun build(context: Context): VReaderDatabase =

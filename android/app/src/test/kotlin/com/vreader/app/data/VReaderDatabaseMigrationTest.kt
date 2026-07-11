@@ -268,6 +268,126 @@ class VReaderDatabaseMigrationTest {
     }
 
     /**
+     * Feature #128 WI-4 — the FULL migration chain 1→…→7 through [VReaderDatabase.ALL_MIGRATIONS]: a
+     * v1 file opens as v7 (Room's structural PRAGMA validation passes, so MIGRATION_6_7's DDL matches
+     * the generated v7 schema exactly, incl. the FTS4 content-table + Room-recreated sync triggers), the
+     * seeded book/position survive, the four search tables work, an FTS insert is MATCHable (proving the
+     * content-table triggers were recreated at open), and deleting the book CASCADES its search rows.
+     */
+    @Test
+    fun migrate1To7_throughAllMigrations_addsSearchIndex_ftsWorks_andCascades() {
+        seedVersion1Database()
+
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            assertNotNull("book survived 1→7", runBlocking { db.bookDao().find(key) })
+            assertNotNull("position survived 1→7", runBlocking { db.readingPositionDao().find(key) })
+
+            runBlocking {
+                val dao = db.searchDao()
+                // A published section (via staging → copy) is MATCHable — proves Room recreated the FTS
+                // content-table sync triggers when it opened the migrated DB.
+                dao.insertStagingBatch(
+                    listOf(
+                        SearchStagingEntity(
+                            bookKey = key, sectionIndex = 0, chunkOrdinal = 0, sectionTitle = null,
+                            text = "migrated search corpus text", indexedText = "migrated search corpus text",
+                        ),
+                    ),
+                )
+                dao.copyStagingToSections(key)
+                dao.clearStaging(key)
+                assertNotNull("FTS MATCH works after migration", dao.firstMatchingSection(key, "corpus"))
+                dao.markIndexed(SearchIndexStateEntity(key, 1, 1L, "indexed"))
+
+                // deleting the book CASCADES all four search tables.
+                db.bookDao().delete(key)
+                assertTrue("search_sections cascaded on book delete", dao.sectionsFor(key).isEmpty())
+                assertNull("search_index_state cascaded on book delete", dao.indexState(key))
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * Feature #128 WI-4 — MIGRATION_6_7 in ISOLATION against an AUTHENTIC v6 database. Hand-builds the
+     * v6 `books` shape (has `author`), seeds a book, applies ONLY the 6→7 DDL via a raw SupportSQLite
+     * helper, and asserts the four search tables + the bookKey indexes + the FTS4 virtual table now
+     * exist and are writable — validating the migration's SQL directly, not just its full-chain
+     * registration.
+     */
+    @Test
+    fun migrate6To7_inIsolation_addsSearchTables_andFtsVirtualTable() {
+        val isoDbName = "iso-6-to-7.db"
+        context.deleteDatabase(isoDbName)
+        try {
+            // Build the v6 `books` table directly (v6 shape: …addedAt + lastOpenedAt + author).
+            val v6Callback = object : SupportSQLiteOpenHelper.Callback(6) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `books` (`fingerprintKey` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, `originalFormat` TEXT NOT NULL, `contentSHA256` TEXT NOT NULL, " +
+                            "`fileByteCount` INTEGER NOT NULL, `localFilePath` TEXT, `sourceUri` TEXT, " +
+                            "`addedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, `author` TEXT, " +
+                            "PRIMARY KEY(`fingerprintKey`))",
+                    )
+                }
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(v6Callback).build(),
+            ).writableDatabase.use { db ->
+                db.execSQL(
+                    "INSERT INTO books (fingerprintKey, title, originalFormat, contentSHA256, fileByteCount, " +
+                        "localFilePath, sourceUri, addedAt, lastOpenedAt, author) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    arrayOf<Any?>("k1", "Book", "epub", "a".repeat(64), 100L, "/p", null, 1L, null, "Author"),
+                )
+            }
+
+            // Apply ONLY MIGRATION_6_7 through a raw helper whose onUpgrade runs the real migration.
+            val migrateCallback = object : SupportSQLiteOpenHelper.Callback(7) {
+                override fun onCreate(db: SupportSQLiteDatabase) = Unit  // never — the file already exists at v6
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    assertEquals(6, oldVersion)
+                    assertEquals(7, newVersion)
+                    VReaderDatabase.MIGRATION_6_7.migrate(db)
+                }
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(migrateCallback).build(),
+            ).writableDatabase.use { db ->
+                // All four search tables now exist + are writable (else these throw).
+                db.execSQL(
+                    "INSERT INTO search_sections (bookKey, sectionIndex, chunkOrdinal, sectionTitle, text, indexedText) " +
+                        "VALUES ('k1', 0, 0, NULL, 'raw', 'indexed')",
+                )
+                db.execSQL(
+                    "INSERT INTO search_index_state (bookKey, indexerVersion, indexedAt, status) " +
+                        "VALUES ('k1', 1, 1, 'indexed')",
+                )
+                db.execSQL(
+                    "INSERT INTO search_sections_staging (bookKey, sectionIndex, chunkOrdinal, sectionTitle, text, indexedText) " +
+                        "VALUES ('k1', 0, 0, NULL, 'raw', 'indexed')",
+                )
+                // The FTS4 virtual table exists (querying it does not throw "no such table").
+                db.query("SELECT COUNT(*) FROM search_sections_fts").use { c ->
+                    assertTrue(c.moveToFirst())
+                }
+                db.query("SELECT bookKey, indexedText FROM search_sections WHERE bookKey = 'k1'").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("k1", c.getString(0))
+                    assertEquals("indexed", c.getString(1))
+                }
+            }
+        } finally {
+            context.deleteDatabase(isoDbName)
+        }
+    }
+
+    /**
      * Feature #128 WI-1 (audit follow-up) — MIGRATION_5_6 in ISOLATION against an AUTHENTIC v5 `books`
      * table (has `lastOpenedAt`, has NO `author`). Hand-builds exactly the v5 `books` shape, seeds a
      * legacy row + an already-set-lastOpenedAt row, applies ONLY the 5→6 DDL via a raw SupportSQLite
