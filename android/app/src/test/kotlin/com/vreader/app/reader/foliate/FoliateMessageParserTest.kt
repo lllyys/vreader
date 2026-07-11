@@ -128,4 +128,42 @@ class FoliateMessageParserTest {
         assertTrue(m is FoliateMessage.Relocate)
         assertEquals("/2", (m as FoliateMessage.Relocate).cfi)
     }
+
+    // --- feature #135 WI-2: the awaited-goTo ack channel (goto-ack) ---
+
+    @Test fun gotoAck_ok_full() {
+        val m = FoliateMessageParser.parse(
+            """{"name":"goto-ack","detail":{"id":"g7","ok":true,"cfi":"/6/4!/4/2","fraction":0.42}}""",
+        )
+        assertEquals(FoliateMessage.GoToAck("g7", true, "/6/4!/4/2", 0.42), m)
+    }
+
+    @Test fun gotoAck_failure_noPosition() {
+        val m = FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"g7","ok":false}}""")
+        assertEquals(FoliateMessage.GoToAck("g7", false, null, null), m)
+    }
+
+    @Test fun gotoAck_okDefaultsFalse_whenAbsent() {
+        val m = FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"g7"}}""") as FoliateMessage.GoToAck
+        assertEquals(false, m.ok)
+        assertEquals("g7", m.id)
+    }
+
+    @Test fun gotoAck_missingOrBlankId_returnsNull() {
+        // Without a request id the host cannot resolve the matching deferred — the whole message is useless.
+        assertNull(FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"ok":true}}"""))
+        assertNull(FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"","ok":true}}"""))
+        assertNull(FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":42,"ok":true}}"""))
+    }
+
+    @Test fun gotoAck_nonBooleanOk_isFalse() {
+        // A quoted "true" / numeric 1 must not read as a truthy ok — a hostile ack can't force a false success.
+        assertEquals(false, (FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"g","ok":"true"}}""") as FoliateMessage.GoToAck).ok)
+        assertEquals(false, (FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"g","ok":1}}""") as FoliateMessage.GoToAck).ok)
+    }
+
+    @Test fun gotoAck_nonFiniteOrStringFraction_isNull() {
+        assertNull((FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"g","ok":true,"fraction":"0.5"}}""") as FoliateMessage.GoToAck).fraction)
+        assertNull((FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"g","ok":true,"fraction":"NaN"}}""") as FoliateMessage.GoToAck).fraction)
+    }
 }

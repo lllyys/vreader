@@ -7203,10 +7203,10 @@ ${doc.querySelector("parsererror").innerText}`);
       view.goRight();
     },
     goTo(target) {
-      view.goTo(target);
+      return view.goTo(target);
     },
     goToFraction(f3) {
-      view.goToFraction(f3);
+      return view.goToFraction(f3);
     },
     // Annotations
     addAnnotation(annotation) {

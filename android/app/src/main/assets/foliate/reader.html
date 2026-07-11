@@ -46,6 +46,30 @@ foliate-view { display: block; width: 100vw; height: 100vh; height: 100dvh; }
         window.webkit.messageHandlers = handlers;
         // Expose for the inline bootstrap below + error hooks.
         window.__vreaderPost = send;
+
+        // --- feature #135 WI-2: awaited goTo ack channel --------------------------
+        // The native FoliateGoToDispatcher injects `window.__vreaderGoTo(id, target)` (id + target are
+        // JSON-escaped host-side via jsString). We call the returning `readerAPI.goTo`/`goToFraction`
+        // promise and, AFTER foliate's relocate settles, post `{name:'goto-ack', id, ok, cfi?, fraction?}`
+        // over the SAME `vreaderHost` channel (never addJavascriptInterface). The id is echoed back so
+        // the host resolves the matching CompletableDeferred; a reject → ok:false so the sheet stays open.
+        window.__vreaderGoTo = function (id, target) {
+            function ack(ok, cfi, fraction) {
+                send('goto-ack', { id: id, ok: !!ok, cfi: cfi == null ? null : cfi, fraction: (typeof fraction === 'number' && isFinite(fraction)) ? fraction : null });
+            }
+            try {
+                if (!window.readerAPI || !target) { ack(false, null, null); return; }
+                var p;
+                if (target.cfi != null) { p = window.readerAPI.goTo(target.cfi); }
+                else if (target.fraction != null) { p = window.readerAPI.goToFraction(target.fraction); }
+                else { ack(false, null, null); return; }
+                Promise.resolve(p).then(function () {
+                    var reachedCfi = null;
+                    try { var s = window.readerAPI.getState && window.readerAPI.getState(); reachedCfi = s ? s.lastLocation : null; } catch (e) {}
+                    ack(true, reachedCfi, target.fraction != null ? target.fraction : null);
+                }).catch(function () { ack(false, null, null); });
+            } catch (e) { ack(false, null, null); }
+        };
     })();
     window.onerror = function (msg, src, line) {
         window.__vreaderPost('error', { message: 'JS: ' + msg + ' @ ' + line, type: 'window.onerror' });

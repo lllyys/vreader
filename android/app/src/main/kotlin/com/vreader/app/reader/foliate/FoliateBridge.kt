@@ -16,12 +16,18 @@ import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
+import java.util.UUID
 
 /**
  * Configures [webView] for secure foliate-js hosting and exposes its events as [messages].
@@ -31,9 +37,29 @@ import java.io.ByteArrayInputStream
 class FoliateBridge(
     private val webView: WebView,
     private val assetLoader: WebViewAssetLoader,
+    /** Scope the awaited-goTo ack collector runs on. Defaults to a Main-dispatcher scope (WebView is
+     *  main-thread only); tests inject a `runTest` scope so virtual time drives the timeout path. */
+    scope: CoroutineScope = CoroutineScope(Dispatchers.Main),
 ) {
     private val _messages = MutableSharedFlow<FoliateMessage>(extraBufferCapacity = 64)
     val messages: SharedFlow<FoliateMessage> = _messages.asSharedFlow()
+
+    /** feature #135 WI-2 — the awaited AZW3/foliate goTo machinery. Injects the JSON-escaped shim call
+     *  and suspends on a request-id-keyed deferred resolved by the matching [FoliateMessage.GoToAck]
+     *  (routed through the SAME allow-listed `vreaderHost` channel — never `addJavascriptInterface`). */
+    val goToDispatcher = FoliateGoToDispatcher(
+        sendJs = ::eval,
+        messages = _messages,
+        scope = scope,
+    )
+
+    /**
+     * Await a jump to [target], resolving only after foliate's `view.goTo(...)` relocate settles (or a
+     * timeout). The request id + target are JSON-escaped ([jsString]) into the shell shim call. A
+     * superseding goTo cancels the prior. Main-thread only (WebView is).
+     */
+    suspend fun goTo(target: FoliateGoToTarget, timeoutMs: Long = DEFAULT_GOTO_TIMEOUT_MS): Azw3GoToResult =
+        goToDispatcher.goTo(target, timeoutMs)
 
     /** Invoked when this device's WebView is too old for `addWebMessageListener` (→ WebViewUnsupported). */
     var onWebViewUnsupported: (() -> Unit)? = null
@@ -147,7 +173,113 @@ class FoliateBridge(
 
     companion object {
         const val BRIDGE_NAME = "vreaderHost"
+        /** Wall-clock budget for an awaited goTo — foliate must relocate + ack within this window. */
+        const val DEFAULT_GOTO_TIMEOUT_MS = 3_000L
     }
+}
+
+/** feature #135 WI-2 — the outcome of an awaited [FoliateBridge.goTo]. */
+sealed interface Azw3GoToResult {
+    /** The jump landed; `cfi`/`fraction` are the reached position when the ack reported them. */
+    data class Succeeded(val cfi: String?, val fraction: Double?) : Azw3GoToResult
+    /** No ack arrived within the timeout window (dead bundle / wedged renderer). */
+    data object Timeout : Azw3GoToResult
+    /** Foliate acked a FAILED jump (`ok=false`) — an unresolvable target. */
+    data object Failed : Azw3GoToResult
+    /** A later goTo superseded this one before it acked (the caller should ignore this result). */
+    data object Superseded : Azw3GoToResult
+}
+
+/** feature #135 WI-2 — the foliate navigation target the shim's `goTo`/`goToFraction` accepts. */
+sealed interface FoliateGoToTarget {
+    data class Cfi(val cfi: String) : FoliateGoToTarget
+    data class Fraction(val fraction: Double) : FoliateGoToTarget
+
+    companion object {
+        /**
+         * Derive a jump target from a canonical [vreader.contracts.Locator], CFI-FIRST then fraction
+         * (matches [Azw3Document.restoreOrInit]'s precedence). Returns null when there is nothing to
+         * jump to (no cfi + no finite progression) so the caller degrades without injecting JS.
+         */
+        fun from(locator: vreader.contracts.Locator): FoliateGoToTarget? {
+            locator.cfi?.takeIf { it.isNotBlank() }?.let { return Cfi(it) }
+            locator.progression?.takeIf { it.isFinite() }?.let { return Fraction(it) }
+            return null
+        }
+    }
+}
+
+/**
+ * feature #135 WI-2 — the pure, WebView-free await-machinery for an ack'd foliate goTo. Injects the
+ * JSON-escaped shell-shim call (`window.__vreaderGoTo(id, target)`), suspends on a request-id-keyed
+ * [CompletableDeferred], and resolves it from the matching [FoliateMessage.GoToAck] arriving over
+ * [messages]. Fully unit-testable: a fake `sendJs` records the injected JS and a test channel drives
+ * acks under `runTest` virtual time. NEVER uses `addJavascriptInterface` — the ack rides the existing
+ * allow-listed `vreaderHost` message channel only.
+ */
+class FoliateGoToDispatcher(
+    private val sendJs: (String) -> Unit,
+    messages: SharedFlow<FoliateMessage>,
+    scope: CoroutineScope,
+) {
+    private data class Pending(val id: String, val deferred: CompletableDeferred<Azw3GoToResult>)
+
+    /** At most one in-flight goTo — a superseding goTo cancels the prior. Guarded by the main thread /
+     *  the dispatcher's single-collector; the collector and goTo() run on the same scope. */
+    private var pending: Pending? = null
+
+    init {
+        // A SharedFlow tolerates multiple collectors (Azw3Document also collects for state/relocate),
+        // so this ack collector is independent and never steals the document's messages.
+        scope.launch {
+            messages.collect { message ->
+                if (message is FoliateMessage.GoToAck) resolve(message)
+            }
+        }
+    }
+
+    /** Test/diagnostic: how many goTos are awaiting an ack (0 or 1). */
+    fun pendingCount(): Int = if (pending == null) 0 else 1
+
+    suspend fun goTo(target: FoliateGoToTarget, timeoutMs: Long = FoliateBridge.DEFAULT_GOTO_TIMEOUT_MS): Azw3GoToResult {
+        // Supersede any in-flight goTo: cancel-resolve it + drop its entry so a late ack can't resolve it.
+        pending?.let { prior ->
+            pending = null
+            prior.deferred.complete(Azw3GoToResult.Superseded)
+        }
+        val id = UUID.randomUUID().toString()
+        val deferred = CompletableDeferred<Azw3GoToResult>()
+        pending = Pending(id, deferred)
+        sendJs(gotoJs(id, target))
+        val result = withTimeoutOrNull(timeoutMs) { deferred.await() }
+        return if (result != null) {
+            result
+        } else {
+            // Timed out — remove the entry if it is still the one we minted (a supersede may have replaced it).
+            if (pending?.id == id) pending = null
+            Azw3GoToResult.Timeout
+        }
+    }
+
+    private fun resolve(ack: FoliateMessage.GoToAck) {
+        val current = pending ?: return
+        if (current.id != ack.id) return // stale / unknown id — ignore (do not resolve).
+        pending = null
+        current.deferred.complete(
+            if (ack.ok) Azw3GoToResult.Succeeded(ack.cfi, ack.fraction) else Azw3GoToResult.Failed,
+        )
+    }
+
+    /** The JSON-escaped shell-shim call. The request id + CFI/fraction are JSON-encoded so a hostile
+     *  book-derived CFI cannot break out of the injected JS string (the [jsString] escaping seam). */
+    private fun gotoJs(id: String, target: FoliateGoToTarget): String = when (target) {
+        is FoliateGoToTarget.Cfi ->
+            "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{cfi:${jsString(target.cfi)}})}catch(e){}"
+        is FoliateGoToTarget.Fraction ->
+            "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{fraction:${target.fraction}})}catch(e){}"
+    }
+
+    private fun jsString(s: String): String = Json.encodeToString(String.serializer(), s)
 }
 
 /**
