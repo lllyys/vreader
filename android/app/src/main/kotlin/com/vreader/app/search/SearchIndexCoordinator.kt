@@ -114,34 +114,43 @@ class SearchIndexCoordinator(
                         author = result.author,
                     )
                 }
-                is ExtractResult.Unsupported -> {
-                    searchDao.clearStaging(bookKey)
-                    if (searchDao.bookExists(bookKey)) {
-                        searchDao.markIndexed(
-                            SearchIndexStateEntity(bookKey, INDEXER_VERSION, now(), STATUS_SKIPPED_UNSUPPORTED),
-                        )
-                    }
-                }
-                is ExtractResult.Failed -> markFailed(bookKey)
+                is ExtractResult.Unsupported -> markTerminalState(bookKey, STATUS_SKIPPED_UNSUPPORTED)
+                is ExtractResult.Failed -> markTerminalState(bookKey, STATUS_FAILED)
             }
         } catch (e: CancellationException) {
             // Cancellation must propagate (structured concurrency) — but clear the invisible staging
             // first so a cancelled attempt never leaks staging rows across runs. NonCancellable so the
             // suspend DELETE actually runs during cancellation (a plain suspend call would immediately
             // re-throw). No state row is written on this path (atomicity HIGH — the publish never ran).
-            withContext(NonCancellable) { searchDao.clearStaging(bookKey) }
+            withContext(NonCancellable) { runCatching { searchDao.clearStaging(bookKey) } }
             throw e
         } catch (e: Throwable) {
-            // Isolate an ordinary per-book failure: the collector keeps draining the rest.
-            markFailed(bookKey)
+            // Isolate an ordinary per-book failure: the collector keeps draining the rest. This mark
+            // must NOT be able to throw (a FK failure from a concurrent delete escaping here would kill
+            // the sole collector — Gate-4 follow-up), so markTerminalState swallows its own failures.
+            markTerminalState(bookKey, STATUS_FAILED)
         }
     }
 
-    /** Clear staging and, only if the book still exists, record a retryable `failed` state. */
-    private suspend fun markFailed(bookKey: String) {
-        searchDao.clearStaging(bookKey)
-        if (searchDao.bookExists(bookKey)) {
-            searchDao.markIndexed(SearchIndexStateEntity(bookKey, INDEXER_VERSION, now(), STATUS_FAILED))
+    /**
+     * Record a terminal/retry state row (skipped_unsupported or failed) for a book, robustly against a
+     * concurrent delete. Clears staging first, then writes the state row ONLY if the book still exists.
+     * The bookExists→markIndexed pair is not one transaction (SearchDao has no such op and it is
+     * off my write-set), so a delete landing BETWEEN the check and the write would make markIndexed
+     * fail its FK constraint; that failure is caught and treated as a benign no-op — the book is gone,
+     * there is nothing to record, and the collector must keep draining (Gate-4 follow-up: a mark
+     * failure must never terminate the single lifetime collector). No exception ever escapes.
+     */
+    private suspend fun markTerminalState(bookKey: String, status: String) {
+        runCatching {
+            searchDao.clearStaging(bookKey)
+            if (searchDao.bookExists(bookKey)) {
+                searchDao.markIndexed(SearchIndexStateEntity(bookKey, INDEXER_VERSION, now(), status))
+            }
+        }.onFailure { e ->
+            // A CancellationException must still propagate (structured concurrency) even from here.
+            if (e is CancellationException) throw e
+            // Any other failure (e.g. an FK-constraint loss to a concurrent delete) is a benign no-op.
         }
     }
 

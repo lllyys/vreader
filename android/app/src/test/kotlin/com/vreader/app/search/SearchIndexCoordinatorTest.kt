@@ -345,6 +345,41 @@ class SearchIndexCoordinatorTest {
         assertTrue("staging cascaded away by the delete", searchDao.stagingFor(bookA).isEmpty())
     }
 
+    // --- terminal-state write survives a delete-mid-mark race (Gate-4 follow-up) ----------------
+    // A Failed book deleted while its `failed` mark is being written must NOT terminate the sole
+    // collector: no orphan state row, and the healthy book still indexes afterwards.
+
+    @Test fun failedBookDeletedMidMark_doesNotKillCollector() = runBlocking {
+        seedBook(bookA, "epub")   // Failed, then deleted while its mark is pending
+        seedBook(bookB, "epub")   // healthy — must still index after the race
+        val gate = CompletableDeferred<Unit>()
+        buildCoordinator(batchSize = 1) { fmt ->
+            object : BookTextExtractor {
+                override suspend fun extract(book: Book, sink: SectionSink): ExtractResult {
+                    if (book.fingerprintKey == bookA) {
+                        sink.emit(BookTextSection(0, 0, null, "will be deleted"))
+                        gate.await()   // hold here until the test deletes bookA
+                        return ExtractResult.Failed("transient")
+                    }
+                    sink.emit(BookTextSection(0, 0, null, "healthy widget"))
+                    return ExtractResult.Success(null)
+                }
+            }
+        }.startSearchIndexing()
+
+        // bookA staged its section and is now gated inside extract.
+        await { searchDao.stagingFor(bookA).isNotEmpty() }
+        // Delete bookA mid-index — the pending Failed mark must become a benign no-op, not a crash.
+        db.bookDao().delete(bookA)
+        await { !searchDao.bookExists(bookA) }
+        gate.complete(Unit)
+
+        // The collector survives → the healthy book still indexes.
+        await { searchDao.indexState(bookB)?.status == "indexed" }
+        assertNull("no orphan state row for the deleted, failed book", searchDao.indexState(bookA))
+        assertEquals("the collector kept draining and indexed the healthy book", "indexed", searchDao.indexState(bookB)?.status)
+    }
+
     // --- single-collector idempotency: double start() spawns exactly one collector --------------
 
     @Test fun doubleStart_spawnsExactlyOneCollector() = runBlocking {
