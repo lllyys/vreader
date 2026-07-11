@@ -24,7 +24,7 @@ import java.io.File
 class BookOpenException(message: String) : Exception(message)
 
 /** The book-level metadata the Library needs from an opened publication. */
-data class BookMetadata(val title: String?, val readingOrderCount: Int)
+data class BookMetadata(val title: String?, val readingOrderCount: Int, val author: String? = null)
 
 /**
  * Opens a stored EPUB (app-private storage [File]) into a Readium [Publication].
@@ -54,6 +54,7 @@ class BookOpener(
             BookMetadata(
                 title = publication.metadata.title,
                 readingOrderCount = publication.readingOrder.size,
+                author = publication.metadata.authors.firstOrNull()?.name,
             )
         } finally {
             publication.close()
