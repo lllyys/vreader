@@ -185,7 +185,10 @@ class WebDavRoundTripConnectedTest {
             assertNotNull("book restored", restored)
             assertEquals("author survived the round-trip", "Herman Melville", restored!!.author)
             assertEquals("title survived the round-trip", book.title, restored.title)
-            assertEquals("addedAt survived the round-trip", addedAt, restored.addedAt)
+            // The backup manifest serializes timestamps at SECOND precision (IsoInstantSerializer
+            // truncatedTo SECONDS, iOS `.iso8601` parity), so addedAt round-trips to the whole second —
+            // the sub-second millis are dropped by contract. Assert equality at second precision.
+            assertEquals("addedAt survived the round-trip (second precision)", addedAt / 1000, restored.addedAt / 1000)
         } finally {
             db.close()
             booksDir.deleteRecursively()
