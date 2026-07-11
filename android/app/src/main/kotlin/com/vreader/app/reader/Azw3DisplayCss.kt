@@ -4,9 +4,9 @@
 // resolve against the calibrated size), a descendant cascade-flatten (Kindle/MOBI carry per-element em
 // font-size + <font color> ink that would otherwise compound / survive a body rule), headings revert,
 // the serif/sans family stack, the theme's bg/ink hex, a descendant `color: inherit` reset for theme
-// parity, and the margin as `body { padding }`. Deterministic (byte-identical for equal settings) and
-// JS-escape-safe: `foliateSetStylesJs` JSON-encodes the whole blob into a JS string literal (the
-// FoliateJSEscaper analog) so no settings/book-derived value can break out of the shell JS.
+// parity, and the margin as `body { padding }`. Deterministic (byte-identical for equal settings). The
+// JS-escape-safe injection wrapper is the SHARED `foliateSetStylesJs` in the foliate package (the same
+// seam FoliateBridge.setStyles runs, so the pinned escaping IS the production escaping).
 // Pure value types (JVM-unit-testable, Azw3DisplayCssTest) — no Android runtime beyond Compose Color.
 //
 // @coordinates-with: Azw3ReaderActivity.kt (collects ReaderSettings, injects the CSS through the
@@ -18,8 +18,6 @@ import androidx.compose.ui.graphics.toArgb
 import com.vreader.app.reader.settings.ReaderFontFamily
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderTheme
-import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 
 // Font stacks mirror the iOS FoliateStyleMapper serif/sans intent (Source Serif 4 / Inter →
@@ -70,17 +68,6 @@ fun ReaderSettings.foliateDisplayCss(): String {
         "body { padding: ${marginPx}px !important; margin: 0 !important; }",
     ).joinToString("\n")
 }
-
-/**
- * The JS one-liner that applies [css] through the foliate reader shell. The CSS is JSON-encoded into a
- * JS string literal (the FoliateJSEscaper analog) so ANY value — quotes, backslashes, newlines,
- * `</script>` — is neutralized and cannot break out of the shell JS. Deterministic for a given [css].
- */
-fun foliateSetStylesJs(css: String): String =
-    "try{readerAPI.setStyles&&readerAPI.setStyles(${jsString(css)})}catch(e){}"
-
-/** JSON-encode [s] as a JS string literal (quotes/backslashes/control chars all escaped). */
-private fun jsString(s: String): String = Json.encodeToString(String.serializer(), s)
 
 /** Format the line-spacing multiplier to one decimal for stable, deterministic CSS output. */
 private fun formatLineHeight(v: Float): String {

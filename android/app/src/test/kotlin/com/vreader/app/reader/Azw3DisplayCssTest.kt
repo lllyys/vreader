@@ -7,6 +7,7 @@
 // injection (no shell-JS break). Pure JVM (no Android runtime) — the RED test that leads WI-6.
 package com.vreader.app.reader
 
+import com.vreader.app.reader.foliate.foliateSetStylesJs
 import com.vreader.app.reader.settings.ReaderFontFamily
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderTheme
@@ -151,7 +152,8 @@ class Azw3DisplayCssTest {
         }
     }
 
-    // ---- JS-escape safety: the setStyles call wraps the CSS in a JSON-encoded (JS-safe) literal ----
+    // ---- JS-escape safety: the SHARED production seam (foliateSetStylesJs — the exact function
+    // FoliateBridge.setStyles runs through evaluateJavascript) wraps the CSS in a JSON-encoded literal.
 
     @Test
     fun setStylesJs_wrapsCssInJsonEncodedLiteral() {
