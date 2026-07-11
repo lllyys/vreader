@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -114,10 +115,11 @@ internal fun InBookSearchField(
             },
         )
         if (hasQuery) {
-            // A ≥48dp invisible tap target around the 16dp glyph (the visual stays design-faithful).
+            // A 48dp invisible tap target around the 16dp glyph — the Material touch-target minimum (the
+            // visible glyph stays design-faithful).
             Box(
                 Modifier
-                    .size(44.dp)
+                    .size(48.dp)
                     .clickable { onQueryChange("") }
                     .testTag("inbook-search-clear")
                     .semantics { contentDescription = "Clear search" },
@@ -126,11 +128,12 @@ internal fun InBookSearchField(
                 Icon(Icons.Filled.Close, contentDescription = null, tint = sub, modifier = Modifier.size(16.dp))
             }
         }
-        // Cancel: the same 14sp text, but its clickable box fills the pill height so the tap target reaches
-        // the 48dp minimum without changing the visible label.
+        // Cancel: the same 14sp text, but its clickable box is at least 48×48dp so the tap target meets the
+        // Material minimum in BOTH dimensions without changing the visible label.
         Box(
             Modifier
-                .heightIn(min = 44.dp)
+                .heightIn(min = 48.dp)
+                .widthIn(min = 48.dp)
                 .clickable(onClick = onDismiss)
                 .padding(start = 6.dp, end = 2.dp)
                 .testTag("inbook-search-cancel")
