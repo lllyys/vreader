@@ -237,6 +237,11 @@ abstract class AnnotationDao {
     @Query("SELECT * FROM annotation_notes WHERE bookKey = :bookKey ORDER BY createdAt")
     abstract suspend fun notesForBook(bookKey: String): List<AnnotationNoteEntity>
 
+    // feature #132 WI-6b — all notes snapshot for the backup collector (WI-8). Ordered by
+    // (bookKey, createdAt) so a repeat backup of unchanged content is byte-stable.
+    @Query("SELECT * FROM annotation_notes ORDER BY bookKey, createdAt")
+    abstract suspend fun allNotes(): List<AnnotationNoteEntity>
+
     @Query("DELETE FROM annotation_notes WHERE noteId = :id")
     abstract suspend fun deleteNote(id: String)
 
@@ -250,6 +255,42 @@ abstract class AnnotationDao {
     @Query("SELECT * FROM bookmarks WHERE bookKey = :bookKey ORDER BY createdAt")
     abstract suspend fun bookmarksForBook(bookKey: String): List<BookmarkEntity>
 
+    // feature #132 WI-6b — all bookmarks snapshot for the backup collector (WI-8). Ordered by
+    // (bookKey, createdAt) for byte-stable repeat backups.
+    @Query("SELECT * FROM bookmarks ORDER BY bookKey, createdAt")
+    abstract suspend fun allBookmarks(): List<BookmarkEntity>
+
     @Query("DELETE FROM bookmarks WHERE bookmarkId = :id")
     abstract suspend fun deleteBookmark(id: String)
+
+    // ---- feature #132 WI-6b: UUID-preserving restore (insert-if-absent per kind) ----
+    // Each insert IGNOREs on any constraint conflict (PK/unique index), returning -1. A -1 means
+    // the row already exists (a repeated restore of the same UUID, or a same-anchor different-UUID
+    // highlight guarded by the (profileKey, anchorKey) unique index) → idempotent no-op. The whole
+    // restore runs in ONE @Transaction so a concurrent restore/create can't half-apply.
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertHighlightForRestore(highlight: HighlightEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertNoteIfAbsent(note: AnnotationNoteEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertBookmarkIfAbsent(bookmark: BookmarkEntity): Long
+
+    /** Insert the pre-validated entities preserving their backed-up UUIDs + timestamps, returning
+     *  the count APPLIED (freshly inserted) per kind as `Triple(highlights, notes, bookmarks)`.
+     *  A row already present (UUID collision or same-anchor duplicate) is IGNOREd (not counted).
+     *  Wrapped in @Transaction so a repeated/concurrent restore can't half-apply. */
+    @Transaction
+    open suspend fun restoreAnnotationEntities(
+        highlights: List<HighlightEntity>,
+        notes: List<AnnotationNoteEntity>,
+        bookmarks: List<BookmarkEntity>,
+    ): Triple<Int, Int, Int> {
+        val h = highlights.count { insertHighlightForRestore(it) != -1L }
+        val n = notes.count { insertNoteIfAbsent(it) != -1L }
+        val b = bookmarks.count { insertBookmarkIfAbsent(it) != -1L }
+        return Triple(h, n, b)
+    }
 }
