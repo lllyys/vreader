@@ -67,15 +67,43 @@ data class EpubGroup(
 )
 
 /**
- * A resume handle for EPUB paging: the LIVE Readium iterator [source] + any [leftover] locators that
+ * A resume handle for EPUB paging: the LIVE Readium iterator [source] + any leftover locators that
  * overflowed the previous page's budget, so nothing is discarded (round-3 completeness). WI-6 keeps it
  * alive across `loadMore()` and passes it to [EpubInBookSearchEngine.nextPage]; a non-null cursor is
  * always resumable (a terminal page closes the iterator and hands back a null cursor).
+ *
+ * Lifecycle (round-2 audit — a live cursor owns a Readium iterator, so its disposal must be explicit):
+ * - SINGLE-CONSUMPTION: [consume] flips an atomic guard so a cursor is used by exactly ONE `nextPage`
+ *   call. A reused or concurrent call fails fast (returns false / gets no leftover) rather than replaying
+ *   the immutable leftover as duplicate hits or racing the shared iterator. The engine consumes the
+ *   PASSED-IN cursor and mints a FRESH one for the next page, so paging stays linear.
+ * - IDEMPOTENT CLOSE: [close] closes the underlying iterator at most once. WI-6 MUST call it on an
+ *   ABANDONED cursor (query replaced, search UI dismissed, "load more" declined) so the iterator never
+ *   leaks; a terminal page already closes it, and a double close is a no-op.
  */
 class EpubSearchCursor internal constructor(
     internal val source: SearchIteratorSource,
     internal val leftover: List<ReadiumLocator>,
-)
+) {
+    private val consumed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Atomically claim this cursor for a single resume; returns false if already consumed OR closed
+     * (a reuse, a race, or a resume after abandonment). Claiming also blocks a later [close] from closing
+     * the shared iterator the resume path now owns.
+     */
+    internal fun consume(): Boolean = consumed.compareAndSet(false, true)
+
+    /**
+     * Close the underlying Readium iterator at most once (idempotent). A no-op if the cursor was already
+     * CONSUMED (the resume path owns the iterator's lifecycle through the fresh cursor it returned), so a
+     * shared iterator is never prematurely / doubly closed. WI-6 calls this to dispose an ABANDONED cursor.
+     */
+    fun close() {
+        // Claim the cursor for close (same guard as consume): only the FIRST of consume-or-close wins.
+        if (consumed.compareAndSet(false, true)) source.close()
+    }
+}
 
 /**
  * One page of EPUB in-book results: [groups] (by chapter, first-seen order), [moreAvailable], and the
@@ -225,9 +253,19 @@ class EpubInBookSearchEngine internal constructor(
      * Resume paging from a live [cursor] (its iterator + any leftover locators from the prior page's
      * overflow), producing the next page. Same terminal semantics as [searchFirstPage] except a fully
      * consumed cursor with zero further hits yields [EpubSearchOutcome.NoResults] (no more results).
+     *
+     * SINGLE-CONSUMPTION (round-2 audit): the cursor is claimed atomically — a reused or concurrently
+     * dispatched cursor returns [EpubSearchOutcome.Error] WITHOUT replaying its leftover or touching the
+     * shared iterator, so paging can never emit duplicate hits or race the iterator. The engine mints a
+     * FRESH cursor for the next page, so a linear caller keeps paging with the returned cursor.
      */
-    suspend fun nextPage(cursor: EpubSearchCursor): EpubSearchOutcome =
-        fillPage(cursor.source, cursor.leftover)
+    suspend fun nextPage(cursor: EpubSearchCursor): EpubSearchOutcome {
+        if (!cursor.consume()) {
+            // Reuse / concurrent dispatch: do NOT touch the iterator (its rightful consumer owns it).
+            return EpubSearchOutcome.Error(EpubSearchError("search cursor already consumed"))
+        }
+        return fillPage(cursor.source, cursor.leftover)
+    }
 
     /**
      * Fill one page (up to [pageSize] hits) from [iterator], consuming [leftover] Readium locators FIRST

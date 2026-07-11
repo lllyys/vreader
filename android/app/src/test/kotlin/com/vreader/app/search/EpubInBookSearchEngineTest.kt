@@ -55,7 +55,8 @@ class EpubInBookSearchEngineTest {
     }
 
     private class FakeIterator(private val pages: MutableList<Canned>) : SearchIteratorSource {
-        var closed = false
+        var closeCount = 0
+        val closed: Boolean get() = closeCount > 0
         override suspend fun nextPage(): SearchPageResult =
             when (val next = if (pages.isEmpty()) Canned.Exhausted else pages.removeAt(0)) {
                 is Canned.Page -> SearchPageResult.Locators(next.locators)
@@ -63,7 +64,7 @@ class EpubInBookSearchEngineTest {
                 is Canned.Failure -> SearchPageResult.Failed(next.error)
             }
 
-        override fun close() { closed = true }
+        override fun close() { closeCount++ }
     }
 
     private class FakeSource(
@@ -344,5 +345,83 @@ class EpubInBookSearchEngineTest {
         val page = (engine.searchFirstPage("cat") as EpubSearchOutcome.Results).page
         assertEquals(3, page.groups.sumOf { it.hits.size })
         assertTrue(page.moreAvailable)
+    }
+
+    @Test
+    fun abandonedCursor_close_closesTheIterator_idempotently() = runTest {
+        val l1 = loc(chapterTitle = "C", highlight = "cat")
+        val l2 = loc(chapterTitle = "D", highlight = "cat")
+        val source = FakeSource(
+            searchable = true,
+            pages = listOf(Canned.Page(listOf(l1)), Canned.Page(listOf(l2)), Canned.Exhausted),
+        )
+        val engine = EpubInBookSearchEngine(source, pageSize = 1)
+
+        val page = (engine.searchFirstPage("cat") as EpubSearchOutcome.Results).page
+        val cursor = page.cursor!!
+        assertFalse(source.lastIterator!!.closed)
+
+        // The caller abandons the cursor (new query / UI dismiss) and disposes it.
+        cursor.close()
+        assertEquals("close closes the iterator", 1, source.lastIterator!!.closeCount)
+        // Idempotent: a second close is a no-op.
+        cursor.close()
+        assertEquals("close is idempotent", 1, source.lastIterator!!.closeCount)
+    }
+
+    @Test
+    fun reusedCursor_isRejected_neverReplaysLeftover() = runTest {
+        // ONE Readium page with 3 locators, pageSize=1 -> page1 has 1 hit + 2 leftover in the cursor.
+        val all = (1..3).map { loc(chapterTitle = "C", highlight = "cat$it") }
+        val source = FakeSource(searchable = true, pages = listOf(Canned.Page(all), Canned.Exhausted))
+        val engine = EpubInBookSearchEngine(source, pageSize = 1)
+
+        val page = (engine.searchFirstPage("cat") as EpubSearchOutcome.Results).page
+        val cursor = page.cursor!!
+
+        // First resume consumes the cursor.
+        val page2 = (engine.nextPage(cursor) as EpubSearchOutcome.Results).page
+        assertEquals(1, page2.groups.sumOf { it.hits.size })
+
+        // Reusing the SAME cursor must be rejected (never replays the immutable leftover as duplicates).
+        val reuse = engine.nextPage(cursor)
+        assertTrue("a reused cursor is rejected", reuse is EpubSearchOutcome.Error)
+    }
+
+    @Test
+    fun closedCursor_resume_isRejected() = runTest {
+        val all = (1..3).map { loc(chapterTitle = "C", highlight = "cat$it") }
+        val source = FakeSource(searchable = true, pages = listOf(Canned.Page(all), Canned.Exhausted))
+        val engine = EpubInBookSearchEngine(source, pageSize = 1)
+
+        val cursor = (engine.searchFirstPage("cat") as EpubSearchOutcome.Results).page.cursor!!
+        cursor.close()
+
+        // Resuming a closed (abandoned) cursor is rejected — consume and close share one guard.
+        val outcome = engine.nextPage(cursor)
+        assertTrue(outcome is EpubSearchOutcome.Error)
+    }
+
+    @Test
+    fun fullDrain_closesIteratorExactlyOnce() = runTest {
+        // Drain a multi-page overflow to exhaustion and assert the iterator is closed EXACTLY once
+        // (no double-close across the resume chain; no leak).
+        val all = (1..5).map { loc(chapterTitle = "C", highlight = "cat$it") }
+        val source = FakeSource(searchable = true, pages = listOf(Canned.Page(all), Canned.Exhausted))
+        val engine = EpubInBookSearchEngine(source, pageSize = 2)
+
+        var outcome = engine.searchFirstPage("cat")
+        while (outcome is EpubSearchOutcome.Results) {
+            val page = outcome.page
+            // While non-terminal, the iterator must stay OPEN.
+            if (page.moreAvailable) {
+                assertFalse("iterator stays open across overflow pages", source.lastIterator!!.closed)
+                outcome = engine.nextPage(page.cursor!!)
+            } else {
+                assertNull(page.cursor)
+                break
+            }
+        }
+        assertEquals("iterator closed exactly once on drain", 1, source.lastIterator!!.closeCount)
     }
 }
