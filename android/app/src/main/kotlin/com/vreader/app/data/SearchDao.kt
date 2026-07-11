@@ -93,6 +93,15 @@ abstract class SearchDao {
     /** True iff every indexable book is settled (indexed | skipped_unsupported). */
     suspend fun isIndexComplete(): Boolean = countUnsettledIndexable() == 0
 
+    /**
+     * Observable count of PUBLISHED search sections — the index-generation signal the repository
+     * (WI-6) flatMapLatest/combines over so a HELD query re-runs and GROWS as the coordinator publishes
+     * more books mid-indexing (fix #1 — live result growth). Every `publishBook` adds rows, so this
+     * Flow re-emits and the repository re-queries with the same query string.
+     */
+    @Query("SELECT COUNT(*) FROM search_sections")
+    abstract fun observeSearchSectionsCount(): Flow<Int>
+
     // ---- first-hit-per-book FTS match (two-step, both minSdk-26-safe; NO window functions) ----
 
     /**
