@@ -280,12 +280,15 @@ class RawOffsetMatcherTest {
         assertNull(slice.nextOccurrenceIndex)
     }
 
-    @Test fun foldedOnlyNoAnchor_multiUnitQuery_firstUnitAbsent_returnsZero() {
-        // A genuine folded/AND case: the chunk contains the SECOND unit ("beta") but NOT the anchor
-        // (first unit "alpha"). The chunk hit the FTS MATCH via AND, but the anchor has no raw span
-        // here -> the matcher returns 0 (the repository head-fallback jumps to the section head).
-        val text = "only beta appears in this chunk, no anchor word"
-        val q = sq("alpha beta gamma")   // first unit Term("alpha") — absent from the text
+    @Test fun anchorPresentOnlyAsSubstring_notWholeWord_returnsZero_headFallback() {
+        // The anchor's fold appears in the chunk ONLY as a substring inside a longer word, never as a
+        // locatable whole-word raw anchor. Term("cat") folds present inside "category"/"scatter" but
+        // never as the word "cat" -> Term whole-token equality rejects both -> 0 occurrences. This is
+        // the folded/AND head-fallback path (the FTS index may have matched a segmented form of the
+        // chunk, but the raw matcher cannot locate a valid anchor span, so the repository jumps to the
+        // section head). Distinct from plain absence: the fold IS present, just not as a valid anchor.
+        val text = "the category has scatter but never the standalone term"
+        val q = sq("cat and x")   // first unit Term("cat")
         val slice = RawOffsetMatcher.occurrences(text, q, fromOccurrenceIndex = 0, maxThisPage = 10)
         assertEquals(emptyList<RawOccurrence>(), slice.occurrences)
         assertNull(slice.nextOccurrenceIndex)

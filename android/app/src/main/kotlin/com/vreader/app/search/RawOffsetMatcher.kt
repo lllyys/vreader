@@ -24,23 +24,14 @@
 // - RESUMABLE within a chunk: occurrences(from, maxThisPage) returns the window
 //   [from, from + emitted) and RawOccurrenceSlice.nextOccurrenceIndex (null == chunk exhausted). The
 //   cap is a per-PAGE window, NOT a truncation — every occurrence is retrievable across successive pages
-//   (round-3 completeness). An internal OOM_GUARD ceiling (far above any realistic count) bounds memory
-//   only; normal content never reaches it.
+//   (round-3 completeness). The enumeration is naturally BOUNDED: every iteration advances the scan
+//   cursor by at least one UTF-16 unit (a match advances past its own end; a non-match advances one
+//   code point), so occurrences ≤ chunk length and the loop always terminates — no artificial cap or
+//   OOM guard is needed, and completeness holds with no false-exhaustion edge.
 package com.vreader.app.search
 
 /** Locates raw-text occurrences of a [StructuredQuery], resumable within a chunk. Pure JVM. */
 object RawOffsetMatcher {
-
-    /**
-     * A memory-safety ceiling on how many occurrences a single chunk may enumerate. This is an OOM
-     * guard set FAR above any realistic occurrence count (a ~4 KB #128 chunk cannot hold anywhere near
-     * this many word/phrase occurrences, so it is UNREACHABLE in practice), NOT a user-visible
-     * truncation — pagination completeness is provided by the
-     * [fromOccurrenceIndex]/[RawOccurrenceSlice.nextOccurrenceIndex] window, not by this cap. If the
-     * guard were ever tripped it returns the current index as a RESUME point, never a false "exhausted"
-     * (null), so completeness holds even at the guard boundary.
-     */
-    private const val OCCURRENCE_OOM_GUARD = 100_000
 
     /**
      * Returns the page window `[fromOccurrenceIndex, fromOccurrenceIndex + maxThisPage)` of all
@@ -80,13 +71,6 @@ object RawOffsetMatcher {
                 }
                 occurrenceIndex++
                 i = end   // non-overlapping: advance past this match.
-                if (occurrenceIndex >= OCCURRENCE_OOM_GUARD) {
-                    // OOM guard tripped. A real chunk (bounded to ~4 KB by the #128 extractor) holds at
-                    // most a few thousand word/phrase occurrences, so this is UNREACHABLE in practice.
-                    // If it is ever hit we must NOT falsely claim exhaustion — return the current index
-                    // as the resume point so no occurrence is silently dropped (completeness contract).
-                    return RawOccurrenceSlice(emitted, occurrenceIndex)
-                }
             } else {
                 i += Character.charCount(text.codePointAt(i))
             }
