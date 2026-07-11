@@ -47,6 +47,7 @@ import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.data.Book
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderChromeStateSaver
+import com.vreader.app.reader.nav.JumpResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.debounce
@@ -165,6 +166,23 @@ class PdfReaderActivity : ComponentActivity() {
                         val bookDetails = androidx.compose.runtime.remember(s.book, collectionNames, s.document.pageCount) {
                             com.vreader.app.reader.details.BookDetailsMapper.map(s.book, collectionNames, pageCount = s.document.pageCount)
                         }
+
+                        // feature #135 WI-7 — the bookmark wiring. PDF has no TOC or preview (null tocIndex +
+                        // null provider → the WI-4 projection shows just "p. N"). The current position is the
+                        // top-visible page → a plain canonical Locator; the jump scrolls to the page.
+                        val dateRenderer = androidx.compose.runtime.remember { bookmarkDateRenderer() }
+                        val bookmarkRecords by androidx.compose.runtime.remember(bookKey) {
+                            container.annotationsRepository.bookmarks(bookKey)
+                        }.collectAsStateWithLifecycle(emptyList())
+                        val bookmarkRows = androidx.compose.runtime.remember(bookmarkRecords, s.book) {
+                            bookmarkRowItems(bookmarkRecords, s.book.originalFormat, tocIndex = null, previewProvider = null, dateRenderer = dateRenderer)
+                        }
+                        val livePage = listState.firstVisibleItemIndex
+                        val liveCanonical = androidx.compose.runtime.remember(s.book, livePage) { pdfBookmarkLocator(s.book, livePage) }
+                        val isBookmarked by produceState(false, liveCanonical, bookmarkRecords) {
+                            value = runCatching { container.annotationsRepository.isBookmarked(bookKey, liveCanonical) }.getOrDefault(false)
+                        }
+
                         PdfReaderChrome(
                             theme = settings.theme,
                             title = s.title,
@@ -181,6 +199,25 @@ class PdfReaderActivity : ComponentActivity() {
                             bookDetails = bookDetails,
                             onShareBook = { com.vreader.app.reader.share.shareBook(this@PdfReaderActivity, s.book) },
                             onCopyFingerprint = { copyFingerprint(it) },
+                            // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + PDF jump.
+                            isCurrentBookmarked = isBookmarked,
+                            onToggleBookmark = {
+                                container.appScope.launch {
+                                    runCatching { container.annotationsRepository.toggleBookmark(bookKey, title = null, locator = liveCanonical) }
+                                }
+                            },
+                            currentLocator = liveCanonical,
+                            bookmarks = bookmarkRows,
+                            // PDF jump: scroll to the bookmark's page; out-of-range → Failed (sheet stays open).
+                            onJumpBookmark = { record ->
+                                val target = pdfBookmarkPageTarget(record.locator.page, s.document.pageCount)
+                                if (target == null) {
+                                    JumpResult.Failed
+                                } else {
+                                    jumpScope.launch { listState.scrollToItem(target) }
+                                    JumpResult.Succeeded
+                                }
+                            },
                         )
                     }
                 }

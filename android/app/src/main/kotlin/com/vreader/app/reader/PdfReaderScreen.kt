@@ -66,8 +66,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vreader.app.annotations.AnnotationItem
 import com.vreader.app.annotations.AnnotationsSnapshot
+import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.reader.chrome.ReaderChromeScaffold
 import com.vreader.app.reader.chrome.ReaderChromeState
+import com.vreader.app.reader.nav.BookmarkRowItem
+import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
 
@@ -149,6 +152,13 @@ internal fun PdfReaderChrome(
     bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
+    // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + PDF page jump (all nullable/
+    // default so #132/#134 callers stay valid). The Bookmarks-tab row shows "p. N" (no preview/chapter).
+    isCurrentBookmarked: Boolean = false,
+    onToggleBookmark: (() -> Unit)? = null,
+    currentLocator: vreader.contracts.Locator? = null,
+    bookmarks: List<BookmarkRowItem> = emptyList(),
+    onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -162,7 +172,7 @@ internal fun PdfReaderChrome(
             onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
             onJumpToAnnotation = onJumpToAnnotation,
             onShareAnnotations = onShareAnnotations,
-            // Search/bookmark top-bar slots stay null (#133/#135 — no dead controls). feature #134 WI-5:
+            // Search top-bar slot stays null (#133 — no dead control). feature #134 WI-5:
             // the More button + Book Details / Share are wired through the scaffold's More menu below.
             bottomChrome = { _, onOpenNotes ->
                 // PDF has no Contents (empty TOC) + no Display control → Notes only.
@@ -172,8 +182,39 @@ internal fun PdfReaderChrome(
             bookDetails = bookDetails,
             onShareBook = onShareBook,
             onCopyFingerprint = onCopyFingerprint,
+            // feature #135 WI-7 — the bookmark toggle + Bookmarks tab, now lit up for PDF.
+            isCurrentBookmarked = isCurrentBookmarked,
+            onToggleBookmark = onToggleBookmark,
+            currentLocator = currentLocator,
+            bookmarks = bookmarks,
+            onJumpBookmark = onJumpBookmark,
         )
     }
+}
+
+/**
+ * feature #135 WI-7 — the current PDF reading position (the top-visible page index) as a plain canonical
+ * [vreader.contracts.Locator] (the bookmark equality basis + create/jump anchor). Mirrors the host's
+ * save-position construction (identity triple + `page`). Pure/JVM-testable.
+ */
+fun pdfBookmarkLocator(book: com.vreader.app.data.Book, page: Int): vreader.contracts.Locator =
+    vreader.contracts.Locator(
+        contentSHA256 = book.contentSHA256,
+        fileByteCount = book.fileByteCount,
+        format = book.originalFormat.name,
+        page = page.coerceAtLeast(0),
+    )
+
+/**
+ * feature #135 WI-7 — the PDF bookmark jump target: the page index to scroll to, or null when it is out of
+ * range (→ [JumpResult.Failed], the sheet stays open — rule 51). A null/negative page, a page at/past the
+ * end ([page] >= [pageCount]), or an empty document ([pageCount] == 0) is out of range. The PDF analog of
+ * [txtBookmarkScrollTarget]. Pure/JVM-testable.
+ */
+fun pdfBookmarkPageTarget(page: Int?, pageCount: Int): Int? {
+    if (pageCount <= 0) return null
+    if (page == null || page < 0 || page >= pageCount) return null
+    return page
 }
 
 /**

@@ -69,18 +69,25 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vreader.app.VReaderApp
 import com.vreader.app.annotations.AnnotationsSnapshot
+import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.data.Book
 import com.vreader.app.reader.chrome.ReaderChromeScaffold
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderChromeStateSaver
 import com.vreader.app.reader.foliate.Azw3DocState
 import com.vreader.app.reader.foliate.Azw3Document
+import com.vreader.app.reader.foliate.Azw3GoToResult
 import com.vreader.app.reader.foliate.Azw3LocatorBridge
 import com.vreader.app.reader.foliate.FoliateMessage
+import com.vreader.app.reader.nav.BookmarkRowItem
+import com.vreader.app.reader.nav.BookmarkTocIndex
+import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import vreader.contracts.BookFormat
+import vreader.contracts.Locator
 import vreader.contracts.VReaderLocator
 import java.io.File
 
@@ -134,6 +141,28 @@ class Azw3ReaderActivity : ComponentActivity() {
                     val bookDetails = remember(o.book, collectionNames) {
                         com.vreader.app.reader.details.BookDetailsMapper.map(o.book, collectionNames, pageCount = null)
                     }
+
+                    // feature #135 WI-7 — the bookmark wiring. AZW3 has no reader TOC, so the row projection
+                    // has no chapter/page (the WI-4 EPUB/AZW3 branch degrades to null fields — no crash) — a
+                    // null tocIndex. The current position comes from the relocate-derived canonical Locator;
+                    // the jump uses Azw3Document.goTo (CFI-first→fraction, render-death carry-across).
+                    val bookmarkRecords by container.annotationsRepository.bookmarks(bookKey)
+                        .collectAsStateWithLifecycle(initialValue = emptyList())
+                    val dateRenderer = remember { bookmarkDateRenderer() }
+                    val bookmarkRows = remember(bookmarkRecords) {
+                        bookmarkRowItems(bookmarkRecords, BookFormat.azw3, tocIndex = null, previewProvider = null, dateRenderer = dateRenderer)
+                    }
+                    // The live position + the document to jump into, hoisted from the body so the chrome-level
+                    // toggle/jump can reach them. currentCanonical is null until foliate's first relocate.
+                    var currentCanonical by remember { mutableStateOf<Locator?>(null) }
+                    var liveDocument by remember { mutableStateOf<Azw3Document?>(null) }
+                    // Presence — refreshed on every relocate AND right after a toggle.
+                    val isBookmarked by produceState(false, currentCanonical, bookmarkRecords) {
+                        val c = currentCanonical
+                        value = c != null && runCatching { container.annotationsRepository.isBookmarked(bookKey, c) }.getOrDefault(false)
+                    }
+                    val jumpScope = rememberCoroutineScope()
+
                     Azw3ReaderChrome(
                         theme = displayTheme.theme,
                         title = o.book.title,
@@ -144,13 +173,54 @@ class Azw3ReaderActivity : ComponentActivity() {
                         bookDetails = bookDetails,
                         onShareBook = { com.vreader.app.reader.share.shareBook(this@Azw3ReaderActivity, o.book) },
                         onCopyFingerprint = { copyFingerprint(it) },
+                        // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + AZW3 jump.
+                        isCurrentBookmarked = isBookmarked,
+                        onToggleBookmark = if (currentCanonical != null) {
+                            {
+                                val c = currentCanonical
+                                if (c != null) container.appScope.launch {
+                                    runCatching { container.annotationsRepository.toggleBookmark(bookKey, title = null, locator = c) }
+                                }
+                            }
+                        } else null,
+                        currentLocator = currentCanonical,
+                        bookmarks = bookmarkRows,
+                        onJumpBookmark = { record ->
+                            val doc = liveDocument
+                            // Decide the sheet's dismiss SYNCHRONOUSLY from target validity: an unjumpable
+                            // bookmark (no cfi + no finite progression) → Failed (sheet stays open, no
+                            // invented error surface — rule 51); a jumpable one → Succeeded (dismiss). The
+                            // ACTUAL landing is the awaited Azw3Document.goTo (CFI-first→fraction) launched
+                            // off the jump scope — it blocks ~3s on the bundle relocate ack, so it CANNOT run
+                            // on the tap thread (that would ANR). render-death mid-jump is carried across by
+                            // the host's recreate path (takePendingGoTo → run(pendingGoTo=)); goTo re-lands once.
+                            val decision = azw3JumpDecision(doc, record.locator)
+                            if (decision == JumpResult.Succeeded && doc != null) {
+                                jumpScope.launch {
+                                    // The awaited landing (mapped for symmetry with the plan's Succeeded/
+                                    // Timeout/Failed contract); a landed jump relocates → presence refreshes.
+                                    val landed = runCatching { doc.goTo(record.locator) }
+                                        .getOrDefault(Azw3GoToResult.Failed)
+                                    if (azw3JumpResult(landed) == JumpResult.Succeeded && currentCanonical != null) {
+                                        currentCanonical = record.locator // reflect the reached position promptly
+                                    }
+                                }
+                            }
+                            decision
+                        },
                         body = {
                             Azw3ReaderHost(
                                 book = o.book,
                                 bookFile = File(o.path),
                                 restore = o.restore,
                                 settings = container.readerSettingsStore.settings,
-                                onRelocate = { rel -> enqueueSave(o.book, rel) },
+                                onRelocate = { rel ->
+                                    enqueueSave(o.book, rel)
+                                    currentCanonical = Azw3LocatorBridge
+                                        .toEnvelope(rel, o.book.contentSHA256, o.book.fileByteCount)
+                                        .legacyLocator?.copy(format = BookFormat.azw3.name)?.validatedOrNull()
+                                },
+                                onDocument = { doc -> liveDocument = doc },
                             )
                         },
                     )
@@ -218,6 +288,39 @@ class Azw3ReaderActivity : ComponentActivity() {
     }
 }
 
+// ---- feature #135 WI-7 — AZW3 pure host wiring helpers ----
+
+/**
+ * feature #135 WI-7 — map an awaited [Azw3GoToResult] (the settled outcome of [Azw3Document.goTo]) to the
+ * sheet's [JumpResult]. [Azw3GoToResult.Succeeded] landed → [JumpResult.Succeeded]; Timeout / Failed
+ * (unresolvable target or dead bundle) / Superseded (a newer jump replaced this one) are all NON-landings
+ * → [JumpResult.Failed] (no invented error surface — rule 51). Pure/JVM-testable. Used to surface the
+ * awaited landing outcome off the background jump (the SYNCHRONOUS sheet-dismiss decision is
+ * [azw3JumpDecision], since the awaited goTo cannot run on the tap thread).
+ */
+fun azw3JumpResult(result: Azw3GoToResult): JumpResult = when (result) {
+    is Azw3GoToResult.Succeeded -> JumpResult.Succeeded
+    Azw3GoToResult.Timeout, Azw3GoToResult.Failed, Azw3GoToResult.Superseded -> JumpResult.Failed
+}
+
+/**
+ * feature #135 WI-7 — the SYNCHRONOUS dismiss decision for an AZW3 bookmark jump. Because the actual
+ * [Azw3Document.goTo] is awaited (~3s on the bundle relocate ack — it cannot run on the tap thread), the
+ * sheet decides dismiss-vs-stay up front from target validity: a null document (nothing loaded) OR a
+ * canonical with no jumpable target (no cfi + no finite progression, per [FoliateGoToTarget.from]) →
+ * [JumpResult.Failed] (the sheet stays open — rule 51); an otherwise-jumpable target → [JumpResult.Succeeded]
+ * (dismiss; the awaited goTo then lands the position off-thread, re-issued once on render death).
+ * Pure/JVM-testable ([document] is only null-checked).
+ */
+fun azw3JumpDecision(document: Azw3Document?, canonical: Locator): JumpResult {
+    if (document == null) return JumpResult.Failed
+    return if (com.vreader.app.reader.foliate.FoliateGoToTarget.from(canonical) != null) {
+        JumpResult.Succeeded
+    } else {
+        JumpResult.Failed
+    }
+}
+
 private val Ink = Color(0xFF1D1A14)
 private val ChromeFill = Color(0xFFF7F4EE)
 private val Accent = Color(0xFF8C2F2F)
@@ -233,6 +336,10 @@ private fun Azw3ReaderHost(
     restore: VReaderLocator?,
     settings: kotlinx.coroutines.flow.Flow<com.vreader.app.reader.settings.ReaderSettings>,
     onRelocate: (FoliateMessage.Relocate) -> Unit,
+    // feature #135 WI-7 — hoist the CURRENT document up so the chrome-level bookmark jump can reach it. Fired
+    // with the fresh document on each (re)create (render-death recovery swaps the WebView + document), and
+    // with null on dispose — so the chrome always jumps into the live document, never a dead one.
+    onDocument: (Azw3Document?) -> Unit = {},
 ) {
     val context = LocalContext.current
     var reloadKey by remember { mutableIntStateOf(0) }
@@ -255,19 +362,30 @@ private fun Azw3ReaderHost(
         Holder(wv, bookFile, context)
     }
     val state by holder.document.state.collectAsState()
+    // feature #135 WI-7 — a bookmark goTo pending across a render-death recreate. On render death the host
+    // reads it OFF the dying document (takePendingGoTo) BEFORE the reloadKey bump destroys it, then seeds it
+    // into the replacement via run(pendingGoTo=) so an in-flight jump re-lands exactly once (WI-2's seam).
+    var carriedGoTo by remember { mutableStateOf<Locator?>(null) }
 
     DisposableEffect(holder) {
         val doc = holder.document
+        onDocument(doc)   // hoist the live document up for the chrome-level bookmark jump
         doc.onRelocate = { rel ->
             onRelocate(rel)
             resume = Azw3LocatorBridge.toEnvelope(rel, book.contentSHA256, book.fileByteCount)
         }
-        doc.onRenderProcessGone = { reloadKey++ }
-        onDispose { doc.destroy() }
+        doc.onRenderProcessGone = {
+            // Carry any in-flight bookmark jump across the recreate (read + clear it off the dying document),
+            // then recreate — the fresh document re-issues it once after book-ready (WI-2 render-death path).
+            carriedGoTo = doc.takePendingGoTo()
+            reloadKey++
+        }
+        onDispose { onDocument(null); doc.destroy() }
     }
 
-    // Holder-scoped: the collector lives exactly as long as this holder (cancelled on reload/dispose).
-    LaunchedEffect(holder) { holder.document.run(resume) }
+    // Holder-scoped: the collector lives exactly as long as this holder (cancelled on reload/dispose). Seed
+    // any carried bookmark goTo so a render death mid-jump re-lands the position once on the replacement.
+    LaunchedEffect(holder) { holder.document.run(resume, pendingGoTo = carriedGoTo) }
 
     // feature #129 WI-6 — apply the Display CSS to the current document. Re-keyed on `holder` so a fresh
     // render (reload / render-death recovery) re-records the CSS, and on `displaySettings` so a live
@@ -328,6 +446,14 @@ internal fun Azw3ReaderChrome(
     bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
+    // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + AZW3 jump (all nullable/default
+    // so #132/#134 callers stay valid). A non-null onToggleBookmark fills the toggle; onJumpBookmark makes
+    // the Bookmarks-tab rows clickable + dismiss-on-Succeeded (null → review-only rows).
+    isCurrentBookmarked: Boolean = false,
+    onToggleBookmark: (() -> Unit)? = null,
+    currentLocator: Locator? = null,
+    bookmarks: List<BookmarkRowItem> = emptyList(),
+    onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -342,7 +468,7 @@ internal fun Azw3ReaderChrome(
             // AZW3 tap-to-jump is NULL — review-only capability gate (no goTo until #135); cards non-clickable.
             onJumpToAnnotation = null,
             onShareAnnotations = onShareAnnotations,
-            // Search/bookmark top-bar slots stay null (#133/#135 — no dead controls). feature #134 WI-5:
+            // Search top-bar slot stays null (#133 — no dead control). feature #134 WI-5:
             // the More button + Book Details / Share are wired through the scaffold's More menu below.
             bottomChrome = { _, onOpenNotes ->
                 // AZW3 has no Contents (empty TOC) + no Display control → Notes only.
@@ -352,6 +478,12 @@ internal fun Azw3ReaderChrome(
             bookDetails = bookDetails,
             onShareBook = onShareBook,
             onCopyFingerprint = onCopyFingerprint,
+            // feature #135 WI-7 — the bookmark toggle + Bookmarks tab, now lit up for AZW3.
+            isCurrentBookmarked = isCurrentBookmarked,
+            onToggleBookmark = onToggleBookmark,
+            currentLocator = currentLocator,
+            bookmarks = bookmarks,
+            onJumpBookmark = onJumpBookmark,
         )
     }
 }
