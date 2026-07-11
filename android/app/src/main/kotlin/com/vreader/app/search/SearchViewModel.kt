@@ -84,15 +84,20 @@ class SearchViewModel(
     private val _state = MutableStateFlow(SearchUiState())
     val state: StateFlow<SearchUiState> = _state.asStateFlow()
 
+    /** A settled result batch, tagged with the exact (trimmed) query it was computed for, so a stale
+     *  emission arriving during the NEXT query's debounce window can be discarded instead of overwriting
+     *  the current state with mislabeled rows (Gate-4 High). */
+    private data class SearchResults(val query: String, val searched: Boolean, val rows: List<SearchResultRow>)
+
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
-    private val resultsFlow: Flow<Pair<Boolean, List<SearchResultRow>>> =
+    private val resultsFlow: Flow<SearchResults> =
         _query
             .map { it.trim() }
             .debounce(debounceMillis)           // 300 ms — collapse as-you-type keystrokes
             .distinctUntilChanged()
             .flatMapLatest { q ->               // stale-query cancellation: a new query drops the old
                 if (q.isEmpty()) {
-                    flowOf(false to emptyList())
+                    flowOf(SearchResults(q, searched = false, rows = emptyList()))
                 } else {
                     // onStart(emptyList) so metadata results render IMMEDIATELY — in-text hits are always
                     // live but the Room-backed textHits Flow's first emission may lag; the combine must
@@ -101,7 +106,7 @@ class SearchViewModel(
                         libraryFlow,
                         textHitsFor(q).onStart { emit(emptyList()) },
                     ) { books, hits ->
-                        true to buildRows(q, books, hits)
+                        SearchResults(q, searched = true, rows = buildRows(q, books, hits))
                     }
                 }
             }
@@ -114,26 +119,47 @@ class SearchViewModel(
             recentsFlow,
             collectionsFlow,
             indexCompleteFlow.distinctUntilChanged(),
-        ) { (searched, rows), recents, collections, complete ->
-            SearchUiState(
-                query = _query.value,
-                recents = recents,
-                collections = collections,
-                results = rows,
-                searched = searched,
-                indexComplete = complete,
-            )
+        ) { results, recents, collections, complete ->
+            State(results, recents, collections, complete)
         }
-            .onEach { _state.value = it }
+            .onEach { s ->
+                // Discard a STALE result batch — one whose tagged query no longer equals the live raw
+                // query (it arrived during the next query's debounce window). Keep the reset empty state
+                // set by onQueryChange rather than flashing mislabeled rows / a wrong definitive copy.
+                val liveQuery = _query.value.trim()
+                if (s.results.query != liveQuery) {
+                    // Still keep the always-live empty-state feeds fresh.
+                    _state.value = _state.value.copy(
+                        recents = s.recents, collections = s.collections, indexComplete = s.complete,
+                    )
+                    return@onEach
+                }
+                _state.value = SearchUiState(
+                    query = _query.value,          // the raw typed text — matches s.results.query here
+                    recents = s.recents,
+                    collections = s.collections,
+                    results = s.results.rows,
+                    searched = s.results.searched,
+                    indexComplete = s.complete,
+                )
+            }
             .launchIn(viewModelScope)
     }
 
-    /** Update the query text (drives the debounced search). Also mirrored into the emitted state's
-     *  `query` immediately so the field reflects typing without waiting for the debounce. */
+    /** Internal combine tuple (avoids a 4-arg destructuring lambda). */
+    private data class State(
+        val results: SearchResults,
+        val recents: List<String>,
+        val collections: List<Collection>,
+        val complete: Boolean,
+    )
+
+    /** Update the query text (drives the debounced search). Immediately reflects the raw text AND
+     *  resets `searched`/`results` so no stale rows or a stale definitive-no-results copy linger while
+     *  the debounce settles (Gate-4 High — the emitted state stays self-consistent for the new query). */
     fun onQueryChange(text: String) {
         _query.value = text
-        // Reflect the raw query immediately (results still lag by the debounce).
-        _state.value = _state.value.copy(query = text)
+        _state.value = _state.value.copy(query = text, searched = false, results = emptyList())
     }
 
     /** Records the CURRENT (trimmed) query into recents — call on IME-search / result-open. No-op for

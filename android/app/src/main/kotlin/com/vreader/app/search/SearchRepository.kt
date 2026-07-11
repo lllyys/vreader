@@ -18,7 +18,6 @@ package com.vreader.app.search
 import com.vreader.app.data.SearchDao
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -52,9 +51,11 @@ class SearchRepository(private val searchDao: SearchDao) {
         // still fires — metadata search stays live even for a null in-text query.
         val built = SearchQueryBuilder.ftsQuery(rawQuery) ?: return flowOf(emptyList())
         // Fix #1: flatMapLatest over the index-generation signal so a HELD query re-queries + grows as
-        // more sections publish. distinctUntilChanged so an unchanged count doesn't re-run needlessly.
+        // more sections publish. No distinctUntilChanged on the count: Room re-emits the count on ANY
+        // search_sections write (invalidation), so re-running even when the total is unchanged (e.g. a
+        // reindex into the same chunk count) keeps results fresh; Room already dedupes identical results
+        // downstream via the StateFlow/collector, so the extra query is cheap.
         return searchDao.observeSearchSectionsCount()
-            .distinctUntilChanged()
             .flatMapLatest {
                 flow { emit(queryOnce(built, limit)) }
             }

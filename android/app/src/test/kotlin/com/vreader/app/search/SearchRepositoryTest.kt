@@ -8,8 +8,14 @@ import com.vreader.app.data.SearchDao
 import com.vreader.app.data.SearchIndexStateEntity
 import com.vreader.app.data.SearchStagingEntity
 import com.vreader.app.data.VReaderDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -87,15 +93,35 @@ class SearchRepositoryTest {
     @Test fun textHits_growAsSectionsPublish_forAHeldQuery() = runBlocking {
         seedBook(bookA)
         seedBook(bookB)
-        // Query held constant across an indexing pass. Initially no book has matching text.
-        assertTrue("initially empty", repo.textHits("widget").first().isEmpty())
+        // ONE held collector across the whole indexing pass — proving the SAME Flow re-emits enlarged
+        // results as sections publish (fix #1). A one-shot implementation would NOT re-emit here.
+        val emissions = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            scope.launch { repo.textHits("widget").collect { emissions.add(it.size) } }
 
-        publishSection(bookA, 0, 0, "a widget appears here")
-        assertEquals("book A now hits", 1, repo.textHits("widget").first().size)
+            // Wait for the initial (empty) emission.
+            awaitCount(emissions) { it.isNotEmpty() }
+            assertEquals("initial emission is empty", 0, emissions.last())
 
-        publishSection(bookB, 0, 1, "another widget over there")
-        // SAME query string, results GREW because the index-generation signal changed (fix #1).
-        assertEquals("results grow to include book B", 2, repo.textHits("widget").first().size)
+            publishSection(bookA, 0, 0, "a widget appears here")
+            awaitCount(emissions) { it.lastOrNull() == 1 }
+            assertEquals("held Flow re-emits 1 after book A publishes", 1, emissions.last())
+
+            publishSection(bookB, 0, 1, "another widget over there")
+            awaitCount(emissions) { it.lastOrNull() == 2 }
+            assertEquals("held Flow GROWS to 2 after book B publishes (observable, not one-shot)", 2, emissions.last())
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** Poll [list] until [predicate] holds (Room-Flow re-emission is async) — bounded so a stuck Flow
+     *  fails the test rather than hangs. */
+    private suspend fun awaitCount(list: List<Int>, predicate: (List<Int>) -> Boolean) {
+        withTimeout(5_000) {
+            while (!predicate(list)) kotlinx.coroutines.delay(20)
+        }
     }
 
     // ---- first-hit-per-book ----
