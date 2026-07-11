@@ -129,6 +129,11 @@ class FoliateBridge(
 
     fun prev() = eval("try{readerAPI.prev&&readerAPI.prev()}catch(e){}")
 
+    /** feature #129 WI-6 — apply the "Display" theme+typography CSS to the rendered book. The CSS is
+     *  JSON-escaped (a valid, injection-safe JS string literal) exactly like [jsString] above, so no
+     *  settings/book-derived value can break out of the shell JS. Mirrors iOS Foliate `setStyles`. */
+    fun setStyles(css: String) = eval("try{readerAPI.setStyles&&readerAPI.setStyles(${jsString(css)})}catch(e){}")
+
     fun destroy() = webView.destroy()
 
     private fun eval(js: String) = webView.evaluateJavascript(js, null)

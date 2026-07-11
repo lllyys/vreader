@@ -50,6 +50,8 @@ class Azw3Document(
 
     private var bookReady = false
     private var restore: VReaderLocator? = null
+    /** The latest Display CSS to (re)apply once the book is rendered — set before/after book-ready. */
+    private var pendingStylesCss: String? = null
 
     /**
      * Wire the bridge and load, then SUSPEND collecting messages until cancelled. Call from a
@@ -72,6 +74,9 @@ class Azw3Document(
             is FoliateMessage.BookReady -> {
                 bookReady = true
                 restoreOrInit()
+                // Re-apply the latest Display CSS now the renderer exists (a setStyles issued before
+                // book-ready would be a no-op — view.renderer isn't wired yet).
+                pendingStylesCss?.let(bridge::setStyles)
                 _state.value = if (message.sectionTotal > 0) Azw3DocState.Loaded(message.sectionTotal) else Azw3DocState.Empty
             }
             is FoliateMessage.Relocate -> {
@@ -98,4 +103,15 @@ class Azw3Document(
     fun next() = bridge.next()
     fun prev() = bridge.prev()
     fun destroy() = bridge.destroy()
+
+    /**
+     * feature #129 WI-6 — apply the "Display" theme+typography CSS. Records it so a fresh render (or a
+     * render-death recovery, which recreates the document) re-applies the current look, and — if the
+     * book is already rendered — injects it live so a settings change updates the open reader at once.
+     * Main-thread only (WebView is).
+     */
+    fun setStyles(css: String) {
+        pendingStylesCss = css
+        if (bookReady) bridge.setStyles(css)
+    }
 }
