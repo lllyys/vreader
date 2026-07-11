@@ -7,10 +7,14 @@ package com.vreader.app.reader.foliate
 import android.content.Context
 import android.webkit.WebView
 import androidx.annotation.MainThread
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.onSubscription
+import kotlinx.coroutines.launch
+import vreader.contracts.Locator
 import vreader.contracts.VReaderLocator
 import java.io.File
 
@@ -53,15 +57,47 @@ class Azw3Document(
     /** The latest Display CSS to (re)apply once the book is rendered — set before/after book-ready. */
     private var pendingStylesCss: String? = null
 
+    /** feature #135 WI-2 — the awaited-goTo controller (CFI-first→fraction target + ack mapping). */
+    private val goToController = FoliateGoToController(bridge.goToDispatcher)
+
+    /**
+     * feature #135 WI-2 — a goTo target awaiting a render (the book isn't ready yet, or the render
+     * process died mid-jump). Re-issued EXACTLY ONCE after the next book-ready so a bookmark jump
+     * survives a renderer restart without an infinite re-issue loop. Main-thread-owned.
+     *
+     * IMPORTANT (Gate-4 F2): render-death recovery in the host (`Azw3ReaderActivity`, wired by WI-7)
+     * DISPOSES this document and creates a fresh one — so an in-document field alone does NOT survive
+     * that path. The host carries the pending target across recreation via [takePendingGoTo] (read on
+     * the dying instance) → [run]'s `pendingGoTo` argument (seeded on the replacement), mirroring how
+     * `resume`/`restore` already survive. The in-document re-issue at book-ready covers the case where
+     * the SAME instance receives a fresh book-ready (e.g. an in-place reopen).
+     */
+    private var pendingGoTo: Locator? = null
+
+    /** The scope [run] collects on — used to re-issue a render-death-pending goTo. Set in [run]. */
+    private var reissueScope: CoroutineScope? = null
+
+    /**
+     * feature #135 WI-2 — the host reads + CLEARS the pending goTo target from a dying document during
+     * render-death recovery, then seeds it into the replacement via [run]'s `pendingGoTo` argument, so
+     * an in-flight bookmark jump survives the document recreation (Gate-4 F2). Main-thread only.
+     */
+    fun takePendingGoTo(): Locator? = pendingGoTo.also { pendingGoTo = null }
+
     /**
      * Wire the bridge and load, then SUSPEND collecting messages until cancelled. Call from a
      * HOLDER-SCOPED `LaunchedEffect` on the Main dispatcher (WebView is main-thread-only) so a reload
      * / dispose cancels the collector and never retains the old document/bridge/WebView. The
      * `onSubscription { load() }` guarantees the collector is subscribed BEFORE the bundle emits (no
      * hot-flow race), so `bridge-ready`/`book-ready` are never missed.
+     *
+     * [pendingGoTo] (feature #135 WI-2) seeds a bookmark jump the host carried across a render-death
+     * recreation — it is re-issued EXACTLY ONCE after this instance's book-ready.
      */
-    suspend fun run(restore: VReaderLocator?) {
+    suspend fun run(restore: VReaderLocator?, pendingGoTo: Locator? = null) {
         this.restore = restore
+        this.pendingGoTo = pendingGoTo
+        reissueScope = CoroutineScope(currentCoroutineContext())
         bridge.onWebViewUnsupported = { _state.value = Azw3DocState.WebViewUnsupported }
         bridge.onRenderProcessGone = { onRenderProcessGone?.invoke(); true } // survive; host recreates
         bridge.attach()
@@ -78,12 +114,22 @@ class Azw3Document(
                 // book-ready would be a no-op — view.renderer isn't wired yet).
                 pendingStylesCss?.let(bridge::setStyles)
                 _state.value = if (message.sectionTotal > 0) Azw3DocState.Loaded(message.sectionTotal) else Azw3DocState.Empty
+                // Re-issue a goTo that was pending across a render restart, EXACTLY ONCE (clear the
+                // field before re-issuing so a second render-death doesn't loop it forever). Fire and
+                // forget — the host's own goTo() already returned; this only re-lands the position.
+                pendingGoTo?.let { target ->
+                    pendingGoTo = null
+                    reissueScope?.launch { goToController.goTo(target) }
+                }
             }
             is FoliateMessage.Relocate -> {
                 latestRelocate = message
                 onRelocate?.invoke(message)
             }
             is FoliateMessage.Error -> if (!bookReady) _state.value = Azw3DocState.Corrupt
+            // The goTo ack is consumed by the FoliateGoToDispatcher's own collector (feature #135 WI-2);
+            // the document ignores it here.
+            is FoliateMessage.GoToAck -> Unit
             is FoliateMessage.Other -> Unit
         }
     }
@@ -105,6 +151,28 @@ class Azw3Document(
     fun destroy() = bridge.destroy()
 
     /**
+     * feature #135 WI-2 — jump to a persisted bookmark's canonical position (CFI-first→fraction). The
+     * awaited result lets the host decide dismiss-vs-stay: [Azw3GoToResult.Succeeded] landed;
+     * [Azw3GoToResult.Failed]/[Azw3GoToResult.Timeout] did not (the sheet stays open). If the book
+     * isn't ready yet (or a render restart is in flight), the target is HELD and re-issued exactly
+     * once after the next book-ready — a jump survives a renderer death mid-flight. Main-thread only.
+     */
+    suspend fun goTo(canonical: Locator): Azw3GoToResult {
+        if (!bookReady) {
+            // Nothing to jump into yet — remember the target for the post-book-ready re-issue and
+            // report a soft failure so the sheet stays open until the render lands + re-issues.
+            pendingGoTo = canonical
+            return Azw3GoToResult.Failed
+        }
+        pendingGoTo = canonical // held so a render death DURING the jump re-issues it once.
+        val result = goToController.goTo(canonical)
+        // A settled (non-superseded) result means the jump completed its round-trip; drop the pending
+        // re-issue so a later unrelated book-ready doesn't replay a stale jump.
+        if (result != Azw3GoToResult.Superseded) pendingGoTo = null
+        return result
+    }
+
+    /**
      * feature #129 WI-6 — apply the "Display" theme+typography CSS. Records it so a fresh render (or a
      * render-death recovery, which recreates the document) re-applies the current look, and — if the
      * book is already rendered — injects it live so a settings change updates the open reader at once.
@@ -113,5 +181,22 @@ class Azw3Document(
     fun setStyles(css: String) {
         pendingStylesCss = css
         if (bookReady) bridge.setStyles(css)
+    }
+}
+
+/**
+ * feature #135 WI-2 — maps a canonical [Locator] to a foliate goTo through the awaited
+ * [FoliateGoToDispatcher]. Derives the target CFI-FIRST then fraction (matching
+ * [Azw3Document.restoreOrInit]'s precedence). When the locator has nothing to jump to (no cfi + no
+ * finite progression), returns [Azw3GoToResult.Failed] WITHOUT injecting any JS. Pure enough to
+ * unit-test against a fake dispatcher (no WebView).
+ */
+class FoliateGoToController(private val dispatcher: FoliateGoToDispatcher) {
+    suspend fun goTo(
+        canonical: Locator,
+        timeoutMs: Long = FoliateBridge.DEFAULT_GOTO_TIMEOUT_MS,
+    ): Azw3GoToResult {
+        val target = FoliateGoToTarget.from(canonical) ?: return Azw3GoToResult.Failed
+        return dispatcher.goTo(target, timeoutMs)
     }
 }

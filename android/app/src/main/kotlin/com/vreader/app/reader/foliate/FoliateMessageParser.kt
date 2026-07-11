@@ -7,6 +7,7 @@ package com.vreader.app.reader.foliate
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -40,6 +41,17 @@ object FoliateMessageParser {
                 message = detail.str("message") ?: "unknown",
                 type = detail.str("type"),
             )
+            "goto-ack" -> {
+                // Without a request id the ack resolves nothing — reject the whole message so a
+                // mint-less / hostile ack never reaches the dispatcher's pending map.
+                val id = detail.str("id") ?: return null
+                FoliateMessage.GoToAck(
+                    id = id,
+                    ok = detail.bool("ok") ?: false,
+                    cfi = detail.str("cfi"),
+                    fraction = detail.dbl("fraction"),
+                )
+            }
             else -> FoliateMessage.Other(name)
         }
     }
@@ -58,4 +70,9 @@ object FoliateMessageParser {
      *  non-finite values are rejected — a hostile book must not corrupt the fraction resume anchor. */
     private fun JsonObject.dbl(key: String): Double? =
         prim(key)?.takeUnless { it.isString }?.doubleOrNull?.takeIf { it.isFinite() }
+
+    /** Strict JSON boolean (only the literals `true`/`false`), or null. A quoted "true" / numeric 1
+     *  is NOT accepted — a hostile goto-ack must not force a truthy `ok`. */
+    private fun JsonObject.bool(key: String): Boolean? =
+        prim(key)?.takeUnless { it.isString }?.let { it.booleanOrNull }
 }

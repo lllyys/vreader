@@ -27,6 +27,20 @@ sealed interface FoliateMessage {
     /** A JS-side error (bundle init failure, open failure, unhandled rejection). */
     data class Error(val message: String, val type: String?) : FoliateMessage
 
+    /**
+     * feature #135 WI-2 — acknowledgement of an awaited [FoliateBridge.goTo]. The shell shim posts
+     * this AFTER foliate's `view.goTo(...)` promise settles, echoing the request `id` the host minted
+     * so the matching suspended [kotlinx.coroutines.CompletableDeferred] resolves. `ok` is the jump's
+     * success; `cfi`/`fraction` carry the reached position when known. `id` is required (a mint-less
+     * ack can resolve nothing → the parser rejects it).
+     */
+    data class GoToAck(
+        val id: String,
+        val ok: Boolean,
+        val cfi: String?,
+        val fraction: Double?,
+    ) : FoliateMessage
+
     /** A recognized-but-unconsumed event name (selection, tap, tts-*, search-*, …). */
     data class Other(val name: String) : FoliateMessage
 }

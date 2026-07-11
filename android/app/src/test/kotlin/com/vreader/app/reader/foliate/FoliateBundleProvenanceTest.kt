@@ -19,11 +19,16 @@ import java.security.MessageDigest
  *   - the bytes drift from the pinned patched SHA-256.
  *
  * Source: `vreader/Services/Foliate/JS/foliate-bundle.js` (iOS, SHA-256 3463a2ee…) → strip
- * `allow-same-origin allow-scripts` → `allow-same-origin` (2 occurrences) → this patched bundle.
+ * `allow-same-origin allow-scripts` → `allow-same-origin` (2 occurrences) → THEN the feature #135
+ * WI-2 awaited-goTo patch (make `readerAPI.goTo`/`goToFraction` RETURN foliate's `view.goTo(...)`
+ * promise so the shell shim can await the relocate + post `goto-ack`) → this patched bundle.
  */
 class FoliateBundleProvenanceTest {
 
-    private val patchedSha = "aa4327f1aac8b4c65a4ca653e53118ca84650887a35e51b0bf7592c4d12aa807"
+    // The pinned SHA of the shipped bundle = iOS bundle, allow-scripts stripped (2×), THEN
+    // goTo/goToFraction changed to `return view.goTo(...)`/`return view.goToFraction(...)` (feature #135
+    // WI-2). Re-derive by applying BOTH patches; update this pin + bundle-patch.md if the bundle drifts.
+    private val patchedSha = "c9b0e101435b1b1757eade7d06633bf7ba382980327574067ae449273e8cf3fa"
     private val iosSha = "3463a2ee41168f1549f5ed49fdcfe9eb521dbb5adab3702c63c429838480503d"
 
     private fun bundleFile(): File {
@@ -54,7 +59,8 @@ class FoliateBundleProvenanceTest {
             .joinToString("") { "%02x".format(it) }
         assertEquals(
             "shipped foliate-bundle.js drifted from the pinned patched SHA — re-derive from the iOS bundle " +
-                "($iosSha) by stripping allow-scripts, and update bundle-patch.md + this pin",
+                "($iosSha) by stripping allow-scripts AND applying the #135 WI-2 goTo-return patch, then " +
+                "update bundle-patch.md + this pin",
             patchedSha,
             sha,
         )
