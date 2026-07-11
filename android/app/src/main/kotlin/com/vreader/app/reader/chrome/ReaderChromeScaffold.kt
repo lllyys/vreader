@@ -4,8 +4,9 @@
 // the Contents/Notes open callbacks INTO the bottom-chrome slot so the host wires them without reaching
 // into scaffold state. A center-tap on the body toggles chrome visibility (the top + bottom bars hide
 // together). It hosts the modal sheets driven by the hoisted [ReaderChromeState.sheet]:
-// [ReaderSheet.Toc] → the WI-3 [TocContentsSheet], [ReaderSheet.Notes] → the WI-4 [AnnotationsReviewSheet],
-// and — feature #134 WI-5 — [ReaderSheet.Details] → the WI-4 [BookDetailsSheet]. The top-bar More button
+// [ReaderSheet.Toc] → the #135 WI-6 [TocBookmarksSheet] (the promoted two-tab Contents|Bookmarks sheet,
+// which REUSES #132's Contents body), [ReaderSheet.Notes] → the WI-4 [AnnotationsReviewSheet], and —
+// feature #134 WI-5 — [ReaderSheet.Details] → the WI-4 [BookDetailsSheet]. The top-bar More button
 // (rendered iff [bookDetails] is non-null) toggles the WI-3 [MorePopup] carrying ONLY the Details + Share
 // rows (the §more-row-ownership contract — TTS/Auto-turn/Bilingual/Export belong to other features):
 // Details opens the Details sheet, Share fires [onShareBook], and the Details sheet's copy-fingerprint
@@ -14,11 +15,13 @@
 // so the bottom chrome omits it — the no-dead-controls rule). feature #135 WI-5 — the top-bar bookmark
 // toggle: when [onToggleBookmark] is non-null the scaffold fills [ReaderTopChrome]'s reserved bookmark
 // slot with the WI-5 [BookmarkToggleButton] (filled/outline by [isCurrentBookmarked]); a null callback
-// omits it (the #129 no-dead-control rule → #132 Contents/Notes-only callers stay back-compatible). The
-// [ReaderSheet.Bookmarks] route is added here but its designed LIST surface is WI-6's TocBookmarksSheet,
-// so WI-5 renders it as a documented no-op ([currentLocator] is threaded for the host to derive presence
-// but the scaffold does not read it). Pure function of hoisted state + callbacks (rule 50 §4); same
-// [ReaderTheme] token map as the reader chrome.
+// omits it (the #129 no-dead-control rule → #132 Contents/Notes-only callers stay back-compatible). feature
+// #135 WI-6 — the promoted two-tab TOC sheet: the [ReaderSheet.Toc] route now renders [TocBookmarksSheet]
+// (Contents|Bookmarks), and [bookmarks]/[onJumpBookmark] feed its Bookmarks tab (nullable/defaulted → #132
+// Contents/Notes-only callers stay valid); the [ReaderSheet.Bookmarks] route opens the SAME two-tab sheet
+// (host wiring feeds the data in WI-7). [currentLocator] is threaded for the host to derive presence but the
+// scaffold does not read it. Pure function of hoisted state + callbacks (rule 50 §4); same [ReaderTheme]
+// token map as the reader chrome.
 package com.vreader.app.reader.chrome
 
 import androidx.compose.foundation.background
@@ -43,11 +46,15 @@ import com.vreader.app.annotations.AnnotationsReviewSheet
 import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.reader.details.BookDetailsSheet
 import com.vreader.app.reader.details.BookDetailsUiModel
+import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.reader.more.MoreActionId
 import com.vreader.app.reader.more.MorePopup
 import com.vreader.app.reader.more.MoreRow
-import com.vreader.app.reader.nav.TocContentsSheet
+import com.vreader.app.reader.nav.BookmarkRowItem
+import com.vreader.app.reader.nav.JumpResult
+import com.vreader.app.reader.nav.TocBookmarksSheet
 import com.vreader.app.reader.nav.TocEntry
+import com.vreader.app.reader.nav.TocTab
 import com.vreader.app.reader.settings.ReaderTheme
 import vreader.contracts.Locator
 
@@ -73,9 +80,15 @@ import vreader.contracts.Locator
  * by [isCurrentBookmarked]; a null callback omits the slot (the #129 no-dead-control rule → #132
  * Contents/Notes-only callers stay valid). [currentLocator] is the current reading position the host uses
  * to derive presence + create the bookmark (threaded through for WI-7's host wiring; the scaffold itself
- * does not read it). The [ReaderSheet.Bookmarks] route is a documented no-op here — its designed LIST
- * surface is WI-6's TocBookmarksSheet. A host that passes [topBookmarkSlot] directly overrides the built
- * toggle (kept for symmetry with [onOpenMore]).
+ * does not read it). A host that passes [topBookmarkSlot] directly overrides the built toggle (kept for
+ * symmetry with [onOpenMore]).
+ *
+ * feature #135 WI-6 — the promoted two-tab TOC sheet: [ReaderSheet.Toc] renders [TocBookmarksSheet]
+ * (Contents|Bookmarks, the Contents tab REUSING #132's body), and [ReaderSheet.Bookmarks] opens the same
+ * sheet with the Bookmarks tab pre-selected. [bookmarks] are the projected Bookmarks-tab rows (default
+ * empty); [onJumpBookmark] performs a bookmark jump (returns [JumpResult] for dismiss-on-Succeeded; null →
+ * an unwired host, a jump degrades to Failed so the sheet stays open). Both are nullable/defaulted so #132
+ * Contents/Notes-only callers stay valid (WI-7 feeds them per host).
  *
  * [bottomChrome] receives the Contents/Notes open callbacks (a null Contents callback when [tocEntries] is
  * empty) and renders the reader's bottom chrome. [body] is the reader content; a center-tap on it toggles
@@ -102,6 +115,8 @@ fun ReaderChromeScaffold(
     onToggleBookmark: (() -> Unit)? = null,
     currentLocator: Locator? = null,
     topBookmarkSlot: (@Composable () -> Unit)? = null,
+    bookmarks: List<BookmarkRowItem> = emptyList(),
+    onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
     bookDetails: BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
@@ -180,15 +195,24 @@ fun ReaderChromeScaffold(
         )
     }
 
+    // feature #135 WI-6 — the two-tab sheet's Bookmarks-jump seam. An unwired host (null [onJumpBookmark],
+    // i.e. #132/#134/#135-WI-5 callers) degrades to a Failed jump so the sheet stays open (no dismiss, no
+    // invented error surface — rule 51); WI-7 supplies the real per-host jump.
+    val bookmarkJump: (BookmarkRecord) -> JumpResult = onJumpBookmark ?: { JumpResult.Failed }
+
     // Modal sheets — driven by the hoisted open-sheet state. Dismiss returns to [ReaderSheet.None].
     when (state.sheet) {
         ReaderSheet.None -> Unit
-        ReaderSheet.Toc -> TocContentsSheet(
+        // feature #135 WI-6 — the promoted two-tab TOC sheet (Contents|Bookmarks). The Contents tab REUSES
+        // #132's TocContentsSheet body unchanged; the Bookmarks tab renders [bookmarks].
+        ReaderSheet.Toc -> TocBookmarksSheet(
             theme = theme,
             bookTitle = title,
             entries = tocEntries,
             currentTocIndex = currentTocIndex,
-            onJump = onJumpToc,
+            bookmarks = bookmarks,
+            onJumpToc = onJumpToc,
+            onJumpBookmark = bookmarkJump,
             onDismiss = { openSheet(ReaderSheet.None) },
         )
         ReaderSheet.Notes -> AnnotationsReviewSheet(
@@ -207,10 +231,19 @@ fun ReaderChromeScaffold(
             onShare = onShareBook,
             onDismiss = { openSheet(ReaderSheet.None) },
         )
-        // feature #135 WI-5 — the Bookmarks route is a documented no-op: its designed LIST surface is
-        // WI-6's TocBookmarksSheet (rule 51 — WI-5 must not invent an undesigned list). Rendering nothing
-        // keeps the route safe (no dead surface / scrim) until WI-6 wires the sheet.
-        ReaderSheet.Bookmarks -> Unit
+        // feature #135 WI-6 — the Bookmarks route opens the SAME two-tab sheet with the Bookmarks tab
+        // pre-selected (the designed [TocBookmarksSheet]; rule 51 — no invented list surface).
+        ReaderSheet.Bookmarks -> TocBookmarksSheet(
+            theme = theme,
+            bookTitle = title,
+            entries = tocEntries,
+            currentTocIndex = currentTocIndex,
+            bookmarks = bookmarks,
+            onJumpToc = onJumpToc,
+            onJumpBookmark = bookmarkJump,
+            onDismiss = { openSheet(ReaderSheet.None) },
+            initialTab = TocTab.Bookmarks,
+        )
     }
 }
 

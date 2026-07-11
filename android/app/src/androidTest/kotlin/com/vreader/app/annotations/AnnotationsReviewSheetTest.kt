@@ -20,11 +20,11 @@ import org.junit.runner.RunWith
 import vreader.contracts.Locator
 
 /**
- * Feature #132 WI-4 — the `AnnotationsReviewSheet` (vreader-android-annotations.jsx `AnnotationsSheet`,
- * the "Notes" surface): a `ModalBottomSheet` over WI-6b's [AnnotationsSnapshot] with All/Highlights/Notes
- * filter chips (NO Bookmarks chip — that is #135), `HighlightCard` + `StandaloneNoteCard` (NO
- * `BookmarkCard` — #135), an empty state, a sheet-level trailing Share (`onShareAll`), and a
- * capability-based nullable `onJumpToAnnotation` tap-to-jump on the card body.
+ * Feature #132 WI-4 + #135 WI-6 — the `AnnotationsReviewSheet` (vreader-android-annotations.jsx
+ * `AnnotationsSheet`, the "Notes" surface): a `ModalBottomSheet` over WI-6b's [AnnotationsSnapshot] + #135's
+ * [BookmarkCardItem] list, with All/Highlights/Notes/Bookmarks filter chips (#135 added the Bookmarks chip),
+ * `HighlightCard` + `StandaloneNoteCard` + #135's `BookmarkCard`, an empty state, a sheet-level trailing
+ * Share (`onShareAll`), and a capability-based nullable `onJumpToAnnotation` tap-to-jump on the card body.
  *
  * Tests target [AnnotationsReviewSheetContent] directly (the `AssignSheetContent`/`TocContentsSheetContent`
  * precedent — a `ModalBottomSheet`'s content renders in a separate window instrumented clicks reach
@@ -54,6 +54,12 @@ class AnnotationsReviewSheetTest {
             createdAt = 2_000L, updatedAt = 2_000L,
         )
 
+    private fun bookmark(id: String, title: String? = null, offset: Int = 0): BookmarkRecord =
+        BookmarkRecord(
+            id = id, bookKey = "book-1", title = title, locator = locator(offset),
+            createdAt = 3_000L, updatedAt = 3_000L,
+        )
+
     private val snapshot = AnnotationsSnapshot(
         highlights = listOf(
             highlight("hl-1", "She was a woman of mean understanding.", note = "Austen's irony.", offset = 10),
@@ -64,18 +70,27 @@ class AnnotationsReviewSheetTest {
         ),
     )
 
+    private val bookmarks = listOf(
+        BookmarkCardItem(bookmark("bm-1", offset = 5), label = "…rightful property of some one or other of their daughters.", meta = "Ch. 1 · 14%"),
+        BookmarkCardItem(bookmark("bm-2", offset = 40), label = "The Netherfield ball", meta = "Ch. 11 · 62%"),
+    )
+
     private fun setSheet(
         snap: AnnotationsSnapshot = snapshot,
+        marks: List<BookmarkCardItem> = bookmarks,
         theme: ReaderTheme = ReaderTheme.Paper,
         onShareAll: () -> Unit = {},
         onJumpToAnnotation: ((AnnotationItem) -> Unit)? = {},
+        onJumpToBookmark: ((BookmarkRecord) -> Unit)? = {},
     ) {
         compose.setContent {
             AnnotationsReviewSheetContent(
                 theme = theme,
                 snapshot = snap,
+                bookmarks = marks,
                 onShareAll = onShareAll,
                 onJumpToAnnotation = onJumpToAnnotation,
+                onJumpToBookmark = onJumpToBookmark,
             )
         }
     }
@@ -161,13 +176,74 @@ class AnnotationsReviewSheetTest {
         compose.onNodeWithTag("annot-card-nt-1", useUnmergedTree = true).assertHasNoClickAction()
     }
 
-    // ── design gates (absence assertions) ────────────────────
+    // ── #135 WI-6: the Bookmarks filter chip + BookmarkCard ──
 
-    @Test fun noBookmarksFilterChip() {
-        // #135, not #132 — the Bookmarks chip must NOT exist.
+    @Test fun bookmarksFilterChip_exists() {
+        // #135 WI-6 — the Bookmarks chip is now present (the design's fourth FilterChip).
         setSheet()
-        compose.onAllNodesWithTag("annot-filter-bookmarks", useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithTag("annot-filter-bookmarks", useUnmergedTree = true).assertExists()
     }
+
+    @Test fun bookmarksFilter_showsOnlyBookmarkCards() {
+        setSheet()
+        compose.onNodeWithTag("annot-filter-bookmarks", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        // 2 bookmark cards, no highlight/note card.
+        compose.onAllNodes(isAnnotCard, useUnmergedTree = true).assertCountEquals(2)
+        compose.onNodeWithTag("annot-card-bm-1", useUnmergedTree = true).assertExists()
+        compose.onAllNodesWithTag("annot-card-hl-1", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("annot-card-nt-1", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test fun allFilter_includesBookmarks() {
+        setSheet()
+        // All = 2 highlights + 1 note + 2 bookmarks = 5 cards.
+        compose.onAllNodes(isAnnotCard, useUnmergedTree = true).assertCountEquals(5)
+    }
+
+    @Test fun bookmarkCard_rendersLabelAndMeta() {
+        setSheet()
+        compose.onNodeWithTag("annot-filter-bookmarks", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("The Netherfield ball", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("Ch. 11 · 62%", useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun bookmarksFilterWithNoBookmarks_showsEmptyState() {
+        setSheet(marks = emptyList())
+        compose.onNodeWithTag("annot-filter-bookmarks", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("annot-empty", useUnmergedTree = true).assertExists()
+        compose.onAllNodes(isAnnotCard, useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test fun nonNullJump_bookmarkCardTapInvokesJumpWithRecord() {
+        var jumped: BookmarkRecord? = null
+        setSheet(onJumpToBookmark = { jumped = it })
+        compose.onNodeWithTag("annot-filter-bookmarks", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("annot-card-bm-2", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        assertEquals("bm-2", jumped?.id)
+    }
+
+    @Test fun nullJump_bookmarkCardsAreNotClickable() {
+        setSheet(onJumpToBookmark = null)
+        compose.onNodeWithTag("annot-filter-bookmarks", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("annot-card-bm-1", useUnmergedTree = true).assertHasNoClickAction()
+    }
+
+    @Test fun noPerBookmarkCardDelete() {
+        // Bookmark row/card DELETION is deferred (rule 51) — no per-card delete control.
+        setSheet()
+        compose.onNodeWithTag("annot-filter-bookmarks", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithTag("annot-delete-bm-1", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("annot-delete-bm-2", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    // ── design gates (absence assertions) ────────────────────
 
     @Test fun noPerCardCopyOrShareButtons() {
         // The Android review cards depict NO per-card Copy/Share (those live on the SelectionPopover).
