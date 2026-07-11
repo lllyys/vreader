@@ -1,11 +1,11 @@
 // Purpose: feature #134 WI-4 — the Book Details sheet's individual pieces (design
-// `vreader-book-details.jsx` `DetailsStacked`): the centered title/author block, the tag chips, the
-// `MetaList` card of `Format/Size/Pages/Fingerprint/Location` rows, and the `ActionList` (Share only).
-// Each meta row is ABSENT when its model value is null/empty — no invented/dead rows (§details-source,
-// §page-count, §location; Design-gate #1: no cover art / placeholder / Export). The copy-fingerprint
-// mini-action carries the FULL canonical key (§fingerprint); Location is a read-only label with no
-// mini-action. Reuses the [ReaderTheme] token map (ink/accent/isDark → the design's ink/sub/rule/mono
-// tokens), the same posture as MorePopup / AnnotationsReviewSheet. Pure function of state (rule 50 §4).
+// `vreader-book-details.jsx` `DetailsStacked`): the centered title/author block, the tag chips (wrapping),
+// the `MetaList` card (`Format/Size/Pages/Fingerprint/Location`), and the `ActionList` (Share only). Each
+// meta/optional row is ABSENT when its model value is null/empty — no invented/dead rows (§details-source,
+// §page-count, §location; Design-gate #1: no cover art / placeholder / Export). The copy mini-action
+// carries the FULL canonical key (§fingerprint); Location is a read-only label. Reuses the [ReaderTheme]
+// token map (ink/accent/isDark → the design's ink/sub/rule/mono), same posture as MorePopup /
+// AnnotationsReviewSheet. Pure function of state (rule 50 §4).
 package com.vreader.app.reader.details
 
 import androidx.compose.foundation.background
@@ -15,14 +15,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Icon
@@ -45,20 +47,7 @@ import androidx.compose.ui.unit.sp
 import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
 
-/** The design's secondary-text token (`t.sub`) derived from [ReaderTheme.ink]. */
-internal fun ReaderTheme.subColor(): Color = ink.copy(alpha = 0.62f)
-
-/** The design's hairline divider token (`t.rule`) derived from [ReaderTheme.ink]. */
-internal fun ReaderTheme.ruleColor(): Color = ink.copy(alpha = if (isDark) 0.10f else 0.08f)
-
-/** The `MetaList`/`ActionList` card surface (`t.isDark ? rgba(255,255,255,0.04) : #fff`). */
-internal fun ReaderTheme.cardColor(): Color =
-    if (isDark) Color(0x0AFFFFFF) else Color(0xFFFFFFFF)
-
-/**
- * The centered title/author block (design `DetailsStacked` head). The title is a serif italic; the
- * [author] line is OMITTED entirely when null (no dangling `·` separator / placeholder — §details-source).
- */
+/** The centered title/author block (design `DetailsStacked` head). The [author] line is OMITTED when null. */
 @Composable
 internal fun BookTitleBlock(theme: ReaderTheme, title: String, author: String?) {
     Column(
@@ -90,19 +79,19 @@ internal fun BookTitleBlock(theme: ReaderTheme, title: String, author: String?) 
     }
 }
 
-/**
- * The tag-chip row (design `book.tags`) = collection names. The whole row is OMITTED when [tags] is empty
- * (§details-source). Each chip is a rounded, tinted pill.
- */
+/** The tag-chip row (design `book.tags` = collection names). OMITTED when [tags] is empty; chips wrap. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun BookTagChips(theme: ReaderTheme, tags: List<String>) {
     if (tags.isEmpty()) return
-    Row(
+    // FlowRow so multiple/long chips wrap onto new lines (the design's `flexWrap: 'wrap'`), never overflow.
+    FlowRow(
         Modifier
             .fillMaxWidth()
             .padding(top = 4.dp)
             .testTag("details-tags"),
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         tags.forEach { tag ->
             Text(
@@ -123,10 +112,8 @@ internal fun BookTagChips(theme: ReaderTheme, tags: List<String>) {
 }
 
 /**
- * The `MetaList` card (design `Format/Size/Pages/Fingerprint/Location`). Each row is present ONLY when its
- * model value is non-null: [pagesLabel]/[locationLabel] may be null → those rows are omitted. The
- * Fingerprint row carries the copy mini-action (payload = [fingerprintFull], the FULL key — §fingerprint);
- * the Location row is a plain read-only label (no reveal/download mini-action — §location).
+ * The `MetaList` card. [pagesLabel]/[locationLabel] rows are omitted when null. The Fingerprint row copies
+ * [fingerprintFull] (the FULL key — §fingerprint); the Location row is a read-only label (§location).
  */
 @Composable
 internal fun BookMetaList(
@@ -139,7 +126,7 @@ internal fun BookMetaList(
     locationLabel: String?,
     onCopyFingerprint: (String) -> Unit,
 ) {
-    // The rows to render, in design order, filtering out the absent optionals.
+    // The rows in design order; absent optionals (Pages/Location) are filtered out.
     data class Meta(val label: String, val value: String, val copyPayload: String?)
     val rows = buildList {
         add(Meta("Format", formatLabel, null))
@@ -172,10 +159,7 @@ internal fun BookMetaList(
     }
 }
 
-/**
- * One meta row: a fixed-width label + a monospace value (+ an optional copy mini-action when
- * [copyPayload] is non-null → the Fingerprint row). testTag `details-meta-<label-lowercased>`.
- */
+/** One meta row: label + monospace value (+ a copy mini-action when [copyPayload] is non-null). */
 @Composable
 private fun MetaRow(
     theme: ReaderTheme,
@@ -241,10 +225,7 @@ private fun MetaRow(
     }
 }
 
-/**
- * The `ActionList` card (design `ActionList`, Share ONLY — Export + cover-edit omitted). One tappable
- * row: an icon tile + label + chevron. testTag `details-share`.
- */
+/** The `ActionList` card (Share ONLY — Export + cover-edit omitted): icon tile + label + chevron. */
 @Composable
 internal fun BookActionList(theme: ReaderTheme, onShare: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 22.dp)) {
@@ -288,17 +269,24 @@ internal fun BookActionList(theme: ReaderTheme, onShare: () -> Unit) {
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.Medium,
                 )
+                // The design's trailing chevron accessory (`ActionList` `Icons.Chevron`).
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = theme.subColor(),
+                    modifier = Modifier.size(16.dp),
+                )
             }
         }
     }
 }
 
-/** A section header (design `SectionLabel`): small, tracked, muted uppercase-ish label. */
+/** A section header (design `SectionLabel`): small, muted, semibold label. */
 @Composable
 private fun SectionLabel(theme: ReaderTheme, text: String) {
     Text(
         text,
-        modifier = Modifier.widthIn().padding(start = 2.dp),
+        modifier = Modifier.padding(start = 2.dp),
         color = theme.subColor(),
         fontFamily = VReaderFonts.Sans,
         fontSize = 12.sp,

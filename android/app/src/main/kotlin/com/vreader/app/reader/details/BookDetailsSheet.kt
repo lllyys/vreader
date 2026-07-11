@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -41,6 +42,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
+
+// The design's derived tokens off [ReaderTheme.ink]/[isDark], shared with BookDetailsRows: secondary text
+// (`t.sub`), the hairline divider (`t.rule`), and the card surface (`t.isDark ? rgba(...,0.04) : #fff`).
+internal fun ReaderTheme.subColor(): Color = ink.copy(alpha = 0.62f)
+internal fun ReaderTheme.ruleColor(): Color = ink.copy(alpha = if (isDark) 0.10f else 0.08f)
+internal fun ReaderTheme.cardColor(): Color = if (isDark) Color(0x0AFFFFFF) else Color(0xFFFFFFFF)
 
 /**
  * The Book Details sheet as a [ModalBottomSheet]. [model] is WI-1's assembled metadata. [onCopyFingerprint]
