@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +57,8 @@ fun LibraryScreen(
     state: LibraryUiState,
     onOpenBook: (LibraryBook) -> Unit,
     onImport: () -> Unit,
+    // feature #128 WI-7 — the functional Search pill in the nav row opens the search takeover.
+    onOpenSearch: () -> Unit = {},
     // feature #127 — collections shelf-bar (empty list = no bar; "All" = null selection).
     collections: List<com.vreader.app.data.Collection> = emptyList(),
     selectedCollectionId: String? = null,
@@ -87,15 +90,17 @@ fun LibraryScreen(
                 onEditCollection = onManageCollections,
             )
         } else {
-            // Nav bar — the functional controls (view-toggle / import). The design's
-            // settings + search pills are added when those features land (separate WIs);
-            // shipping non-functional controls is a fidelity defect, so they're omitted now.
+            // Nav bar — the functional controls (search / view-toggle / import). The Search pill
+            // is wired as of feature #128 WI-7 (opens the search takeover). The design's
+            // settings/More pill is added when that feature lands (a separate WI); shipping a
+            // non-functional control is a fidelity defect, so it's still omitted.
             Row(
                 Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 6.dp),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PillIcon(Icons.Filled.Search, "Search", onOpenSearch)
                     PillIcon(
                         if (view == LibraryView.Grid) Icons.AutoMirrored.Filled.ViewList else Icons.Filled.GridView,
                         "Toggle view",
@@ -181,15 +186,29 @@ private fun BookGrid(books: List<LibraryBook>, onOpen: (LibraryBook) -> Unit, on
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 FallbackCover(book, Modifier.fillMaxWidth().aspectRatio(104f / 156f), 4.dp)
-                Text(
-                    book.title,
-                    color = VReaderColors.Ink,
-                    fontFamily = VReaderFonts.Serif,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.5.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(
+                        book.title,
+                        color = VReaderColors.Ink,
+                        fontFamily = VReaderFonts.Serif,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.5.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // feature #128 WI-7 — the designed author subtitle (muted sans, small top margin);
+                    // rendered only when the book has a non-blank author (nullable field, v6/#128).
+                    book.author?.takeIf { it.isNotBlank() }?.let { author ->
+                        Text(
+                            author,
+                            color = VReaderColors.InkMuted,
+                            fontFamily = VReaderFonts.Sans,
+                            fontSize = 11.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }
