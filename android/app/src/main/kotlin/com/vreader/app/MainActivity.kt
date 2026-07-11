@@ -34,6 +34,7 @@ import com.vreader.app.reader.Azw3ReaderActivity
 import com.vreader.app.reader.ReaderActivity
 import com.vreader.app.reader.PdfReaderActivity
 import com.vreader.app.reader.TxtReaderActivity
+import com.vreader.app.search.SearchScreen
 import com.vreader.app.ui.theme.VReaderTheme
 import vreader.contracts.BookFormat
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +55,9 @@ class MainActivity : ComponentActivity() {
                 val selectedCollectionId by viewModel.selectedCollectionId.collectAsStateWithLifecycle()
                 // feature #127 WI-4 — which collections sheet is open (survives rotation/process death).
                 var sheetRoute by rememberSaveable(stateSaver = SheetRouteSaver) { mutableStateOf<SheetRoute>(SheetRoute.None) }
+                // feature #128 WI-7 — the search takeover open/closed flag (the SheetRoute saveable
+                // precedent; a Boolean needs no custom Saver, so rememberSaveable survives rotation/death).
+                var searchOpen by rememberSaveable { mutableStateOf(false) }
 
                 val picker = rememberLauncherForActivityResult(
                     ActivityResultContracts.OpenDocument(),
@@ -69,6 +73,26 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Route by the typed format (exhaustive — never open a format into the wrong host).
+                // Shared by the library grid tap and the search result tap (both carry a typed format +
+                // fingerprintKey).
+                fun openBook(format: BookFormat, key: String) {
+                    when (format) {
+                        BookFormat.epub ->
+                            startActivity(ReaderActivity.intent(this@MainActivity, key))
+                        BookFormat.txt, BookFormat.md ->
+                            // .md reuses the text reader host (#112): same decode/
+                            // document/resume/chrome, MarkdownRenderer per chunk.
+                            startActivity(TxtReaderActivity.intent(this@MainActivity, key))
+                        BookFormat.pdf ->
+                            // #115 — continuous-scroll PdfRenderer reader.
+                            startActivity(PdfReaderActivity.intent(this@MainActivity, key))
+                        BookFormat.azw3 ->
+                            // #126 — foliate-js WebView reader (AZW3/MOBI/KF8).
+                            startActivity(Azw3ReaderActivity.intent(this@MainActivity, key))
+                    }
+                }
+
                 LibraryScreen(
                     state = state,
                     collections = collections,
@@ -76,25 +100,8 @@ class MainActivity : ComponentActivity() {
                     onSelectCollection = viewModel::selectCollection,
                     onAssignBook = { book -> sheetRoute = SheetRoute.Assign(book.id) },
                     onManageCollections = { sheetRoute = SheetRoute.Manage },
-                    onOpenBook = { book ->
-                        // Route by the typed format (exhaustive — never open a format into
-                        // the wrong host). Formats without a reader yet are surfaced, not
-                        // silently mis-opened.
-                        when (book.originalFormat) {
-                            BookFormat.epub ->
-                                startActivity(ReaderActivity.intent(this@MainActivity, book.id))
-                            BookFormat.txt, BookFormat.md ->
-                                // .md reuses the text reader host (#112): same decode/
-                                // document/resume/chrome, MarkdownRenderer per chunk.
-                                startActivity(TxtReaderActivity.intent(this@MainActivity, book.id))
-                            BookFormat.pdf ->
-                                // #115 — continuous-scroll PdfRenderer reader.
-                                startActivity(PdfReaderActivity.intent(this@MainActivity, book.id))
-                            BookFormat.azw3 ->
-                                // #126 — foliate-js WebView reader (AZW3/MOBI/KF8).
-                                startActivity(Azw3ReaderActivity.intent(this@MainActivity, book.id))
-                        }
-                    },
+                    onOpenSearch = { searchOpen = true },
+                    onOpenBook = { book -> openBook(book.originalFormat, book.id) },
                     // EPUBs are exposed by SAF providers under varied MIME types
                     // (epub+zip, octet-stream, generic); accept broadly and let
                     // BookImporter reject non-EPUBs by extension with a clear toast.
@@ -104,6 +111,35 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                 )
+
+                // feature #128 WI-7 — the search takeover. Rendered OVER the library when open; fed by
+                // the AppContainer's SearchViewModel (WI-6). Obtained through `viewModel(factory=…)` so it's
+                // owned by the Activity's ViewModelStore — its viewModelScope is properly cleared on the
+                // Activity's destroy (a raw `remember { … }` would leak the coroutine collector forever).
+                if (searchOpen) {
+                    val searchViewModel: com.vreader.app.search.SearchViewModel = viewModel(
+                        key = "search",
+                        factory = viewModelFactory { initializer { container.searchViewModel() } },
+                    )
+                    val searchState by searchViewModel.state.collectAsStateWithLifecycle()
+                    SearchScreen(
+                        state = searchState,
+                        onQueryChange = searchViewModel::onQueryChange,
+                        onCancel = { searchOpen = false },
+                        onRecentTap = searchViewModel::onQueryChange,
+                        onPickCollection = { id ->
+                            // Filter the library to the chosen collection and close the takeover.
+                            viewModel.selectCollection(id)
+                            searchOpen = false
+                        },
+                        onOpenResult = { row ->
+                            // Record the query as recent (WI-6) AND open the book, then dismiss.
+                            searchViewModel.recordCurrentQuery()
+                            openBook(row.book.originalFormat, row.book.fingerprintKey)
+                            searchOpen = false
+                        },
+                    )
+                }
 
                 // feature #127 WI-4 — the assign-to-collections sheet (long-press a book).
                 val route = sheetRoute
